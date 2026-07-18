@@ -397,13 +397,13 @@ pub const Layout = struct {
 
     /// Create the fixed top-level subdirectories under an opened cache root.
     /// `history/<mapId>` is created on demand by the writer (map-id varies).
-    pub fn ensure(root: std.fs.Dir) !void {
-        try root.makePath(manifests_dir);
-        try root.makePath(chunks_dir);
-        try root.makePath(summaries_dir);
-        try root.makePath(assets_dir);
-        try root.makePath(history_dir);
-        try root.makePath(current_dir);
+    pub fn ensure(io: std.Io, root: std.Io.Dir) !void {
+        try root.createDirPath(io, manifests_dir);
+        try root.createDirPath(io, chunks_dir);
+        try root.createDirPath(io, summaries_dir);
+        try root.createDirPath(io, assets_dir);
+        try root.createDirPath(io, history_dir);
+        try root.createDirPath(io, current_dir);
     }
 };
 

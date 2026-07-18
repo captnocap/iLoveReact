@@ -10,7 +10,6 @@
 const std = @import("std");
 const fs = @import("../fs/fs.zig");
 const sqlite = @import("sqlite.zig");
-const host_io = @import("../host_io.zig");
 
 pub const MAX_KEY = 256;
 // Values are heap-backed end to end — the v8 binding allocs the exact UTF-8 length,
@@ -37,7 +36,7 @@ pub const KeyEntry = struct {
 // -- Module state --
 
 var db: ?sqlite.Database = null;
-var db_mutex: host_io.Mutex = .{};
+var db_mutex: std.Io.Mutex = .init;
 var db_path_buf: [fs.MAX_PATH]u8 = undefined;
 var db_path_len: usize = 0;
 
@@ -65,14 +64,15 @@ const WriteJob = struct {
     }
 };
 
-var write_mutex: host_io.Mutex = .{};
+var write_mutex: std.Io.Mutex = .init;
 var write_cond: std.Io.Condition = .init;
 var write_queue: [WRITE_QUEUE_CAP]WriteJob = undefined;
 var write_queue_len: usize = 0;
 var write_cache: [WRITE_QUEUE_CAP]WriteJob = undefined;
 var write_cache_len: usize = 0;
 var write_stop: bool = false;
-var write_thread: ?std.Thread = null;
+var write_tasks: std.Io.Group = .init;
+var writer_started: bool = false;
 
 fn ensureSchema(database: *sqlite.Database) !void {
     try database.exec(
@@ -85,7 +85,7 @@ fn ensureSchema(database: *sqlite.Database) !void {
     );
 }
 
-fn setWithDb(database: *sqlite.Database, namespace: []const u8, key: []const u8, value: []const u8) !void {
+fn setWithDb(io: std.Io, database: *sqlite.Database, namespace: []const u8, key: []const u8, value: []const u8) !void {
     var stmt = try database.prepare(
         "INSERT OR REPLACE INTO store (namespace, key, value, updated_at) VALUES (?, ?, ?, ?)",
     );
@@ -94,7 +94,7 @@ fn setWithDb(database: *sqlite.Database, namespace: []const u8, key: []const u8,
     try stmt.bindText(1, namespace);
     try stmt.bindText(2, key);
     try stmt.bindText(3, value);
-    try stmt.bindInt(4, host_io.timestamp());
+    try stmt.bindInt(4, std.Io.Clock.now(.real, io).toSeconds());
 
     _ = try stmt.step();
 }
@@ -135,9 +135,9 @@ fn rememberSetLocked(namespace: []const u8, key: []const u8, value: []const u8) 
     write_cache_len += 1;
 }
 
-fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
-    write_mutex.lock();
-    defer write_mutex.unlock();
+fn getRemembered(io: std.Io, namespace: []const u8, key: []const u8, buf: []u8) !?usize {
+    write_mutex.lockUncancelable(io);
+    defer write_mutex.unlock(io);
 
     var remaining = write_cache_len;
     while (remaining > 0) {
@@ -159,9 +159,9 @@ fn getRemembered(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
 
 /// Read-your-writes lookup that allocates: pending/cached value first, then the
 /// DB row. Caller owns the returned slice. Null = key not found.
-fn getRememberedAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
-    write_mutex.lock();
-    defer write_mutex.unlock();
+fn getRememberedAlloc(io: std.Io, allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
+    write_mutex.lockUncancelable(io);
+    defer write_mutex.unlock(io);
 
     var remaining = write_cache_len;
     while (remaining > 0) {
@@ -180,9 +180,9 @@ fn getRememberedAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: 
 /// null namespace = everything; null key = the whole namespace. Without this,
 /// delete()/clear() removed the DB row while the session cache kept serving
 /// the dead value — a delete that doesn't delete.
-fn purgeRemembered(namespace: ?[]const u8, key: ?[]const u8) void {
-    write_mutex.lock();
-    defer write_mutex.unlock();
+fn purgeRemembered(io: std.Io, namespace: ?[]const u8, key: ?[]const u8) void {
+    write_mutex.lockUncancelable(io);
+    defer write_mutex.unlock(io);
 
     inline for (.{ .{ &write_cache, &write_cache_len }, .{ &write_queue, &write_queue_len } }) |pair| {
         const jobs = pair[0];
@@ -204,11 +204,11 @@ fn purgeRemembered(namespace: ?[]const u8, key: ?[]const u8) void {
     }
 }
 
-fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
+fn enqueueSet(io: std.Io, namespace: []const u8, key: []const u8, value: []const u8) !void {
     if (namespace.len > MAX_KEY or key.len > MAX_KEY or value.len > MAX_VALUE) return error.BufferTooSmall;
 
-    write_mutex.lock();
-    defer write_mutex.unlock();
+    write_mutex.lockUncancelable(io);
+    defer write_mutex.unlock(io);
     try rememberSetLocked(namespace, key, value);
 
     var i: usize = 0;
@@ -219,7 +219,7 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
             const next = try value_alloc.dupe(u8, value);
             value_alloc.free(write_queue[i].value);
             write_queue[i].value = next;
-            write_cond.signal(host_io.io());
+            write_cond.signal(io);
             return;
         }
     }
@@ -236,15 +236,17 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
 
     write_queue[write_queue_len] = try writeJobFrom(namespace, key, value);
     write_queue_len += 1;
-    write_cond.signal(host_io.io());
+    write_cond.signal(io);
 }
 
-fn popWriteJob() ?WriteJob {
-    write_mutex.lock();
-    defer write_mutex.unlock();
+fn popWriteJob(io: std.Io) ?WriteJob {
+    write_mutex.lockUncancelable(io);
+    defer write_mutex.unlock(io);
 
     while (write_queue_len == 0 and !write_stop) {
-        write_cond.waitUncancelable(host_io.io(), &write_mutex.inner);
+        // The writer owns queued heap values and must drain them during
+        // shutdown, so this ownership wait is intentionally uncancelable.
+        write_cond.waitUncancelable(io, &write_mutex);
     }
 
     if (write_queue_len == 0 and write_stop) return null;
@@ -258,18 +260,20 @@ fn popWriteJob() ?WriteJob {
     return job;
 }
 
-fn writerMain() void {
-    while (popWriteJob()) |job| {
-        db_mutex.lock();
+fn writerMain(io: std.Io) std.Io.Cancelable!void {
+    while (popWriteJob(io)) |job| {
+        db_mutex.lockUncancelable(io);
         if (db) |*d| {
-            setWithDb(d, job.namespaceSlice(), job.keySlice(), job.valueSlice()) catch |err| {
+            setWithDb(io, d, job.namespaceSlice(), job.keySlice(), job.valueSlice()) catch |err| {
                 // a dropped persist is data loss — never fail silently
-                std.debug.print("[localstore] WRITE FAILED ns={s} key={s} len={d}: {s}\n", .{
+                var msg_buf: [768]u8 = undefined;
+                const msg = std.fmt.bufPrint(&msg_buf, "[localstore] WRITE FAILED ns={s} key={s} len={d}: {s}\n", .{
                     job.namespaceSlice(), job.keySlice(), job.value.len, @errorName(err),
-                });
+                }) catch &.{};
+                std.Io.File.stderr().writeStreamingAll(io, msg) catch {};
             };
         }
-        db_mutex.unlock();
+        db_mutex.unlock(io);
         value_alloc.free(job.value);
     }
 }
@@ -278,7 +282,7 @@ fn writerMain() void {
 
 /// Initialize the local store. Opens (or creates) localstore.db in the app data directory.
 /// Requires fs.init() to have been called first.
-pub fn init() !void {
+pub fn init(io: std.Io) !void {
     if (db != null) return;
 
     const data_path = try fs.dataDirPath();
@@ -286,7 +290,7 @@ pub fn init() !void {
     const path = std.fmt.bufPrint(&path_buf, "{s}/localstore.db", .{data_path}) catch
         return error.NameTooLong;
 
-    var database = try sqlite.Database.open(path);
+    var database = try sqlite.Database.open(io, path);
 
     ensureSchema(&database) catch |err| {
         database.close();
@@ -297,18 +301,24 @@ pub fn init() !void {
     db_path_len = path.len;
     write_stop = false;
     db = database;
-    write_thread = std.Thread.spawn(.{}, writerMain, .{}) catch null;
+    write_tasks.concurrent(io, writerMain, .{io}) catch |err| {
+        if (db) |*d| d.close();
+        db = null;
+        db_path_len = 0;
+        return err;
+    };
+    writer_started = true;
 }
 
-pub fn deinit() void {
-    write_mutex.lock();
+pub fn deinit(io: std.Io) void {
+    write_mutex.lockUncancelable(io);
     write_stop = true;
-    write_cond.signal(host_io.io());
-    write_mutex.unlock();
-    if (write_thread) |t| t.join();
-    write_thread = null;
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    write_cond.signal(io);
+    write_mutex.unlock(io);
+    if (writer_started) _ = write_tasks.await(io) catch {};
+    writer_started = false;
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
     if (db) |*d| d.close();
     db = null;
     db_path_len = 0;
@@ -329,11 +339,11 @@ pub fn isInitialized() bool {
 // -- Get --
 
 /// Get a value by namespace and key. Returns bytes written to buf, or null if not found.
-pub fn get(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
-    if (try getRemembered(namespace, key, buf)) |n| return n;
+pub fn get(io: std.Io, namespace: []const u8, key: []const u8, buf: []u8) !?usize {
+    if (try getRemembered(io, namespace, key, buf)) |n| return n;
 
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
 
     var d = db orelse return error.NotInitialized;
     var stmt = try d.prepare("SELECT value FROM store WHERE namespace = ? AND key = ?");
@@ -354,11 +364,11 @@ pub fn get(namespace: []const u8, key: []const u8, buf: []u8) !?usize {
 /// allocator). Null = key not found. This is the host bindings' read path —
 /// fixed read buffers silently truncated/dropped large values (the same class
 /// of bug as the old 8KB write cap).
-pub fn getAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
-    if (try getRememberedAlloc(allocator, namespace, key)) |v| return v;
+pub fn getAlloc(io: std.Io, allocator: std.mem.Allocator, namespace: []const u8, key: []const u8) !?[]u8 {
+    if (try getRememberedAlloc(io, allocator, namespace, key)) |v| return v;
 
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
 
     var d = db orelse return error.NotInitialized;
     var stmt = try d.prepare("SELECT value FROM store WHERE namespace = ? AND key = ?");
@@ -374,10 +384,10 @@ pub fn getAlloc(allocator: std.mem.Allocator, namespace: []const u8, key: []cons
 }
 
 /// Does the key exist? No value buffer involved, so size never matters.
-pub fn has(namespace: []const u8, key: []const u8) !bool {
+pub fn has(io: std.Io, namespace: []const u8, key: []const u8) !bool {
     {
-        write_mutex.lock();
-        defer write_mutex.unlock();
+        write_mutex.lockUncancelable(io);
+        defer write_mutex.unlock(io);
         var remaining = write_cache_len;
         while (remaining > 0) {
             remaining -= 1;
@@ -387,8 +397,8 @@ pub fn has(namespace: []const u8, key: []const u8) !bool {
         }
     }
 
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
 
     var d = db orelse return error.NotInitialized;
     var stmt = try d.prepare("SELECT 1 FROM store WHERE namespace = ? AND key = ?");
@@ -400,23 +410,23 @@ pub fn has(namespace: []const u8, key: []const u8) !bool {
 }
 
 /// Get a stored integer value. Returns null if not found.
-pub fn getInt(namespace: []const u8, key: []const u8) !?i64 {
+pub fn getInt(io: std.Io, namespace: []const u8, key: []const u8) !?i64 {
     var buf: [64]u8 = undefined;
-    const len = (try get(namespace, key, &buf)) orelse return null;
+    const len = (try get(io, namespace, key, &buf)) orelse return null;
     return std.fmt.parseInt(i64, buf[0..len], 10) catch null;
 }
 
 /// Get a stored float value. Returns null if not found.
-pub fn getFloat(namespace: []const u8, key: []const u8) !?f64 {
+pub fn getFloat(io: std.Io, namespace: []const u8, key: []const u8) !?f64 {
     var buf: [64]u8 = undefined;
-    const len = (try get(namespace, key, &buf)) orelse return null;
+    const len = (try get(io, namespace, key, &buf)) orelse return null;
     return std.fmt.parseFloat(f64, buf[0..len]) catch null;
 }
 
 /// Get a stored boolean value. Returns null if not found.
-pub fn getBool(namespace: []const u8, key: []const u8) !?bool {
+pub fn getBool(io: std.Io, namespace: []const u8, key: []const u8) !?bool {
     var buf: [8]u8 = undefined;
-    const len = (try get(namespace, key, &buf)) orelse return null;
+    const len = (try get(io, namespace, key, &buf)) orelse return null;
     const s = buf[0..len];
     if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "1")) return true;
     if (std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "0")) return false;
@@ -426,39 +436,39 @@ pub fn getBool(namespace: []const u8, key: []const u8) !?bool {
 // -- Set --
 
 /// Set a text value for namespace + key. Creates or replaces.
-pub fn set(namespace: []const u8, key: []const u8, value: []const u8) !void {
+pub fn set(io: std.Io, namespace: []const u8, key: []const u8, value: []const u8) !void {
     if (db == null) return error.NotInitialized;
-    try enqueueSet(namespace, key, value);
+    try enqueueSet(io, namespace, key, value);
 }
 
 /// Set an integer value.
-pub fn setInt(namespace: []const u8, key: []const u8, value: i64) !void {
+pub fn setInt(io: std.Io, namespace: []const u8, key: []const u8, value: i64) !void {
     var buf: [64]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{value}) catch return error.BufferTooSmall;
-    return set(namespace, key, s);
+    return set(io, namespace, key, s);
 }
 
 /// Set a float value.
-pub fn setFloat(namespace: []const u8, key: []const u8, value: f64) !void {
+pub fn setFloat(io: std.Io, namespace: []const u8, key: []const u8, value: f64) !void {
     var buf: [64]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{value}) catch return error.BufferTooSmall;
-    return set(namespace, key, s);
+    return set(io, namespace, key, s);
 }
 
 /// Set a boolean value.
-pub fn setBool(namespace: []const u8, key: []const u8, value: bool) !void {
-    return set(namespace, key, if (value) "true" else "false");
+pub fn setBool(io: std.Io, namespace: []const u8, key: []const u8, value: bool) !void {
+    return set(io, namespace, key, if (value) "true" else "false");
 }
 
 // -- Delete --
 
 /// Delete a single key from a namespace.
-pub fn delete(namespace: []const u8, key: []const u8) !void {
+pub fn delete(io: std.Io, namespace: []const u8, key: []const u8) !void {
     // the cache/queue first, so a read can't resurrect the dead value
-    purgeRemembered(namespace, key);
+    purgeRemembered(io, namespace, key);
 
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
 
     var d = db orelse return error.NotInitialized;
     var stmt = try d.prepare("DELETE FROM store WHERE namespace = ? AND key = ?");
@@ -478,11 +488,11 @@ fn keyEntryLessThan(_: void, a: KeyEntry, b: KeyEntry) bool {
 /// List all keys in a namespace, sorted alphabetically. Merges pending writes
 /// (the async queue may not have committed yet) with the DB rows.
 /// Returns the number of keys written to `out`.
-pub fn keys(namespace: []const u8, out: []KeyEntry) !usize {
+pub fn keys(io: std.Io, namespace: []const u8, out: []KeyEntry) !usize {
     var count: usize = 0;
     {
-        db_mutex.lock();
-        defer db_mutex.unlock();
+        db_mutex.lockUncancelable(io);
+        defer db_mutex.unlock(io);
 
         var d = db orelse return error.NotInitialized;
         var stmt = try d.prepare("SELECT key FROM store WHERE namespace = ? ORDER BY key");
@@ -502,8 +512,8 @@ pub fn keys(namespace: []const u8, out: []KeyEntry) !usize {
 
     // read-your-writes: session-written keys the writer hasn't committed yet
     {
-        write_mutex.lock();
-        defer write_mutex.unlock();
+        write_mutex.lockUncancelable(io);
+        defer write_mutex.unlock(io);
         var i: usize = 0;
         outer: while (i < write_cache_len) : (i += 1) {
             const job = &write_cache[i];
@@ -527,12 +537,12 @@ pub fn keys(namespace: []const u8, out: []KeyEntry) !usize {
 // -- Clear --
 
 /// Clear all keys in a namespace. If namespace is null, clear everything.
-pub fn clear(namespace: ?[]const u8) !void {
+pub fn clear(io: std.Io, namespace: ?[]const u8) !void {
     // the cache/queue first, so reads can't resurrect cleared values
-    purgeRemembered(namespace, null);
+    purgeRemembered(io, namespace, null);
 
-    db_mutex.lock();
-    defer db_mutex.unlock();
+    db_mutex.lockUncancelable(io);
+    defer db_mutex.unlock(io);
 
     var d = db orelse return error.NotInitialized;
 
@@ -548,84 +558,91 @@ pub fn clear(namespace: ?[]const u8) !void {
 
 // -- Tests --
 
+fn initTestFs() !void {
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try environ.put("HOME", "/tmp");
+    try fs.init(std.testing.io, &environ, "tsz-localstore-test");
+}
+
 test "init requires fs" {
     // fs not initialized, so init should fail
-    const result = init();
+    const result = init(std.testing.io);
     try std.testing.expectError(error.NotInitialized, result);
 }
 
 test "round-trip text value" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
-    try set("app", "theme", "dark");
+    try set(std.testing.io, "app", "theme", "dark");
 
     var buf: [256]u8 = undefined;
-    const len = (try get("app", "theme", &buf)).?;
+    const len = (try get(std.testing.io, "app", "theme", &buf)).?;
     try std.testing.expectEqualStrings("dark", buf[0..len]);
 }
 
 test "round-trip typed values" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
     // Integer
-    try setInt("app", "count", 42);
-    try std.testing.expectEqual(@as(?i64, 42), try getInt("app", "count"));
+    try setInt(std.testing.io, "app", "count", 42);
+    try std.testing.expectEqual(@as(?i64, 42), try getInt(std.testing.io, "app", "count"));
 
     // Float
-    try setFloat("app", "ratio", 3.14);
-    const f = (try getFloat("app", "ratio")).?;
+    try setFloat(std.testing.io, "app", "ratio", 3.14);
+    const f = (try getFloat(std.testing.io, "app", "ratio")).?;
     try std.testing.expect(std.math.approxEqAbs(f64, 3.14, f, 0.01));
 
     // Bool
-    try setBool("app", "enabled", true);
-    try std.testing.expectEqual(@as(?bool, true), try getBool("app", "enabled"));
+    try setBool(std.testing.io, "app", "enabled", true);
+    try std.testing.expectEqual(@as(?bool, true), try getBool(std.testing.io, "app", "enabled"));
 }
 
 test "get missing key returns null" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
     var buf: [256]u8 = undefined;
-    const result = try get("app", "nonexistent", &buf);
+    const result = try get(std.testing.io, "app", "nonexistent", &buf);
     try std.testing.expect(result == null);
 }
 
 test "delete key" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
-    try set("app", "temp", "value");
-    try delete("app", "temp");
+    try set(std.testing.io, "app", "temp", "value");
+    try delete(std.testing.io, "app", "temp");
 
     var buf: [256]u8 = undefined;
-    try std.testing.expect((try get("app", "temp", &buf)) == null);
+    try std.testing.expect((try get(std.testing.io, "app", "temp", &buf)) == null);
 }
 
 test "keys listing" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
     // Clear first
-    try clear("test-keys");
+    try clear(std.testing.io, "test-keys");
 
-    try set("test-keys", "alpha", "1");
-    try set("test-keys", "beta", "2");
-    try set("test-keys", "gamma", "3");
+    try set(std.testing.io, "test-keys", "alpha", "1");
+    try set(std.testing.io, "test-keys", "beta", "2");
+    try set(std.testing.io, "test-keys", "gamma", "3");
 
     var entries: [16]KeyEntry = undefined;
-    const count = try keys("test-keys", &entries);
+    const count = try keys(std.testing.io, "test-keys", &entries);
     try std.testing.expectEqual(@as(usize, 3), count);
     try std.testing.expectEqualStrings("alpha", entries[0].key());
     try std.testing.expectEqualStrings("beta", entries[1].key());
@@ -633,38 +650,38 @@ test "keys listing" {
 }
 
 test "clear namespace" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
-    try set("clearme", "a", "1");
-    try set("clearme", "b", "2");
-    try set("keep", "c", "3");
+    try set(std.testing.io, "clearme", "a", "1");
+    try set(std.testing.io, "clearme", "b", "2");
+    try set(std.testing.io, "keep", "c", "3");
 
-    try clear("clearme");
+    try clear(std.testing.io, "clearme");
 
     // clearme keys gone
     var buf: [256]u8 = undefined;
-    try std.testing.expect((try get("clearme", "a", &buf)) == null);
-    try std.testing.expect((try get("clearme", "b", &buf)) == null);
+    try std.testing.expect((try get(std.testing.io, "clearme", "a", &buf)) == null);
+    try std.testing.expect((try get(std.testing.io, "clearme", "b", &buf)) == null);
 
     // keep keys remain
-    const len = (try get("keep", "c", &buf)).?;
+    const len = (try get(std.testing.io, "keep", "c", &buf)).?;
     try std.testing.expectEqualStrings("3", buf[0..len]);
 }
 
 test "overwrite value" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
-    try set("app", "version", "1.0");
-    try set("app", "version", "2.0");
+    try set(std.testing.io, "app", "version", "1.0");
+    try set(std.testing.io, "app", "version", "2.0");
 
     var buf: [256]u8 = undefined;
-    const len = (try get("app", "version", &buf)).?;
+    const len = (try get(std.testing.io, "app", "version", &buf)).?;
     try std.testing.expectEqualStrings("2.0", buf[0..len]);
 }
 
@@ -674,40 +691,40 @@ test "large value survives set, restart, and getAlloc" {
     // failure was swallowed — visible all session (in-process caches), gone
     // on restart. This pins set→persist→reopen→read for a >64KB value
     // (past the old write cap AND the old fixed read buffers).
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
 
     const big = try std.testing.allocator.alloc(u8, 100 * 1024);
     defer std.testing.allocator.free(big);
     for (big, 0..) |*c, i| c.* = 'a' + @as(u8, @intCast(i % 26));
 
-    try set("app", "big-value", big);
+    try set(std.testing.io, "app", "big-value", big);
 
     // read-your-writes before the writer commits
-    const cached = (try getAlloc(std.testing.allocator, "app", "big-value")).?;
+    const cached = (try getAlloc(std.testing.io, std.testing.allocator, "app", "big-value")).?;
     defer std.testing.allocator.free(cached);
     try std.testing.expectEqualStrings(big, cached);
 
     // "restart": deinit flushes the write queue and drops the in-memory cache
-    deinit();
-    try init();
-    defer deinit();
+    deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
-    const reread = (try getAlloc(std.testing.allocator, "app", "big-value")).?;
+    const reread = (try getAlloc(std.testing.io, std.testing.allocator, "app", "big-value")).?;
     defer std.testing.allocator.free(reread);
     try std.testing.expectEqualStrings(big, reread);
-    try std.testing.expect(try has("app", "big-value"));
+    try std.testing.expect(try has(std.testing.io, "app", "big-value"));
 }
 
 test "oversized value is a loud error, not a silent drop" {
-    try fs.init("tsz-localstore-test");
-    defer fs.deinit();
-    try init();
-    defer deinit();
+    try initTestFs();
+    defer fs.deinit(std.testing.io);
+    try init(std.testing.io);
+    defer deinit(std.testing.io);
 
     const huge = try std.testing.allocator.alloc(u8, MAX_VALUE + 1);
     defer std.testing.allocator.free(huge);
     @memset(huge, 'x');
-    try std.testing.expectError(error.BufferTooSmall, set("app", "too-big", huge));
+    try std.testing.expectError(error.BufferTooSmall, set(std.testing.io, "app", "too-big", huge));
 }

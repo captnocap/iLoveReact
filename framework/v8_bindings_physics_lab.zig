@@ -20,7 +20,6 @@
 //! CSV is retained as a compatibility/debug fallback.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const c = @import("engine.zig").c;
@@ -155,8 +154,8 @@ fn makePlayer() Player {
     };
 }
 
-inline fn nowNs() i64 {
-    return @as(i64, @truncate(host_io.nanoTimestamp()));
+inline fn nowNs(io: std.Io) i64 {
+    return @as(i64, @truncate(std.Io.Clock.now(.awake, io).toNanoseconds()));
 }
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
@@ -259,14 +258,14 @@ fn seedBalls(count: usize) void {
     while (g_ball_count < n) addBall(@as(f32, @floatFromInt(g_ball_count)) * 0.19);
 }
 
-fn reset(count: usize) void {
+fn reset(io: std.Io, count: usize) void {
     g_player = makePlayer();
     g_t = 0;
     g_contacts = 0;
     g_peak_contacts = 0;
     g_spawn_seq = 0;
     seedBalls(count);
-    g_last_ns = nowNs();
+    g_last_ns = nowNs(io);
 }
 
 fn collideCircleBlock(p: *Player, block: Block) bool {
@@ -616,7 +615,7 @@ fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const count_f = argToF64(info, 0) orelse 5;
     const count: usize = if (count_f > 0) @intFromFloat(@min(count_f, @as(f64, @floatFromInt(MAX_BALLS)))) else 5;
-    reset(count);
+    reset(v8_runtime.hostContext(info.getIsolate()).io, count);
 }
 
 fn hostBurst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -627,7 +626,7 @@ fn hostBurst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     while (i < count and g_ball_count < MAX_BALLS) : (i += 1) addBall(g_t + @as(f32, @floatFromInt(i)) * 0.19 + @as(f32, @floatFromInt(g_spawn_seq)) * 0.011);
 }
 
-fn advanceWorld(yaw: f32, paused: bool, t0: i64) f64 {
+fn advanceWorld(io: std.Io, yaw: f32, paused: bool, t0: i64) f64 {
     const now = t0;
     var dt_ns: i64 = if (g_last_ns == 0) 0 else now - g_last_ns;
     g_last_ns = now;
@@ -645,7 +644,7 @@ fn advanceWorld(yaw: f32, paused: bool, t0: i64) f64 {
         g_peak_contacts = @max(g_peak_contacts * 0.965, @as(f32, @floatFromInt(contacts)));
     }
 
-    return @as(f64, @floatFromInt(nowNs() - t0)) / 1000.0;
+    return @as(f64, @floatFromInt(nowNs(io) - t0)) / 1000.0;
 }
 
 fn writeSnapshot(host_us: f32) []f32 {
@@ -701,10 +700,11 @@ fn writeSnapshot(host_us: f32) []f32 {
 
 fn hostStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const t0 = nowNs(io);
     const yaw: f32 = @floatCast(argToF64(info, 0) orelse 0);
     const paused = argToBool(info, 1) orelse false;
-    const elapsed_us = advanceWorld(yaw, paused, t0);
+    const elapsed_us = advanceWorld(io, yaw, paused, t0);
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.ensureTotalCapacity(alloc, 256 + g_ball_count * 72) catch {
@@ -749,16 +749,17 @@ fn hostStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostStepBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const t0 = nowNs(io);
     const yaw: f32 = @floatCast(argToF64(info, 0) orelse 0);
     const paused = argToBool(info, 1) orelse false;
-    const elapsed_us = advanceWorld(yaw, paused, t0);
+    const elapsed_us = advanceWorld(io, yaw, paused, t0);
     const snapshot = writeSnapshot(@floatCast(elapsed_us));
     setReturnF32Buffer(info, snapshot);
 }
 
-pub fn registerPhysicsLab(_: anytype) void {
-    reset(5);
+pub fn registerPhysicsLab(host: anytype) void {
+    reset(host.io, 5);
     v8_runtime.registerHostFn("__physics_lab_reset", hostReset);
     v8_runtime.registerHostFn("__physics_lab_burst", hostBurst);
     v8_runtime.registerHostFn("__physics_lab_step", hostStep);

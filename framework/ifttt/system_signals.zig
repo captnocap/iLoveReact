@@ -11,15 +11,15 @@
 // interval to avoid 60Hz spam.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const v8_runtime = @import("../v8_runtime.zig");
+const HostContext = @import("../host_context.zig");
 
 // ── Tunables ────────────────────────────────────────────────────────────
-const CURSOR_POLL_MS: u32 = 16;     // ~60Hz max for cursor delta
-const PERF_POLL_MS: u32 = 1000;     // 1Hz for ram/vram polls
-const SLOW_FRAME_MS: f32 = 32.0;    // > 2 frames at 60Hz = "slow"
-const HANG_FRAMES: u32 = 3;         // N consecutive slow frames = hang
+const CURSOR_POLL_MS: u32 = 16; // ~60Hz max for cursor delta
+const PERF_POLL_MS: u32 = 1000; // 1Hz for ram/vram polls
+const SLOW_FRAME_MS: f32 = 32.0; // > 2 frames at 60Hz = "slow"
+const HANG_FRAMES: u32 = 3; // N consecutive slow frames = hang
 
 // ── Cursor ──────────────────────────────────────────────────────────────
 var cursor_accum_ms: u32 = 0;
@@ -91,32 +91,32 @@ pub fn init() void {
 
 // ── Public API: notifications from engine event handlers ───────────────
 
-pub fn notifyFocus(gained: bool) void {
+pub fn notifyFocus(host: *HostContext, gained: bool) void {
     const want: i8 = if (gained) 1 else 0;
     if (last_focused == want) return;
     last_focused = want;
     var buf: [96]u8 = undefined;
     const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemFocus({d})", .{want}) catch return;
-    fire(sentinel);
+    fire(host, sentinel);
 }
 
-pub fn notifyDrop(path: []const u8) void {
+pub fn notifyDrop(host: *HostContext, path: []const u8) void {
     const n = @min(path.len, drop_path_buf.len);
     @memcpy(drop_path_buf[0..n], path[0..n]);
     drop_path_len = n;
-    fire("__ifttt_onSystemDrop()");
+    fire(host, "__ifttt_onSystemDrop()");
 }
 
 /// Pointer device flipped (mouse ⇄ pen). Engine calls this on the change edge
 /// only (mouse_state.updatePointerDevice returns true), so no dedupe needed here.
 /// dev: 0 = mouse, 1 = pen — matches mouse_state.PointerDevice.
-pub fn notifyPointerDevice(dev: u8) void {
+pub fn notifyPointerDevice(host: *HostContext, dev: u8) void {
     var buf: [96]u8 = undefined;
     const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemPointerDevice({d})", .{dev}) catch return;
-    fire(sentinel);
+    fire(host, sentinel);
 }
 
-pub fn notifyResize(w: f32, h: f32) void {
+pub fn notifyResize(host: *HostContext, w: f32, h: f32) void {
     last_w = w;
     last_h = h;
     // Tier-gated: SDL fires PIXEL_SIZE_CHANGED on every pixel of an active
@@ -130,7 +130,7 @@ pub fn notifyResize(w: f32, h: f32) void {
     last_bp_tier = new_tier;
     var buf: [128]u8 = undefined;
     const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemResize({d:.0},{d:.0})", .{ w, h }) catch return;
-    fire(sentinel);
+    fire(host, sentinel);
 }
 
 // JS getters — let cart modules read the current viewport size on import
@@ -156,7 +156,7 @@ pub fn getDropPath() []const u8 {
 
 // ── Public API: per-frame tick (call once per main loop iteration) ─────
 
-pub fn tick(dt_ms: u32) void {
+pub fn tick(host: *HostContext, dt_ms: u32) void {
     cursor_accum_ms += dt_ms;
     perf_accum_ms += dt_ms;
 
@@ -176,51 +176,52 @@ pub fn tick(dt_ms: u32) void {
             cursor_last_y = y;
             var buf: [192]u8 = undefined;
             const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemCursor({d:.0},{d:.0},{d:.0},{d:.0})", .{ x, y, dx, dy }) catch return;
-            fire(sentinel);
+            fire(host, sentinel);
         }
     }
 
     if (perf_accum_ms >= PERF_POLL_MS) {
         perf_accum_ms = 0;
-        pollMem();
-        pollVram();
+        pollMem(host);
+        pollVram(host);
     }
 }
 
 // ── Public API: post-paint frame timing ────────────────────────────────
 
-pub fn tickPostPaint(dt_sec: f32) void {
+pub fn tickPostPaint(host: *HostContext, dt_sec: f32) void {
     const ms = dt_sec * 1000.0;
     if (ms < SLOW_FRAME_MS) {
         consecutive_slow = 0;
         if (hang_announced) {
             // Recovered — announce end of hang as count=0. Edge-only fire.
             hang_announced = false;
-            fire("__ifttt_onSystemHang(0)");
+            fire(host, "__ifttt_onSystemHang(0)");
         }
         return;
     }
     consecutive_slow += 1;
     var buf: [128]u8 = undefined;
     if (std.fmt.bufPrintZ(&buf, "__ifttt_onSystemSlowFrame({d:.2})", .{ms})) |sentinel| {
-        fire(sentinel);
+        fire(host, sentinel);
     } else |_| {}
     if (consecutive_slow >= HANG_FRAMES and !hang_announced) {
         hang_announced = true;
         var hbuf: [96]u8 = undefined;
         if (std.fmt.bufPrintZ(&hbuf, "__ifttt_onSystemHang({d})", .{consecutive_slow})) |sentinel| {
-            fire(sentinel);
+            fire(host, sentinel);
         } else |_| {}
     }
 }
 
 // ── Mem pollers ────────────────────────────────────────────────────────
 
-fn pollMem() void {
-    const file = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/meminfo", .{}) catch return;
-    defer file.close(host_io.io());
+fn pollMem(host: *HostContext) void {
+    const io = host.io;
+    const file = std.Io.Dir.openFileAbsolute(io, "/proc/meminfo", .{}) catch return;
+    defer file.close(io);
     var buf: [4096]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
+    const n = file.readPositionalAll(io, &buf, 0) catch return;
     var total: u64 = 0;
     var avail: u64 = 0;
     var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
@@ -238,11 +239,12 @@ fn pollMem() void {
     last_ram_total = total;
     var fbuf: [192]u8 = undefined;
     if (std.fmt.bufPrintZ(&fbuf, "__ifttt_onSystemRam({d},{d})", .{ used, total })) |sentinel| {
-        fire(sentinel);
+        fire(host, sentinel);
     } else |_| {}
 }
 
-fn pollVram() void {
+fn pollVram(host: *HostContext) void {
+    const io = host.io;
     // Try AMD/Intel discrete GPUs via /sys/class/drm/cardN/device/mem_info_vram_*.
     // We sweep cards 0..3 and use the first one that exposes both totals.
     var card: u32 = 0;
@@ -251,15 +253,15 @@ fn pollVram() void {
         var used_path: [96]u8 = undefined;
         const tp = std.fmt.bufPrint(&total_path, "/sys/class/drm/card{d}/device/mem_info_vram_total", .{card}) catch return;
         const up = std.fmt.bufPrint(&used_path, "/sys/class/drm/card{d}/device/mem_info_vram_used", .{card}) catch return;
-        const total = readU64File(tp) orelse continue;
-        const used = readU64File(up) orelse continue;
+        const total = readU64File(io, tp) orelse continue;
+        const used = readU64File(io, up) orelse continue;
         if (total == 0) continue;
         if (used == last_vram_used and total == last_vram_total) return;
         last_vram_used = used;
         last_vram_total = total;
         var fbuf: [192]u8 = undefined;
         if (std.fmt.bufPrintZ(&fbuf, "__ifttt_onSystemVram({d},{d})", .{ used, total })) |sentinel| {
-            fire(sentinel);
+            fire(host, sentinel);
         } else |_| {}
         return;
     }
@@ -280,17 +282,17 @@ fn parseFirstNumber(line: []const u8) u64 {
     return n;
 }
 
-fn readU64File(path: []const u8) ?u64 {
-    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
-    defer file.close(host_io.io());
+fn readU64File(io: std.Io, path: []const u8) ?u64 {
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
+    defer file.close(io);
     var buf: [64]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return null;
+    const n = file.readPositionalAll(io, &buf, 0) catch return null;
     if (n == 0) return null;
     return parseFirstNumber(buf[0..n]);
 }
 
-fn fire(sentinel: [:0]const u8) void {
-    v8_runtime.callGlobal("__beginJsEvent");
-    v8_runtime.evalExpr(sentinel);
-    v8_runtime.callGlobal("__endJsEvent");
+fn fire(host: *HostContext, sentinel: [:0]const u8) void {
+    v8_runtime.callGlobal(host, "__beginJsEvent");
+    v8_runtime.evalExpr(host, sentinel);
+    v8_runtime.callGlobal(host, "__endJsEvent");
 }

@@ -24,7 +24,6 @@
 //! number even on the pure-Zig backend).
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const c = @import("engine.zig").c;
@@ -88,14 +87,13 @@ fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     g_z = if (info.length() >= 2) @floatCast(argToF64(info, 1) orelse 0) else 0;
     g_last_dx = 0;
     g_last_dz = 0;
-    g_last_ns = nowNs();
+    g_last_ns = nowNs(info);
 }
 
-// std.time.nanoTimestamp returns i128; we store i64 (good for ~292 years
-// past epoch). Match the luajit_worker.zig pattern: truncate at the
-// boundary so the arithmetic everywhere else stays in i64.
-inline fn nowNs() i64 {
-    return @as(i64, @truncate(host_io.nanoTimestamp()));
+// Io.Timestamp nanoseconds are i96; this benchmark stores i64 (roughly 292
+// years of monotonic-clock range) so the hot-path arithmetic stays narrow.
+inline fn nowNs(info: v8.FunctionCallbackInfo) i64 {
+    return @as(i64, @truncate(std.Io.Clock.now(.awake, v8_runtime.hostContext(info.getIsolate()).io).toNanoseconds()));
 }
 
 fn hostSetYaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -116,14 +114,14 @@ fn hostSetEnabled(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (info.length() < 1) return;
     g_enabled = argToBool(info, 0) orelse false;
     // Reset clock on enable so the next tick gets a clean dt.
-    if (g_enabled) g_last_ns = nowNs();
+    if (g_enabled) g_last_ns = nowNs(info);
 }
 
 // __input_bench_pos() — advance integration with an internal dt clock,
 // read SDL keyboard state, return "x,z,dx,dz,us".
 fn hostPos(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
 
     if (g_enabled) {
         const now = t0;
@@ -165,7 +163,7 @@ fn hostPos(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         g_last_ns = t0;
     }
 
-    const elapsed_us: f64 = @as(f64, @floatFromInt(nowNs() - t0)) / 1000.0;
+    const elapsed_us: f64 = @as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0;
     var out: [128]u8 = undefined;
     const s = std.fmt.bufPrint(&out, "{d:.4},{d:.4},{d:.5},{d:.5},{d:.2}", .{
         g_x, g_z, g_last_dx, g_last_dz, elapsed_us,
@@ -184,7 +182,7 @@ fn hostPos(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // precision is preserved by dividing ns by 1000 in floating point.
 fn hostNowUs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const now = nowNs();
+    const now = nowNs(info);
     if (g_bench_origin_ns == 0) g_bench_origin_ns = now;
     const us: f64 = @as(f64, @floatFromInt(now - g_bench_origin_ns)) / 1000.0;
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), us));

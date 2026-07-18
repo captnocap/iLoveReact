@@ -23,11 +23,6 @@
 //!     ZIGOS_SCREENSHOT_FRAMES=8 ./zig-out/bin/world_loader [game-file.b64]
 
 const std = @import("std");
-const host_io = struct {
-    fn getenv(name: [:0]const u8) ?[]const u8 {
-        return if (std.c.getenv(name.ptr)) |p| std.mem.span(p) else null;
-    }
-};
 const c = @import("c.zig").imports;
 const wgpu = @import("wgpu");
 const gpu = @import("gpu/gpu.zig");
@@ -119,10 +114,10 @@ pub fn anyPaintArmed() bool {
 
 pub const PaintPhase = paint_surface.PaintPhase;
 
-pub fn paintPointer(node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
+pub fn paintPointer(io: std.Io, node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
     const entry = findMounted(node_id) orelse return;
     const runtime = entry.runtime orelse return;
-    paint_surface.paintPointer(runtime, phase, mx, my);
+    paint_surface.paintPointer(runtime, io, phase, mx, my);
 }
 
 pub fn groundHitAt(node_id: u32, mx: f32, my: f32, level_y: f32) ?[3]f32 {
@@ -149,36 +144,36 @@ fn findVacantMounted() ?*MountedLoader {
     return null;
 }
 
-pub fn mount(allocator: std.mem.Allocator, node_id: u32, game_file: []const u8, store_dir: []const u8) !void {
+pub fn mount(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8, store_dir: []const u8) !void {
     if (node_id == 0) return error.BadNodeId;
-    unmount(node_id);
+    unmount(io, node_id);
     const entry = findVacantMounted() orelse return error.TooManyWorldLoaders;
-    entry.runtime = try Runtime.create(allocator, game_file, store_dir, node_id);
+    entry.runtime = try Runtime.create(io, environ, allocator, game_file, store_dir, node_id);
     entry.active = true;
 }
 
-pub fn unmount(node_id: u32) void {
+pub fn unmount(io: std.Io, node_id: u32) void {
     if (findMounted(node_id)) |entry| {
-        if (entry.runtime) |runtime| runtime.destroy();
+        if (entry.runtime) |runtime| runtime.destroy(io);
         entry.runtime = null;
         entry.active = false;
     }
 }
 
-fn runtimeForNode(allocator: std.mem.Allocator, node: *Node) !*Runtime {
+fn runtimeForNode(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node: *Node) !*Runtime {
     if (node.id == 0) return error.BadNodeId;
     if (findMounted(node.id)) |entry| {
         if (entry.runtime) |runtime| return runtime;
     }
     const game_file = node.world_loader_game_file orelse "zig-out/game/hmsc.gamefile";
     const store_dir = node.world_loader_store_dir orelse STORE_DIR;
-    try mount(allocator, node.id, game_file, store_dir);
+    try mount(io, environ, allocator, node.id, game_file, store_dir);
     const entry = findMounted(node.id) orelse return error.MountFailed;
     return entry.runtime orelse error.MountFailed;
 }
 
-pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
-    const runtime = runtimeForNode(allocator, node) catch |err| {
+pub fn renderEmbedded(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
+    const runtime = runtimeForNode(io, environ, allocator, node) catch |err| {
         log.print("[loader] embedded mount/render failed for node {d}: {any}\n", .{ node.id, err });
         return false;
     };
@@ -187,7 +182,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     // [live-diag req_1812] RJIT_LIVE_PROBE=1: inject ONE bright box at the camera's look
     // target so a headless shot proves whether the live overlay RENDERS at all (isolates
     // the Zig draw path from the JS push). Only when nothing real is set for this node.
-    if (host_io.getenv("RJIT_LIVE_PROBE") != null) {
+    if (environ.get("RJIT_LIVE_PROBE") != null) {
         const cur = pendingLiveFor(node.id);
         if (cur == null or cur.?.count == 0) {
             const lk = runtime.camera.ext_look;
@@ -205,10 +200,10 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     runtime.paint_last_y = y;
     runtime.paint_last_w = w;
     runtime.paint_last_h = h;
-    applyPaintLayer(runtime);
-    runtime.stepNow();
-    runtime_lifecycle.ensureMaterials(runtime);
-    const ok = scene3d.render(&runtime.root, x, y, w, h, opacity);
+    applyPaintLayer(runtime, io);
+    runtime.stepNow(io, environ);
+    runtime_lifecycle.ensureMaterials(runtime, io, environ);
+    const ok = scene3d.render(io, environ, &runtime.root, x, y, w, h, opacity);
     // Interaction HUD (PROPUSE req_0624) — queued after the world quad so the
     // image-boundary segmentation draws it on top, inside this pane.
     if (ok) runtime_interaction.drawHud(runtime, x, y, w, h);
@@ -219,13 +214,13 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
 /// detached target — the pop-out window path. Unlike renderEmbedded nothing
 /// is queued into the main window's 2D stream; the returned view is the
 /// window's to blit. The runtime must already be mounted (mount()).
-pub fn renderDetachedView(node_id: u32, target: *scene3d.DetachedTarget, w: f32, h: f32) ?*wgpu.TextureView {
+pub fn renderDetachedView(io: std.Io, environ: *const std.process.Environ.Map, node_id: u32, target: *scene3d.DetachedTarget, w: f32, h: f32) ?*wgpu.TextureView {
     const entry = findMounted(node_id) orelse return null;
     const runtime = entry.runtime orelse return null;
     runtime.last_aspect = w / @max(h, 1);
-    runtime.stepNow();
-    runtime_lifecycle.ensureMaterials(runtime);
-    return scene3d.renderDetached(target, &runtime.root, w, h);
+    runtime.stepNow(io, environ);
+    runtime_lifecycle.ensureMaterials(runtime, io, environ);
+    return scene3d.renderDetached(io, environ, target, &runtime.root, w, h);
 }
 
 /// WORLDWIN + PROPUSE req_0624: queue the interaction HUD prims for a
@@ -299,6 +294,7 @@ pub fn statusAlloc(allocator: std.mem.Allocator, node_id: u32) ![]u8 {
 
 pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.c_allocator;
+    game_physics.configureDiagnostics(init.environ_map);
 
     var args_list: std.ArrayList([:0]const u8) = .empty;
     defer args_list.deinit(allocator);
@@ -311,8 +307,8 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var runtime: Runtime = undefined;
-    runtime.initInPlace(allocator, path, STORE_DIR, 0) catch |err| return err;
-    defer runtime.deinit();
+    runtime.initInPlace(init.io, init.environ_map, allocator, path, STORE_DIR, 0) catch |err| return err;
+    defer runtime.deinit(init.io);
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -321,18 +317,20 @@ pub fn main(init: std.process.Init) !void {
     }
     defer c.SDL_Quit();
 
-    const headless = host_io.getenv("ZIGOS_HEADLESS") != null;
+    const headless = init.environ_map.get("ZIGOS_HEADLESS") != null;
     const flags: u64 = if (headless) c.SDL_WINDOW_HIDDEN else 0;
     const window = c.SDL_CreateWindow("world_loader", WIN_W, WIN_H, flags) orelse {
         log.print("[loader] SDL_CreateWindow failed\n", .{});
         return error.WindowFailed;
     };
 
-    gpu.init(window) catch |err| {
+    gpu.init(init.io, init.environ_map, window) catch |err| {
         log.print("[loader] gpu.init failed: {any}\n", .{err});
         return err;
     };
-    capture.init();
+    defer gpu.deinit();
+    capture.init(init.environ_map);
+    defer capture.deinit(init.io);
 
     // Text for the interaction HUD (PROPUSE req_0624) — same system-font
     // fallback chain the engine uses. Missing fonts degrade gracefully:
@@ -342,7 +340,7 @@ pub fn main(init: std.process.Init) !void {
         text_engine.TextEngine.initHeadless("/System/Library/Fonts/Supplemental/Arial.ttf") catch
         text_engine.TextEngine.initHeadless("C:/Windows/Fonts/segoeui.ttf") catch null;
     if (te) |*engine_ref| {
-        gpu.initText(engine_ref.library, engine_ref.face, engine_ref.fallback_faces, engine_ref.fallback_count);
+        gpu.initText(init.environ_map, engine_ref.library, engine_ref.face, engine_ref.fallback_faces, engine_ref.fallback_count);
         if (engine_ref.face_bold != null) gpu.setBoldFace(engine_ref.face_bold);
     } else {
         log.print("[loader] no system font found — HUD prompts render without text\n", .{});
@@ -358,7 +356,7 @@ pub fn main(init: std.process.Init) !void {
     var running = true;
     while (running) {
         runtime_stream.pollStandaloneEvents(&runtime, &running);
-        runtime.stepNow();
+        runtime.stepNow(init.io, init.environ_map);
         if (screenshotting and runtime.frame % 30 == 0) {
             // what does the LIVE physics set hold under the player's column?
             var covering: usize = 0;
@@ -375,11 +373,11 @@ pub fn main(init: std.process.Init) !void {
                 runtime.frame, runtime.player.y, runtime.player.vy, runtime.player.grounded, runtime.physics_colliders.rect_count, covering, best_top,
             });
         }
-        runtime_lifecycle.ensureMaterials(&runtime);
-        _ = scene3d.render(&runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
+        runtime_lifecycle.ensureMaterials(&runtime, init.io, init.environ_map);
+        _ = scene3d.render(init.io, init.environ_map, &runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         // Interaction HUD over the world quad (PROPUSE req_0624).
         runtime_interaction.drawHud(&runtime, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H));
-        gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
+        gpu.frame(init.io, init.environ_map, 0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 
         if (screenshotting) {
             if (capture.tick(null) or runtime.frame >= MAX_FRAMES) break; // captured → exit

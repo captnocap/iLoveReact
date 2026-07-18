@@ -19,8 +19,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const host_io = @import("host_io.zig");
-const sysx = @import("net/sysx.zig");
 
 const MAX_SLIDERS: usize = 16;
 const MAX_EVENTS: usize = 128;
@@ -34,6 +32,7 @@ const JITTER_RAW: i32 = 4;
 /// Polls between reopen attempts while disconnected (~1s at the hook's
 /// default 30Hz drain).
 const REOPEN_EVERY_POLLS: u32 = 30;
+const READ_QUEUE_CAPACITY: usize = 4096;
 
 pub const DeejEvent = struct {
     slider: u8 = 0,
@@ -42,7 +41,8 @@ pub const DeejEvent = struct {
 
 const State = struct {
     started: bool = false,
-    fd: ?std.posix.fd_t = null,
+    allocator: ?std.mem.Allocator = null,
+    reader: ?*SerialReader = null,
     port: [MAX_PORT]u8 = [_]u8{0} ** MAX_PORT,
     port_len: usize = 0,
     explicit: [MAX_PORT]u8 = [_]u8{0} ** MAX_PORT,
@@ -62,9 +62,62 @@ const State = struct {
 
 var S: State = .{};
 
-pub fn start(port: ?[]const u8, baud: u32) bool {
+const SerialReader = struct {
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    file: std.Io.File,
+    tasks: std.Io.Group = .init,
+    bytes: std.Io.Queue(u8),
+    byte_storage: [READ_QUEUE_CAPACITY]u8 = undefined,
+    terminal: std.atomic.Value(bool) = .init(false),
+
+    fn readLoop(self: *SerialReader) std.Io.Cancelable!void {
+        var buf: [512]u8 = undefined;
+        while (true) {
+            const n = self.file.readStreaming(self.io, &.{&buf}) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.EndOfStream => {
+                    self.terminal.store(true, .release);
+                    return;
+                },
+                else => {
+                    self.terminal.store(true, .release);
+                    return;
+                },
+            };
+            if (n == 0) continue;
+            self.bytes.putAll(self.io, buf[0..n]) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.Closed => return,
+            };
+        }
+    }
+
+    fn create(allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) !*SerialReader {
+        const self = try allocator.create(SerialReader);
+        errdefer allocator.destroy(self);
+        self.* = .{
+            .allocator = allocator,
+            .io = io,
+            .file = file,
+            .bytes = .init(&self.byte_storage),
+        };
+        try self.tasks.concurrent(io, readLoop, .{self});
+        return self;
+    }
+
+    fn destroy(self: *SerialReader) void {
+        self.tasks.cancel(self.io);
+        self.bytes.close(self.io);
+        self.file.close(self.io);
+        self.allocator.destroy(self);
+    }
+};
+
+pub fn start(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, port: ?[]const u8, baud: u32) bool {
     if (builtin.os.tag != .linux) return false;
     S.baud = if (baud == 0) 9600 else baud;
+    S.allocator = allocator;
     S.explicit_len = 0;
     if (port) |p| {
         if (p.len > 0 and p.len < MAX_PORT) {
@@ -74,7 +127,7 @@ pub fn start(port: ?[]const u8, baud: u32) bool {
     }
     S.started = true;
     S.polls_since_reopen = 0;
-    if (S.fd == null) _ = tryOpen();
+    if (S.reader == null) _ = tryOpen(io, environ);
     return true;
 }
 
@@ -88,33 +141,27 @@ pub fn isStarted() bool {
 }
 
 pub fn isConnected() bool {
-    return S.fd != null;
+    return S.reader != null;
 }
 
 /// Drain the serial line and queue move events. Returns queued count.
-pub fn poll() u32 {
+pub fn poll(io: std.Io, environ: *const std.process.Environ.Map) u32 {
     if (!S.started or builtin.os.tag != .linux) return 0;
-    if (S.fd == null) {
+    if (S.reader == null) {
         S.polls_since_reopen += 1;
         if (S.polls_since_reopen >= REOPEN_EVERY_POLLS) {
             S.polls_since_reopen = 0;
-            _ = tryOpen();
+            _ = tryOpen(io, environ);
         }
     }
-    const fd = S.fd orelse return queuedCount();
+    const reader = S.reader orelse return queuedCount();
     var buf: [512]u8 = undefined;
     while (true) {
-        const n = sysx.read(fd, &buf) catch |e| switch (e) {
-            error.WouldBlock => break,
-            else => {
-                disconnect();
-                break;
-            },
-        };
+        const n = reader.bytes.getUncancelable(io, &buf, 0) catch 0;
         if (n == 0) break;
         feed(buf[0..n]);
-        if (n < buf.len) break;
     }
+    if (reader.terminal.load(.acquire)) disconnect();
     return queuedCount();
 }
 
@@ -132,7 +179,7 @@ pub fn eventJson(ev: DeejEvent, buf: []u8) []const u8 {
 pub fn stateJson(buf: []u8) []const u8 {
     var w = std.Io.Writer.fixed(buf);
     w.print("{{\"connected\":{},\"port\":\"{s}\",\"count\":{d},\"values\":[", .{
-        S.fd != null, S.port[0..S.port_len], S.count,
+        S.reader != null, S.port[0..S.port_len], S.count,
     }) catch return "{}";
     var i: usize = 0;
     while (i < S.count) : (i += 1) {
@@ -147,35 +194,42 @@ pub fn stateJson(buf: []u8) []const u8 {
 // ── internals ──────────────────────────────────────────────
 
 fn disconnect() void {
-    if (S.fd) |fd| sysx.close(fd);
-    S.fd = null;
+    if (S.reader) |reader| reader.destroy();
+    S.reader = null;
     S.line_len = 0;
     S.seen_line = false;
 }
 
-fn tryOpen() bool {
-    if (S.explicit_len > 0) return openPort(S.explicit[0..S.explicit_len]);
-    if (host_io.getenv("RJIT_DEEJ_PORT")) |env_port| {
-        if (env_port.len > 0) return openPort(env_port);
+fn tryOpen(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (S.explicit_len > 0) return openPort(io, S.explicit[0..S.explicit_len]);
+    if (environ.get("RJIT_DEEJ_PORT")) |env_port| {
+        if (env_port.len > 0) return openPort(io, env_port);
     }
     const candidates = [_][]const u8{
         "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM3",
         "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyUSB3",
     };
     for (candidates) |path| {
-        if (openPort(path)) return true;
+        if (openPort(io, path)) return true;
     }
     return false;
 }
 
-fn openPort(path: []const u8) bool {
+fn openPort(io: std.Io, path: []const u8) bool {
     if (path.len >= MAX_PORT) return false;
-    const fd = sysx.open(path, .{ .ACCMODE = .RDONLY, .NONBLOCK = true, .NOCTTY = true }, 0) catch return false;
-    if (!configureSerial(fd, S.baud)) {
-        sysx.close(fd);
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_only }) catch return false;
+    if (!configureSerial(file.handle, S.baud)) {
+        file.close(io);
         return false;
     }
-    S.fd = fd;
+    const allocator = S.allocator orelse {
+        file.close(io);
+        return false;
+    };
+    S.reader = SerialReader.create(allocator, io, file) catch {
+        file.close(io);
+        return false;
+    };
     @memcpy(S.port[0..path.len], path);
     S.port_len = path.len;
     S.line_len = 0;
@@ -198,7 +252,7 @@ fn speedFor(baud: u32) std.posix.speed_t {
 /// tcgetattr fails on anything else, which is what makes the autodetect
 /// scan safe.
 fn configureSerial(fd: std.posix.fd_t, baud: u32) bool {
-    var tio = sysx.tcgetattr(fd) catch return false;
+    var tio = std.posix.tcgetattr(fd) catch return false;
     const spd = speedFor(baud);
     tio.iflag = .{};
     tio.oflag = .{};
@@ -217,7 +271,7 @@ fn configureSerial(fd: std.posix.fd_t, baud: u32) bool {
     tio.cc[@intFromEnum(std.os.linux.V.TIME)] = 0;
     tio.ispeed = spd;
     tio.ospeed = spd;
-    sysx.tcsetattr(fd, .NOW, tio) catch return false;
+    std.posix.tcsetattr(fd, .NOW, tio) catch return false;
     return true;
 }
 
@@ -336,9 +390,11 @@ test "garbage lines and partial chunks are ignored" {
 
 test "start degrades cleanly with no device" {
     resetForTest();
-    try std.testing.expect(start("/dev/definitely-not-a-real-port", 9600));
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try std.testing.expect(start(std.testing.io, &environ, std.testing.allocator, "/dev/definitely-not-a-real-port", 9600));
     try std.testing.expect(!isConnected());
-    _ = poll();
+    _ = poll(std.testing.io, &environ);
     var buf: [512]u8 = undefined;
     try std.testing.expect(std.mem.indexOf(u8, stateJson(&buf), "\"connected\":false") != null);
     stop();

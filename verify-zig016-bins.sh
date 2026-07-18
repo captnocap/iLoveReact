@@ -1,11 +1,16 @@
 #!/bin/bash
 # Zig 0.16 gate 2: every non-test build step compiles; test gate stays green.
-Z16=/home/siah/toolchains/zig-x86_64-linux-0.16.0/zig
-cd "$(dirname "$0")"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+zig_bin="$repo_root/tools/zig/zig"
+if [ ! -x "$zig_bin" ]; then
+  echo "FAIL toolchain: $zig_bin is missing; run scripts/fetch-zig.sh"
+  exit 1
+fi
+cd "$repo_root" || exit 1
 fails=0
 for s in v8-hello v8-cli hmsc-parity-compiler flora-dump flora-geometry loader-geometry gamefile-writer app; do
   grep -q "^\s*$s\b" zig-out/steps-baseline.txt || continue
-  out=$($Z16 build "$s" 2>&1)
+  out=$("$zig_bin" build "$s" 2>&1)
   if [ $? -eq 0 ]; then
     echo "PASS $s"
   else

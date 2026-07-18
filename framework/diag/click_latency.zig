@@ -1,5 +1,4 @@
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 pub const default_capacity: usize = 4096;
 
@@ -28,13 +27,14 @@ pub const Percentiles = struct {
 };
 
 pub const ClickLatencyRing = struct {
+    io: std.Io,
     samples: [default_capacity]ClickLatencySample = [_]ClickLatencySample{.{}} ** default_capacity,
     head: usize = 0,
     len: usize = 0,
     next_seq: u64 = 1,
 
-    pub fn nowNs() u64 {
-        return @intCast(host_io.nanoTimestamp());
+    pub fn nowNs(self: *const ClickLatencyRing) u64 {
+        return @intCast(std.Io.Clock.now(.awake, self.io).toNanoseconds());
     }
 
     fn slotForSeq(self: *ClickLatencyRing, seq: u64) ?*ClickLatencySample {
@@ -55,7 +55,7 @@ pub const ClickLatencyRing = struct {
 
         slot.* = .{
             .seq = seq,
-            .press_ns = ClickLatencyRing.nowNs(),
+            .press_ns = self.nowNs(),
         };
         self.next_seq += 1;
         return seq;
@@ -72,31 +72,31 @@ pub const ClickLatencyRing = struct {
 
     pub fn stampDispatch(self: *ClickLatencyRing, seq: u64) bool {
         const sample = self.slotForSeq(seq) orelse return false;
-        sample.dispatch_ns = ClickLatencyRing.nowNs();
+        sample.dispatch_ns = self.nowNs();
         return true;
     }
 
     pub fn stampHandler(self: *ClickLatencyRing, seq: u64) bool {
         const sample = self.slotForSeq(seq) orelse return false;
-        sample.handler_ns = ClickLatencyRing.nowNs();
+        sample.handler_ns = self.nowNs();
         return true;
     }
 
     pub fn stampStateUpdate(self: *ClickLatencyRing, seq: u64) bool {
         const sample = self.slotForSeq(seq) orelse return false;
-        sample.state_update_ns = ClickLatencyRing.nowNs();
+        sample.state_update_ns = self.nowNs();
         return true;
     }
 
     pub fn stampFlush(self: *ClickLatencyRing, seq: u64) bool {
         const sample = self.slotForSeq(seq) orelse return false;
-        sample.flush_ns = ClickLatencyRing.nowNs();
+        sample.flush_ns = self.nowNs();
         return true;
     }
 
     pub fn stampApplyDone(self: *ClickLatencyRing, seq: u64) bool {
         const sample = self.slotForSeq(seq) orelse return false;
-        sample.apply_done_ns = ClickLatencyRing.nowNs();
+        sample.apply_done_ns = self.nowNs();
         return true;
     }
 

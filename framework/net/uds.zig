@@ -1,6 +1,7 @@
 //! UDS server — listens on a Unix domain socket path, accepts inbound
-//! connections, exposes per-connection read/write/close. Pure POSIX,
-//! non-blocking, drained by host bindings each tick.
+//! connections, exposes per-connection read/write/close. Blocking native
+//! `std.Io.net` operations run in cancelable tasks and are drained by host
+//! bindings each tick.
 //!
 //! Used for two cases today:
 //!   1. Firecracker vsock guest→host connections. Firecracker creates
@@ -12,7 +13,7 @@
 //!      driven from JS without a Python subprocess.
 //!
 //! Usage:
-//!   var srv = try uds.UdsServer.listen("/tmp/foo.sock");
+//!   var srv = try uds.UdsServer.listen(allocator, io, "/tmp/foo.sock");
 //!   defer srv.deinit();
 //!   var ev_buf: [16]uds.Event = undefined;
 //!   const n = srv.update(&ev_buf);
@@ -26,9 +27,7 @@
 //!   srv.closeConn(conn_id);
 
 const std = @import("std");
-// ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
-// posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
+const transport = @import("transport.zig");
 const workspace = @import("../sync/workspace.zig");
 
 const READ_BUF = 65536;
@@ -44,7 +43,7 @@ pub const Event = union(EventTag) {
 };
 
 const Conn = struct {
-    fd: sysx.socket_t,
+    stream: ?transport.StreamPump = null,
     active: bool = false,
     read_buf: [READ_BUF]u8 = undefined,
     err_buf: [128]u8 = undefined,
@@ -55,10 +54,12 @@ const Conn = struct {
 };
 
 pub const UdsServer = struct {
-    listener: sysx.socket_t,
-    path_buf: [108]u8 = undefined,  // sun_path max is 108 on Linux
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    listener: transport.ListenerPump,
+    path_buf: [108]u8 = undefined, // sun_path max is 108 on Linux
     path_len: usize = 0,
-    conns: [MAX_CONNS]Conn = [_]Conn{.{ .fd = -1 }} ** MAX_CONNS,
+    conns: [MAX_CONNS]Conn = [_]Conn{.{}} ** MAX_CONNS,
     /// Optional workspace mode. When set, accepted connections route
     /// inbound bytes through workspace.InboundParser. The root is
     /// owned by the server and freed in deinit.
@@ -68,47 +69,29 @@ pub const UdsServer = struct {
     /// Bind + listen on the given UDS path. Removes any stale file at
     /// that path first. The path is copied into the server so callers
     /// don't need to keep it alive.
-    pub fn listen(path: []const u8) !UdsServer {
-        if (path.len >= 108) return error.PathTooLong;
+    pub fn listen(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !UdsServer {
+        if (path.len >= std.Io.net.UnixAddress.max_len) return error.PathTooLong;
 
         // Clean up any stale UDS file at this path. ENOENT is fine.
-        sysx.unlink(path) catch |e| switch (e) {
+        std.Io.Dir.deleteFileAbsolute(io, path) catch |e| switch (e) {
             error.FileNotFound => {},
             else => return e,
         };
 
-        const fd = try sysx.socket(
-            sysx.AF.UNIX,
-            sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK | sysx.SOCK.CLOEXEC,
-            0,
-        );
-        errdefer sysx.close(fd);
-
-        // sun_path is [108]u8 on Linux but [104]u8 on macOS — zero the field
-        // by its actual length instead of hardcoding 108 so both platforms build.
-        var sa = sysx.sockaddr.un{
-            .family = sysx.AF.UNIX,
-            .path = undefined,
-        };
-        @memset(&sa.path, 0);
-        @memcpy(sa.path[0..path.len], path);
-
-        // sockaddr_un size: family (2 bytes) + path (variable). We pass
-        // the exact byte count so the kernel doesn't read past our path.
-        const sa_len: sysx.socklen_t = @intCast(
-            @sizeOf(@TypeOf(sa.family)) + path.len + 1,
-        );
-        const sa_bytes: *const sysx.sockaddr = @ptrCast(&sa);
-        try sysx.bind(fd, sa_bytes, sa_len);
+        const address = try std.Io.net.UnixAddress.init(path);
+        var server = try address.listen(io, .{ .kernel_backlog = 8 });
+        errdefer server.deinit(io);
 
         // Tighten perms so only this user can dial. fchmodat takes a
         // path slice (not toPosixPath) in this Zig version; null-byte
         // termination is handled internally.
-        sysx.fchmodat(sysx.AT.FDCWD, path, 0o600, 0) catch {};
+        std.Io.Dir.cwd().setFilePermissions(io, path, .fromMode(0o600), .{}) catch {};
 
-        try sysx.listen(fd, 8);
-
-        var self = UdsServer{ .listener = fd };
+        var self = UdsServer{
+            .allocator = allocator,
+            .io = io,
+            .listener = try transport.ListenerPump.init(allocator, io, server),
+        };
         @memcpy(self.path_buf[0..path.len], path);
         self.path_len = path.len;
         return self;
@@ -117,18 +100,18 @@ pub const UdsServer = struct {
     pub fn deinit(self: *UdsServer) void {
         for (&self.conns) |*c| {
             if (c.active) {
-                sysx.close(c.fd);
+                if (c.stream) |*stream| stream.deinit();
+                c.stream = null;
                 c.active = false;
-                c.fd = -1;
             }
             if (c.parser) |*p| {
                 p.deinit();
                 c.parser = null;
             }
         }
-        sysx.close(self.listener);
+        self.listener.deinit();
         if (self.path_len > 0) {
-            sysx.unlink(self.path_buf[0..self.path_len]) catch {};
+            std.Io.Dir.deleteFileAbsolute(self.io, self.path_buf[0..self.path_len]) catch {};
         }
         if (self.workspace_root) |root| {
             self.workspace_allocator.free(root);
@@ -160,31 +143,12 @@ pub const UdsServer = struct {
         }
     }
 
-    /// Send bytes to one connection. Best-effort — short writes are
-    /// retried until done or the fd dies; callers don't have to loop.
+    /// Send bytes to one connection. Best-effort; callers don't have to loop.
     pub fn send(self: *UdsServer, conn_id: u32, data: []const u8) void {
         const conn = self.connPtr(conn_id) orelse return;
         if (!conn.active) return;
-        var pos: usize = 0;
-        while (pos < data.len) {
-            const n = sysx.write(conn.fd, data[pos..]) catch |err| {
-                if (err == error.WouldBlock) {
-                    // Wait for writability — short-blocking poll. We
-                    // accept up to ~5s of wall stall for huge writes
-                    // (the initial workspace tar can be 200MB+).
-                    var pfd = [_]sysx.pollfd{.{ .fd = conn.fd, .events = sysx.POLL.OUT, .revents = 0 }};
-                    _ = sysx.poll(&pfd, 5000) catch break;
-                    continue;
-                }
-                self.closeInternal(conn);
-                return;
-            };
-            if (n == 0) {
-                self.closeInternal(conn);
-                return;
-            }
-            pos += n;
-        }
+        const stream = if (conn.stream) |*pump| pump else return;
+        stream.send(data) catch self.closeInternal(conn);
     }
 
     pub fn closeConn(self: *UdsServer, conn_id: u32) void {
@@ -201,9 +165,12 @@ pub const UdsServer = struct {
         // 1. Try accepting one new connection per call. More than one
         // per call is fine but we keep slices simple.
         if (n_out < out.len) {
-            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK | sysx.SOCK.CLOEXEC) catch null;
-            if (accepted) |fd| {
-                if (self.allocConnId(fd)) |id| {
+            if (self.listener.accept()) |accepted| {
+                const pump = transport.StreamPump.init(self.allocator, self.io, accepted) catch {
+                    accepted.close(self.io);
+                    return n_out;
+                };
+                if (self.allocConnId(pump)) |id| {
                     // If workspace mode is on, attach a parser to the
                     // freshly-allocated conn so inbound bytes route to
                     // the filesystem instead of bubbling up as data
@@ -214,7 +181,8 @@ pub const UdsServer = struct {
                     out[n_out] = .{ .accepted = id };
                     n_out += 1;
                 } else {
-                    sysx.close(fd);
+                    var rejected = pump;
+                    rejected.deinit();
                 }
             }
         }
@@ -229,29 +197,33 @@ pub const UdsServer = struct {
             if (!conn.active) continue;
             var iters: u32 = 0;
             while (iters < 32 and n_out < out.len) : (iters += 1) {
-                const r = sysx.read(conn.fd, &conn.read_buf) catch |err| {
-                    if (err == error.WouldBlock) break;
-                    const msg = std.fmt.bufPrint(&conn.err_buf, "read: {s}", .{@errorName(err)}) catch "read err";
-                    out[n_out] = .{ .err = .{ .conn_id = i, .msg = msg } };
-                    n_out += 1;
-                    self.closeInternal(conn);
-                    break;
+                const stream = if (conn.stream) |*pump| pump else break;
+                const r = switch (stream.drain(&conn.read_buf)) {
+                    .empty => break,
+                    .data => |count| count,
+                    .closed => {
+                        out[n_out] = .{ .closed = i };
+                        n_out += 1;
+                        self.closeInternal(conn);
+                        break;
+                    },
+                    .failed => |err| {
+                        const msg = std.fmt.bufPrint(&conn.err_buf, "read: {s}", .{@errorName(err)}) catch "read err";
+                        out[n_out] = .{ .err = .{ .conn_id = i, .msg = msg } };
+                        n_out += 1;
+                        self.closeInternal(conn);
+                        break;
+                    },
                 };
-                if (r == 0) {
-                    out[n_out] = .{ .closed = i };
-                    n_out += 1;
-                    self.closeInternal(conn);
-                    break;
-                }
                 if (conn.parser) |*p| {
                     // Workspace mode: bytes go straight to filesystem;
                     // no data event up to JS. (Avoids the V8 string
                     // round-trip that would corrupt binary payloads.)
-                    p.feed(conn.read_buf[0..r]);
+                    p.feed(self.io, conn.read_buf[0..r]);
                 } else {
                     out[n_out] = .{ .data = .{ .conn_id = i, .bytes = conn.read_buf[0..r] } };
                     n_out += 1;
-                    break;  // Bubble up one chunk per tick when not in workspace mode.
+                    break; // Bubble up one chunk per tick when not in workspace mode.
                 }
             }
         }
@@ -266,10 +238,10 @@ pub const UdsServer = struct {
         return &self.conns[conn_id];
     }
 
-    fn allocConnId(self: *UdsServer, fd: sysx.socket_t) ?u32 {
+    fn allocConnId(self: *UdsServer, stream: transport.StreamPump) ?u32 {
         for (&self.conns, 0..) |*c, i| {
             if (!c.active) {
-                c.fd = fd;
+                c.stream = stream;
                 c.active = true;
                 return @intCast(i);
             }
@@ -280,9 +252,9 @@ pub const UdsServer = struct {
     fn closeInternal(self: *UdsServer, conn: *Conn) void {
         _ = self;
         if (!conn.active) return;
-        sysx.close(conn.fd);
+        if (conn.stream) |*stream| stream.deinit();
+        conn.stream = null;
         conn.active = false;
-        conn.fd = -1;
         if (conn.parser) |*p| {
             p.deinit();
             conn.parser = null;
@@ -292,8 +264,7 @@ pub const UdsServer = struct {
 
 // ────────────────────────────────────────────────────────────────────
 // Writer adapter — lets framework/sync/workspace.zig write outbound
-// frames straight to a UDS conn's fd. Wraps the posix.write retry
-// loop in the `writeAll` shape that std.io.GenericWriter expects.
+// frames straight to a UDS connection.
 // ────────────────────────────────────────────────────────────────────
 
 pub const ConnWriter = struct {
@@ -303,19 +274,8 @@ pub const ConnWriter = struct {
     pub fn writeAll(self: ConnWriter, bytes: []const u8) !void {
         const conn = self.server.connPtr(self.conn_id) orelse return error.NoSuchConn;
         if (!conn.active) return error.ConnClosed;
-        var pos: usize = 0;
-        while (pos < bytes.len) {
-            const n = sysx.write(conn.fd, bytes[pos..]) catch |err| {
-                if (err == error.WouldBlock) {
-                    var pfd = [_]sysx.pollfd{.{ .fd = conn.fd, .events = sysx.POLL.OUT, .revents = 0 }};
-                    _ = sysx.poll(&pfd, 5000) catch return error.WouldBlock;
-                    continue;
-                }
-                return err;
-            };
-            if (n == 0) return error.WriteZero;
-            pos += n;
-        }
+        const stream = if (conn.stream) |*pump| pump else return error.ConnClosed;
+        try stream.send(bytes);
     }
 };
 
@@ -325,6 +285,6 @@ pub fn writerForConn(server: *UdsServer, conn_id: u32) ConnWriter {
     return .{ .server = server, .conn_id = conn_id };
 }
 
-// Make connPtr accessible to ConnWriter (same module, no change needed
-// since both live in this file).
-
+test "public UDS API compiles" {
+    std.testing.refAllDecls(@This());
+}

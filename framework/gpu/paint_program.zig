@@ -42,7 +42,6 @@
 //! calls model_paint directly and suppresses recording, so it never re-records itself.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 const material_tex = @import("material_tex.zig");
@@ -427,7 +426,7 @@ pub fn redoLabel() []const u8 {
 /// Undo one unit: swap the live program with the top pre-state snapshot and re-run the
 /// program onto the atlas. Commits any open stroke first (an undo mid-drag undoes THAT
 /// stroke — never a stale older one). False when there's nothing to undo.
-pub fn undoStroke() bool {
+pub fn undoStroke(io: std.Io, environ: *const std.process.Environ.Map) bool {
     _ = endStrokeUnit();
     if (g_undo_snaps.items.len == 0) return false;
     const pre = g_undo_snaps.items[g_undo_snaps.items.len - 1];
@@ -439,11 +438,11 @@ pub fn undoStroke() bool {
         };
     }
     adoptSnapshot(pre);
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
-pub fn redoStroke() bool {
+pub fn redoStroke(io: std.Io, environ: *const std.process.Environ.Map) bool {
     _ = endStrokeUnit();
     if (g_redo_snaps.items.len == 0) return false;
     const post = g_redo_snaps.items[g_redo_snaps.items.len - 1];
@@ -455,7 +454,7 @@ pub fn redoStroke() bool {
         };
     }
     adoptSnapshot(post);
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
@@ -700,7 +699,7 @@ pub fn layerAdd() u32 {
 
 /// Delete a layer AND its strokes (the "fuck off everything behind it" verb). Journaled —
 /// undo restores the layer and every stroke, because the program is the truth. Replays.
-pub fn layerDelete(id: u32) bool {
+pub fn layerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     _ = endStrokeUnit();
     const idx = layerIndexOf(id) orelse return false;
     pushUndo("delete layer");
@@ -720,12 +719,12 @@ pub fn layerDelete(id: u32) bool {
     if (layerIndexOf(g_active_layer) == null) {
         g_active_layer = g_layers.items[g_layers.items.len - 1].id;
     }
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
 /// Move a layer one step toward the top (up=true → composites later) or bottom. Journaled.
-pub fn layerMove(id: u32, up: bool) bool {
+pub fn layerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
     _ = endStrokeUnit();
     const idx = layerIndexOf(id) orelse return false;
     if (up and idx + 1 >= g_layers.items.len) return false;
@@ -735,7 +734,7 @@ pub fn layerMove(id: u32, up: bool) bool {
     const tmp = g_layers.items[idx];
     g_layers.items[idx] = g_layers.items[other];
     g_layers.items[other] = tmp;
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
@@ -743,12 +742,12 @@ pub fn layerMove(id: u32, up: bool) bool {
 /// not a program edit: no stroke is added or removed, the eye just filters the composite.
 /// Replays (the atlas is derived, so the composite must re-lay), and adoptSnapshot keeps
 /// the live eye state through undo/redo so history never flips what you're looking at.
-pub fn layerSetVisible(id: u32, on: bool) bool {
+pub fn layerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
     _ = endStrokeUnit();
     const idx = layerIndexOf(id) orelse return false;
     if (g_layers.items[idx].visible == on) return true;
     g_layers.items[idx].visible = on;
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
@@ -775,7 +774,7 @@ pub fn layerRename(id: u32, name: []const u8) bool {
 /// Fold a layer's strokes into the layer BELOW it and drop the layer. The merged strokes
 /// keep their composite position: below's strokes stay first, the merged layer's follow.
 /// Journaled; replays. False on the bottom layer (nothing below to merge into).
-pub fn layerMergeDown(id: u32) bool {
+pub fn layerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     _ = endStrokeUnit();
     const idx = layerIndexOf(id) orelse return false;
     if (idx == 0) return false;
@@ -824,7 +823,7 @@ pub fn layerMergeDown(id: u32) bool {
     const removed = g_layers.orderedRemove(idx);
     alloc.free(removed.name);
     if (g_active_layer == id) g_active_layer = below;
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 
@@ -862,8 +861,8 @@ const Cursor = struct {
     }
 };
 
-fn bakeMatRecipe(key: []const u8, wgsl: []const u8, data: []const f32, tiles: f32) bool {
-    const raw = material_tex.bakePixels(key, wgsl, data, MAT_BAKE_SIZE) orelse return false;
+fn bakeMatRecipe(io: std.Io, environ: *const std.process.Environ.Map, key: []const u8, wgsl: []const u8, data: []const f32, tiles: f32) bool {
+    const raw = material_tex.bakePixels(io, environ, key, wgsl, data, MAT_BAKE_SIZE) orelse return false;
     defer std.heap.page_allocator.free(raw);
     if (raw.len < 8) return false;
     const w = std.mem.readInt(u32, raw[0..4], .little);
@@ -882,7 +881,7 @@ const ReplayInk = struct {
     pending_rgb: ?[3]u8 = null,
 };
 
-fn flushInk(ink: *ReplayInk) void {
+fn flushInk(io: std.Io, environ: *const std.process.Environ.Map, ink: *ReplayInk) void {
     if (ink.pending_rgb) |c| {
         ink.rgb = c;
         if (ink.mat_active) model_paint.clearMaterialInk();
@@ -891,17 +890,20 @@ fn flushInk(ink: *ReplayInk) void {
     } else if (ink.pending_mat) |idx| {
         if (!ink.mat_active or ink.mat_idx != idx) {
             const m = g_mats.items[idx];
-            ink.mat_active = bakeMatRecipe(m.key, m.wgsl, m.data, m.tiles);
+            ink.mat_active = bakeMatRecipe(io, environ, m.key, m.wgsl, m.data, m.tiles);
             ink.mat_idx = idx;
         }
         ink.pending_mat = null;
     }
 }
 
-fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *usize) void {
+fn runStrokeOps(io: std.Io, environ: *const std.process.Environ.Map, ops: []const u8, res: *const Resolver, ink: *ReplayInk) void {
     var skips: []usize = &.{};
     var skips_owned = false;
-    if (paint_ops.redundantFillOffsets(alloc, ops)) |s| { skips = s; skips_owned = true; } else |_| {}
+    if (paint_ops.redundantFillOffsets(alloc, ops)) |s| {
+        skips = s;
+        skips_owned = true;
+    } else |_| {}
     defer if (skips_owned) alloc.free(skips);
     var skip_i: usize = 0;
     var c = Cursor{ .b = ops };
@@ -927,9 +929,8 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 const v = c.f32v() orelse return;
                 const radius = c.f32v() orelse return;
                 const flow = c.f32v() orelse return;
-                dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
-                flushInk(ink);
+                flushInk(io, environ, ink);
                 if (ink.mat_active) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow);
             },
             OP_DAB_SHAPED => {
@@ -944,20 +945,21 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 const angle = c.f32v() orelse return;
                 const aspect = c.f32v() orelse return;
                 const scatter = c.f32v() orelse return;
-                dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
                 const spec = model_paint.BrushShape{ .kind = @intCast(@min(kind, 255)), .hardness = hardness, .angle_rad = angle, .aspect = aspect, .scatter = scatter };
-                flushInk(ink);
+                flushInk(io, environ, ink);
                 if (ink.mat_active) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow, spec);
             },
             OP_FILL => {
                 const group = c.u32v() orelse return;
                 const ord = c.u32v() orelse return;
-                if (skip_i < skips.len and skips[skip_i] == op_off) { skip_i += 1; continue; }
-                dabs.* += 1;
+                if (skip_i < skips.len and skips[skip_i] == op_off) {
+                    skip_i += 1;
+                    continue;
+                }
                 const face = resolveFace(res, group, ord) orelse continue;
                 // RGB-only fill: replay must not un-glass a face any more than the live fill does (req_2928).
-                flushInk(ink);
+                flushInk(io, environ, ink);
                 if (ink.mat_active) model_paint.paintFaceTex(face) else model_paint.paintFaceRgb(face, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2] });
             },
             else => return,
@@ -969,8 +971,7 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
 /// every visible layer's strokes bottom→top, strokes in chronological order inside each
 /// layer. The one composite function behind undo/redo and every layer op. Logs its cost —
 /// undo must never hitch the frame, and this line is the receipt.
-pub fn replayAll() void {
-    var timer = host_io.Timer.start() catch null;
+pub fn replayAll(io: std.Io, environ: *const std.process.Environ.Map) void {
     if (g_baseline) |b| {
         if (!model_paint.setAtlas(b)) model_paint.clearAtlas(); // detail changed → base fallback
     } else {
@@ -981,25 +982,20 @@ pub fn replayAll() void {
     var res = buildResolver();
     defer res.deinit();
     var ink = ReplayInk{};
-    var dabs: usize = 0;
     for (g_layers.items) |lay| {
         if (!lay.visible) continue;
         for (g_strokes.items) |st| {
             if (st.layer != lay.id) continue;
-            runStrokeOps(st.ops, &res, &ink, &dabs);
+            runStrokeOps(io, environ, st.ops, &res, &ink);
         }
     }
     // Leave the LIVE brush ink the way the user had it — a replay that silently
     // switched the brush to the last replayed ink would betray the next stroke.
     if (g_active_is_mat and g_active_mat < g_mats.items.len) {
         const m = g_mats.items[g_active_mat];
-        _ = bakeMatRecipe(m.key, m.wgsl, m.data, m.tiles);
+        _ = bakeMatRecipe(io, environ, m.key, m.wgsl, m.data, m.tiles);
     } else {
         model_paint.clearMaterialInk();
-    }
-    if (timer) |*t| {
-        const ms = @as(f64, @floatFromInt(t.read())) / 1_000_000.0;
-        std.debug.print("[paint-journal] replay: {d} strokes / {d} ops in {d:.2} ms\n", .{ g_strokes.items.len, dabs, ms });
     }
 }
 
@@ -1180,7 +1176,7 @@ fn convertV1Ops(ops: []const u8) ?[]u8 {
 /// v2 blobs restore their layer table; v1 blobs load as one "Layer 1" stroke. The caller
 /// must have already set the program's detail (see programDetail). The stroke journal
 /// starts fresh — the loaded painting is the new floor, not an undoable unit.
-pub fn apply(blob: []const u8) bool {
+pub fn apply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
     var c = Cursor{ .b = blob };
     const magic = c.bytes(4) orelse return false;
     if (!std.mem.eql(u8, magic, &MAGIC)) return false;
@@ -1202,7 +1198,7 @@ pub fn apply(blob: []const u8) bool {
     model_paint.activateBase();
     model_paint.clearAtlas();
     forceBaselineCapture();
-    replayAll();
+    replayAll(io, environ);
     return true;
 }
 

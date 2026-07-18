@@ -64,7 +64,10 @@ var g_ring_count: u64 = 0;
 /// Confirmed-event broadcaster. The V8 binding installs one that calls the host's
 /// `__ffiEmit(CHANNEL, json)`. Kept as a function pointer so this core module has
 /// ZERO dependency on v8 — it compiles & unit-tests fully headless.
-pub const Broadcaster = *const fn (json: []const u8) void;
+pub const Broadcaster = struct {
+    context: ?*anyopaque,
+    send: *const fn (context: ?*anyopaque, json: []const u8) void,
+};
 var g_broadcaster: ?Broadcaster = null;
 
 pub fn setBroadcaster(bc: Broadcaster) void {
@@ -135,7 +138,7 @@ pub fn append(envelope_json: []const u8) i64 {
 
     ringPush(seq, confirmed);
 
-    if (g_broadcaster) |bc| bc(confirmed);
+    if (g_broadcaster) |bc| bc.send(bc.context, confirmed);
 
     return seq;
 }

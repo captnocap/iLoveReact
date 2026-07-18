@@ -173,8 +173,7 @@ globals from any v8cli script:
 | `__writeStdout(s)` | direct stdout write. |
 | `__termSize()` | JSON `[cols, rows]` via TIOCGWINSZ. `[0,0]` if not a TTY. |
 | `__setStdinRaw(enable)` | termios save/restore. Keeps ISIG. |
-| `__readStdin()` | non-blocking; zero-timeout poll then read. |
-| `__pollFds(json, ms)` | wait on multiple fds, returns ready indices as JSON. |
+| `__readStdin()` | non-blocking drain of the root-owned stdin queue. |
 | `__nowMs` / `__sleepMs` | for the timer trampoline. |
 | `__unixConnect/Write/ReadAll/Close` | for the dev shell socket. |
 

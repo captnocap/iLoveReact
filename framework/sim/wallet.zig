@@ -2,7 +2,6 @@
 //! tracks PnL from average buy price.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 pub const MAX_HOLDINGS: usize = 64;
 
@@ -28,15 +27,12 @@ pub const WalletState = struct {
     biggest_loss: f64,
 };
 
-pub fn generateAddress() [20]u8 {
-    var addr: [20]u8 = undefined;
-    host_io.io().random(&addr);
-    return addr;
-}
-
-pub fn init(starting_usd: f64) WalletState {
+/// Construct a wallet from entropy supplied by the simulation owner. Wallet
+/// state is otherwise pure and has no reason to retain or discover an I/O
+/// capability.
+pub fn init(starting_usd: f64, address: [20]u8) WalletState {
     return .{
-        .address = generateAddress(),
+        .address = address,
         .usd = starting_usd,
         .holdings = undefined,
         .holding_count = 0,
@@ -46,6 +42,14 @@ pub fn init(starting_usd: f64) WalletState {
         .biggest_win = 0,
         .biggest_loss = 0,
     };
+}
+
+test "wallet initialization uses caller-provided entropy" {
+    const address = [_]u8{0xa5} ** 20;
+    const wallet = init(1000.0, address);
+
+    try std.testing.expectEqualSlices(u8, &address, &wallet.address);
+    try std.testing.expectEqual(@as(f64, 1000.0), wallet.usd);
 }
 
 fn findHolding(w: *WalletState, token_id: u32) ?*Holding {

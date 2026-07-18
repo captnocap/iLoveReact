@@ -1,6 +1,6 @@
 // whisper.zig — speech-to-text via whisper.cpp (CPU, gguf models).
 //
-// Owns one whisper_context. Inference runs on a worker thread because
+// Owns one whisper_context. Inference runs as a concurrent std.Io task because
 // whisper_full blocks for 100ms..2s+ depending on model size, far too long
 // for the engine tick. JS submits jobs via __whisper_load_model /
 // __whisper_transcribe; results land back on the engine tick via
@@ -12,7 +12,7 @@
 // to whisper.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
+const HostContext = @import("../host_context.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 const voice = @import("voice.zig");
 
@@ -49,10 +49,13 @@ const State = struct {
     ctx: ?*wh.whisper_context = null,
     loaded_model_path: ?[]u8 = null, // owned
 
-    // Cross-thread plumbing.
-    thread: ?std.Thread = null,
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    // The owner supplies these process capabilities once; the inference task
+    // and every synchronization operation use that same explicit Io instance.
+    io: std.Io = undefined,
+    environ: *const std.process.Environ.Map = undefined,
+    tasks: std.Io.Group = .init,
+    mutex: std.Io.Mutex = .init,
+    cond: std.Io.Condition = .init,
     jobs: std.array_list.Managed(Job) = undefined,
     results: std.array_list.Managed(Result) = undefined,
     shutdown: bool = false,
@@ -64,24 +67,33 @@ var S: State = .{};
 
 // ── Lifecycle ────────────────────────────────────────────────────────
 
-pub fn init(allocator: std.mem.Allocator) void {
-    if (S.initialized) return;
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator) bool {
+    if (S.initialized) return true;
+    S.io = io;
+    S.environ = environ;
+    S.tasks = .init;
+    S.mutex = .init;
+    S.cond = .init;
     S.allocator = allocator;
     S.jobs = std.array_list.Managed(Job).init(allocator);
     S.results = std.array_list.Managed(Result).init(allocator);
     S.shutdown = false;
-    S.thread = std.Thread.spawn(.{}, workerLoop, .{}) catch null;
+    S.tasks.concurrent(io, workerLoop, .{&S}) catch {
+        S.jobs.deinit();
+        S.results.deinit();
+        return false;
+    };
     S.initialized = true;
+    return true;
 }
 
-pub fn deinit() void {
+pub fn deinit(io: std.Io) void {
     if (!S.initialized) return;
-    S.mutex.lock();
+    S.mutex.lockUncancelable(io);
     S.shutdown = true;
-    S.cond.signal();
-    S.mutex.unlock();
-    if (S.thread) |t| t.join();
-    S.thread = null;
+    S.cond.signal(io);
+    S.mutex.unlock(io);
+    _ = S.tasks.await(io) catch {};
 
     if (S.ctx) |c| wh.whisper_free(c);
     S.ctx = null;
@@ -106,29 +118,29 @@ pub fn deinit() void {
 /// it's not already loaded, run whisper_full on the PCM identified by
 /// buf_id (must come from voice.zig), and post the result back. Returns
 /// false if either the buffer doesn't exist or the queue is full.
-pub fn enqueueTranscribe(buf_id: u32, model_path: []const u8) bool {
+pub fn enqueueTranscribe(io: std.Io, buf_id: u32, model_path: []const u8) bool {
     if (!S.initialized) return false;
     if (model_path.len == 0 or model_path.len > MAX_MODEL_PATH) return false;
     if (voice.getBuffer(buf_id) == null) return false;
     const path_copy = S.allocator.dupe(u8, model_path) catch return false;
-    S.mutex.lock();
-    defer S.mutex.unlock();
+    S.mutex.lockUncancelable(io);
+    defer S.mutex.unlock(io);
     S.jobs.append(.{ .buf_id = buf_id, .model_path = path_copy }) catch {
         S.allocator.free(path_copy);
         return false;
     };
-    S.cond.signal();
+    S.cond.signal(io);
     return true;
 }
 
 /// Drain ready results on the engine tick and fire JS callbacks.
-pub fn tick(_: u32) void {
+pub fn tick(host: *HostContext, _: u32) void {
     if (!S.initialized) return;
     while (true) {
         var maybe_result: ?Result = null;
         {
-            S.mutex.lock();
-            defer S.mutex.unlock();
+            S.mutex.lockUncancelable(host.io);
+            defer S.mutex.unlock(host.io);
             if (S.results.items.len == 0) return;
             maybe_result = S.results.orderedRemove(0);
         }
@@ -143,7 +155,7 @@ pub fn tick(_: u32) void {
         const text_n = @min(r.text.len, MAX_RESULT_TEXT);
         @memcpy(text_buf[0..text_n], r.text[0..text_n]);
         text_buf[text_n] = 0;
-        v8_runtime.callGlobalStr("__voice_onTranscript", @ptrCast(&text_buf));
+        v8_runtime.callGlobalStr(host, "__voice_onTranscript", @ptrCast(&text_buf));
 
         // Fire the detail event for benchmark-style carts. JSON payload
         // keeps the bridge surface stable while letting us evolve the
@@ -160,73 +172,73 @@ pub fn tick(_: u32) void {
                 if (r.success) "true" else "false",
             },
         ) catch continue;
-        v8_runtime.callGlobalStr("__whisper_onResult", @ptrCast(json_str.ptr));
+        v8_runtime.callGlobalStr(host, "__whisper_onResult", @ptrCast(json_str.ptr));
     }
 }
 
-// ── Worker thread ─────────────────────────────────────────────────────
+// ── Worker task ───────────────────────────────────────────────────────
 
-fn workerLoop() void {
+fn workerLoop(state: *State) std.Io.Cancelable!void {
     while (true) {
         var job: ?Job = null;
         {
-            S.mutex.lock();
-            defer S.mutex.unlock();
-            while (S.jobs.items.len == 0 and !S.shutdown) {
-                S.cond.wait(&S.mutex);
+            state.mutex.lockUncancelable(state.io);
+            defer state.mutex.unlock(state.io);
+            while (state.jobs.items.len == 0 and !state.shutdown) {
+                state.cond.waitUncancelable(state.io, &state.mutex);
             }
-            if (S.shutdown) return;
-            job = S.jobs.orderedRemove(0);
+            if (state.shutdown) return;
+            job = state.jobs.orderedRemove(0);
         }
-        runJob(job.?);
+        runJob(state, job.?);
     }
 }
 
-fn runJob(job: Job) void {
-    defer S.allocator.free(job.model_path);
+fn runJob(state: *State, job: Job) void {
+    defer state.allocator.free(job.model_path);
 
-    const t_start = host_io.milliTimestamp();
+    const t_start = std.Io.Clock.now(.awake, state.io);
 
     // Load model if it isn't already this one.
     const need_load = blk: {
-        if (S.ctx == null) break :blk true;
-        if (S.loaded_model_path) |p| {
+        if (state.ctx == null) break :blk true;
+        if (state.loaded_model_path) |p| {
             break :blk !std.mem.eql(u8, p, job.model_path);
         }
         break :blk true;
     };
     if (need_load) {
-        if (S.ctx) |c| wh.whisper_free(c);
-        S.ctx = null;
-        if (S.loaded_model_path) |p| S.allocator.free(p);
-        S.loaded_model_path = null;
+        if (state.ctx) |c| wh.whisper_free(c);
+        state.ctx = null;
+        if (state.loaded_model_path) |p| state.allocator.free(p);
+        state.loaded_model_path = null;
 
         var path_z: [MAX_MODEL_PATH + 1]u8 = undefined;
-        const expanded = expandHome(job.model_path, &path_z) orelse {
-            postFailure(job.buf_id, job.model_path, "path too long", t_start);
+        const expanded = expandHome(state.environ, job.model_path, &path_z) orelse {
+            postFailure(state, job.buf_id, job.model_path, "path too long", t_start);
             return;
         };
         path_z[expanded] = 0;
 
         const new_ctx = wh.whisper_init_from_file(@ptrCast(&path_z));
         if (new_ctx == null) {
-            postFailure(job.buf_id, job.model_path, "model load failed", t_start);
+            postFailure(state, job.buf_id, job.model_path, "model load failed", t_start);
             return;
         }
-        S.ctx = new_ctx;
-        S.loaded_model_path = S.allocator.dupe(u8, job.model_path) catch null;
+        state.ctx = new_ctx;
+        state.loaded_model_path = state.allocator.dupe(u8, job.model_path) catch null;
     }
 
     // Pull PCM from the voice subsystem and convert i16 → f32.
     const pcm = voice.getBuffer(job.buf_id) orelse {
-        postFailure(job.buf_id, job.model_path, "buffer not found", t_start);
+        postFailure(state, job.buf_id, job.model_path, "buffer not found", t_start);
         return;
     };
-    const f32_buf = S.allocator.alloc(f32, pcm.len) catch {
-        postFailure(job.buf_id, job.model_path, "alloc failed", t_start);
+    const f32_buf = state.allocator.alloc(f32, pcm.len) catch {
+        postFailure(state, job.buf_id, job.model_path, "alloc failed", t_start);
         return;
     };
-    defer S.allocator.free(f32_buf);
+    defer state.allocator.free(f32_buf);
     for (pcm, 0..) |s, i| f32_buf[i] = @as(f32, @floatFromInt(s)) / 32768.0;
 
     var params = wh.whisper_full_default_params(wh.WHISPER_SAMPLING_GREEDY);
@@ -242,55 +254,58 @@ fn runJob(job: Job) void {
     params.language = "en";
     params.n_threads = 4;
 
-    const rc = wh.whisper_full(S.ctx.?, params, f32_buf.ptr, @intCast(f32_buf.len));
+    const rc = wh.whisper_full(state.ctx.?, params, f32_buf.ptr, @intCast(f32_buf.len));
     if (rc != 0) {
-        postFailure(job.buf_id, job.model_path, "whisper_full failed", t_start);
+        postFailure(state, job.buf_id, job.model_path, "whisper_full failed", t_start);
         return;
     }
 
     // Concatenate every segment.
-    const n_segs = wh.whisper_full_n_segments(S.ctx.?);
-    var text_buf = std.array_list.Managed(u8).init(S.allocator);
+    const n_segs = wh.whisper_full_n_segments(state.ctx.?);
+    var text_buf = std.array_list.Managed(u8).init(state.allocator);
     defer text_buf.deinit();
     var i: c_int = 0;
     while (i < n_segs) : (i += 1) {
-        const seg = wh.whisper_full_get_segment_text(S.ctx.?, i);
+        const seg = wh.whisper_full_get_segment_text(state.ctx.?, i);
         if (seg == null) continue;
         const span = std.mem.span(seg);
         text_buf.appendSlice(span) catch break;
     }
 
-    const text_owned = S.allocator.dupe(u8, text_buf.items) catch {
-        postFailure(job.buf_id, job.model_path, "result dup failed", t_start);
+    const text_owned = state.allocator.dupe(u8, text_buf.items) catch {
+        postFailure(state, job.buf_id, job.model_path, "result dup failed", t_start);
         return;
     };
 
-    const elapsed: u32 = @intCast(@as(i64, host_io.milliTimestamp() - t_start));
-    postResult(job.buf_id, job.model_path, text_owned, elapsed, true);
+    postResult(state, job.buf_id, job.model_path, text_owned, elapsedMs(state.io, t_start), true);
 }
 
-fn postFailure(buf_id: u32, model_path: []const u8, reason: []const u8, t_start: i64) void {
-    const text = S.allocator.dupe(u8, reason) catch return;
-    const elapsed: u32 = @intCast(@as(i64, host_io.milliTimestamp() - t_start));
-    postResult(buf_id, model_path, text, elapsed, false);
+fn elapsedMs(io: std.Io, start: std.Io.Timestamp) u32 {
+    const elapsed = start.durationTo(std.Io.Clock.now(.awake, io)).toMilliseconds();
+    return @intCast(@min(@as(i64, std.math.maxInt(u32)), @max(0, elapsed)));
 }
 
-fn postResult(buf_id: u32, model_path: []const u8, text_owned: []u8, elapsed_ms: u32, success: bool) void {
-    const path_owned = S.allocator.dupe(u8, model_path) catch {
-        S.allocator.free(text_owned);
+fn postFailure(state: *State, buf_id: u32, model_path: []const u8, reason: []const u8, t_start: std.Io.Timestamp) void {
+    const text = state.allocator.dupe(u8, reason) catch return;
+    postResult(state, buf_id, model_path, text, elapsedMs(state.io, t_start), false);
+}
+
+fn postResult(state: *State, buf_id: u32, model_path: []const u8, text_owned: []u8, elapsed_ms: u32, success: bool) void {
+    const path_owned = state.allocator.dupe(u8, model_path) catch {
+        state.allocator.free(text_owned);
         return;
     };
-    S.mutex.lock();
-    defer S.mutex.unlock();
-    S.results.append(.{
+    state.mutex.lockUncancelable(state.io);
+    defer state.mutex.unlock(state.io);
+    state.results.append(.{
         .buf_id = buf_id,
         .model_path = path_owned,
         .text = text_owned,
         .elapsed_ms = elapsed_ms,
         .success = success,
     }) catch {
-        S.allocator.free(path_owned);
-        S.allocator.free(text_owned);
+        state.allocator.free(path_owned);
+        state.allocator.free(text_owned);
     };
 }
 
@@ -300,9 +315,9 @@ fn postResult(buf_id: u32, model_path: []const u8, text_owned: []u8, elapsed_ms:
 /// `out`. Returns the byte length written, or null if the result wouldn't
 /// fit. Carts pass paths like "~/.reactjit/models/ggml-base.en-q5_1.bin"
 /// so they don't have to know the absolute location of $HOME.
-fn expandHome(path: []const u8, out: *[MAX_MODEL_PATH + 1]u8) ?usize {
+fn expandHome(environ: *const std.process.Environ.Map, path: []const u8, out: *[MAX_MODEL_PATH + 1]u8) ?usize {
     if (path.len >= 2 and path[0] == '~' and path[1] == '/') {
-        const home = std.posix.getenv("HOME") orelse "";
+        const home = environ.get("HOME") orelse "";
         const tail = path[1..]; // includes the leading "/"
         const total = home.len + tail.len;
         if (total > MAX_MODEL_PATH) return null;

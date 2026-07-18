@@ -56,7 +56,7 @@ test "pointer-blocking overlay consumes hit before interactive sibling behind it
     try testing.expectEqual(&root.children[1], hit);
 }
 
-fn noopPress() void {}
+fn noopPress(_: ?*anyopaque) void {}
 
 test "small centered text in a fixed-width box does not expand parent row height" {
     layout.setMeasureFn(mockMeasure);

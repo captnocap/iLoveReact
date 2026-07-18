@@ -8,17 +8,15 @@
 //! don't try to mimic node's fs/process/child_process shapes.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
-const sysx = @import("net/sysx.zig");
+const posix = std.posix;
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const hotstate = @import("state/hotstate.zig");
+const transport = @import("net/transport.zig");
 
 extern fn getpid() c_int;
-extern fn usleep(usec: c_uint) c_int;
+extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 
 // ── argv storage (set by v8_cli main before eval) ─────────────────────
 var g_argv_storage: [][]const u8 = &.{};
@@ -164,13 +162,14 @@ fn argv(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn envGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const alloc = std.heap.page_allocator;
     const name = argStringAlloc(alloc, info, 0) orelse {
         setNull(info);
         return;
     };
     defer alloc.free(name);
-    const val = sysx.getenv(name) orelse {
+    const val = host.environ.get(name) orelse {
         setNull(info);
         return;
     };
@@ -183,10 +182,18 @@ fn exitProc(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     std.process.exit(@intCast(code & 0xff));
 }
 
+fn terminalExitProc(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const code = argI32(info, 0, 0);
+    terminalHost(info).deinit();
+    std.process.exit(@intCast(code & 0xff));
+}
+
 fn cwd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const n = std.process.currentPath(host_io.io(), &buf) catch {
+    const n = std.process.currentPath(io, &buf) catch {
         setString(info, "");
         return;
     };
@@ -195,28 +202,103 @@ fn cwd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn nowMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const ms = host_io.milliTimestamp();
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const ms = @divFloor(std.Io.Clock.now(.real, io).toNanoseconds(), std.time.ns_per_ms);
     setNumber(info, @as(f64, @floatFromInt(ms)));
 }
 
 fn sleepMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ms = argI32(info, 0, 0);
     if (ms <= 0) {
         setUndefined(info);
         return;
     }
-    _ = usleep(@intCast(@as(u32, @intCast(ms)) * 1000));
+    std.Io.sleep(io, .fromMilliseconds(ms), .awake) catch {};
     setUndefined(info);
 }
 
-// ── stdin (raw mode + non-blocking read + fd polling) ─────────────────
-//
-// Adds the missing piece for interactive TUI/dev-shell carts: read keys
-// from the controlling terminal without blocking, and wait on multiple
-// fds at once so a TUI can service stdin + unix sockets in the same loop.
+// ── stdin (raw mode + owner-managed async read) ────────────────────────
 
-var g_termios_saved: ?sysx.termios = null;
+const STDIN_QUEUE_CAPACITY = 64 * 1024;
+const STDIN_READ_CAPACITY = 4096;
+
+const StdinPump = struct {
+    io: std.Io,
+    tasks: std.Io.Group,
+    bytes: std.Io.Queue(u8),
+    byte_storage: [STDIN_QUEUE_CAPACITY]u8,
+    started: bool,
+
+    fn init(self: *StdinPump, io: std.Io) !void {
+        self.* = .{
+            .io = io,
+            .tasks = .init,
+            .bytes = undefined,
+            .byte_storage = undefined,
+            .started = false,
+        };
+        self.bytes = .init(&self.byte_storage);
+        try self.tasks.concurrent(io, readLoop, .{self});
+        self.started = true;
+    }
+
+    fn readLoop(self: *StdinPump) std.Io.Cancelable!void {
+        defer self.bytes.close(self.io);
+        const stdin = std.Io.File.stdin();
+        var buffer: [STDIN_READ_CAPACITY]u8 = undefined;
+
+        while (true) {
+            const n = stdin.readStreaming(self.io, &.{buffer[0..]}) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.EndOfStream => return,
+                else => return,
+            };
+            if (n == 0) continue;
+            self.bytes.putAll(self.io, buffer[0..n]) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                error.Closed => return,
+            };
+        }
+    }
+
+    fn drain(self: *StdinPump, out: []u8) usize {
+        return self.bytes.getUncancelable(self.io, out, 0) catch 0;
+    }
+
+    fn deinit(self: *StdinPump) void {
+        if (!self.started) return;
+        self.started = false;
+        self.tasks.cancel(self.io);
+        self.bytes.close(self.io);
+    }
+};
+
+/// Root-owned process context for hosts that install the terminal bindings.
+/// Keeping `host` as a real field lets fixed V8 callbacks recover this owner
+/// from the HostContext stored in the isolate without a module-global pointer.
+pub const TerminalHost = struct {
+    host: HostContext,
+    stdin: StdinPump,
+
+    pub fn init(self: *TerminalHost, host: HostContext) !void {
+        self.host = host;
+        try self.stdin.init(host.io);
+    }
+
+    pub fn deinit(self: *TerminalHost) void {
+        self.stdin.deinit();
+        restoreTty();
+    }
+};
+
+fn terminalHost(info: v8.FunctionCallbackInfo) *TerminalHost {
+    const host = v8_runtime.hostContext(info.getIsolate());
+    return @fieldParentPtr("host", host);
+}
+
+var g_termios_saved: ?posix.termios = null;
 
 /// __setStdinRaw(enable) → bool. Saves the original termios on first
 /// enable, restores it on disable. Keeps ISIG so ctrl-c still kills.
@@ -225,7 +307,7 @@ fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const enable = argI32(info, 0, 1) != 0;
 
     if (enable) {
-        const current = sysx.tcgetattr(0) catch {
+        const current = posix.tcgetattr(0) catch {
             setBool(info, false);
             return;
         };
@@ -241,33 +323,30 @@ fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         t.iflag.INPCK = false;
         t.iflag.ISTRIP = false;
         t.oflag.OPOST = false;
-        t.cc[@intFromEnum(sysx.V.MIN)] = 0;
-        t.cc[@intFromEnum(sysx.V.TIME)] = 0;
-        sysx.tcsetattr(0, .NOW, t) catch {
+        // The root-owned stdin task blocks in std.Io, so one byte should wake
+        // it. The JS-facing read remains non-blocking because it only drains
+        // the bounded queue.
+        t.cc[@intFromEnum(posix.V.MIN)] = 1;
+        t.cc[@intFromEnum(posix.V.TIME)] = 0;
+        posix.tcsetattr(0, .NOW, t) catch {
             setBool(info, false);
             return;
         };
         setBool(info, true);
     } else {
         if (g_termios_saved) |saved| {
-            sysx.tcsetattr(0, .NOW, saved) catch {};
+            posix.tcsetattr(0, .NOW, saved) catch {};
         }
         setBool(info, true);
     }
 }
 
-/// __readStdin() → string. Always non-blocking: zero-timeout poll first,
-/// then read only if data is ready. Works with or without raw mode.
+/// __readStdin() → string. Always non-blocking: the root-owned std.Io task
+/// performs the blocking read and this callback only drains queued bytes.
 fn readStdin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    var pfd = [_]sysx.pollfd{.{ .fd = 0, .events = sysx.POLL.IN, .revents = 0 }};
-    const ready = sysx.poll(&pfd, 0) catch 0;
-    if (ready == 0 or (pfd[0].revents & sysx.POLL.IN) == 0) {
-        setString(info, "");
-        return;
-    }
     var buf: [4096]u8 = undefined;
-    const n = sysx.read(0, &buf) catch 0;
+    const n = terminalHost(info).stdin.drain(&buf);
     setString(info, buf[0..n]);
 }
 
@@ -294,94 +373,31 @@ fn termSize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setString(info, s);
 }
 
-/// __pollFds(fdsJson, timeoutMs) → JSON array of indices ready to read.
-/// fdsJson is a JSON array of fd numbers, e.g. "[0, 5, 7]". Index 0 is
-/// stdin if 0 is in the list. Used by the dev-shell event loop to wait
-/// on stdin + multiple unix sockets simultaneously.
-fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const fds_json = argStringAlloc(alloc, info, 0) orelse {
-        setString(info, "[]");
-        return;
-    };
-    defer alloc.free(fds_json);
-    const timeout_ms = argI32(info, 1, 0);
-
-    var pfds: [32]sysx.pollfd = undefined;
-    var n_fds: usize = 0;
-    var i: usize = 0;
-    while (i < fds_json.len and n_fds < pfds.len) {
-        const c = fds_json[i];
-        if (c >= '0' and c <= '9') {
-            var v: i32 = 0;
-            while (i < fds_json.len and fds_json[i] >= '0' and fds_json[i] <= '9') {
-                v = v * 10 + @as(i32, @intCast(fds_json[i] - '0'));
-                i += 1;
-            }
-            pfds[n_fds] = .{ .fd = v, .events = sysx.POLL.IN, .revents = 0 };
-            n_fds += 1;
-        } else {
-            i += 1;
-        }
-    }
-
-    if (n_fds == 0) {
-        setString(info, "[]");
-        return;
-    }
-
-    _ = sysx.poll(pfds[0..n_fds], timeout_ms) catch {
-        setString(info, "[]");
-        return;
-    };
-
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(alloc);
-    out.append(alloc, '[') catch {
-        setString(info, "[]");
-        return;
-    };
-    var first = true;
-    for (pfds[0..n_fds], 0..) |pfd, idx| {
-        if ((pfd.revents & sysx.POLL.IN) != 0) {
-            if (!first) out.append(alloc, ',') catch break;
-            first = false;
-            var nbuf: [16]u8 = undefined;
-            const s = std.fmt.bufPrint(&nbuf, "{d}", .{idx}) catch break;
-            out.appendSlice(alloc, s) catch break;
-        }
-    }
-    out.append(alloc, ']') catch {
-        setString(info, "[]");
-        return;
-    };
-    setString(info, out.items);
-}
-
 // ── stdout / stderr ────────────────────────────────────────────────────
 
 fn writeStdout(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const s = argStringAlloc(alloc, info, 0) orelse {
         setUndefined(info);
         return;
     };
     defer alloc.free(s);
-    _ = sysx.write(1, s) catch {};
+    std.Io.File.stdout().writeStreamingAll(io, s) catch {};
     setUndefined(info);
 }
 
 fn writeStderr(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const s = argStringAlloc(alloc, info, 0) orelse {
         setUndefined(info);
         return;
     };
     defer alloc.free(s);
-    _ = sysx.write(2, s) catch {};
+    std.Io.File.stderr().writeStreamingAll(io, s) catch {};
     setUndefined(info);
 }
 
@@ -441,7 +457,7 @@ fn spawnSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     argv_arr[0] = cmd;
     for (extra_args, 0..) |a, i| argv_arr[i + 1] = a;
 
-    const io = host_io.io();
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     var child = std.process.spawn(io, .{
         .argv = argv_arr,
         .stdin = if (stdin_in.len > 0) .pipe else .ignore,
@@ -512,12 +528,8 @@ fn spawnSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 const ChildHandle = struct {
     child: std.process.Child,
-    // Line-buffered stdout reader state. We read bytes into `scratch` and
-    // return whole lines to the script. `residual` holds the trailing
-    // partial line between reads.
-    residual: std.ArrayList(u8),
-    done: bool,
-    exit_code: i32,
+    multi_buffer: std.Io.File.MultiReader.Buffer(1),
+    multi_reader: std.Io.File.MultiReader,
 };
 
 var g_children: std.AutoHashMap(u32, *ChildHandle) = undefined;
@@ -528,9 +540,9 @@ var g_children_ready: bool = false;
 // async-signal-safe; a fixed-size array is. Lookups from JS (__childKill etc.)
 // still use g_children; this table is only read inside the signal handler.
 const MAX_TRACKED_PIDS: usize = 64;
-var g_pid_table: [MAX_TRACKED_PIDS]sysx.pid_t = [_]sysx.pid_t{0} ** MAX_TRACKED_PIDS;
+var g_pid_table: [MAX_TRACKED_PIDS]posix.pid_t = [_]posix.pid_t{0} ** MAX_TRACKED_PIDS;
 
-fn recordPid(pid: sysx.pid_t) void {
+fn recordPid(pid: posix.pid_t) void {
     for (&g_pid_table) |*slot| {
         if (slot.* == 0) {
             slot.* = pid;
@@ -541,7 +553,7 @@ fn recordPid(pid: sysx.pid_t) void {
     // signal handler just won't know about this one.
 }
 
-fn forgetPid(pid: sysx.pid_t) void {
+fn forgetPid(pid: posix.pid_t) void {
     for (&g_pid_table) |*slot| {
         if (slot.* == pid) {
             slot.* = 0;
@@ -559,20 +571,21 @@ fn forgetPid(pid: sysx.pid_t) void {
 /// corner. Both atexit (normal __exit) and the signal handler call this.
 fn restoreTty() callconv(.c) void {
     if (g_termios_saved) |saved| {
-        sysx.tcsetattr(0, .NOW, saved) catch {};
+        posix.tcsetattr(0, .NOW, saved) catch {};
         // Order matters: disable mouse reporting BEFORE leaving the alt
         // screen so mouse-mode bytes don't end up at the user's shell
         // prompt if the shell happens to repaint immediately after.
         // 1000l = press/release off, 1002l = drag tracking off,
         // 1006l = SGR extended off, 1049l = alt screen off, 25h = cursor
         // on, 0m = SGR reset.
-        _ = sysx.write(1, "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
+        const reset = "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m";
+        _ = write(1, reset.ptr, reset.len);
     }
 }
 
 extern fn atexit(func: *const fn () callconv(.c) void) c_int;
 
-fn signalHandler(sig: sysx.SIG) callconv(.c) void {
+fn signalHandler(sig: posix.SIG) callconv(.c) void {
     // Restore terminal first so the user's shell isn't left in raw mode
     // / alt-screen if a TUI cart got SIGINT'd.
     restoreTty();
@@ -580,30 +593,30 @@ fn signalHandler(sig: sysx.SIG) callconv(.c) void {
     // disposition so our own exit status reflects the signal that killed us.
     for (g_pid_table) |pid| {
         if (pid != 0) {
-            _ = sysx.kill(pid, sysx.SIG.TERM) catch {};
+            posix.kill(pid, posix.SIG.TERM) catch {};
         }
     }
-    const dfl = sysx.Sigaction{
-        .handler = .{ .handler = sysx.SIG.DFL },
-        .mask = sysx.sigemptyset(),
+    const dfl = posix.Sigaction{
+        .handler = .{ .handler = posix.SIG.DFL },
+        .mask = posix.sigemptyset(),
         .flags = 0,
     };
-    sysx.sigaction(sig, &dfl, null);
-    _ = sysx.raise(sig) catch {};
+    posix.sigaction(sig, &dfl, null);
+    posix.raise(sig) catch {};
 }
 
 /// Install SIGINT/SIGTERM/SIGHUP handlers that kill tracked child processes,
 /// plus an atexit hook for terminal restore. Call once from main before
 /// spawning anything.
 pub fn installSignalHandlers() void {
-    const act = sysx.Sigaction{
+    const act = posix.Sigaction{
         .handler = .{ .handler = signalHandler },
-        .mask = sysx.sigemptyset(),
+        .mask = posix.sigemptyset(),
         .flags = 0,
     };
-    sysx.sigaction(sysx.SIG.INT, &act, null);
-    sysx.sigaction(sysx.SIG.TERM, &act, null);
-    sysx.sigaction(sysx.SIG.HUP, &act, null);
+    posix.sigaction(posix.SIG.INT, &act, null);
+    posix.sigaction(posix.SIG.TERM, &act, null);
+    posix.sigaction(posix.SIG.HUP, &act, null);
     _ = atexit(restoreTty);
 }
 
@@ -617,6 +630,7 @@ fn ensureChildren() void {
 /// stdout is piped; stderr is inherited (goes to our stderr).
 fn spawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     ensureChildren();
 
@@ -624,74 +638,50 @@ fn spawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setNumber(info, -1);
         return;
     };
+    defer alloc.free(cmd);
     const args_json = argStringAlloc(alloc, info, 1) orelse {
-        alloc.free(cmd);
         setNumber(info, -1);
         return;
     };
     defer alloc.free(args_json);
 
     const extra_args = parseStringArrayJson(alloc, args_json) orelse {
-        alloc.free(cmd);
         setNumber(info, -1);
         return;
     };
+    defer freeStringArray(alloc, extra_args);
 
-    // Child needs argv to outlive the spawn call. We duplicate into a
-    // persistent block owned by the handle.
-    const arena = std.heap.c_allocator;
-    const handle = arena.create(ChildHandle) catch {
-        alloc.free(cmd);
-        freeStringArray(alloc, extra_args);
+    const argv_arr = alloc.alloc([]const u8, 1 + extra_args.len) catch {
         setNumber(info, -1);
         return;
     };
-    const argv_arr = arena.alloc([]const u8, 1 + extra_args.len) catch {
-        arena.destroy(handle);
-        alloc.free(cmd);
-        freeStringArray(alloc, extra_args);
-        setNumber(info, -1);
-        return;
-    };
-    argv_arr[0] = arena.dupe(u8, cmd) catch {
-        arena.free(argv_arr);
-        arena.destroy(handle);
-        alloc.free(cmd);
-        freeStringArray(alloc, extra_args);
-        setNumber(info, -1);
-        return;
-    };
-    for (extra_args, 0..) |a, i| {
-        argv_arr[i + 1] = arena.dupe(u8, a) catch {
-            // partial cleanup acceptable on oom path
-            setNumber(info, -1);
-            return;
-        };
-    }
-    alloc.free(cmd);
-    freeStringArray(alloc, extra_args);
+    defer alloc.free(argv_arr);
+    argv_arr[0] = cmd;
+    for (extra_args, 0..) |a, i| argv_arr[i + 1] = a;
 
-    const spawned = std.process.spawn(host_io.io(), .{
+    var spawned = std.process.spawn(io, .{
         .argv = argv_arr,
         .stdout = .pipe,
         .stderr = .inherit,
         .stdin = .ignore,
     }) catch {
-        arena.destroy(handle);
         setNumber(info, -1);
         return;
     };
-    handle.* = .{
-        .child = spawned,
-        .residual = .empty,
-        .done = false,
-        .exit_code = 0,
+    const arena = std.heap.c_allocator;
+    const handle = arena.create(ChildHandle) catch {
+        spawned.kill(io);
+        setNumber(info, -1);
+        return;
     };
+    handle.child = spawned;
+    handle.multi_reader.init(arena, io, handle.multi_buffer.toStreams(), &.{spawned.stdout.?});
 
     const id = g_children_next_id;
     g_children_next_id += 1;
     g_children.put(id, handle) catch {
-        handle.child.kill(host_io.io());
+        handle.multi_reader.deinit();
+        handle.child.kill(io);
         arena.destroy(handle);
         setNumber(info, -1);
         return;
@@ -705,6 +695,7 @@ fn spawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// A 0 timeout polls without blocking.
 fn childReadLine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = v8_runtime.hostContext(info.getIsolate()).io;
     ensureChildren();
     const id: u32 = @intCast(argI32(info, 0, -1));
     const timeout_ms = argI32(info, 1, 0);
@@ -713,58 +704,43 @@ fn childReadLine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    // Fast path: return a line already buffered in residual.
-    if (splitLine(handle.residual.items)) |found| {
-        emitLineAndConsume(info, handle, found);
+    const reader = handle.multi_reader.reader(0);
+    if (splitLine(reader.buffered())) |found| {
+        emitLineAndConsume(info, reader, found);
         return;
     }
 
-    const fd = blk: {
-        const pipe = handle.child.stdout orelse break :blk @as(sysx.fd_t, -1);
-        break :blk pipe.handle;
+    const timeout: std.Io.Timeout = .{ .duration = .{
+        .raw = .fromMilliseconds(@max(timeout_ms, 0)),
+        .clock = .awake,
+    } };
+    handle.multi_reader.fill(1, timeout) catch |err| switch (err) {
+        error.Timeout => {
+            setNull(info);
+            return;
+        },
+        error.EndOfStream => {
+            const tail = reader.buffered();
+            if (tail.len == 0) {
+                setString(info, "");
+            } else {
+                setString(info, tail);
+                reader.toss(tail.len);
+            }
+            return;
+        },
+        else => {
+            setNull(info);
+            return;
+        },
     };
-    if (fd < 0) {
-        // stdout already closed and nothing buffered
-        setString(info, "");
-        return;
-    }
 
-    var pfd = [_]sysx.pollfd{.{ .fd = fd, .events = sysx.POLL.IN, .revents = 0 }};
-    const n = sysx.poll(&pfd, timeout_ms) catch {
+    if (splitLine(reader.buffered())) |found| {
+        emitLineAndConsume(info, reader, found);
+    } else {
+        // Partial lines stay in the reader until a later fill completes them.
         setNull(info);
-        return;
-    };
-    if (n == 0) {
-        setNull(info);
-        return;
     }
-
-    var buf: [4096]u8 = undefined;
-    const got = sysx.read(fd, &buf) catch 0;
-    if (got == 0) {
-        // EOF: child stdout closed. Return whatever residual is as a final line
-        // (if any), else empty.
-        if (handle.residual.items.len > 0) {
-            const line = std.heap.c_allocator.dupe(u8, handle.residual.items) catch "";
-            handle.residual.clearRetainingCapacity();
-            setString(info, line);
-            std.heap.c_allocator.free(line);
-        } else {
-            setString(info, "");
-        }
-        return;
-    }
-
-    handle.residual.appendSlice(std.heap.c_allocator, buf[0..got]) catch {
-        setNull(info);
-        return;
-    };
-    if (splitLine(handle.residual.items)) |found| {
-        emitLineAndConsume(info, handle, found);
-        return;
-    }
-    // Data arrived but no complete line yet — tell caller to poll again.
-    setNull(info);
 }
 
 fn splitLine(data: []const u8) ?usize {
@@ -774,24 +750,15 @@ fn splitLine(data: []const u8) ?usize {
     return null;
 }
 
-fn emitLineAndConsume(info: v8.FunctionCallbackInfo, handle: *ChildHandle, nl_idx: usize) void {
-    const line = std.heap.c_allocator.dupe(u8, handle.residual.items[0..nl_idx]) catch {
-        setNull(info);
-        return;
-    };
-    defer std.heap.c_allocator.free(line);
-    // Shift residual: drop line + '\n'.
-    const remaining = handle.residual.items[nl_idx + 1 ..];
-    const moved = std.heap.c_allocator.dupe(u8, remaining) catch "";
-    handle.residual.clearRetainingCapacity();
-    handle.residual.appendSlice(std.heap.c_allocator, moved) catch {};
-    std.heap.c_allocator.free(moved);
-    setString(info, line);
+fn emitLineAndConsume(info: v8.FunctionCallbackInfo, reader: *std.Io.Reader, nl_idx: usize) void {
+    setString(info, reader.buffered()[0..nl_idx]);
+    reader.toss(nl_idx + 1);
 }
 
 /// __childKill(id) → bool
 fn childKill(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     ensureChildren();
     const id: u32 = @intCast(argI32(info, 0, -1));
     const handle = g_children.get(id) orelse {
@@ -799,18 +766,33 @@ fn childKill(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     forgetPid(handle.child.id orelse 0);
-    handle.child.kill(host_io.io());
-    handle.residual.deinit(std.heap.c_allocator);
-    std.heap.c_allocator.destroy(handle);
     _ = g_children.remove(id);
+    handle.multi_reader.deinit();
+    handle.child.kill(io);
+    std.heap.c_allocator.destroy(handle);
     setBool(info, true);
 }
 
 // ── unix sockets (for push-bundle IPC) ─────────────────────────────────
 
-/// __unixConnect(path) → fd (i32) or -1.
+const UnixHandle = struct {
+    pump: transport.StreamPump,
+};
+
+var g_unix_handles: std.AutoHashMap(u32, *UnixHandle) = undefined;
+var g_unix_next_id: u32 = 1;
+var g_unix_ready = false;
+
+fn ensureUnixHandles() void {
+    if (g_unix_ready) return;
+    g_unix_handles = .init(std.heap.c_allocator);
+    g_unix_ready = true;
+}
+
+/// __unixConnect(path) → opaque stream handle or -1.
 fn unixConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const path = argStringAlloc(alloc, info, 0) orelse {
         setNumber(info, -1);
@@ -818,69 +800,81 @@ fn unixConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path);
 
-    // std.net is gone in 0.16; blocking unix connect via sysx (raw fd, the
-    // same pattern pty_remote uses — downstream reads/writes are sysx too).
-    if (path.len >= 108) {
-        setNumber(info, -1);
-        return;
-    }
-    const fd = sysx.socket(sysx.AF.UNIX, sysx.SOCK.STREAM, 0) catch {
+    const address = std.Io.net.UnixAddress.init(path) catch {
         setNumber(info, -1);
         return;
     };
-    var addr: sysx.sockaddr.un = .{ .family = sysx.AF.UNIX, .path = undefined };
-    @memset(&addr.path, 0);
-    @memcpy(addr.path[0..path.len], path);
-    sysx.connect(fd, @ptrCast(&addr), @sizeOf(sysx.sockaddr.un)) catch {
-        sysx.close(fd);
+    const stream = address.connect(io) catch {
         setNumber(info, -1);
         return;
     };
-    setNumber(info, @as(i32, @intCast(fd)));
+    const handle = std.heap.c_allocator.create(UnixHandle) catch {
+        stream.close(io);
+        setNumber(info, -1);
+        return;
+    };
+    handle.* = .{ .pump = transport.StreamPump.init(std.heap.c_allocator, io, stream) catch {
+        stream.close(io);
+        std.heap.c_allocator.destroy(handle);
+        setNumber(info, -1);
+        return;
+    } };
+
+    ensureUnixHandles();
+    const id = g_unix_next_id;
+    g_unix_next_id +%= 1;
+    if (g_unix_next_id == 0) g_unix_next_id = 1;
+    g_unix_handles.put(id, handle) catch {
+        handle.pump.deinit();
+        std.heap.c_allocator.destroy(handle);
+        setNumber(info, -1);
+        return;
+    };
+    setNumber(info, id);
 }
 
-/// __unixWrite(fd, content) → bytes written or -1.
+/// __unixWrite(handle, content) → bytes written or -1.
 fn unixWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const fd = argI32(info, 0, -1);
-    if (fd < 0) {
+    ensureUnixHandles();
+    const id = argI32(info, 0, -1);
+    if (id < 0) {
         setNumber(info, -1);
         return;
     }
+    const handle = g_unix_handles.get(@intCast(id)) orelse {
+        setNumber(info, -1);
+        return;
+    };
     const alloc = std.heap.page_allocator;
     const content = argStringAlloc(alloc, info, 1) orelse {
         setNumber(info, -1);
         return;
     };
     defer alloc.free(content);
-    const n = sysx.write(@intCast(fd), content) catch {
+    handle.pump.send(content) catch {
         setNumber(info, -1);
         return;
     };
-    setNumber(info, @as(i64, @intCast(n)));
+    setNumber(info, content.len);
 }
 
-/// __unixReadAll(fd, timeoutMs, maxBytes) → string or null on timeout / empty on EOF.
+/// __unixReadAll(handle, timeoutMs, maxBytes) → string or null on timeout / empty on EOF.
 fn unixReadAll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const fd = argI32(info, 0, -1);
+    ensureUnixHandles();
+    const id = argI32(info, 0, -1);
     const timeout_ms = argI32(info, 1, 0);
     const max_bytes_arg = argI32(info, 2, 65536);
-    if (fd < 0) {
+    if (id < 0) {
         setString(info, "");
         return;
     }
-    const max_bytes: usize = if (max_bytes_arg <= 0) 65536 else @intCast(max_bytes_arg);
-
-    var pfd = [_]sysx.pollfd{.{ .fd = @intCast(fd), .events = sysx.POLL.IN, .revents = 0 }};
-    const n = sysx.poll(&pfd, timeout_ms) catch {
-        setNull(info);
+    const handle = g_unix_handles.get(@intCast(id)) orelse {
+        setString(info, "");
         return;
     };
-    if (n == 0) {
-        setNull(info);
-        return;
-    }
+    const max_bytes: usize = if (max_bytes_arg <= 0) 65536 else @intCast(max_bytes_arg);
 
     const alloc = std.heap.page_allocator;
     const buf = alloc.alloc(u8, max_bytes) catch {
@@ -888,18 +882,32 @@ fn unixReadAll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(buf);
-    const got = sysx.read(@intCast(fd), buf) catch {
+    const timeout: std.Io.Timeout = .{ .duration = .{
+        .raw = .fromMilliseconds(@max(timeout_ms, 0)),
+        .clock = .awake,
+    } };
+    const result = handle.pump.drainWait(buf, timeout) catch {
         setNull(info);
         return;
     };
-    setString(info, buf[0..got]);
+    switch (result) {
+        .data => |n| setString(info, buf[0..n]),
+        .closed => setString(info, ""),
+        .empty, .failed => setNull(info),
+    }
 }
 
-/// __unixClose(fd) → undefined.
+/// __unixClose(handle) → undefined.
 fn unixClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const fd = argI32(info, 0, -1);
-    if (fd >= 0) sysx.close(@intCast(fd));
+    ensureUnixHandles();
+    const id = argI32(info, 0, -1);
+    if (id >= 0) {
+        if (g_unix_handles.fetchRemove(@intCast(id))) |entry| {
+            entry.value.pump.deinit();
+            std.heap.c_allocator.destroy(entry.value);
+        }
+    }
     setUndefined(info);
 }
 
@@ -984,11 +992,6 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__writeStdout", writeStdout);
     v8_runtime.registerHostFn("__writeStderr", writeStderr);
 
-    v8_runtime.registerHostFn("__setStdinRaw", setStdinRaw);
-    v8_runtime.registerHostFn("__readStdin", readStdin);
-    v8_runtime.registerHostFn("__pollFds", pollFds);
-    v8_runtime.registerHostFn("__termSize", termSize);
-
     v8_runtime.registerHostFn("__hotGet", hotGet);
     v8_runtime.registerHostFn("__hotSet", hotSet);
     v8_runtime.registerHostFn("__hotRemove", hotRemove);
@@ -1007,4 +1010,16 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__unixWrite", unixWrite);
     v8_runtime.registerHostFn("__unixReadAll", unixReadAll);
     v8_runtime.registerHostFn("__unixClose", unixClose);
+}
+
+/// Install terminal-only bindings after `registerAll`. The application root
+/// must store the HostContext passed to V8 inside a live `TerminalHost` and
+/// call `TerminalHost.deinit` before releasing it.
+pub fn registerTerminal() void {
+    // Override generic process exit so the stdin task is canceled and joined
+    // even though std.process.exit does not unwind Zig defers.
+    v8_runtime.registerHostFn("__exit", terminalExitProc);
+    v8_runtime.registerHostFn("__setStdinRaw", setStdinRaw);
+    v8_runtime.registerHostFn("__readStdin", readStdin);
+    v8_runtime.registerHostFn("__termSize", termSize);
 }

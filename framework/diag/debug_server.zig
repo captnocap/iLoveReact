@@ -12,9 +12,7 @@
 //! Spec: tsz/docs/TSZ_TOOLS_SPEC.md
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const ipc = @import("../net/ipc.zig");
-const sysx = @import("../net/sysx.zig");
 const telemetry = @import("telemetry.zig");
 const app_crypto = @import("../privacy/crypto.zig");
 const json_probe = @import("json_probe.zig");
@@ -27,8 +25,6 @@ const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 
 // POSIX externs (same pattern as process.zig)
 extern fn getpid() c_int;
-extern fn mkdir(path: [*:0]const u8, mode: c_uint) c_int;
-extern fn unlink(path: [*:0]const u8) c_int;
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -50,6 +46,9 @@ var session_path_buf: [256]u8 = undefined;
 var session_path_len: usize = 0;
 var app_name_buf: [128]u8 = undefined;
 var app_name_len: usize = 0;
+var home_buf: [std.fs.max_path_bytes]u8 = undefined;
+var home_len: usize = 0;
+var auto_accept: bool = false;
 
 // Persistent pairing — SHA-256 fingerprint of trusted tools pubkeys
 const MAX_TRUSTED = 8;
@@ -61,17 +60,26 @@ var resp_buf: [RESP_SIZE]u8 = undefined;
 
 // ── Public API ─────────────────────────────────────────────────────
 
-pub fn init(title: [*:0]const u8) void {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, environ: *const std.process.Environ.Map, title: [*:0]const u8) void {
     const name = std.mem.span(title);
     const n = @min(name.len, 128);
     @memcpy(app_name_buf[0..n], name[0..n]);
     app_name_len = n;
-    const env = host_io.getenv("TSZ_DEBUG") orelse return;
+    home_len = 0;
+    auto_accept = false;
+    const env = environ.get("TSZ_DEBUG") orelse return;
     if (env.len == 0 or env[0] != '1') return;
-    startServer();
+    if (environ.get("HOME")) |home| {
+        home_len = @min(home.len, home_buf.len);
+        @memcpy(home_buf[0..home_len], home[0..home_len]);
+    }
+    if (environ.get("TSZ_DEBUG_AUTOACCEPT")) |value| {
+        auto_accept = value.len > 0 and value[0] == '1';
+    }
+    startServer(allocator, io);
 }
 
-pub fn poll() void {
+pub fn poll(io: std.Io) void {
     var srv = &(server orelse return);
     _ = srv.acceptClient();
     if (!srv.connected()) {
@@ -82,17 +90,17 @@ pub fn poll() void {
     const msgs = srv.poll();
     for (msgs) |msg| {
         if (awaiting_code) {
-            handleCodeVerify(srv, msg.data);
+            handleCodeVerify(io, srv, msg.data);
         } else if (!authenticated) {
-            handleHandshake(srv, msg.data);
+            handleHandshake(io, srv, msg.data);
         } else {
-            handleEncrypted(srv, msg.data);
+            handleEncrypted(io, srv, msg.data);
         }
     }
     if (streaming_telemetry and authenticated) {
         // Throttle to ~4 pushes/sec (every 250ms matches client poll rate)
         // Prevents recv buffer overflow from 230fps frame spam
-        const now = host_io.milliTimestamp();
+        const now = std.Io.Clock.now(.awake, io).toMilliseconds();
         if (now - last_push_ms >= 250) {
             last_push_ms = now;
             pushTelemetryFrame(srv);
@@ -111,42 +119,52 @@ pub fn getPairingCode() ?[]const u8 {
     return &pairing_code;
 }
 
-pub fn deinit() void {
+pub fn deinit(io: std.Io) void {
     if (server) |*s| s.close();
     server = null;
     enabled = false;
     authenticated = false;
-    removeSessionFile();
+    home_len = 0;
+    auto_accept = false;
+    last_push_ms = 0;
+    removeSessionFile(io);
 }
 
 // ── Server startup ─────────────────────────────────────────────────
 
-fn startServer() void {
+fn startServer(allocator: std.mem.Allocator, io: std.Io) void {
     if (server != null) return;
-    server = ipc.Server.bind(0) catch return;
+    server = ipc.Server.bind(allocator, io, 0) catch return;
     enabled = true;
-    our_keypair = X25519.KeyPair.generate(host_io.io());
-    loadTrustedKeys();
+    our_keypair = X25519.KeyPair.generate(io);
+    loadTrustedKeys(io);
     const port = server.?.getPort();
-    writeSessionFile(port);
+    writeSessionFile(io, port);
     var port_buf: [64]u8 = undefined;
     const msg = std.fmt.bufPrint(&port_buf, "[debug_server] port {d}\n", .{port}) catch return;
-    _ = sysx.write(2, msg) catch {};
+    std.Io.File.stderr().writeStreamingAll(io, msg) catch {};
 }
 
 // ── Session file ───────────────────────────────────────────────────
 
-fn writeSessionFile(port: u16) void {
-    const home = host_io.getenv("HOME") orelse return;
+fn writeSessionFile(io: std.Io, port: u16) void {
+    const home = home_buf[0..home_len];
+    if (home.len == 0) return;
     const pid: c_int = getpid();
 
     // mkdir -p ~/.tsz/sessions/ (ignore errors if exists)
-    var parent_buf: [256:0]u8 = [_:0]u8{0} ** 256;
-    _ = std.fmt.bufPrint(parent_buf[0..255], "{s}/.tsz", .{home}) catch return;
-    _ = mkdir(&parent_buf, 0o755);
-    var dir_buf: [256:0]u8 = [_:0]u8{0} ** 256;
-    _ = std.fmt.bufPrint(dir_buf[0..255], "{s}/.tsz/sessions", .{home}) catch return;
-    _ = mkdir(&dir_buf, 0o755);
+    var parent_buf: [256]u8 = undefined;
+    const parent = std.fmt.bufPrint(&parent_buf, "{s}/.tsz", .{home}) catch return;
+    std.Io.Dir.createDirAbsolute(io, parent, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return,
+    };
+    var dir_buf: [256]u8 = undefined;
+    const dir = std.fmt.bufPrint(&dir_buf, "{s}/.tsz/sessions", .{home}) catch return;
+    std.Io.Dir.createDirAbsolute(io, dir, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return,
+    };
 
     // Session file path
     const path_slice = std.fmt.bufPrint(&session_path_buf, "{s}/.tsz/sessions/{d}.json", .{ home, pid }) catch return;
@@ -158,22 +176,21 @@ fn writeSessionFile(port: u16) void {
 
     // Write JSON
     var json_buf: [512]u8 = undefined;
-    const json = std.fmt.bufPrint(&json_buf,
+    const json = std.fmt.bufPrint(
+        &json_buf,
         "{{\"pid\":{d},\"port\":{d},\"pubkey\":\"{s}\",\"app\":\"{s}\"}}\n",
         .{ pid, port, pubkey_hex[0..64], app_name_buf[0..app_name_len] },
     ) catch return;
 
-    // Use std.fs for file I/O (handles null-termination correctly)
-    const cwd = std.Io.Dir.cwd();
-    const file = cwd.createFile(host_io.io(), session_path_buf[0..session_path_len], .{}) catch return;
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), json) catch {};
+    // Absolute file I/O keeps this independent of the process working directory.
+    const file = std.Io.Dir.createFileAbsolute(io, session_path_buf[0..session_path_len], .{}) catch return;
+    defer file.close(io);
+    file.writeStreamingAll(io, json) catch {};
 }
 
-fn removeSessionFile() void {
+fn removeSessionFile(io: std.Io) void {
     if (session_path_len == 0) return;
-    const cwd = std.Io.Dir.cwd();
-    cwd.deleteFile(host_io.io(), session_path_buf[0..session_path_len]) catch {};
+    std.Io.Dir.deleteFileAbsolute(io, session_path_buf[0..session_path_len]) catch {};
     session_path_len = 0;
 }
 
@@ -194,23 +211,32 @@ fn keyFingerprint(pubkey: [32]u8) [32]u8 {
 }
 
 /// Phase 1: client sends pubkey → check trust or show pairing code.
-fn handleHandshake(srv: *ipc.Server, raw: []const u8) void {
+fn handleHandshake(io: std.Io, srv: *ipc.Server, raw: []const u8) void {
     const hex = jsonStr(raw, "pubkey") orelse {
         dropClient(srv);
         return;
     };
-    if (hex.len != 64) { dropClient(srv); return; }
-    _ = app_crypto.hexToBytes(hex, &pending_client_pubkey) catch { dropClient(srv); return; };
+    if (hex.len != 64) {
+        dropClient(srv);
+        return;
+    }
+    _ = app_crypto.hexToBytes(hex, &pending_client_pubkey) catch {
+        dropClient(srv);
+        return;
+    };
 
     // Check persistent trust: is this tools key already paired?
     const fp = keyFingerprint(pending_client_pubkey);
     for (trusted_fingerprints[0..trusted_count]) |tfp| {
         if (std.crypto.timing_safe.eql([32]u8, tfp, fp)) {
             // Key is trusted — verify pinning hash to detect key substitution
-            if (verifyPinningHash(pending_client_pubkey)) {
+            if (verifyPinningHash(io, pending_client_pubkey)) {
                 // Auto-reconnect: send challenge first, then encrypted OK
                 _ = srv.sendLine("{\"challenge\":\"trusted\"}");
-                completeDH(srv) catch { dropClient(srv); return; };
+                completeDH(srv) catch {
+                    dropClient(srv);
+                    return;
+                };
                 return;
             }
             // Pinning hash mismatch — possible MITM, force fresh pairing
@@ -220,19 +246,20 @@ fn handleHandshake(srv: *ipc.Server, raw: []const u8) void {
 
     // TSZ_DEBUG_AUTOACCEPT=1 — skip visual pairing for automated testing.
     // Only compiled in dev builds (behind HAS_DEBUG_SERVER comptime gate).
-    if (host_io.getenv("TSZ_DEBUG_AUTOACCEPT")) |aa| {
-        if (aa.len > 0 and aa[0] == '1') {
-            // Send challenge first (plaintext), then encrypted OK
-            _ = srv.sendLine("{\"challenge\":\"auto_accepted\"}");
-            completeDH(srv) catch { dropClient(srv); return; };
-            savePairing(pending_client_pubkey);
+    if (auto_accept) {
+        // Send challenge first (plaintext), then encrypted OK
+        _ = srv.sendLine("{\"challenge\":\"auto_accepted\"}");
+        completeDH(srv) catch {
+            dropClient(srv);
             return;
-        }
+        };
+        savePairing(io, pending_client_pubkey);
+        return;
     }
 
     // Not trusted or pin mismatch — require visual pairing
     var rng_bytes: [4]u8 = undefined;
-    host_io.io().random(&rng_bytes);
+    io.random(&rng_bytes);
     const rng_val = std.mem.readInt(u32, &rng_bytes, .little) % 1_000_000;
     _ = std.fmt.bufPrint(&pairing_code, "{d:0>6}", .{rng_val}) catch {};
     awaiting_code = true;
@@ -240,7 +267,7 @@ fn handleHandshake(srv: *ipc.Server, raw: []const u8) void {
 }
 
 /// Phase 2: client sends code → verify → complete DH → save trust.
-fn handleCodeVerify(srv: *ipc.Server, raw: []const u8) void {
+fn handleCodeVerify(io: std.Io, srv: *ipc.Server, raw: []const u8) void {
     const code = jsonStr(raw, "code") orelse {
         dropClient(srv);
         awaiting_code = false;
@@ -260,7 +287,7 @@ fn handleCodeVerify(srv: *ipc.Server, raw: []const u8) void {
     awaiting_code = false;
 
     // Save persistent trust
-    savePairing(pending_client_pubkey);
+    savePairing(io, pending_client_pubkey);
 }
 
 /// Complete X25519 DH + HKDF → shared key, mark authenticated.
@@ -276,16 +303,16 @@ fn completeDH(srv: *ipc.Server) !void {
 
 // ── Persistent pairing ────────────────────────────────────────────
 
-fn loadTrustedKeys() void {
+fn loadTrustedKeys(io: std.Io) void {
     trusted_count = 0;
-    const home = host_io.getenv("HOME") orelse return;
+    const home = home_buf[0..home_len];
+    if (home.len == 0) return;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.Io.Dir.cwd();
-    const file = cwd.openFile(host_io.io(), path, .{}) catch return;
-    defer file.close(host_io.io());
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return;
+    defer file.close(io);
     var buf: [1024]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
+    const n = file.readPositionalAll(io, &buf, 0) catch return;
     const data = buf[0..n];
 
     // Extract fingerprint hex and last_active from JSON
@@ -294,7 +321,7 @@ fn loadTrustedKeys() void {
     const last_active = std.fmt.parseInt(i64, ts_str, 10) catch return;
 
     // Check 15 minute freshness
-    const now = host_io.timestamp();
+    const now = std.Io.Clock.now(.real, io).toSeconds();
     if (now - last_active > 15 * 60) return; // stale — require fresh pairing
 
     if (fp_hex.len != 64) return;
@@ -304,15 +331,15 @@ fn loadTrustedKeys() void {
     }
 }
 
-fn verifyPinningHash(tools_pubkey: [32]u8) bool {
-    const home = host_io.getenv("HOME") orelse return false;
+fn verifyPinningHash(io: std.Io, tools_pubkey: [32]u8) bool {
+    const home = home_buf[0..home_len];
+    if (home.len == 0) return false;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return false;
-    const cwd = std.Io.Dir.cwd();
-    const file = cwd.openFile(host_io.io(), path, .{}) catch return false;
-    defer file.close(host_io.io());
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
+    defer file.close(io);
     var buf: [1024]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return false;
+    const n = file.readPositionalAll(io, &buf, 0) catch return false;
     const data = buf[0..n];
 
     const stored_hex = jsonStr(data, "pairing_hash") orelse return false;
@@ -324,13 +351,17 @@ fn verifyPinningHash(tools_pubkey: [32]u8) bool {
     return std.crypto.timing_safe.eql([32]u8, stored_hash, computed);
 }
 
-fn savePairing(tools_pubkey: [32]u8) void {
-    const home = host_io.getenv("HOME") orelse return;
+fn savePairing(io: std.Io, tools_pubkey: [32]u8) void {
+    const home = home_buf[0..home_len];
+    if (home.len == 0) return;
 
     // Ensure ~/.tsz/paired/ exists
-    var dir_buf: [256:0]u8 = [_:0]u8{0} ** 256;
-    _ = std.fmt.bufPrint(dir_buf[0..255], "{s}/.tsz/paired", .{home}) catch return;
-    _ = mkdir(&dir_buf, 0o755);
+    var dir_buf: [256]u8 = undefined;
+    const dir = std.fmt.bufPrint(&dir_buf, "{s}/.tsz/paired", .{home}) catch return;
+    std.Io.Dir.createDirAbsolute(io, dir, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return,
+    };
 
     // Compute key pinning hash and fingerprint
     const pin_hash = computePairingHash(tools_pubkey);
@@ -341,20 +372,20 @@ fn savePairing(tools_pubkey: [32]u8) void {
     var fp_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&fp, &fp_hex);
 
-    const now = host_io.timestamp();
+    const now = std.Io.Clock.now(.real, io).toSeconds();
 
     var json_buf: [512]u8 = undefined;
-    const json = std.fmt.bufPrint(&json_buf,
+    const json = std.fmt.bufPrint(
+        &json_buf,
         "{{\"pairing_hash\":\"{s}\",\"tools_key_fingerprint\":\"{s}\",\"last_active\":\"{d}\"}}\n",
         .{ pin_hex[0..64], fp_hex[0..64], now },
     ) catch return;
 
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.Io.Dir.cwd();
-    const file = cwd.createFile(host_io.io(), path, .{}) catch return;
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), json) catch {};
+    const file = std.Io.Dir.createFileAbsolute(io, path, .{}) catch return;
+    defer file.close(io);
+    file.writeStreamingAll(io, json) catch {};
 
     // Update in-memory trust
     if (trusted_count < MAX_TRUSTED) {
@@ -364,15 +395,15 @@ fn savePairing(tools_pubkey: [32]u8) void {
 }
 
 /// Update last_active timestamp on incoming debug messages.
-fn touchPairing() void {
-    const home = host_io.getenv("HOME") orelse return;
+fn touchPairing(io: std.Io) void {
+    const home = home_buf[0..home_len];
+    if (home.len == 0) return;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.Io.Dir.cwd();
-    const file = cwd.openFile(host_io.io(), path, .{ .mode = .read_write }) catch return;
-    defer file.close(host_io.io());
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write }) catch return;
+    defer file.close(io);
     var buf: [1024]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
+    const n = file.readPositionalAll(io, &buf, 0) catch return;
     const data = buf[0..n];
 
     // Find and replace last_active value
@@ -382,7 +413,7 @@ fn touchPairing() void {
     const val_end_pos = std.mem.indexOfPos(u8, data, val_start, "\"") orelse return;
 
     // Rebuild with new timestamp
-    const now = host_io.timestamp();
+    const now = std.Io.Clock.now(.real, io).toSeconds();
     var new_buf: [1024]u8 = undefined;
     var pos: usize = 0;
     ap(&new_buf, &pos, data[0..val_start]);
@@ -391,14 +422,17 @@ fn touchPairing() void {
     ap(&new_buf, &pos, ts_str);
     ap(&new_buf, &pos, data[val_end_pos..n]);
 
-    file.writePositionalAll(host_io.io(), new_buf[0..pos], 0) catch {};
+    file.writePositionalAll(io, new_buf[0..pos], 0) catch {};
 }
 
 fn dropClient(srv: *ipc.Server) void {
-    if (srv.client_fd) |fd| {
-        sysx.close(fd);
-        srv.client_fd = null;
+    if (srv.client) |*client| {
+        client.deinit();
+        srv.client = null;
     }
+    // A protocol rejection drops only this peer; the listener remains ready
+    // for the next connection.
+    srv.dead = false;
     authenticated = false;
 }
 
@@ -424,11 +458,14 @@ fn sendEncrypted(srv: *ipc.Server, plaintext: []const u8) void {
     hexEncode(&resp_buf, &pos, &nonce);
     hexEncode(&resp_buf, &pos, ct_buf[0..plaintext.len]);
     hexEncode(&resp_buf, &pos, &tag);
-    if (pos < RESP_SIZE) { resp_buf[pos] = '\n'; pos += 1; }
+    if (pos < RESP_SIZE) {
+        resp_buf[pos] = '\n';
+        pos += 1;
+    }
     _ = srv.send(resp_buf[0..pos]);
 }
 
-fn handleEncrypted(srv: *ipc.Server, raw: []const u8) void {
+fn handleEncrypted(io: std.Io, srv: *ipc.Server, raw: []const u8) void {
     const min_hex = (XChaCha.nonce_length + XChaCha.tag_length) * 2;
     if (raw.len < min_hex) return;
 
@@ -446,16 +483,16 @@ fn handleEncrypted(srv: *ipc.Server, raw: []const u8) void {
         dropClient(srv);
         return;
     };
-    handleRequest(srv, pt_buf[0..ct_len]);
+    handleRequest(io, srv, pt_buf[0..ct_len]);
 }
 
 // ── Request dispatch ───────────────────────────────────────────────
 
-fn handleRequest(srv: *ipc.Server, raw: []const u8) void {
+fn handleRequest(io: std.Io, srv: *ipc.Server, raw: []const u8) void {
     const method = jsonStr(raw, "method") orelse return;
 
     // Bump last_active on meaningful authenticated traffic
-    touchPairing();
+    touchPairing(io);
 
     if (eql(method, "debug.tree")) {
         respondTree(srv);
@@ -535,8 +572,10 @@ fn respondState(srv: *ipc.Server) void {
     const snap = telemetry.current;
     var pos: usize = 0;
     ap(&resp_buf, &pos, "{\"method\":\"debug.state\"");
-    ap(&resp_buf, &pos, ",\"total_nodes\":"); apInt(&resp_buf, &pos, @intCast(snap.total_nodes));
-    ap(&resp_buf, &pos, ",\"visible_nodes\":"); apInt(&resp_buf, &pos, @intCast(snap.visible_nodes));
+    ap(&resp_buf, &pos, ",\"total_nodes\":");
+    apInt(&resp_buf, &pos, @intCast(snap.total_nodes));
+    ap(&resp_buf, &pos, ",\"visible_nodes\":");
+    apInt(&resp_buf, &pos, @intCast(snap.visible_nodes));
     ap(&resp_buf, &pos, "}");
     sendEncrypted(srv, resp_buf[0..pos]);
 }
@@ -574,18 +613,30 @@ fn pushTelemetryFrame(srv: *ipc.Server) void {
 }
 
 fn appendPerfFields(buf: []u8, pos: *usize, snap: telemetry.Snapshot) void {
-    ap(buf, pos, ",\"fps\":"); apInt(buf, pos, @intCast(snap.fps));
-    ap(buf, pos, ",\"frame\":"); apInt(buf, pos, @intCast(snap.frame_number));
-    ap(buf, pos, ",\"layout_us\":"); apInt(buf, pos, @intCast(snap.layout_us));
-    ap(buf, pos, ",\"paint_us\":"); apInt(buf, pos, @intCast(snap.paint_us));
-    ap(buf, pos, ",\"gpu_us\":"); apInt(buf, pos, @intCast(snap.gpu_us));
-    ap(buf, pos, ",\"frame_total_us\":"); apInt(buf, pos, @intCast(snap.frame_total_us));
-    ap(buf, pos, ",\"rects\":"); apInt(buf, pos, @intCast(snap.rect_count));
-    ap(buf, pos, ",\"glyphs\":"); apInt(buf, pos, @intCast(snap.glyph_count));
-    ap(buf, pos, ",\"visible\":"); apInt(buf, pos, @intCast(snap.visible_nodes));
-    ap(buf, pos, ",\"total\":"); apInt(buf, pos, @intCast(snap.total_nodes));
-    ap(buf, pos, ",\"window_w\":"); apInt(buf, pos, @intCast(snap.window_w));
-    ap(buf, pos, ",\"window_h\":"); apInt(buf, pos, @intCast(snap.window_h));
+    ap(buf, pos, ",\"fps\":");
+    apInt(buf, pos, @intCast(snap.fps));
+    ap(buf, pos, ",\"frame\":");
+    apInt(buf, pos, @intCast(snap.frame_number));
+    ap(buf, pos, ",\"layout_us\":");
+    apInt(buf, pos, @intCast(snap.layout_us));
+    ap(buf, pos, ",\"paint_us\":");
+    apInt(buf, pos, @intCast(snap.paint_us));
+    ap(buf, pos, ",\"gpu_us\":");
+    apInt(buf, pos, @intCast(snap.gpu_us));
+    ap(buf, pos, ",\"frame_total_us\":");
+    apInt(buf, pos, @intCast(snap.frame_total_us));
+    ap(buf, pos, ",\"rects\":");
+    apInt(buf, pos, @intCast(snap.rect_count));
+    ap(buf, pos, ",\"glyphs\":");
+    apInt(buf, pos, @intCast(snap.glyph_count));
+    ap(buf, pos, ",\"visible\":");
+    apInt(buf, pos, @intCast(snap.visible_nodes));
+    ap(buf, pos, ",\"total\":");
+    apInt(buf, pos, @intCast(snap.total_nodes));
+    ap(buf, pos, ",\"window_w\":");
+    apInt(buf, pos, @intCast(snap.window_w));
+    ap(buf, pos, ",\"window_h\":");
+    apInt(buf, pos, @intCast(snap.window_h));
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -620,26 +671,26 @@ fn eql(a: []const u8, b: []const u8) bool {
 
 test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     // Start server
-    startServer();
-    defer deinit();
+    startServer(std.testing.allocator, std.testing.io);
+    defer deinit(std.testing.io);
     const port = server.?.getPort();
     try std.testing.expect(port > 0);
 
     // Client connects
-    var client = try ipc.Client.connect(port);
+    var client = try ipc.Client.connect(std.testing.allocator, std.testing.io, port);
     defer client.close();
     try std.testing.expect(server.?.acceptClient());
 
     // Phase 1: Client sends pubkey
-    const client_kp = X25519.KeyPair.generate(host_io.io());
+    const client_kp = X25519.KeyPair.generate(std.testing.io);
     var pubkey_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&client_kp.public_key, &pubkey_hex);
     var msg_buf: [128]u8 = undefined;
     const hs_msg = std.fmt.bufPrint(&msg_buf, "{{\"pubkey\":\"{s}\"}}", .{pubkey_hex[0..64]}) catch unreachable;
     try std.testing.expect(client.sendLine(hs_msg));
 
-    std.Thread.sleep(20 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    poll(std.testing.io);
 
     // Server should be awaiting code, NOT authenticated yet
     try std.testing.expect(awaiting_code);
@@ -650,7 +701,7 @@ test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     try std.testing.expectEqual(@as(usize, 6), code.len);
 
     // Client reads challenge response
-    std.Thread.sleep(20 * std.time.ns_per_ms);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
     const challenge_msgs = client.poll();
     try std.testing.expect(challenge_msgs.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, challenge_msgs[0].data, "enter_code") != null);
@@ -660,8 +711,8 @@ test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     const code_msg = std.fmt.bufPrint(&code_buf, "{{\"code\":\"{s}\"}}", .{code}) catch unreachable;
     try std.testing.expect(client.sendLine(code_msg));
 
-    std.Thread.sleep(20 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    poll(std.testing.io);
 
     // Now authenticated, pairing dismissed
     try std.testing.expect(authenticated);
@@ -675,7 +726,7 @@ test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     app_crypto.hkdfExpand(&client_prk, "debug-channel", &client_shared) catch unreachable;
 
     // Read + decrypt handshake OK
-    std.Thread.sleep(20 * std.time.ns_per_ms);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
     const resp_msgs = client.poll();
     try std.testing.expect(resp_msgs.len > 0);
     const pt = try decryptWire(resp_msgs[0].data, client_shared);
@@ -687,33 +738,33 @@ test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     const enc_msg = encryptForSend(select_json, client_shared, &enc_buf);
     try std.testing.expect(client.sendLine(enc_msg));
 
-    std.Thread.sleep(20 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    poll(std.testing.io);
     try std.testing.expectEqual(@as(i32, 42), getSelectedNode());
 }
 
 test "wrong pairing code is rejected" {
-    startServer();
-    defer deinit();
-    var client = try ipc.Client.connect(server.?.getPort());
+    startServer(std.testing.allocator, std.testing.io);
+    defer deinit(std.testing.io);
+    var client = try ipc.Client.connect(std.testing.allocator, std.testing.io, server.?.getPort());
     defer client.close();
     _ = server.?.acceptClient();
 
     // Send pubkey
-    const client_kp = X25519.KeyPair.generate(host_io.io());
+    const client_kp = X25519.KeyPair.generate(std.testing.io);
     var pubkey_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&client_kp.public_key, &pubkey_hex);
     var msg_buf: [128]u8 = undefined;
     const hs_msg = std.fmt.bufPrint(&msg_buf, "{{\"pubkey\":\"{s}\"}}", .{pubkey_hex[0..64]}) catch unreachable;
     _ = client.sendLine(hs_msg);
-    std.Thread.sleep(20 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    poll(std.testing.io);
     try std.testing.expect(awaiting_code);
 
     // Send wrong code
     _ = client.sendLine("{\"code\":\"000000\"}");
-    std.Thread.sleep(20 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    poll(std.testing.io);
 
     // Should be rejected
     try std.testing.expect(!authenticated);
@@ -721,21 +772,24 @@ test "wrong pairing code is rejected" {
 }
 
 test "unauthenticated client is dropped" {
-    startServer();
-    defer deinit();
-    var client = try ipc.Client.connect(server.?.getPort());
+    startServer(std.testing.allocator, std.testing.io);
+    defer deinit(std.testing.io);
+    var client = try ipc.Client.connect(std.testing.allocator, std.testing.io, server.?.getPort());
     defer client.close();
     _ = server.?.acceptClient();
     _ = client.sendLine("{\"method\":\"debug.tree\"}");
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-    poll();
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    poll(std.testing.io);
     try std.testing.expect(!authenticated);
 }
 
 // ── Test helpers ───────────────────────────────────────────────────
 
 fn decryptWire(wire_hex: []const u8, key: [32]u8) ![]const u8 {
-    const S = struct { var pt: [RESP_SIZE / 2]u8 = undefined; var wb: [RESP_SIZE / 2]u8 = undefined; };
+    const S = struct {
+        var pt: [RESP_SIZE / 2]u8 = undefined;
+        var wb: [RESP_SIZE / 2]u8 = undefined;
+    };
     const wl = try app_crypto.hexToBytes(wire_hex, &S.wb);
     if (wl < XChaCha.nonce_length + XChaCha.tag_length) return error.TooShort;
     const nonce = S.wb[0..XChaCha.nonce_length].*;
@@ -747,7 +801,10 @@ fn decryptWire(wire_hex: []const u8, key: [32]u8) ![]const u8 {
 }
 
 fn encryptForSend(plaintext: []const u8, key: [32]u8, out: []u8) []const u8 {
-    const S = struct { var ct: [512]u8 = undefined; var nc: u64 = 0; };
+    const S = struct {
+        var ct: [512]u8 = undefined;
+        var nc: u64 = 0;
+    };
     var nonce: [XChaCha.nonce_length]u8 = [_]u8{0} ** XChaCha.nonce_length;
     nonce[0] = 'C';
     const nb = std.mem.asBytes(&S.nc);

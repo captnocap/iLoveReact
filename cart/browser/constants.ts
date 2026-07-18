@@ -63,8 +63,8 @@ export const DEFAULT_BOOKMARKS: BookmarkEntry[] = [
   },
   {
     id: 'bookmark-zig',
-    title: 'Zig 0.15.2',
-    address: 'https://ziglang.org/documentation/0.15.2/',
+    title: 'Zig 0.16.0',
+    address: 'https://ziglang.org/documentation/0.16.0/',
     createdAt: 3,
   },
   {
@@ -87,7 +87,7 @@ export const HOME_LINKS: HomeLink[] = [
     id: 'link-zig',
     title: 'Zig Runtime',
     subtitle: 'Keep host-side API details nearby',
-    address: 'https://ziglang.org/documentation/0.15.2/',
+    address: 'https://ziglang.org/documentation/0.16.0/',
     accent: COLORS.homeTileB,
   },
   {

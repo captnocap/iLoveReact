@@ -3,8 +3,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const host_io = @import("../host_io.zig");
-const sysx = @import("../net/sysx.zig");
 
 var g_fd: ?std.posix.fd_t = null;
 var g_initialized = false;
@@ -55,8 +53,17 @@ const Sigaction = if (is_linux) extern struct {
 
 extern fn sigaction(sig: c_int, act: *const Sigaction, oldact: ?*Sigaction) c_int;
 extern fn _exit(status: c_int) noreturn;
+extern fn write(fd: c_int, buffer: [*]const u8, count: usize) isize;
 
-pub fn init() void {
+/// The crash path is a true async-signal-safe OS boundary. Zig's buffered
+/// `std.Io` machinery is intentionally unavailable inside a signal handler;
+/// POSIX `write(2)` is the primitive the platform guarantees here.
+fn signalWrite(fd: c_int, bytes: []const u8) void {
+    if (bytes.len == 0) return;
+    _ = write(fd, bytes.ptr, bytes.len);
+}
+
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map) void {
     if (g_initialized) return;
     g_initialized = true;
 
@@ -67,16 +74,16 @@ pub fn init() void {
         path_buf[path.len] = 0;
         const path_z: [*:0]const u8 = @ptrCast(path_buf[0..path.len]);
 
-        g_fd = if (std.Io.Dir.createFileAbsolute(host_io.io(), std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
+        g_fd = if (std.Io.Dir.createFileAbsolute(io, std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
     } else {
         // macOS: write to ~/Library/Logs/
         var path_buf: [256]u8 = undefined;
-        const home = host_io.getenv("HOME") orelse return;
+        const home = environ.get("HOME") orelse return;
         const path = std.fmt.bufPrint(&path_buf, "{s}/Library/Logs/reactjit-crash.log", .{home}) catch return;
         path_buf[path.len] = 0;
         const path_z: [*:0]const u8 = @ptrCast(path_buf[0..path.len]);
 
-        g_fd = if (std.Io.Dir.createFileAbsolute(host_io.io(), std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
+        g_fd = if (std.Io.Dir.createFileAbsolute(io, std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
     }
 
     // Install crash handlers with SA_SIGINFO for faulting address
@@ -110,9 +117,9 @@ fn atexitHandler() callconv(.c) void {
     // (SDL init failure, wgpu panic, C library assertion, etc.)
     logRaw("EXIT: abnormal — exit() called without engine shutdown\n");
     const stderr = 2;
-    _ = sysx.write(stderr, "\n[CRASH] Process called exit() without clean shutdown.\n") catch {};
-    _ = sysx.write(stderr, "[CRASH] Likely cause: SDL init failure, wgpu error, or C library abort.\n") catch {};
-    _ = sysx.write(stderr, "[CRASH] Check stderr output above for the actual error.\n\n") catch {};
+    signalWrite(stderr, "\n[CRASH] Process called exit() without clean shutdown.\n");
+    signalWrite(stderr, "[CRASH] Likely cause: SDL init failure, wgpu error, or C library abort.\n");
+    signalWrite(stderr, "[CRASH] Check stderr output above for the actual error.\n\n");
 }
 
 /// Install a normal (non-SA_SIGINFO) signal handler. Use for SIGINT/SIGTERM
@@ -169,16 +176,16 @@ fn crashHandlerSiginfo(sig: c_int, info: *siginfo_t, ctx: ?*anyopaque) callconv(
     // Must be unmissable. Signal handler context: no allocator, no formatting
     // beyond bufPrint, only write() is async-signal-safe.
     const stderr = 2;
-    _ = sysx.write(stderr, "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
-    _ = sysx.write(stderr, "!!!  CRASH: ") catch {};
-    _ = sysx.write(stderr, name) catch {};
-    _ = sysx.write(stderr, "  !!!\n") catch {};
-    _ = sysx.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
+    signalWrite(stderr, "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    signalWrite(stderr, "!!!  CRASH: ");
+    signalWrite(stderr, name);
+    signalWrite(stderr, "  !!!\n");
+    signalWrite(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
     if (info.si_addr) |addr| {
         var buf: [80]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, "fault address: 0x{x}\n", .{@intFromPtr(addr)}) catch "fault address: ?\n";
-        _ = sysx.write(stderr, s) catch {};
+        signalWrite(stderr, s);
     }
 
     if (ctx) |uctx| {
@@ -189,17 +196,17 @@ fn crashHandlerSiginfo(sig: c_int, info: *siginfo_t, ctx: ?*anyopaque) callconv(
             const rip_ptr: *const u64 = @ptrCast(@alignCast(uctx_bytes + rip_offset));
             var buf2: [80]u8 = undefined;
             const s2 = std.fmt.bufPrint(&buf2, "instruction ptr: 0x{x}\n", .{rip_ptr.*}) catch "instruction ptr: ?\n";
-            _ = sysx.write(stderr, s2) catch {};
+            signalWrite(stderr, s2);
         } else {
             var buf2: [80]u8 = undefined;
             const s2 = std.fmt.bufPrint(&buf2, "ucontext: 0x{x}\n", .{@intFromPtr(uctx_bytes)}) catch "ucontext: ?\n";
-            _ = sysx.write(stderr, s2) catch {};
+            signalWrite(stderr, s2);
         }
     }
 
-    _ = sysx.write(stderr, "Rebuild with --debug for symbols, then:\n") catch {};
-    _ = sysx.write(stderr, "  addr2line -e zig-out/bin/APP 0xADDRESS\n") catch {};
-    _ = sysx.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n") catch {};
+    signalWrite(stderr, "Rebuild with --debug for symbols, then:\n");
+    signalWrite(stderr, "  addr2line -e zig-out/bin/APP 0xADDRESS\n");
+    signalWrite(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n");
 
     // Also write to log file
     logRaw("CRASH: signal ");
@@ -232,7 +239,7 @@ pub fn log(msg: []const u8) void {
 
 fn logRaw(msg: []const u8) void {
     if (g_fd) |fd| {
-        _ = sysx.write(fd, msg) catch {};
+        signalWrite(fd, msg);
     }
 }
 

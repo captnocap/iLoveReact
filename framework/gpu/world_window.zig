@@ -90,11 +90,11 @@ pub fn isOpen() bool {
 /// Open the pop-out (or RELOAD it when already open — the Compile-button
 /// case: same window, fresh gamefile). Width/height are the initial window
 /// size; the user resizes from there.
-pub fn open(game_file: []const u8, store_dir: []const u8, width: u32, height: u32) !void {
+pub fn open(io: std.Io, environ: *const std.process.Environ.Map, game_file: []const u8, store_dir: []const u8, width: u32, height: u32) !void {
     if (g_window != null) {
         // reload: drop the runtime, keep the window + swapchain
-        world_loader.unmount(WINDOW_NODE_ID);
-        try world_loader.mount(std.heap.c_allocator, WINDOW_NODE_ID, game_file, store_dir);
+        world_loader.unmount(io, WINDOW_NODE_ID);
+        try world_loader.mount(io, environ, std.heap.c_allocator, WINDOW_NODE_ID, game_file, store_dir);
         if (g_window) |w| _ = c.SDL_RaiseWindow(w);
         return;
     }
@@ -121,7 +121,7 @@ pub fn open(game_file: []const u8, store_dir: []const u8, width: u32, height: u3
         return error.SurfaceFailed;
     };
 
-    try world_loader.mount(std.heap.c_allocator, WINDOW_NODE_ID, game_file, store_dir);
+    try world_loader.mount(io, environ, std.heap.c_allocator, WINDOW_NODE_ID, game_file, store_dir);
 
     g_window = w;
     g_window_id = c.SDL_GetWindowID(w);
@@ -131,9 +131,9 @@ pub fn open(game_file: []const u8, store_dir: []const u8, width: u32, height: u3
     log.print("[world-window] open {d}x{d} (click to capture the mouse, Esc releases)\n", .{ g_width, g_height });
 }
 
-pub fn close() void {
+pub fn close(io: std.Io) void {
     if (g_window == null) return;
-    world_loader.unmount(WINDOW_NODE_ID);
+    world_loader.unmount(io, WINDOW_NODE_ID);
     releaseBlitBindGroup();
     g_target.deinit();
     if (g_surface) |s| {
@@ -150,8 +150,8 @@ pub fn close() void {
 }
 
 /// Engine-exit teardown (pipeline objects included).
-pub fn deinitAll() void {
-    close();
+pub fn deinitAll(io: std.Io) void {
+    close(io);
     if (g_blit_pipeline) |p| p.release();
     g_blit_pipeline = null;
     if (g_blit_bgl) |l| l.release();
@@ -174,12 +174,12 @@ fn setMouseCaptured(captured: bool) void {
 
 /// Route one SDL event. Returns true when the event belonged to this window
 /// (consumed — the main window must not also act on it).
-pub fn routeEvent(event: *const c.SDL_Event) bool {
+pub fn routeEvent(io: std.Io, event: *const c.SDL_Event) bool {
     if (g_window == null) return false;
     switch (event.type) {
         c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
             if (event.window.windowID != g_window_id) return false;
-            close();
+            close(io);
             return true;
         },
         c.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED => {
@@ -310,13 +310,15 @@ fn ensureBlitPipeline(device: *wgpu.Device) bool {
 /// One pop-out frame: step + render the world into the detached RT, then
 /// blit it into this window's swapchain and present. Called from the engine
 /// loop after the main gpu.frame(); fully self-contained otherwise.
-pub fn frame() void {
+pub fn frame(io: std.Io, environ: *const std.process.Environ.Map) void {
     if (g_window == null) return;
     const device = gpu.getDevice() orelse return;
     const queue = gpu.getQueue() orelse return;
     const surface = g_surface orelse return;
 
     const view = world_loader.renderDetachedView(
+        io,
+        environ,
         WINDOW_NODE_ID,
         &g_target,
         @floatFromInt(g_width),

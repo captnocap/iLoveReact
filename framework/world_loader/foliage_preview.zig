@@ -4,7 +4,6 @@
 //! thread alone publishes completed row sets into retained scene nodes.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const foliage = @import("../world/foliage.zig");
 const map_paint = @import("../game/map/engine.zig");
@@ -213,27 +212,27 @@ pub const FoliageMailbox = struct {
     working: bool = false,
     shutdown: bool = false,
 
-    pub fn idle(self: *FoliageMailbox) bool {
-        self.mutex.lockUncancelable(host_io.io());
-        defer self.mutex.unlock(host_io.io());
+    pub fn idle(self: *FoliageMailbox, io: std.Io) bool {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         return self.pending == null and !self.working and self.result == null;
     }
 
-    pub fn submit(self: *FoliageMailbox, job: FoliageJob) bool {
-        self.mutex.lockUncancelable(host_io.io());
-        defer self.mutex.unlock(host_io.io());
+    pub fn submit(self: *FoliageMailbox, io: std.Io, job: FoliageJob) bool {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         if (self.shutdown) return false;
         if (self.pending != null or self.working or self.result != null) return false;
         self.pending = job;
-        self.cond.signal(host_io.io());
+        self.cond.signal(io);
         return true;
     }
 
     /// Worker-only blocking take. `null` means shutdown.
-    pub fn waitTake(self: *FoliageMailbox) ?FoliageJob {
-        self.mutex.lockUncancelable(host_io.io());
-        defer self.mutex.unlock(host_io.io());
-        while (self.pending == null and !self.shutdown) self.cond.waitUncancelable(host_io.io(), &self.mutex);
+    pub fn waitTake(self: *FoliageMailbox, io: std.Io) ?FoliageJob {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        while (self.pending == null and !self.shutdown) self.cond.waitUncancelable(io, &self.mutex);
         if (self.shutdown) return null;
         const job = self.pending.?;
         self.pending = null;
@@ -241,26 +240,26 @@ pub const FoliageMailbox = struct {
         return job;
     }
 
-    pub fn publish(self: *FoliageMailbox, result: FoliageResult) void {
-        self.mutex.lockUncancelable(host_io.io());
-        defer self.mutex.unlock(host_io.io());
+    pub fn publish(self: *FoliageMailbox, io: std.Io, result: FoliageResult) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         self.working = false;
         if (!self.shutdown) self.result = result;
     }
 
-    pub fn poll(self: *FoliageMailbox) ?FoliageResult {
-        self.mutex.lockUncancelable(host_io.io());
-        defer self.mutex.unlock(host_io.io());
+    pub fn poll(self: *FoliageMailbox, io: std.Io) ?FoliageResult {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         const out = self.result;
         self.result = null;
         return out;
     }
 
-    pub fn stop(self: *FoliageMailbox) void {
-        self.mutex.lockUncancelable(host_io.io());
+    pub fn stop(self: *FoliageMailbox, io: std.Io) void {
+        self.mutex.lockUncancelable(io);
         self.shutdown = true;
-        self.cond.signal(host_io.io());
-        self.mutex.unlock(host_io.io());
+        self.cond.signal(io);
+        self.mutex.unlock(io);
     }
 };
 
@@ -343,8 +342,8 @@ pub fn requestFoliageRegen(runtime: anytype, log_full: bool) void {
 
 /// MAIN THREAD, every paint-layer frame: apply a finished regen, then feed
 /// the worker if a regen is wanted and the pipeline is idle.
-pub fn pollFoliageRegen(runtime: anytype) void {
-    if (runtime.foliage_box.poll()) |result| {
+pub fn pollFoliageRegen(runtime: anytype, io: std.Io) void {
+    if (runtime.foliage_box.poll(io)) |result| {
         if (paint_revision.resultIsCurrent(result.map_revision, runtime.paint_map_revision)) {
             applyFoliageResult(runtime, result);
         } else {
@@ -354,14 +353,15 @@ pub fn pollFoliageRegen(runtime: anytype) void {
         }
     }
     if (!runtime.foliage_want) return;
-    if (!runtime.foliage_box.idle()) return;
-    if (runtime.foliage_worker == null) {
-        runtime.foliage_worker = std.Thread.spawn(.{}, foliageWorkerMain, .{runtime}) catch |err| {
+    if (!runtime.foliage_box.idle(io)) return;
+    if (!runtime.foliage_worker_started) {
+        runtime.startFoliageWorker(io) catch |err| {
             log.print("[paint] foliage worker spawn FAILED ({any}) — live foliage preview will not update\n", .{err});
             runtime.foliage_want = false;
             runtime.foliage_want_log = false;
             return;
         };
+        runtime.foliage_worker_started = true;
     }
     if (!snapshotPaintedChunks(runtime)) return; // OOM: keep the want, retry next frame
     var job = FoliageJob{
@@ -372,7 +372,7 @@ pub fn pollFoliageRegen(runtime: anytype) void {
         .specs = undefined,
     };
     for (0..map_paint.MAX_PALETTE) |k| job.specs[k] = map_paint.floraSpec(@intCast(k));
-    if (runtime.foliage_box.submit(job)) {
+    if (runtime.foliage_box.submit(io, job)) {
         runtime.foliage_want = false;
         runtime.foliage_want_log = false;
     }
@@ -435,9 +435,9 @@ pub fn applyFoliageResult(runtime: anytype, result: FoliageResult) void {
 }
 
 /// WORKER THREAD entry: block on the mailbox, regen, publish, repeat.
-pub fn foliageWorkerMain(runtime: anytype) void {
-    while (runtime.foliage_box.waitTake()) |job| {
-        runtime.foliage_box.publish(buildFoliageRows(runtime, job));
+pub fn foliageWorkerMain(runtime: anytype, io: std.Io) std.Io.Cancelable!void {
+    while (runtime.foliage_box.waitTake(io)) |job| {
+        runtime.foliage_box.publish(io, buildFoliageRows(runtime, job));
     }
 }
 

@@ -61,8 +61,10 @@ const TEMPO_FLAG_END_TEMPO = types.TEMPO_FLAG_END_TEMPO;
 const TEMPO_FLAG_END_MEASURE = types.TEMPO_FLAG_END_MEASURE;
 const TRACK_FLAG_RANGE = types.TRACK_FLAG_RANGE;
 
-pub fn init() bool {
+pub fn init(io: std.Io) bool {
     if (state.g_engine.initialized) return true;
+
+    state.g_engine.io = io;
 
     // Wire buffer pool
     state.g_engine.buffer_pool.data = &state.g_engine.buffer_storage;
@@ -89,7 +91,7 @@ pub fn init() bool {
     }
 
     // Set callback
-    _ = sdl.SDL_SetAudioStreamGetCallback(state.g_engine.stream, callback.audioCallback, null);
+    _ = sdl.SDL_SetAudioStreamGetCallback(state.g_engine.stream, callback.audioCallback, &state.g_engine.io);
 
     // Bind stream to device
     if (!sdl.SDL_BindAudioStream(state.g_engine.device_id, state.g_engine.stream)) {

@@ -16,11 +16,15 @@
 //! eventlog cart runs as a separate binary and queries this same db.
 //!
 //! Contract:
-//!   - Single writer (main thread). No locks. Polling other threads call
+//!   - `emit*` only copies into bounded memory. It never reads a clock, opens a
+//!     file, touches SQLite, writes stderr, or needs an `std.Io` capability.
+//!   - One root-owned `Sink` performs those effects from `flush(io)`. The sink
+//!     is explicit state, so no process-global `std.Io` is retained here.
+//!   - Single producer (main thread). No locks. Polling other threads call
 //!     emit() at their own risk; today nothing does.
-//!   - Best-effort. If sqlite open fails (HAS_SQLITE off, no $HOME, FS
-//!     permission), the bus keeps the in-memory ring alive but skips
-//!     persistence. emit() never blocks the runtime.
+//!   - Best-effort. If SQLite is unavailable, the in-memory history remains
+//!     live. If producers outrun flush, the oldest unflushed entries are
+//!     evicted and the next flush reports the exact drop count.
 //!   - event_type and source can be arbitrary UTF-8 — SQLite's parameter
 //!     binding handles escape, no caller-side discipline required.
 //!   - payload_json is stored as-is in the `payload` column. Callers
@@ -41,24 +45,101 @@
 const std = @import("std");
 const sqlite = @import("../storage/sqlite.zig");
 const json_probe = @import("json_probe.zig");
-const host_io = @import("../host_io.zig");
 
-const alloc = std.heap.c_allocator;
-
-const RING_SIZE: usize = 4096;
+pub const RING_SIZE: usize = 4096;
+const EVENT_TYPE_CAP: usize = 96;
+const SOURCE_CAP: usize = 160;
+const PAYLOAD_CAP: usize = 4096;
+const CONSOLE_QUEUE_SIZE: usize = 256;
+const CONSOLE_LINE_CAP: usize = 2048;
 
 /// Where the SQLite db lives. Stable across sessions so eventlog can
-/// always find it. The file is created on first init() call.
+/// always find it. The file is created by the root-owned `open()` call.
 pub const DB_SUBPATH = ".cache/reactjit/events.db";
+
+fn BoundedText(comptime capacity: usize) type {
+    return struct {
+        const Self = @This();
+
+        buf: [capacity]u8 = undefined,
+        len: u16 = 0,
+
+        fn slice(self: *const Self) []const u8 {
+            return self.buf[0..self.len];
+        }
+
+        fn set(self: *Self, value: []const u8) void {
+            if (value.len <= capacity) {
+                @memcpy(self.buf[0..value.len], value);
+                self.len = @intCast(value.len);
+                return;
+            }
+            const marker = "<oversize>";
+            @memcpy(self.buf[0..marker.len], marker);
+            self.len = marker.len;
+        }
+
+        fn setPayload(self: *Self, value: []const u8) void {
+            const safe = if (value.len == 0) "{}" else value;
+            if (safe.len <= capacity) {
+                @memcpy(self.buf[0..safe.len], safe);
+                self.len = @intCast(safe.len);
+                return;
+            }
+            const marker = std.fmt.bufPrint(
+                &self.buf,
+                "{{\"truncated\":true,\"original_bytes\":{d}}}",
+                .{safe.len},
+            ) catch "{}";
+            self.len = @intCast(marker.len);
+        }
+
+        fn setLine(self: *Self, value: []const u8) void {
+            if (value.len <= capacity) {
+                @memcpy(self.buf[0..value.len], value);
+                self.len = @intCast(value.len);
+                return;
+            }
+            const suffix = "...\n";
+            const prefix_len = capacity - suffix.len;
+            @memcpy(self.buf[0..prefix_len], value[0..prefix_len]);
+            @memcpy(self.buf[prefix_len..capacity], suffix);
+            self.len = capacity;
+        }
+    };
+}
 
 const RingEntry = struct {
     id: u64 = 0,
     ts_ms: i64 = 0,
     importance: f32 = 0,
     parent_id: ?u64 = null,
-    event_type: []u8 = &.{},
-    source: []u8 = &.{},
-    payload: []u8 = &.{},
+    event_type: BoundedText(EVENT_TYPE_CAP) = .{},
+    source: BoundedText(SOURCE_CAP) = .{},
+    payload: BoundedText(PAYLOAD_CAP) = .{},
+
+    fn set(
+        self: *RingEntry,
+        id: u64,
+        ts_ms: i64,
+        importance: f32,
+        parent_id: ?u64,
+        event_type: []const u8,
+        source: []const u8,
+        payload: []const u8,
+    ) void {
+        self.id = id;
+        self.ts_ms = ts_ms;
+        self.importance = importance;
+        self.parent_id = parent_id;
+        self.event_type.set(event_type);
+        self.source.set(source);
+        self.payload.setPayload(payload);
+    }
+};
+
+const ConsoleLine = struct {
+    text: BoundedText(CONSOLE_LINE_CAP) = .{},
 };
 
 var g_inited: bool = false;
@@ -71,8 +152,12 @@ var g_inited: bool = false;
 /// `l` in devshell cycles to a lower threshold for opt-in trace.
 /// 0.0 = pass everything, 1.0 = silence everything.
 var g_min_importance: f32 = 0.30;
-pub fn minImportance() f32 { return g_min_importance; }
-pub fn setMinImportance(threshold: f32) void { g_min_importance = threshold; }
+pub fn minImportance() f32 {
+    return g_min_importance;
+}
+pub fn setMinImportance(threshold: f32) void {
+    g_min_importance = threshold;
+}
 
 /// Row cap on the SQLite events table. Once exceeded, oldest rows are
 /// pruned to keep the file from growing without bound during long
@@ -91,12 +176,21 @@ var g_session_buf: [16]u8 = undefined;
 var g_session_len: usize = 0;
 var g_db_path_buf: [512]u8 = undefined;
 var g_db_path_len: usize = 0;
-var g_db: ?sqlite.Database = null;
-var g_insert_stmt: ?sqlite.Statement = null;
 var g_next_id: u64 = 1;
 var g_ring: [RING_SIZE]RingEntry = undefined;
 var g_ring_inited: bool = false;
 var g_ring_count: u64 = 0;
+var g_flushed_count: u64 = 0;
+// Producer timestamps use the most recent root clock sample (taken by open or
+// flush). This keeps emit non-I/O while retaining frame-scale event timing.
+var g_sampled_ts_ms: i64 = 0;
+var g_events_dropped_total: u64 = 0;
+var g_events_dropped_unreported: u64 = 0;
+var g_console: [CONSOLE_QUEUE_SIZE]ConsoleLine = undefined;
+var g_console_write: u64 = 0;
+var g_console_read: u64 = 0;
+var g_console_dropped_total: u64 = 0;
+var g_console_dropped_unreported: u64 = 0;
 
 pub fn isInitialized() bool {
     return g_inited;
@@ -118,62 +212,102 @@ pub fn logPath() []const u8 {
     return dbPath();
 }
 
-/// Initialize the bus. Idempotent. Safe to call before any cart code runs.
-///
-/// Best-effort:
-///   - Always: in-memory ring is set up unconditionally.
-///   - When SQLite + $HOME are available: opens ~/.cache/reactjit/events.db
-///     in WAL mode, creates the schema, and prepares the insert
-///     statement. Persistence is on.
-///   - When SQLite is stubbed (HAS_SQLITE=false) or open fails: stays in
-///     in-memory-only mode. emit() still works for in-process consumers
-///     that read the ring; cross-process eventlog views will be empty.
+/// Initialize only the bounded in-memory producer side. This is intentionally
+/// non-I/O and safe to call before the root has an `std.Io` capability.
 pub fn init() void {
     if (g_inited) return;
-
-    // Session id: random u64 from monotonic-ns seed. Stable for the
-    // process; rolls on every boot.
-    const seed_i128 = host_io.nanoTimestamp();
-    const seed: u64 = @truncate(@as(u128, @bitCast(seed_i128)));
-    var prng = std.Random.DefaultPrng.init(seed);
-    const sid = prng.random().int(u64);
-    const sid_str = std.fmt.bufPrint(&g_session_buf, "{x:0>16}", .{sid}) catch return;
-    g_session_len = sid_str.len;
-
     for (&g_ring) |*e| e.* = .{};
+    for (&g_console) |*line| line.* = .{};
     g_ring_inited = true;
     g_inited = true;
-
-    // SQLite setup is best-effort and entirely optional. If anything below
-    // fails, the bus continues with the ring alone.
-    setupDb();
-
-    _ = emitWithImportance("bus.boot", "framework/event_bus.zig", 0.6, null, "{}");
+    g_min_importance = 0.30;
+    g_emits_since_prune = 0;
+    g_session_len = 0;
+    g_db_path_len = 0;
+    g_next_id = 1;
+    g_ring_count = 0;
+    g_flushed_count = 0;
+    g_sampled_ts_ms = 0;
+    g_events_dropped_total = 0;
+    g_events_dropped_unreported = 0;
+    g_console_write = 0;
+    g_console_read = 0;
+    g_console_dropped_total = 0;
+    g_console_dropped_unreported = 0;
 }
 
-fn setupDb() void {
-    const home = host_io.getenv("HOME") orelse return;
+pub const FlushStats = struct {
+    events_persisted: usize = 0,
+    events_memory_only: usize = 0,
+    console_lines_written: usize = 0,
+    events_dropped: u64 = 0,
+    console_lines_dropped: u64 = 0,
+    persistence_failed: bool = false,
+    stderr_failed: bool = false,
+};
+
+/// Root-owned effectful half of the bus. It may retain files/database handles,
+/// but the producer globals above never retain an `std.Io` capability.
+pub const Sink = struct {
+    db: ?sqlite.Database = null,
+    insert_stmt: ?sqlite.Statement = null,
+    closed: bool = false,
+
+    pub fn flush(self: *Sink, io: std.Io) FlushStats {
+        if (self.closed) return .{};
+        return flushTo(self, io);
+    }
+
+    /// Final flush, then release effectful resources. The explicit `io` keeps
+    /// shutdown at the same capability boundary as normal flushing.
+    pub fn close(self: *Sink, io: std.Io) FlushStats {
+        if (self.closed) return .{};
+        const stats = flushTo(self, io);
+        if (self.insert_stmt) |*stmt| stmt.deinit();
+        self.insert_stmt = null;
+        if (self.db) |*db| db.close();
+        self.db = null;
+        self.closed = true;
+        return stats;
+    }
+};
+
+/// Open the root-owned sink. SQLite persistence is best-effort; a returned
+/// sink with no database still drains the producer queue and stderr queue.
+pub fn open(io: std.Io, environ: *const std.process.Environ.Map) Sink {
+    if (!g_inited) init();
+
+    var sid_bytes: [@sizeOf(u64)]u8 = undefined;
+    io.random(&sid_bytes);
+    const sid = std.mem.readInt(u64, &sid_bytes, .little);
+    const sid_str = std.fmt.bufPrint(&g_session_buf, "{x:0>16}", .{sid}) catch &.{};
+    g_session_len = sid_str.len;
+    g_sampled_ts_ms = std.Io.Clock.now(.real, io).toMilliseconds();
+
+    var sink: Sink = .{};
+    openPersistence(&sink, io, environ);
+    _ = emitWithImportance("bus.boot", "framework/event_bus.zig", 0.6, null, "{}");
+    return sink;
+}
+
+fn openPersistence(sink: *Sink, io: std.Io, environ: *const std.process.Environ.Map) void {
+    const home = environ.get("HOME") orelse return;
     var dir_buf: [384]u8 = undefined;
     const dir_path = std.fmt.bufPrint(&dir_buf, "{s}/.cache/reactjit", .{home}) catch return;
-    std.Io.Dir.createDirAbsolute(host_io.io(), dir_path, .default_dir) catch |e| switch (e) {
-        error.PathAlreadyExists => {},
-        else => return,
+    std.Io.Dir.cwd().createDirPath(io, dir_path) catch |err| {
+        queueOpenWarning("create event directory", err);
+        return;
     };
 
     const db_path = std.fmt.bufPrint(&g_db_path_buf, "{s}/{s}", .{ home, DB_SUBPATH }) catch return;
     g_db_path_len = db_path.len;
 
-    var db = sqlite.Database.open(db_path) catch return;
-    // WAL + relaxed sync = batched fsyncs (every checkpoint, not every
-    // commit). Combined with multi-process safety, this is what makes
-    // running eventlog as a separate reader cheap.
+    var db = sqlite.Database.open(io, db_path) catch |err| {
+        queueOpenWarning("open event database", err);
+        return;
+    };
     db.exec("PRAGMA journal_mode=WAL;") catch {};
     db.exec("PRAGMA synchronous=NORMAL;") catch {};
-    // auto_vacuum=INCREMENTAL means the file actively shrinks as rows are
-    // deleted (rather than just marking pages free). Only takes effect on
-    // a fresh db (sqlite docs are explicit on this); existing dbs need a
-    // full VACUUM to opt in. Together with the row cap below this stops
-    // long sessions from bloating the events file unbounded.
     db.exec("PRAGMA auto_vacuum=INCREMENTAL;") catch {};
     db.exec(
         \\CREATE TABLE IF NOT EXISTS events (
@@ -186,7 +320,8 @@ fn setupDb() void {
         \\  parent_id INTEGER,
         \\  payload TEXT
         \\);
-    ) catch {
+    ) catch |err| {
+        queueOpenWarning("create event schema", err);
         db.close();
         return;
     };
@@ -196,30 +331,28 @@ fn setupDb() void {
 
     const stmt = db.prepare(
         "INSERT INTO events(ts_ms, session_id, event_type, source, importance, parent_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?);",
-    ) catch {
+    ) catch |err| {
+        queueOpenWarning("prepare event insert", err);
         db.close();
         return;
     };
-
-    g_db = db;
-    g_insert_stmt = stmt;
+    sink.db = db;
+    sink.insert_stmt = stmt;
 }
 
+fn queueOpenWarning(action: []const u8, err: anyerror) void {
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "event bus could not {s}: {s}", .{ action, @errorName(err) }) catch return;
+    _ = emitFromLog(.warn, "event_bus", msg);
+}
+
+/// Release only the non-I/O producer state. Close the root-owned Sink first.
 pub fn deinit() void {
     if (!g_inited) return;
-    if (g_insert_stmt) |*s| s.deinit();
-    g_insert_stmt = null;
-    if (g_db) |*d| d.close();
-    g_db = null;
-    if (g_ring_inited) {
-        for (&g_ring) |*e| {
-            if (e.event_type.len > 0) alloc.free(e.event_type);
-            if (e.source.len > 0) alloc.free(e.source);
-            if (e.payload.len > 0) alloc.free(e.payload);
-        }
-        g_ring_inited = false;
-    }
+    g_ring_inited = false;
     g_inited = false;
+    g_session_len = 0;
+    g_db_path_len = 0;
 }
 
 fn containsAny(haystack: []const u8, needles: []const []const u8) bool {
@@ -261,44 +394,44 @@ pub fn emitWithImportance(
     // string dup, JSON validation, SQL bind, or ring-slot eviction.
     if (importance < g_min_importance) return 0;
 
-    const ts = host_io.milliTimestamp();
-    const safe_payload = if (payload_json.len == 0) "{}" else payload_json;
-
-    // SQLite insert (when persistence is wired). The autoincrement column
-    // assigns its own rowid; we don't read it back — the ring's
-    // independent monotonic counter is what emit() returns to callers
-    // for parent_id chaining (works even when persistence is off).
-    if (g_insert_stmt) |*stmt| {
-        insertRow(stmt, ts, event_type, source, importance, parent_id, safe_payload);
-        g_emits_since_prune += 1;
-        if (g_emits_since_prune >= PRUNE_EVERY) {
-            g_emits_since_prune = 0;
-            pruneOldRows();
-        }
-    }
-
     const id = g_next_id;
     g_next_id += 1;
 
     if (g_ring_inited) {
+        // The history ring doubles as the pending persistence queue. When the
+        // producer laps flush, advance the pending cursor and account for the
+        // exact number of entries lost before persistence.
+        if (g_ring_count - g_flushed_count >= RING_SIZE) {
+            g_flushed_count += 1;
+            g_events_dropped_total += 1;
+            g_events_dropped_unreported += 1;
+        }
         const slot: usize = @intCast(g_ring_count % RING_SIZE);
         const e = &g_ring[slot];
-        if (e.event_type.len > 0) alloc.free(e.event_type);
-        if (e.source.len > 0) alloc.free(e.source);
-        if (e.payload.len > 0) alloc.free(e.payload);
-        e.* = .{
-            .id = id,
-            .ts_ms = ts,
-            .importance = importance,
-            .parent_id = parent_id,
-            .event_type = alloc.dupe(u8, event_type) catch &.{},
-            .source = alloc.dupe(u8, source) catch &.{},
-            .payload = alloc.dupe(u8, safe_payload) catch &.{},
-        };
+        e.set(id, g_sampled_ts_ms, importance, parent_id, event_type, source, payload_json);
         g_ring_count += 1;
     }
 
     return id;
+}
+
+fn enqueueConsole(line: []const u8) void {
+    if (g_console_write - g_console_read >= CONSOLE_QUEUE_SIZE) {
+        g_console_read += 1;
+        g_console_dropped_total += 1;
+        g_console_dropped_unreported += 1;
+    }
+    const slot: usize = @intCast(g_console_write % CONSOLE_QUEUE_SIZE);
+    g_console[slot].text.setLine(line);
+    g_console_write += 1;
+}
+
+pub fn pendingCount() usize {
+    return @intCast(g_ring_count - g_flushed_count);
+}
+
+pub fn droppedCount() u64 {
+    return g_events_dropped_total;
 }
 
 /// Serialize the most recent `max_n` ring entries as a JSON array.
@@ -330,10 +463,10 @@ pub fn recentEventsJson(out_alloc: std.mem.Allocator, max_n: usize) ![]u8 {
             const head = std.fmt.bufPrint(
                 &head_buf,
                 "{{\"id\":{d},\"ts\":{d},\"imp\":{d:.3},\"type\":\"{s}\",\"src\":\"{s}\",\"payload\":",
-                .{ e.id, e.ts_ms, e.importance, e.event_type, e.source },
+                .{ e.id, e.ts_ms, e.importance, e.event_type.slice(), e.source.slice() },
             ) catch continue;
             try out.appendSlice(out_alloc, head);
-            try out.appendSlice(out_alloc, e.payload);
+            try out.appendSlice(out_alloc, e.payload.slice());
             try out.append(out_alloc, '}');
         }
     }
@@ -341,60 +474,109 @@ pub fn recentEventsJson(out_alloc: std.mem.Allocator, max_n: usize) ![]u8 {
     return out.toOwnedSlice(out_alloc);
 }
 
-/// Drop everything below (max rowid - ROW_CAP). Bounded work — SQLite's
-/// rowid is the primary key, so the WHERE clause hits the b-tree
-/// directly. Called every PRUNE_EVERY emits, deleting ~PRUNE_EVERY rows
-/// per call in steady state.
-fn pruneOldRows() void {
-    if (g_db) |*db| {
-        var buf: [160:0]u8 = undefined;
-        const sql = std.fmt.bufPrintZ(
-            &buf,
-            "DELETE FROM events WHERE rowid <= (SELECT MAX(rowid) - {d} FROM events);",
-            .{ROW_CAP},
-        ) catch return;
-        db.exec(sql) catch {};
-        // We deliberately do NOT call PRAGMA incremental_vacuum here —
-        // it's another synchronous SQL pass on the freelist that
-        // doubles the prune-cycle hitch. Without it, freed pages stay
-        // in-file and get reused for new INSERTs, so the file stabilizes
-        // at high-water mark rather than shrinking. Row count is still
-        // bounded by ROW_CAP. Run `VACUUM` manually offline if you
-        // need to actually shrink the file.
+fn flushTo(sink: *Sink, io: std.Io) FlushStats {
+    if (!g_inited) return .{};
+    var stats: FlushStats = .{};
+    g_sampled_ts_ms = std.Io.Clock.now(.real, io).toMilliseconds();
+
+    stats.events_dropped = g_events_dropped_unreported;
+    if (g_events_dropped_unreported > 0) {
+        if (writeDropReport(io, "events", g_events_dropped_unreported)) {
+            g_events_dropped_unreported = 0;
+        } else {
+            stats.stderr_failed = true;
+        }
     }
+
+    stats.console_lines_dropped = g_console_dropped_unreported;
+    if (g_console_dropped_unreported > 0) {
+        if (writeDropReport(io, "stderr lines", g_console_dropped_unreported)) {
+            g_console_dropped_unreported = 0;
+        } else {
+            stats.stderr_failed = true;
+        }
+    }
+
+    while (g_console_read < g_console_write) {
+        const slot: usize = @intCast(g_console_read % CONSOLE_QUEUE_SIZE);
+        std.Io.File.stderr().writeStreamingAll(io, g_console[slot].text.slice()) catch {
+            stats.stderr_failed = true;
+            break;
+        };
+        g_console_read += 1;
+        stats.console_lines_written += 1;
+    }
+
+    const flush_end = g_ring_count;
+    if (sink.insert_stmt) |*stmt| {
+        while (g_flushed_count < flush_end) {
+            const slot: usize = @intCast(g_flushed_count % RING_SIZE);
+            const entry = &g_ring[slot];
+            if (entry.ts_ms == 0) entry.ts_ms = g_sampled_ts_ms;
+            insertRow(stmt, entry) catch {
+                stats.persistence_failed = true;
+                break;
+            };
+            g_flushed_count += 1;
+            stats.events_persisted += 1;
+            g_emits_since_prune += 1;
+            if (g_emits_since_prune >= PRUNE_EVERY) {
+                g_emits_since_prune = 0;
+                if (sink.db) |*db| pruneOldRows(db);
+            }
+        }
+    } else {
+        stats.events_memory_only = @intCast(flush_end - g_flushed_count);
+        g_flushed_count = flush_end;
+    }
+    return stats;
 }
 
-fn insertRow(
-    stmt: *sqlite.Statement,
-    ts: i64,
-    event_type: []const u8,
-    source: []const u8,
-    importance: f32,
-    parent_id: ?u64,
-    payload: []const u8,
-) void {
-    stmt.reset() catch return;
-    stmt.bindInt(1, ts) catch return;
-    stmt.bindText(2, g_session_buf[0..g_session_len]) catch return;
-    stmt.bindText(3, event_type) catch return;
-    stmt.bindText(4, source) catch return;
-    stmt.bindFloat(5, importance) catch return;
-    if (parent_id) |pid| {
-        stmt.bindInt(6, @intCast(pid)) catch return;
+fn writeDropReport(io: std.Io, comptime kind: []const u8, count: u64) bool {
+    var buf: [160]u8 = undefined;
+    const line = std.fmt.bufPrint(
+        &buf,
+        "[warn/event_bus] dropped {d} queued {s} before flush\n",
+        .{ count, kind },
+    ) catch return false;
+    std.Io.File.stderr().writeStreamingAll(io, line) catch return false;
+    return true;
+}
+
+/// Drop everything below (max rowid - ROW_CAP). Bounded work — SQLite's
+/// rowid is the primary key, so the WHERE clause hits the b-tree directly.
+fn pruneOldRows(db: *sqlite.Database) void {
+    var buf: [160:0]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(
+        &buf,
+        "DELETE FROM events WHERE rowid <= (SELECT MAX(rowid) - {d} FROM events);",
+        .{ROW_CAP},
+    ) catch return;
+    db.exec(sql) catch {};
+}
+
+fn insertRow(stmt: *sqlite.Statement, entry: *const RingEntry) !void {
+    try stmt.reset();
+    try stmt.bindInt(1, entry.ts_ms);
+    try stmt.bindText(2, g_session_buf[0..g_session_len]);
+    try stmt.bindText(3, entry.event_type.slice());
+    try stmt.bindText(4, entry.source.slice());
+    try stmt.bindFloat(5, entry.importance);
+    if (entry.parent_id) |pid| {
+        try stmt.bindInt(6, @intCast(pid));
     } else {
-        stmt.bindNull(6) catch return;
+        try stmt.bindNull(6);
     }
-    stmt.bindText(7, payload) catch return;
-    _ = stmt.step() catch return;
+    try stmt.bindText(7, entry.payload.slice());
+    _ = try stmt.step();
 }
 
 // ── std.log adapter ────────────────────────────────────────────────────
 //
 // Wire as `pub const std_options = .{ .logFn = event_bus.fromStdLog }`
 // in v8_app.zig. Every `std.log.info/warn/err/debug` call in the
-// framework then routes through here — bus first, optional stderr
-// fallthrough for warns/errs so the terminal still surfaces real
-// problems even if the eventlog window is closed.
+// framework then routes through here. Warn/error terminal fallback is queued
+// alongside the bus event and drained by the root-owned Sink.
 //
 // Importance map (level → imp):
 //   .err   → 0.85   (eligible for stderr)
@@ -408,22 +590,19 @@ fn insertRow(
 const writeJsonString = json_probe.writeString;
 
 /// Runtime-arg log emitter — used by both fromStdLog (the std.options
-/// override) and framework/log.zig's print/info/warn/err helpers. Keeps
-/// the formatting + escape + console-gate logic in one place.
+/// override) and framework/log.zig's print/info/warn/err helpers. This only
+/// formats and enqueues; warn/error stderr fallback is drained by Sink.flush.
 pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64 {
+    if (!g_inited) init();
     const lvl_str = @tagName(level);
 
-    // Console gate — errors and warns ALWAYS hit stderr regardless of bus
-    // state, so pre-bus boot failures and post-deinit shutdown errors stay
-    // visible. Lower levels are bus-only.
+    // Console gate — errors and warns are always queued for stderr. Lower
+    // levels remain bus-only.
     if (level == .err or level == .warn) {
-        const stderr = std.Io.File.stderr();
         var line_buf: [4200]u8 = undefined;
         const line = std.fmt.bufPrint(&line_buf, "[{s}/{s}] {s}\n", .{ lvl_str, scope, msg }) catch msg;
-        stderr.writeStreamingAll(host_io.io(), line) catch {};
+        enqueueConsole(line);
     }
-
-    if (!g_inited) return 0;
 
     const importance: f32 = switch (level) {
         .err => 0.85,
@@ -432,18 +611,18 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
         .debug => 0.15,
     };
 
-    var pbuf: std.ArrayList(u8) = .empty;
-    defer pbuf.deinit(alloc);
-    var aw: std.Io.Writer.Allocating = .fromArrayList(alloc, &pbuf);
-    defer pbuf = aw.toArrayList();
-    const w = &aw.writer;
-    w.writeAll("{\"msg\":") catch return 0;
-    writeJsonString(w, msg) catch return 0;
-    w.writeAll(",\"scope\":") catch return 0;
-    writeJsonString(w, scope) catch return 0;
-    w.writeAll(",\"level\":") catch return 0;
-    writeJsonString(w, lvl_str) catch return 0;
-    w.writeAll("}") catch return 0;
+    var pbuf: [PAYLOAD_CAP]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&pbuf);
+    const payload = blk: {
+        writer.writeAll("{\"msg\":") catch break :blk "{\"truncated\":true}";
+        writeJsonString(&writer, msg) catch break :blk "{\"truncated\":true}";
+        writer.writeAll(",\"scope\":") catch break :blk "{\"truncated\":true}";
+        writeJsonString(&writer, scope) catch break :blk "{\"truncated\":true}";
+        writer.writeAll(",\"level\":") catch break :blk "{\"truncated\":true}";
+        writeJsonString(&writer, lvl_str) catch break :blk "{\"truncated\":true}";
+        writer.writeAll("}") catch break :blk "{\"truncated\":true}";
+        break :blk writer.buffered();
+    };
 
     var src_buf: [80]u8 = undefined;
     const src = std.fmt.bufPrint(&src_buf, "log:{s}", .{scope}) catch "log:?";
@@ -455,7 +634,7 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
         .debug => "log.debug",
     };
 
-    return emitWithImportance(event_type, src, importance, null, aw.written());
+    return emitWithImportance(event_type, src, importance, null, payload);
 }
 
 pub fn fromStdLog(
@@ -479,17 +658,16 @@ pub fn fromStdLog(
 ///   0 = log/info  → js.log  imp 0.30 (bus-only)
 ///   1 = warn      → js.warn imp 0.70 (bus + stderr)
 ///   2 = error     → js.err  imp 0.85 (bus + stderr)
-/// Stderr fallthrough fires regardless of bus state so JS-side errors
-/// remain visible during pre-bus boot or post-deinit shutdown.
+/// Stderr fallthrough is queued regardless of bus state so JS-side errors
+/// remain visible at the next root flush.
 pub fn emitJsLog(severity: i32, msg: []const u8) u64 {
+    if (!g_inited) init();
     if (severity >= 1) {
-        const stderr = std.Io.File.stderr();
         var line_buf: [4200]u8 = undefined;
         const tag: []const u8 = if (severity >= 2) "[js.err]" else "[js.warn]";
         const line = std.fmt.bufPrint(&line_buf, "{s} {s}\n", .{ tag, msg }) catch msg;
-        stderr.writeStreamingAll(host_io.io(), line) catch {};
+        enqueueConsole(line);
     }
-    if (!g_inited) return 0;
 
     const importance: f32 = switch (severity) {
         2 => 0.85,
@@ -502,16 +680,16 @@ pub fn emitJsLog(severity: i32, msg: []const u8) u64 {
         else => "js.log",
     };
 
-    var pbuf: std.ArrayList(u8) = .empty;
-    defer pbuf.deinit(alloc);
-    var aw: std.Io.Writer.Allocating = .fromArrayList(alloc, &pbuf);
-    defer pbuf = aw.toArrayList();
-    const w = &aw.writer;
-    w.writeAll("{\"msg\":") catch return 0;
-    writeJsonString(w, msg) catch return 0;
-    w.writeAll("}") catch return 0;
+    var pbuf: [PAYLOAD_CAP]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&pbuf);
+    const payload = blk: {
+        writer.writeAll("{\"msg\":") catch break :blk "{\"truncated\":true}";
+        writeJsonString(&writer, msg) catch break :blk "{\"truncated\":true}";
+        writer.writeAll("}") catch break :blk "{\"truncated\":true}";
+        break :blk writer.buffered();
+    };
 
-    return emitWithImportance(event_type, "js", importance, null, aw.written());
+    return emitWithImportance(event_type, "js", importance, null, payload);
 }
 
 /// Build a JSON array of recent events with importance >= min_importance,
@@ -534,16 +712,16 @@ pub fn recentJson(allocator: std.mem.Allocator, max_count: usize, min_importance
             var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buf);
             defer buf = aw.toArrayList();
             const w = &aw.writer;
-            const payload_str = if (e.payload.len > 0) e.payload else "{}";
+            const payload_str = if (e.payload.len > 0) e.payload.slice() else "{}";
             if (e.parent_id) |pid| {
                 try w.print(
                     "{{\"id\":{d},\"ts\":{d},\"type\":\"{s}\",\"src\":\"{s}\",\"imp\":{d:.3},\"par\":{d},\"payload\":{s}}}",
-                    .{ e.id, e.ts_ms, e.event_type, e.source, e.importance, pid, payload_str },
+                    .{ e.id, e.ts_ms, e.event_type.slice(), e.source.slice(), e.importance, pid, payload_str },
                 );
             } else {
                 try w.print(
                     "{{\"id\":{d},\"ts\":{d},\"type\":\"{s}\",\"src\":\"{s}\",\"imp\":{d:.3},\"par\":null,\"payload\":{s}}}",
-                    .{ e.id, e.ts_ms, e.event_type, e.source, e.importance, payload_str },
+                    .{ e.id, e.ts_ms, e.event_type.slice(), e.source.slice(), e.importance, payload_str },
                 );
             }
             emitted += 1;
@@ -552,4 +730,50 @@ pub fn recentJson(allocator: std.mem.Allocator, max_count: usize, min_importance
 
     try buf.append(allocator, ']');
     return buf.toOwnedSlice(allocator);
+}
+
+test "emit is non-I/O and preserves filter and id semantics" {
+    init();
+    defer deinit();
+
+    setMinImportance(0.5);
+    try std.testing.expectEqual(@as(u64, 0), emitWithImportance("below", "test", 0.2, null, "{}"));
+    const first = emit("first", "test", null, "{}");
+    const second = emitWithImportance("second", "test", 0.9, first, "{}");
+    try std.testing.expectEqual(@as(u64, 1), first);
+    try std.testing.expectEqual(@as(u64, 2), second);
+    try std.testing.expectEqual(@as(usize, 2), pendingCount());
+}
+
+test "pending queue is bounded and reports exact overwrite count" {
+    init();
+    defer deinit();
+    setMinImportance(0);
+
+    for (0..RING_SIZE + 3) |_| _ = emit("bulk", "test", null, "{}");
+    try std.testing.expectEqual(RING_SIZE, pendingCount());
+    try std.testing.expectEqual(@as(u64, 3), droppedCount());
+}
+
+test "memory-only flush drains pending events at explicit Io boundary" {
+    init();
+    defer deinit();
+    _ = emit("memory", "test", null, "{}");
+
+    var sink: Sink = .{};
+    const stats = sink.flush(std.testing.io);
+    try std.testing.expectEqual(@as(usize, 1), stats.events_memory_only);
+    try std.testing.expectEqual(@as(usize, 0), pendingCount());
+}
+
+test "oversize payload remains valid JSON marker" {
+    init();
+    defer deinit();
+    setMinImportance(0);
+    var payload: [PAYLOAD_CAP + 1]u8 = undefined;
+    @memset(&payload, 'x');
+    _ = emit("large", "test", null, &payload);
+    const json = try recentEventsJson(std.testing.allocator, 1);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"truncated\":true") != null);
 }

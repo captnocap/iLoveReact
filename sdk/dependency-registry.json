@@ -10,7 +10,7 @@
           "build",
           "ship"
         ],
-        "version": "0.15.2",
+        "version": "0.16.0",
         "payloadPath": "tools/zig/zig",
         "supportPaths": [
           "tools/zig/lib",

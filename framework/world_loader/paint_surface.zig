@@ -56,11 +56,11 @@ pub const PaintPhase = enum { down, move, up };
 /// Route a pointer event into the map painter (engine.zig calls this while a
 /// paint drag owns the pointer). Screen coords are window-absolute; the pane
 /// rect renderEmbedded stored maps them into the viewport.
-pub fn paintPointer(runtime: anytype, phase: PaintPhase, mx: f32, my: f32) void {
+pub fn paintPointer(runtime: anytype, io: std.Io, phase: PaintPhase, mx: f32, my: f32) void {
     if (phase == .up) {
         if (runtime.paint_stroking) {
             runtime.paint_stroking = false;
-            _ = map_paint.strokeEnd();
+            _ = map_paint.strokeEnd(io);
         }
         return;
     }
@@ -69,7 +69,7 @@ pub fn paintPointer(runtime: anytype, phase: PaintPhase, mx: f32, my: f32) void 
     switch (phase) {
         .down => {
             runtime.paint_stroking = true;
-            map_paint.strokeBegin(hit[0], hit[2]);
+            map_paint.strokeBegin(io, hit[0], hit[2]);
         },
         .move => {
             if (runtime.paint_stroking) map_paint.strokeMove(hit[0], hit[2]);

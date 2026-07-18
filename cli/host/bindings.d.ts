@@ -11,7 +11,6 @@ declare global {
   function __writeStderr(text: string): void;
   function __setStdinRaw(enable: number): boolean;
   function __readStdin(): string;
-  function __pollFds(fdsJson: string, timeoutMs: number): string;
   function __termSize(): string;
   function __spawnSync(cmd: string, argsJson: string, stdin: string): string;
   function __spawn(cmd: string, argsJson: string): number;

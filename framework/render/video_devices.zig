@@ -8,15 +8,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-fn io() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
-}
-
 const c = if (builtin.os.tag == .linux) @cImport({
-    @cInclude("fcntl.h");
     @cInclude("linux/videodev2.h");
     @cInclude("sys/ioctl.h");
-    @cInclude("unistd.h");
 }) else struct {};
 
 pub const VideoDevice = struct {
@@ -65,19 +59,15 @@ fn sanitizedCString(allocator: std.mem.Allocator, buf: anytype) ![]u8 {
     return out;
 }
 
-fn queryLinuxDevice(allocator: std.mem.Allocator, index: u32) !VideoDevice {
+fn queryLinuxDevice(io: std.Io, allocator: std.mem.Allocator, index: u32) !VideoDevice {
     if (builtin.os.tag != .linux) return error.UnsupportedPlatform;
     const source = try std.fmt.allocPrint(allocator, "/dev/video{d}", .{index});
     errdefer allocator.free(source);
-    const source_z = try allocator.dupeZ(u8, source);
-    defer allocator.free(source_z);
-
-    const fd = c.open(source_z.ptr, c.O_RDONLY | c.O_NONBLOCK);
-    if (fd < 0) return error.OpenFailed;
-    defer _ = c.close(fd);
+    const file = std.Io.Dir.openFileAbsolute(io, source, .{}) catch return error.OpenFailed;
+    defer file.close(io);
 
     var capability: c.struct_v4l2_capability = std.mem.zeroes(c.struct_v4l2_capability);
-    if (c.ioctl(fd, c.VIDIOC_QUERYCAP, &capability) < 0) return error.QueryCapabilitiesFailed;
+    if (c.ioctl(file.handle, c.VIDIOC_QUERYCAP, &capability) < 0) return error.QueryCapabilitiesFailed;
     const caps: u32 = if (capability.capabilities & @as(u32, c.V4L2_CAP_DEVICE_CAPS) != 0)
         capability.device_caps
     else
@@ -92,7 +82,7 @@ fn queryLinuxDevice(allocator: std.mem.Allocator, index: u32) !VideoDevice {
     return .{ .index = index, .source = source, .name = name, .driver = driver, .bus = bus };
 }
 
-pub fn list(allocator: std.mem.Allocator) !DeviceList {
+pub fn list(io: std.Io, allocator: std.mem.Allocator) !DeviceList {
     if (builtin.os.tag != .linux) return .{ .items = try allocator.alloc(VideoDevice, 0), .allocator = allocator };
     var devices: std.ArrayList(VideoDevice) = .empty;
     errdefer {
@@ -100,14 +90,14 @@ pub fn list(allocator: std.mem.Allocator) !DeviceList {
         devices.deinit(allocator);
     }
 
-    var dev_dir = std.Io.Dir.openDirAbsolute(io(), "/dev", .{ .iterate = true }) catch {
+    var dev_dir = std.Io.Dir.openDirAbsolute(io, "/dev", .{ .iterate = true }) catch {
         return .{ .items = try allocator.alloc(VideoDevice, 0), .allocator = allocator };
     };
-    defer dev_dir.close(io());
+    defer dev_dir.close(io);
     var iterator = dev_dir.iterate();
-    while (try iterator.next(io())) |entry| {
+    while (try iterator.next(io)) |entry| {
         const index = parseVideoIndex(entry.name) orelse continue;
-        var device = queryLinuxDevice(allocator, index) catch continue;
+        var device = queryLinuxDevice(io, allocator, index) catch continue;
         devices.append(allocator, device) catch |err| {
             device.deinit(allocator);
             return err;

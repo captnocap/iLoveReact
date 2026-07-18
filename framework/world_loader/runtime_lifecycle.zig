@@ -3,7 +3,6 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const material_tex = @import("../gpu/material_tex.zig");
 const decal_raster = @import("../gpu/decal_raster.zig");
 const layout = @import("../layout.zig");
@@ -22,8 +21,13 @@ const loadGameFile = m_game_file.loadGameFile;
 const setHideWalls = m_live_inputs.setHideWalls;
 const build = scene_build.build;
 
-pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !void {
-    const bytes = loadGameFile(allocator, path) catch |err| {
+fn envFlag(environ: *const std.process.Environ.Map, name: []const u8) bool {
+    const value = environ.get(name) orelse return false;
+    return value.len == 0 or value[0] != '0';
+}
+
+pub fn initInPlace(self: anytype, io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !void {
+    const bytes = loadGameFile(io, allocator, path) catch |err| {
         // BLANKBOOT req_2490: no game file at this path yet — the paint-first
         // editor opens an EMPTY canvas instead of failing the mount. The world
         // is exactly the live layers (painted map, placed pieces, brush beam)
@@ -34,10 +38,13 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
             self.* = @TypeOf(self.*){
                 .allocator = allocator,
                 .node_id = node_id,
+                .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
+                .live_log = envFlag(environ, "RJIT_LIVELOG"),
+                .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
                 .scene = constructor.blankScene(),
             };
             log.print("[loader] no game file at {s} — BLANK world (paint-first canvas)\n", .{path});
-            try build(self);
+            try build(self, io, environ);
             return;
         }
         log.print("[loader] failed to read game-file {s}: {any}\n", .{ path, err });
@@ -45,27 +52,30 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
     };
     defer allocator.free(bytes);
 
-    var store = std.Io.Dir.cwd().createDirPathOpen(host_io.io(), store_dir, .{}) catch |err| {
+    var store = std.Io.Dir.cwd().createDirPathOpen(io, store_dir, .{}) catch |err| {
         log.print("[loader] cannot open content store {s}: {any}\n", .{ store_dir, err });
         return err;
     };
-    defer store.close(host_io.io());
+    defer store.close(io);
 
-    const scene = constructor.construct(allocator, bytes, store) catch |err| {
+    const scene = constructor.construct(io, allocator, bytes, store) catch |err| {
         log.print("[loader] construct FAILED: {any}\n", .{err});
         return err;
     };
     self.* = @TypeOf(self.*){
         .allocator = allocator,
         .node_id = node_id,
+        .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
+        .live_log = envFlag(environ, "RJIT_LIVELOG"),
+        .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
         .scene = scene,
     };
-    errdefer deinit(self);
+    errdefer deinit(self, io);
     log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ self.scene.width, self.scene.height, path });
     // WALLHIDE req_2053: RJIT_HIDE_WALLS=1 seeds the editor's "disable walls" so a headless
     // `rjit game shot` exercises the collapse (the door is otherwise only called from the
     // editor build pane). Diagnostic knob in the RJIT_STREAM / RJIT_COLLIDERLOG family.
-    if (host_io.getenv("RJIT_HIDE_WALLS")) |v| {
+    if (environ.get("RJIT_HIDE_WALLS")) |v| {
         if (v.len > 0 and v[0] == '1') {
             setHideWalls(node_id, true);
             log.print("[loader] RJIT_HIDE_WALLS=1 — walls collapsed (interior-edit view)\n", .{});
@@ -76,7 +86,7 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
     } else {
         log.print("[loader] no stats config lump — player stats use built-in defaults\n", .{});
     }
-    try build(self);
+    try build(self, io, environ);
 }
 
 /// Run each face material's RECIPE into its texture — a SHADER runs on
@@ -85,7 +95,7 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
 /// (idempotent; needs gpu up, so it runs at first render not build).
 /// A material that fails to materialize leaves its faces on the
 /// fallback color.
-pub fn ensureMaterials(self: anytype) void {
+pub fn ensureMaterials(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     if (self.materials_ready) return;
     self.materials_ready = true;
     // The content-addressed image payloads decal docs reference by key
@@ -124,12 +134,12 @@ pub fn ensureMaterials(self: anytype) void {
         // no-JS game path does not depend on the effects shader pipeline for
         // player-authored wall paint.
         if (materializeCutoutStencilPixels(self.allocator, key, m)) continue;
-        if (!material_tex.materialize(key, m.wgsl, m.data, MATERIAL_TILE_PX))
+        if (!material_tex.materialize(io, environ, key, m.wgsl, m.data, MATERIAL_TILE_PX))
             log.print("[loader] material {d} not materialized — faces show fallback color\n", .{i});
     }
 }
 
-pub fn deinit(self: anytype) void {
+pub fn deinit(self: anytype, io: std.Io) void {
     self.mesh_by_hash.deinit(self.allocator);
     self.live_cooked_door_by_identity.deinit(self.allocator);
     if (self.resident) |*res| res.deinit(self.allocator);
@@ -173,9 +183,9 @@ pub fn deinit(self: anytype) void {
     }
     // Foliage worker teardown (req_2864): stop the mailbox, join, THEN free
     // the worker-owned row sets — never while a regen could be writing them.
-    self.foliage_box.stop();
-    if (self.foliage_worker) |worker| worker.join();
-    self.foliage_worker = null;
+    self.foliage_box.stop(io);
+    if (self.foliage_worker_started) _ = self.foliage_tasks.await(io) catch {};
+    self.foliage_worker_started = false;
     for (&self.foliage_sets) |*set| {
         for (&set.rows) |*maybe_rows| {
             if (maybe_rows.*) |buf| std.heap.c_allocator.free(buf);

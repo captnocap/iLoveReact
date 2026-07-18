@@ -28,7 +28,6 @@ const std = @import("std");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
-const log = @import("../diag/log.zig");
 
 const page_alloc = std.heap.page_allocator;
 
@@ -315,7 +314,7 @@ const BRUSH_WGSL =
     \\  // adjacent flat colours stay crisp (no blend across a colour boundary).
     \\  return vec4f(U.value * coverage, U.value_g * coverage, U.value_b * coverage, coverage);
     \\}
-    ;
+;
 
 // ─── Init / teardown ──────────────────────────────────────────────────────
 
@@ -425,7 +424,6 @@ fn findOrCreateEntry(key: []const u8, w: u32, h: u32, rgba: bool) ?*Paintable {
         flushParkedUpload(e);
         return e;
     }
-    log.print("[paintable] no free slot (max={d})\n", .{MAX_PAINTABLES});
     return null;
 }
 
@@ -465,7 +463,6 @@ fn parkUpload(key: []const u8, bytes: []const u8) void {
         if (slot == null and !p.active) slot = p;
     }
     const p = slot orelse {
-        log.print("[paintable] parked-upload table full (max={d}) — dropping {s}\n", .{ MAX_PARKED_UPLOADS, key });
         return;
     };
     const key_copy = page_alloc.alloc(u8, key.len) catch return;
@@ -487,7 +484,6 @@ fn flushParkedUpload(e: *Paintable) void {
             page_alloc.free(p.key);
             p.* = .{};
         } else {
-            log.print("[paintable] parked upload size mismatch for {s}: got {d}, want {d}*{d}\n", .{ e.key, p.bytes.len, e.width, e.height });
             releaseParked(p);
         }
         return;
@@ -1011,7 +1007,6 @@ pub fn queueUpload(key: []const u8, bytes: []const u8) void {
         return;
     };
     if (bytes.len != @as(usize, e.width) * @as(usize, e.height) * @as(usize, bpp(e))) {
-        log.print("[paintable] upload size mismatch: got {d}, want {d}*{d}*{d}\n", .{ bytes.len, e.width, e.height, bpp(e) });
         return;
     }
     const copy = page_alloc.alloc(u8, bytes.len) catch return;
@@ -1038,7 +1033,10 @@ fn pushOp(e: *Paintable, op: Op) void {
 pub fn drainAll() void {
     var any: bool = false;
     for (g_entries[0..]) |*e| {
-        if (e.active and e.op_count > 0) { any = true; break; }
+        if (e.active and e.op_count > 0) {
+            any = true;
+            break;
+        }
     }
     if (!any) return;
     if (!ensureBrushPipeline()) return;
@@ -1390,7 +1388,9 @@ fn rasterizePolygonCpu(e: *Paintable, op: Op) void {
 
     queue.writeTexture(
         &.{ .texture = tex, .mip_level = 0, .origin = .{
-            .x = @intCast(xMin), .y = @intCast(yMin), .z = 0,
+            .x = @intCast(xMin),
+            .y = @intCast(yMin),
+            .z = 0,
         }, .aspect = .all },
         @ptrCast(buf.ptr),
         buf.len,

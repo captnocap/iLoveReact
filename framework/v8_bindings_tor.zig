@@ -13,6 +13,7 @@
 //! wins; subsequent starts no-op and the existing handle's event fires.
 
 const std = @import("std");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const tor = @import("net/tor.zig");
@@ -60,7 +61,7 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     return if (v >= 0) @intCast(v) else null;
 }
 
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
@@ -73,7 +74,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 // Minimal extraction of a string field "key":"value" from a JSON blob.
@@ -122,6 +123,7 @@ fn jsonGetU16(json: []const u8, key: []const u8) ?u16 {
 fn hostTorStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 1) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const opts_json = argToStringAlloc(info, 1) orelse alloc.dupe(u8, "{}") catch return;
     defer alloc.free(opts_json);
@@ -134,7 +136,7 @@ fn hostTorStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const hs_port = jsonGetU16(opts_json, "hiddenServicePort") orelse 80;
     const sp = jsonGetU16(opts_json, "socksPort") orelse 0;
 
-    tor.start(.{
+    tor.start(host.io, host.environ, .{
         .identity = identity,
         .hidden_service_port = hs_port,
         .socks_port = sp,
@@ -143,7 +145,7 @@ fn hostTorStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         const chan = std.fmt.bufPrint(&chan_buf, "tor:error:{d}", .{id}) catch return;
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "start: {s}", .{@errorName(e)}) catch "start failed";
-        emitEvent(chan, msg);
+        emitEvent(host, chan, msg);
         return;
     };
     g_tor.append(alloc, .{ .id = id, .opened = false }) catch return;
@@ -152,17 +154,18 @@ fn hostTorStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostTorStop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 1) return;
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const id = argToU32(info, 0) orelse return;
     removeTor(id);
     // Only stop the global Tor process when the last handle goes away.
-    if (g_tor.items.len == 0 and tor.isRunning()) tor.stop();
+    if (g_tor.items.len == 0 and tor.isRunning()) tor.stop(io);
 }
 
 // ── Tick drain — emit tor:open once hostname is published ──────────
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     if (g_tor.items.len == 0) return;
-    const hostname = tor.getHostname() orelse return;
+    const hostname = tor.getHostname(host.io) orelse return;
     const socks_port = tor.getProxyPort();
     const hs_port = tor.getHsPort();
 
@@ -172,7 +175,7 @@ pub fn tickDrain() void {
         const chan = std.fmt.bufPrint(&chan_buf, "tor:open:{d}", .{e.id}) catch continue;
         var payload_buf: [256]u8 = undefined;
         const payload = std.fmt.bufPrint(&payload_buf, "{{\"socksPort\":{d},\"hostname\":\"{s}\",\"hsPort\":{d}}}", .{ socks_port, hostname, hs_port }) catch continue;
-        emitEvent(chan, payload);
+        emitEvent(host, chan, payload);
         e.opened = true;
     }
 }

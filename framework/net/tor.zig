@@ -4,20 +4,15 @@
 //! polls for .onion hostname. Provides SOCKS5 proxy port for routing.
 //!
 //! Usage:
-//!   try tor.start(.{ .identity = "myapp", .hidden_service_port = 80 });
+//!   try tor.start(io, environ_map, .{ .identity = "myapp", .hidden_service_port = 80 });
 //!   // poll each frame:
-//!   if (tor.getHostname()) |hostname| {
+//!   if (tor.getHostname(io)) |hostname| {
 //!       // hostname is "abc...xyz.onion"
 //!   }
 //!   // on shutdown:
-//!   tor.stop();
+//!   tor.stop(io);
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const netx = @import("netx.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
-// posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -48,43 +43,35 @@ var running = false;
 // ── Public API ───────────────────────────────────────────────────────────
 
 /// Start Tor with the given options.
-pub fn start(opts: TorOpts) !void {
+pub fn start(io: std.Io, environ: *const std.process.Environ.Map, opts: TorOpts) !void {
     if (running) return;
 
     // Find available SOCKS port
-    socks_port = if (opts.socks_port != 0) opts.socks_port else findOpenPort(BASE_SOCKS_PORT);
+    socks_port = if (opts.socks_port != 0) opts.socks_port else findOpenPort(io, BASE_SOCKS_PORT);
 
     // Find available hidden service port
-    hs_port = findOpenPort(BASE_HS_PORT);
+    hs_port = findOpenPort(io, BASE_HS_PORT);
 
     // Create config directory: ~/.cache/reactjit-tor/<identity>/
-    const home = sysx.getenv("HOME") orelse "/tmp";
+    const home = environ.get("HOME") orelse "/tmp";
     const identity = opts.identity;
     const dir = try std.fmt.bufPrint(&config_dir, "{s}/.cache/reactjit-tor/{s}", .{ home, identity });
     config_dir_len = dir.len;
 
-    // Create directories
-    std.Io.Dir.createDirAbsolute(host_io.io(), dir, .default_dir) catch |err| {
-        if (err != error.PathAlreadyExists) {
-            // Try creating parent first
-            var parent_buf: [MAX_PATH]u8 = undefined;
-            const parent = try std.fmt.bufPrint(&parent_buf, "{s}/.cache/reactjit-tor", .{home});
-            std.Io.Dir.createDirAbsolute(host_io.io(), parent, .default_dir) catch {};
-            std.Io.Dir.createDirAbsolute(host_io.io(), dir, .default_dir) catch {};
-        }
-    };
+    // Create the full hierarchy through the native 0.16 path operation.
+    try std.Io.Dir.cwd().createDirPath(io, dir);
 
     // Create hidden service directory
     var hs_dir_buf: [MAX_PATH]u8 = undefined;
     const hs_dir = try std.fmt.bufPrint(&hs_dir_buf, "{s}/hidden_service", .{dir});
-    std.Io.Dir.createDirAbsolute(host_io.io(), hs_dir, .default_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(io, hs_dir);
 
     // Generate torrc
     var torrc_path_buf: [MAX_PATH]u8 = undefined;
     const torrc_path = try std.fmt.bufPrint(&torrc_path_buf, "{s}/torrc", .{dir});
 
-    const torrc_file = try std.Io.Dir.createFileAbsolute(host_io.io(), torrc_path, .{});
-    defer torrc_file.close(host_io.io());
+    const torrc_file = try std.Io.Dir.createFileAbsolute(io, torrc_path, .{});
+    defer torrc_file.close(io);
     var torrc_buf: [2048]u8 = undefined;
     const torrc = try std.fmt.bufPrint(
         &torrc_buf,
@@ -95,16 +82,17 @@ pub fn start(opts: TorOpts) !void {
             "Log notice file {s}/tor.log\n",
         .{ socks_port, hs_dir, opts.hidden_service_port, hs_port, dir, dir },
     );
-    try torrc_file.writeStreamingAll(host_io.io(), torrc);
+    try torrc_file.writeStreamingAll(io, torrc);
 
     // Create data directory
     var data_dir_buf: [MAX_PATH]u8 = undefined;
     const data_dir = try std.fmt.bufPrint(&data_dir_buf, "{s}/data", .{dir});
-    std.Io.Dir.createDirAbsolute(host_io.io(), data_dir, .default_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(io, data_dir);
 
     // Spawn Tor process
-    const child = try std.process.spawn(host_io.io(), .{
+    const child = try std.process.spawn(io, .{
         .argv = &[_][]const u8{ "tor", "-f", torrc_path },
+        .environ_map = environ,
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
@@ -117,7 +105,7 @@ pub fn start(opts: TorOpts) !void {
 
 /// Get the .onion hostname. Returns null while Tor is still bootstrapping.
 /// Reference: love2d/lua/tor.lua:213-229
-pub fn getHostname() ?[]const u8 {
+pub fn getHostname(io: std.Io) ?[]const u8 {
     if (!running) return null;
     if (hostname_len > 0) return hostname_buf[0..hostname_len];
 
@@ -125,11 +113,11 @@ pub fn getHostname() ?[]const u8 {
     var path_buf: [MAX_PATH]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/hidden_service/hostname", .{config_dir[0..config_dir_len]}) catch return null;
 
-    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
-    defer file.close(host_io.io());
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
+    defer file.close(io);
 
     var buf: [MAX_HOSTNAME]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return null;
+    const n = file.readPositionalAll(io, &buf, 0) catch return null;
     if (n == 0) return null;
 
     // Strip trailing whitespace
@@ -158,11 +146,11 @@ pub fn isRunning() bool {
 }
 
 /// Stop Tor and cleanup.
-pub fn stop() void {
+pub fn stop(io: std.Io) void {
     if (!running) return;
     if (pid) |*child| {
-        child.kill(host_io.io());
-        _ = child.wait(host_io.io()) catch {};
+        child.kill(io);
+        _ = child.wait(io) catch {};
     }
     pid = null;
     running = false;
@@ -172,15 +160,18 @@ pub fn stop() void {
 // ── Internal ─────────────────────────────────────────────────────────────
 
 /// Find an open TCP port starting from `base`.
-fn findOpenPort(base: u16) u16 {
+fn findOpenPort(io: std.Io, base: u16) u16 {
     var port = base;
     while (port < 65535) : (port += 1) {
-        const addr = netx.Address.parseIp4("127.0.0.1", port) catch continue;
-        const fd = sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0) catch continue;
-        defer sysx.close(fd);
-        sysx.bind(fd, &addr.any, addr.getOsSockLen()) catch continue;
+        const addr: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
+        var server = addr.listen(io, .{}) catch continue;
+        server.deinit(io);
         // Port is available
         return port;
     }
     return base; // fallback
+}
+
+test "public Tor API compiles" {
+    std.testing.refAllDecls(@This());
 }

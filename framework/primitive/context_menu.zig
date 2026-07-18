@@ -16,7 +16,7 @@ const layout = @import("../layout.zig");
 
 pub const MenuItem = struct {
     label: []const u8,
-    handler: *const fn () void,
+    handler: *const fn (?*anyopaque) void,
 };
 
 // ── Config ────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ pub fn updateHover(mx: f32, my: f32) void {
 
 /// Handle a left-click while the menu is visible.
 /// Returns true if the click was consumed (hit an item or was inside the menu area).
-pub fn handleClick(mx: f32, my: f32) bool {
+pub fn handleClick(context: ?*anyopaque, mx: f32, my: f32) bool {
     if (!visible) return false;
 
     // If click is inside the menu bounds
@@ -140,7 +140,7 @@ pub fn handleClick(mx: f32, my: f32) bool {
             if (idx < items_ptr.len) {
                 const handler = items_ptr[idx].handler;
                 hide();
-                handler();
+                handler(context);
                 return true;
             }
         }

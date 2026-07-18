@@ -2,7 +2,7 @@ import type { VmImage } from '../recipe';
 
 // Full developer worker — what an agent needs to do real work in this repo.
 //
-// Toolchain: nvm + latest LTS node, luajit, zig (host's pinned 0.15.2),
+// Toolchain: nvm + latest LTS node, luajit, zig (host's pinned 0.16.0),
 // git, ssh, build-essential. Plus claude-code via npm; codex/kimi/etc go in
 // the same npm-global slot when needed.
 //
@@ -59,7 +59,7 @@ const recipe: VmImage = {
         '@anthropic-ai/claude-code"',
     },
 
-    // -- zig 0.15.2 (host's pinned copy) --------------------------------
+    // -- zig 0.16.0 (host's pinned copy) --------------------------------
     { copyFromHost: { src: 'tools/zig/zig', dest: '/usr/local/bin/zig' } },
     { copyFromHost: { src: 'tools/zig/lib', dest: '/usr/local/lib/zig' } },
     { run: 'chmod 755 /usr/local/bin/zig' },

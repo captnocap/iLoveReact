@@ -37,7 +37,7 @@
 //! v8_ingredients.zig). A 2D cart pays zero bytes and zero host fns.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const game_physics = @import("game/physics.zig");
@@ -115,15 +115,15 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
     info.getReturnValue().set(ab);
 }
 
-inline fn nowNs() i64 {
-    return @as(i64, @truncate(host_io.nanoTimestamp()));
+inline fn nowNs(info: v8.FunctionCallbackInfo) i64 {
+    return @as(i64, @truncate(std.Io.Clock.now(.awake, v8_runtime.hostContext(info.getIsolate()).io).toNanoseconds()));
 }
 
 // __hmsc_physics_step(inputFloat32Array) — one sim frame across the bridge.
 // Returns null on a malformed buffer (cart falls back to JS movement).
 fn hostPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const bytes = argBytes(info, 0) orelse {
         setReturnNull(info);
         return;
@@ -138,13 +138,13 @@ fn hostPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         setReturnNull(info);
         return;
     };
-    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     setReturnF32Buffer(info, snapshot);
 }
 
 fn hostPhysicsStepInto(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const input_bytes = argBytes(info, 0) orelse {
         setReturnNull(info);
         return;
@@ -168,14 +168,14 @@ fn hostPhysicsStepInto(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnNull(info);
         return;
     }
-    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     @memcpy(output_bytes[0..snapshot_bytes.len], snapshot_bytes);
     setReturnF64(info, @floatFromInt(snapshot.len));
 }
 
 fn hostCameraOcclusion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const bytes = argBytes(info, 0) orelse {
         setReturnNull(info);
         return;
@@ -190,7 +190,7 @@ fn hostCameraOcclusion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnNull(info);
         return;
     };
-    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     setReturnF32Buffer(info, snapshot);
 }
 
@@ -223,7 +223,7 @@ fn hostCameraOcclusionDistance(info_c: ?*const v8.c.FunctionCallbackInfo) callco
 
 fn hostCameraOcclusionHit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const snapshot = game_physics.cameraOcclusionConfiguredHitOutput(
         @floatCast(argToF64(info, 0) orelse 0),
         @floatCast(argToF64(info, 1) orelse 0),
@@ -236,13 +236,13 @@ fn hostCameraOcclusionHit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         setReturnNull(info);
         return;
     };
-    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     setReturnF32Buffer(info, snapshot);
 }
 
 fn hostCameraOcclusionHits(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const snapshot = game_physics.cameraOcclusionConfiguredHits(
         @floatCast(argToF64(info, 0) orelse 0),
         @floatCast(argToF64(info, 1) orelse 0),
@@ -256,7 +256,7 @@ fn hostCameraOcclusionHits(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
         setReturnNull(info);
         return;
     };
-    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    snapshot[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     setReturnF32Buffer(info, snapshot);
 }
 
@@ -304,7 +304,8 @@ fn hostSpikeTrace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnNull(info);
 }
 
-pub fn registerGamePhysics(_: anytype) void {
+pub fn registerGamePhysics(host: *HostContext) void {
+    game_physics.configureDiagnostics(host.environ);
     v8_runtime.registerHostFn("__hmsc_physics_step", hostPhysicsStep);
     v8_runtime.registerHostFn("__hmsc_register_heightfield", hostRegisterHeightfield);
     v8_runtime.registerHostFn("__hmsc_clear_heightfields", hostClearHeightfields);

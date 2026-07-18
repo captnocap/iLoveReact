@@ -4,7 +4,7 @@
 //! Adding new framework modules (geometry, watchdog, etc.) happens here — no codegen changes needed.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 pub const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const text_mod = @import("primitive/text.zig");
@@ -35,16 +35,18 @@ const whisper = if (@hasDecl(build_options_for_whisper, "has_whisper") and build
     @import("voice/whisper.zig")
 else
     struct {
-        pub fn init(_: anytype) void {}
-        pub fn deinit() void {}
-        pub fn tick(_: u32) void {}
+        pub fn init(_: std.Io, _: *const std.process.Environ.Map, _: std.mem.Allocator) bool {
+            return false;
+        }
+        pub fn deinit(_: std.Io) void {}
+        pub fn tick(_: *HostContext, _: u32) void {}
     };
 const pose = if (@hasDecl(build_options_for_whisper, "has_onnx") and build_options_for_whisper.has_onnx)
     @import("ml/pose.zig")
 else
     struct {
-        pub fn init(_: anytype) void {}
-        pub fn deinit() void {}
+        pub fn init(_: std.Io, _: *const std.process.Environ.Map, _: std.mem.Allocator) void {}
+        pub fn deinit(_: std.Io) void {}
     };
 const system_signals = @import("ifttt/system_signals.zig");
 const ifttt_zig = @import("ifttt/ifttt.zig");
@@ -67,16 +69,12 @@ const HAS_CANVAS = if (@hasDecl(build_options, "has_canvas")) build_options.has_
 const HAS_3D = if (@hasDecl(build_options, "has_3d")) build_options.has_3d else true;
 const HAS_COMPILED_WORLD = if (@hasDecl(build_options, "has_compiled_world")) build_options.has_compiled_world else false;
 const HAS_TRANSITIONS = if (@hasDecl(build_options, "has_transitions")) build_options.has_transitions else true;
-const HAS_CRYPTO = if (@hasDecl(build_options, "has_crypto")) build_options.has_crypto else true;
 const HAS_DEBUG_SERVER = if (@hasDecl(build_options, "has_debug_server")) build_options.has_debug_server else false;
 
 var g_paisley_debug_enabled: ?bool = null;
 
 fn paisleyDebugEnabled() bool {
-    if (g_paisley_debug_enabled == null) {
-        g_paisley_debug_enabled = host_io.getenv("ZIGOS_PAISLEY_DEBUG") != null;
-    }
-    return g_paisley_debug_enabled.?;
+    return g_paisley_debug_enabled orelse false;
 }
 
 fn isPaisleyName(name: []const u8) bool {
@@ -84,9 +82,9 @@ fn isPaisleyName(name: []const u8) bool {
 }
 
 const debug_server = if (HAS_DEBUG_SERVER) @import("diag/debug_server.zig") else struct {
-    pub fn init(_: [*:0]const u8) void {}
-    pub fn poll() void {}
-    pub fn deinit() void {}
+    pub fn init(_: std.mem.Allocator, _: std.Io, _: *const std.process.Environ.Map, _: [*:0]const u8) void {}
+    pub fn poll(_: std.Io) void {}
+    pub fn deinit(_: std.Io) void {}
     pub fn getSelectedNode() i32 {
         return -1;
     }
@@ -95,16 +93,9 @@ const debug_server = if (HAS_DEBUG_SERVER) @import("diag/debug_server.zig") else
     }
 };
 
-// Force-reference crypto.zig so its export fn symbols (e.g. crypto_run_all_tests) are available to the linker.
-comptime {
-    if (HAS_CRYPTO) _ = @import("privacy/crypto.zig");
-}
-
-// Force-reference luajit_worker.zig so its export fn symbols are available to the linker.
-// LuaJIT workers are compute-only, off-thread — they never touch rendering, layout, or state.
-comptime {
-    _ = @import("process/luajit_worker.zig");
-}
+// LuaJIT workers are compute-only, off-thread — they never touch rendering,
+// layout, or state. The typed module API receives host capabilities explicitly.
+const luajit_worker = @import("process/luajit_worker.zig");
 
 // luajit_runtime archived to archive/qjs-stack/ — Smith-era .tsz script-block
 // evaluator. V8 carts never set handlers.lua_on_* (only the .tsz toolchain
@@ -121,9 +112,14 @@ const luajit_runtime = struct {
 const mouse_state = @import("state/mouse_state.zig");
 
 const pty_remote = if (HAS_TERMINAL) @import("terminal/pty_remote.zig") else struct {
-    pub fn init() void {}
-    pub fn deinit() void {}
-    pub fn poll() void {}
+    pub const Server = struct {
+        pub fn init(_: std.mem.Allocator) Server {
+            return .{};
+        }
+        pub fn start(_: *Server, _: std.Io) void {}
+        pub fn deinit(_: *Server, _: std.Io) void {}
+        pub fn poll(_: *Server, _: std.Io) void {}
+    };
 };
 
 const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
@@ -179,7 +175,7 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
     pub fn scrollbackCellByName(_: []const u8, _: u16, _: u16) Cell {
         return .{};
     }
-    pub fn pollPtyByName(_: []const u8) bool {
+    pub fn pollPtyByName(_: std.Io, _: []const u8) bool {
         return false;
     }
     pub fn resizeByName(_: []const u8, _: u16, _: u16) void {}
@@ -189,7 +185,7 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
     }
     pub fn scrollToBottomByName(_: []const u8) void {}
     pub fn scrollUpByName(_: []const u8, _: u16) void {}
-    pub fn spawnShellByName(_: []const u8, _: [*:0]const u8, _: u16, _: u16) void {}
+    pub fn spawnShellByName(_: std.Io, _: []const u8, _: [*:0]const u8, _: u16, _: u16) void {}
     pub fn writePtyByName(_: []const u8, _: []const u8) void {}
     pub fn ptyAliveByName(_: []const u8) bool {
         return false;
@@ -297,7 +293,7 @@ const canvas = if (HAS_CANVAS) @import("primitive/canvas.zig") else struct {
 };
 // devtools removed — inspector lives in tsz-tools (standalone IPC app)
 const testharness = if (HAS_QUICKJS) @import("testing/harness.zig") else struct {
-    pub fn envEnabled() bool {
+    pub fn envEnabled(_: *const std.process.Environ.Map) bool {
         return false;
     }
     pub fn enable() void {}
@@ -334,35 +330,35 @@ const videos = if (HAS_VIDEO) @import("render/videos.zig") else struct {
 };
 const render_surfaces = if (HAS_RENDER_SURFACES) @import("render/render_surfaces.zig") else struct {
     pub fn init() void {}
-    pub fn deinit() void {}
-    pub fn update() void {}
-    pub fn handleMouseDown(_: f32, _: f32, _: u8) bool {
+    pub fn deinit(_: std.Io) void {}
+    pub fn update(_: std.Io, _: *const std.process.Environ.Map) void {}
+    pub fn handleMouseDown(_: std.Io, _: *const std.process.Environ.Map, _: f32, _: f32, _: u8) bool {
         return false;
     }
-    pub fn handleMouseUp(_: f32, _: f32, _: u8) bool {
+    pub fn handleMouseUp(_: std.Io, _: *const std.process.Environ.Map, _: f32, _: f32, _: u8) bool {
         return false;
     }
-    pub fn handleMouseMotion(_: f32, _: f32) bool {
+    pub fn handleMouseMotion(_: std.Io, _: *const std.process.Environ.Map, _: f32, _: f32) bool {
         return false;
     }
     pub fn handleTextInput(_: [*:0]const u8) bool {
         return false;
     }
-    pub fn handleKeyDown(_: i32) bool {
+    pub fn handleKeyDown(_: std.Io, _: *const std.process.Environ.Map, _: i32) bool {
         return false;
     }
-    pub fn handleKeyUp(_: i32) bool {
+    pub fn handleKeyUp(_: std.Io, _: *const std.process.Environ.Map, _: i32) bool {
         return false;
     }
-    pub fn paintSurface(_: ?[]const u8, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
+    pub fn paintSurface(_: std.Io, _: *const std.process.Environ.Map, _: ?[]const u8, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
-    pub fn setSuspended(_: []const u8, _: bool) void {}
+    pub fn setSuspended(_: std.Io, _: *const std.process.Environ.Map, _: []const u8, _: bool) void {}
 };
 const capture = if (HAS_EFFECTS) @import("gpu/capture.zig") else struct {
-    pub fn init() void {}
-    pub fn deinit() void {}
-    pub fn handleKey(_: i32) bool {
+    pub fn init(_: *const std.process.Environ.Map) void {}
+    pub fn deinit(_: std.Io) void {}
+    pub fn handleKey(_: std.Io, _: *const std.process.Environ.Map, _: i32) bool {
         return false;
     }
     pub fn tick(_: *Node) bool {
@@ -370,14 +366,14 @@ const capture = if (HAS_EFFECTS) @import("gpu/capture.zig") else struct {
     }
 };
 const effects = if (HAS_EFFECTS) @import("gpu/effects.zig") else struct {
-    pub fn init() void {}
+    pub fn init(_: *const std.process.Environ.Map) void {}
     pub fn deinit() void {}
     pub fn update(_: f32) void {}
     pub fn pollMouse(_: f32, _: f32, _: f32) void {}
     pub fn paintEffect(_: ?[]const u8, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
-    pub fn paintCustomEffect(_: *const Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
+    pub fn paintCustomEffect(_: std.Io, _: *const std.process.Environ.Map, _: *const Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
     pub fn paintNamedEffect(_: *const Node, _: []const u8, _: f32, _: f32, _: f32, _: f32) bool {
@@ -392,7 +388,7 @@ const paintable = if (HAS_EFFECTS) @import("gpu/paintable.zig") else struct {
     pub fn drainAll() void {}
 };
 const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
-    pub fn render(_: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
+    pub fn render(_: std.Io, _: *const std.process.Environ.Map, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
     pub fn update(_: f32) void {}
@@ -467,7 +463,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshClearMarquee() void {}
 };
 const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("world_loader.zig") else struct {
-    pub fn renderEmbedded(_: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
+    pub fn renderEmbedded(_: std.Io, _: *const std.process.Environ.Map, _: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
     pub fn mouseLook(_: u32, _: f32, _: f32) void {}
@@ -485,16 +481,16 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("world_loader.zi
     pub fn anyPaintArmed() bool {
         return false;
     }
-    pub fn paintPointer(_: u32, _: PaintPhase, _: f32, _: f32) void {}
+    pub fn paintPointer(_: std.Io, _: u32, _: PaintPhase, _: f32, _: f32) void {}
 };
 // WORLDWIN-0611: the compiled-world pop-out window — same gate as the loader
 // it hosts. The stub keeps the loop call-sites unconditional.
 const world_window = if (HAS_3D and HAS_COMPILED_WORLD) @import("gpu/world_window.zig") else struct {
-    pub fn routeEvent(_: *const c.SDL_Event) bool {
+    pub fn routeEvent(_: std.Io, _: *const c.SDL_Event) bool {
         return false;
     }
-    pub fn frame() void {}
-    pub fn deinitAll() void {}
+    pub fn frame(_: std.Io, _: *const std.process.Environ.Map) void {}
+    pub fn deinitAll(_: std.Io) void {}
 };
 // PANELWIN-0628: the editor-panel pop-out window — renders a 2D React subtree
 // into a second OS window (2nd monitor). Pure 2D, so no HAS_3D gate.
@@ -1105,12 +1101,12 @@ fn sliderSnap(node: *Node, raw: f32) f32 {
     return slider_math.snap(node.slider_min, node.slider_max, node.slider_step, raw);
 }
 
-fn dispatchSliderJs(comptime fmt: []const u8, slot: u32, value: f32) void {
+fn dispatchSliderJs(host: *HostContext, comptime fmt: []const u8, slot: u32, value: f32) void {
     var buf: [96]u8 = undefined;
     if (std.fmt.bufPrintZ(&buf, fmt, .{ slot, value })) |expr| {
-        js_vm.callGlobal("__beginJsEvent");
-        js_vm.evalExpr(expr);
-        js_vm.callGlobal("__endJsEvent");
+        js_vm.callGlobal(host, "__beginJsEvent");
+        js_vm.evalExpr(host, expr);
+        js_vm.callGlobal(host, "__endJsEvent");
     } else |_| {}
 }
 
@@ -1118,7 +1114,7 @@ fn dispatchSliderJs(comptime fmt: []const u8, slot: u32, value: f32) void {
 // the tooltip-left latch every move (zero JS — the cart binds it via
 // left:'latch:KEY'), dispatch __dispatchSliderHover ONLY when the quantized
 // bucket changes. Quantize-by-meaning, not throttle-by-time.
-fn updateSliderPointerValue(node: *Node, slot: u32, mx: f32, value: f32) void {
+fn updateSliderPointerValue(host: *HostContext, node: *Node, slot: u32, mx: f32, value: f32) void {
     if (!node.slider_hover) return;
     const r = node.computed;
     if (node.slider_hover_latch_key) |key| {
@@ -1131,20 +1127,20 @@ fn updateSliderPointerValue(node: *Node, slot: u32, mx: f32, value: f32) void {
     const bucket = slider_math.hoverBucket(value, node.slider_hover_step);
     if (bucket != slider_hover_last_bucket) {
         slider_hover_last_bucket = bucket;
-        dispatchSliderJs("__dispatchSliderHover({d},{d})", slot, slider_math.bucketValue(bucket, node.slider_hover_step));
+        dispatchSliderJs(host, "__dispatchSliderHover({d},{d})", slot, slider_math.bucketValue(bucket, node.slider_hover_step));
     }
 }
 
 // Cursor moved without a slider drag active: track hover enter/move/leave.
 // Leave dispatches value -1 once so the cart can hide its tooltip.
-fn updateSliderHover(root: *Node, mx: f32, my: f32) void {
+fn updateSliderHover(host: *HostContext, root: *Node, mx: f32, my: f32) void {
     const hit = hitTestSlider(root, mx, my);
     if (hit == null or !hit.?.slider_hover or hit.?.scroll_persist_slot == 0) {
         if (slider_hover_slot != 0) {
             const slot = slider_hover_slot;
             slider_hover_slot = 0;
             slider_hover_last_bucket = std.math.minInt(i64);
-            dispatchSliderJs("__dispatchSliderHover({d},{d})", slot, -1.0);
+            dispatchSliderJs(host, "__dispatchSliderHover({d},{d})", slot, -1.0);
         }
         return;
     }
@@ -1153,10 +1149,10 @@ fn updateSliderHover(root: *Node, mx: f32, my: f32) void {
     const knob_w = sliderKnobW(r);
     const frac = slider_math.fracFromMouse(mx, r.x, r.w, knob_w);
     const value = sliderSnap(node, node.slider_min + frac * (node.slider_max - node.slider_min));
-    updateSliderPointerValue(node, node.scroll_persist_slot, mx, value);
+    updateSliderPointerValue(host, node, node.scroll_persist_slot, mx, value);
 }
 
-fn updateSliderDrag(root: *Node, mx: f32) void {
+fn updateSliderDrag(host: *HostContext, root: *Node, mx: f32) void {
     if (slider_drag_slot == 0) return;
     const node = findNodeByScrollSlot(root, slider_drag_slot) orelse return;
     const r = node.computed;
@@ -1173,7 +1169,7 @@ fn updateSliderDrag(root: *Node, mx: f32) void {
     if (next != slider_drag_last_sent and now_ms -% slider_drag_last_dispatch_ms >= 16) {
         slider_drag_last_dispatch_ms = now_ms;
         slider_drag_last_sent = next;
-        dispatchSliderJs("__dispatchSliderChange({d},{d})", slider_drag_slot, next);
+        dispatchSliderJs(host, "__dispatchSliderChange({d},{d})", slider_drag_slot, next);
     }
 
     // Media-bound scrub (MEDIASLIDER-0705): stream cheap keyframe seeks so
@@ -1186,10 +1182,10 @@ fn updateSliderDrag(root: *Node, mx: f32) void {
     }
 
     // The drag thumb IS the pointer value — tooltip follows it.
-    updateSliderPointerValue(node, slider_drag_slot, mx, next);
+    updateSliderPointerValue(host, node, slider_drag_slot, mx, next);
 }
 
-fn endSliderDrag(root: *Node) void {
+fn endSliderDrag(host: *HostContext, root: *Node) void {
     if (slider_drag_slot == 0) return;
     const slot = slider_drag_slot;
     slider_drag_slot = 0;
@@ -1204,7 +1200,7 @@ fn endSliderDrag(root: *Node) void {
             slider_media_settle_target = node.slider_value;
             slider_media_settle_until_ms = @as(u32, @intCast(c.SDL_GetTicks() & 0xFFFFFFFF)) +% SLIDER_MEDIA_SETTLE_MS;
         }
-        dispatchSliderJs("__dispatchSliderCommit({d},{d})", slot, node.slider_value);
+        dispatchSliderJs(host, "__dispatchSliderCommit({d},{d})", slot, node.slider_value);
         state_mod.markDirty();
     }
 }
@@ -1269,7 +1265,7 @@ fn releaseWorldLoaderPointer() void {
     _ = setRelativeMouseMode(false);
 }
 
-fn updateScrollbarDrag(root: *Node, pos: f32) bool {
+fn updateScrollbarDrag(host: *HostContext, root: *Node, pos: f32) bool {
     if (scrollbar_drag_slot == 0) return false;
     const node = findNodeByScrollSlot(root, scrollbar_drag_slot) orelse return false;
     const movable = @max(0.0, scrollbar_drag_track_len - scrollbar_drag_thumb_len);
@@ -1283,12 +1279,12 @@ fn updateScrollbarDrag(root: *Node, pos: f32) bool {
         .vertical => {
             const prev = node.scroll_y;
             node.scroll_y = @max(0.0, @min(next_scroll, scrollbar_drag_cached_max_scroll));
-            if (node.scroll_y != prev) dispatchScrollChanged(node, 0, node.scroll_y - prev);
+            if (node.scroll_y != prev) dispatchScrollChanged(host, node, 0, node.scroll_y - prev);
         },
         .horizontal => {
             const prev = node.scroll_x;
             node.scroll_x = @max(0.0, @min(next_scroll, scrollbar_drag_cached_max_scroll));
-            if (node.scroll_x != prev) dispatchScrollChanged(node, node.scroll_x - prev, 0);
+            if (node.scroll_x != prev) dispatchScrollChanged(host, node, node.scroll_x - prev, 0);
         },
     }
     return true;
@@ -1308,7 +1304,7 @@ fn setPointerCursor(active: bool) void {
     }
 }
 
-fn updateHover(root: *Node, mx: f32, my: f32) void {
+fn updateHover(host: *HostContext, root: *Node, mx: f32, my: f32) void {
     const scrollbar_hover = hitTestScrollbar(root, mx, my);
     if (scrollbar_hover) |hit| {
         if (scrollbar_hover_slot != hit.node.scroll_persist_slot or scrollbar_hover_axis != hit.axis) {
@@ -1329,22 +1325,22 @@ fn updateHover(root: *Node, mx: f32, my: f32) void {
 
     // Exit previous
     if (hovered_node) |prev| {
-        if (prev.handlers.on_hover_exit) |handler| handler();
+        if (prev.handlers.on_hover_exit) |handler| handler(prev.handlers.context);
         if (prev.handlers.js_on_hover_exit) |js_expr| {
-            js_vm.callGlobal("__beginJsEvent");
-            js_vm.evalExpr(std.mem.span(js_expr));
-            js_vm.callGlobal("__endJsEvent");
+            js_vm.callGlobal(host, "__beginJsEvent");
+            js_vm.evalExpr(host, std.mem.span(js_expr));
+            js_vm.callGlobal(host, "__endJsEvent");
             state_mod.markDirty();
         }
     }
     hovered_node = hit;
     // Enter new
     if (hit) |node| {
-        if (node.handlers.on_hover_enter) |handler| handler();
+        if (node.handlers.on_hover_enter) |handler| handler(node.handlers.context);
         if (node.handlers.js_on_hover_enter) |js_expr| {
-            js_vm.callGlobal("__beginJsEvent");
-            js_vm.evalExpr(std.mem.span(js_expr));
-            js_vm.callGlobal("__endJsEvent");
+            js_vm.callGlobal(host, "__beginJsEvent");
+            js_vm.evalExpr(host, std.mem.span(js_expr));
+            js_vm.callGlobal(host, "__endJsEvent");
             state_mod.markDirty();
         }
         // Tooltip: show if node carries tooltip text. `node.computed` is in
@@ -1376,6 +1372,10 @@ fn brighten(color: Color, amount: u8) Color {
 // ── App interface ────────────────────────────────────────────────────────
 
 pub const AppConfig = struct {
+    host: *HostContext,
+    /// Root-owned diagnostics sink. Producers only enqueue; the engine flushes
+    /// their bounded queues once per frame at the blocking boundary.
+    diag_sink: *@import("diag/log.zig").Sink,
     title: [*:0]const u8 = "tsz app",
     width: u32 = 1280,
     height: u32 = 800,
@@ -1385,16 +1385,16 @@ pub const AppConfig = struct {
     js_logic: []const u8 = "",
     lua_logic: []const u8 = "",
     /// Called once after QuickJS VM is ready. Register FFI host functions, set initial state.
-    init: ?*const fn () void = null,
+    init: ?*const fn (*HostContext) void = null,
     /// Called every frame before layout. Do FFI polling, state dirty checks, dynamic text updates.
-    tick: ?*const fn (now_ms: u32) void = null,
+    tick: ?*const fn (*HostContext, now_ms: u32) void = null,
     /// Hot-reload callback — called at the start of each frame.
     /// If it returns true, root/init/tick were swapped and the engine re-inits.
-    check_reload: ?*const fn (*AppConfig) bool = null,
+    check_reload: ?*const fn (*HostContext, *AppConfig) bool = null,
     /// Called after init during a hot-reload, before tick. Used for state restoration.
-    post_reload: ?*const fn () void = null,
+    post_reload: ?*const fn (*HostContext) void = null,
     /// Called once during shutdown while host runtimes are still alive.
-    shutdown: ?*const fn () void = null,
+    shutdown: ?*const fn (*HostContext) void = null,
     /// Borderless window — removes OS window decorations (title bar, borders).
     /// The app must provide its own chrome using window_drag / window_resize nodes.
     borderless: bool = false,
@@ -1658,7 +1658,7 @@ pub fn windowIsMaximized() bool {
 
 /// Open a URL — if the app has a JS _browserNavigate handler, navigate in-app.
 /// Otherwise open in the system browser via xdg-open.
-fn openUrl(url: []const u8) void {
+fn openUrl(io: std.Io, url: []const u8) void {
     log.info(.events, "openUrl: {s}", .{url});
     // Try in-app navigation first (browser cart defines _browserNavigate in JS).
     // The QJS-side hasGlobal/callGlobalStr was archived (archive/qjs-stack/);
@@ -1675,8 +1675,8 @@ fn openUrl(url: []const u8) void {
     var cmd_buf: [2048]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "xdg-open '{s}' &", .{url}) catch return;
     const argv = [_][]const u8{ "sh", "-c", cmd };
-    var child = std.process.spawn(host_io.io(), .{ .argv = &argv }) catch return;
-    _ = child.wait(host_io.io()) catch {};
+    var child = std.process.spawn(io, .{ .argv = &argv }) catch return;
+    _ = child.wait(io) catch {};
 }
 
 fn tryParseDispatchEventExpr(expr: []const u8) ?struct { id: u32, handler: []const u8 } {
@@ -1694,7 +1694,7 @@ fn tryParseDispatchEventExpr(expr: []const u8) ?struct { id: u32, handler: []con
     return .{ .id = id, .handler = handler };
 }
 
-fn runJsHandlerExpr(expr: []const u8) void {
+fn runJsHandlerExpr(host: *HostContext, expr: []const u8) void {
     if (g_dispatch_js_event) |dispatch| {
         if (tryParseDispatchEventExpr(expr)) |event| {
             dispatch(event.id, event.handler);
@@ -1702,28 +1702,28 @@ fn runJsHandlerExpr(expr: []const u8) void {
             return;
         }
     }
-    js_vm.callGlobal("__beginJsEvent");
-    js_vm.evalExpr(expr);
-    js_vm.callGlobal("__endJsEvent");
+    js_vm.callGlobal(host, "__beginJsEvent");
+    js_vm.evalExpr(host, expr);
+    js_vm.callGlobal(host, "__endJsEvent");
     state_mod.markDirty();
 }
 
-fn dispatchPointerHandler(node: *Node, comptime kind: enum { down, move, up }) void {
+fn dispatchPointerHandler(host: *HostContext, node: *Node, comptime kind: enum { down, move, up }) void {
     const handlers = &node.handlers;
     switch (kind) {
         .down => {
-            if (handlers.on_mouse_down) |handler| handler();
-            if (handlers.js_on_mouse_down) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.on_mouse_down) |handler| handler(handlers.context);
+            if (handlers.js_on_mouse_down) |js_expr| runJsHandlerExpr(host, std.mem.span(js_expr));
             if (handlers.lua_on_mouse_down) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
         },
         .move => {
-            if (handlers.on_mouse_move) |handler| handler();
-            if (handlers.js_on_mouse_move) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.on_mouse_move) |handler| handler(handlers.context);
+            if (handlers.js_on_mouse_move) |js_expr| runJsHandlerExpr(host, std.mem.span(js_expr));
             if (handlers.lua_on_mouse_move) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
         },
         .up => {
-            if (handlers.on_mouse_up) |handler| handler();
-            if (handlers.js_on_mouse_up) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.on_mouse_up) |handler| handler(handlers.context);
+            if (handlers.js_on_mouse_up) |js_expr| runJsHandlerExpr(host, std.mem.span(js_expr));
             if (handlers.lua_on_mouse_up) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
         },
     }
@@ -1817,8 +1817,9 @@ fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: 
     return text_h;
 }
 
-fn measureImageCallback(src: []const u8) layout.ImageDims {
-    const m = image_cache.measure(src);
+fn measureImageCallback(context: *anyopaque, src: []const u8) layout.ImageDims {
+    const host: *HostContext = @ptrCast(@alignCast(context));
+    const m = image_cache.measure(host.io, host.environ, src);
     return .{ .width = m.w, .height = m.h };
 }
 
@@ -1826,12 +1827,13 @@ fn measureImageCallback(src: []const u8) layout.ImageDims {
 /// `has_on_layout`. Builds a small JS expression that calls into the runtime
 /// dispatcher with the just-computed rect; the dispatcher routes by id to the
 /// React handlerRegistry's `onLayout` callback.
-fn emitLayoutCallback(id: u32, rect: layout.LayoutRect) void {
+fn emitLayoutCallback(context: *anyopaque, id: u32, rect: layout.LayoutRect) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     var buf: [192]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchLayout({d},{d:.2},{d:.2},{d:.2},{d:.2})", .{
         id, rect.x, rect.y, rect.w, rect.h,
     }) catch return;
-    js_vm.evalExpr(expr);
+    js_vm.evalExpr(host, expr);
 }
 
 // ── Node painting (framework-owned) ─────────────────────────────────────
@@ -1957,12 +1959,12 @@ fn nodedumpWalk(node: *Node, count: *u32, depth: u32, limit: u32) void {
     }
 }
 
-fn nodedumpMaybeEmit(root: *Node, win_w: f32, win_h: f32) void {
+fn nodedumpMaybeEmit(environ: *const std.process.Environ.Map, root: *Node, win_w: f32, win_h: f32) void {
     if (g_nodedump_done) return;
     g_nodedump_tick +%= 1;
     if (g_nodedump_tick != 60) return;
     g_nodedump_done = true;
-    if (host_io.getenv("REACTJIT_NODEDUMP") == null) return;
+    if (environ.get("REACTJIT_NODEDUMP") == null) return;
     log.print("[nodedump] window={d}x{d}\n", .{
         @as(i32, @intFromFloat(win_w)),
         @as(i32, @intFromFloat(win_h)),
@@ -2002,9 +2004,9 @@ var input_drag_node_pt: f32 = 0; // node padding-top
 // change edge (mouse ⇄ pen) the useIFTTT `system:pointerDevice` signal fires so
 // carts can swap tools per device (GIMP semantics: pen and mouse each remember
 // their own tool).
-fn notePointerDevice(which: c.SDL_MouseID) void {
+fn notePointerDevice(host: *HostContext, which: c.SDL_MouseID) void {
     const dev: mouse_state.PointerDevice = if (which == c.SDL_PEN_MOUSEID) .pen else .mouse;
-    if (mouse_state.updatePointerDevice(dev)) system_signals.notifyPointerDevice(@intFromEnum(dev));
+    if (mouse_state.updatePointerDevice(dev)) system_signals.notifyPointerDevice(host, @intFromEnum(dev));
 }
 
 // Coalesced drag position — set per SDL_EVENT_MOUSE_MOTION, consumed once
@@ -2030,9 +2032,9 @@ fn stampClickLatency() void {
     _ = .{};
 }
 
-fn stampInputLatency(kind: []const u8) void {
+fn stampInputLatency(io: std.Io, kind: []const u8) void {
     if (g_input_latency_ts_us == 0) {
-        g_input_latency_ts_us = host_io.microTimestamp();
+        g_input_latency_ts_us = std.Io.Clock.now(.awake, io).toMicroseconds();
         g_input_latency_kind = kind;
     }
     g_input_latency_event_count += 1;
@@ -2059,17 +2061,17 @@ fn markScrollActivity(node: *Node) void {
     node.scrollbar_last_activity_ms = @intCast(c.SDL_GetTicks());
 }
 
-fn dispatchScrollChanged(node: *Node, dx: f32, dy: f32) void {
+fn dispatchScrollChanged(host: *HostContext, node: *Node, dx: f32, dy: f32) void {
     markScrollActivity(node);
     luajit_runtime.persistScrollSlot(node.scroll_persist_slot, node.scroll_y);
-    fireScrollHandlers(node, dx, dy);
+    fireScrollHandlers(host, node, dx, dy);
 }
 
 /// Deliver a wheel delta to a node's onScroll handler(s). The Lua path uses the
 /// on_scroll fn pointer; the V8 path uses js_on_scroll, an installed
 /// `__dispatchScroll(id)` expr that reads the prepared scroll payload. Both read
 /// the same prepared globals, so we stage them once and fire whichever exists.
-fn fireScrollHandlers(node: *Node, dx: f32, dy: f32) void {
+fn fireScrollHandlers(host: *HostContext, node: *Node, dx: f32, dy: f32) void {
     if (node.handlers.on_scroll == null and node.handlers.js_on_scroll == null) return;
     prepared_input.prepareScrollEvent(
         node.scroll_persist_slot,
@@ -2078,8 +2080,8 @@ fn fireScrollHandlers(node: *Node, dx: f32, dy: f32) void {
         dx,
         dy,
     );
-    if (node.handlers.on_scroll) |handler| handler();
-    if (node.handlers.js_on_scroll) |expr| runJsHandlerExpr(std.mem.span(expr));
+    if (node.handlers.on_scroll) |handler| handler(node.handlers.context);
+    if (node.handlers.js_on_scroll) |expr| runJsHandlerExpr(host, std.mem.span(expr));
 }
 
 fn scrollbarOpacity(node: *Node) f32 {
@@ -2301,12 +2303,12 @@ fn handleInputVerticalKey(root: *Node, sym: c_int, mods: u16) bool {
     return true;
 }
 
-fn paintStaticSurfaceOverlays(node: *Node) void {
+fn paintStaticSurfaceOverlays(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) void {
     for (node.children) |*child| {
         if (child.static_surface_overlay) {
-            paintNode(child);
+            paintNode(io, environ, child);
         } else if (child.children.len > 0) {
-            paintStaticSurfaceOverlays(child);
+            paintStaticSurfaceOverlays(io, environ, child);
         }
     }
 }
@@ -2344,11 +2346,11 @@ fn setComposedGpuTransform(ox: f32, oy: f32, tx: f32, ty: f32, scale: f32) void 
 // Paint a node's children in z-index order (ascending: lower paints first,
 // higher paints on top). Stable on equal z_index so DOM order wins for ties.
 // Fast-paths the common case where no child has a non-zero z_index.
-fn paintChildrenInZOrder(node: *Node) void {
+fn paintChildrenInZOrder(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) void {
     const n = node.children.len;
     if (n == 0) return;
     if (n == 1) {
-        if (!node.children[0].effect_background) paintNode(&node.children[0]);
+        if (!node.children[0].effect_background) paintNode(io, environ, &node.children[0]);
         return;
     }
     var any_z = false;
@@ -2359,7 +2361,7 @@ fn paintChildrenInZOrder(node: *Node) void {
         }
     }
     if (!any_z) {
-        for (node.children) |*child| if (!child.effect_background) paintNode(child);
+        for (node.children) |*child| if (!child.effect_background) paintNode(io, environ, child);
         return;
     }
     var indices: [256]u16 = undefined;
@@ -2388,15 +2390,15 @@ fn paintChildrenInZOrder(node: *Node) void {
         // letting menus/tooltips/popovers extend outside their parent.
         if (child.style.z_index != 0) {
             gpu.pushScissor(0, 0, win_w, win_h);
-            paintNode(child);
+            paintNode(io, environ, child);
             gpu.popScissor();
         } else {
-            paintNode(child);
+            paintNode(io, environ, child);
         }
     }
     // Anything past slot 256 falls back to DOM order.
     if (n > m) {
-        for (node.children[m..]) |*child| if (!child.effect_background) paintNode(child);
+        for (node.children[m..]) |*child| if (!child.effect_background) paintNode(io, environ, child);
     }
 }
 
@@ -2420,20 +2422,20 @@ pub fn setPanelRootProvider(f: *const fn () ?*Node) void {
     g_panel_root_provider = f;
 }
 
-fn panelPaintCallback() void {
+fn panelPaintCallback(io: std.Io, environ: *const std.process.Environ.Map) void {
     const root = g_panel_paint_root orelse return;
     selection.resetWalkState();
     g_paint_count = 0;
     g_budget_exceeded = false;
     g_hidden_count = 0;
     g_paint_opacity = 1.0;
-    paintNode(root);
+    paintNode(io, environ, root);
 }
 
 /// Called from the main loop AFTER gpu.frame() (the shared 2D batches are reset
 /// and ours for this pass). Lays out the popped-out subtree at the 2nd window's
 /// size, paints it into a gpu RT, and blits that RT into the window's swapchain.
-fn renderPanelWindow() void {
+fn renderPanelWindow(host: *HostContext) void {
     if (!panel_window.isOpen()) return;
     // Reconcile surface + RT dims with the real window size every frame so
     // resize/maximize follow even when the WM withholds PIXEL_SIZE_CHANGED.
@@ -2448,42 +2450,45 @@ fn renderPanelWindow() void {
     layout.layoutNode(root, 0, 0, @floatFromInt(sz[0]), @floatFromInt(sz[1]));
     g_panel_root_cached = root;
     g_panel_paint_root = root;
-    if (gpu.renderPanelInto(sz[0], sz[1], panelPaintCallback)) |view| {
+    if (gpu.renderPanelInto(host.io, host.environ, sz[0], sz[1], panelPaintCallback)) |view| {
         panel_window.blitView(view);
     }
 }
 
 // ── pop-out window input (installed as panel_window's EventHook) ─────────────
-fn panelHover(x: f32, y: f32) void {
+fn panelHover(context: *anyopaque, x: f32, y: f32) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     const root = g_panel_root_cached orelse return;
-    updateHover(root, x, y);
+    updateHover(host, root, x, y);
 }
 
-fn panelPress(x: f32, y: f32, button: u8, down: bool) void {
+fn panelPress(context: *anyopaque, x: f32, y: f32, button: u8, down: bool) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     const root = g_panel_root_cached orelse return;
     if (!down or button != c.SDL_BUTTON_LEFT) return;
     const events = @import("events.zig");
     const hit = events.hitTest(root, x, y) orelse return;
     if (hit.handlers.js_on_mouse_down) |expr| {
-        js_vm.callGlobal("__beginJsEvent");
-        js_vm.evalExpr(std.mem.span(expr));
-        js_vm.callGlobal("__endJsEvent");
+        js_vm.callGlobal(host, "__beginJsEvent");
+        js_vm.evalExpr(host, std.mem.span(expr));
+        js_vm.callGlobal(host, "__endJsEvent");
     }
     if (hit.handlers.js_on_press) |expr| {
         input.unfocus();
-        js_vm.callGlobal("__beginJsEvent");
-        js_vm.evalExpr(std.mem.span(expr));
-        js_vm.callGlobal("__endJsEvent");
+        js_vm.callGlobal(host, "__beginJsEvent");
+        js_vm.evalExpr(host, std.mem.span(expr));
+        js_vm.callGlobal(host, "__endJsEvent");
         state_mod.markDirty();
     }
 }
 
-fn panelWheel(x: f32, y: f32, dx: f32, dy: f32) void {
+fn panelWheel(context: *anyopaque, x: f32, y: f32, dx: f32, dy: f32) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     const root = g_panel_root_cached orelse return;
     const events = @import("events.zig");
     const scroll_node = events.findScrollContainer(root, x, y) orelse {
         // No scroll container — deliver the raw delta to an onScroll handler.
-        if (events.hitTestScroll(root, x, y)) |sn| fireScrollHandlers(sn, dx, dy);
+        if (events.hitTestScroll(root, x, y)) |sn| fireScrollHandlers(host, sn, dx, dy);
         return;
     };
     const scale: f32 = if (comptime @import("builtin").os.tag == .macos) 10.0 else 30.0;
@@ -2495,11 +2500,11 @@ fn panelWheel(x: f32, y: f32, dx: f32, dy: f32) void {
     scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_sy));
     markScrollActivity(scroll_node);
     luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
-    fireScrollHandlers(scroll_node, dx, dy);
+    fireScrollHandlers(host, scroll_node, dx, dy);
     state_mod.markDirty();
 }
 
-fn paintNode(node: *Node) void {
+fn paintNode(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) void {
     if (node.style.display == .none) {
         g_hidden_count += 1;
         return;
@@ -2732,7 +2737,7 @@ fn paintNode(node: *Node) void {
             offsetDescendants(node, -r.x, -r.y);
             const capture_saved_opacity = g_paint_opacity;
             g_paint_opacity = saved_opacity;
-            for (node.children) |*child| if (!child.effect_background) paintNode(child);
+            for (node.children) |*child| if (!child.effect_background) paintNode(io, environ, child);
             g_paint_opacity = capture_saved_opacity;
             restoreGpuTransform(saved_capture_tf);
             offsetDescendants(node, r.x, r.y);
@@ -2753,7 +2758,7 @@ fn paintNode(node: *Node) void {
             const surface_scale = @max(1.0, @min(node.static_surface_scale, 4.0));
             const dirty_frame = node.subtree_last_mutated_frame;
             if (gpu.queueStaticSurface(surface_key, r.x, r.y, r.w, r.h, g_paint_opacity, node.static_surface_intro_frames, surface_scale, dirty_frame)) {
-                paintStaticSurfaceOverlays(node);
+                paintStaticSurfaceOverlays(io, environ, node);
                 g_paint_opacity = saved_opacity;
                 return;
             }
@@ -2774,7 +2779,7 @@ fn paintNode(node: *Node) void {
                     // when the texture quad is composited.
                     const capture_saved_opacity = g_paint_opacity;
                     g_paint_opacity = saved_opacity;
-                    for (node.children) |*child| if (!child.effect_background) paintNode(child);
+                    for (node.children) |*child| if (!child.effect_background) paintNode(io, environ, child);
                     g_paint_opacity = capture_saved_opacity;
                     restoreGpuTransform(saved_capture_tf);
                     offsetDescendants(node, r.x, r.y);
@@ -2782,7 +2787,7 @@ fn paintNode(node: *Node) void {
                     const end_counts = gpu.primitiveCounts();
                     gpu.restoreScissorAfterStaticCapture(scissor_snapshot);
                     gpu.finishStaticSurfaceCapture(token, start_counts, end_counts);
-                    paintStaticSurfaceOverlays(node);
+                    paintStaticSurfaceOverlays(io, environ, node);
                     g_paint_opacity = saved_opacity;
                     return;
                 }
@@ -2791,7 +2796,7 @@ fn paintNode(node: *Node) void {
     }
 
     // Paint this node's visuals (background, text, input, selection)
-    paintNodeVisuals(node);
+    paintNodeVisuals(io, environ, node);
 
     // Background effects — children with effect_background paint behind siblings
     for (node.children) |*child| {
@@ -2804,13 +2809,13 @@ fn paintNode(node: *Node) void {
                 g_effect_bg_logged2 = true;
                 log.print("[eng effect-bg-paint] firing rect={d}x{d}\n", .{ r.w, r.h });
             }
-            _ = effects.paintCustomEffect(child, r.x, r.y, r.w, r.h, g_paint_opacity);
+            _ = effects.paintCustomEffect(io, environ, child, r.x, r.y, r.w, r.h, g_paint_opacity);
         }
     }
 
     // Canvas rendering — separate heavy path
     if (node.canvas_type != null) {
-        paintCanvasContainer(node);
+        paintCanvasContainer(io, environ, node);
         return;
     }
 
@@ -2832,7 +2837,7 @@ fn paintNode(node: *Node) void {
         const ox: f32 = if (node.graph_origin_topleft) r.x else r.x + r.w / 2;
         const oy: f32 = if (node.graph_origin_topleft) r.y else r.y + r.h / 2;
         setComposedGpuTransform(0, 0, ox - vx * vz, oy - vy * vz, vz);
-        for (node.children) |*child| paintNode(child);
+        for (node.children) |*child| paintNode(io, environ, child);
         restoreGpuTransform(saved_tf);
         gpu.popScissor();
         return;
@@ -2858,10 +2863,10 @@ fn paintNode(node: *Node) void {
         const sx = node.scroll_x;
         const sy = node.scroll_y;
         offsetDescendants(node, -sx, -sy);
-        paintChildrenInZOrder(node);
+        paintChildrenInZOrder(io, environ, node);
         offsetDescendants(node, sx, sy);
     } else {
-        paintChildrenInZOrder(node);
+        paintChildrenInZOrder(io, environ, node);
     }
 
     if (is_scroll) paintScrollbars(node);
@@ -3087,7 +3092,7 @@ fn emitNodeRect(node: *Node) void {
 
 /// Paint node visuals: background, hover, text, selection, text input.
 /// Separated from paintNode to reduce the recursive frame size.
-noinline fn paintNodeVisuals(node: *Node) void {
+noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) void {
     const r = node.computed;
     // Auto-hover affordance: dark slate rect drawn over hovered nodes that
     // opt in via `hoverable=true`. Previously this fired for ANY node with
@@ -3247,7 +3252,7 @@ noinline fn paintNodeVisuals(node: *Node) void {
     // top of the background (so a padded/rounded container shows behind) and
     // before the border (so a framed image gets its border on top).
     if (node.image_src) |src| {
-        image_cache.queueQuad(src, r.x, r.y, r.w, r.h, g_paint_opacity);
+        image_cache.queueQuad(io, environ, src, r.x, r.y, r.w, r.h, g_paint_opacity);
     }
 
     // Border without background — draw border-only rect with transparent fill
@@ -3345,8 +3350,8 @@ noinline fn paintNodeVisuals(node: *Node) void {
 
     // Render surface — screen capture, webcam, VM, etc.
     if (node.render_src) |src| {
-        render_surfaces.setSuspended(src, node.render_suspended);
-        _ = render_surfaces.paintSurface(src, r.x, r.y, r.w, r.h, g_paint_opacity);
+        render_surfaces.setSuspended(io, environ, src, node.render_suspended);
+        _ = render_surfaces.paintSurface(io, environ, src, r.x, r.y, r.w, r.h, g_paint_opacity);
     }
 
     // Effect — generative visual
@@ -3359,19 +3364,19 @@ noinline fn paintNodeVisuals(node: *Node) void {
         if (node.effect_name) |ename| {
             _ = effects.paintNamedEffect(node, ename, r.x, r.y, r.w, r.h);
         } else {
-            _ = effects.paintCustomEffect(node, r.x, r.y, r.w, r.h, g_paint_opacity);
+            _ = effects.paintCustomEffect(io, environ, node, r.x, r.y, r.w, r.h, g_paint_opacity);
         }
     }
     // WorldLoader — the no-V8 compiled-game loader as a native host primitive.
     // React owns only this rectangle; world_loader.zig owns construction,
     // camera/player stepping, and the Scene3D render tree behind it.
     if (node.world_loader) {
-        _ = world_loader.renderEmbedded(std.heap.c_allocator, node, r.x, r.y, r.w, r.h, g_paint_opacity);
+        _ = world_loader.renderEmbedded(io, environ, std.heap.c_allocator, node, r.x, r.y, r.w, r.h, g_paint_opacity);
     }
 
     // 3D.View — 3D viewport rendered offscreen, composited here
     if (node.scene3d) {
-        _ = r3d.render(node, r.x, r.y, r.w, r.h, g_paint_opacity);
+        _ = r3d.render(io, environ, node, r.x, r.y, r.w, r.h, g_paint_opacity);
         // Editor overlay (vertex dots / edge highlights / marquee) on top of the
         // composite. The overlay projects the ACTIVE mesh-edit session with the
         // editor's own camera, so it only belongs on the interactive editor
@@ -3809,7 +3814,7 @@ fn hitTestCanvasNode(child: *Node, gpos: [2]f32) ?*Node {
 }
 
 /// Paint a single canvas child (Canvas.Path or Canvas.Node) with highlight + dim/flow.
-fn paintCanvasChild(child: *Node, child_idx: u16, hovered: ?u16, selected: ?u16) void {
+fn paintCanvasChild(io: std.Io, environ: *const std.process.Environ.Map, child: *Node, child_idx: u16, hovered: ?u16, selected: ?u16) void {
     if (child.canvas_node) {
         const node_selected = selected != null and selected.? == child_idx;
         const node_hovered = hovered != null and hovered.? == child_idx;
@@ -3825,13 +3830,13 @@ fn paintCanvasChild(child: *Node, child_idx: u16, hovered: ?u16, selected: ?u16)
     }
     g_paint_opacity = canvas.getNodeDim(child_idx);
     g_flow_enabled = canvas.getFlowOverride(child_idx);
-    paintNode(child);
+    paintNode(io, environ, child);
     g_paint_opacity = 1.0;
     g_flow_enabled = true;
 }
 
 /// Paint a Canvas container: transform setup, graph children, HUD layer.
-noinline fn paintCanvasContainer(node: *Node) void {
+noinline fn paintCanvasContainer(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) void {
     const r = node.computed;
     const ct = node.canvas_type.?;
     // Honor cart-driven viewX/viewY/viewZoom updates, but only when the prop
@@ -3914,13 +3919,13 @@ noinline fn paintCanvasContainer(node: *Node) void {
         for (node.children) |*child| {
             if (child.canvas_clamp) continue;
             if (child.canvas_node or child.canvas_path) {
-                paintCanvasChild(child, child_idx, hovered, selected);
+                paintCanvasChild(io, environ, child, child_idx, hovered, selected);
                 child_idx += 1;
             } else {
                 // Flatten through non-canvas container (map pool wrapper)
                 for (child.children) |*gc| {
                     if (gc.canvas_clamp) continue;
-                    paintCanvasChild(gc, child_idx, hovered, selected);
+                    paintCanvasChild(io, environ, gc, child_idx, hovered, selected);
                     child_idx += 1;
                 }
             }
@@ -3935,13 +3940,13 @@ noinline fn paintCanvasContainer(node: *Node) void {
     for (node.children) |*child| {
         if (child.canvas_clamp) {
             layout.layoutNode(child, r.x, r.y, r.w, r.h);
-            paintNode(child);
+            paintNode(io, environ, child);
         } else if (!child.canvas_node and !child.canvas_path) {
             // Flatten through container for clamp grandchildren
             for (child.children) |*gc| {
                 if (gc.canvas_clamp) {
                     layout.layoutNode(gc, r.x, r.y, r.w, r.h);
-                    paintNode(gc);
+                    paintNode(io, environ, gc);
                 }
             }
         }
@@ -3981,12 +3986,15 @@ fn drawSoftwareCursor(x: f32, y: f32) void {
 
 pub fn run(config_in: AppConfig) !void {
     var config = config_in;
+    const io = config.host.io;
+    const environ = config.host.environ;
+    g_paisley_debug_enabled = environ.get("ZIGOS_PAISLEY_DEBUG") != null;
     g_dispatch_js_event = config.dispatch_js_event;
     defer g_dispatch_js_event = null;
-    const startup_t0 = host_io.microTimestamp();
+    const startup_t0 = std.Io.Clock.now(.awake, io).toMicroseconds();
     // Crash log + signal handling for file-explorer launches (no stderr).
     // Logs to /run/user/<uid>/claude-sessions/supervisor-crash.log
-    crashlog.init();
+    crashlog.init(io, environ);
     crashlog.log("engine.run: starting");
 
     // Ignore signals that kill the process when launched without a controlling terminal
@@ -4000,14 +4008,14 @@ pub fn run(config_in: AppConfig) !void {
     // Skipped in dev mode — Debug builds allocate 50MB+ per click-driven React
     // commit which trips the spike threshold and SIGKILLs the host silently.
     const is_dev = if (@hasDecl(build_options, "dev_mode")) build_options.dev_mode else false;
-    if (!is_dev) watchdog.init();
+    if (!is_dev) watchdog.init(io);
 
     // Debug server — auto-start if TSZ_DEBUG=1 (before SDL so it works headless)
-    debug_server.init(config.title);
-    defer debug_server.deinit();
+    debug_server.init(std.heap.c_allocator, io, environ, config.title);
+    defer debug_server.deinit(io);
 
     // Witness — record/replay for regression testing
-    witness.init();
+    witness.init(io, environ);
 
     // Loopback / "monitor" sources (capture-what's-playing) — by default
     // SDL3's PulseAudio backend hides them, and the native PipeWire backend
@@ -4030,7 +4038,7 @@ pub fn run(config_in: AppConfig) !void {
     // the console via DRM scanout (framework/render/kms.zig) and run SDL with
     // the dummy video+audio drivers — we keep SDL only for its window/event
     // bookkeeping; pixels go straight to the framebuffer, input via evdev.
-    const kms_mode = host_io.getenv("ZIGOS_KMS") != null;
+    const kms_mode = environ.get("ZIGOS_KMS") != null;
     if (kms_mode) {
         kms.init() catch |err| {
             log.print("[kms] init failed: {}\n", .{err});
@@ -4053,12 +4061,12 @@ pub fn run(config_in: AppConfig) !void {
         // when shutdown started; this is the belt to SDL_Quit's suspenders.
         _ = c.SDL_CaptureMouse(false);
         if (g_chrome_dragging) endChromeDrag();
-        pose.deinit();
-        whisper.deinit();
-        voice.deinit();
+        pose.deinit(io);
+        whisper.deinit(io);
+        voice.deinit(config.host);
         audio_input.deinit();
         c.SDL_Quit();
-        watchdog.markCleanExit();
+        watchdog.markCleanExit(io);
         crashlog.markCleanShutdown();
     }
     log.info(.engine, "SDL initialized", .{});
@@ -4067,8 +4075,8 @@ pub fn run(config_in: AppConfig) !void {
     // opened until JS calls __voice_start). Always present so carts can
     // useVoiceInput() without scripts/ship needing to flip a fresh -Dhas-X.
     voice.init(std.heap.c_allocator);
-    whisper.init(std.heap.c_allocator);
-    pose.init(std.heap.c_allocator);
+    _ = whisper.init(io, environ, std.heap.c_allocator);
+    pose.init(io, environ, std.heap.c_allocator);
     audio_input.init(std.heap.c_allocator);
 
     // Canvas system init
@@ -4081,10 +4089,10 @@ pub fn run(config_in: AppConfig) !void {
     var init_x: c_int = c.SDL_WINDOWPOS_CENTERED;
     var init_y: c_int = c.SDL_WINDOWPOS_CENTERED;
     const explicit_size = config.width != 1280 or config.height != 800;
-    const headless_skip_geo = host_io.getenv("ZIGOS_HEADLESS") != null;
+    const headless_skip_geo = environ.get("ZIGOS_HEADLESS") != null;
     var loaded_geom: ?geometry.WindowGeometry = null;
     if (!headless_skip_geo) {
-        loaded_geom = geometry.load();
+        loaded_geom = geometry.load(io);
         if (loaded_geom) |g| {
             init_x = g.x;
             init_y = g.y;
@@ -4095,16 +4103,16 @@ pub fn run(config_in: AppConfig) !void {
             log.info(.geometry, "restored {d}x{d} at ({d},{d}) max={d}", .{ g.width, g.height, g.x, g.y, g.maximized });
         }
     }
-    if (host_io.getenv("ZIGOS_WINDOW_W")) |ws| {
+    if (environ.get("ZIGOS_WINDOW_W")) |ws| {
         if (std.fmt.parseInt(c_int, ws, 10) catch null) |w| init_w = w;
     }
-    if (host_io.getenv("ZIGOS_WINDOW_H")) |hs| {
+    if (environ.get("ZIGOS_WINDOW_H")) |hs| {
         if (std.fmt.parseInt(c_int, hs, 10) catch null) |h| init_h = h;
     }
-    if (host_io.getenv("ZIGOS_WINDOW_X")) |xs| {
+    if (environ.get("ZIGOS_WINDOW_X")) |xs| {
         if (std.fmt.parseInt(c_int, xs, 10) catch null) |x| init_x = x;
     }
-    if (host_io.getenv("ZIGOS_WINDOW_Y")) |ys| {
+    if (environ.get("ZIGOS_WINDOW_Y")) |ys| {
         if (std.fmt.parseInt(c_int, ys, 10) catch null) |y| init_y = y;
     }
     if (config.x) |x| init_x = x;
@@ -4120,7 +4128,7 @@ pub fn run(config_in: AppConfig) !void {
     }
 
     const builtin_os = @import("builtin").os.tag;
-    const headless = host_io.getenv("ZIGOS_HEADLESS") != null;
+    const headless = environ.get("ZIGOS_HEADLESS") != null;
     const resizable_flag: u64 = if (config.not_focusable) 0 else c.SDL_WINDOW_RESIZABLE;
     const window_flags: u64 = resizable_flag |
         (if (comptime builtin_os == .macos) c.SDL_WINDOW_METAL else @as(u64, 0)) |
@@ -4138,8 +4146,8 @@ pub fn run(config_in: AppConfig) !void {
     defer g_main_window = null;
     defer _ = c.SDL_SetWindowRelativeMouseMode(window, false);
     defer c.SDL_DestroyWindow(window);
-    defer windows.deinitAll(); // close all secondary windows before SDL_Quit
-    defer world_window.deinitAll(); // the compiled-world pop-out too (WORLDWIN-0611)
+    defer windows.deinitAll(io); // close all secondary windows before SDL_Quit
+    defer world_window.deinitAll(io); // the compiled-world pop-out too (WORLDWIN-0611)
     defer panel_window.deinitAll(); // the editor-panel pop-out (PANELWIN-0628)
     defer gpu.releasePanelTarget();
     // PANELWIN-0628: route the pop-out window's UI input through engine dispatch.
@@ -4168,29 +4176,35 @@ pub fn run(config_in: AppConfig) !void {
     defer videos.deinit();
 
     render_surfaces.init();
-    defer render_surfaces.deinit();
+    defer render_surfaces.deinit(io);
 
-    capture.init();
-    defer capture.deinit();
+    capture.init(environ);
+    defer capture.deinit(io);
 
-    effects.init();
+    effects.init(environ);
     defer effects.deinit();
 
     // GPU init
-    gpu.init(window) catch |err| {
+    gpu.init(io, environ, window) catch |err| {
         log.print("wgpu init failed: {}\n", .{err});
         return error.GPUInitFailed;
     };
     defer gpu.deinit();
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] gpu: {d}ms\n", .{dt});
     }
 
-    // KMS mode: SDL's dummy video driver delivers no input, so bridge the raw
-    // kernel input devices (/dev/input/event*) into the SDL event queue.
-    if (kms_mode) evdev.init(window, @floatFromInt(init_w), @floatFromInt(init_h));
-    defer if (kms_mode) evdev.deinit();
+    // KMS mode: SDL's dummy video driver delivers no input, so bridge kernel
+    // input devices into the SDL queue through an explicit-Io owner.
+    var evdev_bridge: ?evdev.Bridge = if (kms_mode)
+        evdev.init(config.host.gpa, io, window, @floatFromInt(init_w), @floatFromInt(init_h)) catch |err| blk: {
+            log.print("[evdev] init failed: {s}\n", .{@errorName(err)});
+            break :blk null;
+        }
+    else
+        null;
+    defer if (evdev_bridge) |*bridge| bridge.deinit();
 
     // Text engine (FreeType)
     var te = TextEngine.initHeadless("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch
@@ -4200,15 +4214,15 @@ pub fn run(config_in: AppConfig) !void {
         return error.FontNotFound;
     defer te.deinit();
 
-    gpu.initText(te.library, te.face, te.fallback_faces, te.fallback_count);
+    gpu.initText(environ, te.library, te.face, te.fallback_faces, te.fallback_count);
     if (te.face_bold != null) gpu.setBoldFace(te.face_bold);
     g_text_engine = &te;
     layout.setMeasureFn(measureCallback);
-    layout.setMeasureImageFn(measureImageCallback);
-    layout.setEmitLayoutFn(emitLayoutCallback);
+    layout.setMeasureImageCallback(.{ .context = config.host, .function = measureImageCallback });
+    layout.setEmitLayoutCallback(.{ .context = config.host, .function = emitLayoutCallback });
     input.setMeasureWidthFn(measureWidthOnly);
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] text: {d}ms\n", .{dt});
     }
 
@@ -4216,7 +4230,7 @@ pub fn run(config_in: AppConfig) !void {
     var win_h: f32 = @floatFromInt(init_h);
 
     // QuickJS VM
-    js_vm.initVM();
+    js_vm.initVM(config.host);
     defer js_vm.deinit();
 
     // IFTTT host-fn no-op stubs — telemetry/system_signals fire these
@@ -4228,7 +4242,7 @@ pub fn run(config_in: AppConfig) !void {
     // up front means the worst case is "silently dropped event" rather
     // than "log spam every second forever." useIFTTT.ts later overwrites
     // these with the real emit dispatchers in the parent host.
-    js_vm.evalScript("for (const k of [" ++
+    js_vm.evalScript(config.host, "for (const k of [" ++
         "'__ifttt_onKeyDown','__ifttt_onKeyUp','__ifttt_onClipboardChange'," ++
         "'__ifttt_onSystemFocus','__ifttt_onSystemDrop','__ifttt_onSystemCursor'," ++
         "'__ifttt_onSystemSlowFrame','__ifttt_onSystemHang'," ++
@@ -4240,50 +4254,44 @@ pub fn run(config_in: AppConfig) !void {
     luajit_runtime.initVM();
     defer luajit_runtime.deinit();
     defer {
-        if (config.shutdown) |shutdown| shutdown();
+        if (config.shutdown) |shutdown| shutdown(config.host);
     }
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] vms: {d}ms\n", .{dt});
     }
 
-    // Register window-open bridge so JS can call __openWindow
-    prepared_input.setOpenWindowFn(struct {
-        fn open(title: [*:0]const u8, w: c_int, h: c_int) void {
-            _ = windows.open(.{ .title = title, .width = w, .height = h, .kind = .in_process });
-        }
-    }.open);
-
     // App init (FFI registration, state slots, initial conditionals/maps)
-    if (config.init) |initFn| initFn();
+    if (config.init) |initFn| initFn(config.host);
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] app_init: {d}ms\n", .{dt});
     }
 
     // Load embedded scripts — after init so host functions are registered,
     // then mark dirty so first tick re-evaluates conditionals with scripts available.
-    if (config.js_logic.len > 0) js_vm.evalScript(config.js_logic);
-    if (config.js_logic.len > 0) js_vm.evalExpr("__luaReady = true;");
+    if (config.js_logic.len > 0) js_vm.evalScript(config.host, config.js_logic);
+    if (config.js_logic.len > 0) js_vm.evalExpr(config.host, "__luaReady = true;");
     if (config.js_logic.len > 0 or config.lua_logic.len > 0) state_mod.markDirty();
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] scripts: {d}ms\n", .{dt});
     }
 
     // Test harness — enable if ZIGOS_TEST=1
-    if (testharness.envEnabled()) testharness.enable();
+    if (testharness.envEnabled(environ)) testharness.enable();
 
     // Initial tick — set up dynamic texts after JS/Lua is evaluated
-    if (config.tick) |tickFn| tickFn(@truncate(c.SDL_GetTicks()));
+    if (config.tick) |tickFn| tickFn(config.host, @truncate(c.SDL_GetTicks()));
     {
-        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] first_tick: {d}ms → ready\n", .{dt});
     }
 
     // PTY remote control socket
-    pty_remote.init();
-    defer pty_remote.deinit();
+    var pty_remote_server = pty_remote.Server.init(config.host.gpa);
+    pty_remote_server.start(io);
+    defer pty_remote_server.deinit(io);
 
     // Main loop
     var running = true;
@@ -4305,7 +4313,7 @@ pub fn run(config_in: AppConfig) !void {
 
         // Hot-reload: check if the app .so was recompiled
         if (config.check_reload) |check| {
-            if (check(&config)) {
+            if (check(config.host, &config)) {
                 // Reset stale pointers from the old .so
                 canvas_drag_node = null;
                 canvas_move_drag_id = 0;
@@ -4320,12 +4328,12 @@ pub fn run(config_in: AppConfig) !void {
                 g_hover_changed = true;
                 // Re-init first (registers host functions), then load scripts
                 // (matches startup order: _appInit → evalScript)
-                if (config.init) |initFn| initFn();
-                if (config.js_logic.len > 0) js_vm.evalScript(config.js_logic);
-                if (config.js_logic.len > 0) js_vm.evalExpr("__luaReady = true;");
+                if (config.init) |initFn| initFn(config.host);
+                if (config.js_logic.len > 0) js_vm.evalScript(config.host, config.js_logic);
+                if (config.js_logic.len > 0) js_vm.evalExpr(config.host, "__luaReady = true;");
                 // Restore preserved state (after init resets to defaults, before tick uses it)
-                if (config.post_reload) |postFn| postFn();
-                if (config.tick) |tickFn| tickFn(@truncate(c.SDL_GetTicks()));
+                if (config.post_reload) |postFn| postFn(config.host);
+                if (config.tick) |tickFn| tickFn(config.host, @truncate(c.SDL_GetTicks()));
                 // Update chrome root for borderless hit-testing after root swap
                 if (config.borderless) g_chrome_root = config.root;
                 layout.markLayoutDirty();
@@ -4336,28 +4344,28 @@ pub fn run(config_in: AppConfig) !void {
         // [drag-trace] per-iteration counters for chrome-drag freeze diagnosis.
         // Counters and timestamps are unconditional (cheap); the print at the
         // end of the iteration is gated on g_chrome_dragging.
-        const dt_iter_start = host_io.microTimestamp();
+        const dt_iter_start = std.Io.Clock.now(.awake, io).toMicroseconds();
         const dt_evt_start = dt_iter_start;
         var dt_evt_count: u32 = 0;
         var dt_motion_count: u32 = 0;
 
         // KMS mode: pump raw input devices into the SDL queue first, so the
         // poll loop below sees synthesized mouse events just like real ones.
-        if (kms_mode) evdev.poll();
+        if (evdev_bridge) |*bridge| bridge.poll();
 
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
             dt_evt_count += 1;
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) dt_motion_count += 1;
             // Route to secondary windows first — if consumed, skip main window handling
-            if (windows.routeEvent(&event)) continue;
-            if (world_window.routeEvent(&event)) continue;
-            if (panel_window.routeEvent(&event)) continue;
+            if (windows.routeEvent(io, &event)) continue;
+            if (world_window.routeEvent(io, &event)) continue;
+            if (panel_window.routeEvent(&event, config.host)) continue;
 
             switch (event.type) {
                 c.SDL_EVENT_QUIT => {
                     log.print("[engine] SDL_EVENT_QUIT received\n", .{});
-                    witness.flush(); // save recording before exit
+                    witness.flush(io); // save recording before exit
                     running = false;
                 },
                 c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
@@ -4371,23 +4379,23 @@ pub fn run(config_in: AppConfig) !void {
                     win_w = @floatFromInt(ww);
                     win_h = @floatFromInt(wh);
                     gpu.resize(@intCast(ww), @intCast(wh));
-                    system_signals.notifyResize(win_w, win_h);
-                    geometry.save(window);
+                    system_signals.notifyResize(config.host, win_w, win_h);
+                    geometry.save(io, window);
                     layout.markLayoutDirty();
                     g_resize_hud_w = @intFromFloat(win_w);
                     g_resize_hud_h = @intFromFloat(win_h);
                     g_resize_hud_until_ms = c.SDL_GetTicks() + 500;
                 },
                 c.SDL_EVENT_WINDOW_MOVED => {
-                    geometry.save(window);
+                    geometry.save(io, window);
                 },
                 c.SDL_EVENT_PEN_PROXIMITY_IN => {
                     // Pen hovered into tablet range — pre-switch before it touches,
                     // so the pen's remembered tool is already active on contact.
-                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(1);
+                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(config.host, 1);
                 },
                 c.SDL_EVENT_PEN_DOWN, c.SDL_EVENT_PEN_UP => {
-                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(1);
+                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(config.host, 1);
                     if (!event.ptouch.down) mouse_state.g_pen_pressure = 0;
                 },
                 c.SDL_EVENT_PEN_AXIS => {
@@ -4397,7 +4405,7 @@ pub fn run(config_in: AppConfig) !void {
                         mouse_state.g_pen_pressure = event.paxis.value;
                 },
                 c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
-                    notePointerDevice(event.button.which);
+                    notePointerDevice(config.host, event.button.which);
                     // Standard OS window behavior: double-click on a drag region
                     // (the borderless app's titlebar) toggles maximize/restore.
                     if (config.borderless and event.button.button == c.SDL_BUTTON_LEFT) {
@@ -4417,7 +4425,7 @@ pub fn run(config_in: AppConfig) !void {
                     {
                         const rmx: f32 = event.button.x;
                         const rmy: f32 = event.button.y;
-                        if (render_surfaces.handleMouseDown(rmx, rmy, event.button.button)) continue;
+                        if (render_surfaces.handleMouseDown(io, environ, rmx, rmy, event.button.button)) continue;
                     }
                     // Native mesh-editor input (modelview): middle starts an orbit; left
                     // over the viewport does the active tool (select/marquee or pan-pivot)
@@ -4517,7 +4525,7 @@ pub fn run(config_in: AppConfig) !void {
                                 // stroke runs host-side, zero JS per event.
                                 if (event.button.button == c.SDL_BUTTON_LEFT and world_loader.paintArmed(loader_node.id)) {
                                     world_loader_paint_node_id = loader_node.id;
-                                    world_loader.paintPointer(loader_node.id, .down, mx, my);
+                                    world_loader.paintPointer(io, loader_node.id, .down, mx, my);
                                     state_mod.markDirty();
                                     continue;
                                 }
@@ -4546,7 +4554,7 @@ pub fn run(config_in: AppConfig) !void {
                     if (event.button.button == c.SDL_BUTTON_LEFT and context_menu.isVisible()) {
                         const cmx: f32 = event.button.x;
                         const cmy: f32 = event.button.y;
-                        if (context_menu.handleClick(cmx, cmy)) continue;
+                        if (context_menu.handleClick(config.host, cmx, cmy)) continue;
                         // handleClick returns false for outside clicks (and hides the menu)
                         // — fall through to normal left-click handling
                     }
@@ -4565,7 +4573,7 @@ pub fn run(config_in: AppConfig) !void {
                                 context_menu.showFor(mx, my, items, h.scroll_persist_slot);
                             } else if (h.handlers.on_right_click) |handler| {
                                 prepared_input.prepareNodeEvent(h.scroll_persist_slot);
-                                handler(mx, my);
+                                handler(h.handlers.context, mx, my);
                             }
                         }
                     }
@@ -4578,9 +4586,9 @@ pub fn run(config_in: AppConfig) !void {
                             if (h.handlers.js_on_middle_click) |expr| {
                                 input.unfocus();
                                 const expr_str = std.mem.span(expr);
-                                js_vm.callGlobal("__beginJsEvent");
-                                js_vm.evalExpr(expr_str);
-                                js_vm.callGlobal("__endJsEvent");
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
+                                js_vm.evalExpr(config.host, expr_str);
+                                js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
                             }
                         }
@@ -4603,7 +4611,7 @@ pub fn run(config_in: AppConfig) !void {
                                 hit.thumb_len * 0.5;
                             input.unfocus();
                             markScrollActivity(hit.node);
-                            _ = updateScrollbarDrag(config.root, pos);
+                            _ = updateScrollbarDrag(config.host, config.root, pos);
                             continue;
                         }
                         // <Slider> grab (SLIDER-0611) — engine owns the thumb until
@@ -4615,7 +4623,7 @@ pub fn run(config_in: AppConfig) !void {
                                 slider_drag_last_sent = std.math.nan(f32);
                                 sn.slider_dragging = true;
                                 input.unfocus();
-                                updateSliderDrag(config.root, mx);
+                                updateSliderDrag(config.host, config.root, mx);
                                 continue;
                             }
                         }
@@ -4655,7 +4663,7 @@ pub fn run(config_in: AppConfig) !void {
                         const hit = layout.hitTest(config.root, mx, my);
                         // NAVDEAD-0605 diagnostic: dump the full hit-candidate
                         // stack for every left click → stderr + /tmp/reactjit-hit.log.
-                        hit_trace.trace(config.root, mx, my, hit);
+                        hit_trace.trace(io, environ, config.root, mx, my, hit);
                         const hit_is_interactive = if (hit) |h| (h.input_id != null or h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or h.handlers.on_mouse_move != null or h.handlers.js_on_mouse_move != null or h.handlers.lua_on_mouse_move != null or h.handlers.on_mouse_up != null or h.handlers.js_on_mouse_up != null or h.handlers.lua_on_mouse_up != null or h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or h.href != null) else false;
                         const hit_blocks_pointer = if (hit) |h| h.blocks_pointer_events else false;
                         const canvas_hit = if (!hit_blocks_pointer) events.findCanvasNode(config.root, mx, my) else null;
@@ -4696,8 +4704,8 @@ pub fn run(config_in: AppConfig) !void {
                             } else if (h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null) {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
-                                dispatchPointerHandler(h, .down);
+                                stampInputLatency(config.host.io, "click");
+                                dispatchPointerHandler(config.host, h, .down);
                                 if (nodeWantsPointerCapture(h)) {
                                     pointer_capture_slot = h.scroll_persist_slot;
                                     pointer_capture_button = event.button.button;
@@ -4705,28 +4713,28 @@ pub fn run(config_in: AppConfig) !void {
                             } else if (h.handlers.js_on_mouse_down) |js_expr| {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
+                                stampInputLatency(config.host.io, "click");
                                 const expr = std.mem.span(js_expr);
-                                js_vm.callGlobal("__beginJsEvent");
-                                js_vm.evalExpr(expr);
-                                js_vm.callGlobal("__endJsEvent");
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
+                                js_vm.evalExpr(config.host, expr);
+                                js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
                             } else if (h.handlers.lua_on_mouse_down) |lua_expr| {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
+                                stampInputLatency(config.host.io, "click");
                                 luajit_runtime.evalExpr(std.mem.span(lua_expr));
                             } else if (h.handlers.on_press) |handler| {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
+                                stampInputLatency(config.host.io, "click");
                                 log.print("[press] zig handler at ({d:.0},{d:.0})\n", .{ mx, my });
-                                handler();
+                                handler(h.handlers.context);
                                 // Also run JS handler if present
                                 if (h.handlers.js_on_press) |js_expr| {
                                     const expr = std.mem.span(js_expr);
                                     log.print("[press] +js: '{s}'\n", .{expr});
-                                    runJsHandlerExpr(expr);
+                                    runJsHandlerExpr(config.host, expr);
                                     log.print("[press] +js done\n", .{});
                                 }
                                 // Also run Lua handler if present
@@ -4736,24 +4744,24 @@ pub fn run(config_in: AppConfig) !void {
                             } else if (h.handlers.lua_on_press) |lua_expr| {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
+                                stampInputLatency(config.host.io, "click");
                                 log.print("[lua_on_press] eval: '{s}'\n", .{std.mem.span(lua_expr)});
                                 luajit_runtime.evalExpr(std.mem.span(lua_expr));
                                 log.print("[lua_on_press] done\n", .{});
                             } else if (h.handlers.js_on_press) |js_expr| {
                                 input.unfocus();
                                 stampClickLatency();
-                                stampInputLatency("click");
+                                stampInputLatency(config.host.io, "click");
                                 const expr = std.mem.span(js_expr);
                                 log.print("[js_on_press] eval: '{s}'\n", .{expr});
-                                const jt0 = host_io.microTimestamp();
-                                runJsHandlerExpr(expr);
-                                const jt1 = host_io.microTimestamp();
+                                const jt0 = std.Io.Clock.now(.awake, io).toMicroseconds();
+                                runJsHandlerExpr(config.host, expr);
+                                const jt1 = std.Io.Clock.now(.awake, io).toMicroseconds();
                                 log.print("[js_on_press] done ({d}us)\n", .{jt1 - jt0});
                             } else if (h.href) |url| {
                                 stampClickLatency();
-                                stampInputLatency("click");
-                                openUrl(url);
+                                stampInputLatency(config.host.io, "click");
+                                openUrl(config.host.io, url);
                             }
                             // Witness: record the click with semantic target
                             witness.recordClick(h);
@@ -4803,12 +4811,12 @@ pub fn run(config_in: AppConfig) !void {
                                     handled_interactive = true;
                                 } else if (h.handlers.on_mouse_down) |handler| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
-                                    handler();
+                                    stampInputLatency(config.host.io, "click");
+                                    handler(h.handlers.context);
                                     if (h.handlers.js_on_mouse_down) |js_expr| {
-                                        js_vm.callGlobal("__beginJsEvent");
-                                        js_vm.evalExpr(std.mem.span(js_expr));
-                                        js_vm.callGlobal("__endJsEvent");
+                                        js_vm.callGlobal(config.host, "__beginJsEvent");
+                                        js_vm.evalExpr(config.host, std.mem.span(js_expr));
+                                        js_vm.callGlobal(config.host, "__endJsEvent");
                                         state_mod.markDirty();
                                     }
                                     if (h.handlers.lua_on_mouse_down) |lua_expr| {
@@ -4817,23 +4825,23 @@ pub fn run(config_in: AppConfig) !void {
                                     handled_interactive = true;
                                 } else if (h.handlers.js_on_mouse_down) |js_expr| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
-                                    js_vm.callGlobal("__beginJsEvent");
-                                    js_vm.evalExpr(std.mem.span(js_expr));
-                                    js_vm.callGlobal("__endJsEvent");
+                                    stampInputLatency(config.host.io, "click");
+                                    js_vm.callGlobal(config.host, "__beginJsEvent");
+                                    js_vm.evalExpr(config.host, std.mem.span(js_expr));
+                                    js_vm.callGlobal(config.host, "__endJsEvent");
                                     state_mod.markDirty();
                                     handled_interactive = true;
                                 } else if (h.handlers.lua_on_mouse_down) |lua_expr| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
+                                    stampInputLatency(config.host.io, "click");
                                     luajit_runtime.evalExpr(std.mem.span(lua_expr));
                                     handled_interactive = true;
                                 } else if (h.handlers.on_press) |handler| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
-                                    handler();
+                                    stampInputLatency(config.host.io, "click");
+                                    handler(h.handlers.context);
                                     if (h.handlers.js_on_press) |js_expr| {
-                                        runJsHandlerExpr(std.mem.span(js_expr));
+                                        runJsHandlerExpr(config.host, std.mem.span(js_expr));
                                     }
                                     if (h.handlers.lua_on_press) |lua_expr| {
                                         luajit_runtime.evalExpr(std.mem.span(lua_expr));
@@ -4841,18 +4849,18 @@ pub fn run(config_in: AppConfig) !void {
                                     handled_interactive = true;
                                 } else if (h.handlers.lua_on_press) |lua_expr| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
+                                    stampInputLatency(config.host.io, "click");
                                     luajit_runtime.evalExpr(std.mem.span(lua_expr));
                                     handled_interactive = true;
                                 } else if (h.handlers.js_on_press) |js_expr| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
-                                    runJsHandlerExpr(std.mem.span(js_expr));
+                                    stampInputLatency(config.host.io, "click");
+                                    runJsHandlerExpr(config.host, std.mem.span(js_expr));
                                     handled_interactive = true;
                                 } else if (h.href) |url| {
                                     stampClickLatency();
-                                    stampInputLatency("click");
-                                    openUrl(url);
+                                    stampInputLatency(config.host.io, "click");
+                                    openUrl(config.host.io, url);
                                     handled_interactive = true;
                                 }
                                 if (handled_interactive) witness.recordClick(h);
@@ -4913,7 +4921,7 @@ pub fn run(config_in: AppConfig) !void {
                     }
                 },
                 c.SDL_EVENT_MOUSE_MOTION => {
-                    notePointerDevice(event.motion.which);
+                    notePointerDevice(config.host, event.motion.which);
                     const mx: f32 = event.motion.x;
                     const my: f32 = event.motion.y;
                     mouse_state.updateMouse(mx, my);
@@ -4984,15 +4992,15 @@ pub fn run(config_in: AppConfig) !void {
                     if (world_loader_paint_node_id != 0) {
                         // MAPPAINT req_2473: an active paint drag — stroke host-side.
                         if (findWorldLoaderNodeById(config.root, world_loader_paint_node_id) == null) {
-                            world_loader.paintPointer(world_loader_paint_node_id, .up, mx, my);
+                            world_loader.paintPointer(io, world_loader_paint_node_id, .up, mx, my);
                             world_loader_paint_node_id = 0;
                         } else if (mapPaintHitIsChrome(config.root, mx, my)) {
-                            world_loader.paintPointer(world_loader_paint_node_id, .up, mx, my);
+                            world_loader.paintPointer(io, world_loader_paint_node_id, .up, mx, my);
                             world_loader_paint_node_id = 0;
                             state_mod.markDirty();
                             continue;
                         } else {
-                            world_loader.paintPointer(world_loader_paint_node_id, .move, mx, my);
+                            world_loader.paintPointer(io, world_loader_paint_node_id, .move, mx, my);
                             state_mod.markDirty();
                             continue;
                         }
@@ -5032,28 +5040,28 @@ pub fn run(config_in: AppConfig) !void {
                     if (prepared_input.terminalDockResizeActive()) {
                         if ((event.motion.state & c.SDL_BUTTON_LMASK) != 0) {
                             const next_height = prepared_input.terminalDockResizeStartHeight() + (prepared_input.terminalDockResizeStartY() - my);
-                            js_vm.callGlobalFloat("__setTerminalDockHeight", @floatCast(next_height));
+                            js_vm.callGlobalFloat(config.host, "__setTerminalDockHeight", @floatCast(next_height));
                         } else {
                             prepared_input.endTerminalDockResize();
                         }
                     }
                     // Render surface mouse motion forwarding
-                    if (render_surfaces.handleMouseMotion(mx, my)) continue;
+                    if (render_surfaces.handleMouseMotion(io, environ, mx, my)) continue;
                     if (scrollbar_drag_slot != 0) {
                         const pos = if (scrollbar_drag_axis == .vertical) my else mx;
-                        _ = updateScrollbarDrag(config.root, pos);
+                        _ = updateScrollbarDrag(config.host, config.root, pos);
                         continue;
                     }
                     // <Slider> drag (SLIDER-0611) — engine-owned thumb; zero JS
                     // in the loop beyond the throttled value stream.
                     if (slider_drag_slot != 0) {
-                        updateSliderDrag(config.root, mx);
+                        updateSliderDrag(config.host, config.root, mx);
                         continue;
                     }
                     // <Slider> hover pointer-value (MEDIASLIDER-0705) — non-
                     // consuming: tracks enter/move/leave for hover-enabled
                     // sliders (tooltip latch + quantized bucket dispatch).
-                    updateSliderHover(config.root, mx, my);
+                    updateSliderHover(config.host, config.root, mx, my);
                     // Physics drag update
                     if (physics2d.isDragging()) {
                         physics2d.updateDrag(mx, my);
@@ -5096,9 +5104,9 @@ pub fn run(config_in: AppConfig) !void {
                         input_drag_pending = true;
                         input_drag_pending_x = mx;
                         input_drag_pending_y = my;
-                        stampInputLatency("drag");
+                        stampInputLatency(config.host.io, "drag");
                     }
-                    updateHover(config.root, mx, my);
+                    updateHover(config.host, config.root, mx, my);
                     // Context menu hover tracking
                     context_menu.updateHover(mx, my);
                     // Canvas hit testing — find which Canvas.Node the mouse is over
@@ -5165,16 +5173,16 @@ pub fn run(config_in: AppConfig) !void {
                                     canvas_move_last_gx,
                                     canvas_move_last_gy,
                                 })) |sentinel| {
-                                    js_vm.callGlobal("__beginJsEvent");
-                                    js_vm.evalExpr(sentinel);
-                                    js_vm.callGlobal("__endJsEvent");
+                                    js_vm.callGlobal(config.host, "__beginJsEvent");
+                                    js_vm.evalExpr(config.host, sentinel);
+                                    js_vm.callGlobal(config.host, "__endJsEvent");
                                 } else |_| {}
                             }
                             state_mod.markDirty();
                         }
                     } else if (dragging_left and pointer_capture_slot != 0) {
                         if (findNodeByScrollSlot(config.root, pointer_capture_slot)) |node| {
-                            dispatchPointerHandler(node, .move);
+                            dispatchPointerHandler(config.host, node, .move);
                         }
                     } else if (dragging_left and canvas_drag_node != null) {
                         // Canvas pan — built-in
@@ -5188,7 +5196,7 @@ pub fn run(config_in: AppConfig) !void {
                     }
                 },
                 c.SDL_EVENT_MOUSE_BUTTON_UP => {
-                    notePointerDevice(event.button.which);
+                    notePointerDevice(config.host, event.button.which);
                     mouse_state.updateMouse(event.button.x, event.button.y);
                     mouse_state.updateMouseButton(false, event.button.button == c.SDL_BUTTON_RIGHT);
                     // Native mesh-editor release: end the orbit/pan, or commit the selection
@@ -5223,13 +5231,13 @@ pub fn run(config_in: AppConfig) !void {
                                 me_gizmo_dragging = false;
                                 me_gizmo_axis = -1;
                                 const guarded = r3d.meshGizmoFinish();
-                                js_vm.callGlobal("__beginJsEvent");
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
                                 if (guarded) {
-                                    js_vm.callGlobal("__meshEditGuardChanged");
+                                    js_vm.callGlobal(config.host, "__meshEditGuardChanged");
                                 } else {
-                                    js_vm.callGlobal("__meshEditSelChanged");
+                                    js_vm.callGlobal(config.host, "__meshEditSelChanged");
                                 }
-                                js_vm.callGlobal("__endJsEvent");
+                                js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
                                 continue;
                             }
@@ -5237,9 +5245,9 @@ pub fn run(config_in: AppConfig) !void {
                                 me_selecting = false;
                                 me_marquee = false;
                                 r3d.meshClearMarquee(); // drop the box outline on release
-                                js_vm.callGlobal("__beginJsEvent");
-                                js_vm.callGlobal("__meshEditSelChanged");
-                                js_vm.callGlobal("__endJsEvent");
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
+                                js_vm.callGlobal(config.host, "__meshEditSelChanged");
+                                js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
                                 continue;
                             }
@@ -5247,7 +5255,7 @@ pub fn run(config_in: AppConfig) !void {
                     }
                     if (event.button.button == c.SDL_BUTTON_LEFT and world_loader_paint_node_id != 0) {
                         // MAPPAINT req_2473: release ends the stroke (ramp/slope stamp here).
-                        world_loader.paintPointer(world_loader_paint_node_id, .up, event.button.x, event.button.y);
+                        world_loader.paintPointer(io, world_loader_paint_node_id, .up, event.button.x, event.button.y);
                         world_loader_paint_node_id = 0;
                         state_mod.markDirty();
                         continue;
@@ -5268,12 +5276,12 @@ pub fn run(config_in: AppConfig) !void {
                     {
                         const rmx: f32 = event.button.x;
                         const rmy: f32 = event.button.y;
-                        if (render_surfaces.handleMouseUp(rmx, rmy, event.button.button)) continue;
+                        if (render_surfaces.handleMouseUp(io, environ, rmx, rmy, event.button.button)) continue;
                     }
                     if (event.button.button == c.SDL_BUTTON_LEFT) {
                         if (pointer_capture_slot != 0 and pointer_capture_button == event.button.button) {
                             if (findNodeByScrollSlot(config.root, pointer_capture_slot)) |node| {
-                                dispatchPointerHandler(node, .up);
+                                dispatchPointerHandler(config.host, node, .up);
                             }
                             pointer_capture_slot = 0;
                             pointer_capture_button = 0;
@@ -5287,9 +5295,9 @@ pub fn run(config_in: AppConfig) !void {
                                 canvas_move_last_gx,
                                 canvas_move_last_gy,
                             })) |sentinel| {
-                                js_vm.callGlobal("__beginJsEvent");
-                                js_vm.evalExpr(sentinel);
-                                js_vm.callGlobal("__endJsEvent");
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
+                                js_vm.evalExpr(config.host, sentinel);
+                                js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
                             } else |_| {}
                             canvas_move_drag_id = 0;
@@ -5298,7 +5306,7 @@ pub fn run(config_in: AppConfig) !void {
                         scrollbar_drag_slot = 0;
                         // <Slider> settle (SLIDER-0611) — ONE commit dispatch with
                         // the final value; the cart's React state catches up here.
-                        endSliderDrag(config.root);
+                        endSliderDrag(config.host, config.root);
                         physics2d.endDrag();
                         canvas_drag_node = null;
                         input_drag_active = false;
@@ -5328,7 +5336,7 @@ pub fn run(config_in: AppConfig) !void {
                     // bindings — see framework/v8_bindings_vterm.zig.)
                     // Render surface text input forwarding
                     if (render_surfaces.handleTextInput(text_ptr)) continue;
-                    if (input.getFocusedId() != null) stampInputLatency("type");
+                    if (input.getFocusedId() != null) stampInputLatency(config.host.io, "type");
                     input.handleTextInput(text_ptr);
                 },
                 c.SDL_EVENT_KEY_DOWN => {
@@ -5342,7 +5350,7 @@ pub fn run(config_in: AppConfig) !void {
                     // must survive the wire; see framework/key_pack.zig.
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(mod));
                     // Capture key (F9 recording toggle)
-                    if (capture.handleKey(sym)) continue;
+                    if (capture.handleKey(io, environ, sym)) continue;
                     // Terminal copy/paste: Ctrl+Shift+C/V (not Ctrl+C which is SIGINT)
                     if (sessionInitialized(g_focused_session)) {
                         const t_ctrl = (mod & c.SDL_KMOD_CTRL) != 0;
@@ -5395,7 +5403,7 @@ pub fn run(config_in: AppConfig) !void {
                     // with qjs_runtime. PTY input now flows through the V8
                     // bindings — see framework/v8_bindings_vterm.zig.)
                     // Render surface key forwarding
-                    if (render_surfaces.handleKeyDown(sym)) continue;
+                    if (render_surfaces.handleKeyDown(io, environ, sym)) continue;
                     {
                         const ctrl = (mod & c.SDL_KMOD_CTRL) != 0;
                         // Mesh editor Ctrl+A → select all elements (scoped to the focused
@@ -5409,7 +5417,7 @@ pub fn run(config_in: AppConfig) !void {
                             // lights up the whole app's text.
                             _ = r3d.meshEditSelectAll();
                             selection.clear();
-                            js_vm.callGlobal("__meshEditSelChanged");
+                            js_vm.callGlobal(config.host, "__meshEditSelChanged");
                             state_mod.markDirty();
                             continue;
                         }
@@ -5426,22 +5434,22 @@ pub fn run(config_in: AppConfig) !void {
                                 (!ctrl and printable))
                         else
                             false;
-                        if (input_consumed) stampInputLatency("key");
+                        if (input_consumed) stampInputLatency(config.host.io, "key");
                         if (!input_consumed and !videos.handleKey(sym)) {
                             selection.onKeyDown(config.root, sym, mod);
-                            ifttt_zig.dispatchKeyDown(packed_key);
-                            js_vm.callGlobalInt("__ifttt_onKeyDown", packed_key);
+                            ifttt_zig.dispatchKeyDown(config.host, packed_key);
+                            js_vm.callGlobalInt(config.host, "__ifttt_onKeyDown", packed_key);
                             // Forward key events to QuickJS script layer
-                            js_vm.callGlobalInt("__onKeyDown", @intCast(sym));
+                            js_vm.callGlobalInt(config.host, "__onKeyDown", @intCast(sym));
                         }
                     }
                 },
                 c.SDL_EVENT_KEY_UP => {
                     // Same full-width packing as KEY_DOWN (key_pack.zig).
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(event.key.mod));
-                    _ = render_surfaces.handleKeyUp(@intCast(event.key.key));
-                    ifttt_zig.dispatchKeyUp(packed_key);
-                    js_vm.callGlobalInt("__ifttt_onKeyUp", packed_key);
+                    _ = render_surfaces.handleKeyUp(io, environ, @intCast(event.key.key));
+                    ifttt_zig.dispatchKeyUp(config.host, packed_key);
+                    js_vm.callGlobalInt(config.host, "__ifttt_onKeyUp", packed_key);
                 },
                 c.SDL_EVENT_MOUSE_WHEEL => {
                     // SDL3: mouse_x/mouse_y are in the wheel event itself
@@ -5547,7 +5555,7 @@ pub fn run(config_in: AppConfig) !void {
                             scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_sy));
                             markScrollActivity(scroll_node);
                             luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
-                            fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
+                            fireScrollHandlers(config.host, scroll_node, event.wheel.x, event.wheel.y);
                         } else {
                             const delta: f32 = event.wheel.y;
                             canvas.handleScroll(mx - cn.computed.x, my - cn.computed.y, delta, cn.computed.w, cn.computed.h);
@@ -5569,39 +5577,39 @@ pub fn run(config_in: AppConfig) !void {
                         scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_scroll_y));
                         markScrollActivity(scroll_node);
                         luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
-                        fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
+                        fireScrollHandlers(config.host, scroll_node, event.wheel.x, event.wheel.y);
                     } else if (events.hitTestScroll(config.root, mx, my)) |scroll_node| {
                         // No scroll container under the cursor, but a node opted
                         // into the raw wheel via onScroll (e.g. a transparent
                         // overlay driving a 3D camera dolly). Deliver the delta
                         // straight to its handler — nothing scrolls in the layout.
-                        fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
+                        fireScrollHandlers(config.host, scroll_node, event.wheel.x, event.wheel.y);
                     }
                 },
                 c.SDL_EVENT_DROP_FILE => {
                     if (event.drop.data) |data_ptr| {
                         const path = std.mem.span(data_ptr);
                         filedrop.dispatch(path, config.root);
-                        system_signals.notifyDrop(path);
+                        system_signals.notifyDrop(config.host, path);
                         // SDL3: drop data is managed by SDL, no SDL_free needed
                     }
                 },
                 c.SDL_EVENT_WINDOW_FOCUS_GAINED => {
-                    system_signals.notifyFocus(true);
+                    system_signals.notifyFocus(config.host, true);
                 },
                 c.SDL_EVENT_WINDOW_FOCUS_LOST => {
                     releaseWorldLoaderPointer();
                     if (world_loader_paint_node_id != 0) {
-                        world_loader.paintPointer(world_loader_paint_node_id, .up, 0, 0);
+                        world_loader.paintPointer(io, world_loader_paint_node_id, .up, 0, 0);
                         world_loader_paint_node_id = 0;
                     }
-                    system_signals.notifyFocus(false);
+                    system_signals.notifyFocus(config.host, false);
                 },
                 else => {},
             }
         }
 
-        const dt_evt_end = host_io.microTimestamp();
+        const dt_evt_end = std.Io.Clock.now(.awake, io).toMicroseconds();
 
         // The `app` phase begins exactly where event processing ended — phases
         // are a contiguous partition of the frame, so the next boundary is the
@@ -5632,9 +5640,9 @@ pub fn run(config_in: AppConfig) !void {
             // (post-tick / pre-layout the computed rects are stale).
             hover_needs_resolve = hovered_node != null;
             hovered_node = null;
-            tickFn(@truncate(c.SDL_GetTicks()));
+            tickFn(config.host, @truncate(c.SDL_GetTicks()));
         }
-        const phase_t1 = host_io.microTimestamp();
+        const phase_t1 = std.Io.Clock.now(.awake, io).toMicroseconds();
 
         // Transition tick — interpolate active transitions AFTER style updates, BEFORE layout
         {
@@ -5652,16 +5660,16 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // PTY remote control — accept connections, process commands
-        pty_remote.poll();
+        pty_remote_server.poll(io);
 
         // Terminal tick — walk every Terminal node in the tree, ensure its
         // pipe exists, poll for output, run classifier + semantic per session.
         {
             crashlog.log("tick:term-start");
-            const TickCtx = struct {};
-            var tick_ctx = TickCtx{};
+            const TickCtx = struct { io: std.Io };
+            var tick_ctx = TickCtx{ .io = io };
             forEachTerminalNode(config.root, &tick_ctx, struct {
-                fn visit(_: *TickCtx, tn: *Node, sess: []const u8) void {
+                fn visit(ctx: *TickCtx, tn: *Node, sess: []const u8) void {
                     // <Terminal dumb /> — no PTY. Ensure the cell-grid pipe
                     // exists (so paint has rows) but never spawn a shell or
                     // poll. The cart feeds bytes via __vterm_feed; repaint is
@@ -5683,10 +5691,10 @@ pub fn run(config_in: AppConfig) !void {
                     if (vterm_mod.getPipe(sess) == null) {
                         const shell_path: [*:0]const u8 =
                             if (tn.terminal_shell) |s| s else "bash";
-                        vterm_mod.spawnShellByName(sess, shell_path, 24, 80);
+                        vterm_mod.spawnShellByName(ctx.io, sess, shell_path, 24, 80);
                     }
                     crashlog.log("tick:poll");
-                    if (vterm_mod.pollPtyByName(sess)) {
+                    if (vterm_mod.pollPtyByName(ctx.io, sess)) {
                         classifier.markDirtyByName(sess);
                         layout.markLayoutDirty();
                     }
@@ -5736,10 +5744,10 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // Layout (main window) — skip full flex pass when nothing invalidated geometry
-        const t2 = host_io.microTimestamp();
+        const t2 = std.Io.Clock.now(.awake, io).toMicroseconds();
         const app_h = win_h;
         layout.layout(config.root, 0, 0, win_w, app_h);
-        const t3 = host_io.microTimestamp();
+        const t3 = std.Io.Clock.now(.awake, io).toMicroseconds();
         frame_telemetry.telemetry_layout_us = @intCast(@max(0, t3 - t2));
 
         // Re-resolve hovered_node after layout (computed rects are now valid).
@@ -5755,7 +5763,7 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // One-shot visible-node coord dump at tick 60 (REACTJIT_NODEDUMP gate).
-        nodedumpMaybeEmit(config.root, win_w, app_h);
+        nodedumpMaybeEmit(config.host.environ, config.root, win_w, app_h);
 
         // Physics 2D tick — step world, sync body positions to nodes AFTER layout
         // (physics overwrites computed.x/y — must happen after layout sets them)
@@ -5768,7 +5776,7 @@ pub fn run(config_in: AppConfig) !void {
 
         // Layout + paint secondary windows (in-process, notifications)
         windows.layoutAll();
-        windows.paintAndPresent();
+        windows.paintAndPresent(io);
 
         // Resolve deferred selection (safe — layout is done, FT mutations won't corrupt measurements)
         selection.resolvePending();
@@ -5781,7 +5789,7 @@ pub fn run(config_in: AppConfig) !void {
         if (videos.videoCount() > 0) tickMediaSliders(config.root);
 
         // Render surfaces update — poll XShm/FFmpeg/VNC for new frames
-        render_surfaces.update();
+        render_surfaces.update(io, environ);
 
         // Cursor blink — update before paint so cursor state is fresh
         const now_tick: u32 = @truncate(c.SDL_GetTicks());
@@ -5799,13 +5807,13 @@ pub fn run(config_in: AppConfig) !void {
         paintable.drainAll();
         r3d.update(dt_sec);
         fswatch.tick(dt_ms);
-        clipboard_watch.tick(dt_ms);
-        selection_watch.tick(dt_ms);
-        voice.tick(dt_ms);
-        audio_input.tick(dt_ms);
-        whisper.tick(dt_ms);
-        system_signals.tick(dt_ms);
-        ifttt_zig.tick(dt_ms);
+        clipboard_watch.tick(config.host, dt_ms);
+        selection_watch.tick(config.host, dt_ms);
+        voice.tick(config.host, dt_ms);
+        audio_input.tick(config.host, dt_ms);
+        whisper.tick(config.host, dt_ms);
+        system_signals.tick(config.host, dt_ms);
+        ifttt_zig.tick(config.host, dt_ms);
         sim.tick(dt_ms);
 
         // Paint (main window — wgpu)
@@ -5814,9 +5822,9 @@ pub fn run(config_in: AppConfig) !void {
         g_paint_count = 0;
         g_budget_exceeded = false;
         g_hidden_count = 0;
-        const t4 = host_io.microTimestamp();
-        paintNode(config.root);
-        system_signals.tickPostPaint(dt_sec);
+        const t4 = std.Io.Clock.now(.awake, io).toMicroseconds();
+        paintNode(io, environ, config.root);
+        system_signals.tickPostPaint(config.host, dt_sec);
 
         // (devtools paint removed — inspector lives in tsz-tools)
 
@@ -5871,24 +5879,24 @@ pub fn run(config_in: AppConfig) !void {
 
         // KMS mode: no compositor draws a pointer, so render a software cursor
         // at the evdev position on top of everything else this frame.
-        if (kms_mode) drawSoftwareCursor(evdev.mouseX(), evdev.mouseY());
+        if (evdev_bridge) |*bridge| drawSoftwareCursor(bridge.mouseX(), bridge.mouseY());
 
-        const t5 = host_io.microTimestamp();
+        const t5 = std.Io.Clock.now(.awake, io).toMicroseconds();
         frame_telemetry.telemetry_paint_us = @intCast(@max(0, t5 - t4));
 
-        const phase_t_preframe = host_io.microTimestamp();
-        gpu.frame(0.051, 0.067, 0.090);
-        const phase_t_postframe = host_io.microTimestamp();
+        const phase_t_preframe = std.Io.Clock.now(.awake, io).toMicroseconds();
+        gpu.frame(io, environ, 0.051, 0.067, 0.090);
+        const phase_t_postframe = std.Io.Clock.now(.awake, io).toMicroseconds();
         frame_telemetry.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
 
         // WORLDWIN-0611: the compiled-world pop-out presents its own surface
         // after the main frame — fully self-contained (own RT, own encoder),
         // a no-op while the window is closed.
-        world_window.frame();
+        world_window.frame(io, environ);
         // PANELWIN-0628: the editor-panel pop-out renders its 2D subtree into a
         // gpu RT and blits to its own swapchain — also after the main frame, also
         // a no-op while closed.
-        renderPanelWindow();
+        renderPanelWindow(config.host);
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {
@@ -5906,7 +5914,7 @@ pub fn run(config_in: AppConfig) !void {
         // frame's cycle to post-present. Prints every time so a live typing
         // or drag session produces a running latency trace in stderr.
         if (g_input_latency_ts_us != 0) {
-            const latency_us = host_io.microTimestamp() - g_input_latency_ts_us;
+            const latency_us = std.Io.Clock.now(.awake, io).toMicroseconds() - g_input_latency_ts_us;
             log.print("[input-latency] {s}: {d}ms (batched {d} event{s})\n", .{
                 g_input_latency_kind,
                 @divTrunc(latency_us, 1000),
@@ -5929,8 +5937,8 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // Witness — record tree snapshots / replay actions
-        if (witness.tick(config.root)) {
-            witness.flush();
+        if (witness.tick(io, environ, config.root)) {
+            witness.flush(io);
             std.process.exit(witness.exitCode());
         }
 
@@ -5962,7 +5970,7 @@ pub fn run(config_in: AppConfig) !void {
         //   t_postframe  → t6         : post_frame (world_window.frame, capture/test/witness)
         // bridge_us / present_us / gc_ns are CROSS-CUTTING overlays (they nest
         // inside the phases above), not partition members — kept as annotations.
-        const t6 = host_io.microTimestamp();
+        const t6 = std.Io.Clock.now(.awake, io).toMicroseconds();
         telemetry.collect(.{
             .layout_us = @intCast(@max(0, t3 - t2)),
             .paint_us = @intCast(@max(0, t5 - t4)),
@@ -6038,7 +6046,7 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // Debug server — poll for requests + push telemetry stream
-        debug_server.poll();
+        debug_server.poll(io);
 
         // Telemetry (legacy stderr + qjs_runtime vars)
         fps_frames += 1;
@@ -6054,7 +6062,7 @@ pub fn run(config_in: AppConfig) !void {
             // isn't flooded with 3600 lines/hour. The log-file copy below is
             // unthrottled because nobody watches it live. Set ZIGOS_TELEMETRY=1
             // to print to stderr every second for perf-hunting.
-            const verbose = host_io.getenv("ZIGOS_TELEMETRY") != null;
+            const verbose = environ.get("ZIGOS_TELEMETRY") != null;
             if (verbose or (now -% telemetry_stderr_last) >= 10_000) {
                 telemetry_stderr_last = now;
                 log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{
@@ -6066,9 +6074,17 @@ pub fn run(config_in: AppConfig) !void {
             });
             frame_telemetry.telemetry_bridge_calls = frame_telemetry.bridge_calls_this_second;
             frame_telemetry.bridge_calls_this_second = 0;
-            @import("process/luajit_worker.zig").logTelemetry();
+            if (luajit_worker.takeTelemetry()) |lua_stats| {
+                log.print("[lua-worker] N={d} | processed: {d}/s | total: {d} | pending: {d} | latency: {d}us\n", .{
+                    lua_stats.bridge_n,
+                    lua_stats.processed_per_second,
+                    lua_stats.processed_total,
+                    lua_stats.pending,
+                    lua_stats.latency_us,
+                });
+            }
             if (HAS_AUDIO) @import("audio/api.zig").logTelemetry();
-            watchdog.heartbeat();
+            watchdog.heartbeat(io);
             g_budget_exceeded = false;
             g_hover_changed = false;
             g_hidden_count = 0;
@@ -6084,7 +6100,7 @@ pub fn run(config_in: AppConfig) !void {
         // the bottleneck we're trying to measure. Set ZIGOS_LOG_FILE=/tmp/drag.log
         // before launching the dev host to capture.
         if (g_chrome_dragging) {
-            const dt_iter_end = host_io.microTimestamp();
+            const dt_iter_end = std.Io.Clock.now(.awake, io).toMicroseconds();
             log.writeLine(
                 "[drag-trace] iter={d}us evt={d}us(n={d},mot={d}) apptick={d}us preLayout={d}us layout={d}us paint={d}us gpufrm={d}us",
                 .{
@@ -6100,5 +6116,7 @@ pub fn run(config_in: AppConfig) !void {
                 },
             );
         }
+
+        _ = config.diag_sink.flush(io);
     }
 }

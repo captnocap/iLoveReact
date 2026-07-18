@@ -24,9 +24,9 @@ const gpu = @import("gpu.zig");
 /// the shader won't compile — callers fall back to the face's flat color.
 /// Idempotent per (key, shader): re-calling with the same key reuses the cached
 /// material instance.
-pub fn materialize(key: []const u8, wgsl: []const u8, data: ?[]const f32, size: u32) bool {
+pub fn materialize(io: std.Io, environ: *const std.process.Environ.Map, key: []const u8, wgsl: []const u8, data: ?[]const f32, size: u32) bool {
     const hash = std.hash.Wyhash.hash(0, key);
-    const view = effects.renderShaderToTexture(hash, wgsl, data, size) orelse return false;
+    const view = effects.renderShaderToTexture(io, environ, hash, wgsl, data, size) orelse return false;
     return gpu.installStaticSurfaceView(key, view, size, size);
 }
 
@@ -84,7 +84,7 @@ pub fn materializePixels(key: []const u8, rgba: []const u8, w: u32, h: u32) bool
 /// BORROWED view there, readbackStaticSurface rejects borrowed entries, so that
 /// path returned null on every call. It also leaked one registry entry per
 /// brush-param tweak. (The white-fill paint bug, req_2482.)
-pub fn bakePixels(key: []const u8, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
+pub fn bakePixels(io: std.Io, environ: *const std.process.Environ.Map, key: []const u8, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
     const hash = std.hash.Wyhash.hash(0, key);
-    return effects.renderShaderToPixels(hash, wgsl, data, size);
+    return effects.renderShaderToPixels(io, environ, hash, wgsl, data, size);
 }

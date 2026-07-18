@@ -4,7 +4,7 @@
 //! architecture. No external dependencies.
 //!
 //! Usage:
-//!   var ws = try websocket.connect(alloc, "echo.websocket.org", 80, "/");
+//!   var ws = try websocket.WebSocket.connectTcp(alloc, io, "echo.websocket.org", 80, "/");
 //!   try ws.send("hello");
 //!   // each frame:
 //!   if (ws.update()) |event| {
@@ -17,11 +17,7 @@
 //!   }
 
 const std = @import("std");
-const netx = @import("netx.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
+const transport = @import("transport.zig");
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -59,7 +55,8 @@ const MAX_FRAME_HDR = 14; // 2 + 8 + 4 (max header + mask)
 // ── WebSocket ────────────────────────────────────────────────────────────
 
 pub const WebSocket = struct {
-    stream: netx.Stream,
+    pump: transport.StreamPump,
+    transport_live: bool = true,
     status: Status,
     read_buf: [MAX_MSG]u8 = undefined,
     read_len: usize = 0,
@@ -72,12 +69,7 @@ pub const WebSocket = struct {
 
     /// Connect to a WebSocket server. Sends the HTTP upgrade request.
     /// Call update() each frame to complete the handshake and receive messages.
-    pub fn init(stream: netx.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
-        const ws = WebSocket{
-            .stream = stream,
-            .status = .connecting,
-        };
-
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stream: std.Io.net.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
         // Generate Sec-WebSocket-Key (fixed key is fine for non-security purposes)
         const sec_key = "dGhlIHNhbXBsZSBub25jZQ==";
 
@@ -94,24 +86,25 @@ pub const WebSocket = struct {
                 "Sec-WebSocket-Key: {s}\r\n\r\n",
             .{ path, host, port, sec_key },
         );
-        try stream.writeAll(stream_writer.buffered());
+        var pump = transport.StreamPump.init(allocator, io, stream) catch |err| {
+            stream.close(io);
+            return err;
+        };
+        errdefer pump.deinit();
+        try pump.send(stream_writer.buffered());
 
-        // Set socket to non-blocking for update() polling
-        setNonBlocking(stream);
-
-        return ws;
+        return .{ .pump = pump, .status = .connecting };
     }
 
     /// Connect to a WebSocket server via TCP.
-    pub fn connectTcp(host: []const u8, port: u16, path: []const u8) !WebSocket {
-        const stream = try netx.tcpConnectToHost(std.heap.page_allocator, host, port);
-        errdefer stream.close(); // don't leak on init failure
-        return try init(stream, host, port, path);
+    pub fn connectTcp(allocator: std.mem.Allocator, io: std.Io, host: []const u8, port: u16, path: []const u8) !WebSocket {
+        const stream = try transport.connectHost(io, host, port);
+        return try init(allocator, io, stream, host, port, path);
     }
 
     /// Connect via an already-established stream (e.g., SOCKS5 tunnel).
-    pub fn connectViaStream(stream: netx.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
-        return try init(stream, host, port, path);
+    pub fn connectViaStream(allocator: std.mem.Allocator, io: std.Io, stream: std.Io.net.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
+        return try init(allocator, io, stream, host, port, path);
     }
 
     /// Non-blocking poll. Call once per frame.
@@ -145,7 +138,10 @@ pub const WebSocket = struct {
 
     /// Hard close — shutdown immediately.
     pub fn shutdown(self: *WebSocket) void {
-        self.stream.close();
+        if (self.transport_live) {
+            self.pump.deinit();
+            self.transport_live = false;
+        }
         self.status = .closed;
     }
 
@@ -153,17 +149,18 @@ pub const WebSocket = struct {
 
     fn handleUpgrade(self: *WebSocket) ?Event {
         // Try to read more of the HTTP response
-        const n = self.stream.read(self.upgrade_buf[self.upgrade_len..]) catch |err| {
-            if (err == error.WouldBlock) return null;
-            self.stream.close();
-            self.status = .closed;
-            return .{ .err = "upgrade read failed" };
+        const n = switch (self.pump.drain(self.upgrade_buf[self.upgrade_len..])) {
+            .empty => return null,
+            .data => |count| count,
+            .closed => {
+                self.shutdown();
+                return .{ .err = "connection closed during upgrade" };
+            },
+            .failed => {
+                self.shutdown();
+                return .{ .err = "upgrade read failed" };
+            },
         };
-        if (n == 0) {
-            self.stream.close();
-            self.status = .closed;
-            return .{ .err = "connection closed during upgrade" };
-        }
         self.upgrade_len += n;
 
         // Look for end of HTTP headers (\r\n\r\n)
@@ -176,8 +173,7 @@ pub const WebSocket = struct {
                 headers[0..@min(end_pos, 100)];
 
             if (std.mem.indexOf(u8, first_line, "101") == null) {
-                self.stream.close();
-                self.status = .closed;
+                self.shutdown();
                 return .{ .err = "upgrade rejected (not 101)" };
             }
 
@@ -200,22 +196,18 @@ pub const WebSocket = struct {
     fn handleFrames(self: *WebSocket) ?Event {
         // Try to read more data
         if (self.read_len < MAX_MSG) {
-            const n = self.stream.read(self.read_buf[self.read_len..]) catch |err| {
-                if (err == error.WouldBlock) {
-                    // No data available — check if we have buffered data to process
-                    if (self.read_len >= 2) return self.tryParseFrame();
-                    return null;
-                }
-                self.stream.close();
-                self.status = .closed;
-                return .{ .err = "read failed" };
-            };
-            if (n == 0) {
-                self.stream.close();
-                self.status = .closed;
-                return .{ .close = .{ .code = 1006, .reason = "connection lost" } };
+            switch (self.pump.drain(self.read_buf[self.read_len..])) {
+                .empty => {},
+                .data => |n| self.read_len += n,
+                .closed => {
+                    self.shutdown();
+                    return .{ .close = .{ .code = 1006, .reason = "connection lost" } };
+                },
+                .failed => {
+                    self.shutdown();
+                    return .{ .err = "read failed" };
+                },
             }
-            self.read_len += n;
         }
 
         return self.tryParseFrame();
@@ -317,8 +309,7 @@ pub const WebSocket = struct {
                     code = (@as(u16, self.msg_buf[0]) << 8) | self.msg_buf[1];
                     if (plen > 2) reason = self.msg_buf[2..plen];
                 }
-                self.stream.close();
-                self.status = .closed;
+                self.shutdown();
                 break :blk Event{ .close = .{ .code = code, .reason = reason } };
             },
             .ping => blk: {
@@ -368,14 +359,6 @@ pub const WebSocket = struct {
             masked[i] = payload[i] ^ mask_key[i % 4];
         }
         try writer.writeAll(masked[0..len]);
-        try self.stream.writeAll(stream_writer.buffered());
+        try self.pump.send(stream_writer.buffered());
     }
 };
-
-// ── Helper: set socket non-blocking ──────────────────────────────────────
-
-fn setNonBlocking(stream: netx.Stream) void {
-    const fd = stream.handle;
-    const flags = sysx.fcntl(fd, sysx.F.GETFL, 0) catch return;
-    _ = sysx.fcntl(fd, sysx.F.SETFL, flags | sysx.SOCK.NONBLOCK) catch {};
-}

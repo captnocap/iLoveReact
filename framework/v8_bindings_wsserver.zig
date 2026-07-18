@@ -14,6 +14,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const wsserver = @import("net/wsserver.zig");
 
 const alloc = std.heap.c_allocator;
@@ -66,7 +67,7 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     return if (v >= 0) @intCast(v) else null;
 }
 
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
@@ -79,7 +80,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 fn jsonEscape(in: []const u8, out: []u8) usize {
@@ -130,19 +131,19 @@ fn jsonEscape(in: []const u8, out: []u8) usize {
 fn hostListen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 2) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const port = argToU32(info, 1) orelse return;
 
     if (findServer(id) != null) return;
 
     const srv = alloc.create(wsserver.WsServer) catch return;
-    // Zero-init in place (avoid huge struct literal on stack)
-    srv.* = std.mem.zeroes(wsserver.WsServer);
-    srv.listenInPlace(@intCast(port)) catch {
+    srv.* = undefined;
+    srv.listenInPlace(alloc, host.io, @intCast(port)) catch {
         alloc.destroy(srv);
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "wssrv:error:{d}", .{id}) catch return;
-        emitEvent(chan, "{\"error\":\"listen failed\"}");
+        emitEvent(host, chan, "{\"error\":\"listen failed\"}");
         return;
     };
 
@@ -191,7 +192,7 @@ fn hostClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 var g_ev_buf: [4]wsserver.ServerEvent = undefined;
 var g_msg_payload: [70_000]u8 = undefined;
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     const ev_buf = &g_ev_buf;
     for (g_servers.items) |*s| {
         // Loop until the server returns 0 events (drain backlog from this frame).
@@ -205,7 +206,7 @@ pub fn tickDrain() void {
                         const chan = std.fmt.bufPrint(&chan_buf, "wssrv:open:{d}", .{s.id}) catch continue;
                         var pl: [64]u8 = undefined;
                         const p = std.fmt.bufPrint(&pl, "{{\"clientId\":{d}}}", .{ev.client_id}) catch continue;
-                        emitEvent(chan, p);
+                        emitEvent(host, chan, p);
                     },
                     .client_message => {
                         const chan = std.fmt.bufPrint(&chan_buf, "wssrv:message:{d}", .{s.id}) catch continue;
@@ -216,13 +217,13 @@ pub fn tickDrain() void {
                         pos += jsonEscape(ev.dataSlice(), pl[pos..]);
                         const tail = std.fmt.bufPrint(pl[pos..], "\"}}", .{}) catch continue;
                         pos += tail.len;
-                        emitEvent(chan, pl[0..pos]);
+                        emitEvent(host, chan, pl[0..pos]);
                     },
                     .client_disconnected => {
                         const chan = std.fmt.bufPrint(&chan_buf, "wssrv:close:{d}", .{s.id}) catch continue;
                         var pl: [64]u8 = undefined;
                         const p = std.fmt.bufPrint(&pl, "{{\"clientId\":{d}}}", .{ev.client_id}) catch continue;
-                        emitEvent(chan, p);
+                        emitEvent(host, chan, p);
                     },
                 }
             }

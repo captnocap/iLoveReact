@@ -78,7 +78,7 @@ pub fn setScale(s: f32) void {
 // the GPU host AND queried by the TUI Window paint side never sees a
 // stale pointer.
 
-var g_handler_pool: std.ArrayList([:0]u8) = .{};
+var g_handler_pool: std.ArrayList([:0]u8) = .empty;
 var g_pool_alloc: ?std.mem.Allocator = null;
 
 pub fn initHandlerPool(alloc: std.mem.Allocator) void {

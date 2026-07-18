@@ -18,9 +18,10 @@ April 2026, after every current model's training cutoff, so your instinct for "c
 `std.fs` / `std.time` / `std.Thread` / `std.posix` / `std.net` / `std.process` / `std.crypto`
 call, **read `framework/ZIG_016_API_NOTES.md`** and confirm against the real std source at
 `tools/zig/zig`'s `lib/std/`. Key facts: I/O is an injected `std.Io` capability now, reached
-via `framework/host_io.zig` (`host_io.io()` + 0.15-shaped shims); `framework/net/**`
-(`sysx.zig`, `netx.zig`, `http.zig`) is an EXEMPT layer carrying 0.15 shims on purpose —
-never migrate it to `std.Io.net`. Toolchain lives at `tools/zig/zig` → 0.16. Full history:
+from `std.process.Init` and threaded through signatures/resource owners. V8 callbacks recover
+the root `HostContext` from their isolate. Project-wide I/O accessors, inline singleton shims,
+and copied old-stdlib networking are forbidden; networking uses `std.Io.net` plus bounded
+`std.Io.Group` pumps. Toolchain lives at `tools/zig/zig` → 0.16. Full history:
 `docs/ZIG_016_MIGRATION.md`.
 
 ---

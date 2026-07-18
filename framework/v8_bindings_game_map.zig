@@ -43,7 +43,6 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const host_io = @import("host_io.zig");
 const chunks = @import("game/map/chunks.zig");
 const engine = @import("game/map/engine.zig");
 const stamps = @import("game/map/stamps.zig");
@@ -133,6 +132,7 @@ fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const at = argChunkCoords(info) orelse {
         setReturnF64(info, 0);
         return;
@@ -144,7 +144,7 @@ fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const changed = chunks.chunkCount() > before;
     if (record) engine.commitMapHistory(changed);
     if (grew) {
-        _ = engine.autosaveNow();
+        _ = engine.autosaveNow(io);
         if (record and changed) engine.recordChunkGrow(at[0], at[1]);
     }
     setReturnF64(info, if (grew) 1 else 0);
@@ -276,10 +276,11 @@ fn hostSetZonePalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 // or editing a binding re-encodes chunk D streams, never rebuilds the shader.
 fn hostSetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const rows = argF32Slice(info, 0);
     const record = argBool(info, 1, false);
     if (record) engine.beginMapHistory(.tile_bindings);
-    engine.setTileBindings(rows);
+    engine.setTileBindings(io, rows);
     if (record) {
         engine.commitMapHistory(true);
         engine.recordTileBindings(rows.len / engine.BINDING_FLOATS);
@@ -304,6 +305,7 @@ fn hostGetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 // and shift higher indices down so the grids track the shorter list.
 fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const idx = argToF64(info, 0) orelse return;
     if (idx < 0 or !std.math.isFinite(idx)) return;
     const zone_idx: i16 = @intFromFloat(@min(idx, @as(f64, @floatFromInt(std.math.maxInt(i16)))));
@@ -311,7 +313,7 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (record) engine.beginMapHistory(.zone_drop);
     chunks.dropZoneIndex(zone_idx);
     if (record) engine.commitMapHistory(true);
-    _ = engine.autosaveNow();
+    _ = engine.autosaveNow(io);
     if (record) engine.recordZoneDrop(@intCast(zone_idx));
 }
 
@@ -390,7 +392,8 @@ fn hostRoadSetKinds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 // __map_road_commit() -> stroke id (0 = draft too short / table full — LOUD).
 fn hostRoadCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnF64(info, @floatFromInt(engine.roadCommit() orelse 0));
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    setReturnF64(info, @floatFromInt(engine.roadCommit(io) orelse 0));
 }
 
 fn hostPathCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -414,12 +417,13 @@ fn hostPathUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // __map_road_delete(id) -> 0|1
 fn hostRoadDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const id = argToF64(info, 0) orelse 0;
     if (id <= 0 or !std.math.isFinite(id)) {
         setReturnF64(info, 0);
         return;
     }
-    setReturnF64(info, if (engine.roadDelete(@intFromFloat(id))) 1 else 0);
+    setReturnF64(info, if (engine.roadDelete(io, @intFromFloat(id))) 1 else 0);
 }
 
 fn hostPathDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -428,12 +432,13 @@ fn hostPathDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostPathControlDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const id = argToF64(info, 0) orelse 0;
     if (id <= 0 or !std.math.isFinite(id)) {
         setReturnF64(info, 0);
         return;
     }
-    setReturnF64(info, if (engine.pathControlDelete(@intFromFloat(id))) 1 else 0);
+    setReturnF64(info, if (engine.pathControlDelete(io, @intFromFloat(id))) 1 else 0);
 }
 
 // __map_road_stats() -> [strokeCount, draftPoints, planTruncated]
@@ -510,12 +515,12 @@ fn setMapHistoryResult(info: v8.FunctionCallbackInfo, result: engine.MapHistoryR
 
 fn hostMapUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setMapHistoryResult(info, engine.mapHistoryUndo());
+    setMapHistoryResult(info, engine.mapHistoryUndo(v8_runtime.hostContext(info.getIsolate()).io));
 }
 
 fn hostMapRedo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setMapHistoryResult(info, engine.mapHistoryRedo());
+    setMapHistoryResult(info, engine.mapHistoryRedo(v8_runtime.hostContext(info.getIsolate()).io));
 }
 
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
@@ -528,7 +533,7 @@ fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
 fn hostStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const at = argWorldPoint(info) orelse return;
-    engine.strokeBegin(at[0], at[1]);
+    engine.strokeBegin(v8_runtime.hostContext(info.getIsolate()).io, at[0], at[1]);
 }
 
 fn hostStrokeMove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -541,7 +546,7 @@ var stroke_out: [4]f32 = undefined;
 
 fn hostStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const stats = engine.strokeEnd();
+    const stats = engine.strokeEnd(v8_runtime.hostContext(info.getIsolate()).io);
     stroke_out[0] = @floatFromInt(stats.samples);
     stroke_out[1] = @floatFromInt(stats.stamps);
     stroke_out[2] = @floatFromInt(stats.touched);
@@ -615,6 +620,7 @@ fn hostStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // __map_save_file(path) -> 0|1
 fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const path = argStringAlloc(alloc, info, 0) orelse {
         setReturnF64(info, 0);
@@ -631,8 +637,8 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnF64(info, 0);
         return;
     }
-    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(host_io.io(), dir) catch {};
-    std.Io.Dir.cwd().writeFile(host_io.io(), .{ .sub_path = path, .data = buf[0..n] }) catch {
+    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(io, dir) catch {};
+    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = buf[0..n] }) catch {
         setReturnF64(info, 0);
         return;
     };
@@ -646,19 +652,20 @@ var inspect_file_out: [2]f32 = undefined;
 
 fn hostInspectFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const path = argStringAlloc(alloc, info, 0) orelse {
         setReturnNull(info);
         return;
     };
     defer alloc.free(path);
-    var file = std.Io.Dir.cwd().openFile(host_io.io(), path, .{}) catch {
+    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch {
         setReturnNull(info);
         return;
     };
-    defer file.close(host_io.io());
+    defer file.close(io);
     var prefix: [engine.store.INSPECT_PREFIX_BYTES]u8 = undefined;
-    const read = file.readPositionalAll(host_io.io(), prefix[0..], 0) catch {
+    const read = file.readPositionalAll(io, prefix[0..], 0) catch {
         setReturnNull(info);
         return;
     };
@@ -692,13 +699,14 @@ const MAX_MAP_FILE_BYTES: usize = 512 * 1024 * 1024;
 // on a missing file, cleared on a malformed one — store.load's LOUD contract)
 fn hostLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const path = argStringAlloc(alloc, info, 0) orelse {
         setReturnF64(info, 0);
         return;
     };
     defer alloc.free(path);
-    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(MAX_MAP_FILE_BYTES)) catch {
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(MAX_MAP_FILE_BYTES)) catch {
         setReturnF64(info, 0);
         return;
     };

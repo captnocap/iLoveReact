@@ -24,6 +24,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 
 const layout = @import("layout.zig");
 const windows = @import("primitive/windows.zig");
@@ -60,7 +61,7 @@ var g_last_dumped_slot_count: u32 = 0;
 // Lifecycle
 // ────────────────────────────────────────────────────────────────────
 
-pub fn init(alloc: std.mem.Allocator) !void {
+pub fn init(host: *HostContext, alloc: std.mem.Allocator) !void {
     if (g_inited) return;
     g_alloc = alloc;
     g_slot_by_node_id = std.AutoHashMap(u32, usize).init(alloc);
@@ -84,15 +85,15 @@ pub fn init(alloc: std.mem.Allocator) !void {
     // Wire the SDL3 paint side to call back into JS when handlers
     // fire on hit-tested nodes. windows.zig already does the hit
     // testing + dispatchJs walk; we just provide the eval.
-    windows.setJsDispatchFn(jsDispatch);
+    windows.setJsDispatchFn(host, jsDispatch);
     g_inited = true;
 }
 
-pub fn deinit() void {
+pub fn deinit(io: std.Io) void {
     if (!g_inited) return;
     g_slot_by_node_id.deinit();
     g_frame_arena.deinit();
-    windows.deinitAll();
+    windows.deinitAll(io);
     windows.shutdownSdl();
     g_inited = false;
 }
@@ -154,10 +155,11 @@ fn measureText(
 /// constructing the `__dispatchEvent(42,'onClick')` call ourselves.
 /// The js_on_* fields on the Node act as a non-null gate; their
 /// contents are not consumed by windows.zig.
-fn jsDispatch(node_id: u32, event_name: []const u8) void {
+fn jsDispatch(context: *anyopaque, node_id: u32, event_name: []const u8) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrint(&buf, "__dispatchEvent({d},'{s}')", .{ node_id, event_name }) catch return;
-    v8_runtime.evalExpr(expr);
+    v8_runtime.evalExpr(host, expr);
 }
 
 // (handler-name lookups, JS-eval string pool, and applyMouseHandlerFlags
@@ -173,7 +175,7 @@ fn jsDispatch(node_id: u32, event_name: []const u8) void {
 /// Window itself (title, width, height) are parsed here directly —
 /// they're a small fixed set, not subject to the full applyProps
 /// CSS-parser path that we still don't have wired.
-fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
+fn openHostWindow(io: std.Io, environ: *const std.process.Environ.Map, id: u32, type_name: []const u8, props: ?std.json.Value) void {
     const is_window = std.mem.eql(u8, type_name, "Window");
     const is_notif = std.mem.eql(u8, type_name, "Notification");
     if (!is_window and !is_notif) return;
@@ -201,7 +203,7 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
     };
 
     std.debug.print("[host_window] opening window id={d} w={d} h={d}\n", .{ id, width, height });
-    const slot = windows.open(.{
+    const slot = windows.open(io, environ, .{
         .title = title,
         .width = width,
         .height = height,
@@ -215,7 +217,7 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
 
     g_slot_by_node_id.put(id, slot) catch {
         std.debug.print("[host_window] map put OOM\n", .{});
-        windows.close(slot);
+        windows.close(io, slot);
         return;
     };
 }
@@ -283,13 +285,13 @@ pub fn register() void {}
 // framework/host_tree.zig — same function, same algorithm, used by both
 // shells. tickDrain below calls host_tree.materializeWindowRoot directly.)
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     if (!g_inited or !windows.isSdlInited()) return;
     if (g_slot_by_node_id.count() == 0) return;
 
     // Pump SDL events into per-window routing. In a slim TUI binary
     // there's nothing else polling the queue, so we own it.
-    windows.pumpEvents();
+    windows.pumpEvents(host.io);
 
     // Rebuild every open Window's Node tree this frame, point its
     // slot at the new root, then layout + paint. Arena reset is
@@ -315,7 +317,7 @@ pub fn tickDrain() void {
     const slot_count = g_slot_by_node_id.count();
     if (slot_count != g_last_dumped_slot_count) {
         g_last_dumped_slot_count = slot_count;
-        const dump_env = std.posix.getenv("RJIT_DUMP_LAYOUT") orelse "";
+        const dump_env = host.environ.get("RJIT_DUMP_LAYOUT") orelse "";
         if (dump_env.len > 0 and dump_env[0] != '0' and slot_count > 0) {
             var dit = g_slot_by_node_id.iterator();
             while (dit.next()) |entry| {
@@ -329,7 +331,7 @@ pub fn tickDrain() void {
             }
         }
     }
-    windows.paintAndPresent();
+    windows.paintAndPresent(host.io);
 }
 
 fn dumpTree(node: *Node, depth: u32) void {
@@ -338,11 +340,8 @@ fn dumpTree(node: *Node, depth: u32) void {
     const r = node.computed;
     const txt: []const u8 = node.text orelse "";
     std.debug.print("rect=({d:.0},{d:.0},{d:.0}x{d:.0}) w_style={?d:.0} h_style={?d:.0} fg={d} '{s}'\n", .{
-        r.x, r.y, r.w, r.h,
-        node.style.width,
-        node.style.height,
-        node.style.flex_grow,
-        if (txt.len > 30) txt[0..30] else txt,
+        r.x,              r.y,               r.w,                  r.h,
+        node.style.width, node.style.height, node.style.flex_grow, if (txt.len > 30) txt[0..30] else txt,
     });
     for (node.children) |*child| dumpTree(child, depth + 1);
 }

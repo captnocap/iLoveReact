@@ -8,7 +8,6 @@
 //! Header: magic "TREC", version u8, rows u16, cols u16.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 pub const MAGIC = "TREC";
 pub const VERSION: u8 = 1;
@@ -31,18 +30,20 @@ pub const Recorder = struct {
     rows: u16 = 24,
     cols: u16 = 80,
 
-    pub fn start(self: *Recorder, rows: u16, cols: u16) void {
+    pub fn start(self: *Recorder, now_us: u64, rows: u16, cols: u16) void {
         self.rows = rows;
         self.cols = cols;
         self.frame_count = 0;
         self.data_pos = 0;
-        self.start_us = getMicroseconds();
+        self.start_us = now_us;
         self.recording = true;
     }
 
-    pub fn capture(self: *Recorder, data: []const u8) void {
+    /// Enqueue one already-timestamped terminal chunk. Clock access stays at
+    /// the owning PTY boundary so recording itself is a pure memory operation.
+    pub fn capture(self: *Recorder, now_us: u64, data: []const u8) void {
         if (!self.recording) {
-            self.start_us = getMicroseconds();
+            self.start_us = now_us;
             self.recording = true;
         }
         if (data.len == 0) return;
@@ -56,7 +57,7 @@ pub const Recorder = struct {
 
         // Store frame
         self.frames[self.frame_count] = .{
-            .timestamp_us = getMicroseconds() - self.start_us,
+            .timestamp_us = now_us -| self.start_us,
             .data_offset = offset,
             .data_len = @intCast(data.len),
         };
@@ -81,24 +82,24 @@ pub const Recorder = struct {
     }
 
     /// Save recording to a file.
-    pub fn save(self: *const Recorder, path: []const u8) bool {
-        const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return false;
-        defer file.close(host_io.io());
+    pub fn save(self: *const Recorder, io: std.Io, path: []const u8) bool {
+        const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return false;
+        defer file.close(io);
 
         // Header
-        file.writeStreamingAll(host_io.io(), MAGIC) catch return false;
-        file.writeStreamingAll(host_io.io(), &[1]u8{VERSION}) catch return false;
-        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u16, self.rows))) catch return false;
-        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u16, self.cols))) catch return false;
-        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u32, self.frame_count))) catch return false;
+        file.writeStreamingAll(io, MAGIC) catch return false;
+        file.writeStreamingAll(io, &[1]u8{VERSION}) catch return false;
+        file.writeStreamingAll(io, std.mem.asBytes(&std.mem.nativeToLittle(u16, self.rows))) catch return false;
+        file.writeStreamingAll(io, std.mem.asBytes(&std.mem.nativeToLittle(u16, self.cols))) catch return false;
+        file.writeStreamingAll(io, std.mem.asBytes(&std.mem.nativeToLittle(u32, self.frame_count))) catch return false;
 
         // Frames
         var i: u32 = 0;
         while (i < self.frame_count) : (i += 1) {
             const f = self.frames[i];
-            file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u64, f.timestamp_us))) catch return false;
-            file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u32, f.data_len))) catch return false;
-            file.writeStreamingAll(host_io.io(), self.data_buf[f.data_offset .. f.data_offset + f.data_len]) catch return false;
+            file.writeStreamingAll(io, std.mem.asBytes(&std.mem.nativeToLittle(u64, f.timestamp_us))) catch return false;
+            file.writeStreamingAll(io, std.mem.asBytes(&std.mem.nativeToLittle(u32, f.data_len))) catch return false;
+            file.writeStreamingAll(io, self.data_buf[f.data_offset .. f.data_offset + f.data_len]) catch return false;
         }
         return true;
     }
@@ -124,6 +125,15 @@ pub const Recording = struct {
     }
 };
 
-fn getMicroseconds() u64 {
-    return @intCast(@max(0, host_io.microTimestamp()));
+test "recording uses caller timestamps without I/O" {
+    var recorder: Recorder = .{};
+    recorder.start(1_000, 24, 80);
+    recorder.capture(1_250, "one");
+    recorder.capture(1_900, "two");
+
+    try std.testing.expectEqual(@as(u32, 2), recorder.frame_count);
+    try std.testing.expectEqual(@as(u64, 250), recorder.frames[0].timestamp_us);
+    try std.testing.expectEqual(@as(u64, 900), recorder.frames[1].timestamp_us);
+    try std.testing.expectEqualStrings("one", recorder.getFrameData(0).?);
+    try std.testing.expectEqualStrings("two", recorder.getFrameData(1).?);
 }

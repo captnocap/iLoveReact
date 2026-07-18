@@ -21,10 +21,9 @@
 //!   PING / PONG\n         — liveness, no payload
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 const FRAME_LEN_BYTES = 4;
-const MAX_HEADER_LEN = 4 * 1024;       // sanity bound
+const MAX_HEADER_LEN = 4 * 1024; // sanity bound
 const MAX_INLINE_PAYLOAD = 512 * 1024 * 1024; // 512MB — workspace tar fits
 
 // ────────────────────────────────────────────────────────────────────
@@ -35,18 +34,19 @@ const MAX_INLINE_PAYLOAD = 512 * 1024 * 1024; // 512MB — workspace tar fits
 // ────────────────────────────────────────────────────────────────────
 
 /// Write a SET/INIT-style frame: 4B length, header line, then `size`
-/// bytes of payload streamed from `payload_fd`.
+/// bytes of payload streamed from `payload_file`.
 pub fn writeFileFrame(
+    io: std.Io,
     writer: anytype,
     op: []const u8,
     rel: []const u8,
-    payload_fd: std.posix.fd_t,
+    payload_file: std.Io.File,
     payload_size: u64,
 ) !void {
     var header_buf: [256]u8 = undefined;
     const header = try std.fmt.bufPrint(&header_buf, "{s} {s} {d}\n", .{ op, rel, payload_size });
     try writeLenPrefixed(writer, header);
-    try streamFd(writer, payload_fd, payload_size);
+    try streamFile(io, writer, payload_file, payload_size);
 }
 
 /// Write a header-only frame (DEL/DIR/PING).
@@ -66,26 +66,29 @@ pub fn writeMsgFrame(
 /// Convenience: SET frame for a file at `local_path`, with the given
 /// rel path. Opens, stats, streams. Closes the fd on return.
 pub fn writeSetFromFile(
+    io: std.Io,
     writer: anytype,
     rel: []const u8,
     local_path: []const u8,
 ) !void {
-    const file = try std.Io.Dir.cwd().openFile(host_io.io(), local_path, .{});
-    defer file.close(host_io.io());
-    const st = try file.stat(host_io.io());
-    try writeFileFrame(writer, "SET", rel, file.handle, st.size);
+    const file = try std.Io.Dir.cwd().openFile(io, local_path, .{});
+    defer file.close(io);
+    const st = try file.stat(io);
+    try writeFileFrame(io, writer, "SET", rel, file, st.size);
 }
 
 /// Build a workspace tar (via `git ls-files | tar`) and ship it as a
 /// single INIT frame. Filters out paths under DENY_PATTERNS and
 /// missing files (tracked-but-deleted entries break tar otherwise).
 pub fn writeInitTar(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     writer: anytype,
     allocator: std.mem.Allocator,
     cwd: []const u8,
     dest: []const u8,
 ) !void {
-    const tar_bytes = try buildTarBytes(allocator, cwd);
+    const tar_bytes = try buildTarBytes(allocator, io, environ, cwd);
     defer allocator.free(tar_bytes);
 
     var header_buf: [256]u8 = undefined;
@@ -104,15 +107,17 @@ fn writeLenPrefixed(writer: anytype, header: []const u8) !void {
     try writer.writeAll(header);
 }
 
-fn streamFd(writer: anytype, fd: std.posix.fd_t, total: u64) !void {
+fn streamFile(io: std.Io, writer: anytype, file: std.Io.File, total: u64) !void {
     var buf: [64 * 1024]u8 = undefined;
     var remaining = total;
+    var offset: u64 = 0;
     while (remaining > 0) {
         const want = @min(buf.len, remaining);
-        const n = try std.posix.read(fd, buf[0..want]);
+        const n = try file.readPositional(io, &.{buf[0..want]}, offset);
         if (n == 0) return error.UnexpectedEof;
         try writer.writeAll(buf[0..n]);
         remaining -= @intCast(n);
+        offset += @intCast(n);
     }
 }
 
@@ -124,10 +129,10 @@ fn streamFd(writer: anytype, fd: std.posix.fd_t, total: u64) !void {
 // tar and in runtime inotify fanout. Backstop for non-git workspaces
 // and for vendored deps that aren't in .gitignore.
 const DENY_SEGMENTS = [_][]const u8{
-    ".git",       ".zig-cache", "node_modules", "zig-out",
-    "target",     "deps",       "archive",      "images",
-    ".cache",     "__pycache__", ".next",        "dist",
-    "build",      ".DS_Store",
+    ".git",   ".zig-cache",  "node_modules", "zig-out",
+    "target", "deps",        "archive",      "images",
+    ".cache", "__pycache__", ".next",        "dist",
+    "build",  ".DS_Store",
 };
 
 pub fn isDenied(rel_path: []const u8) bool {
@@ -143,12 +148,17 @@ pub fn isDenied(rel_path: []const u8) bool {
     return false;
 }
 
-fn buildTarBytes(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+fn buildTarBytes(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    cwd: []const u8,
+) ![]u8 {
     // Step 1: `git ls-files -z --cached --others --exclude-standard`
     const ls = try runCapture(allocator, &.{
-        "git", "-C", cwd, "ls-files", "-z",
+        "git",      "-C",       cwd,                  "ls-files", "-z",
         "--cached", "--others", "--exclude-standard",
-    }, null);
+    }, null, io, environ);
     defer allocator.free(ls);
 
     // Step 2: filter — drop denied + missing files. Reuse buffer.
@@ -160,7 +170,7 @@ fn buildTarBytes(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
         if (b != 0) continue;
         if (i > start) {
             const path_rel = ls[start..i];
-            if (!isDenied(path_rel) and existsUnder(cwd, path_rel)) {
+            if (!isDenied(path_rel) and existsUnder(io, cwd, path_rel)) {
                 try kept.appendSlice(allocator, path_rel);
                 try kept.append(allocator, 0);
             }
@@ -170,17 +180,17 @@ fn buildTarBytes(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
 
     // Step 3: `tar -cf - -C <cwd> --ignore-failed-read --null --no-recursion --files-from -`
     return try runCapture(allocator, &.{
-        "tar",                 "-cf",                 "-",
-        "-C",                  cwd,                   "--ignore-failed-read",
-        "--null",              "--no-recursion",      "--files-from",
+        "tar",    "-cf",            "-",
+        "-C",     cwd,              "--ignore-failed-read",
+        "--null", "--no-recursion", "--files-from",
         "-",
-    }, kept.items);
+    }, kept.items, io, environ);
 }
 
-fn existsUnder(cwd: []const u8, rel: []const u8) bool {
+fn existsUnder(io: std.Io, cwd: []const u8, rel: []const u8) bool {
     var pathbuf: [4096]u8 = undefined;
     const full = std.fmt.bufPrint(&pathbuf, "{s}/{s}", .{ cwd, rel }) catch return false;
-    std.Io.Dir.accessAbsolute(host_io.io(), full, .{}) catch return false;
+    std.Io.Dir.accessAbsolute(io, full, .{}) catch return false;
     return true;
 }
 
@@ -188,42 +198,68 @@ fn runCapture(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
     stdin_bytes: ?[]const u8,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
 ) ![]u8 {
-    var child = try std.process.spawn(host_io.io(), .{
+    var child = try std.process.spawn(io, .{
         .argv = argv,
         .stdin = if (stdin_bytes != null) .pipe else .ignore,
         .stdout = .pipe,
         .stderr = .ignore,
+        .environ_map = environ,
     });
+    defer child.kill(io);
 
-    // Feed stdin in a separate "thread of control" if provided.
+    // Feed stdin concurrently with stdout draining. `tar` can begin producing
+    // output before it has consumed the complete file list, so sequentially
+    // filling stdin first can deadlock once either pipe reaches capacity.
     if (stdin_bytes) |bytes| {
-        var stdin = child.stdin.?;
-        stdin.writeStreamingAll(host_io.io(), bytes) catch {};
-        stdin.close(host_io.io());
+        const stdin = child.stdin.?;
         child.stdin = null;
+        var input_task = try std.Io.concurrent(io, writeChildInput, .{ io, stdin, bytes });
+        const output = try readChildOutput(allocator, io, child.stdout.?);
+        errdefer allocator.free(output);
+        try input_task.await(io);
+        try acceptChildTerm(try child.wait(io), output.len);
+        return output;
     }
 
+    const output = try readChildOutput(allocator, io, child.stdout.?);
+    errdefer allocator.free(output);
+    try acceptChildTerm(try child.wait(io), output.len);
+    return output;
+}
+
+fn writeChildInput(io: std.Io, file: std.Io.File, bytes: []const u8) !void {
+    defer file.close(io);
+    try file.writeStreamingAll(io, bytes);
+}
+
+fn readChildOutput(allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) ![]u8 {
     var stdout_buf: std.ArrayList(u8) = .empty;
     errdefer stdout_buf.deinit(allocator);
 
     var read_buf: [64 * 1024]u8 = undefined;
     while (true) {
-        const n = child.stdout.?.readStreaming(host_io.io(), &.{&read_buf}) catch break;
-        if (n == 0) break;
+        const n = file.readStreaming(io, &.{&read_buf}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => |e| return e,
+        };
+        if (n == 0) continue;
         try stdout_buf.appendSlice(allocator, read_buf[0..n]);
     }
+    return stdout_buf.toOwnedSlice(allocator);
+}
 
-    const term = try child.wait(host_io.io());
+fn acceptChildTerm(term: std.process.Child.Term, output_len: usize) !void {
     // tar can exit 1 if some files vanished mid-archive; accept if we
     // got bytes out.
     switch (term) {
         .exited => |code| {
-            if (code != 0 and stdout_buf.items.len == 0) return error.ChildFailed;
+            if (code != 0 and output_len == 0) return error.ChildFailed;
         },
         else => return error.ChildAbnormalExit,
     }
-    return stdout_buf.toOwnedSlice(allocator);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -251,7 +287,7 @@ pub const InboundParser = struct {
 
     /// Append received bytes, parse and apply as many complete frames
     /// as fit. Partial frames stay in buf for next call.
-    pub fn feed(self: *InboundParser, bytes: []const u8) void {
+    pub fn feed(self: *InboundParser, io: std.Io, bytes: []const u8) void {
         self.buf.appendSlice(self.allocator, bytes) catch return;
         while (true) {
             if (self.buf.items.len < FRAME_LEN_BYTES) return;
@@ -273,7 +309,7 @@ pub const InboundParser = struct {
             if (self.buf.items.len < total) return;
 
             const payload = self.buf.items[FRAME_LEN_BYTES + hlen .. total];
-            self.applyFrame(header, payload);
+            self.applyFrame(io, header, payload);
 
             // Shift remaining bytes to the front. For small drains this
             // is cheap; for big payloads we already absorbed them.
@@ -285,7 +321,7 @@ pub const InboundParser = struct {
         }
     }
 
-    fn applyFrame(self: *InboundParser, header: []const u8, payload: []const u8) void {
+    fn applyFrame(self: *InboundParser, io: std.Io, header: []const u8, payload: []const u8) void {
         // Parse `OP <args...>` — first token is the op, remainder is args.
         const space = std.mem.indexOfScalar(u8, header, ' ') orelse header.len;
         const op = header[0..space];
@@ -294,15 +330,15 @@ pub const InboundParser = struct {
             const rest = if (space < header.len) header[space + 1 ..] else "";
             const rel = firstToken(rest);
             if (rel.len == 0 or isDenied(rel)) return;
-            self.writeFile(rel, payload);
+            self.writeFile(io, rel, payload);
         } else if (std.mem.eql(u8, op, "DEL")) {
             const rel = firstToken(if (space < header.len) header[space + 1 ..] else "");
             if (rel.len == 0 or isDenied(rel)) return;
-            self.deletePath(rel);
+            self.deletePath(io, rel);
         } else if (std.mem.eql(u8, op, "DIR")) {
             const rel = firstToken(if (space < header.len) header[space + 1 ..] else "");
             if (rel.len == 0 or isDenied(rel)) return;
-            self.makeDir(rel);
+            self.makeDir(io, rel);
         }
         // INIT shouldn't appear on the host receive path (the host
         // sends INIT to the guest, not the other way around). PING/
@@ -314,14 +350,14 @@ pub const InboundParser = struct {
         return std.fmt.bufPrint(buf, "{s}/{s}", .{ self.root, trimmed }) catch null;
     }
 
-    fn writeFile(self: *InboundParser, rel: []const u8, payload: []const u8) void {
+    fn writeFile(self: *InboundParser, io: std.Io, rel: []const u8, payload: []const u8) void {
         var pathbuf: [4096]u8 = undefined;
         const full = self.fullPath(rel, &pathbuf) orelse return;
         if (std.mem.lastIndexOfScalar(u8, full, '/')) |idx| {
-            std.Io.Dir.createDirAbsolute(host_io.io(), full[0..idx], .default_dir) catch |e| switch (e) {
+            std.Io.Dir.createDirAbsolute(io, full[0..idx], .default_dir) catch |e| switch (e) {
                 error.PathAlreadyExists => {},
                 else => {
-                    std.Io.Dir.cwd().createDirPath(host_io.io(), full[0..idx]) catch {};
+                    std.Io.Dir.cwd().createDirPath(io, full[0..idx]) catch {};
                 },
             };
         }
@@ -331,31 +367,31 @@ pub const InboundParser = struct {
         // other's temps.
         var tmpbuf: [4096 + 32]u8 = undefined;
         const tmp = std.fmt.bufPrint(&tmpbuf, "{s}.cwsync-{d}.tmp", .{ full, std.os.linux.getpid() }) catch return;
-        const f = std.Io.Dir.createFileAbsolute(host_io.io(), tmp, .{ .truncate = true }) catch return;
-        defer f.close(host_io.io());
-        f.writeStreamingAll(host_io.io(), payload) catch {
-            std.Io.Dir.deleteFileAbsolute(host_io.io(), tmp) catch {};
+        const f = std.Io.Dir.createFileAbsolute(io, tmp, .{ .truncate = true }) catch return;
+        defer f.close(io);
+        f.writeStreamingAll(io, payload) catch {
+            std.Io.Dir.deleteFileAbsolute(io, tmp) catch {};
             return;
         };
-        std.Io.Dir.renameAbsolute(tmp, full, host_io.io()) catch {
-            std.Io.Dir.deleteFileAbsolute(host_io.io(), tmp) catch {};
+        std.Io.Dir.renameAbsolute(tmp, full, io) catch {
+            std.Io.Dir.deleteFileAbsolute(io, tmp) catch {};
         };
     }
 
-    fn deletePath(self: *InboundParser, rel: []const u8) void {
+    fn deletePath(self: *InboundParser, io: std.Io, rel: []const u8) void {
         var pathbuf: [4096]u8 = undefined;
         const full = self.fullPath(rel, &pathbuf) orelse return;
         // Try as file first; if it was a directory, try rmdir (best-
         // effort — non-empty dirs stay).
-        std.Io.Dir.deleteFileAbsolute(host_io.io(), full) catch {
-            std.Io.Dir.deleteDirAbsolute(host_io.io(), full) catch {};
+        std.Io.Dir.deleteFileAbsolute(io, full) catch {
+            std.Io.Dir.deleteDirAbsolute(io, full) catch {};
         };
     }
 
-    fn makeDir(self: *InboundParser, rel: []const u8) void {
+    fn makeDir(self: *InboundParser, io: std.Io, rel: []const u8) void {
         var pathbuf: [4096]u8 = undefined;
         const full = self.fullPath(rel, &pathbuf) orelse return;
-        std.Io.Dir.cwd().createDirPath(host_io.io(), full) catch {};
+        std.Io.Dir.cwd().createDirPath(io, full) catch {};
     }
 };
 
@@ -372,4 +408,45 @@ fn parsePayloadSize(header: []const u8) usize {
 fn firstToken(s: []const u8) []const u8 {
     const end = std.mem.indexOfScalar(u8, s, ' ') orelse s.len;
     return s[0..end];
+}
+
+const TestBufferWriter = struct {
+    bytes: std.ArrayList(u8) = .empty,
+
+    fn deinit(self: *TestBufferWriter) void {
+        self.bytes.deinit(std.testing.allocator);
+    }
+
+    pub fn writeAll(self: *TestBufferWriter, data: []const u8) !void {
+        try self.bytes.appendSlice(std.testing.allocator, data);
+    }
+};
+
+test "file frames and inbound writes use the supplied Io" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const payload = "hello workspace";
+    const source = try tmp.dir.createFile(std.testing.io, "source.txt", .{ .read = true });
+    defer source.close(std.testing.io);
+    try source.writeStreamingAll(std.testing.io, payload);
+
+    var out: TestBufferWriter = .{};
+    defer out.deinit();
+    try writeFileFrame(std.testing.io, &out, "SET", "copy.txt", source, payload.len);
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path_len = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const owned_root = try std.testing.allocator.dupe(u8, path_buf[0..path_len]);
+    defer std.testing.allocator.free(owned_root);
+    var parser = InboundParser.init(std.testing.allocator, owned_root);
+    defer parser.deinit();
+
+    const split = @min(out.bytes.items.len, 7);
+    parser.feed(std.testing.io, out.bytes.items[0..split]);
+    parser.feed(std.testing.io, out.bytes.items[split..]);
+
+    const copied = try tmp.dir.readFileAlloc(std.testing.io, "copy.txt", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(copied);
+    try std.testing.expectEqualStrings(payload, copied);
 }

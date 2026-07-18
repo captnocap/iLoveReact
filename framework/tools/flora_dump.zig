@@ -13,10 +13,6 @@
 //!   zig build flora-dump && ./zig-out/bin/flora_dump
 
 const std = @import("std");
-// standalone module root: cannot import framework/host_io.zig; same process-wide instance
-fn hio() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
-}
 const flora_geometry = @import("flora_geometry");
 const geometry = @import("loader_geometry");
 
@@ -33,19 +29,19 @@ const Shape = struct {
     verts: []const f32,
 };
 
-fn writePackage(shape: Shape) !void {
+fn writePackage(io: std.Io, shape: Shape) !void {
     var path_buf: [256]u8 = undefined;
     const cwd = std.Io.Dir.cwd();
 
     for (SUBDIRS) |sub| {
         const dir_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/{s}", .{ PROPS_HOME, shape.name, sub });
-        try cwd.createDirPath(hio(), dir_path);
+        try cwd.createDirPath(io, dir_path);
     }
 
     const blob_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/mesh/base.blob", .{ PROPS_HOME, shape.name });
-    const blob = try cwd.createFile(hio(), blob_path, .{});
-    defer blob.close(hio());
-    try blob.writeStreamingAll(hio(), std.mem.sliceAsBytes(shape.verts));
+    const blob = try cwd.createFile(io, blob_path, .{});
+    defer blob.close(io);
+    try blob.writeStreamingAll(io, std.mem.sliceAsBytes(shape.verts));
 
     // The manifest is the commit point (same order the editor store uses):
     // blob first, manifest last, so an interrupted run never advertises a
@@ -76,14 +72,14 @@ fn writePackage(shape: Shape) !void {
         \\
     , .{ shape.id, shape.name, shape.color, triangles });
     const manifest_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/manifest.json", .{ PROPS_HOME, shape.name });
-    const file = try cwd.createFile(hio(), manifest_path, .{});
-    defer file.close(hio());
-    try file.writeStreamingAll(hio(), manifest);
+    const file = try cwd.createFile(io, manifest_path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, manifest);
 
     std.debug.print("  {s}: {d} verts ({d} tris) -> {s}/{s}\n", .{ shape.name, shape.verts.len / 8, triangles, PROPS_HOME, shape.name });
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // Unit-space instanced cards — the per-instance transform gives them their
     // world size, so what you see here is the raw 1-unit-tall silhouette.
     const grass_blade = geometry.buildGrassBlade();
@@ -114,6 +110,6 @@ pub fn main() !void {
     };
 
     std.debug.print("flora_dump: exporting {d} flora meshes as model packages\n", .{shapes.len});
-    for (shapes) |shape| try writePackage(shape);
+    for (shapes) |shape| try writePackage(init.io, shape);
     std.debug.print("flora_dump: done\n", .{});
 }

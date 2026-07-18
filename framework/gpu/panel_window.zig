@@ -30,7 +30,6 @@ const std = @import("std");
 const wgpu = @import("wgpu");
 const c = @import("../c.zig").imports;
 const gpu = @import("gpu.zig");
-const log = @import("../diag/log.zig");
 
 const blit_wgsl =
     \\@group(0) @binding(0) var src_tex: texture_2d<f32>;
@@ -63,9 +62,9 @@ const blit_wgsl =
 // scroll). Coordinates are window-local pixels (the panel root is laid out at
 // 0,0,w,h, so window-local == panel space directly).
 pub const EventHook = struct {
-    hover: *const fn (x: f32, y: f32) void,
-    press: *const fn (x: f32, y: f32, button: u8, down: bool) void,
-    wheel: *const fn (x: f32, y: f32, dx: f32, dy: f32) void,
+    hover: *const fn (context: *anyopaque, x: f32, y: f32) void,
+    press: *const fn (context: *anyopaque, x: f32, y: f32, button: u8, down: bool) void,
+    wheel: *const fn (context: *anyopaque, x: f32, y: f32, dx: f32, dy: f32) void,
 };
 var g_event_hook: ?EventHook = null;
 pub fn setEventHook(h: EventHook) void {
@@ -125,13 +124,11 @@ pub fn open(width: u32, height: u32) !void {
     }
 
     const w = c.SDL_CreateWindow("hmsc · panel", @intCast(@max(320, width)), @intCast(@max(240, height)), c.SDL_WINDOW_RESIZABLE) orelse {
-        log.print("[panel-window] SDL_CreateWindow failed\n", .{});
         return error.WindowFailed;
     };
     errdefer c.SDL_DestroyWindow(w);
 
     const surface = gpu.createWindowSurface(w) orelse {
-        log.print("[panel-window] surface creation failed\n", .{});
         return error.SurfaceFailed;
     };
     errdefer surface.release();
@@ -142,14 +139,12 @@ pub fn open(width: u32, height: u32) !void {
     g_width = @intCast(@max(1, pw));
     g_height = @intCast(@max(1, ph));
     g_surface_format = gpu.configureExtraSurface(surface, g_width, g_height) orelse {
-        log.print("[panel-window] surface configure failed\n", .{});
         return error.SurfaceFailed;
     };
 
     g_window = w;
     g_window_id = c.SDL_GetWindowID(w);
     g_surface = surface;
-    log.print("[panel-window] open {d}x{d}\n", .{ g_width, g_height });
 }
 
 pub fn close() void {
@@ -163,7 +158,6 @@ pub fn close() void {
     if (g_window) |w| c.SDL_DestroyWindow(w);
     g_window = null;
     g_window_id = 0;
-    log.print("[panel-window] closed\n", .{});
 }
 
 /// Engine-exit teardown (pipeline objects included).
@@ -185,7 +179,7 @@ fn releaseBlitBindGroup() void {
 
 /// Route one SDL event. Returns true when the event belonged to this window
 /// (consumed — the main window must not also act on it).
-pub fn routeEvent(event: *const c.SDL_Event) bool {
+pub fn routeEvent(event: *const c.SDL_Event, context: *anyopaque) bool {
     if (g_window == null) return false;
     switch (event.type) {
         c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
@@ -209,23 +203,23 @@ pub fn routeEvent(event: *const c.SDL_Event) bool {
         },
         c.SDL_EVENT_MOUSE_MOTION => {
             if (event.motion.windowID != g_window_id) return false;
-            if (g_event_hook) |h| h.hover(event.motion.x, event.motion.y);
+            if (g_event_hook) |h| h.hover(context, event.motion.x, event.motion.y);
             return true;
         },
         c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
             if (event.button.windowID != g_window_id) return false;
-            if (g_event_hook) |h| h.press(event.button.x, event.button.y, event.button.button, true);
+            if (g_event_hook) |h| h.press(context, event.button.x, event.button.y, event.button.button, true);
             return true;
         },
         c.SDL_EVENT_MOUSE_BUTTON_UP => {
             if (event.button.windowID != g_window_id) return false;
-            if (g_event_hook) |h| h.press(event.button.x, event.button.y, event.button.button, false);
+            if (g_event_hook) |h| h.press(context, event.button.x, event.button.y, event.button.button, false);
             return true;
         },
         c.SDL_EVENT_MOUSE_WHEEL => {
             if (event.wheel.windowID != g_window_id) return false;
             // SDL wheel events carry the pointer position in mouse_x/mouse_y.
-            if (g_event_hook) |h| h.wheel(event.wheel.mouse_x, event.wheel.mouse_y, event.wheel.x, event.wheel.y);
+            if (g_event_hook) |h| h.wheel(context, event.wheel.mouse_x, event.wheel.mouse_y, event.wheel.x, event.wheel.y);
             return true;
         },
         else => return false,

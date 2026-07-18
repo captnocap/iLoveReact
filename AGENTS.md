@@ -179,7 +179,7 @@ class appearing after your change is an automatic FAIL of that change.
 - **Commit per file or per logical unit.** Conventional commit messages: `feat: ...`, `fix: ...`, `refactor: ...`.
 - **Main only, no branches.** Safe commands: `git add`, `git commit`, `git push`, `git status`, `git log`, `git diff`. Never `git checkout`, `git stash`, `git reset --hard`, `git branch`, `git switch`.
 - **`love2d/` and `tsz/` are read-only.** Copy OUT for porting, never write INTO them. Same treatment for `archive/`.
-- **Zig 0.15.2.** Training data covers 0.13/0.14 mostly — check actual source before assuming API shapes.
+- **Zig 0.16.0.** Read `framework/ZIG_016_API_NOTES.md`; inject `std.Io` through signatures/owners and check the compiler's actual std source before assuming API shapes.
 - **Daily checkpoint at 2am and 2pm.** When beginning work around 02:00 or 14:00, check `git status`. If the working tree is dirty, stage all changes and commit with a `checkpoint:` message, then continue. This is the only exception to the explicit-staging rule.
 - **Dev builds are always `ReleaseFast`.** Debug builds crash on click — pre-existing framework bug.
 

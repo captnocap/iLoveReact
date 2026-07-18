@@ -51,8 +51,11 @@ pub fn parseSedEditCommand(allocator: std.mem.Allocator, command: []const u8) er
         return null;
     }
 
-    var args = std.ArrayList([]const u8).init(allocator);
-    defer args.deinit();
+    var args: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (args.items) |arg| allocator.free(arg);
+        args.deinit(allocator);
+    }
 
     // Simple argument parsing (doesn't handle all shell quoting)
     const without_sed = trimmed[3..];
@@ -146,14 +149,14 @@ pub fn parseSedEditCommand(allocator: std.mem.Allocator, command: []const u8) er
     const rest = expr[2..];
 
     // Parse pattern, replacement, flags
-    var pattern = std.ArrayList(u8).init(allocator);
-    defer pattern.deinit();
+    var pattern: std.ArrayList(u8) = .empty;
+    defer pattern.deinit(allocator);
 
-    var replacement = std.ArrayList(u8).init(allocator);
-    defer replacement.deinit();
+    var replacement: std.ArrayList(u8) = .empty;
+    defer replacement.deinit(allocator);
 
-    var flags = std.ArrayList(u8).init(allocator);
-    defer flags.deinit();
+    var flags: std.ArrayList(u8) = .empty;
+    defer flags.deinit(allocator);
 
     var state: ParseState = .pattern;
     var j: usize = 0;
@@ -164,9 +167,9 @@ pub fn parseSedEditCommand(allocator: std.mem.Allocator, command: []const u8) er
         if (char == '\\' and j + 1 < rest.len) {
             // Escaped character
             switch (state) {
-                .pattern => try pattern.appendSlice(rest[j .. j + 2]),
-                .replacement => try replacement.appendSlice(rest[j .. j + 2]),
-                .flags => try flags.appendSlice(rest[j .. j + 2]),
+                .pattern => try pattern.appendSlice(allocator, rest[j .. j + 2]),
+                .replacement => try replacement.appendSlice(allocator, rest[j .. j + 2]),
+                .flags => try flags.appendSlice(allocator, rest[j .. j + 2]),
             }
             j += 2;
             continue;
@@ -183,9 +186,9 @@ pub fn parseSedEditCommand(allocator: std.mem.Allocator, command: []const u8) er
         }
 
         switch (state) {
-            .pattern => try pattern.append(char),
-            .replacement => try replacement.append(char),
-            .flags => try flags.append(char),
+            .pattern => try pattern.append(allocator, char),
+            .replacement => try replacement.append(allocator, char),
+            .flags => try flags.append(allocator, char),
         }
         j += 1;
     }
@@ -205,9 +208,9 @@ pub fn parseSedEditCommand(allocator: std.mem.Allocator, command: []const u8) er
 
     return SedEditInfo{
         .file_path = try allocator.dupe(u8, file_path.?),
-        .pattern = try pattern.toOwnedSlice(),
-        .replacement = try replacement.toOwnedSlice(),
-        .flags = try flags.toOwnedSlice(),
+        .pattern = try pattern.toOwnedSlice(allocator),
+        .replacement = try replacement.toOwnedSlice(allocator),
+        .flags = try flags.toOwnedSlice(allocator),
         .extended_regex = extended_regex,
     };
 }
@@ -224,15 +227,15 @@ fn parseArgs(allocator: std.mem.Allocator, input: []const u8, args: *std.ArrayLi
         }
         if (i >= trimmed.len) break;
 
-        var arg = std.ArrayList(u8).init(allocator);
-        defer arg.deinit();
+        var arg: std.ArrayList(u8) = .empty;
+        defer arg.deinit(allocator);
 
         // Handle quoted strings
         if (trimmed[i] == '\'' or trimmed[i] == '"') {
             const quote = trimmed[i];
             i += 1;
             while (i < trimmed.len and trimmed[i] != quote) {
-                try arg.append(trimmed[i]);
+                try arg.append(allocator, trimmed[i]);
                 i += 1;
             }
             if (i < trimmed.len and trimmed[i] == quote) {
@@ -241,13 +244,15 @@ fn parseArgs(allocator: std.mem.Allocator, input: []const u8, args: *std.ArrayLi
         } else {
             // Unquoted argument
             while (i < trimmed.len and !std.ascii.isWhitespace(trimmed[i])) {
-                try arg.append(trimmed[i]);
+                try arg.append(allocator, trimmed[i]);
                 i += 1;
             }
         }
 
         if (arg.items.len > 0) {
-            try args.append(try allocator.dupe(u8, arg.items));
+            const owned = try allocator.dupe(u8, arg.items);
+            errdefer allocator.free(owned);
+            try args.append(allocator, owned);
         }
     }
 }

@@ -25,7 +25,6 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const host_io = @import("host_io.zig");
 const codec = @import("image/codec.zig");
 const quantize = @import("image/quantize.zig");
 
@@ -306,13 +305,14 @@ fn quantizeOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// so a cart using @reactjit/image doesn't have to also pull @reactjit fs.
 fn writeFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ok = blk: {
         const path = argStringAlloc(info, 0) orelse break :blk false;
         defer alloc.free(path);
         const bytes = argView(info, 1) orelse break :blk false;
-        const f = std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true }) catch break :blk false;
-        defer f.close(host_io.io());
-        f.writeStreamingAll(host_io.io(), bytes) catch break :blk false;
+        const f = std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true }) catch break :blk false;
+        defer f.close(io);
+        f.writeStreamingAll(io, bytes) catch break :blk false;
         break :blk true;
     };
     info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), ok));

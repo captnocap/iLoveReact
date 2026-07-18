@@ -28,7 +28,6 @@
 //! v8_ingredients.zig). A cart that never places a build piece pays zero bytes.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const build = @import("game/build.zig");
@@ -90,8 +89,8 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
     info.getReturnValue().set(ab);
 }
 
-inline fn nowNs() i64 {
-    return @as(i64, @truncate(host_io.nanoTimestamp()));
+inline fn nowNs(info: v8.FunctionCallbackInfo) i64 {
+    return @as(i64, @truncate(std.Io.Clock.now(.awake, v8_runtime.hostContext(info.getIsolate()).io).toNanoseconds()));
 }
 
 // ── marshaling ────────────────────────────────────────────────────────────────
@@ -125,7 +124,7 @@ fn pieceFromPacked(block: []const f32) build.PlacedBuildPiece {
 
 fn hostRaycast(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const t0 = nowNs();
+    const t0 = nowNs(info);
     const bytes = argBytes(info, 0) orelse {
         setReturnNull(info);
         return;
@@ -155,7 +154,7 @@ fn hostRaycast(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     const hit = build.raycastPieces(ray, scratch_pieces[0..count], input[6]);
 
-    raycast_out[0] = @floatCast(@as(f64, @floatFromInt(nowNs() - t0)) / 1000.0);
+    raycast_out[0] = @floatCast(@as(f64, @floatFromInt(nowNs(info) - t0)) / 1000.0);
     if (hit) |h| {
         raycast_out[1] = 1;
         raycast_out[2] = @floatFromInt(h.index);

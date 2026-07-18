@@ -81,7 +81,8 @@ Not currently public terminal props:
 | Node fields/layout | `framework/layout.zig`, `framework/api.zig` |
 | Engine tick/events/paint | `framework/engine.zig` |
 | Feature gate | `framework/vterm.zig`, `framework/vterm_real.zig`, `framework/vterm_stub.zig`, `build.zig`, `sdk/dependency-registry.json` |
-| PTY | `framework/pty.zig` |
+| PTY | `framework/terminal/pty.zig` |
+| KMS input bridge | `framework/render/evdev.zig` |
 | Semantic classification | `framework/classifier.zig`, `framework/semantic.zig` |
 | Recording/player | `framework/recorder.zig`, `framework/player.zig`, `runtime/hooks/useTerminalRecorder.ts` |
 | Related raw PTY host API | `framework/v8_bindings_telemetry.zig`, `framework/qjs_runtime.zig` |
@@ -99,14 +100,15 @@ Not currently public terminal props:
    `terminal_id` values.
 8. For each discovered terminal slot, the engine starts a shell if that slot has
    not been initialized.
-9. The PTY reads shell output.
+9. A cancelable task in the PTY's injected `std.Io.Group` reads shell output
+   into a bounded `std.Io.Queue`; the frame only drains completed bytes.
 10. libvterm consumes the PTY bytes and updates terminal cells, cursor state,
     damage rows, and scrollback.
 11. The engine marks terminal classification/layout dirty when PTY output arrives.
 12. `paintTerminal()` reads cells from libvterm and draws backgrounds, glyphs,
     selection, scrollback indicator, cursor, and semantic accents.
-13. SDL text/key/mouse events are routed back to the focused terminal and written
-    to the PTY.
+13. SDL text/key/mouse events are routed back to the focused terminal and queued
+    for the PTY's injected-Io writer task.
 
 ## V8 node materialization
 
@@ -203,10 +205,10 @@ Then the frame tick starts and polls terminals:
 findTerminalNodes(config.root, &term_count);
 while (ti < term_count) : (ti += 1) {
     if (!terminals_initialized[ti]) {
-        vterm_mod.spawnShellIdx(ti, "bash", 24, 80);
+        vterm_mod.spawnShellIdx(ctx.io, ti, "bash", 24, 80);
         terminals_initialized[ti] = true;
     }
-    if (vterm_mod.pollPtyIdx(ti)) {
+    if (vterm_mod.pollPtyIdx(ctx.io, ti)) {
         classifier.markDirtyIdx(ti);
         layout.markLayoutDirty();
     }
@@ -223,9 +225,9 @@ Important consequences:
 
 ## PTY lifecycle
 
-Source: `framework/pty.zig`, `framework/vterm_real.zig`
+Source: `framework/terminal/pty.zig`, `framework/terminal/vterm.zig`
 
-`framework/pty.zig` opens a real POSIX pseudo-terminal:
+`framework/terminal/pty.zig` opens a real POSIX pseudo-terminal:
 
 1. `posix_openpt()` opens the PTY master.
 2. `grantpt()` and `unlockpt()` prepare the slave.
@@ -236,25 +238,33 @@ Source: `framework/pty.zig`, `framework/vterm_real.zig`
 6. Optional `cwd` is applied with `chdir()`.
 7. `TERM=xterm-256color` and `COLORTERM=truecolor` are set.
 8. `execvp(shell, [shell, null])` starts the shell.
-9. The parent keeps the master fd, sets window size with `TIOCSWINSZ`, and uses
-   non-blocking reads/writes.
+9. The parent wraps the master fd as an `std.Io.File` and starts reader, writer,
+   and child-wait tasks in an injected `std.Io.Group`. Fixed-capacity
+   `std.Io.Queue` instances carry output bytes and pending writes between those
+   tasks and the frame.
+
+Raw libc ABI is intentionally limited to the PTY-specific setup boundary
+(`posix_openpt`, `grantpt`, `unlockpt`, `ptsname_r`, `fork`/session setup, and
+`execvp`) plus `ioctl` for controlling-terminal and window-size operations.
+Steady-state reads, writes, cancellation, close, and child waiting use the
+injected Zig 0.16 `std.Io`; there is no `O_NONBLOCK`/`fcntl` readiness loop.
 
 This is why shell behavior is terminal-like: readline editing, color output,
 Ctrl+C, job control, cursor movement, and SIGWINCH resize all happen through the
 PTY instead of through plain pipes.
 
-`vterm_real.zig` owns the global PTY:
+Each `vterm.zig` `Pipe` owns its PTY and passes the engine's injected capability
+when spawning it:
 
 ```zig
-var g_pty: ?pty_mod.Pty = null;
-
-pub fn spawnShell(shell: [*:0]const u8, rows: u16, cols: u16) void {
-    if (g_pty != null) closePty();
-    if (g_vterm == null) initVterm(rows, cols);
-    g_pty = pty_mod.openPty(.{ .shell = shell, .rows = rows, .cols = cols, .cwd = cwd }) catch |err| {
-        std.debug.print("[vterm] spawnShell failed: {}\n", .{err});
-        return;
-    };
+pub fn spawnShell(self: *Pipe, io: std.Io, shell: [*:0]const u8, rows: u16, cols: u16) void {
+    if (self.pty != null) self.closePty();
+    self.pty = pty_mod.openPty(g_alloc, io, .{
+        .shell = shell,
+        .rows = rows,
+        .cols = cols,
+        .cwd = cwd,
+    }) catch return;
 }
 ```
 
@@ -263,7 +273,7 @@ native terminal spawn. It does not move an already-running shell.
 
 ## libvterm screen state
 
-Source: `framework/vterm_real.zig`
+Source: `framework/terminal/vterm.zig`
 
 `VTerm` wraps the libvterm handle and screen:
 
@@ -277,20 +287,32 @@ Source: `framework/vterm_real.zig`
 PTY output is drained once per frame:
 
 ```zig
-pub fn pollPty() bool {
-    var p = &(g_pty orelse return false);
-    const data = p.readData() orelse return false;
-    if (g_recording_active) g_recorder.capture(data);
-    if (g_vterm) |*v| {
-        v.feedData(data);
+pub fn pollPty(self: *Pipe, io: std.Io) bool {
+    var p = &(self.pty orelse return false);
+    var got_data = false;
+    var iters: u32 = 0;
+    while (iters < 32) : (iters += 1) {
+        const data = p.readData() orelse break;
+        got_data = true;
+        if (self.recording_active) {
+            const now_us: u64 = @intCast(@max(0, std.Io.Clock.now(.awake, io).toMicroseconds()));
+            self.recorder.?.capture(now_us, data);
+        }
+        self.feedData(data);
+    }
+    if (got_data) {
         var out_buf: [4096]u8 = undefined;
-        if (v.readOutputData(&out_buf)) |response| {
-            _ = p.writeData(response);
+        if (self.readOutputData(&out_buf)) |response| {
+            _ = p.writeData(response); // queues work for the Io writer task
         }
     }
-    return true;
+    return got_data;
 }
 ```
+
+Despite the historical `pollPty` name, this function does not poll a file
+descriptor. It drains the bounded output queue with a zero-length wait and
+feeds libvterm on the frame thread.
 
 The last step matters: libvterm may generate terminal responses for queries
 such as device attributes or cursor reports. Those bytes are written back to
@@ -387,8 +409,9 @@ if (terminals_initialized[g_focused_terminal]) {
 }
 ```
 
-`terminalHandleTextInput()` writes the UTF-8 text bytes directly to the PTY and
-scrolls to the bottom.
+`terminalHandleTextInput()` queues the UTF-8 text bytes for the PTY's
+injected-Io writer task and scrolls to the bottom. The frame does not issue a
+raw `write(2)` call.
 
 Key-down events also go to the focused native terminal first. Special handling:
 
@@ -409,6 +432,13 @@ Key-down events also go to the focused native terminal first. Special handling:
 
 While a terminal is initialized and focused, terminal text/key handling takes
 priority over normal inputs, render surfaces, and JS key callbacks.
+
+In KMS/no-display-server mode, `framework/render/evdev.zig` owns input-device
+I/O. It opens devices through the injected `std.Io`, runs one cancelable reader
+task per device in an `std.Io.Group`, and feeds parsed events into a bounded
+`std.Io.Queue`. The frame drains that queue and synthesizes SDL events. Linux
+`ioctl` remains only for evdev-specific axis metadata; ordinary open, read,
+cancellation, and close ownership do not use a raw fd-readiness loop.
 
 ## Selection, clipboard, and scrollback
 

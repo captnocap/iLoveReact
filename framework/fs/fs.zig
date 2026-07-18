@@ -11,7 +11,6 @@
 // - Operations take a Dir handle so callers can scope to different roots
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 pub const MAX_PATH = std.fs.max_path_bytes;
 pub const MAX_NAME = 255;
@@ -51,12 +50,12 @@ var data_path_len: usize = 0;
 /// Initialize the filesystem substrate with an app name.
 /// Resolves the XDG data directory ($XDG_DATA_HOME/<app> or ~/.local/share/<app>),
 /// creates it if needed, and opens a Dir handle for subsequent operations.
-pub fn init(app_name: []const u8) !void {
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map, app_name: []const u8) !void {
     if (data_dir != null) return;
 
     // Resolve XDG data home
     data_path_len = 0;
-    if (host_io.getenv("XDG_DATA_HOME")) |xdg| {
+    if (environ.get("XDG_DATA_HOME")) |xdg| {
         if (xdg.len > 0) {
             const s = std.fmt.bufPrint(&data_path, "{s}/{s}", .{ xdg, app_name }) catch
                 return error.NameTooLong;
@@ -64,7 +63,7 @@ pub fn init(app_name: []const u8) !void {
         }
     }
     if (data_path_len == 0) {
-        const home = host_io.getenv("HOME") orelse return error.AppDataDirUnavailable;
+        const home = environ.get("HOME") orelse return error.AppDataDirUnavailable;
         const s = std.fmt.bufPrint(&data_path, "{s}/.local/share/{s}", .{ home, app_name }) catch
             return error.NameTooLong;
         data_path_len = s.len;
@@ -72,12 +71,12 @@ pub fn init(app_name: []const u8) !void {
 
     // Create directory tree and open handle
     const path_slice = data_path[0..data_path_len];
-    try std.Io.Dir.cwd().createDirPath(host_io.io(), path_slice);
-    data_dir = try std.Io.Dir.cwd().openDir(host_io.io(), path_slice, .{ .iterate = true });
+    try std.Io.Dir.cwd().createDirPath(io, path_slice);
+    data_dir = try std.Io.Dir.cwd().openDir(io, path_slice, .{ .iterate = true });
 }
 
-pub fn deinit() void {
-    if (data_dir) |d| d.close(host_io.io());
+pub fn deinit(io: std.Io) void {
+    if (data_dir) |d| d.close(io);
     data_dir = null;
     data_path_len = 0;
 }
@@ -133,24 +132,24 @@ fn checkPath(path: []const u8) error{PathNotConfined}!void {
 
 /// Read a file's contents into the provided buffer. Returns bytes read.
 /// If the file is larger than the buffer, only buf.len bytes are read.
-pub fn readText(dir: std.Io.Dir, path: []const u8, buf: []u8) !usize {
+pub fn readText(io: std.Io, dir: std.Io.Dir, path: []const u8, buf: []u8) !usize {
     try checkPath(path);
-    const file = try dir.openFile(host_io.io(), path, .{});
-    defer file.close(host_io.io());
-    return file.readPositionalAll(host_io.io(), buf, 0);
+    const file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    return file.readPositionalAll(io, buf, 0);
 }
 
 /// Write content to a file, creating or truncating as needed.
-pub fn writeText(dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
+pub fn writeText(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     try checkPath(path);
-    const file = try dir.createFile(host_io.io(), path, .{ .truncate = true });
-    defer file.close(host_io.io());
-    try file.writeStreamingAll(host_io.io(), content);
+    const file = try dir.createFile(io, path, .{ .truncate = true });
+    defer file.close(io);
+    try file.writeStreamingAll(io, content);
 }
 
 /// Write content atomically: write to a temp file, then rename over the target.
 /// If the process crashes mid-write, the original file is untouched.
-pub fn writeAtomic(dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
+pub fn writeAtomic(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     try checkPath(path);
 
     // Build temp path
@@ -159,69 +158,69 @@ pub fn writeAtomic(dir: std.Io.Dir, path: []const u8, content: []const u8) !void
         return error.NameTooLong;
 
     // Write to temp file
-    const file = try dir.createFile(host_io.io(), tmp_path, .{ .truncate = true });
-    file.writeStreamingAll(host_io.io(), content) catch |err| {
-        file.close(host_io.io());
-        dir.deleteFile(host_io.io(), tmp_path) catch {};
+    const file = try dir.createFile(io, tmp_path, .{ .truncate = true });
+    file.writeStreamingAll(io, content) catch |err| {
+        file.close(io);
+        dir.deleteFile(io, tmp_path) catch {};
         return err;
     };
-    file.close(host_io.io());
+    file.close(io);
 
     // Atomic rename (single syscall on POSIX)
-    std.Io.Dir.rename(dir, tmp_path, dir, path, host_io.io()) catch |err| {
-        dir.deleteFile(host_io.io(), tmp_path) catch {};
+    std.Io.Dir.rename(dir, tmp_path, dir, path, io) catch |err| {
+        dir.deleteFile(io, tmp_path) catch {};
         return err;
     };
 }
 
 /// Delete a file.
-pub fn deleteFile(dir: std.Io.Dir, path: []const u8) !void {
+pub fn deleteFile(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteFile(host_io.io(), path);
+    try dir.deleteFile(io, path);
 }
 
 /// Check if a path exists (file or directory).
-pub fn pathExists(dir: std.Io.Dir, path: []const u8) bool {
+pub fn pathExists(io: std.Io, dir: std.Io.Dir, path: []const u8) bool {
     if (!isConfined(path)) return false;
-    _ = dir.statFile(host_io.io(), path, .{}) catch return false;
+    _ = dir.statFile(io, path, .{}) catch return false;
     return true;
 }
 
 // -- Directory operations --
 
 /// Create a single directory. Parent must exist.
-pub fn makeDir(dir: std.Io.Dir, path: []const u8) !void {
+pub fn makeDir(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.createDir(host_io.io(), path, .default_dir);
+    try dir.createDir(io, path, .default_dir);
 }
 
 /// Create a directory and all missing parents.
-pub fn makePath(dir: std.Io.Dir, path: []const u8) !void {
+pub fn makePath(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.createDirPath(host_io.io(), path);
+    try dir.createDirPath(io, path);
 }
 
 /// List the contents of a directory. Returns the number of entries written to `out`.
 /// If there are more entries than out.len, only the first out.len are returned.
-pub fn listDir(dir: std.Io.Dir, path: []const u8, out: []DirEntry) !usize {
+pub fn listDir(io: std.Io, dir: std.Io.Dir, path: []const u8, out: []DirEntry) !usize {
     try checkPath(path);
-    var sub = try dir.openDir(host_io.io(), path, .{ .iterate = true });
-    defer sub.close(host_io.io());
-    return iterateDir(sub, out);
+    var sub = try dir.openDir(io, path, .{ .iterate = true });
+    defer sub.close(io);
+    return iterateDir(io, sub, out);
 }
 
 /// List the contents of an already-open directory handle.
-pub fn listOpenDir(dir: std.Io.Dir, out: []DirEntry) !usize {
+pub fn listOpenDir(io: std.Io, dir: std.Io.Dir, out: []DirEntry) !usize {
     // Re-open to get a fresh iterator without consuming the caller's handle
-    var copy = try std.Io.Dir.openDir(dir, host_io.io(), ".", .{ .iterate = true });
-    defer copy.close(host_io.io());
-    return iterateDir(copy, out);
+    var copy = try std.Io.Dir.openDir(dir, io, ".", .{ .iterate = true });
+    defer copy.close(io);
+    return iterateDir(io, copy, out);
 }
 
-fn iterateDir(dir: std.Io.Dir, out: []DirEntry) !usize {
+fn iterateDir(io: std.Io, dir: std.Io.Dir, out: []DirEntry) !usize {
     var iter = dir.iterate();
     var count: usize = 0;
-    while (try iter.next(host_io.io())) |entry| {
+    while (try iter.next(io)) |entry| {
         if (count >= out.len) break;
         const len: u8 = @intCast(@min(entry.name.len, MAX_NAME));
         @memcpy(out[count].name_buf[0..len], entry.name[0..len]);
@@ -233,23 +232,23 @@ fn iterateDir(dir: std.Io.Dir, out: []DirEntry) !usize {
 }
 
 /// Delete an empty directory.
-pub fn deleteDir(dir: std.Io.Dir, path: []const u8) !void {
+pub fn deleteDir(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteDir(host_io.io(), path);
+    try dir.deleteDir(io, path);
 }
 
 /// Recursively delete a directory and all its contents.
-pub fn deleteTree(dir: std.Io.Dir, path: []const u8) !void {
+pub fn deleteTree(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteTree(host_io.io(), path);
+    try dir.deleteTree(io, path);
 }
 
 // -- Stat --
 
 /// Get metadata for a file or directory.
-pub fn statPath(dir: std.Io.Dir, path: []const u8) !FileStat {
+pub fn statPath(io: std.Io, dir: std.Io.Dir, path: []const u8) !FileStat {
     try checkPath(path);
-    const s = try dir.statFile(host_io.io(), path, .{});
+    const s = try dir.statFile(io, path, .{});
     return FileStat{
         .size = s.size,
         .mtime_ns = @intCast(s.mtime.toNanoseconds()),
@@ -292,20 +291,20 @@ test "file round-trip in tmp dir" {
     defer tmp.cleanup();
 
     const content = "hello, tsz filesystem";
-    try writeText(tmp.dir, "test.txt", content);
+    try writeText(std.testing.io, tmp.dir, "test.txt", content);
 
     var buf: [256]u8 = undefined;
-    const n = try readText(tmp.dir, "test.txt", &buf);
+    const n = try readText(std.testing.io, tmp.dir, "test.txt", &buf);
     try std.testing.expectEqualStrings(content, buf[0..n]);
 
     // Stat
-    const s = try statPath(tmp.dir, "test.txt");
+    const s = try statPath(std.testing.io, tmp.dir, "test.txt");
     try std.testing.expectEqual(@as(u64, content.len), s.size);
     try std.testing.expectEqual(std.Io.File.Kind.file, s.kind);
 
     // Delete
-    try deleteFile(tmp.dir, "test.txt");
-    try std.testing.expect(!pathExists(tmp.dir, "test.txt"));
+    try deleteFile(std.testing.io, tmp.dir, "test.txt");
+    try std.testing.expect(!pathExists(std.testing.io, tmp.dir, "test.txt"));
 }
 
 test "atomic write" {
@@ -313,17 +312,17 @@ test "atomic write" {
     defer tmp.cleanup();
 
     // Write original
-    try writeText(tmp.dir, "data.txt", "version1");
+    try writeText(std.testing.io, tmp.dir, "data.txt", "version1");
 
     // Atomic overwrite
-    try writeAtomic(tmp.dir, "data.txt", "version2");
+    try writeAtomic(std.testing.io, tmp.dir, "data.txt", "version2");
 
     var buf: [256]u8 = undefined;
-    const n = try readText(tmp.dir, "data.txt", &buf);
+    const n = try readText(std.testing.io, tmp.dir, "data.txt", &buf);
     try std.testing.expectEqualStrings("version2", buf[0..n]);
 
     // Temp file should not remain
-    try std.testing.expect(!pathExists(tmp.dir, "data.txt.tmp"));
+    try std.testing.expect(!pathExists(std.testing.io, tmp.dir, "data.txt.tmp"));
 }
 
 test "directory operations" {
@@ -331,21 +330,21 @@ test "directory operations" {
     defer tmp.cleanup();
 
     // makePath creates nested dirs
-    try makePath(tmp.dir, "a/b/c");
-    try std.testing.expect(pathExists(tmp.dir, "a/b/c"));
+    try makePath(std.testing.io, tmp.dir, "a/b/c");
+    try std.testing.expect(pathExists(std.testing.io, tmp.dir, "a/b/c"));
 
     // Write files in subdirectory
-    try writeText(tmp.dir, "a/b/c/one.txt", "1");
-    try writeText(tmp.dir, "a/b/c/two.txt", "2");
+    try writeText(std.testing.io, tmp.dir, "a/b/c/one.txt", "1");
+    try writeText(std.testing.io, tmp.dir, "a/b/c/two.txt", "2");
 
     // listDir
     var entries: [16]DirEntry = undefined;
-    const count = try listDir(tmp.dir, "a/b/c", &entries);
+    const count = try listDir(std.testing.io, tmp.dir, "a/b/c", &entries);
     try std.testing.expectEqual(@as(usize, 2), count);
 
     // deleteTree
-    try deleteTree(tmp.dir, "a");
-    try std.testing.expect(!pathExists(tmp.dir, "a"));
+    try deleteTree(std.testing.io, tmp.dir, "a");
+    try std.testing.expect(!pathExists(std.testing.io, tmp.dir, "a"));
 }
 
 test "path confinement enforcement" {
@@ -353,11 +352,11 @@ test "path confinement enforcement" {
     defer tmp.cleanup();
 
     // Absolute path rejected
-    try std.testing.expectError(error.PathNotConfined, readText(tmp.dir, "/etc/passwd", &[_]u8{}));
+    try std.testing.expectError(error.PathNotConfined, readText(std.testing.io, tmp.dir, "/etc/passwd", &[_]u8{}));
 
     // Traversal rejected
-    try std.testing.expectError(error.PathNotConfined, writeText(tmp.dir, "../escape.txt", "bad"));
+    try std.testing.expectError(error.PathNotConfined, writeText(std.testing.io, tmp.dir, "../escape.txt", "bad"));
 
     // Empty rejected
-    try std.testing.expectError(error.PathNotConfined, deleteFile(tmp.dir, ""));
+    try std.testing.expectError(error.PathNotConfined, deleteFile(std.testing.io, tmp.dir, ""));
 }

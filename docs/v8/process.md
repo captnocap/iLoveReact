@@ -7,8 +7,8 @@ There are three separate process runner surfaces:
 ```text
 sync shell command:
   globalThis.__exec(cmd)
-  -> framework/v8_bindings_fs.zig execCmd()
-  -> libc popen(cmd, "r")
+  -> framework/v8_bindings_env.zig execCmd()
+  -> std.process.run(host.io, /bin/sh -c ...)
   -> blocking stdout capture
   -> string return
 
@@ -16,7 +16,8 @@ async shell command:
   execAsync(cmd)
   -> globalThis.__exec_async(cmd, requestId)
   -> framework/v8_bindings_core.zig hostExecAsync()
-  -> framework/exec_async.zig detached thread + popen(cmd, "r")
+  -> framework/process/exec_async.zig std.Io.Group task
+  -> std.process.spawn(io, /bin/sh -c ...) + readStreaming(io, ...)
   -> v8_app.zig per-frame tickDrain()
   -> __ffiEmit("exec:<requestId>", {"code":N,"stdout":"..."})
   -> Promise resolves
@@ -25,8 +26,8 @@ long-lived process:
   spawn(...) or useHost({kind:"process", ...})
   -> globalThis.__proc_spawn(JSON)
   -> framework/v8_bindings_process.zig hostSpawn()
-  -> framework/process.zig spawnPiped()
-  -> fork/execvp with stdin/stdout/stderr pipes
+  -> framework/process/process.zig spawnPiped(host.io, ...)
+  -> std.process.spawn(io, ...) + std.Io pipe pumps
   -> v8_app.zig per-frame tickDrain()
   -> __ffiEmit("proc:stdout:<pid>", line)
   -> __ffiEmit("proc:stderr:<pid>", line)
@@ -48,13 +49,14 @@ Use the shell exec APIs for one-shot commands. Use `spawn()` or
   effects so `proc:*` sources and actions register.
 - `framework/v8_bindings_core.zig` registers `__exec_async` and drains finished
   async exec jobs.
-- `framework/exec_async.zig` owns the detached-thread `popen()` worker queue.
-- `framework/v8_bindings_fs.zig` registers `__exec`, `__env_get`, `__env_set`,
+- `framework/process/exec_async.zig` owns the injected-Io task group and bounded
+  completed-result store for async shell commands.
+- `framework/v8_bindings_env.zig` registers `__exec`, `__env_get`, `__env_set`,
   `__exit`, and `__getpid`.
 - `framework/v8_bindings_process.zig` registers the `__proc_*` host functions,
   owns child entries, drains pipes, emits process events, and samples `/proc`.
-- `framework/process.zig` owns POSIX `fork`, `execvp`, pipe wiring, child
-  registry cleanup, liveness checks, signals, and exit-code decode.
+- `framework/process/process.zig` owns native `std.process.spawn`, child wait
+  tasks, bounded stdout/stderr pumps, registry cleanup, and signal delivery.
 - `v8_app.zig` source-gates optional bindings and calls binding `tickDrain()`
   methods once per frame.
 - `scripts/ship` and `scripts/ship-metafile-gate.js` decide which optional V8
@@ -103,12 +105,12 @@ The direct helpers:
 | `kill(pid, signal?)` | `__proc_kill(pid, signal)` | Sends `SIGTERM` by default; `SIGKILL` is also recognized. |
 | `wait(pid)` | `__proc_wait(pid)` | Declared in JS, but the V8 process binding does not currently register `__proc_wait`. |
 | `stdinWrite(pid, data)` | `__proc_stdin_write(pid, data)` | Writes to child stdin if the child was spawned with `stdin:"pipe"`. |
-| `stdinClose(pid)` | `__proc_stdin_close(pid)` | Closes parent-side stdin fd. |
+| `stdinClose(pid)` | `__proc_stdin_close(pid)` | Closes the parent-side `std.Io.File`. |
 | `onStdout(pid, fn)` | `proc:stdout:<pid>` subscription | Receives line strings. |
 | `onStderr(pid, fn)` | `proc:stderr:<pid>` subscription | Receives line strings. |
-| `onExit(pid, fn)` | `proc:exit:<pid>` subscription | Receives `{ code, signal }`; V8 currently emits `signal:null`. |
+| `onExit(pid, fn)` | `proc:exit:<pid>` subscription | Receives `{ code, signal }`; signaled/stopped terms include a `SIG*` name. |
 | `run(cmd, args?)` | wrapper around `spawn` | Collects stdout/stderr lines until exit and resolves `{ code, stdout, stderr }`. |
-| `execAsync(cmd)` | `__exec_async(cmd, rid)` | Runs a shell command on a detached thread and resolves `{ code, stdout }`. |
+| `execAsync(cmd)` | `__exec_async(cmd, rid)` | Runs a shell command in an injected-Io task and resolves `{ code, stdout }`. |
 | `envGet(name)` | `__env_get(name)` | Reads the host process environment; returns string or null. |
 | `envSet(name, value)` | `__env_set(name, value)` | Sets an environment variable in the host process. |
 | `exit(code?)` | `__exit(code)` | Exits the host process. |
@@ -140,27 +142,28 @@ child.stop();
 ## Shell exec path
 
 `__exec(cmd)` is the synchronous shell command primitive registered by
-`framework/v8_bindings_fs.zig`.
+`framework/v8_bindings_env.zig`.
 
 ```text
 JS calls globalThis.__exec(cmd)
-  -> v8_bindings_fs.execCmd()
-  -> copy JS string into a nul-terminated command
-  -> popen(command, "r")
-  -> fread() stdout into a 65536-byte stack buffer
-  -> pclose()
+  -> v8_bindings_env.execCmd()
+  -> std.process.run(page_allocator, host.io, {
+       argv = ["/bin/sh", "-c", command],
+       stdout_limit = 64 KiB,
+       stderr_limit = 64 KiB,
+       environ_map = host.environ,
+     })
   -> return stdout string
 ```
 
 Important behavior:
 
 - It blocks the JS/UI frame for the whole command runtime.
-- It captures stdout only. Stderr is not returned unless the command redirects
-  it, for example `cmd 2>&1`.
-- Output is capped at 64 KiB.
+- The native run captures both streams with 64 KiB limits, but the host function
+  returns only stdout. Redirect stderr explicitly when the caller needs it.
 - The exit status is ignored. Empty output and command failure both return an
   empty string.
-- Because it uses `popen`, the command is interpreted by the platform shell.
+- The command is intentionally interpreted by `/bin/sh -c`.
 
 Use it only for tiny commands where blocking the frame is acceptable.
 
@@ -174,12 +177,12 @@ runtime/hooks/process.ts execAsync(cmd)
   -> subscribe("exec:<rid>", handler)
   -> callHost("__exec_async", cmd, rid)
   -> v8_bindings_core.hostExecAsync()
-  -> exec_async.spawn(rid, cmd)
-  -> detached Zig thread:
-       popen(cmd, "r")
-       fread() stdout into an ArrayList
-       pclose()
-       push completed result into mutex queue
+  -> process/exec_async.Executor.spawn(rid, cmd)
+  -> std.Io.Group task:
+       std.process.spawn(io, ["/bin/sh", "-c", cmd])
+       readStreaming(io, ...) stdout into a capped ArrayList
+       child.wait(io)
+       publish an owned result into a bounded completed-result store
   -> v8_bindings_core.tickDrain()
   -> exec_async.drain(emitExecResult)
   -> __ffiEmit("exec:<rid>", JSON)
@@ -191,12 +194,13 @@ binding. That is why `execAsync()` can work even when `__proc_*` is not shipped.
 
 Important behavior:
 
-- It captures stdout only. Redirect stderr explicitly if needed.
-- The worker uses `popen`, so the command is shell-interpreted.
-- Output is accumulated in memory with no 64 KiB cap.
-- The emitted `code` is the raw `pclose()` status, not the decoded process exit
-  code used by `framework/process.zig`. A clean command reports `0`, but nonzero
-  exits may be wait-status encoded.
+- It captures stdout only; stderr is inherited by the host process.
+- The command is shell-interpreted by `/bin/sh -c`.
+- Captured stdout is capped at 4 MiB.
+- The emitted `code` comes from `std.process.Child.Term`: normal exits use their
+  exit code, while signal/stopped terms are returned as negative signal numbers.
+- The executor admits at most 32 in-flight commands and holds at most 64
+  completed results pending a frame drain.
 - Listener dispatch still goes through `__ffiEmit` and `setTimeout(0)`, so the
   Promise resolves on a later JS tick after the native drain.
 
@@ -214,38 +218,33 @@ JS SpawnOptions
   -> JSON.stringify({cmd,args,cwd,env,stdin})
   -> v8_bindings_process.hostSpawn()
   -> hand-parse cmd/cwd/stdin and args array
-  -> process.spawnPiped({
-       exe,
-       args,
-       cwd,
-       pipe_stdin: stdin == "pipe",
-       pipe_stdout: true,
-       pipe_stderr: true,
+  -> process.spawnPiped(alloc, host.io, {
+       argv: [cmd, ...args],
+       cwd: cwd path or inherit,
+       environ_map: host.environ,
+       stdin: pipe | ignore | inherit,
+       stdout: pipe,
+       stderr: pipe,
      })
 ```
 
-In `framework/process.zig`, `spawnPiped()` does the POSIX work:
+In `framework/process/process.zig`, `spawnPiped()` stays on Zig 0.16's native
+process and I/O model:
 
 ```text
-pipe2(O_CLOEXEC) for stdin/stdout/stderr as requested
-fork()
-
-child:
-  setsid() unless disabled
-  chdir(cwd) when provided
-  dup2(stdin read end, 0)
-  dup2(stdout write end, 1)
-  dup2(stderr write end, 2)
-  setenv() for provided EnvVar entries
-  execvp(exe, [exe, ...args, null])
-  _exit(127) if exec fails
-
-parent:
-  register(pid) in the child registry
-  close child-side pipe ends
-  set stdout/stderr read fds O_NONBLOCK
-  return PipedProcess { process, stdin_fd, stdout_fd, stderr_fd }
+std.process.spawn(io, SpawnOptions)
+  -> optional stdin/stdout/stderr std.Io.File values
+  -> one cancelable std.Io.Group reader task per output pipe
+       readStreaming(io, ...)
+       put bytes into a fixed 128 KiB std.Io.Queue
+  -> one std.Io.Group waiter task owns child.wait(io)
+       publish native Child.Term + signal an std.Io.Event
+  -> return PipedProcess { process, stdin, stdout pump, stderr pump }
 ```
+
+The tasks are allowed to block inside the injected `std.Io` capability. Queue
+capacity supplies backpressure. The frame thread never changes descriptor flags
+and never probes raw fds for readiness.
 
 `v8_bindings_process.zig` stores each child in `g_entries`:
 
@@ -262,17 +261,19 @@ Entry {
 
 On every native frame, `tickDrain()`:
 
-1. Reads each child's stdout fd without blocking.
+1. Drains bytes already available in each child's stdout queue without waiting.
 2. Emits each complete newline-terminated line on `proc:stdout:<pid>`.
-3. Reads and emits stderr the same way on `proc:stderr:<pid>`.
+3. Drains and emits stderr the same way on `proc:stderr:<pid>`.
 4. Flushes a full 64 KiB partial line as one event.
-5. Checks `process.alive()`.
-6. When the child exits, flushes trailing partial stdout/stderr text.
-7. Emits `proc:exit:<pid>` with `{"code":N,"signal":null}`.
-8. Removes the entry, closes fds, and closes/deregisters the process handle.
+5. Reads the atomic state published by the native child-wait task.
+6. After the child terminates and both pipe queues reach EOF, flushes trailing
+   partial stdout/stderr text.
+7. Emits `proc:exit:<pid>` from the native `Child.Term`.
+8. Removes the entry, cancels/joins owned I/O tasks, closes files, and
+   closes/deregisters the process handle.
 
-`framework/process.zig` decodes child exit code as `(status >> 8) & 0xFF` when
-`waitpid(..., WNOHANG)` reports the child has exited.
+No raw `waitpid(..., WNOHANG)` status decoder is involved. Normal exit codes and
+signals come directly from `std.process.Child.Term`.
 
 ## Event delivery
 
@@ -298,7 +299,7 @@ Raw channels:
 | --- | --- |
 | `proc:stdout:<pid>` | stdout line string, without the newline |
 | `proc:stderr:<pid>` | stderr line string, without the newline |
-| `proc:exit:<pid>` | JSON string shaped like `{ "code": number, "signal": null }` |
+| `proc:exit:<pid>` | JSON string shaped like `{ "code": number, "signal": string \| null }` |
 | `proc:ram:<pid>` | JSON string shaped like `{ pid, id, rss, vsize, memTotal, percent }` |
 | `proc:cpu:<pid>` | JSON string shaped like `{ pid, id, utime, stime, delta, intervalMs }` |
 | `exec:<rid>` | JSON string shaped like `{ code, stdout }` |
@@ -399,10 +400,10 @@ v8_bindings_core.registerCore()
 ```
 
 `__exec`, `__env_get`, `__env_set`, `__exit`, and `__getpid` are registered by
-the optional fs binding:
+the required environment ingredient:
 
 ```text
-v8_bindings_fs.registerFs()
+v8_bindings_env.registerEnv()
   -> __exec
   -> __env_get
   -> __env_set
@@ -436,14 +437,14 @@ Current ship gate behavior:
   `runtime/package.json` because it registers IFTTT sources.
 
 Sharp edge: a cart that imports only `runtime/hooks/process.ts` may include the
-JS process API without causing `has-process` or `has-fs` to be enabled by the
-current dependency registry. `execAsync()` still works because it is core, but
-`spawn()`, `procStat()`, `watchProcess()`, `envGet()`, `envSet()`, `exit()`, and
-sync `__exec` depend on optional bindings.
+JS process API without causing `has-process` to be enabled by the current
+dependency registry. `execAsync()`, `envGet()`, `envSet()`, `exit()`, and sync
+`__exec` are always registered; `spawn()`, `procStat()`, and `watchProcess()`
+still depend on the optional process ingredient.
 
 ## Child ownership and cleanup
 
-`framework/process.zig` keeps a small child registry:
+`framework/process/process.zig` keeps a small child registry:
 
 ```text
 /tmp/tsz_children_<parent_pid>
@@ -452,17 +453,22 @@ sync `__exec` depend on optional bindings.
 Every spawned child is registered. The registry supports cleanup on host exit
 or crash watchdog cleanup.
 
-`Process.closeProccess()` does:
+`Process.closeProcess(io)` does:
 
 ```text
 if still running:
   SIGTERM
   wait up to about 200 ms
   SIGKILL if still alive
-  blocking waitpid final reap
+wait for the std.Io.Event published by the child.wait(io) task
+join the owned std.Io.Group
 
 deregister(pid)
 ```
+
+Raw POSIX is limited here to sending a selected signal without taking wait/reap
+ownership away from the native child task. Spawn, wait, sleep, files, and
+registry-file I/O all use the injected `std.Io` capability.
 
 The V8 process binding calls this when removing a child entry after exit and
 also when tearing down an entry.
@@ -475,26 +481,26 @@ component unmounts or the process spec changes.
 - `wait(pid)` is present in the JS API, but V8 does not register
   `__proc_wait`.
 - `SpawnOptions.env` is serialized by JS but currently ignored by
-  `v8_bindings_process.hostSpawn()`. `framework/process.zig` can apply env
-  entries, but the V8 JSON parser does not pass them through yet.
-- `stdin:"inherit"` and `stdin:"ignore"` both mean "do not create a stdin pipe"
-  in the current V8 process binding. The child then inherits whatever fd 0 is.
+  `v8_bindings_process.hostSpawn()`. The child receives the root host environment
+  map; the V8 JSON parser does not overlay the per-call entries yet.
+- `stdin:"pipe"`, `stdin:"inherit"`, and `stdin:"ignore"` map to the matching
+  native `std.process.SpawnOptions` behavior.
 - Stdout and stderr are always piped for `__proc_spawn`.
 - Args are parsed by a small hand-rolled JSON string-array parser, not a full
   JSON parser.
-- The V8 process binding builds a fixed argv buffer for at most 32 args.
+- The V8 process binding builds a fixed argv buffer for at most 1024 args.
 - Pipe line buffers are 64 KiB per stream per child. A longer line is emitted
   as a partial line when the buffer fills.
 - Stdout/stderr events are text line events. Binary protocols should use a
   dedicated transport instead.
-- `stdinWrite()` returns true when the `write()` syscall returns a nonnegative
-  value; it does not currently verify that the full buffer was written.
+- `stdinWrite()` uses `std.Io.File.writeStreamingAll(host.io, bytes)` and returns
+  true only when the full write succeeds.
 - `kill(pid)` only searches the V8 process binding's child entries. Process
   watchers can sample arbitrary pids, but `__proc_kill` cannot kill arbitrary
   pids that were not spawned by the binding.
 - `SIGKILL` maps to kill. Any other signal string maps to SIGTERM.
-- `proc:exit` currently emits `signal:null` even if the process died from a
-  signal.
+- `proc:exit` emits native exited/signaled/stopped terms; signal terms include a
+  `SIG*` string and use `code:-1`.
 - `__exec` and `__exec_async` are shell-command APIs. Do not pass unsanitized
   user text into them.
 

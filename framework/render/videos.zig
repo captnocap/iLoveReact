@@ -22,7 +22,6 @@
 //! Status lifecycle per src: null → loading → ready | error
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
@@ -31,7 +30,7 @@ const gpu_core = @import("../gpu/gpu.zig");
 const images = @import("../gpu/images.zig");
 
 // ════════════════════════════════════════════════════════════════════════
-// POSIX dynamic loading (libc — linked by build.zig)
+// libmpv plugin ABI dynamic loading (libc — linked by build.zig).
 // ════════════════════════════════════════════════════════════════════════
 
 extern fn dlopen(filename: ?[*:0]const u8, flags: c_int) ?*anyopaque;
@@ -441,10 +440,6 @@ fn getMpvInt(handle: ?*anyopaque, name: [*:0]const u8) ?i64 {
     return null;
 }
 
-fn isRemoteUrl(src: []const u8) bool {
-    return std.mem.startsWith(u8, src, "http://") or std.mem.startsWith(u8, src, "https://");
-}
-
 fn findEntry(src: []const u8) ?*VideoEntry {
     for (entries[0..entry_count]) |*e| {
         if (std.mem.eql(u8, e.src, src)) return e;
@@ -516,18 +511,6 @@ fn loadVideo(src: []const u8) void {
         entries[entry_count] = .{ .src = src, .status = .@"error" };
         entry_count += 1;
         return;
-    }
-
-    if (!isRemoteUrl(src)) {
-        const f = std.Io.Dir.cwd().openFile(host_io.io(), src, .{}) catch {
-            log.print("[videos] file not found: {s}\n", .{src});
-            mpv_fns.render_ctx_free(render_ctx);
-            mpv_fns.terminate_destroy(handle);
-            entries[entry_count] = .{ .src = src, .status = .@"error" };
-            entry_count += 1;
-            return;
-        };
-        f.close(host_io.io());
     }
 
     @memcpy(path_buf[0..src.len], src);

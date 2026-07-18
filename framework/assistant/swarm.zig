@@ -4,7 +4,6 @@
 //! Supports pane-based (tmux, iTerm2) and in-process teammate execution.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 // Sub-modules
 pub const constants = @import("swarm/constants.zig");
@@ -56,11 +55,13 @@ pub const PLAN_MODE_REQUIRED_ENV_VAR = constants.PLAN_MODE_REQUIRED_ENV_VAR;
 
 /// Team manager for high-level operations
 pub const TeamManager = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     base_dir: []const u8,
 
-    pub fn init(allocator: std.mem.Allocator, base_dir: []const u8) TeamManager {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8) TeamManager {
         return .{
+            .io = io,
             .allocator = allocator,
             .base_dir = base_dir,
         };
@@ -73,7 +74,7 @@ pub const TeamManager = struct {
         lead_agent_id: []const u8,
         description: ?[]const u8,
     ) error{OutOfMemory}!TeamFile {
-        const now = host_io.timestamp();
+        const now = std.Io.Clock.now(.real, self.io).toSeconds();
 
         return TeamFile{
             .name = try self.allocator.dupe(u8, team_name),
@@ -164,7 +165,7 @@ pub fn generateTeamName(
 
 test "TeamManager creates team correctly" {
     const allocator = std.testing.allocator;
-    const manager = TeamManager.init(allocator, "/home/user/.config");
+    const manager = TeamManager.init(std.testing.io, allocator, "/home/user/.config");
 
     const team = try manager.createTeam("my-team", "lead@my-team", "Test team");
     defer {
@@ -189,7 +190,7 @@ test "isValidTeamName validates correctly" {
 
 test "generateTeamName with unique name" {
     const allocator = std.testing.allocator;
-    const existing = &[_][]const u8{"team-a", "team-b"};
+    const existing = &[_][]const u8{ "team-a", "team-b" };
 
     const name = try generateTeamName(allocator, "my-team", existing);
     defer allocator.free(name);
@@ -199,7 +200,7 @@ test "generateTeamName with unique name" {
 
 test "generateTeamName with duplicate name" {
     const allocator = std.testing.allocator;
-    const existing = &[_][]const u8{"my-team", "my-team-2"};
+    const existing = &[_][]const u8{ "my-team", "my-team-2" };
 
     const name = try generateTeamName(allocator, "my-team", existing);
     defer allocator.free(name);

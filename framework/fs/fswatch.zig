@@ -13,7 +13,6 @@
 // Polling matches Lua behavior and keeps cross-platform semantics stable.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 
 pub const MAX_WATCHERS = 8;
 pub const MAX_FILES = 512;
@@ -53,6 +52,7 @@ const SnapEntry = struct {
 };
 
 const Watcher = struct {
+    io: std.Io = undefined,
     // Config
     watch_path: [std.fs.max_path_bytes]u8 = undefined,
     watch_path_len: usize = 0,
@@ -110,7 +110,7 @@ pub fn deinit() void {
 // -- Add / Remove --
 
 /// Register a new file watcher. Returns the watcher ID (0-based).
-pub fn addWatcher(config: WatcherConfig) error{ TooManyWatchers, NameTooLong }!u8 {
+pub fn addWatcher(io: std.Io, config: WatcherConfig) error{ TooManyWatchers, NameTooLong }!u8 {
     // Find a free slot
     var slot: ?u8 = null;
     for (0..MAX_WATCHERS) |i| {
@@ -121,6 +121,7 @@ pub fn addWatcher(config: WatcherConfig) error{ TooManyWatchers, NameTooLong }!u
     }
     const id = slot orelse return error.TooManyWatchers;
     var w = &watchers[id];
+    w.io = io;
 
     // Copy path
     if (config.path.len > w.watch_path.len) return error.NameTooLong;
@@ -158,7 +159,7 @@ pub fn addWatcher(config: WatcherConfig) error{ TooManyWatchers, NameTooLong }!u
 
     // Detect if path is a directory
     w.is_dir = blk: {
-        const s = std.Io.Dir.cwd().statFile(host_io.io(), config.path, .{}) catch break :blk false;
+        const s = std.Io.Dir.cwd().statFile(io, config.path, .{}) catch break :blk false;
         break :blk s.kind == .directory;
     };
 
@@ -257,7 +258,7 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
 
     if (!w.is_dir) {
         // Single file watch
-        const s = std.Io.Dir.cwd().statFile(host_io.io(), watch_path, .{}) catch return 0;
+        const s = std.Io.Dir.cwd().statFile(w.io, watch_path, .{}) catch return 0;
         const basename = std.fs.path.basename(watch_path);
         const len: u16 = @intCast(@min(basename.len, SNAP_PATH_MAX));
         @memcpy(out[0].rel_path[0..len], basename[0..len]);
@@ -268,15 +269,15 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
     }
 
     // Directory watch
-    var dir = std.Io.Dir.cwd().openDir(host_io.io(), watch_path, .{ .iterate = true }) catch return 0;
-    defer dir.close(host_io.io());
+    var dir = std.Io.Dir.cwd().openDir(w.io, watch_path, .{ .iterate = true }) catch return 0;
+    defer dir.close(w.io);
 
     if (w.recursive) {
         // Recursive scan using Dir.walk (requires allocator)
         var walker = dir.walk(std.heap.page_allocator) catch return 0;
         defer walker.deinit();
 
-        while (walker.next(host_io.io()) catch null) |entry| {
+        while (walker.next(w.io) catch null) |entry| {
             if (count >= MAX_FILES) break;
             if (entry.kind == .directory) continue;
 
@@ -287,7 +288,7 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
             if (w.has_pattern and !matchGlob(w.pattern[0..w.pattern_len], entry.basename)) continue;
 
             // Stat
-            const s = entry.dir.statFile(host_io.io(), entry.basename, .{}) catch continue;
+            const s = entry.dir.statFile(w.io, entry.basename, .{}) catch continue;
             const plen: u16 = @intCast(@min(entry.path.len, SNAP_PATH_MAX));
             @memcpy(out[count].rel_path[0..plen], entry.path[0..plen]);
             out[count].rel_len = plen;
@@ -298,7 +299,7 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
     } else {
         // Shallow scan
         var iter = dir.iterate();
-        while (iter.next(host_io.io()) catch null) |entry| {
+        while (iter.next(w.io) catch null) |entry| {
             if (count >= MAX_FILES) break;
             if (entry.kind == .directory) continue;
 
@@ -306,7 +307,7 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
             if (w.has_pattern and !matchGlob(w.pattern[0..w.pattern_len], entry.name)) continue;
 
             // Stat
-            const s = dir.statFile(host_io.io(), entry.name, .{}) catch continue;
+            const s = dir.statFile(w.io, entry.name, .{}) catch continue;
             const nlen: u16 = @intCast(@min(entry.name.len, SNAP_PATH_MAX));
             @memcpy(out[count].rel_path[0..nlen], entry.name[0..nlen]);
             out[count].rel_len = nlen;
@@ -503,21 +504,22 @@ test "watcher lifecycle with real files" {
     defer tmp.cleanup();
 
     // Write initial files
-    var f1 = try tmp.dir.createFile("one.txt", .{});
-    try f1.writeAll("hello");
-    f1.close();
-    var f2 = try tmp.dir.createFile("two.txt", .{});
-    try f2.writeAll("world");
-    f2.close();
+    var f1 = try tmp.dir.createFile(std.testing.io, "one.txt", .{});
+    try f1.writeStreamingAll(std.testing.io, "hello");
+    f1.close(std.testing.io);
+    var f2 = try tmp.dir.createFile(std.testing.io, "two.txt", .{});
+    try f2.writeStreamingAll(std.testing.io, "world");
+    f2.close(std.testing.io);
 
     // Get the temp dir path
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = try tmp.dir.realpath(".", &path_buf);
+    const tmp_path_len = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const tmp_path = path_buf[0..tmp_path_len];
 
     init();
     defer deinit();
 
-    const id = try addWatcher(.{
+    const id = try addWatcher(std.testing.io, .{
         .path = tmp_path,
         .interval_ms = 100,
     });
@@ -528,9 +530,9 @@ test "watcher lifecycle with real files" {
     try std.testing.expectEqual(@as(usize, 0), count);
 
     // Create a new file
-    var f3 = try tmp.dir.createFile("three.txt", .{});
-    try f3.writeAll("new");
-    f3.close();
+    var f3 = try tmp.dir.createFile(std.testing.io, "three.txt", .{});
+    try f3.writeStreamingAll(std.testing.io, "new");
+    f3.close(std.testing.io);
 
     // Poll again: should detect created
     count = poll(200, &events);
@@ -539,7 +541,7 @@ test "watcher lifecycle with real files" {
     try std.testing.expectEqualStrings("three.txt", events[0].path());
 
     // Delete a file
-    try tmp.dir.deleteFile("one.txt");
+    try tmp.dir.deleteFile(std.testing.io, "one.txt");
 
     // Poll: should detect deleted
     count = poll(200, &events);
@@ -554,20 +556,21 @@ test "glob pattern filter" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var f1 = try tmp.dir.createFile("app.zig", .{});
-    f1.close();
-    var f2 = try tmp.dir.createFile("app.lua", .{});
-    f2.close();
-    var f3 = try tmp.dir.createFile("test.zig", .{});
-    f3.close();
+    var f1 = try tmp.dir.createFile(std.testing.io, "app.zig", .{});
+    f1.close(std.testing.io);
+    var f2 = try tmp.dir.createFile(std.testing.io, "app.lua", .{});
+    f2.close(std.testing.io);
+    var f3 = try tmp.dir.createFile(std.testing.io, "test.zig", .{});
+    f3.close(std.testing.io);
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = try tmp.dir.realpath(".", &path_buf);
+    const tmp_path_len = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const tmp_path = path_buf[0..tmp_path_len];
 
     init();
     defer deinit();
 
-    _ = try addWatcher(.{
+    _ = try addWatcher(std.testing.io, .{
         .path = tmp_path,
         .interval_ms = 100,
         .pattern = "*.zig",
@@ -579,15 +582,15 @@ test "glob pattern filter" {
 
     // Only .zig files should be in snapshot
     // Verify by creating a .lua file — should not be detected
-    var f4 = try tmp.dir.createFile("new.lua", .{});
-    f4.close();
+    var f4 = try tmp.dir.createFile(std.testing.io, "new.lua", .{});
+    f4.close(std.testing.io);
 
     var count = poll(200, &events);
     try std.testing.expectEqual(@as(usize, 0), count); // .lua filtered out
 
     // Creating a .zig file should be detected
-    var f5 = try tmp.dir.createFile("new.zig", .{});
-    f5.close();
+    var f5 = try tmp.dir.createFile(std.testing.io, "new.zig", .{});
+    f5.close(std.testing.io);
 
     count = poll(200, &events);
     try std.testing.expectEqual(@as(usize, 1), count);

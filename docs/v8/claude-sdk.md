@@ -10,8 +10,8 @@ The practical layers:
 
 - `runtime/hooks/useClaudeChat.ts` is the React hook surface.
 - `framework/v8_bindings_sdk.zig` exposes `__claude_*` host functions.
-- `framework/claude_sdk/session.zig` spawns and drives the `claude` CLI.
-- `framework/claude_sdk/parser.zig` converts CLI NDJSON lines into typed Zig
+- `framework/assistant/claude_sdk/session.zig` spawns and drives the `claude` CLI.
+- `framework/assistant/claude_sdk/parser.zig` converts CLI NDJSON lines into typed Zig
   messages.
 - `framework/v8_bindings_sdk.zig` converts typed Zig messages into plain JS
   objects.
@@ -273,14 +273,14 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
    It then calls:
 
    ```zig
-   claude_sdk.Session.init(std.heap.c_allocator, opts)
+   claude_sdk.Session.init(host.io, host.environ, std.heap.c_allocator, opts)
    ```
 
    and stores the result in `g_claude_session`.
 
 4. The SDK resolves and spawns the CLI.
 
-   `framework/claude_sdk/argv.zig` resolves the binary:
+   `framework/assistant/claude_sdk/argv.zig` resolves the binary:
 
    1. `SessionOptions.cli_path`, if provided by native code.
    2. Search every `PATH` entry for `claude`.
@@ -303,14 +303,16 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
 
 5. `Session.init` configures the child process.
 
-   `framework/claude_sdk/session.zig` creates `std.process.Child` with:
+   `framework/assistant/claude_sdk/session.zig` receives the root-injected
+   `std.Io` capability and environment map, then calls `std.process.spawn(io, …)`
+   with:
 
-   - `child.cwd = opts.cwd`
-   - `stdin_behavior = .Pipe`
-   - `stdout_behavior = .Pipe`
-   - `stderr_behavior = .Inherit` when `inherit_stderr` is true
+   - `.cwd = .{ .path = opts.cwd }`
+   - `.stdin = .pipe`
+   - `.stdout = .pipe`
+   - `.stderr = .inherit` when `inherit_stderr` is true
 
-   If `config_dir` is set, it forks the parent environment, adds:
+   If `config_dir` is set, it clones the injected environment map, adds:
 
    ```text
    CLAUDE_CONFIG_DIR=<config_dir>
@@ -319,8 +321,11 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
    and passes that environment map to the child. This is how a cart can select
    between different Claude auth/session directories.
 
-   After spawn, the SDK sets child stdout to `O_NONBLOCK` so polling can return
-   promptly when no complete line is available.
+   After spawn, ownership of the stdout `std.Io.File` moves to `ChildStdout`.
+   A cancelable task in an `std.Io.Group` performs blocking
+   `readStreaming(io, …)` calls and publishes bytes through a fixed-capacity
+   `std.Io.Queue`. The frame-facing poll path only drains bytes already in that
+   queue; it does not change descriptor flags or run an fd-readiness loop.
 
 6. `ask(text)` writes a user turn.
 
@@ -354,11 +359,13 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
    `session.closed` is true, the host binding deinitializes the session and sets
    `g_claude_session = null`.
 
-9. `Session.poll` drains non-blocking stdout.
+9. `Session.poll` drains queued stdout without blocking the frame.
 
    The session owns:
 
-   - an 8192-byte read chunk
+   - a `ChildStdout` owner with a cancelable `std.Io.Group` reader task and a
+     bounded byte queue
+   - an 8192-byte queue-drain chunk
    - a `ReadBuffer` that accumulates partial stdout bytes
    - a stable `last_line` buffer for the most recently drained line
 
@@ -366,9 +373,10 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
 
    - drain a complete line from `ReadBuffer` if one exists
    - parse it
-   - if no complete line exists, `read()` non-blocking stdout
-   - return null on `WouldBlock`
-   - mark closed on EOF
+   - if no complete line exists, drain bytes currently available from
+     `ChildStdout`'s queue
+   - return null when the queue is currently empty
+   - mark closed after the reader task reports EOF or failure
 
 10. The parser converts one NDJSON line.
 
@@ -479,7 +487,7 @@ the `claude` binary to be discoverable on `PATH` unless a native caller supplies
 
 ## Native Types
 
-`framework/claude_sdk/types.zig` is the stable internal schema:
+`framework/assistant/claude_sdk/types.zig` is the stable internal schema:
 
 ```zig
 pub const ContentBlock = union(enum) {
@@ -532,12 +540,13 @@ The arena ownership matters because V8 conversion must finish before
 - `runtime/hooks/useClaudeChat.ts`
 - `cart/app/chat/useAssistantChat.ts`
 - `framework/v8_bindings_sdk.zig`
-- `framework/claude_sdk/mod.zig`
-- `framework/claude_sdk/session.zig`
-- `framework/claude_sdk/argv.zig`
-- `framework/claude_sdk/options.zig`
-- `framework/claude_sdk/parser.zig`
-- `framework/claude_sdk/types.zig`
-- `framework/claude_sdk/buffer.zig`
+- `framework/assistant/claude_sdk/mod.zig`
+- `framework/assistant/claude_sdk/session.zig`
+- `framework/assistant/claude_sdk/child_stdout.zig`
+- `framework/assistant/claude_sdk/argv.zig`
+- `framework/assistant/claude_sdk/options.zig`
+- `framework/assistant/claude_sdk/parser.zig`
+- `framework/assistant/claude_sdk/types.zig`
+- `framework/assistant/claude_sdk/buffer.zig`
 - `sdk/dependency-registry.json`
 - `v8_app.zig`

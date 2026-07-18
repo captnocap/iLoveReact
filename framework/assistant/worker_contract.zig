@@ -9,7 +9,6 @@
 //!     one session timeline, and one event stream.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const claude_types = @import("claude_sdk/types.zig");
 const codex_sdk = @import("codex_sdk.zig");
 const kimi_wire_sdk = @import("kimi_wire_sdk.zig");
@@ -187,6 +186,7 @@ pub const WorkerEvent = struct {
 };
 
 pub const WorkerStore = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     worker_id: []const u8,
     display_name: ?[]const u8,
@@ -206,9 +206,10 @@ pub const WorkerStore = struct {
     sessions: std.ArrayList(SessionEpisode) = .empty,
     events: std.ArrayList(WorkerEvent) = .empty,
 
-    pub fn init(allocator: std.mem.Allocator, config: StoreConfig) !WorkerStore {
-        const now = host_io.milliTimestamp();
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, config: StoreConfig) !WorkerStore {
+        const now = realMillis(io);
         return .{
+            .io = io,
             .allocator = allocator,
             .worker_id = try allocator.dupe(u8, config.worker_id),
             .display_name = if (config.display_name) |value| try allocator.dupe(u8, value) else null,
@@ -266,7 +267,7 @@ pub const WorkerStore = struct {
     pub fn beginSession(self: *WorkerStore, opts: StartSessionOptions) !*SessionEpisode {
         if (self.activeSessionMut()) |existing| {
             existing.status = .ended;
-            existing.ended_at_ms = host_io.milliTimestamp();
+            existing.ended_at_ms = realMillis(self.io);
             if (existing.reason_ended == null) {
                 existing.reason_ended = try dupOpt(self.allocator, "superseded");
             }
@@ -288,7 +289,7 @@ pub const WorkerStore = struct {
             .thread_id = try dupOpt(self.allocator, opts.thread_id),
             .status = .active,
             .reason_started = try dupOpt(self.allocator, opts.reason_started),
-            .started_at_ms = host_io.milliTimestamp(),
+            .started_at_ms = realMillis(self.io),
             .switch_index = self.switch_count,
         });
 
@@ -296,7 +297,7 @@ pub const WorkerStore = struct {
         self.status = .active;
         self.current_backend = opts.backend;
         try self.setCurrentModel(opts.model);
-        self.last_active_at_ms = host_io.milliTimestamp();
+        self.last_active_at_ms = realMillis(self.io);
 
         const session = &self.sessions.items[self.active_session_index.?];
         try self.appendEvent(.{
@@ -335,7 +336,7 @@ pub const WorkerStore = struct {
         if (session.reason_ended) |value| self.allocator.free(value);
         session.reason_ended = try dupOpt(self.allocator, reason);
         session.status = status;
-        session.ended_at_ms = host_io.milliTimestamp();
+        session.ended_at_ms = realMillis(self.io);
         self.active_session_index = null;
         self.current_backend = null;
         if (self.current_model) |value| {
@@ -491,9 +492,7 @@ pub const WorkerStore = struct {
                             .external_session_id = session.external_session_id,
                         }),
                         .tool_use => |tool_block| {
-                            const tool_payload = try std.fmt.allocPrint(self.allocator,
-                                "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}",
-                                .{ tool_block.id, tool_block.name, tool_block.input_json });
+                            const tool_payload = try std.fmt.allocPrint(self.allocator, "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}", .{ tool_block.id, tool_block.name, tool_block.input_json });
                             defer self.allocator.free(tool_payload);
 
                             try self.appendEvent(.{
@@ -765,7 +764,7 @@ pub const WorkerStore = struct {
                     }
                 }
                 if (std.mem.eql(u8, event.event_type, "ToolCall")) {
-                    return self.appendKimiEvent(session, .tool_call, .tool, "tool_call", getStringPath(event.payload, &.{"function", "name"}), payload_json, event.event_type, .{});
+                    return self.appendKimiEvent(session, .tool_call, .tool, "tool_call", getStringPath(event.payload, &.{ "function", "name" }), payload_json, event.event_type, .{});
                 }
                 if (std.mem.eql(u8, event.event_type, "ToolCallPart")) {
                     return self.appendKimiEvent(session, .tool_call, .tool, "tool_call_delta", getStringPath(event.payload, &.{"arguments_part"}), payload_json, event.event_type, .{});
@@ -773,7 +772,7 @@ pub const WorkerStore = struct {
                 if (std.mem.eql(u8, event.event_type, "ToolResult")) {
                     const maybe_text = try extractKimiToolResultText(self.allocator, event.payload);
                     defer if (maybe_text) |value| self.allocator.free(value);
-                    return self.appendKimiEvent(session, .tool_output, .tool, "tool_result", maybe_text, payload_json, if (boolFromPath(event.payload, &.{"return_value", "is_error"}) orelse false) "error" else event.event_type, .{});
+                    return self.appendKimiEvent(session, .tool_output, .tool, "tool_result", maybe_text, payload_json, if (boolFromPath(event.payload, &.{ "return_value", "is_error" }) orelse false) "error" else event.event_type, .{});
                 }
                 if (std.mem.eql(u8, event.event_type, "PlanDisplay")) {
                     return self.appendKimiEvent(session, .assistant_message, .assistant, "plan", getStringPath(event.payload, &.{"content"}), payload_json, event.event_type, .{});
@@ -882,9 +881,7 @@ pub const WorkerStore = struct {
                 const id = event.tool_call_id orelse "";
                 const name = event.tool_call_name orelse "";
                 const args = event.tool_call_args orelse "{}";
-                const payload = try std.fmt.allocPrint(self.allocator,
-                    "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}",
-                    .{ id, name, args });
+                const payload = try std.fmt.allocPrint(self.allocator, "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}", .{ id, name, args });
                 defer self.allocator.free(payload);
                 try self.appendEvent(.{
                     .session_id = session.id,
@@ -921,9 +918,7 @@ pub const WorkerStore = struct {
                 const id = event.tool_call_id orelse "";
                 const name = event.tool_call_name orelse "";
                 const args = event.tool_call_args orelse "{}";
-                const payload = try std.fmt.allocPrint(self.allocator,
-                    "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}",
-                    .{ id, name, args });
+                const payload = try std.fmt.allocPrint(self.allocator, "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}", .{ id, name, args });
                 defer self.allocator.free(payload);
                 try self.appendEvent(.{
                     .session_id = session.id,
@@ -1031,7 +1026,7 @@ pub const WorkerStore = struct {
     }
 
     fn appendEvent(self: *WorkerStore, spec: EventSpec) !void {
-        const now = host_io.milliTimestamp();
+        const now = realMillis(self.io);
         try self.events.append(self.allocator, .{
             .id = self.next_event_id,
             .worker_id = try self.allocator.dupe(u8, self.worker_id),
@@ -1276,10 +1271,10 @@ fn extractKimiContentText(allocator: std.mem.Allocator, maybe_value: ?std.json.V
 }
 
 fn extractKimiToolResultText(allocator: std.mem.Allocator, payload: std.json.Value) !?[]const u8 {
-    if (getStringPath(payload, &.{"return_value", "message"})) |message| {
+    if (getStringPath(payload, &.{ "return_value", "message" })) |message| {
         return try allocator.dupe(u8, message);
     }
-    return extractKimiContentText(allocator, getPath(payload, &.{"return_value", "output"}));
+    return extractKimiContentText(allocator, getPath(payload, &.{ "return_value", "output" }));
 }
 
 fn extractKimiQuestionText(allocator: std.mem.Allocator, payload: std.json.Value) !?[]const u8 {
@@ -1324,6 +1319,10 @@ fn parseRole(role_text: []const u8) ?MessageRole {
 fn dupOpt(allocator: std.mem.Allocator, value: ?[]const u8) !?[]const u8 {
     if (value) |unwrapped| return try allocator.dupe(u8, unwrapped);
     return null;
+}
+
+fn realMillis(io: std.Io) i64 {
+    return std.Io.Clock.now(.real, io).toMilliseconds();
 }
 
 fn getPath(root: std.json.Value, path: []const []const u8) ?std.json.Value {
@@ -1447,7 +1446,7 @@ fn makeKimiInbound(
 test "worker store tracks claude session metadata and transcript" {
     const allocator = std.testing.allocator;
 
-    var store = try WorkerStore.init(allocator, .{
+    var store = try WorkerStore.init(std.testing.io, allocator, .{
         .worker_id = "worker-alpha",
         .display_name = "Atlas",
         .objective = "triage cockpit task",
@@ -1507,7 +1506,7 @@ test "worker store tracks claude session metadata and transcript" {
 test "worker store normalizes codex notifications into one session timeline" {
     const allocator = std.testing.allocator;
 
-    var store = try WorkerStore.init(allocator, .{
+    var store = try WorkerStore.init(std.testing.io, allocator, .{
         .worker_id = "worker-beta",
         .display_name = "Beta",
     });
@@ -1515,28 +1514,23 @@ test "worker store normalizes codex notifications into one session timeline" {
 
     try store.bindCodexThread("thread-1", "gpt-5.4", "hotbar switch");
 
-    var started = try makeCodexNotification(allocator, "turn/started",
-        "{\"turn\":{\"id\":\"turn-1\",\"status\":\"running\"}}");
+    var started = try makeCodexNotification(allocator, "turn/started", "{\"turn\":{\"id\":\"turn-1\",\"status\":\"running\"}}");
     defer started.deinit();
     try store.ingestCodexNotification(&started);
 
-    var delta = try makeCodexNotification(allocator, "item/agentMessage/delta",
-        "{\"turnId\":\"turn-1\",\"delta\":\"hello \"}");
+    var delta = try makeCodexNotification(allocator, "item/agentMessage/delta", "{\"turnId\":\"turn-1\",\"delta\":\"hello \"}");
     defer delta.deinit();
     try store.ingestCodexNotification(&delta);
 
-    var completed_item = try makeCodexNotification(allocator, "item/completed",
-        "{\"turnId\":\"turn-1\",\"item\":{\"type\":\"agentMessage\",\"phase\":\"final_answer\",\"text\":\"world\"}}");
+    var completed_item = try makeCodexNotification(allocator, "item/completed", "{\"turnId\":\"turn-1\",\"item\":{\"type\":\"agentMessage\",\"phase\":\"final_answer\",\"text\":\"world\"}}");
     defer completed_item.deinit();
     try store.ingestCodexNotification(&completed_item);
 
-    var usage = try makeCodexNotification(allocator, "thread/tokenUsageUpdated",
-        "{\"turnId\":\"turn-1\",\"tokenUsage\":{\"inputTokens\":12,\"outputTokens\":34}}");
+    var usage = try makeCodexNotification(allocator, "thread/tokenUsageUpdated", "{\"turnId\":\"turn-1\",\"tokenUsage\":{\"inputTokens\":12,\"outputTokens\":34}}");
     defer usage.deinit();
     try store.ingestCodexNotification(&usage);
 
-    var completed = try makeCodexNotification(allocator, "turn/completed",
-        "{\"turn\":{\"id\":\"turn-1\",\"status\":\"completed\"}}");
+    var completed = try makeCodexNotification(allocator, "turn/completed", "{\"turn\":{\"id\":\"turn-1\",\"status\":\"completed\"}}");
     defer completed.deinit();
     try store.ingestCodexNotification(&completed);
 
@@ -1554,7 +1548,7 @@ test "worker store normalizes codex notifications into one session timeline" {
 test "switching sessions preserves worker identity and increments switch count" {
     const allocator = std.testing.allocator;
 
-    var store = try WorkerStore.init(allocator, .{
+    var store = try WorkerStore.init(std.testing.io, allocator, .{
         .worker_id = "worker-switch",
     });
     defer store.deinit();
@@ -1581,7 +1575,7 @@ test "switching sessions preserves worker identity and increments switch count" 
 test "worker store normalizes kimi wire events into one session timeline" {
     const allocator = std.testing.allocator;
 
-    var store = try WorkerStore.init(allocator, .{
+    var store = try WorkerStore.init(std.testing.io, allocator, .{
         .worker_id = "worker-kimi",
         .display_name = "Kimi",
     });
@@ -1589,33 +1583,27 @@ test "worker store normalizes kimi wire events into one session timeline" {
 
     try store.bindKimiSession("kimi-session-1", "k2", "operator switched to kimi");
 
-    var turn_begin = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"TurnBegin\",\"payload\":{\"user_input\":\"scan the repo\"}}}");
+    var turn_begin = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"TurnBegin\",\"payload\":{\"user_input\":\"scan the repo\"}}}");
     defer turn_begin.deinit();
     try store.ingestKimiWireMessage(&turn_begin.msg);
 
-    var thinking = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"think\",\"think\":\"checking files\"}}}");
+    var thinking = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"think\",\"think\":\"checking files\"}}}");
     defer thinking.deinit();
     try store.ingestKimiWireMessage(&thinking.msg);
 
-    var text = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"text\",\"text\":\"Found two hotspots.\"}}}");
+    var text = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"text\",\"text\":\"Found two hotspots.\"}}}");
     defer text.deinit();
     try store.ingestKimiWireMessage(&text.msg);
 
-    var tool_request = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"request\",\"id\":\"wire-req-1\",\"params\":{\"type\":\"ToolCallRequest\",\"payload\":{\"id\":\"tc-1\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}}");
+    var tool_request = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"request\",\"id\":\"wire-req-1\",\"params\":{\"type\":\"ToolCallRequest\",\"payload\":{\"id\":\"tc-1\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}}");
     defer tool_request.deinit();
     try store.ingestKimiWireMessage(&tool_request.msg);
 
-    var usage = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"StatusUpdate\",\"payload\":{\"token_usage\":{\"input_other\":7,\"output\":11,\"input_cache_read\":3,\"input_cache_creation\":2}}}}");
+    var usage = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"StatusUpdate\",\"payload\":{\"token_usage\":{\"input_other\":7,\"output\":11,\"input_cache_read\":3,\"input_cache_creation\":2}}}}");
     defer usage.deinit();
     try store.ingestKimiWireMessage(&usage.msg);
 
-    var finished = try makeKimiInbound(allocator,
-        "{\"jsonrpc\":\"2.0\",\"id\":\"reactjit-kimi-1\",\"result\":{\"status\":\"finished\"}}");
+    var finished = try makeKimiInbound(allocator, "{\"jsonrpc\":\"2.0\",\"id\":\"reactjit-kimi-1\",\"result\":{\"status\":\"finished\"}}");
     defer finished.deinit();
     try store.ingestKimiWireMessage(&finished.msg);
 

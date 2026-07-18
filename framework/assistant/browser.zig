@@ -61,11 +61,9 @@ pub const AgentBrowser = struct {
 };
 
 /// Apply stealth patches to Firefox installation
-pub fn applyStealthPatches(firefox_path: []const u8, force: bool) !void {
-    const allocator = std.heap.page_allocator;
-
+pub fn applyStealthPatches(io: std.Io, allocator: std.mem.Allocator, firefox_path: []const u8, force: bool) !void {
     // Layer 1: Binary patch
-    stealth.patchLibxul(allocator, firefox_path, force) catch |err| {
+    stealth.patchLibxul(io, allocator, firefox_path, force) catch |err| {
         std.log.warn("Failed to patch libxul: {s}", .{@errorName(err)});
     };
 

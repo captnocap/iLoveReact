@@ -4,27 +4,26 @@ const std = @import("std");
 const engine = @import("../../game/map/engine.zig");
 const chunks = @import("../../game/map/chunks.zig");
 const roads = @import("../../game/map/roads.zig");
-const host_io = @import("../../host_io.zig");
 
 test "reset unbinds the outgoing document and clears map-scoped bindings" {
     engine.reset();
-    engine.setTileBindings(&.{ 11, 12, 13, 14, 21, 22, 23, 24 });
+    engine.setTileBindings(std.testing.io, &.{ 11, 12, 13, 14, 21, 22, 23, 24 });
     try std.testing.expectEqual(@as(usize, 2), engine.tileBindings().len);
 
     const path = "/tmp/reactjit-map-reset-boundary.rmap";
-    std.Io.Dir.cwd().deleteFile(host_io.io(), path) catch {};
-    defer std.Io.Dir.cwd().deleteFile(host_io.io(), path) catch {};
+    std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
 
     _ = chunks.growChunk(0, 0).?;
     engine.setAutosaveFile(path);
-    try std.testing.expect(engine.autosaveNow());
+    try std.testing.expect(engine.autosaveNow(std.testing.io));
 
     engine.reset();
     try std.testing.expectEqual(@as(usize, 0), engine.tileBindings().len);
     // Make the replacement map non-empty so false proves the document target
     // was unbound, rather than merely hitting autosave's empty-world guard.
     _ = chunks.growChunk(0, 0).?;
-    try std.testing.expect(!engine.autosaveNow());
+    try std.testing.expect(!engine.autosaveNow(std.testing.io));
 }
 
 test "transport pen previews after one anchor and keeps rail out of the road tile compiler" {
@@ -34,17 +33,17 @@ test "transport pen previews after one anchor and keeps rail out of the road til
     engine.setTool(.{ .channel = .road });
     engine.setPathProfile(.{ .light_rail = .{ .tracks = 2 } }, 18);
 
-    engine.strokeBegin(-20, 0);
-    _ = engine.strokeEnd();
+    engine.strokeBegin(std.testing.io, -20, 0);
+    _ = engine.strokeEnd(std.testing.io);
     engine.setPathHover(20, 0);
     const live = engine.transport.draftPreview().?;
     try std.testing.expectEqual(@as(usize, 1), engine.transport.draftPointCount());
     try std.testing.expectEqual(@as(usize, 2), live.points.len);
     try std.testing.expect(engine.transport.draftValidation().valid);
 
-    engine.strokeBegin(20, 0);
-    _ = engine.strokeEnd();
-    try std.testing.expect(engine.pathCommit() != null);
+    engine.strokeBegin(std.testing.io, 20, 0);
+    _ = engine.strokeEnd(std.testing.io);
+    try std.testing.expect(engine.pathCommit(std.testing.io) != null);
     try std.testing.expectEqual(@as(usize, 1), engine.transport.railCount());
     for (chunk.tiles) |tile| try std.testing.expectEqual(chunks.EMPTY_CELL, tile);
 }
@@ -57,16 +56,16 @@ test "rail storey points derive grade and TC Stops sample the same 3D path" {
     engine.setPathProfile(.{ .light_rail = .{} }, 18);
 
     engine.setPathLevel(0);
-    engine.strokeBegin(-30, 0);
-    _ = engine.strokeEnd();
+    engine.strokeBegin(std.testing.io, -30, 0);
+    _ = engine.strokeEnd(std.testing.io);
     engine.setPathLevel(1);
     engine.setPathHover(30, 0);
     const validation = engine.transport.draftValidation();
     try std.testing.expect(validation.valid);
     try std.testing.expectApproxEqAbs(@as(f32, 0.05), validation.max_grade, 0.001);
-    engine.strokeBegin(30, 0);
-    _ = engine.strokeEnd();
-    const path_id = engine.pathCommit().?;
+    engine.strokeBegin(std.testing.io, 30, 0);
+    _ = engine.strokeEnd(std.testing.io);
+    const path_id = engine.pathCommit(std.testing.io).?;
     const path = engine.transport.pathForId(path_id).?;
     try std.testing.expectApproxEqAbs(@as(f32, 3), path.points[1].elevation_m, 0.001);
 
@@ -75,8 +74,8 @@ test "rail storey points derive grade and TC Stops sample the same 3D path" {
     const stop_preview = engine.transport.controlPreview().?;
     try std.testing.expect(stop_preview.valid);
     try std.testing.expectApproxEqAbs(@as(f32, 1.5), stop_preview.sample.point.elevation_m, 0.1);
-    engine.strokeBegin(0, 1);
-    _ = engine.strokeEnd();
+    engine.strokeBegin(std.testing.io, 0, 1);
+    _ = engine.strokeEnd(std.testing.io);
     try std.testing.expectEqual(@as(usize, 1), engine.transport.controlCount());
 }
 
@@ -85,17 +84,17 @@ test "Map Paint undo and redo restore the native RMAP concern per gesture" {
     defer engine.reset();
     _ = chunks.growChunk(0, 0).?;
     engine.setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 3, .center_z = 6, .profile = .flat });
-    engine.strokeBegin(0, 0);
-    _ = engine.strokeEnd();
+    engine.strokeBegin(std.testing.io, 0, 0);
+    _ = engine.strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 6), engine.heightAt(0, 0), 0.001);
     try std.testing.expectEqual(@as(usize, 1), engine.mapHistoryStats().undo);
 
-    const undone = engine.mapHistoryUndo();
+    const undone = engine.mapHistoryUndo(std.testing.io);
     try std.testing.expect(undone.ok);
     try std.testing.expectApproxEqAbs(@as(f32, 0), engine.heightAt(0, 0), 0.001);
     try std.testing.expectEqual(@as(usize, 1), undone.stats.redo);
 
-    const redone = engine.mapHistoryRedo();
+    const redone = engine.mapHistoryRedo(std.testing.io);
     try std.testing.expect(redone.ok);
     try std.testing.expectApproxEqAbs(@as(f32, 6), engine.heightAt(0, 0), 0.001);
     try std.testing.expectEqual(@as(usize, 1), redone.stats.undo);
@@ -110,17 +109,17 @@ test "analytic road rows and visual undercoat ride the compact ground stream" {
     defer roads.setKindIndices(@splat(chunks.EMPTY_CELL));
 
     const chunk = chunks.growChunk(0, 0).?;
-    engine.setTileBindings(&.{ 11, 12, 13, 0 });
+    engine.setTileBindings(std.testing.io, &.{ 11, 12, 13, 0 });
     const authored_undercoat = chunks.cellIndex(60, 66).?;
     chunk.tiles[authored_undercoat] = 4;
     chunk.materials[authored_undercoat] = 0;
     engine.setTool(.{ .channel = .road });
     engine.setPathProfile(.{ .road = .{ .lanesF = 2, .lanesB = 1, .sidewalks = false } }, 8);
-    engine.strokeBegin(-20, 0);
-    _ = engine.strokeEnd();
-    engine.strokeBegin(20, 0);
-    _ = engine.strokeEnd();
-    try std.testing.expect(engine.pathCommit() != null);
+    engine.strokeBegin(std.testing.io, -20, 0);
+    _ = engine.strokeEnd(std.testing.io);
+    engine.strokeBegin(std.testing.io, 20, 0);
+    _ = engine.strokeEnd(std.testing.io);
+    try std.testing.expect(engine.pathCommit(std.testing.io) != null);
 
     const data = try std.testing.allocator.alloc(f32, engine.groundDataFloats());
     defer std.testing.allocator.free(data);

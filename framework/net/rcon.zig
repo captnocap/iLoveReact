@@ -67,10 +67,10 @@ pub const RconClient = struct {
     /// Connect, send the AUTH packet, return the half-initialized client.
     /// The caller polls `update()` until either `.auth_ok` or `.auth_fail`
     /// arrives before calling `command()`.
-    pub fn connect(host: []const u8, port: u16, password: []const u8, alloc: std.mem.Allocator) !RconClient {
+    pub fn connect(io: std.Io, host: []const u8, port: u16, password: []const u8, alloc: std.mem.Allocator) !RconClient {
         const pw = try alloc.dupe(u8, password);
         errdefer alloc.free(pw);
-        const inner = try tcp.TcpClient.connect(host, port);
+        const inner = try tcp.TcpClient.connect(alloc, io, host, port);
         var self: RconClient = .{ .inner = inner, .password = pw };
         self.sendAuth();
         return self;

@@ -23,7 +23,6 @@
 
 const std = @import("std");
 const onnx = @import("onnx.zig");
-const host_io = @import("../host_io.zig");
 // Use onnx.c (shared cimport) so OrtApi/OrtValue/etc match the types
 // returned by onnx.api() and other helpers. A second @cImport here would
 // generate distinct-but-identical Zig types and break every cross-module
@@ -45,7 +44,7 @@ const SAM_MASKS_PER_DECODE: usize = 3;
 // Standard SAM ImageNet-like normalization. Same constants as the python
 // transformers reference.
 const SAM_MEAN: [3]f32 = .{ 123.675, 116.28, 103.53 };
-const SAM_STD:  [3]f32 = .{ 58.395, 57.12, 57.375 };
+const SAM_STD: [3]f32 = .{ 58.395, 57.12, 57.375 };
 
 // ── Global ORT state ─────────────────────────────────────────────────
 
@@ -61,10 +60,10 @@ var g_init_error: ?[]u8 = null;
 
 const Handle = struct {
     in_use: bool = false,
-    src_w: u32 = 0,         // original source width (pixels)
-    src_h: u32 = 0,         // original source height (pixels)
-    fit_w: u32 = 0,         // letterbox width inside 1024-canvas
-    fit_h: u32 = 0,         // letterbox height inside 1024-canvas
+    src_w: u32 = 0, // original source width (pixels)
+    src_h: u32 = 0, // original source height (pixels)
+    fit_w: u32 = 0, // letterbox width inside 1024-canvas
+    fit_h: u32 = 0, // letterbox height inside 1024-canvas
     img_emb: ?[]f32 = null, // [1,256,64,64] = 1,048,576 f32 = 4MB
     pos_emb: ?[]f32 = null, // same shape
 };
@@ -106,8 +105,12 @@ fn freeHandle(id: u32, alloc: std.mem.Allocator) void {
 /// Get default model paths from $HOME/.reactjit/models/ . Returns null if
 /// the encoder doesn't exist (user needs to download). Caller frees both
 /// returned slices.
-fn modelPaths(alloc: std.mem.Allocator) ?struct { enc: []u8, dec: []u8 } {
-    const home = host_io.getenv("HOME") orelse return null;
+fn modelPaths(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    alloc: std.mem.Allocator,
+) ?struct { enc: []u8, dec: []u8 } {
+    const home = environ.get("HOME") orelse return null;
     const dir = std.fmt.allocPrint(alloc, "{s}/.reactjit/models", .{home}) catch return null;
     defer alloc.free(dir);
     const enc = std.fmt.allocPrint(alloc, "{s}/slimsam_encoder.onnx", .{dir}) catch return null;
@@ -116,7 +119,7 @@ fn modelPaths(alloc: std.mem.Allocator) ?struct { enc: []u8, dec: []u8 } {
         return null;
     };
     // Sanity check at least encoder exists.
-    std.Io.Dir.cwd().access(host_io.io(), enc, .{}) catch {
+    std.Io.Dir.cwd().access(io, enc, .{}) catch {
         alloc.free(enc);
         alloc.free(dec);
         return null;
@@ -127,7 +130,7 @@ fn modelPaths(alloc: std.mem.Allocator) ?struct { enc: []u8, dec: []u8 } {
 /// Load the encoder + decoder sessions once. Idempotent — subsequent calls
 /// short-circuit. Sets g_init_failed + g_init_error on failure so future
 /// open() calls return the same error without re-attempting.
-fn ensureInit(alloc: std.mem.Allocator) bool {
+fn ensureInit(io: std.Io, environ: *const std.process.Environ.Map, alloc: std.mem.Allocator) bool {
     if (g_init_done) return true;
     if (g_init_failed) return false;
     g_init_done = true; // set early so re-entry is a no-op
@@ -175,7 +178,7 @@ fn ensureInit(alloc: std.mem.Allocator) bool {
     }
 
     // Load models from ~/.reactjit/models/
-    const paths = modelPaths(alloc) orelse {
+    const paths = modelPaths(io, environ, alloc) orelse {
         recordInitErr(alloc, "SAM model files not found at ~/.reactjit/models/slimsam_{encoder,decoder}.onnx — download via scripts/fetch-sam-models");
         return false;
     };
@@ -309,12 +312,13 @@ fn preprocessToTensor(
                 const v01: f32 = @floatFromInt(src_rgb[p01 + chan]);
                 const v10: f32 = @floatFromInt(src_rgb[p10 + chan]);
                 const v11: f32 = @floatFromInt(src_rgb[p11 + chan]);
-                const top  = v00 * (1 - tx) + v01 * tx;
-                const bot  = v10 * (1 - tx) + v11 * tx;
-                const raw  = top * (1 - ty) + bot * ty;
+                const top = v00 * (1 - tx) + v01 * tx;
+                const bot = v10 * (1 - tx) + v11 * tx;
+                const raw = top * (1 - ty) + bot * ty;
                 const norm = (raw - SAM_MEAN[chan]) / SAM_STD[chan];
-                tensor[chan * SAM_INPUT_SIZE * SAM_INPUT_SIZE
-                    + dy * SAM_INPUT_SIZE + dx] = norm;
+                tensor[
+                    chan * SAM_INPUT_SIZE * SAM_INPUT_SIZE + dy * SAM_INPUT_SIZE + dx
+                ] = norm;
             }
         }
     }
@@ -326,8 +330,13 @@ fn preprocessToTensor(
 /// Load an image, run the encoder, store embeddings under a fresh handle.
 /// Returns -1 on failure (call initError() / lastError() for details);
 /// otherwise a small int handle for refine() / close().
-pub fn openImage(alloc: std.mem.Allocator, path: []const u8) i32 {
-    if (!ensureInit(alloc)) return -1;
+pub fn openImage(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    alloc: std.mem.Allocator,
+    path: []const u8,
+) i32 {
+    if (!ensureInit(io, environ, alloc)) return -1;
     const api = onnx.api() orelse return -1;
 
     // Decode source via stb_image → RGB u8 buffer.
@@ -375,7 +384,8 @@ pub fn openImage(alloc: std.mem.Allocator, path: []const u8) i32 {
     {
         const run_fn = api.Run orelse return -1;
         const status = run_fn(
-            g_encoder, null,
+            g_encoder,
+            null,
             @as([*c]const [*c]const u8, @ptrCast(&enc_in_names)),
             @as([*c]const ?*const c.OrtValue, @ptrCast(&enc_inputs)),
             enc_in_names.len,
@@ -402,17 +412,20 @@ pub fn openImage(alloc: std.mem.Allocator, path: []const u8) i32 {
         return -1;
     };
     if (!copyTensorTo(api, enc_outputs[0], img_emb)) {
-        alloc.free(img_emb); alloc.free(pos_emb);
+        alloc.free(img_emb);
+        alloc.free(pos_emb);
         return -1;
     }
     if (!copyTensorTo(api, enc_outputs[1], pos_emb)) {
-        alloc.free(img_emb); alloc.free(pos_emb);
+        alloc.free(img_emb);
+        alloc.free(pos_emb);
         return -1;
     }
 
     const handle_id = allocHandle() orelse {
         log.err("all segment handles in use", .{});
-        alloc.free(img_emb); alloc.free(pos_emb);
+        alloc.free(img_emb);
+        alloc.free(pos_emb);
         return -1;
     };
     const h = &g_handles[handle_id];
@@ -507,7 +520,8 @@ pub fn refineSegment(
     {
         const run_fn = api.Run orelse return null;
         const status = run_fn(
-            g_decoder, null,
+            g_decoder,
+            null,
             @as([*c]const [*c]const u8, @ptrCast(&dec_in_names)),
             @as([*c]const ?*const c.OrtValue, @ptrCast(&dec_inputs)),
             dec_in_names.len,
@@ -583,8 +597,10 @@ fn recordRunErr(api: *const c.OrtApi, status: ?*c.OrtStatus, where: []const u8) 
 fn postprocessMask(
     alloc: std.mem.Allocator,
     mask_logits: []const f32,
-    fit_w: u32, fit_h: u32,
-    src_w: u32, src_h: u32,
+    fit_w: u32,
+    fit_h: u32,
+    src_w: u32,
+    src_h: u32,
     threshold: f32,
 ) ?[]u8 {
     const dec_size_f: f32 = @floatFromInt(SAM_DEC_OUT_SIZE);

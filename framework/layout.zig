@@ -759,6 +759,7 @@ pub const Node = struct {
     inline_slot_count: u8 = 0,
     // Effect — user-compiled pixel render callback
     effect_render: ?effect_ctx.RenderFn = null,
+    effect_render_context: ?*anyopaque = null,
     effect_shader: ?effect_shader.GpuShaderDesc = null,
     effect_name: ?[]const u8 = null, // named effect — renders but not drawn, referenced by fillEffect
     // <Effect textures={['mask-A', 'src-img']}>. Each entry is a paintable
@@ -814,11 +815,17 @@ pub const Node = struct {
     _in_stretchh: ?f32 = null,
 };
 pub const MeasureTextFn = *const fn (text: []const u8, font_size: u16, font_family_id: u8, max_width: f32, letter_spacing: f32, line_height: f32, max_lines: u16, no_wrap: bool, bold: bool) TextMetrics;
-pub const MeasureImageFn = *const fn (path: []const u8) ImageDims;
+pub const MeasureImageCallback = struct {
+    context: *anyopaque,
+    function: *const fn (context: *anyopaque, path: []const u8) ImageDims,
+};
 /// Layout-event callback. Fires inside `setRect` for nodes flagged
 /// `has_on_layout`. Engine wires this to a JS dispatcher; bench/standalone
 /// callers leave it null and pay nothing.
-pub const EmitLayoutFn = *const fn (id: u32, rect: LayoutRect) void;
+pub const EmitLayoutCallback = struct {
+    context: *anyopaque,
+    function: *const fn (context: *anyopaque, id: u32, rect: LayoutRect) void,
+};
 
 pub const PendingLayoutEvent = struct {
     id: u32,
@@ -842,8 +849,8 @@ pub fn clearPendingLayoutEvents() void {
 
 // ── Module state ───────────────────────────────────
 var measureFn: ?MeasureTextFn = null;
-var measureImageFn: ?MeasureImageFn = null;
-var emitLayoutFn: ?EmitLayoutFn = null;
+var measure_image_callback: ?MeasureImageCallback = null;
+var emit_layout_callback: ?EmitLayoutCallback = null;
 const LAYOUT_BUDGET: usize = 100000;
 var layoutCount: usize = 0;
 
@@ -1048,12 +1055,12 @@ pub fn setMeasureFn(f: ?MeasureTextFn) void {
     measureFn = f;
 }
 
-pub fn setMeasureImageFn(f: ?MeasureImageFn) void {
-    measureImageFn = f;
+pub fn setMeasureImageCallback(callback: ?MeasureImageCallback) void {
+    measure_image_callback = callback;
 }
 
-pub fn setEmitLayoutFn(f: ?EmitLayoutFn) void {
-    emitLayoutFn = f;
+pub fn setEmitLayoutCallback(callback: ?EmitLayoutCallback) void {
+    emit_layout_callback = callback;
 }
 
 /// Single chokepoint for assigning a node's computed rect. Replaces raw
@@ -1069,7 +1076,7 @@ pub fn setEmitLayoutFn(f: ?EmitLayoutFn) void {
 pub inline fn setRect(node: *Node, rect: LayoutRect) void {
     node.computed = rect;
     if (g_emit_layout_pass and node.has_on_layout and node.id != 0) {
-        if (emitLayoutFn) |f| f(node.id, rect);
+        if (emit_layout_callback) |callback| callback.function(callback.context, node.id, rect);
     }
 }
 
@@ -1129,8 +1136,10 @@ fn clampVal(val: f32, minVal: ?f32, maxVal: ?f32) f32 {
 }
 
 fn measureNodeImage(node: *Node) ImageDims {
-    if (node.image_src != null and measureImageFn != null) {
-        return measureImageFn.?(node.image_src.?);
+    if (node.image_src) |src| {
+        if (measure_image_callback) |callback| {
+            return callback.function(callback.context, src);
+        }
     }
     return .{ .width = 0, .height = 0 };
 }

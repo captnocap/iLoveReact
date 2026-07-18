@@ -382,6 +382,7 @@ var g_controllers: [MAX_CONTROLLERS]ControllerSlot = [_]ControllerSlot{.{}} ** M
 var g_active_node_id: u32 = 0;
 var g_legacy_controller: Controller = .{};
 var g_probe_last_ms: u32 = 0;
+var g_probe_clock_ms: u32 = 0;
 var g_probe_snapshot: ProbeSnapshot = .{};
 
 fn distance3(a: Vec3, b: Vec3) f32 {
@@ -391,13 +392,9 @@ fn distance3(a: Vec3, b: Vec3) f32 {
     return @sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-fn wallMs() i64 {
-    return std.Io.Clock.now(.real, std.Io.Threaded.global_single_threaded.io()).toMilliseconds();
-}
-
 fn probeRecordParams(slot: *ControllerSlot) void {
     slot.probe_params += 1;
-    slot.probe_last_param_wall_ms = wallMs();
+    slot.probe_last_param_wall_ms = @intCast(g_probe_clock_ms);
 }
 
 fn probeRecordMode(slot: *ControllerSlot) void {
@@ -406,7 +403,7 @@ fn probeRecordMode(slot: *ControllerSlot) void {
 
 fn probeRecordDeltas(slot: *ControllerSlot) void {
     slot.probe_deltas += 1;
-    slot.probe_last_param_wall_ms = wallMs();
+    slot.probe_last_param_wall_ms = @intCast(g_probe_clock_ms);
 }
 
 fn probeRecordFrame(slot: *ControllerSlot, dt_ms: u32, desired: Solved, solved: Solved) void {
@@ -650,6 +647,7 @@ pub fn resetForTests() void {
     g_active_node_id = 0;
     g_legacy_controller = .{};
     g_probe_last_ms = 0;
+    g_probe_clock_ms = 0;
     g_probe_snapshot = .{};
 }
 
@@ -670,6 +668,7 @@ pub fn stepActive(now_ms: u32) ?Solved {
 
 pub fn stepNode(node_id: u32, now_ms: u32) ?Solved {
     const slot = getSlot(node_id) orelse return null;
+    g_probe_clock_ms = now_ms;
     const dt_ms = if (slot.last_tick_ms == 0 or now_ms < slot.last_tick_ms) 0 else now_ms - slot.last_tick_ms;
     slot.last_tick_ms = now_ms;
     const dt_seconds = @as(f32, @floatFromInt(dt_ms)) / 1000.0;
@@ -679,7 +678,7 @@ pub fn stepNode(node_id: u32, now_ms: u32) ?Solved {
     if (g_probe_last_ms == 0 or now_ms < g_probe_last_ms or now_ms - g_probe_last_ms >= 1000) {
         g_probe_last_ms = now_ms;
         const avg_dt = if (slot.probe_frames == 0) 0 else @as(f32, @floatFromInt(slot.probe_dt_sum_ms)) / @as(f32, @floatFromInt(slot.probe_frames));
-        const last_param_age_ms = if (slot.probe_last_param_wall_ms == 0) -1 else wallMs() - slot.probe_last_param_wall_ms;
+        const last_param_age_ms = if (slot.probe_last_param_wall_ms == 0) -1 else @as(i64, now_ms) - slot.probe_last_param_wall_ms;
         g_probe_snapshot = .{
             .has_sample = true,
             .node_id = node_id,

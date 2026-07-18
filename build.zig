@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
     ) orelse b.pathFromRoot("deps/v8-prebuilt/libc_v8.a");
 
     // ── wgpu-native ────────────────────────────────────────────
-    // macOS links wgpu dynamically. Zig 0.15.2's self-hosted MachO linker
+    // macOS links wgpu dynamically. The self-hosted Mach-O linker
     // panics ("unexpected pointer encoding") while parsing the 387 __eh_frame
     // sections in the Rust-built libwgpu_native.a; the prebuilt .dylib sidesteps
     // that entirely (a dylib's eh_frame isn't parsed into __unwind_info at link
@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
     // macOS is the exception: Homebrew DOES provide /opt/homebrew/lib/
     // libluajit.dylib, and we MUST use it. The source build emits a static
     // liblua.a whose hand-written arm64 VM assembly carries __eh_frame pointer
-    // encodings that Zig 0.15.2's self-hosted MachO linker can't parse (it
+    // encodings that the self-hosted Mach-O linker can't parse (it
     // panics "unexpected pointer encoding"). Linking the system dylib skips the
     // static archive entirely. brew luajit headers live at the include path the
     // macOS branch below already adds.
@@ -1343,7 +1343,7 @@ pub fn build(b: *std.Build) void {
     const game_pathing_test = b.addTest(.{
         .name = "game-pathing-test",
         .root_module = game_pathing_test_mod,
-        // Zig 0.15.2's self-hosted x86_64 Debug backend miscompiles the A*
+        // The self-hosted x86_64 Debug backend miscompiles the A*
         // (emit MIR: no encoding for mov m32,m32). The app always builds
         // through LLVM (ReleaseFast); pin the test to LLVM too.
         .use_llvm = true,
@@ -1730,6 +1730,34 @@ pub fn build(b: *std.Build) void {
     const dev_reload_policy_test = b.addTest(.{ .name = "dev-reload-policy-test", .root_module = dev_reload_policy_test_mod });
     b.step("test-dev-reload-policy", "Run development reload policy tests")
         .dependOn(&b.addRunArtifact(dev_reload_policy_test).step);
+
+    // Assistant task ownership and cancellation. Root at framework/ so the
+    // assistant modules' sibling imports remain in one module.
+    const assistant_io_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_assistant_io.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const assistant_io_test = b.addTest(.{
+        .name = "assistant-io-test",
+        .root_module = assistant_io_test_mod,
+    });
+    b.step("test-assistant-io", "Run assistant native-I/O ownership tests")
+        .dependOn(&b.addRunArtifact(assistant_io_test).step);
+
+    const pty_io_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/terminal/pty.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const pty_io_test = b.addTest(.{
+        .name = "pty-io-test",
+        .root_module = pty_io_test_mod,
+    });
+    b.step("test-pty-io", "Run PTY native-I/O ownership tests")
+        .dependOn(&b.addRunArtifact(pty_io_test).step);
 
     // ── Localstore behavior tests (PAINTLOSS req_0695, P4) ──────
     // Exercises framework/storage/localstore.zig: large-value persistence

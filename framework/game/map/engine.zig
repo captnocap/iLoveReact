@@ -24,7 +24,6 @@ const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
 const foliage = @import("../../world/foliage.zig");
-const host_io = @import("../../host_io.zig");
 pub const transport = @import("transport.zig");
 pub const roads = @import("roads.zig");
 
@@ -166,8 +165,8 @@ fn claimStamp(key: u64) bool {
     return !gop.found_existing;
 }
 
-fn nowMs() i64 {
-    return host_io.milliTimestamp();
+fn nowMs(io: std.Io) i64 {
+    return std.Io.Clock.now(.awake, io).toMilliseconds();
 }
 
 fn pushAuthoringEvent(event: AuthoringEvent) void {
@@ -200,9 +199,9 @@ pub fn drainAuthoringEvents(out: []AuthoringEvent) usize {
     return n;
 }
 
-fn pushStrokeAuthoringEvent() void {
+fn pushStrokeAuthoringEvent(io: std.Io) void {
     if (g_stats.stamps == 0 and g_stats.samples == 0 and !g_stats.water_dry) return;
-    const ended_ms = nowMs();
+    const ended_ms = nowMs(io);
     const elapsed = @max(@as(i64, 0), ended_ms - g_stroke_started_ms);
     pushAuthoringEvent(.{
         .kind = .stroke,
@@ -312,7 +311,7 @@ pub fn setRoadProfile(profile: roads.RoadProfile) void {
 
 // ── the stroke lifecycle ──────────────────────────────────────────────────────
 
-pub fn strokeBegin(x: f32, z: f32) void {
+pub fn strokeBegin(io: std.Io, x: f32, z: f32) void {
     g_stroke_active = true;
     g_stats = .{};
     g_last = null;
@@ -322,7 +321,7 @@ pub fn strokeBegin(x: f32, z: f32) void {
     g_stroke_tool = g_tool;
     g_stroke_start = .{ x, z };
     g_stroke_end = .{ x, z };
-    g_stroke_started_ms = nowMs();
+    g_stroke_started_ms = nowMs(io);
     g_seen.clearRetainingCapacity();
 
     if (g_tool.channel != .road) beginMapHistory(.paint_stroke);
@@ -345,7 +344,7 @@ pub fn strokeBegin(x: f32, z: f32) void {
             if (transport.commitControlPreview()) |id| {
                 g_stats.stamps += 1;
                 commitMapHistory(true);
-                _ = autosaveNow();
+                _ = autosaveNow(io);
                 pushAuthoringEvent(.{ .kind = .path_control_add, .tool = g_tool, .id = id });
             } else {
                 commitMapHistory(false);
@@ -403,7 +402,7 @@ pub fn strokeMove(x: f32, z: f32) void {
     g_last = .{ x, z };
 }
 
-pub fn strokeEnd() StrokeStats {
+pub fn strokeEnd(io: std.Io) StrokeStats {
     if (!g_stroke_active) return g_stats;
     g_stroke_active = false;
 
@@ -418,9 +417,9 @@ pub fn strokeEnd() StrokeStats {
     g_stats.touched = dirtyChunkCount();
     // Transport anchors are still a draft and are not serialized until Finish;
     // writing the unchanged RMAP after every click only stalls the live pen.
-    if (g_stats.stamps > 0 and g_tool.channel != .road) _ = autosaveNow();
+    if (g_stats.stamps > 0 and g_tool.channel != .road) _ = autosaveNow(io);
     if (g_stroke_tool.channel != .road) commitMapHistory(g_stats.stamps > 0);
-    pushStrokeAuthoringEvent();
+    pushStrokeAuthoringEvent(io);
     return g_stats;
 }
 
@@ -1156,7 +1155,7 @@ var g_tile_binding_count: usize = 0;
 
 /// vals = count×4 rows. Re-encodes every painted chunk (the table rides each
 /// chunk's D stream), so an edited entry repaints live.
-pub fn setTileBindings(vals: []const f32) void {
+pub fn setTileBindings(io: std.Io, vals: []const f32) void {
     g_tile_binding_count = @min(MAX_TILE_BINDINGS, vals.len / BINDING_FLOATS);
     for (0..g_tile_binding_count) |i| {
         g_tile_bindings[i] = .{ vals[i * 4], vals[i * 4 + 1], vals[i * 4 + 2], vals[i * 4 + 3] };
@@ -1165,7 +1164,7 @@ pub fn setTileBindings(vals: []const f32) void {
         const ch = maybe orelse continue;
         ch.dirty.tiles = true;
     }
-    _ = autosaveNow();
+    _ = autosaveNow(io);
 }
 
 pub fn tileBindings() []const [BINDING_FLOATS]f32 {
@@ -1376,7 +1375,7 @@ pub fn roadsRestamp() void {
 
 /// Commit the live-previewed transport draft. Roads recompile the lane grid;
 /// rail remains a semantic path rendered directly from its recipe.
-pub fn pathCommit() ?u32 {
+pub fn pathCommit(io: std.Io) ?u32 {
     const kind = transport.draftKind() orelse return null;
     beginMapHistory(.path_commit);
     const id = transport.commitDraft() orelse {
@@ -1385,13 +1384,13 @@ pub fn pathCommit() ?u32 {
     };
     if (kind == .road) roadsRestamp();
     commitMapHistory(true);
-    _ = autosaveNow();
+    _ = autosaveNow(io);
     pushAuthoringEvent(.{ .kind = .road_commit, .tool = g_tool, .id = id });
     return id;
 }
 
-pub fn roadCommit() ?u32 {
-    return pathCommit();
+pub fn roadCommit(io: std.Io) ?u32 {
+    return pathCommit(io);
 }
 
 pub fn pathCancel() void {
@@ -1406,14 +1405,14 @@ pub fn pathUndoPoint() bool {
     return transport.undoDraftPoint();
 }
 
-pub fn pathDelete(id: u32) bool {
+pub fn pathDelete(io: std.Io, id: u32) bool {
     const kind = transport.kindForId(id) orelse return false;
     beginMapHistory(.path_delete);
     const ok = transport.deletePath(id);
     if (ok) {
         if (kind == .road) roadsRestamp();
         commitMapHistory(true);
-        _ = autosaveNow();
+        _ = autosaveNow(io);
         pushAuthoringEvent(.{ .kind = .road_delete, .tool = g_tool, .id = id });
     } else {
         commitMapHistory(false);
@@ -1421,12 +1420,12 @@ pub fn pathDelete(id: u32) bool {
     return ok;
 }
 
-pub fn pathControlDelete(id: u32) bool {
+pub fn pathControlDelete(io: std.Io, id: u32) bool {
     beginMapHistory(.control_delete);
     const ok = transport.deleteControl(id);
     if (ok) {
         commitMapHistory(true);
-        _ = autosaveNow();
+        _ = autosaveNow(io);
         pushAuthoringEvent(.{ .kind = .path_control_delete, .tool = g_tool, .id = id });
     } else {
         commitMapHistory(false);
@@ -1434,8 +1433,8 @@ pub fn pathControlDelete(id: u32) bool {
     return ok;
 }
 
-pub fn roadDelete(id: u32) bool {
-    return pathDelete(id);
+pub fn roadDelete(io: std.Io, id: u32) bool {
+    return pathDelete(io, id);
 }
 
 // ── flora specs (the population contract — req_2497) ─────────────────────────
@@ -1646,7 +1645,7 @@ fn restoreMapSnapshot(snapshot: MapSnapshot) bool {
     return loadMapInternal(storage[0..snapshot.used], false);
 }
 
-pub fn mapHistoryUndo() MapHistoryResult {
+pub fn mapHistoryUndo(io: std.Io) MapHistoryResult {
     var target = popMapSnapshot(g_map_undo[0..], &g_map_undo_count) orelse return .{
         .ok = false,
         .kind = .paint_stroke,
@@ -1656,7 +1655,7 @@ pub fn mapHistoryUndo() MapHistoryResult {
     const ok = restoreMapSnapshot(target);
     if (ok) {
         if (current) |snapshot| pushMapSnapshot(g_map_redo[0..], &g_map_redo_count, snapshot);
-        _ = autosaveNow();
+        _ = autosaveNow(io);
     } else {
         if (current) |snapshot| {
             var discarded = snapshot;
@@ -1670,7 +1669,7 @@ pub fn mapHistoryUndo() MapHistoryResult {
     return .{ .ok = true, .kind = kind, .stats = mapHistoryStats() };
 }
 
-pub fn mapHistoryRedo() MapHistoryResult {
+pub fn mapHistoryRedo(io: std.Io) MapHistoryResult {
     var target = popMapSnapshot(g_map_redo[0..], &g_map_redo_count) orelse return .{
         .ok = false,
         .kind = .paint_stroke,
@@ -1680,7 +1679,7 @@ pub fn mapHistoryRedo() MapHistoryResult {
     const ok = restoreMapSnapshot(target);
     if (ok) {
         if (current) |snapshot| pushMapSnapshot(g_map_undo[0..], &g_map_undo_count, snapshot);
-        _ = autosaveNow();
+        _ = autosaveNow(io);
     } else {
         if (current) |snapshot| {
             var discarded = snapshot;
@@ -1742,7 +1741,7 @@ pub fn setAutosaveFile(path: []const u8) void {
 
 /// Serialize the painting and atomically replace the autosave file.
 /// No-op (false) when no path is registered or the world is empty.
-pub fn autosaveNow() bool {
+pub fn autosaveNow(io: std.Io) bool {
     if (g_autosave_len == 0) return false;
     const path = g_autosave_path_buf[0..g_autosave_len];
     const alloc = std.heap.page_allocator;
@@ -1750,11 +1749,11 @@ pub fn autosaveNow() bool {
     defer alloc.free(buf);
     const n = saveMap(buf);
     if (n == 0) return false;
-    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(host_io.io(), dir) catch {};
+    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(io, dir) catch {};
     var tmp_buf: [g_autosave_path_buf.len + 4]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
-    std.Io.Dir.cwd().writeFile(host_io.io(), .{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
-    std.Io.Dir.rename(.cwd(), tmp, .cwd(), path, host_io.io()) catch return false;
+    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
+    std.Io.Dir.rename(.cwd(), tmp, .cwd(), path, io) catch return false;
     return true;
 }
 
@@ -1783,8 +1782,8 @@ test "heightAt bilinear-samples painted terrain, 0 off-chunk" {
     defer reset();
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 6), heightAt(0, 0), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(50, 50), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(500, 0), 0.0001); // no chunk there
@@ -1810,8 +1809,8 @@ test "groundHit lands a top-down ray on the sculpted cap" {
     defer reset();
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
-    strokeBegin(10, 10);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 10, 10);
+    _ = strokeEnd(std.testing.io);
 
     // iso-style ray from above, angled onto the hill at (10,10)
     const hit = groundHit(10, 50, 40, 0, -0.8, -0.6, 200).?;
@@ -1897,8 +1896,8 @@ test "height stroke stamps seam-free across the shared border" {
     _ = chunks.growChunk(1, 0).?;
 
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 3, .center_z = 5, .profile = .flat });
-    strokeBegin(60, 0); // dead on the chunk 0/1 border
-    const stats = strokeEnd();
+    strokeBegin(std.testing.io, 60, 0); // dead on the chunk 0/1 border
+    const stats = strokeEnd(std.testing.io);
     try std.testing.expect(stats.touched == 2);
 
     const c0 = chunks.chunkAt(0, 0).?;
@@ -1917,9 +1916,9 @@ test "stroke interpolation fills a fast drag without gaps" {
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .tile, .radius_m = 1, .kind_idx = 3 });
 
-    strokeBegin(-50, 0);
+    strokeBegin(std.testing.io, -50, 0);
     strokeMove(50, 0); // one event leaping 100 m
-    _ = strokeEnd();
+    _ = strokeEnd(std.testing.io);
 
     const ch = chunks.chunkAt(0, 0).?;
     // every tile along z=60 (local row) between the endpoints is painted
@@ -1943,38 +1942,38 @@ test "water carves its own bed and fills to the stamp's lowest covered grade" {
 
     // raise a 6 m plateau — water needs NO sub-0 basin (req_2701)
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
 
     // water depth 2, brush entirely ON the plateau top: level = plateau grade
     // (6), bed carves to 4, pool inset flush with the top
     setTool(.{ .channel = .water, .radius_m = 3, .center_z = 2, .profile = .flat });
-    strokeBegin(0, 0);
-    var stats = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    var stats = strokeEnd(std.testing.io);
     try std.testing.expect(!stats.water_dry);
     try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
 
     // re-stroking is stable: a wet cell keeps its pool level (bed + depth),
     // so a re-drag at the same DEPTH never trenches deeper
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
 
     // flat unpainted ground works too: bed −3, surface at grade 0
     const flat = 120 * chunks.SAMPLE_COLS + 180; // world (30, 0)
     setTool(.{ .channel = .water, .radius_m = 2, .center_z = 3, .profile = .flat });
-    strokeBegin(30, 0);
-    stats = strokeEnd();
+    strokeBegin(std.testing.io, 30, 0);
+    stats = strokeEnd(std.testing.io);
     try std.testing.expect(!stats.water_dry);
     try std.testing.expectApproxEqAbs(@as(f32, -3), ch.height[flat], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 3), ch.water[flat], 0.0001);
 
     // erase drains without re-filling the carve
     setTool(.{ .channel = .water, .mode = .erase, .radius_m = 3 });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.water[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
 }
@@ -1988,16 +1987,16 @@ test "water over a mound pools below the surrounding grade — no glacier (req_2
 
     // a 6 m mound narrower than the water brush
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = 6, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 6), ch.height[center], 0.0001);
 
     // the brush covers mound + surrounding flat: level = grade 0. The mound
     // core carves to −2 and the pool fills to 0 — the water surface never
     // rises above the ground around it (the req_2748 glacier).
     setTool(.{ .channel = .water, .radius_m = 5, .center_z = 2, .profile = .flat });
-    strokeBegin(0, 0);
-    const stats = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    const stats = strokeEnd(std.testing.io);
     try std.testing.expect(!stats.water_dry);
     try std.testing.expectApproxEqAbs(@as(f32, -2), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
@@ -2013,8 +2012,8 @@ test "terrain sculpt adjusts water depth instead of lifting the water column" {
 
     // Establish a 2 m pool at world level 0: bed -2, depth 2.
     setTool(.{ .channel = .water, .radius_m = 2, .center_z = 2, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, -2), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
 
@@ -2022,8 +2021,8 @@ test "terrain sculpt adjusts water depth instead of lifting the water column" {
     // surface remains at 0.
     clearDirty();
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = -4, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, -4), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 4), ch.water[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center] + ch.water[center], 0.0001);
@@ -2033,8 +2032,8 @@ test "terrain sculpt adjusts water depth instead of lifting the water column" {
     // the old 4 m depth here would render a +7 m tower over +3 m terrain.
     clearDirty();
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = 3, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 3), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.water[center], 0.0001);
     try std.testing.expect(ch.dirty.water);
@@ -2046,9 +2045,9 @@ test "ramp drag stamps the lerped grade between anchor and release" {
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .terrain, .terrain_tool = .ramp, .ramp_min = 0, .ramp_max = 8, .ramp_wide = 4 });
 
-    strokeBegin(0.2, 0.2); // anchors to cell center (0.5, 0.5)
+    strokeBegin(std.testing.io, 0.2, 0.2); // anchors to cell center (0.5, 0.5)
     strokeMove(0.5, 20.5); // drag 20 m north
-    _ = strokeEnd();
+    _ = strokeEnd(std.testing.io);
 
     const ch = chunks.chunkAt(0, 0).?;
     // the midpoint of the ramp carries the mid height
@@ -2064,10 +2063,10 @@ test "slope stroke grades along the drawn path at stroke end" {
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .terrain, .terrain_tool = .slope, .radius_m = 1, .ramp_min = 0, .ramp_max = 10, .profile = .flat });
 
-    strokeBegin(-20, 0);
+    strokeBegin(std.testing.io, -20, 0);
     strokeMove(0, 0);
     strokeMove(20, 0); // 40 m total run
-    _ = strokeEnd();
+    _ = strokeEnd(std.testing.io);
 
     const ch = chunks.chunkAt(0, 0).?;
     const row: usize = 120;
@@ -2090,26 +2089,26 @@ test "terrain erase clears even when ramp or slope tool is selected" {
     const center = 120 * chunks.SAMPLE_COLS + 120;
 
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 8, .center_z = 6, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 6), ch.height[center], 0.0001);
 
     setTool(.{ .channel = .terrain, .mode = .erase, .terrain_tool = .ramp, .radius_m = 3, .ramp_min = 2, .ramp_max = 10, .profile = .flat });
-    strokeBegin(0, 0);
+    strokeBegin(std.testing.io, 0, 0);
     strokeMove(0, 12);
-    _ = strokeEnd();
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center], 0.0001);
 
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 8, .center_z = 6, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 6), ch.height[center], 0.0001);
 
     setTool(.{ .channel = .terrain, .mode = .erase, .terrain_tool = .slope, .radius_m = 3, .ramp_min = 2, .ramp_max = 10, .profile = .flat });
-    strokeBegin(-6, 0);
+    strokeBegin(std.testing.io, -6, 0);
     strokeMove(0, 0);
     strokeMove(6, 0);
-    _ = strokeEnd();
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center], 0.0001);
 }
 
@@ -2123,8 +2122,8 @@ test "smooth eases spikes toward the local plane" {
     ch.height[spike] = 10;
 
     setTool(.{ .channel = .terrain, .terrain_tool = .smooth, .radius_m = 3, .smooth_strength = 1, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     // the spike collapses toward the (near-flat) fitted plane
     try std.testing.expect(ch.height[spike] < 1.0);
 }
@@ -2155,20 +2154,20 @@ test "flora paints its lane; zone paints membership; erase clears" {
     const ch = chunks.chunkAt(0, 0).?;
 
     setTool(.{ .channel = .flora, .radius_m = 0, .flora_kind_idx = 5, .flora_lane = 1 });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     const idx = chunks.cellIndex(60, 60).?;
     try std.testing.expectEqual(@as(i16, 5), ch.flora[1][idx]);
     try std.testing.expectEqual(chunks.EMPTY_CELL, ch.flora[0][idx]);
 
     setTool(.{ .channel = .zone, .radius_m = 0, .zone_idx = 2 });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectEqual(@as(i16, 2), ch.zones[idx]);
 
     setTool(.{ .channel = .zone, .mode = .erase, .radius_m = 0 });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
     try std.testing.expectEqual(chunks.EMPTY_CELL, ch.zones[idx]);
 }
 
@@ -2177,10 +2176,10 @@ test "stationary height brush deposits once per stroke (global dedup)" {
     defer reset();
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = 3 });
-    strokeBegin(0, 0);
+    strokeBegin(std.testing.io, 0, 0);
     strokeMove(0.01, 0.01);
     strokeMove(0.02, 0.0);
-    const stats = strokeEnd();
+    const stats = strokeEnd(std.testing.io);
     try std.testing.expectEqual(@as(u32, 1), stats.stamps);
 }
 
@@ -2190,9 +2189,9 @@ test "completed strokes queue map authoring events" {
     _ = chunks.growChunk(0, 0).?;
     setTool(.{ .channel = .tile, .radius_m = 1, .kind_idx = 3, .bind_idx = 2 });
 
-    strokeBegin(-2, 0);
+    strokeBegin(std.testing.io, -2, 0);
     strokeMove(2, 0);
-    const stats = strokeEnd();
+    const stats = strokeEnd(std.testing.io);
 
     var events: [4]AuthoringEvent = undefined;
     const n = drainAuthoringEvents(events[0..]);
@@ -2213,19 +2212,19 @@ test "road clicks draft, commit stamps with undercoat, delete restores" {
     const ch = chunks.growChunk(0, 0).?;
     // pre-paint the ground so the undercoat has something to restore
     setTool(.{ .channel = .tile, .radius_m = 40, .kind_idx = 7 });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
 
     // map road cell kinds to content indices (RoadCellKind order)
     roads.setKindIndices(.{ 10, 11, 12, 13, 14, 15, 16, 17 });
     setRoadProfile(.{ .lanesF = 1, .lanesB = 1, .sidewalks = true });
     setTool(.{ .channel = .road });
     // two clicks: a straight vertical road through the chunk center
-    strokeBegin(0, -20);
-    _ = strokeEnd();
-    strokeBegin(0, 20);
-    _ = strokeEnd();
-    const id = roadCommit().?;
+    strokeBegin(std.testing.io, 0, -20);
+    _ = strokeEnd(std.testing.io);
+    strokeBegin(std.testing.io, 0, 20);
+    _ = strokeEnd(std.testing.io);
+    const id = roadCommit(std.testing.io).?;
     try std.testing.expect(!road_plan_truncated);
 
     // the centerline cell wears a road kind, not the pre-paint
@@ -2235,7 +2234,7 @@ test "road clicks draft, commit stamps with undercoat, delete restores" {
     try std.testing.expect(ch.dirty.tiles);
 
     // delete restores the paint beneath
-    try std.testing.expect(roadDelete(id));
+    try std.testing.expect(roadDelete(std.testing.io, id));
     try std.testing.expectEqual(@as(i16, 7), ch.tiles[mid]);
     try std.testing.expectEqual(@as(usize, 0), roads.strokeCount());
 }

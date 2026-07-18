@@ -112,6 +112,8 @@ const PartialToolCall = struct {
 };
 
 pub const Session = struct {
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     allocator: std.mem.Allocator,
     base_url_owned: []u8,
     api_key_owned: ?[]u8 = null,
@@ -151,9 +153,16 @@ pub const Session = struct {
     /// Body buffer for the in-flight request — must outlive the request.
     body_owned: ?[]u8 = null,
 
-    pub fn init(allocator: std.mem.Allocator, options: SessionOptions) !*Session {
+    pub fn init(
+        io: std.Io,
+        environ: *const std.process.Environ.Map,
+        allocator: std.mem.Allocator,
+        options: SessionOptions,
+    ) !*Session {
         const self = try allocator.create(Session);
         self.* = .{
+            .io = io,
+            .environ = environ,
             .allocator = allocator,
             .base_url_owned = try allocator.dupe(u8, options.base_url),
             .api_key_owned = if (options.api_key) |k| try allocator.dupe(u8, k) else null,
@@ -296,7 +305,7 @@ pub const Session = struct {
             .ctx = @ptrCast(self),
         };
 
-        if (v8_bindings_sdk.httpStartZigStream(opts, callbacks) == null) {
+        if (v8_bindings_sdk.httpStartZigStream(self.io, self.environ, opts, callbacks) == null) {
             self.allocator.free(body);
             self.body_owned = null;
             try self.emitErrorString("net_http.request failed to start");

@@ -1,7 +1,7 @@
 //! Screenshot + video recording — port of love2d/lua/screenshot.lua + recorder.lua
 //!
 //! Screenshot: triggered by ZIGOS_SCREENSHOT=1. Waits N frames for layout to settle,
-//! captures via gpu.captureScreenshot(), encodes PNG via stbi_write_png, exits.
+//! captures via gpu.captureScreenshot(), encodes PNG in memory, writes via std.Io, exits.
 //! Supports node crop (ZIGOS_SCREENSHOT_NODE) and region crop (ZIGOS_SCREENSHOT_REGION).
 //!
 //! Recording: F9 toggles. Opens ffmpeg pipe, each frame captures via gpu.startCapture(),
@@ -13,22 +13,55 @@
 //! love.graphics.captureScreenshot(callback).
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const gpu = @import("gpu.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 
-// stbi_write_png — compiled via stb_image_write_impl.c, linked in build.zig
-extern fn stbi_write_png(filename: [*:0]const u8, w: c_int, h: c_int, comp: c_int, data: ?*const anyopaque, stride: c_int) c_int;
-
-// C popen/pclose/fwrite for ffmpeg pipe
-extern fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn pclose(stream: *anyopaque) c_int;
-extern fn fwrite(ptr: [*]const u8, size: usize, nmemb: usize, stream: *anyopaque) usize;
+// stb only encodes to memory here. File creation and writes stay on the
+// injected std.Io capability instead of being hidden inside stbi_write_png.
+const StbiWriteFunc = *const fn (context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void;
+extern fn stbi_write_png_to_func(func: StbiWriteFunc, context: ?*anyopaque, w: c_int, h: c_int, comp: c_int, data: ?*const anyopaque, stride: c_int) c_int;
 
 const page_alloc = std.heap.page_allocator;
+
+const PngSink = struct {
+    bytes: std.ArrayList(u8) = .empty,
+    failed: bool = false,
+};
+
+fn appendPngBytes(context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void {
+    const sink: *PngSink = @ptrCast(@alignCast(context orelse return));
+    if (sink.failed or data == null or size <= 0) return;
+    const src: [*]const u8 = @ptrCast(data.?);
+    sink.bytes.appendSlice(page_alloc, src[0..@intCast(size)]) catch {
+        sink.failed = true;
+    };
+}
+
+fn writePng(io: std.Io, path: []const u8, rgba: []const u8, w: u32, h: u32) bool {
+    var sink = PngSink{};
+    defer sink.bytes.deinit(page_alloc);
+    const encoded = stbi_write_png_to_func(
+        appendPngBytes,
+        &sink,
+        @intCast(w),
+        @intCast(h),
+        4,
+        rgba.ptr,
+        @intCast(w * 4),
+    );
+    if (encoded == 0 or sink.failed) return false;
+
+    const file = if (std.fs.path.isAbsolute(path))
+        std.Io.Dir.createFileAbsolute(io, path, .{ .truncate = true }) catch return false
+    else
+        std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true }) catch return false;
+    defer file.close(io);
+    file.writeStreamingAll(io, sink.bytes.items) catch return false;
+    return true;
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Screenshot state (mirrors screenshot.lua)
@@ -42,7 +75,7 @@ var ss_frame: u32 = 0;
 var ss_wait_frames: u32 = 60;
 
 var ss_path_buf: [512]u8 = undefined;
-var ss_path: [*:0]const u8 = "screenshot.png";
+var ss_path: []const u8 = "screenshot.png";
 
 var ss_node_buf: [256]u8 = undefined;
 var ss_node: ?[]const u8 = null;
@@ -60,7 +93,7 @@ var ss_should_exit: bool = false;
 
 var rec_active: bool = false;
 var rec_frame_count: u32 = 0;
-var rec_pipe: ?*anyopaque = null;
+var rec_child: ?std.process.Child = null;
 var rec_width: u32 = 0;
 var rec_height: u32 = 0;
 
@@ -68,28 +101,27 @@ var rec_height: u32 = 0;
 // Init — check env vars for screenshot mode (like screenshot.lua.init())
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn init() void {
-    const ss = host_io.getenv("ZIGOS_SCREENSHOT") orelse return;
+pub fn init(environ: *const std.process.Environ.Map) void {
+    const ss = environ.get("ZIGOS_SCREENSHOT") orelse return;
     if (!std.mem.eql(u8, ss, "1")) return;
 
     ss_enabled = true;
 
-    if (host_io.getenv("ZIGOS_SCREENSHOT_OUTPUT")) |p| {
-        if (p.len < ss_path_buf.len) {
+    if (environ.get("ZIGOS_SCREENSHOT_OUTPUT")) |p| {
+        if (p.len <= ss_path_buf.len) {
             @memcpy(ss_path_buf[0..p.len], p);
-            ss_path_buf[p.len] = 0;
-            ss_path = ss_path_buf[0..p.len :0];
+            ss_path = ss_path_buf[0..p.len];
         }
     }
 
-    if (host_io.getenv("ZIGOS_SCREENSHOT_NODE")) |n| {
+    if (environ.get("ZIGOS_SCREENSHOT_NODE")) |n| {
         if (n.len < ss_node_buf.len) {
             @memcpy(ss_node_buf[0..n.len], n);
             ss_node = ss_node_buf[0..n.len];
         }
     }
 
-    if (host_io.getenv("ZIGOS_SCREENSHOT_REGION")) |r| {
+    if (environ.get("ZIGOS_SCREENSHOT_REGION")) |r| {
         var parts: [4]u32 = .{ 0, 0, 0, 0 };
         var idx: usize = 0;
         var iter = std.mem.splitScalar(u8, r, ',');
@@ -103,16 +135,16 @@ pub fn init() void {
         }
     }
 
-    if (host_io.getenv("ZIGOS_SCREENSHOT_PAD")) |p| {
+    if (environ.get("ZIGOS_SCREENSHOT_PAD")) |p| {
         ss_padding = std.fmt.parseInt(u32, p, 10) catch 8;
     }
 
-    if (host_io.getenv("ZIGOS_SCREENSHOT_FRAMES")) |f| {
+    if (environ.get("ZIGOS_SCREENSHOT_FRAMES")) |f| {
         ss_wait_frames = std.fmt.parseInt(u32, f, 10) catch 60;
         if (ss_wait_frames == 0) ss_wait_frames = 1;
     }
 
-    log.print("[capture] screenshot mode enabled → {s}\n", .{std.mem.span(ss_path)});
+    log.print("[capture] screenshot mode enabled → {s}\n", .{ss_path});
 }
 
 pub fn isScreenshotMode() bool {
@@ -144,7 +176,7 @@ pub fn tick(root: ?*Node) bool {
 // Screenshot callback — receives BGRA pixels from gpu.performCapture()
 // ════════════════════════════════════════════════════════════════════════
 
-fn onScreenshotPixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
+fn onScreenshotPixels(io: std.Io, pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
     ss_captured = true;
     log.print("[capture] received {d}x{d} pixels (stride={d})\n", .{ w, h, stride });
 
@@ -179,13 +211,13 @@ fn onScreenshotPixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
     if (cy + ch > h) ch = h - cy;
     if (cw == 0 or ch == 0) return;
 
-    writeRegionPng(ss_path, pixels, stride, cx, cy, cw, ch);
+    writeRegionPng(io, ss_path, pixels, stride, cx, cy, cw, ch);
     ss_should_exit = true;
 }
 
 /// BGRA frame region → RGBA PNG on disk. Shared by the env-mode screenshot
 /// (above) and the live __capture_frame one-shot (below) — one write path.
-fn writeRegionPng(path: [*:0]const u8, pixels: [*]const u8, stride: u32, cx: u32, cy: u32, cw: u32, ch: u32) void {
+fn writeRegionPng(io: std.Io, path: []const u8, pixels: [*]const u8, stride: u32, cx: u32, cy: u32, cw: u32, ch: u32) void {
     const out_size = @as(usize, cw) * @as(usize, ch) * 4;
     const rgba = page_alloc.alloc(u8, out_size) catch return;
     defer page_alloc.free(rgba);
@@ -203,20 +235,19 @@ fn writeRegionPng(path: [*:0]const u8, pixels: [*]const u8, stride: u32, cx: u32
         }
     }
 
-    const ret = stbi_write_png(path, @intCast(cw), @intCast(ch), 4, @ptrCast(rgba.ptr), @intCast(cw * 4));
-    if (ret != 0) {
-        log.print("SCREENSHOT_SAVED:{s} ({d}x{d})\n", .{ std.mem.span(path), cw, ch });
+    if (writePng(io, path, rgba, cw, ch)) {
+        log.print("SCREENSHOT_SAVED:{s} ({d}x{d})\n", .{ path, cw, ch });
     } else {
-        log.print("[capture] stbi_write_png failed: {s}\n", .{std.mem.span(path)});
+        log.print("[capture] PNG encode/write failed: {s}\n", .{path});
     }
 }
 
 /// Write already-RGBA pixels straight to a PNG (no framebuffer, no BGRA swizzle).
 /// The model-package writer uses this to persist a painted atlas as a real,
 /// copy-anywhere image file (req_2523). `rgba` must be w*h*4 bytes.
-pub fn writeRgbaPng(path: [*:0]const u8, rgba: []const u8, w: u32, h: u32) bool {
+pub fn writeRgbaPng(io: std.Io, path: []const u8, rgba: []const u8, w: u32, h: u32) bool {
     if (rgba.len < @as(usize, w) * @as(usize, h) * 4) return false;
-    return stbi_write_png(path, @intCast(w), @intCast(h), 4, @ptrCast(rgba.ptr), @intCast(w * 4)) != 0;
+    return writePng(io, path, rgba, w, h);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -231,7 +262,7 @@ pub fn writeRgbaPng(path: [*:0]const u8, rgba: []const u8, w: u32, h: u32) bool 
 // ════════════════════════════════════════════════════════════════════════
 
 var live_path_buf: [512]u8 = undefined;
-var live_path: ?[:0]const u8 = null;
+var live_path: ?[]const u8 = null;
 
 /// Queue a one-shot capture of the next rendered frame to a PNG at `path`.
 /// Returns false when the path is unusable or the F9 recorder owns the
@@ -241,22 +272,21 @@ pub fn requestFrame(path: []const u8) bool {
         log.print("[capture] __capture_frame refused — F9 recording owns the capture hook\n", .{});
         return false;
     }
-    if (path.len == 0 or path.len + 1 >= live_path_buf.len) return false;
+    if (path.len == 0 or path.len > live_path_buf.len) return false;
     @memcpy(live_path_buf[0..path.len], path);
-    live_path_buf[path.len] = 0;
-    live_path = live_path_buf[0..path.len :0];
+    live_path = live_path_buf[0..path.len];
     gpu.captureScreenshot(&onLiveFramePixels);
     return true;
 }
 
-fn onLiveFramePixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
+fn onLiveFramePixels(io: std.Io, pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
     // One-shot: disarm FIRST — captureScreenshot leaves the hook armed
     // (env mode exits after one frame and never needed to clear it).
     gpu.stopCapture();
     const path = live_path orelse return;
     live_path = null;
     if (w == 0 or h == 0) return;
-    writeRegionPng(path, pixels, stride, 0, 0, w, h);
+    writeRegionPng(io, path, pixels, stride, 0, 0, w, h);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -264,16 +294,16 @@ fn onLiveFramePixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
 // ════════════════════════════════════════════════════════════════════════
 
 /// Handle F9 key. Returns true if consumed.
-pub fn handleKey(sym: c_int) bool {
+pub fn handleKey(io: std.Io, environ: *const std.process.Environ.Map, sym: c_int) bool {
     const c_imports = @import("../c.zig").imports;
     if (sym == c_imports.SDLK_F9) {
-        if (rec_active) stopRecording() else startRecording();
+        if (rec_active) stopRecording(io) else startRecording(io, environ);
         return true;
     }
     return false;
 }
 
-fn startRecording() void {
+fn startRecording(io: std.Io, environ: *const std.process.Environ.Map) void {
     const w = gpu.getWidth();
     const h = gpu.getHeight();
     if (w == 0 or h == 0) return;
@@ -281,18 +311,24 @@ fn startRecording() void {
     rec_width = w;
     rec_height = h;
 
-    // Open ffmpeg pipe — raw BGRA input, H.264 output
-    var cmd_buf: [512]u8 = undefined;
-    const cmd = std.fmt.bufPrint(
-        &cmd_buf,
-        "ffmpeg -y -f rawvideo -pix_fmt bgra -s {d}x{d} -r 30 -i - " ++
-            "-c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p recording.mp4 2>/dev/null",
-        .{ w, h },
-    ) catch return;
-    cmd_buf[cmd.len] = 0;
-
-    rec_pipe = popen(cmd_buf[0..cmd.len :0], "w");
-    if (rec_pipe == null) {
+    // Spawn ffmpeg directly. Its stdin pipe is an std.Io.File owned by the
+    // Child; no shell, libc FILE stream, or ambient process environment.
+    var size_buf: [32]u8 = undefined;
+    const size = std.fmt.bufPrint(&size_buf, "{d}x{d}", .{ w, h }) catch return;
+    const argv = [_][]const u8{
+        "ffmpeg",   "-y",   "-loglevel", "error",   "-f",            "rawvideo",
+        "-pix_fmt", "bgra", "-s",        size,      "-r",            "30",
+        "-i",       "-",    "-c:v",      "libx264", "-preset",       "ultrafast",
+        "-crf",     "18",   "-pix_fmt",  "yuv420p", "recording.mp4",
+    };
+    rec_child = std.process.spawn(io, .{
+        .argv = &argv,
+        .stdin = .pipe,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .environ_map = environ,
+    }) catch null;
+    if (rec_child == null) {
         log.print("[capture] failed to open ffmpeg pipe — is ffmpeg installed?\n", .{});
         return;
     }
@@ -303,32 +339,45 @@ fn startRecording() void {
     log.print("[capture] recording started {d}x{d} → recording.mp4\n", .{ w, h });
 }
 
-fn stopRecording() void {
+fn stopRecording(io: std.Io) void {
     gpu.stopCapture();
     rec_active = false;
 
-    if (rec_pipe) |p| {
-        _ = pclose(p);
-        rec_pipe = null;
+    if (rec_child) |*child| {
+        // EOF is ffmpeg's flush/finalize signal. wait() would deadlock if the
+        // parent's write end remained open until child cleanup.
+        if (child.stdin) |file| {
+            file.close(io);
+            child.stdin = null;
+        }
+        _ = child.wait(io) catch {};
+        rec_child = null;
     }
 
     log.print("[capture] recording stopped. {d} frames → recording.mp4\n", .{rec_frame_count});
 }
 
-fn onRecordPixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
-    const pipe = rec_pipe orelse return;
+fn onRecordPixels(io: std.Io, pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
+    const child = if (rec_child) |*value| value else return;
+    const pipe = child.stdin orelse return;
     if (w != rec_width or h != rec_height) return;
 
     // Write raw BGRA pixels to ffmpeg — row by row if stride != w*4
     const row_bytes = @as(usize, w) * 4;
     if (stride == @as(u32, @intCast(row_bytes))) {
         // No padding — write entire buffer at once
-        _ = fwrite(pixels, 1, @as(usize, w) * @as(usize, h) * 4, pipe);
+        pipe.writeStreamingAll(io, pixels[0 .. @as(usize, w) * @as(usize, h) * 4]) catch {
+            stopRecording(io);
+            return;
+        };
     } else {
         // Strip row padding
         for (0..h) |row| {
             const off = row * @as(usize, stride);
-            _ = fwrite(pixels + off, 1, row_bytes, pipe);
+            pipe.writeStreamingAll(io, (pixels + off)[0..row_bytes]) catch {
+                stopRecording(io);
+                return;
+            };
         }
     }
 
@@ -368,6 +417,6 @@ fn nodeRect(node: *Node) Rect {
 // Cleanup
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn deinit() void {
-    if (rec_active) stopRecording();
+pub fn deinit(io: std.Io) void {
+    if (rec_active) stopRecording(io);
 }

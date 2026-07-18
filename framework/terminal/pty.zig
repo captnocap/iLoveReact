@@ -1,13 +1,15 @@
 //! PTY (pseudo-terminal) — port of love2d/lua/pty.lua
 //!
-//! Opens a PTY master/slave pair via posix_openpt, forks a shell into the
-//! slave, and provides non-blocking bidirectional I/O via the master fd.
+//! Opens a PTY master/slave pair via posix_openpt and forks a shell into the
+//! slave. The kernel-specific setup stays at this boundary; steady-state
+//! reads, writes, cancellation, and child waiting run through injected
+//! `std.Io` capabilities.
 //!
 //! Unlike plain pipes, a PTY gives shells proper terminal behavior: readline
 //! editing, color output, Ctrl+C handling, job control, cursor movement.
 //!
 //! Usage:
-//!   var pty = try Pty.open(.{ .shell = "bash", .rows = 40, .cols = 120 });
+//!   var pty = try openPty(allocator, io, .{ .shell = "bash", .rows = 40, .cols = 120 });
 //!   defer pty.close();
 //!
 //!   // Per-frame: drain available output
@@ -20,7 +22,6 @@
 //!   pty.resize(30, 120);
 
 const std = @import("std");
-const log = @import("../diag/log.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // POSIX constants (Linux x86-64)
@@ -29,17 +30,8 @@ const log = @import("../diag/log.zig");
 const O_RDWR: c_int = 2;
 const O_NOCTTY: c_int = 0x400;
 const O_CLOEXEC: c_int = 0x80000;
-const O_NONBLOCK: c_int = 0x800;
-const F_GETFL: c_int = 3;
-const F_SETFL: c_int = 4;
 const TIOCSCTTY: c_ulong = 0x540E;
 const TIOCSWINSZ: c_ulong = 0x5414;
-const WNOHANG: c_int = 1;
-const SIGTERM: c_int = 15;
-const SIGKILL: c_int = 9;
-const EAGAIN: c_int = 11;
-const EINTR: c_int = 4;
-const EIO: c_int = 5;
 
 // ════════════════════════════════════════════════════════════════════════
 // POSIX externs (libc — linked by build.zig)
@@ -55,18 +47,10 @@ extern fn dup2(oldfd: c_int, newfd: c_int) c_int;
 extern fn execvp(file: [*:0]const u8, argv: [*]const ?[*:0]const u8) c_int;
 extern fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
 extern fn close(fd: c_int) c_int;
-extern fn read(fd: c_int, buf: [*]u8, count: usize) isize;
-extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
-extern fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
-extern fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern fn kill(pid: c_int, sig: c_int) c_int;
 extern fn chdir(path: [*:0]const u8) c_int;
 extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 extern fn _exit(status: c_int) noreturn;
-// errno access — Linux uses __errno_location, macOS uses __error
-extern fn __errno_location() *c_int;
-extern fn __error() *c_int;
 
 const WinSize = extern struct {
     ws_row: u16,
@@ -75,18 +59,13 @@ const WinSize = extern struct {
     ws_ypixel: u16 = 0,
 };
 
-fn getErrno() c_int {
-    if (comptime @import("builtin").os.tag == .macos) {
-        return __error().*;
-    }
-    return __errno_location().*;
-}
-
 // ════════════════════════════════════════════════════════════════════════
 // PTY struct
 // ════════════════════════════════════════════════════════════════════════
 
 const READ_BUF_SIZE = 8192;
+const OUTPUT_QUEUE_CAPACITY = 256 * 1024;
+const WRITE_QUEUE_CAPACITY = 64;
 
 pub const OpenOptions = struct {
     shell: [*:0]const u8 = "bash",
@@ -96,127 +75,175 @@ pub const OpenOptions = struct {
 };
 
 pub const Pty = struct {
-    pid: c_int,
-    masterfd: c_int,
-    closed: bool = false,
-    exited: bool = false,
-    child_exited: bool = false,
-    exit_code: c_int = -1,
+    state: *State,
     read_buf: [READ_BUF_SIZE]u8 = undefined,
 
-    /// Non-blocking drain: returns all available output, or null if none ready.
-    pub fn readData(self: *Pty) ?[]const u8 {
-        if (self.closed or self.masterfd < 0) return null;
+    const WriteRequest = struct {
+        bytes: []u8,
+    };
 
-        var total: usize = 0;
-        while (total < self.read_buf.len - 1) {
-            const n = read(self.masterfd, self.read_buf[total..].ptr, self.read_buf.len - total);
-            if (n > 0) {
-                total += @intCast(n);
-            } else if (n == 0) {
-                self.child_exited = true;
-                break;
-            } else {
-                const e = getErrno();
-                if (e == EAGAIN or e == EINTR) break;
-                if (e == EIO) {
-                    self.child_exited = true;
-                    break;
-                }
-                break;
+    const State = struct {
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        master: std.Io.File,
+        child: std.process.Child,
+        tasks: std.Io.Group = .init,
+        output: std.Io.Queue(u8),
+        output_storage: [OUTPUT_QUEUE_CAPACITY]u8 = undefined,
+        writes: std.Io.Queue(WriteRequest),
+        write_storage: [WRITE_QUEUE_CAPACITY]WriteRequest = undefined,
+        closed: std.atomic.Value(bool) = .init(false),
+        exited: std.atomic.Value(bool) = .init(false),
+        output_done: std.atomic.Value(bool) = .init(false),
+        write_failed: std.atomic.Value(bool) = .init(false),
+        exit_code: std.atomic.Value(c_int) = .init(-1),
+
+        fn readLoop(state: *State) std.Io.Cancelable!void {
+            defer {
+                state.output_done.store(true, .release);
+                state.output.close(state.io);
+            }
+
+            var backing: [READ_BUF_SIZE]u8 = undefined;
+            var reader = state.master.readerStreaming(state.io, &backing);
+            while (true) {
+                reader.interface.fillMore() catch |err| switch (err) {
+                    error.EndOfStream => return,
+                    error.ReadFailed => {
+                        const read_err = reader.err orelse error.Unexpected;
+                        if (read_err == error.Canceled) return error.Canceled;
+                        // Linux PTY masters report EIO after the slave closes.
+                        // It is a terminal condition here, not a reason to
+                        // recreate a raw errno/read loop.
+                        return;
+                    },
+                };
+
+                const available = reader.interface.buffered();
+                if (available.len == 0) continue;
+                state.output.putAll(state.io, available) catch |err| switch (err) {
+                    error.Canceled => return error.Canceled,
+                    error.Closed => return,
+                };
+                reader.interface.tossBuffered();
             }
         }
 
-        if (total == 0) return null;
-        return self.read_buf[0..total];
+        fn writeLoop(state: *State) std.Io.Cancelable!void {
+            while (true) {
+                const request = state.writes.getOne(state.io) catch |err| switch (err) {
+                    error.Canceled => return error.Canceled,
+                    error.Closed => return,
+                };
+                defer state.allocator.free(request.bytes);
+
+                state.master.writeStreamingAll(state.io, request.bytes) catch |err| {
+                    if (err == error.Canceled) return error.Canceled;
+                    state.write_failed.store(true, .release);
+                    return;
+                };
+            }
+        }
+
+        fn waitLoop(state: *State) std.Io.Cancelable!void {
+            const term = state.child.wait(state.io) catch |err| {
+                if (err == error.Canceled) return error.Canceled;
+                state.exit_code.store(-1, .release);
+                state.exited.store(true, .release);
+                return;
+            };
+            state.exit_code.store(termExitCode(term), .release);
+            state.exited.store(true, .release);
+        }
+
+        fn termExitCode(term: std.process.Child.Term) c_int {
+            return switch (term) {
+                .exited => |code| @intCast(code),
+                .signal => |signal| 128 + @as(c_int, @intCast(@intFromEnum(signal))),
+                .stopped, .unknown => -1,
+            };
+        }
+    };
+
+    /// Non-blocking drain of bytes already produced by the Io reader task.
+    pub fn readData(self: *Pty) ?[]const u8 {
+        const state = self.state;
+        if (state.closed.load(.acquire)) return null;
+        const count = state.output.getUncancelable(state.io, &self.read_buf, 0) catch return null;
+        return if (count == 0) null else self.read_buf[0..count];
     }
 
-    /// Write raw bytes to the PTY master (keyboard input to shell).
+    /// Queues raw bytes for the Io writer task without blocking the frame loop.
     pub fn writeData(self: *Pty, data: []const u8) bool {
-        if (self.closed or self.masterfd < 0) return false;
+        const state = self.state;
+        if (state.closed.load(.acquire) or state.write_failed.load(.acquire)) return false;
         if (data.len == 0) return true;
 
-        var written: usize = 0;
-        while (written < data.len) {
-            const n = write(self.masterfd, data[written..].ptr, data.len - written);
-            if (n < 0) {
-                const e = getErrno();
-                if (e == EAGAIN or e == EINTR) continue;
-                if (e == EIO) {
-                    self.child_exited = true;
-                    return false;
-                }
-                return false;
-            }
-            written += @intCast(n);
+        const copy = state.allocator.dupe(u8, data) catch return false;
+        const count = state.writes.putUncancelable(state.io, &.{.{ .bytes = copy }}, 0) catch {
+            state.allocator.free(copy);
+            return false;
+        };
+        if (count == 0) {
+            state.allocator.free(copy);
+            return false;
         }
         return true;
     }
 
     /// Update terminal window size and send SIGWINCH to shell.
     pub fn resize(self: *Pty, rows: u16, cols: u16) void {
-        if (self.closed or self.masterfd < 0) return;
+        const state = self.state;
+        if (state.closed.load(.acquire)) return;
         var ws = WinSize{ .ws_row = rows, .ws_col = cols };
-        _ = ioctl(self.masterfd, TIOCSWINSZ, @intFromPtr(&ws));
+        _ = ioctl(state.master.handle, TIOCSWINSZ, @intFromPtr(&ws));
     }
 
-    /// Non-blocking liveness check.
-    pub fn alive(self: *Pty) bool {
-        if (self.closed or self.exited) return false;
-        if (self.child_exited) {
-            var status: c_int = 0;
-            const ret = waitpid(self.pid, &status, WNOHANG);
-            if (ret == self.pid or ret < 0) {
-                self.exited = true;
-                self.exit_code = (status >> 8) & 0xFF;
-                return false;
-            }
-            return true;
-        }
-        var status: c_int = 0;
-        const ret = waitpid(self.pid, &status, WNOHANG);
-        if (ret == 0) return true;
-        if (ret == self.pid) {
-            self.exited = true;
-            self.exit_code = (status >> 8) & 0xFF;
-            return false;
-        }
-        self.exited = true;
-        return false;
+    /// Lock-free liveness snapshot maintained by the Io child-wait task.
+    pub fn alive(self: *const Pty) bool {
+        const state = self.state;
+        if (state.closed.load(.acquire)) return false;
+        // Keep the session drainable until both the child and its output pump
+        // have finished. Callers that stop on `alive() == false` can then
+        // perform one final queue drain without racing the reader task.
+        return !state.exited.load(.acquire) or !state.output_done.load(.acquire);
     }
 
-    pub fn exitCode(self: *Pty) c_int {
-        return self.exit_code;
+    pub fn exitCode(self: *const Pty) c_int {
+        return self.state.exit_code.load(.acquire);
     }
 
-    /// Close the PTY and reap child. Safe to call multiple times.
+    /// The child identifier exposed by Zig's native process owner. Callers
+    /// that inspect `/proc` must tolerate it becoming null after reaping.
+    pub fn processId(self: *const Pty) ?std.process.Child.Id {
+        return self.state.child.id;
+    }
+
+    /// Cancel owned I/O tasks, terminate/reap the child through `std.Io`, and
+    /// release every queued write. Safe to call once; callers null their owner.
     pub fn closePty(self: *Pty) void {
-        if (self.closed) return;
-        self.closed = true;
+        const state = self.state;
+        if (state.closed.swap(true, .acq_rel)) return;
 
-        if (self.masterfd >= 0) {
-            _ = close(self.masterfd);
-            self.masterfd = -1;
+        state.writes.close(state.io);
+        state.tasks.cancel(state.io);
+        if (state.child.id != null) {
+            state.child.kill(state.io);
+            state.exit_code.store(137, .release);
+            state.exited.store(true, .release);
+        }
+        state.output.close(state.io);
+        state.master.close(state.io);
+
+        while (state.writes.getOneUncancelable(state.io)) |request| {
+            state.allocator.free(request.bytes);
+        } else |err| switch (err) {
+            error.Closed => {},
         }
 
-        if (!self.exited) {
-            var status: c_int = 0;
-            var ret = waitpid(self.pid, &status, WNOHANG);
-            if (ret == 0) {
-                _ = kill(self.pid, SIGTERM);
-                // Brief spin wait for graceful exit
-                for (0..200) |_| {
-                    ret = waitpid(self.pid, &status, WNOHANG);
-                    if (ret != 0) break;
-                }
-                if (ret == 0) {
-                    _ = kill(self.pid, SIGKILL);
-                    _ = waitpid(self.pid, &status, 0); // blocking final reap
-                }
-            }
-            self.exited = true;
-            self.exit_code = (status >> 8) & 0xFF;
-        }
+        const allocator = state.allocator;
+        allocator.destroy(state);
+        self.* = undefined;
     }
 };
 
@@ -224,7 +251,7 @@ pub const Pty = struct {
 // Open — fork a shell into a new PTY
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn openPty(opts: OpenOptions) !Pty {
+pub fn openPty(allocator: std.mem.Allocator, io: std.Io, opts: OpenOptions) !Pty {
     // 1. Open PTY master
     const masterfd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (masterfd < 0) return error.PosixOpenPtFailed;
@@ -255,6 +282,11 @@ pub fn openPty(opts: OpenOptions) !Pty {
     //    kernel's default PTY size instead of the intended layout box.
     var ws = WinSize{ .ws_row = opts.rows, .ws_col = opts.cols };
     _ = ioctl(masterfd, TIOCSWINSZ, @intFromPtr(&ws));
+
+    // Allocate the stable owner before fork. Background tasks receive this
+    // pointer only in the parent, after every field is initialized.
+    const state = try allocator.create(Pty.State);
+    errdefer allocator.destroy(state);
 
     // 5. Fork
     const pid = fork();
@@ -289,11 +321,57 @@ pub fn openPty(opts: OpenOptions) !Pty {
 
     // ── PARENT ──
 
-    // Non-blocking master
-    const flags = fcntl(masterfd, F_GETFL);
-    if (flags >= 0) _ = fcntl(masterfd, F_SETFL, flags | O_NONBLOCK);
+    state.* = .{
+        .allocator = allocator,
+        .io = io,
+        .master = .{ .handle = masterfd, .flags = .{ .nonblocking = false } },
+        .child = .{
+            .id = @intCast(pid),
+            .thread_handle = {},
+            .stdin = null,
+            .stdout = null,
+            .stderr = null,
+            .request_resource_usage_statistics = false,
+        },
+        .output = .init(&state.output_storage),
+        .writes = .init(&state.write_storage),
+    };
+    errdefer {
+        state.tasks.cancel(io);
+        state.child.kill(io);
+        state.master.close(io);
+    }
 
-    log.print("[pty] PID={d} slave={s} shell={s}\n", .{ pid, namebuf[0..name_len], std.mem.span(opts.shell) });
+    try state.tasks.concurrent(io, Pty.State.readLoop, .{state});
+    try state.tasks.concurrent(io, Pty.State.writeLoop, .{state});
+    try state.tasks.concurrent(io, Pty.State.waitLoop, .{state});
 
-    return Pty{ .pid = pid, .masterfd = masterfd };
+    return .{ .state = state };
+}
+
+test "PTY owns native Io read, write, and child-wait tasks" {
+    var pty = try openPty(std.testing.allocator, std.testing.io, .{
+        .shell = "/bin/sh",
+        .rows = 24,
+        .cols = 80,
+    });
+    defer pty.closePty();
+
+    try std.testing.expect(pty.writeData("printf 'rjit-pty-ok\\n'; exit 7\n"));
+
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+    const deadline = std.Io.Clock.now(.awake, std.testing.io).addDuration(.fromSeconds(5));
+    while ((!pty.state.exited.load(.acquire) or !pty.state.output_done.load(.acquire)) and
+        std.Io.Clock.now(.awake, std.testing.io).toNanoseconds() < deadline.toNanoseconds())
+    {
+        if (pty.readData()) |bytes| try output.appendSlice(std.testing.allocator, bytes);
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(1), .awake);
+    }
+    while (pty.readData()) |bytes| try output.appendSlice(std.testing.allocator, bytes);
+
+    try std.testing.expect(pty.state.exited.load(.acquire));
+    try std.testing.expect(pty.state.output_done.load(.acquire));
+    try std.testing.expectEqual(@as(c_int, 7), pty.exitCode());
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "rjit-pty-ok") != null);
 }

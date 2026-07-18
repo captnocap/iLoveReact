@@ -2,7 +2,7 @@
 //! RFC 6455 compliant (Autobahn conformance tested).
 //!
 //! Usage:
-//!   var server = try wsserver.WsServer.listen(8080);
+//!   var server = try wsserver.WsServer.listen(allocator, io, 8080);
 //!   // each frame:
 //!   var events: [32]wsserver.ServerEvent = undefined;
 //!   const n = server.update(&events);
@@ -12,12 +12,7 @@
 //!   server.close();
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const netx = @import("netx.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
+const transport = @import("transport.zig");
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -61,7 +56,7 @@ const ClientStatus = enum { handshake, open, closed };
 const Client = struct {
     active: bool = false,
     id: u32 = 0,
-    stream: ?netx.Stream = null,
+    stream: ?transport.StreamPump = null,
     status: ClientStatus = .closed,
     handshake_buf: [MAX_HDR]u8 = undefined,
     handshake_len: usize = 0,
@@ -77,40 +72,36 @@ const Client = struct {
 // ── Server ───────────────────────────────────────────────────────────────
 
 pub const WsServer = struct {
-    listener: sysx.socket_t = undefined,
+    allocator: std.mem.Allocator = undefined,
+    io: std.Io = undefined,
+    listener: transport.ListenerPump = undefined,
     clients: [MAX_CLIENTS]Client = [_]Client{.{}} ** MAX_CLIENTS,
     next_client_id: u32 = 1,
     event_count: usize = 0,
 
     /// Start listening on a port. Initializes self in-place (no large return by value).
-    pub fn listen(port: u16) !WsServer {
-        const addr = try netx.Address.parseIp4("0.0.0.0", port);
-        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
-        errdefer sysx.close(fd);
-
-        const optval: c_int = 1;
-        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
-
-        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
-        try sysx.listen(fd, 16);
-
-        return WsServer{ .listener = fd };
+    pub fn listen(allocator: std.mem.Allocator, io: std.Io, port: u16) !WsServer {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .unspecified(port) };
+        var server = try address.listen(io, .{ .kernel_backlog = 16, .reuse_address = true });
+        errdefer server.deinit(io);
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .listener = try transport.ListenerPump.init(allocator, io, server),
+        };
     }
 
     /// Initialize an existing WsServer in-place (avoids 8MB return-by-value).
-    pub fn listenInPlace(self: *WsServer, port: u16) !void {
-        const addr = try netx.Address.parseIp4("0.0.0.0", port);
-        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
-        errdefer sysx.close(fd);
-
-        const optval: c_int = 1;
-        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
-
-        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
-        try sysx.listen(fd, 16);
+    pub fn listenInPlace(self: *WsServer, allocator: std.mem.Allocator, io: std.Io, port: u16) !void {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .unspecified(port) };
+        var server = try address.listen(io, .{ .kernel_backlog = 16, .reuse_address = true });
+        errdefer server.deinit(io);
+        const listener = try transport.ListenerPump.init(allocator, io, server);
 
         // Set fields individually — avoid constructing a full 8MB struct literal
-        self.listener = fd;
+        self.allocator = allocator;
+        self.io = io;
+        self.listener = listener;
         self.next_client_id = 1;
         self.event_count = 0;
         for (&self.clients) |*c| {
@@ -151,8 +142,10 @@ pub const WsServer = struct {
     pub fn sendWithOpcode(self: *WsServer, client_id: u32, opcode: Opcode, data: []const u8) void {
         for (&self.clients) |*client| {
             if (client.active and client.id == client_id and client.status == .open) {
-                if (client.stream) |stream| {
+                if (client.stream) |*stream| {
                     writeFrame(stream, 0x80 | @as(u8, @intFromEnum(opcode)), data) catch {
+                        stream.deinit();
+                        client.stream = null;
                         client.status = .closed;
                         client.active = false;
                     };
@@ -166,8 +159,10 @@ pub const WsServer = struct {
     pub fn broadcast(self: *WsServer, data: []const u8) void {
         for (&self.clients) |*client| {
             if (client.active and client.status == .open) {
-                if (client.stream) |stream| {
+                if (client.stream) |*stream| {
                     writeFrame(stream, 0x81, data) catch {
+                        stream.deinit();
+                        client.stream = null;
                         client.status = .closed;
                         client.active = false;
                     };
@@ -180,11 +175,12 @@ pub const WsServer = struct {
     pub fn close(self: *WsServer) void {
         for (&self.clients) |*client| {
             if (client.active) {
-                if (client.stream) |s| s.close();
+                if (client.stream) |*stream| stream.deinit();
+                client.stream = null;
                 client.active = false;
             }
         }
-        sysx.close(self.listener);
+        self.listener.deinit();
     }
 
     // ── Internal ─────────────────────────────────────────────────────
@@ -192,15 +188,19 @@ pub const WsServer = struct {
     fn acceptClients(self: *WsServer, out: []ServerEvent) void {
         _ = out;
         while (true) {
-            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch break;
+            const accepted = self.listener.accept() orelse break;
             const slot = self.findClientSlot() orelse {
-                sysx.close(accepted);
+                accepted.close(self.io);
+                break;
+            };
+            const pump = transport.StreamPump.init(self.allocator, self.io, accepted) catch {
+                accepted.close(self.io);
                 break;
             };
             self.clients[slot] = .{
                 .active = true,
                 .id = self.next_client_id,
-                .stream = .{ .handle = accepted },
+                .stream = pump,
                 .status = .handshake,
             };
             self.next_client_id += 1;
@@ -208,26 +208,22 @@ pub const WsServer = struct {
     }
 
     fn processHandshake(self: *WsServer, client: *Client, out: []ServerEvent) void {
-        const stream = client.stream orelse return;
-        const n = stream.read(client.handshake_buf[client.handshake_len..]) catch |err| {
-            if (err == error.WouldBlock) return;
-            client.status = .closed;
-            client.active = false;
-            return;
+        const stream = if (client.stream) |*pump| pump else return;
+        const n = switch (stream.drain(client.handshake_buf[client.handshake_len..])) {
+            .empty => return,
+            .data => |count| count,
+            .closed, .failed => {
+                self.dropClient(client);
+                return;
+            },
         };
-        if (n == 0) {
-            client.status = .closed;
-            client.active = false;
-            return;
-        }
         client.handshake_len += n;
 
         const headers = client.handshake_buf[0..client.handshake_len];
         if (std.mem.indexOf(u8, headers, "\r\n\r\n") == null) return;
 
         const key = extractHeader(headers, "Sec-WebSocket-Key: ") orelse {
-            client.status = .closed;
-            client.active = false;
+            self.dropClient(client);
             return;
         };
 
@@ -245,14 +241,12 @@ pub const WsServer = struct {
             "Upgrade: websocket\r\n" ++
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Accept: {s}\r\n\r\n", .{accept}) catch {
-            client.status = .closed;
-            client.active = false;
+            self.dropClient(client);
             return;
         };
 
-        stream.writeAll(resp) catch {
-            client.status = .closed;
-            client.active = false;
+        stream.send(resp) catch {
+            self.dropClient(client);
             return;
         };
 
@@ -261,28 +255,18 @@ pub const WsServer = struct {
     }
 
     fn processFrames(self: *WsServer, client: *Client, out: []ServerEvent) void {
-        const stream = client.stream orelse return;
+        const stream = if (client.stream) |*pump| pump else return;
         const buf_cap = client.read_buf.len;
         if (client.read_len < buf_cap) {
-            const n = stream.read(client.read_buf[client.read_len..]) catch |err| {
-                if (err == error.WouldBlock) {
-                    if (client.read_len >= 2) {
-                        _ = self.tryParseClientFrame(client, out);
-                    }
+            switch (stream.drain(client.read_buf[client.read_len..])) {
+                .empty => {},
+                .data => |n| client.read_len += n,
+                .closed, .failed => {
+                    self.pushEvent(out, client.id, .client_disconnected, .text, "");
+                    self.dropClient(client);
                     return;
-                }
-                self.pushEvent(out, client.id, .client_disconnected, .text, "");
-                client.status = .closed;
-                client.active = false;
-                return;
-            };
-            if (n == 0) {
-                self.pushEvent(out, client.id, .client_disconnected, .text, "");
-                client.status = .closed;
-                client.active = false;
-                return;
+                },
             }
-            client.read_len += n;
         }
         // Parse as many frames as available
         while (client.read_len >= 2) {
@@ -445,11 +429,9 @@ pub const WsServer = struct {
                     }
                 }
                 // Echo close frame back
-                if (client.stream) |s| writeFrame(s, 0x88, payload[0..payload_len]) catch {};
+                if (client.stream) |*stream| writeFrame(stream, 0x88, payload[0..payload_len]) catch {};
                 self.pushEvent(out, client.id, .client_disconnected, .close, "");
-                if (client.stream) |s| s.close();
-                client.status = .closed;
-                client.active = false;
+                self.dropClient(client);
                 return false;
             },
             .ping => {
@@ -464,7 +446,7 @@ pub const WsServer = struct {
                     return false;
                 }
                 // Pong with same payload
-                if (client.stream) |s| writeFrame(s, 0x8A, payload[0..payload_len]) catch {};
+                if (client.stream) |*stream| writeFrame(stream, 0x8A, payload[0..payload_len]) catch {};
             },
             .pong => {
                 if (!fin) {
@@ -484,15 +466,20 @@ pub const WsServer = struct {
     }
 
     fn sendClose(self: *WsServer, client: *Client, code: u16, reason: []const u8) void {
-        _ = self;
-        if (client.stream) |s| {
+        if (client.stream) |*stream| {
             var close_payload: [127]u8 = undefined;
             std.mem.writeInt(u16, close_payload[0..2], code, .big);
             const rlen = @min(reason.len, 123);
             @memcpy(close_payload[2 .. 2 + rlen], reason[0..rlen]);
-            writeFrame(s, 0x88, close_payload[0 .. 2 + rlen]) catch {};
-            s.close();
+            writeFrame(stream, 0x88, close_payload[0 .. 2 + rlen]) catch {};
         }
+        self.dropClient(client);
+    }
+
+    fn dropClient(self: *WsServer, client: *Client) void {
+        _ = self;
+        if (client.stream) |*stream| stream.deinit();
+        client.stream = null;
         client.status = .closed;
         client.active = false;
     }
@@ -535,8 +522,7 @@ fn extractHeader(headers: []const u8, name: []const u8) ?[]const u8 {
 }
 
 /// Write an unmasked server→client frame. first_byte = FIN+opcode.
-/// Handles WouldBlock on non-blocking sockets by spinning with backoff.
-fn writeFrame(stream: netx.Stream, first_byte: u8, payload: []const u8) !void {
+fn writeFrame(stream: *transport.StreamPump, first_byte: u8, payload: []const u8) !void {
     var hdr: [10]u8 = undefined;
     var hdr_len: usize = 2;
     hdr[0] = first_byte;
@@ -551,28 +537,8 @@ fn writeFrame(stream: netx.Stream, first_byte: u8, payload: []const u8) !void {
     } else {
         hdr[1] = @intCast(payload.len);
     }
-    try writeAllNonBlocking(stream, hdr[0..hdr_len]);
-    if (payload.len > 0) try writeAllNonBlocking(stream, payload);
-}
-
-/// writeAll that handles WouldBlock on non-blocking sockets.
-fn writeAllNonBlocking(stream: netx.Stream, data: []const u8) !void {
-    var offset: usize = 0;
-    var retries: u32 = 0;
-    while (offset < data.len) {
-        const n = stream.write(data[offset..]) catch |err| {
-            if (err == error.WouldBlock) {
-                retries += 1;
-                if (retries > 1000) return err; // give up after ~100ms
-                host_io.sleep(100_000); // 100us
-                continue;
-            }
-            return err;
-        };
-        if (n == 0) return error.ConnectionResetByPeer;
-        offset += n;
-        retries = 0;
-    }
+    try stream.send(hdr[0..hdr_len]);
+    if (payload.len > 0) try stream.send(payload);
 }
 
 fn isValidUtf8(data: []const u8) bool {
@@ -586,4 +552,8 @@ fn isValidCloseCode(code: u16) bool {
         1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011 => true,
         else => false,
     };
+}
+
+test "public WebSocket server API compiles" {
+    std.testing.refAllDecls(@This());
 }

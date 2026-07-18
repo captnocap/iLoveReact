@@ -20,7 +20,6 @@
 //! resize callbacks can't overwrite the rect we just loaded.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 
 pub const WindowGeometry = extern struct {
@@ -59,7 +58,7 @@ fn getPath() [:0]const u8 {
 
 const MAX_OR_FULL: u64 = c.SDL_WINDOW_MAXIMIZED | c.SDL_WINDOW_FULLSCREEN;
 
-pub fn save(window: *c.SDL_Window) void {
+pub fn save(io: std.Io, window: *c.SDL_Window) void {
     const now = c.SDL_GetTicks();
     if (now < save_blocked_until) return;
 
@@ -93,17 +92,17 @@ pub fn save(window: *c.SDL_Window) void {
     }
 
     const bytes: *const [@sizeOf(WindowGeometry)]u8 = @ptrCast(&geom);
-    const file = std.Io.Dir.createFileAbsolute(host_io.io(), getPath(), .{}) catch return;
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), bytes) catch {};
+    const file = std.Io.Dir.createFileAbsolute(io, getPath(), .{}) catch return;
+    defer file.close(io);
+    file.writeStreamingAll(io, bytes) catch {};
 }
 
-pub fn load() ?WindowGeometry {
-    const file = std.Io.Dir.openFileAbsolute(host_io.io(), getPath(), .{}) catch return null;
-    defer file.close(host_io.io());
+pub fn load(io: std.Io) ?WindowGeometry {
+    const file = std.Io.Dir.openFileAbsolute(io, getPath(), .{}) catch return null;
+    defer file.close(io);
 
     var bytes: [@sizeOf(WindowGeometry)]u8 = undefined;
-    const n = file.readPositionalAll(host_io.io(), &bytes, 0) catch return null;
+    const n = file.readPositionalAll(io, &bytes, 0) catch return null;
     if (n < @sizeOf(WindowGeometry)) return null;
 
     const geom: *const WindowGeometry = @ptrCast(@alignCast(&bytes));

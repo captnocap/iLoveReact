@@ -1,7 +1,6 @@
 //! V8 host bindings for environment, process info, and exec.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const process_mod = @import("process/process.zig");
@@ -9,11 +8,6 @@ const prepared_input = @import("state/prepared_input.zig");
 const log = @import("diag/log.zig");
 
 extern fn getpid() c_int;
-extern fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn pclose(stream: *anyopaque) c_int;
-extern fn fread(ptr: [*]u8, size: usize, nmemb: usize, stream: *anyopaque) usize;
-extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-extern fn exit(code: c_int) noreturn;
 
 var g_app_dir_buf: [4096]u8 = undefined;
 var g_app_dir_len: usize = 0;
@@ -60,11 +54,11 @@ fn setString(info: v8.FunctionCallbackInfo, value: []const u8) void {
     setValue(info, v8.String.initUtf8(iso, value));
 }
 
-fn resolveAppDir() usize {
+fn resolveAppDir(io: std.Io) usize {
     if (g_app_dir_resolved) return g_app_dir_len;
     g_app_dir_resolved = true;
 
-    const exe_path_len = std.process.executablePath(host_io.io(), &g_app_dir_buf) catch return 0;
+    const exe_path_len = std.process.executablePath(io, &g_app_dir_buf) catch return 0;
     var dir_end: usize = exe_path_len;
     while (dir_end > 0 and g_app_dir_buf[dir_end - 1] != '/') dir_end -= 1;
     if (dir_end == 0) return 0;
@@ -80,15 +74,9 @@ fn resolveAppDir() usize {
     return dir_end;
 }
 
-fn getenvDynamic(name: []const u8) ?[]const u8 {
-    const alloc = std.heap.page_allocator;
-    const name_z = alloc.dupeZ(u8, name) catch return null;
-    defer alloc.free(name_z);
-    return host_io.getenv(name_z);
-}
-
 fn execCmd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const alloc = std.heap.page_allocator;
     const cmd_buf = argStringAlloc(alloc, info, 0) orelse {
         setString(info, "");
@@ -96,32 +84,18 @@ fn execCmd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(cmd_buf);
 
-    const cmd_z = alloc.alloc(u8, cmd_buf.len + 1) catch {
+    const result = std.process.run(alloc, host.io, .{
+        .argv = &.{ "/bin/sh", "-c", cmd_buf },
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+        .environ_map = host.environ,
+    }) catch {
         setString(info, "");
         return;
     };
-    defer alloc.free(cmd_z);
-    @memcpy(cmd_z[0..cmd_buf.len], cmd_buf);
-    cmd_z[cmd_buf.len] = 0;
-    const cmd_ptr: [*:0]const u8 = @ptrCast(cmd_z.ptr);
-
-    const stream = popen(cmd_ptr, "r") orelse {
-        setString(info, "");
-        return;
-    };
-    var buf: [65536]u8 = undefined;
-    var total: usize = 0;
-    while (total < buf.len) {
-        const n = fread(buf[total..].ptr, 1, buf.len - total, stream);
-        if (n == 0) break;
-        total += n;
-    }
-    _ = pclose(stream);
-    if (total == 0) {
-        setString(info, "");
-        return;
-    }
-    setString(info, buf[0..total]);
+    defer alloc.free(result.stdout);
+    defer alloc.free(result.stderr);
+    setString(info, result.stdout);
 }
 
 fn getPid(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -131,13 +105,14 @@ fn getPid(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn getEnv(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const environ = v8_runtime.hostContext(info.getIsolate()).environ;
     const alloc = std.heap.page_allocator;
     const name_buf = argStringAlloc(alloc, info, 0) orelse {
         setString(info, "");
         return;
     };
     defer alloc.free(name_buf);
-    const val = getenvDynamic(name_buf) orelse {
+    const val = environ.get(name_buf) orelse {
         setString(info, "");
         return;
     };
@@ -146,13 +121,14 @@ fn getEnv(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn envGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const environ = v8_runtime.hostContext(info.getIsolate()).environ;
     const alloc = std.heap.page_allocator;
     const name_buf = argStringAlloc(alloc, info, 0) orelse {
         setNull(info);
         return;
     };
     defer alloc.free(name_buf);
-    const val = getenvDynamic(name_buf) orelse {
+    const val = environ.get(name_buf) orelse {
         setNull(info);
         return;
     };
@@ -161,6 +137,7 @@ fn envGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn envSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const environ = v8_runtime.hostContext(info.getIsolate()).environ;
     const alloc = std.heap.page_allocator;
     const name_buf = argStringAlloc(alloc, info, 0) orelse {
         setUndefined(info);
@@ -173,34 +150,21 @@ fn envSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(value_buf);
 
-    const name_z = alloc.alloc(u8, name_buf.len + 1) catch {
-        setUndefined(info);
-        return;
-    };
-    defer alloc.free(name_z);
-    @memcpy(name_z[0..name_buf.len], name_buf);
-    name_z[name_buf.len] = 0;
-    const value_z = alloc.alloc(u8, value_buf.len + 1) catch {
-        setUndefined(info);
-        return;
-    };
-    defer alloc.free(value_z);
-    @memcpy(value_z[0..value_buf.len], value_buf);
-    value_z[value_buf.len] = 0;
-
-    _ = setenv(@ptrCast(name_z.ptr), @ptrCast(value_z.ptr), 1);
+    environ.put(name_buf, value_buf) catch {};
     setUndefined(info);
 }
 
 fn exitHost(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const code = if (info.length() > 0) info.getArg(0).toI32(currentContext(info)) catch 0 else 0;
-    exit(code);
+    std.process.exit(@intCast(code & 0xff));
 }
 
 fn spawnSelf(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const dir_len = resolveAppDir();
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const io = host.io;
+    const dir_len = resolveAppDir(io);
     if (dir_len == 0) {
         log.info(.engine, "spawn_self: failed to resolve app directory", .{});
         setNumber(info, -1);
@@ -216,14 +180,22 @@ fn spawnSelf(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     var run_buf: [4096]u8 = undefined;
     @memcpy(run_buf[0..dir_len], g_app_dir_buf[0..dir_len]);
     @memcpy(run_buf[dir_len .. dir_len + run_suffix.len], run_suffix);
-    run_buf[dir_len + run_suffix.len] = 0;
-    const run_z: [*:0]const u8 = @ptrCast(run_buf[0 .. dir_len + run_suffix.len :0]);
+    const run_path = run_buf[0 .. dir_len + run_suffix.len];
 
-    log.info(.engine, "spawn_self: run_path={s}", .{run_z});
-    const child = process_mod.spawn(.{
-        .exe = run_z,
-        .env = &.{.{ .key = "TSZ_DEBUG", .value = "1" }},
-        .new_session = false,
+    var child_environ = host.environ.clone(std.heap.c_allocator) catch {
+        setNumber(info, -1);
+        return;
+    };
+    defer child_environ.deinit();
+    child_environ.put("TSZ_DEBUG", "1") catch {
+        setNumber(info, -1);
+        return;
+    };
+
+    log.info(.engine, "spawn_self: run_path={s}", .{run_path});
+    var child = process_mod.spawn(std.heap.c_allocator, io, .{
+        .argv = &.{run_path},
+        .environ_map = &child_environ,
     }) catch |err| {
         log.info(.engine, "spawn_self: spawn failed: {s}", .{@errorName(err)});
         setNumber(info, -1);
@@ -231,11 +203,12 @@ fn spawnSelf(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     log.info(.engine, "spawn_self: child pid={d}", .{child.pid});
     setNumber(info, @as(i64, child.pid));
+    child.detach();
 }
 
 fn getAppDir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const dir_len = resolveAppDir();
+    const dir_len = resolveAppDir(v8_runtime.hostContext(info.getIsolate()).io);
     if (dir_len == 0) {
         setString(info, "");
         return;
@@ -245,7 +218,7 @@ fn getAppDir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn getRunPath(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const dir_len = resolveAppDir();
+    const dir_len = resolveAppDir(v8_runtime.hostContext(info.getIsolate()).io);
     if (dir_len == 0) {
         setString(info, "");
         return;

@@ -10,7 +10,7 @@
 //! `output_schema` are passed as raw JSON strings. This keeps the file
 //! self-contained while still covering the useful SDK path:
 //!
-//!   var codex = try codex_sdk.Codex.init(gpa, .{ .cwd = "/tmp" });
+//!   var codex = try codex_sdk.Codex.init(io, gpa, .{ .cwd = "/tmp" });
 //!   defer codex.deinit();
 //!
 //!   var thread = try codex.threadStart(.{ .model = "gpt-5.4" });
@@ -22,9 +22,6 @@
 //!   if (result.final_response) |text| log.print("{s}\n", .{text});
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const sysx = @import("../net/sysx.zig");
-const log = @import("../diag/log.zig");
 
 pub const VERSION = "0.1.0";
 pub const default_codex_bin = "codex";
@@ -224,16 +221,20 @@ pub const Notification = struct {
 };
 
 pub const AppServerClient = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     config: AppServerConfig,
     child: ?std.process.Child = null,
+    stdout_reader_buffer: ?[]u8 = null,
+    stdout_reader: ?std.Io.File.Reader = null,
     next_request_id: u64 = 1,
     pending_notifications: std.ArrayList(Notification) = .empty,
     active_turn_id: ?[]const u8 = null,
     last_rpc_error: ?[]u8 = null,
 
-    pub fn init(allocator: std.mem.Allocator, config: AppServerConfig) AppServerClient {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, config: AppServerConfig) AppServerClient {
         return .{
+            .io = io,
             .allocator = allocator,
             .config = config,
         };
@@ -264,13 +265,21 @@ pub const AppServerClient = struct {
             try argv_list.appendSlice(self.allocator, &.{ "app-server", "--listen", "stdio://" });
         }
 
-        const child = try std.process.spawn(host_io.io(), .{
+        const reader_buffer = try self.allocator.alloc(u8, 16 * 1024);
+        errdefer self.allocator.free(reader_buffer);
+
+        var child = try std.process.spawn(self.io, .{
             .argv = argv_list.items,
             .cwd = if (self.config.cwd) |c| .{ .path = c } else .inherit,
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = if (self.config.inherit_stderr) .inherit else .ignore,
         });
+        errdefer child.kill(self.io);
+
+        const stdout = child.stdout orelse return error.TransportClosed;
+        self.stdout_reader = stdout.readerStreaming(self.io, reader_buffer);
+        self.stdout_reader_buffer = reader_buffer;
         self.child = child;
     }
 
@@ -279,14 +288,16 @@ pub const AppServerClient = struct {
 
         var child = self.child.?;
         self.child = null;
+        self.stdout_reader = null;
 
         if (child.stdin) |stdin| {
-            stdin.close(host_io.io());
+            stdin.close(self.io);
             child.stdin = null;
         }
 
-        child.kill(host_io.io());
-        _ = child.wait(host_io.io()) catch {};
+        child.kill(self.io);
+        if (self.stdout_reader_buffer) |buffer| self.allocator.free(buffer);
+        self.stdout_reader_buffer = null;
     }
 
     pub fn initialize(self: *AppServerClient) !InitializeResponse {
@@ -435,33 +446,36 @@ pub const AppServerClient = struct {
         try buf.appendSlice(self.allocator, params_json);
         try buf.appendSlice(self.allocator, "}\n");
 
-        try stdin.writeStreamingAll(host_io.io(), buf.items);
+        try stdin.writeStreamingAll(self.io, buf.items);
     }
 
     fn readMessage(self: *AppServerClient) !OwnedJson {
-        const child = self.child orelse return error.TransportClosed;
-        const stdout = child.stdout orelse return error.TransportClosed;
-        // deprecatedReader returns the legacy std.io.GenericReader which still
-        // has readUntilDelimiterOrEofAlloc. The newer File.Reader requires a
-        // pre-allocated buffer and exposes a different API; the codex SDK is
-        // single-line-JSON-RPC and the old reader does the right thing here.
-        // Manual line accumulate over the pipe fd (0.16 dropped the legacy
-        // GenericReader; behavior-identical to readUntilDelimiterOrEofAlloc).
-        var line: std.ArrayList(u8) = .empty;
-        defer line.deinit(self.allocator);
-        while (true) {
-            var byte: [1]u8 = undefined;
-            const n = sysx.read(stdout.handle, &byte) catch return error.TransportClosed;
-            if (n == 0) {
-                if (line.items.len == 0) return error.TransportClosed;
-                break;
-            }
-            if (byte[0] == '\n') break;
-            if (line.items.len >= self.config.max_line_bytes) return error.TransportClosed;
-            try line.append(self.allocator, byte[0]);
-        }
+        if (self.child == null) return error.TransportClosed;
+        const file_reader = if (self.stdout_reader) |*reader| reader else return error.TransportClosed;
 
-        return parseOwnedJson(self.allocator, line.items);
+        var line: std.Io.Writer.Allocating = .init(self.allocator);
+        defer line.deinit();
+
+        const limit = std.math.add(usize, self.config.max_line_bytes, 1) catch
+            return error.ResponseTooLarge;
+        _ = file_reader.interface.streamDelimiterLimit(
+            &line.writer,
+            '\n',
+            .limited(limit),
+        ) catch |err| switch (err) {
+            error.StreamTooLong => return error.ResponseTooLarge,
+            error.ReadFailed => return error.TransportClosed,
+            error.WriteFailed => return error.OutOfMemory,
+        };
+        if (line.written().len > self.config.max_line_bytes)
+            return error.ResponseTooLarge;
+
+        _ = file_reader.interface.discardDelimiterInclusive('\n') catch |err| switch (err) {
+            error.EndOfStream => if (line.written().len == 0) return error.TransportClosed else 0,
+            error.ReadFailed => return error.TransportClosed,
+        };
+
+        return parseOwnedJson(self.allocator, line.written());
     }
 
     fn respondToServerRequest(self: *AppServerClient, root: std.json.ObjectMap) !void {
@@ -482,7 +496,7 @@ pub const AppServerClient = struct {
         try buf.appendSlice(self.allocator, ",\"result\":");
         try buf.appendSlice(self.allocator, response_json);
         try buf.appendSlice(self.allocator, "}\n");
-        try stdin.writeStreamingAll(host_io.io(), buf.items);
+        try stdin.writeStreamingAll(self.io, buf.items);
     }
 
     fn setLastRpcError(self: *AppServerClient, value: std.json.Value) !void {
@@ -497,8 +511,8 @@ pub const Codex = struct {
     client: AppServerClient,
     metadata: InitializeResponse,
 
-    pub fn init(allocator: std.mem.Allocator, config: AppServerConfig) !Codex {
-        var client = AppServerClient.init(allocator, config);
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, config: AppServerConfig) !Codex {
+        var client = AppServerClient.init(io, allocator, config);
         errdefer client.deinit();
 
         try client.start();

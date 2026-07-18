@@ -5,20 +5,21 @@ const std = @import("std");
 const log = @import("../../diag/log.zig");
 const http = @import("../../net/http.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     log.print("=== HTTP Client Test ===\n", .{});
 
     // Init
-    http.init();
-    defer http.destroy();
+    try http.init(io, init.environ_map);
+    defer http.destroy(io);
     log.print("[ok] Workers spawned\n", .{});
 
     // Queue a GET request
-    _ = http.request(1, .{ .url = "https://httpbin.org/get" });
+    _ = http.request(io, 1, .{ .url = "https://httpbin.org/get" });
     log.print("[ok] Request queued (id=1, GET https://httpbin.org/get)\n", .{});
 
     // Queue a second request
-    _ = http.request(2, .{ .url = "https://httpbin.org/status/404" });
+    _ = http.request(io, 2, .{ .url = "https://httpbin.org/status/404" });
     log.print("[ok] Request queued (id=2, GET https://httpbin.org/status/404)\n", .{});
 
     // Poll for responses (with timeout)
@@ -26,7 +27,7 @@ pub fn main() !void {
     var attempts: u32 = 0;
     while (completed < 2 and attempts < 600) : (attempts += 1) {
         var responses: [16]http.Response = undefined;
-        const n = http.poll(&responses);
+        const n = http.poll(io, &responses);
         for (responses[0..n]) |resp| {
             completed += 1;
             if (resp.response_type == .err) {
@@ -40,7 +41,7 @@ pub fn main() !void {
                 });
             }
         }
-        if (completed < 2) std.Thread.sleep(50_000_000); // 50ms
+        if (completed < 2) std.Io.sleep(io, .fromMilliseconds(50), .awake) catch {};
     }
 
     if (completed >= 2) {

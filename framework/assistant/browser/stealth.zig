@@ -32,8 +32,8 @@ pub fn libxulName() []const u8 {
 }
 
 /// Get platform-specific Firefox config directory
-pub fn firefoxConfigDir(buf: []u8) ![]const u8 {
-    const home = std.posix.getenv("HOME") orelse return error.NoHomeDir;
+pub fn firefoxConfigDir(environ: *const std.process.Environ.Map, buf: []u8) ![]const u8 {
+    const home = environ.get("HOME") orelse return error.NoHomeDir;
     return try std.fmt.bufPrint(buf, "{s}/.mozilla/firefox", .{home});
 }
 
@@ -45,42 +45,42 @@ const PATCH_TARGET = "webdriver";
 const PATCH_MARKER = ".browse_patched";
 
 /// Generate a random replacement string of given length
-fn generateReplacement(length: usize, buf: []u8) []const u8 {
+fn generateReplacement(io: std.Io, length: usize, buf: []u8) []const u8 {
     const chars = "abcdefghijklmnopqrstuvwxyz";
-    var i: usize = 0;
-    while (i < length) : (i += 1) {
-        const idx = std.crypto.random.int(u8) % chars.len;
-        buf[i] = chars[idx];
+    const output = buf[0..length];
+    io.random(output);
+    for (output) |*byte| {
+        byte.* = chars[byte.* % chars.len];
     }
-    return buf[0..length];
+    return output;
 }
 
 /// Find libxul in Firefox or Tor Browser directory
-pub fn findLibxul(firefox_path: []const u8, buf: []u8) error{NotFound}![]const u8 {
+pub fn findLibxul(io: std.Io, firefox_path: []const u8, buf: []u8) error{NotFound}![]const u8 {
     const name = libxulName();
 
     // Firefox ESR: engine lib at root of install dir
     const candidate1 = std.fmt.bufPrint(buf, "{s}/{s}", .{ firefox_path, name }) catch return error.NotFound;
-    if (fileExists(candidate1)) return candidate1;
+    if (fileExists(io, candidate1)) return candidate1;
 
     // Tor Browser: engine lib is under Browser/
     const candidate2 = std.fmt.bufPrint(buf, "{s}/Browser/{s}", .{ firefox_path, name }) catch return error.NotFound;
-    if (fileExists(candidate2)) return candidate2;
+    if (fileExists(io, candidate2)) return candidate2;
 
     return error.NotFound;
 }
 
 /// Check if file exists
-fn fileExists(path: []const u8) bool {
-    std.fs.cwd().access(path, .{}) catch return false;
+fn fileExists(io: std.Io, path: []const u8) bool {
+    std.Io.Dir.cwd().access(io, path, .{}) catch return false;
     return true;
 }
 
 /// Check if Firefox installation has been patched
-pub fn isPatched(firefox_path: []const u8) bool {
+pub fn isPatched(io: std.Io, firefox_path: []const u8) bool {
     var marker_buf: [512]u8 = undefined;
     const marker = std.fmt.bufPrint(&marker_buf, "{s}/{s}", .{ firefox_path, PATCH_MARKER }) catch return false;
-    return fileExists(marker);
+    return fileExists(io, marker);
 }
 
 /// Patch libxul to remove navigator.webdriver property
@@ -88,19 +88,19 @@ pub fn isPatched(firefox_path: []const u8) bool {
 /// Replaces the "webdriver" WebIDL property name string with random
 /// bytes of the same length. This makes navigator.webdriver undefined
 /// (the property does not exist) rather than true or false.
-pub fn patchLibxul(allocator: Allocator, firefox_path: []const u8, force: bool) error{ AlreadyPatched, NotFound, OutOfMemory, WriteFailed }!void {
+pub fn patchLibxul(io: std.Io, allocator: Allocator, firefox_path: []const u8, force: bool) error{ AlreadyPatched, NotFound, OutOfMemory, WriteFailed }!void {
     var marker_buf: [512]u8 = undefined;
     const marker_path = std.fmt.bufPrint(&marker_buf, "{s}/{s}", .{ firefox_path, PATCH_MARKER }) catch return error.NotFound;
 
-    if (!force and fileExists(marker_path)) {
+    if (!force and fileExists(io, marker_path)) {
         return error.AlreadyPatched;
     }
 
     var libxul_buf: [512]u8 = undefined;
-    const libxul = findLibxul(firefox_path, &libxul_buf) catch return error.NotFound;
+    const libxul = findLibxul(io, firefox_path, &libxul_buf) catch return error.NotFound;
 
     // Read binary
-    const data = std.fs.cwd().readFileAlloc(allocator, libxul, 100 * 1024 * 1024) catch return error.NotFound;
+    const data = std.Io.Dir.cwd().readFileAlloc(io, libxul, allocator, .limited(100 * 1024 * 1024)) catch return error.NotFound;
     defer allocator.free(data);
 
     // Count occurrences
@@ -114,15 +114,15 @@ pub fn patchLibxul(allocator: Allocator, firefox_path: []const u8, force: bool) 
 
     if (count == 0) {
         // Already patched or unexpected binary
-        const f = std.fs.cwd().createFile(marker_path, .{}) catch return error.WriteFailed;
-        f.writeAll("already_clean") catch return error.WriteFailed;
-        f.close();
+        const f = std.Io.Dir.cwd().createFile(io, marker_path, .{}) catch return error.WriteFailed;
+        defer f.close(io);
+        f.writeStreamingAll(io, "already_clean") catch return error.WriteFailed;
         return;
     }
 
     // Generate replacement
     var repl_buf: [16]u8 = undefined;
-    const replacement = generateReplacement(PATCH_TARGET.len, &repl_buf);
+    const replacement = generateReplacement(io, PATCH_TARGET.len, &repl_buf);
 
     // Replace all occurrences
     var patched = allocator.alloc(u8, data.len) catch return error.OutOfMemory;
@@ -137,7 +137,7 @@ pub fn patchLibxul(allocator: Allocator, firefox_path: []const u8, force: bool) 
     }
 
     // Write back
-    std.fs.cwd().writeFile(.{
+    std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = libxul,
         .data = patched,
     }) catch return error.WriteFailed;
@@ -148,7 +148,7 @@ pub fn patchLibxul(allocator: Allocator, firefox_path: []const u8, force: bool) 
     , .{ PATCH_TARGET, replacement, count, data.len }) catch return error.OutOfMemory;
     defer allocator.free(marker_content);
 
-    std.fs.cwd().writeFile(.{
+    std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = marker_path,
         .data = marker_content,
     }) catch return error.WriteFailed;
@@ -199,33 +199,33 @@ const REMOTE_CONTROL_CSS_NEW =
 ;
 
 /// Find browser/omni.ja in Firefox directory
-pub fn findOmni(firefox_path: []const u8, buf: []u8) error{NotFound}![]const u8 {
+pub fn findOmni(io: std.Io, firefox_path: []const u8, buf: []u8) error{NotFound}![]const u8 {
     // macOS Firefox.app: Contents/Resources/browser/omni.ja
     if (@import("builtin").os.tag == .macos) {
         const candidate1 = std.fmt.bufPrint(buf, "{s}/../Resources/browser/omni.ja", .{firefox_path}) catch return error.NotFound;
-        if (fileExists(candidate1)) return candidate1;
+        if (fileExists(io, candidate1)) return candidate1;
 
         // Tor Browser on macOS
         const candidate2 = std.fmt.bufPrint(buf, "{s}/Browser/browser/omni.ja", .{firefox_path}) catch return error.NotFound;
-        if (fileExists(candidate2)) return candidate2;
+        if (fileExists(io, candidate2)) return candidate2;
     } else {
         // Linux/Windows: browser/omni.ja
         const candidate1 = std.fmt.bufPrint(buf, "{s}/browser/omni.ja", .{firefox_path}) catch return error.NotFound;
-        if (fileExists(candidate1)) return candidate1;
+        if (fileExists(io, candidate1)) return candidate1;
 
         // Tor Browser
         const candidate2 = std.fmt.bufPrint(buf, "{s}/Browser/browser/omni.ja", .{firefox_path}) catch return error.NotFound;
-        if (fileExists(candidate2)) return candidate2;
+        if (fileExists(io, candidate2)) return candidate2;
     }
 
     return error.NotFound;
 }
 
 /// Check if omni.ja has been patched
-pub fn isOmniPatched(firefox_path: []const u8) bool {
+pub fn isOmniPatched(io: std.Io, firefox_path: []const u8) bool {
     var marker_buf: [512]u8 = undefined;
     const marker = std.fmt.bufPrint(&marker_buf, "{s}/{s}", .{ firefox_path, OMNI_PATCH_MARKER }) catch return false;
-    return fileExists(marker);
+    return fileExists(io, marker);
 }
 
 // =============================================================================
@@ -307,14 +307,14 @@ pub const STEALTH_MANIFEST =
 ;
 
 /// Build the stealth WebExtension as an .xpi file
-pub fn buildStealthExtension(allocator: Allocator, output_dir: []const u8) error{OutOfMemory, WriteFailed}![]const u8 {
+pub fn buildStealthExtension(io: std.Io, allocator: Allocator, output_dir: []const u8) error{ OutOfMemory, WriteFailed }![]const u8 {
     const xpi_path = std.fs.path.join(allocator, &.{ output_dir, "browse_stealth.xpi" }) catch return error.OutOfMemory;
 
     // Note: In real implementation, use a zip library
     // For now, just write the files separately
-    std.fs.cwd().makePath(output_dir) catch return error.WriteFailed;
+    std.Io.Dir.cwd().createDirPath(io, output_dir) catch return error.WriteFailed;
 
-    std.fs.cwd().writeFile(.{
+    std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = xpi_path,
         .data = STEALTH_MANIFEST, // Simplified - should be zip
     }) catch return error.WriteFailed;
@@ -350,7 +350,7 @@ test "libxulName returns correct filename" {
 
 test "generateReplacement produces correct length" {
     var buf: [16]u8 = undefined;
-    const repl = generateReplacement(9, &buf);
+    const repl = generateReplacement(std.testing.io, 9, &buf);
     try std.testing.expectEqual(@as(usize, 9), repl.len);
     // Should be lowercase letters only
     for (repl) |c| {
@@ -360,8 +360,78 @@ test "generateReplacement produces correct length" {
 
 test "isPatched returns false for non-existent path" {
     // This should return false for a path that doesn't exist
-    const result = isPatched("/nonexistent/path/that/does/not/exist");
+    const result = isPatched(std.testing.io, "/nonexistent/path/that/does/not/exist");
     try std.testing.expect(!result);
+}
+
+test "firefoxConfigDir reads the supplied environment map" {
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try environ.put("HOME", "/tmp/browser-home");
+
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        "/tmp/browser-home/.mozilla/firefox",
+        try firefoxConfigDir(&environ, &buf),
+    );
+}
+
+test "patchLibxul uses the supplied io capability" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root_len = try tmp.dir.realPath(std.testing.io, &root_buf);
+    const root = root_buf[0..root_len];
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = libxulName(),
+        .data = "prefix-webdriver-middle-webdriver-suffix",
+    });
+
+    try patchLibxul(std.testing.io, std.testing.allocator, root, false);
+    try std.testing.expect(isPatched(std.testing.io, root));
+
+    const patched = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        libxulName(),
+        std.testing.allocator,
+        .limited(1024),
+    );
+    defer std.testing.allocator.free(patched);
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, patched, PATCH_TARGET));
+
+    const marker = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        PATCH_MARKER,
+        std.testing.allocator,
+        .limited(1024),
+    );
+    defer std.testing.allocator.free(marker);
+    try std.testing.expect(std.mem.indexOf(u8, marker, "\"occurrences\": 2") != null);
+}
+
+test "buildStealthExtension uses the supplied io capability" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root_len = try tmp.dir.realPath(std.testing.io, &root_buf);
+    const root = root_buf[0..root_len];
+
+    const output_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "extension" });
+    defer std.testing.allocator.free(output_dir);
+    const xpi_path = try buildStealthExtension(std.testing.io, std.testing.allocator, output_dir);
+    defer std.testing.allocator.free(xpi_path);
+
+    const xpi = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        xpi_path,
+        std.testing.allocator,
+        .limited(16 * 1024),
+    );
+    defer std.testing.allocator.free(xpi);
+    try std.testing.expectEqualStrings(STEALTH_MANIFEST, xpi);
 }
 
 test "CONTENT_SCRIPT contains expected patterns" {

@@ -1,23 +1,27 @@
 //! argv builder for the claude subprocess.
 //!
-//! Rewritten from codeberg/duhnist/claude-code-sdk-zig argv.zig for 0.15.2.
+//! Rewritten from codeberg/duhnist/claude-code-sdk-zig for the pinned Zig API.
 //! MCP config and advanced flags deferred — expand as the cockpit needs them.
 
 const std = @import("std");
-const host_io = @import("../../host_io.zig");
 const options = @import("options.zig");
 
 /// Locate the claude binary. Checks opts.cli_path first, then searches PATH.
 /// Returns an owned string — caller frees.
-pub fn findBinary(allocator: std.mem.Allocator, cli_path: ?[]const u8) ![]const u8 {
+pub fn findBinary(
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    allocator: std.mem.Allocator,
+    cli_path: ?[]const u8,
+) ![]const u8 {
     if (cli_path) |p| return allocator.dupe(u8, p);
 
-    const path_env = host_io.getenv("PATH") orelse return error.BinaryNotFound;
+    const path_env = environ_map.get("PATH") orelse return error.BinaryNotFound;
 
     var it = std.mem.tokenizeScalar(u8, path_env, std.fs.path.delimiter);
     while (it.next()) |dir| {
         const full = try std.fs.path.join(allocator, &.{ dir, "claude" });
-        std.Io.Dir.accessAbsolute(host_io.io(), full, .{}) catch {
+        std.Io.Dir.accessAbsolute(io, full, .{}) catch {
             allocator.free(full);
             continue;
         };

@@ -231,8 +231,11 @@ root-window rectangle.
 ffmpeg -nostdin -loglevel quiet -f v4l2 -framerate 30 -video_size WxH -i DEVICE -f rawvideo -pix_fmt rgba -an -sn -
 ```
 
-`screen:` fallback uses `-f x11grab`. Stdout is non-blocking; `updateFFmpeg`
-accumulates exactly one raw RGBA frame before marking the feed dirty.
+`screen:` fallback uses `-f x11grab`. FFmpeg stdout is owned by an injected-Io
+`std.Io.File.MultiReader`; `updateFFmpeg` uses a zero-duration fill to harvest
+already-completed bytes without blocking the frame and accumulates exactly one
+raw RGBA frame before marking the feed dirty. It does not set `O_NONBLOCK` or
+probe the raw fd.
 
 ### Virtual display and app embeds
 

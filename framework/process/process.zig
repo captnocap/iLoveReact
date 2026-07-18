@@ -1,471 +1,554 @@
-//! Process manager — spawn, track, and reap child processes.
+//! Tracked child processes built on Zig 0.16's `std.process` and `std.Io`.
 //!
-//! Standalone module (like pty.zig). Used by windows.zig for independent
-//! windows, but available to anything that needs to spawn children.
+//! The application polls process state once per frame, while the native
+//! `Child.wait(io)` operation is blocking. A waiter task therefore owns every
+//! `std.process.Child` and publishes its terminal state atomically. Piped
+//! stdout/stderr use the same pattern: cancelable file-reader tasks feed
+//! bounded queues which the frame thread drains without blocking.
 //!
-//! Port of love2d/lua/process_registry.lua — PID file at
-//! /tmp/tsz_children_<PARENT_PID> so a watchdog can clean up after crashes.
-//!
-//! Usage:
-//!   var child = try process.spawn(.{ .exe = "./zig-out/bin/zigos-app" });
-//!   // ... later ...
-//!   if (!child.alive()) { const code = child.exitCode(); ... }
-//!   child.kill(.term);  // graceful
-//!   child.close();      // reap + deregister
+//! This module adds application-specific ownership (PID registry and polling)
+//! around the standard API; it does not recreate a removed Zig process API.
 
 const std = @import("std");
-const builtin = @import("builtin");
-const log = @import("../diag/log.zig");
-const host_io = @import("../host_io.zig");
-const sysx = @import("../net/sysx.zig");
-
-const is_macos = builtin.os.tag == .macos;
-
-// ════════════════════════════════════════════════════════════════════════
-// POSIX externs (libc — linked by build.zig)
-// ════════════════════════════════════════════════════════════════════════
-
-extern fn fork() c_int;
-extern fn execvp(file: [*:0]const u8, argv: [*]const ?[*:0]const u8) c_int;
-extern fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern fn kill(pid: c_int, sig: c_int) c_int;
-extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-extern fn chdir(path: [*:0]const u8) c_int;
-extern fn close(fd: c_int) c_int;
-extern fn _exit(status: c_int) noreturn;
-extern fn getpid() c_int;
-extern fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
-extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
-extern fn setsid() c_int;
-// pipe2 is Linux-only; macOS has just pipe(2) + fcntl. cloexecPipe() below
-// dispatches so this extern is referenced only in the Linux branch.
-extern fn pipe2(fds: *[2]c_int, flags: c_int) c_int;
-extern fn pipe(fds: *[2]c_int) c_int;
-extern fn dup2(oldfd: c_int, newfd: c_int) c_int;
-
-// O_* bit values differ between the Linux and macOS/BSD ABIs — pick per target.
-const O_NONBLOCK: c_int = if (is_macos) 0x0004 else 0o4000;
-const O_CLOEXEC: c_int = if (is_macos) 0x1000000 else 0o2000000;
-const FD_CLOEXEC: c_int = 1;
-
-/// pipe2(fds, O_CLOEXEC) with a macOS fallback (pipe + fcntl FD_CLOEXEC).
-/// Returns 0 on success, nonzero on failure — same contract as pipe2.
-fn cloexecPipe(fds: *[2]c_int) c_int {
-    if (is_macos) {
-        if (pipe(fds) != 0) return -1;
-        _ = sysx.fcntl(fds[0], sysx.F.SETFD, @intCast(FD_CLOEXEC)) catch {};
-        _ = sysx.fcntl(fds[1], sysx.F.SETFD, @intCast(FD_CLOEXEC)) catch {};
-        return 0;
-    } else {
-        return pipe2(fds, O_CLOEXEC);
-    }
-}
-
-const WNOHANG: c_int = 1;
-const SIGTERM: c_int = 15;
-const SIGKILL: c_int = 9;
-const O_WRONLY: c_int = 1;
-const O_CREAT: c_int = if (is_macos) 0x0200 else 0x40;
-const O_TRUNC: c_int = if (is_macos) 0x0400 else 0x200;
-
-// ════════════════════════════════════════════════════════════════════════
-// Process handle
-// ════════════════════════════════════════════════════════════════════════
 
 pub const Signal = enum { term, kill_ };
+pub const Term = std.process.Child.Term;
+pub const Id = std.process.Child.Id;
+
+const MAX_CHILDREN = 32;
+const PIPE_QUEUE_CAPACITY = 128 * 1024;
+const PIPE_READ_CAPACITY = 16 * 1024;
+
+const WaitStatus = enum(u8) { running, exited, failed };
+
+const ProcessState = struct {
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    child: std.process.Child,
+    pid: Id,
+    tasks: std.Io.Group = .init,
+    completed: std.Io.Event = .unset,
+    status: std.atomic.Value(WaitStatus) = .init(.running),
+    term: Term = .{ .unknown = 0 },
+    wait_error: ?std.process.Child.WaitError = null,
+    detached: bool = false,
+
+    fn waitLoop(state: *ProcessState) std.Io.Cancelable!void {
+        const term = state.child.wait(state.io) catch |err| {
+            state.wait_error = err;
+            state.status.store(.failed, .release);
+            state.completed.set(state.io);
+            if (err == error.Canceled) return error.Canceled;
+            return;
+        };
+        state.term = term;
+        state.status.store(.exited, .release);
+        state.completed.set(state.io);
+    }
+};
 
 pub const Process = struct {
-    pid: c_int,
-    closed: bool = false,
-    exited: bool = false,
-    exit_code: c_int = -1,
+    pid: Id,
+    state: ?*ProcessState,
 
-    /// Non-blocking liveness check. Reaps zombie if child has exited.
-    pub fn alive(self: *Process) bool {
-        if (self.closed or self.exited) return false;
-        var status: c_int = 0;
-        const ret = waitpid(self.pid, &status, WNOHANG);
-        if (ret == 0) return true; // still running
-        if (ret == self.pid) {
-            self.exited = true;
-            self.exit_code = (status >> 8) & 0xFF;
-            return false;
-        }
-        // Error (ret < 0) — assume dead
-        self.exited = true;
-        return false;
+    pub fn alive(self: *const Process) bool {
+        const state = self.state orelse return false;
+        return state.status.load(.acquire) == .running;
+    }
+
+    pub fn termination(self: *const Process) ?Term {
+        const state = self.state orelse return null;
+        return switch (state.status.load(.acquire)) {
+            .running, .failed => null,
+            .exited => state.term,
+        };
     }
 
     pub fn exitCode(self: *const Process) c_int {
-        return self.exit_code;
-    }
-
-    /// Send a signal to the child.
-    pub fn sendSignal(self: *Process, sig: Signal) void {
-        if (self.closed or self.exited) return;
-        const s: c_int = switch (sig) {
-            .term => SIGTERM,
-            .kill_ => SIGKILL,
+        const term = self.termination() orelse return -1;
+        return switch (term) {
+            .exited => |code| code,
+            else => -1,
         };
-        _ = kill(self.pid, s);
     }
 
-    /// Graceful shutdown: SIGTERM, spin-wait up to ~200ms, then SIGKILL.
-    /// Reaps the zombie. Safe to call multiple times.
-    pub fn closeProccess(self: *Process) void {
-        if (self.closed) return;
-        self.closed = true;
+    /// Deliver a signal without waiting. Zig's native `Child.kill(io)` is a
+    /// blocking terminate-and-reap operation, so it cannot implement a frame-
+    /// friendly signal request while the waiter task owns `Child.wait(io)`.
+    /// Signal selection is therefore the one genuine POSIX boundary here.
+    pub fn sendSignal(self: *Process, signal: Signal) void {
+        if (!self.alive()) return;
+        const sig: std.posix.SIG = switch (signal) {
+            .term => .TERM,
+            .kill_ => .KILL,
+        };
+        std.posix.kill(self.pid, sig) catch {};
+    }
 
-        if (!self.exited) {
-            var status: c_int = 0;
-            var ret = waitpid(self.pid, &status, WNOHANG);
-            if (ret == 0) {
-                // Still running — graceful shutdown
-                _ = kill(self.pid, SIGTERM);
-                // Spin-wait for exit (~200ms)
-                for (0..200) |_| {
-                    ret = waitpid(self.pid, &status, WNOHANG);
-                    if (ret != 0) break;
-                    std.Io.sleep(host_io.io(), .fromNanoseconds(std.time.ns_per_ms), .awake) catch return;
-                }
-                if (ret == 0) {
-                    // Force kill
-                    _ = kill(self.pid, SIGKILL);
-                    _ = waitpid(self.pid, &status, 0); // blocking final reap
-                }
-            }
-            self.exited = true;
-            self.exit_code = (status >> 8) & 0xFF;
+    /// Transfer lifetime ownership to the module registry. Detached children
+    /// are still waited and killed during shutdown, but callers no longer hold
+    /// a handle that must be closed.
+    pub fn detach(self: *Process) void {
+        const state = self.state orelse return;
+        state.detached = true;
+        self.state = null;
+    }
+
+    /// Wait for natural termination and return the native Zig terminal value.
+    pub fn wait(self: *Process, io: std.Io) std.process.Child.WaitError!Term {
+        const state = self.state orelse return error.Unexpected;
+        state.completed.waitUncancelable(io);
+        state.tasks.await(io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
+        return switch (state.status.load(.acquire)) {
+            .exited => state.term,
+            .failed => state.wait_error orelse error.Unexpected,
+            .running => unreachable,
+        };
+    }
+
+    /// Graceful shutdown: SIGTERM, a 200ms grace period, then SIGKILL. The
+    /// waiter task performs the actual native wait/reap operation.
+    pub fn closeProcess(self: *Process, io: std.Io) void {
+        const state = self.state orelse return;
+        if (state.status.load(.acquire) == .running) {
+            self.sendSignal(.term);
+            state.completed.waitTimeout(io, .{ .duration = .{
+                .raw = .fromMilliseconds(200),
+                .clock = .awake,
+            } }) catch |err| switch (err) {
+                error.Timeout, error.Canceled => self.sendSignal(.kill_),
+            };
         }
-
-        // Deregister from the global registry
-        deregister(self.pid);
+        state.completed.waitUncancelable(io);
+        state.tasks.await(io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
+        deregister(io, state);
+        state.allocator.destroy(state);
+        self.state = null;
     }
 };
 
-// ════════════════════════════════════════════════════════════════════════
-// Spawn
-// ════════════════════════════════════════════════════════════════════════
+fn trackChild(allocator: std.mem.Allocator, io: std.Io, child: std.process.Child) !Process {
+    reapDetached(io);
+    if (reg_count >= MAX_CHILDREN) return error.ProcessRegistryFull;
 
-pub const EnvVar = struct {
-    key: [*:0]const u8,
-    value: [*:0]const u8,
-};
-
-pub const SpawnOptions = struct {
-    /// Executable path (must be a sentinel-terminated string).
-    exe: [*:0]const u8,
-    /// Arguments (excluding argv[0] which is set to exe). Null-terminated array.
-    args: ?[*]const ?[*:0]const u8 = null,
-    /// Environment variables to set in the child (additive, not replacing).
-    env: []const EnvVar = &.{},
-    /// Working directory for the child. Null = inherit parent's cwd.
-    cwd: ?[*:0]const u8 = null,
-    /// Create a new session (setsid) so the child doesn't share the parent's
-    /// controlling terminal. Default true for background children.
-    new_session: bool = true,
-};
-
-/// Spawn a child process. Returns a Process handle, or error on fork failure.
-pub fn spawn(opts: SpawnOptions) !Process {
-    const pid = fork();
-    if (pid < 0) return error.ForkFailed;
-
-    if (pid == 0) {
-        // ── CHILD ──
-        if (opts.new_session) _ = setsid();
-        if (opts.cwd) |cwd| _ = chdir(cwd);
-
-        // Set additional env vars
-        for (opts.env) |ev| {
-            _ = setenv(ev.key, ev.value, 1);
-        }
-
-        // Build argv: [exe, ...args, null]
-        if (opts.args) |args_ptr| {
-            // Count args (until null sentinel)
-            var argc: usize = 0;
-            while (args_ptr[argc] != null) argc += 1;
-
-            // Cap matches v8_bindings_process.zig (MAX_ARGV=1024). Long
-            // magick chains from cart/cutout overflow the old 32-cap.
-            // 1025 slots = exe + 1024 args + null sentinel.
-            const MAX_ARGV_HERE: usize = 1024;
-            var argv_buf: [MAX_ARGV_HERE + 2]?[*:0]const u8 = undefined;
-            argv_buf[0] = opts.exe;
-            for (0..argc) |i| {
-                if (i + 1 >= MAX_ARGV_HERE + 1) break;
-                argv_buf[i + 1] = args_ptr[i];
-            }
-            const total = @min(argc + 1, MAX_ARGV_HERE + 1);
-            argv_buf[total] = null;
-            _ = execvp(opts.exe, &argv_buf);
-        } else {
-            var argv = [_]?[*:0]const u8{ opts.exe, null };
-            _ = execvp(opts.exe, &argv);
-        }
-
-        // exec failed
-        _exit(127);
-    }
-
-    // ── PARENT ──
-    register(pid);
-    log.info(.engine, "process: spawned PID {d}", .{pid});
-
-    return Process{ .pid = pid };
+    const pid = child.id orelse return error.ProcessDidNotStart;
+    const state = try allocator.create(ProcessState);
+    errdefer allocator.destroy(state);
+    state.* = .{
+        .allocator = allocator,
+        .io = io,
+        .child = child,
+        .pid = pid,
+    };
+    try state.tasks.concurrent(io, ProcessState.waitLoop, .{state});
+    register(io, state);
+    return .{ .pid = pid, .state = state };
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// Spawn with stdio pipes (for streaming stdout/stderr capture)
-// ════════════════════════════════════════════════════════════════════════
+/// Spawn and track a process using Zig's native 0.16 spawn option shape.
+pub fn spawn(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    options: std.process.SpawnOptions,
+) !Process {
+    var child = try std.process.spawn(io, options);
+    errdefer child.kill(io);
+    return trackChild(allocator, io, child);
+}
+
+const FilePump = struct {
+    state: *State,
+    terminal_reported: bool = false,
+
+    const Terminal = enum(u8) { running, eof, failed };
+
+    const State = struct {
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        file: std.Io.File,
+        tasks: std.Io.Group = .init,
+        bytes: std.Io.Queue(u8),
+        byte_storage: [PIPE_QUEUE_CAPACITY]u8 = undefined,
+        readable: std.Io.Event = .unset,
+        terminal: std.atomic.Value(Terminal) = .init(.running),
+        read_error: ?std.Io.File.ReadStreamingError = null,
+
+        fn readLoop(state: *State) std.Io.Cancelable!void {
+            var buffer: [PIPE_READ_CAPACITY]u8 = undefined;
+            while (true) {
+                const n = state.file.readStreaming(state.io, &.{&buffer}) catch |err| switch (err) {
+                    error.EndOfStream => {
+                        state.terminal.store(.eof, .release);
+                        state.readable.set(state.io);
+                        return;
+                    },
+                    error.Canceled => return error.Canceled,
+                    else => {
+                        state.read_error = err;
+                        state.terminal.store(.failed, .release);
+                        state.readable.set(state.io);
+                        return;
+                    },
+                };
+                if (n == 0) continue;
+                state.bytes.putAll(state.io, buffer[0..n]) catch |err| switch (err) {
+                    error.Canceled => return error.Canceled,
+                    error.Closed => return,
+                };
+                state.readable.set(state.io);
+            }
+        }
+    };
+
+    const DrainResult = union(enum) {
+        empty,
+        data: usize,
+        closed,
+        failed: std.Io.File.ReadStreamingError,
+    };
+
+    fn init(allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) !FilePump {
+        const state = try allocator.create(State);
+        errdefer allocator.destroy(state);
+        state.* = .{
+            .allocator = allocator,
+            .io = io,
+            .file = file,
+            .bytes = .init(&state.byte_storage),
+        };
+        try state.tasks.concurrent(io, State.readLoop, .{state});
+        return .{ .state = state };
+    }
+
+    fn drain(pump: *FilePump, out: []u8) DrainResult {
+        if (out.len != 0) {
+            const n = pump.state.bytes.getUncancelable(pump.state.io, out, 0) catch |err| switch (err) {
+                error.Closed => 0,
+            };
+            if (n != 0) return .{ .data = n };
+        }
+        if (pump.terminal_reported) return .empty;
+        return switch (pump.state.terminal.load(.acquire)) {
+            .running => .empty,
+            .eof => result: {
+                pump.terminal_reported = true;
+                break :result .closed;
+            },
+            .failed => result: {
+                pump.terminal_reported = true;
+                break :result .{ .failed = pump.state.read_error orelse error.Unexpected };
+            },
+        };
+    }
+
+    fn drainWait(pump: *FilePump, out: []u8, timeout: std.Io.Timeout) !DrainResult {
+        const immediate = pump.drain(out);
+        switch (immediate) {
+            .empty => {},
+            else => return immediate,
+        }
+
+        pump.state.readable.reset();
+        const after_reset = pump.drain(out);
+        switch (after_reset) {
+            .empty => {},
+            else => return after_reset,
+        }
+
+        try pump.state.readable.waitTimeout(pump.state.io, timeout);
+        return pump.drain(out);
+    }
+
+    fn deinit(pump: *FilePump, io: std.Io) void {
+        const state = pump.state;
+        state.tasks.cancel(io);
+        state.bytes.close(io);
+        state.file.close(io);
+        state.allocator.destroy(state);
+        pump.* = undefined;
+    }
+};
+
+pub const PipeReadResult = FilePump.DrainResult;
 
 pub const PipedProcess = struct {
     process: Process,
-    /// Parent-side write end of child's stdin. -1 if not piped.
-    stdin_fd: c_int = -1,
-    /// Parent-side read end of child's stdout. -1 if not piped. Non-blocking.
-    stdout_fd: c_int = -1,
-    /// Parent-side read end of child's stderr. -1 if not piped. Non-blocking.
-    stderr_fd: c_int = -1,
+    stdin: ?std.Io.File,
+    stdout: ?FilePump,
+    stderr: ?FilePump,
+
+    pub fn hasStdin(self: *const PipedProcess) bool {
+        return self.stdin != null;
+    }
+
+    pub fn hasStdout(self: *const PipedProcess) bool {
+        return self.stdout != null;
+    }
+
+    pub fn hasStderr(self: *const PipedProcess) bool {
+        return self.stderr != null;
+    }
+
+    pub fn writeStdin(self: *PipedProcess, io: std.Io, bytes: []const u8) bool {
+        const file = self.stdin orelse return false;
+        file.writeStreamingAll(io, bytes) catch return false;
+        return true;
+    }
+
+    pub fn closeStdin(self: *PipedProcess, io: std.Io) void {
+        const file = self.stdin orelse return;
+        file.close(io);
+        self.stdin = null;
+    }
+
+    pub fn drainStdout(self: *PipedProcess, out: []u8) PipeReadResult {
+        if (self.stdout) |*pump| return pump.drain(out);
+        return .closed;
+    }
+
+    pub fn drainStderr(self: *PipedProcess, out: []u8) PipeReadResult {
+        if (self.stderr) |*pump| return pump.drain(out);
+        return .closed;
+    }
+
+    pub fn deinit(self: *PipedProcess, io: std.Io) void {
+        self.closeStdin(io);
+        self.process.closeProcess(io);
+        if (self.stdout) |*pump| pump.deinit(io);
+        if (self.stderr) |*pump| pump.deinit(io);
+        self.stdout = null;
+        self.stderr = null;
+    }
 };
 
-pub const PipedSpawnOptions = struct {
-    exe: [*:0]const u8,
-    args: ?[*]const ?[*:0]const u8 = null,
-    env: []const EnvVar = &.{},
-    cwd: ?[*:0]const u8 = null,
-    new_session: bool = true,
-    pipe_stdin: bool = true,
-    pipe_stdout: bool = true,
-    pipe_stderr: bool = true,
-};
+/// Spawn a process and transfer native pipe files into frame-friendly reader
+/// tasks before the waiter task takes ownership of the child.
+pub fn spawnPiped(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    options: std.process.SpawnOptions,
+) !PipedProcess {
+    var child = try std.process.spawn(io, options);
+    errdefer child.kill(io);
 
-/// Spawn a child with optional stdio pipes. Parent fds are O_NONBLOCK so
-/// the caller can drain them each frame without blocking the UI thread.
-pub fn spawnPiped(opts: PipedSpawnOptions) !PipedProcess {
-    var in_pipe: [2]c_int = .{ -1, -1 };
-    var out_pipe: [2]c_int = .{ -1, -1 };
-    var err_pipe: [2]c_int = .{ -1, -1 };
+    const stdin = child.stdin;
+    const stdout_file = child.stdout;
+    const stderr_file = child.stderr;
+    child.stdin = null;
+    child.stdout = null;
+    child.stderr = null;
 
-    if (opts.pipe_stdin) {
-        if (cloexecPipe(&in_pipe) != 0) return error.PipeFailed;
-    }
-    if (opts.pipe_stdout) {
-        if (cloexecPipe(&out_pipe) != 0) {
-            if (in_pipe[0] >= 0) _ = close(in_pipe[0]);
-            if (in_pipe[1] >= 0) _ = close(in_pipe[1]);
-            return error.PipeFailed;
-        }
-    }
-    if (opts.pipe_stderr) {
-        if (cloexecPipe(&err_pipe) != 0) {
-            if (in_pipe[0] >= 0) _ = close(in_pipe[0]);
-            if (in_pipe[1] >= 0) _ = close(in_pipe[1]);
-            if (out_pipe[0] >= 0) _ = close(out_pipe[0]);
-            if (out_pipe[1] >= 0) _ = close(out_pipe[1]);
-            return error.PipeFailed;
-        }
-    }
+    var stdin_unclaimed = stdin;
+    errdefer if (stdin_unclaimed) |file| file.close(io);
+    var stdout_unclaimed = stdout_file;
+    errdefer if (stdout_unclaimed) |file| file.close(io);
+    var stderr_unclaimed = stderr_file;
+    errdefer if (stderr_unclaimed) |file| file.close(io);
 
-    const pid = fork();
-    if (pid < 0) {
-        if (in_pipe[0] >= 0) _ = close(in_pipe[0]);
-        if (in_pipe[1] >= 0) _ = close(in_pipe[1]);
-        if (out_pipe[0] >= 0) _ = close(out_pipe[0]);
-        if (out_pipe[1] >= 0) _ = close(out_pipe[1]);
-        if (err_pipe[0] >= 0) _ = close(err_pipe[0]);
-        if (err_pipe[1] >= 0) _ = close(err_pipe[1]);
-        return error.ForkFailed;
-    }
+    var stdout: ?FilePump = if (stdout_unclaimed) |file| try FilePump.init(allocator, io, file) else null;
+    stdout_unclaimed = null;
+    errdefer if (stdout) |*pump| pump.deinit(io);
+    var stderr: ?FilePump = if (stderr_unclaimed) |file| try FilePump.init(allocator, io, file) else null;
+    stderr_unclaimed = null;
+    errdefer if (stderr) |*pump| pump.deinit(io);
 
-    if (pid == 0) {
-        // ── CHILD ──
-        if (opts.new_session) _ = setsid();
-        if (opts.cwd) |cwd| _ = chdir(cwd);
-
-        // Wire pipes to fd 0/1/2. dup2 clears CLOEXEC on the new fd.
-        if (opts.pipe_stdin) {
-            _ = dup2(in_pipe[0], 0);
-            _ = close(in_pipe[0]);
-            _ = close(in_pipe[1]);
-        }
-        if (opts.pipe_stdout) {
-            _ = dup2(out_pipe[1], 1);
-            _ = close(out_pipe[0]);
-            _ = close(out_pipe[1]);
-        }
-        if (opts.pipe_stderr) {
-            _ = dup2(err_pipe[1], 2);
-            _ = close(err_pipe[0]);
-            _ = close(err_pipe[1]);
-        }
-
-        for (opts.env) |ev| {
-            _ = setenv(ev.key, ev.value, 1);
-        }
-
-        if (opts.args) |args_ptr| {
-            var argc: usize = 0;
-            while (args_ptr[argc] != null) argc += 1;
-            var argv_buf: [34]?[*:0]const u8 = undefined;
-            argv_buf[0] = opts.exe;
-            for (0..argc) |i| {
-                if (i + 1 >= 33) break;
-                argv_buf[i + 1] = args_ptr[i];
-            }
-            const total = @min(argc + 1, 33);
-            argv_buf[total] = null;
-            _ = execvp(opts.exe, &argv_buf);
-        } else {
-            var argv = [_]?[*:0]const u8{ opts.exe, null };
-            _ = execvp(opts.exe, &argv);
-        }
-        _exit(127);
-    }
-
-    // ── PARENT ──
-    register(pid);
-    log.info(.engine, "process: spawned PID {d} (piped)", .{pid});
-
-    // Close child-side ends, set parent-side read fds to non-blocking.
-    var result = PipedProcess{ .process = .{ .pid = pid } };
-    if (opts.pipe_stdin) {
-        _ = close(in_pipe[0]);
-        result.stdin_fd = in_pipe[1];
-    }
-    if (opts.pipe_stdout) {
-        _ = close(out_pipe[1]);
-        _ = sysx.fcntl(out_pipe[0], sysx.F.SETFL, @intCast(O_NONBLOCK)) catch 0;
-        result.stdout_fd = out_pipe[0];
-    }
-    if (opts.pipe_stderr) {
-        _ = close(err_pipe[1]);
-        _ = sysx.fcntl(err_pipe[0], sysx.F.SETFL, @intCast(O_NONBLOCK)) catch 0;
-        result.stderr_fd = err_pipe[0];
-    }
-    return result;
+    const tracked = try trackChild(allocator, io, child);
+    stdin_unclaimed = null;
+    return .{
+        .process = tracked,
+        .stdin = stdin,
+        .stdout = stdout,
+        .stderr = stderr,
+    };
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// PID Registry — track all children for crash cleanup
-// ════════════════════════════════════════════════════════════════════════
-
-const MAX_CHILDREN = 32;
-
-var registered: [MAX_CHILDREN]c_int = [_]c_int{0} ** MAX_CHILDREN;
+// PID registry used by the crash watchdog.
+var registered: [MAX_CHILDREN]?*ProcessState = [_]?*ProcessState{null} ** MAX_CHILDREN;
 var reg_count: usize = 0;
 var registry_path_buf: [128]u8 = undefined;
 var registry_path_len: usize = 0;
-var registry_initialized: bool = false;
+var registry_initialized = false;
 
 fn ensureRegistryInit() void {
     if (registry_initialized) return;
     registry_initialized = true;
-    const parent_pid = getpid();
-    registry_path_len = (std.fmt.bufPrint(&registry_path_buf, "/tmp/tsz_children_{d}", .{parent_pid}) catch return).len;
+    registry_path_len = (std.fmt.bufPrint(
+        &registry_path_buf,
+        "/tmp/tsz_children_{d}",
+        .{std.c.getpid()},
+    ) catch return).len;
 }
 
-fn registryPath() ?[*:0]const u8 {
+fn registryPath() ?[]const u8 {
     ensureRegistryInit();
     if (registry_path_len == 0) return null;
-    // bufPrint wrote into registry_path_buf — add sentinel
-    if (registry_path_len < registry_path_buf.len) {
-        registry_path_buf[registry_path_len] = 0;
-        return @ptrCast(registry_path_buf[0..registry_path_len]);
-    }
-    return null;
+    return registry_path_buf[0..registry_path_len];
 }
 
-fn register(pid: c_int) void {
-    // Deduplicate
-    for (0..reg_count) |i| {
-        if (registered[i] == pid) return;
-    }
-    if (reg_count >= MAX_CHILDREN) return;
-    registered[reg_count] = pid;
+fn register(io: std.Io, state: *ProcessState) void {
+    registered[reg_count] = state;
     reg_count += 1;
-    writeRegistryFile();
+    writeRegistryFile(io);
 }
 
-fn deregister(pid: c_int) void {
-    var write_idx: usize = 0;
-    for (0..reg_count) |i| {
-        if (registered[i] != pid) {
-            registered[write_idx] = registered[i];
-            write_idx += 1;
+fn deregister(io: std.Io, state: *ProcessState) void {
+    var write_index: usize = 0;
+    for (registered[0..reg_count]) |candidate| {
+        if (candidate != state) {
+            registered[write_index] = candidate;
+            write_index += 1;
         }
     }
-    reg_count = write_idx;
-    writeRegistryFile();
+    for (write_index..reg_count) |i| registered[i] = null;
+    reg_count = write_index;
+    writeRegistryFile(io);
 }
 
-fn writeRegistryFile() void {
+fn reapDetached(io: std.Io) void {
+    var index: usize = 0;
+    while (index < reg_count) {
+        const state = registered[index].?;
+        if (!state.detached or state.status.load(.acquire) == .running) {
+            index += 1;
+            continue;
+        }
+        state.completed.waitUncancelable(io);
+        state.tasks.await(io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
+        deregister(io, state);
+        state.allocator.destroy(state);
+    }
+}
+
+fn writeRegistryFile(io: std.Io) void {
     const path = registryPath() orelse return;
-    const fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, @as(c_int, 0o644));
-    if (fd < 0) return;
-    defer _ = close(fd);
+    var file = std.Io.Dir.createFileAbsolute(io, path, .{ .truncate = true }) catch return;
+    defer file.close(io);
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    for (0..reg_count) |i| {
-        const line = std.fmt.bufPrint(buf[pos..], "{d}\n", .{registered[i]}) catch break;
-        pos += line.len;
+    var buffer: [512]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    for (registered[0..reg_count]) |state| {
+        writer.print("{d}\n", .{state.?.pid}) catch break;
     }
-    if (pos > 0) {
-        _ = write(fd, &buf, pos);
-    }
+    file.writeStreamingAll(io, writer.buffered()) catch {};
 }
 
-/// Kill all registered children (SIGTERM → wait 200ms → SIGKILL).
-/// Called from engine shutdown and by external watchdogs.
-pub fn killAll() void {
+/// Kill all tracked children together, then join their native wait tasks.
+pub fn killAll(io: std.Io) void {
     if (reg_count == 0) {
-        cleanup();
+        cleanup(io);
         return;
     }
 
-    log.info(.engine, "process: killing {d} child process(es)", .{reg_count});
-
-    // SIGTERM first
-    for (0..reg_count) |i| {
-        _ = kill(registered[i], SIGTERM);
+    for (registered[0..reg_count]) |state| {
+        if (state.?.status.load(.acquire) == .running)
+            std.posix.kill(state.?.pid, .TERM) catch {};
     }
 
-    // Brief wait
-    std.Io.sleep(host_io.io(), .fromNanoseconds(200 * std.time.ns_per_ms), .awake) catch return;
+    std.Io.sleep(io, .fromMilliseconds(200), .awake) catch |err| switch (err) {
+        error.Canceled => {},
+    };
 
-    // SIGKILL survivors
-    for (0..reg_count) |i| {
-        _ = kill(registered[i], SIGKILL);
+    for (registered[0..reg_count]) |state| {
+        if (state.?.status.load(.acquire) == .running)
+            std.posix.kill(state.?.pid, .KILL) catch {};
     }
 
-    // Reap all
-    for (0..reg_count) |i| {
-        var status: c_int = 0;
-        _ = waitpid(registered[i], &status, WNOHANG);
+    while (reg_count != 0) {
+        const state = registered[reg_count - 1].?;
+        state.completed.waitUncancelable(io);
+        state.tasks.await(io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
+        reg_count -= 1;
+        registered[reg_count] = null;
+        state.allocator.destroy(state);
     }
-
-    reg_count = 0;
-    cleanup();
+    cleanup(io);
 }
 
-/// Remove the PID registry file.
-pub fn cleanup() void {
+pub fn cleanup(io: std.Io) void {
     const path = registryPath() orelse return;
-    // Use std.fs since we just need to delete a file
-    const slice = registry_path_buf[0..registry_path_len];
-    std.Io.Dir.deleteFileAbsolute(host_io.io(), slice) catch {};
-    _ = path;
+    std.Io.Dir.deleteFileAbsolute(io, path) catch {};
 }
 
-/// Return how many children are registered.
 pub fn count() usize {
     return reg_count;
 }
 
-/// Get a registered PID by index (for telemetry/debug).
-pub fn getPid(index: usize) c_int {
+pub fn getPid(index: usize) Id {
     if (index >= reg_count) return -1;
-    return registered[index];
+    return registered[index].?.pid;
+}
+
+test "native piped process publishes stdout, stderr, and exit" {
+    const testing = std.testing;
+    const io = testing.io;
+    var child = try spawnPiped(testing.allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", "IFS= read -r line; printf '%s' \"$line\"; printf error >&2; exit 7" },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
+    defer child.deinit(io);
+
+    try testing.expect(child.writeStdin(io, "output\n"));
+    child.closeStdin(io);
+
+    const term = try child.process.wait(io);
+    try testing.expectEqual(Term{ .exited = 7 }, term);
+
+    var stdout_buffer: [32]u8 = undefined;
+    var stderr_buffer: [32]u8 = undefined;
+    var stdout_len: usize = 0;
+    var stderr_len: usize = 0;
+    var stdout_done = false;
+    var stderr_done = false;
+    while (!stdout_done or !stderr_done) {
+        if (!stdout_done) switch (try child.stdout.?.drainWait(
+            stdout_buffer[stdout_len..],
+            .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake } },
+        )) {
+            .data => |n| stdout_len += n,
+            .closed => stdout_done = true,
+            .failed => |err| return err,
+            .empty => {},
+        };
+        if (!stderr_done) switch (try child.stderr.?.drainWait(
+            stderr_buffer[stderr_len..],
+            .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake } },
+        )) {
+            .data => |n| stderr_len += n,
+            .closed => stderr_done = true,
+            .failed => |err| return err,
+            .empty => {},
+        };
+    }
+    try testing.expectEqualStrings("output", stdout_buffer[0..stdout_len]);
+    try testing.expectEqualStrings("error", stderr_buffer[0..stderr_len]);
+}
+
+test "native process signal is reaped by the waiter task" {
+    const testing = std.testing;
+    const io = testing.io;
+    var child = try spawn(testing.allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", "while :; do sleep 1; done" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    defer child.closeProcess(io);
+
+    try testing.expect(child.alive());
+    child.sendSignal(.term);
+    const term = try child.wait(io);
+    switch (term) {
+        .signal => |signal| try testing.expectEqual(std.posix.SIG.TERM, signal),
+        else => return error.TestExpectedSignalTermination,
+    }
 }

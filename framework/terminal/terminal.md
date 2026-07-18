@@ -45,7 +45,7 @@ lower stages; lower stages don't know about higher ones.
 
 | File | Role |
 |---|---|
-| `pty.zig` | POSIX PTY master/slave, non-blocking I/O, SIGWINCH on resize. Pure POSIX, no libvterm. |
+| `pty.zig` | PTY master/slave setup and SIGWINCH resize. Raw libc is confined to PTY/session/ioctl setup; steady-state I/O uses injected `std.Io` tasks and bounded queues. No libvterm dependency. |
 | `pty_client.zig` | NDJSON client over `supervisor.sock` for external terminal control. |
 | `pty_remote.zig` | NDJSON server on `/run/user/<uid>/claude-sessions/supervisor.sock`. Routes ops to vterm slots. |
 | `vterm.zig` | libvterm wrapper. Single-terminal API + `Idx` per-slot variants for `MAX_TERMINALS=4` slots. Contains the only `extern "vterm"` decls. |
@@ -58,6 +58,25 @@ lower stages; lower stages don't know about higher ones.
 The recorder/player split is deliberate — recordings store the raw stream,
 not classifier output, so a recording captured under one classifier replays
 correctly through another.
+
+## Native I/O ownership
+
+`pty.zig` receives `std.Io` at `openPty`. The parent wraps the master descriptor
+as `std.Io.File`; cancelable reader, writer, and child-wait tasks live in an
+`std.Io.Group`. Fixed-capacity `std.Io.Queue` instances carry output bytes and
+pending writes, so the frame-facing `readData`/`writeData` methods only perform
+bounded queue operations. They do not set `O_NONBLOCK`, poll descriptor
+readiness, or recreate deleted Zig 0.15 syscall wrappers.
+
+The raw ABI boundary exists because PTY creation and control are
+platform-specific: `posix_openpt`/`grantpt`/`unlockpt`/`ptsname_r`, child session
+setup, and the `TIOCSCTTY`/`TIOCSWINSZ` ioctls remain libc/kernel calls. That
+boundary does not own steady-state reads, writes, cancellation, close, or child
+waiting.
+
+KMS input follows the same ownership rule in `framework/render/evdev.zig`: one
+injected-Io reader task per device feeds a bounded event queue that the frame
+drains into SDL. Raw Linux `ioctl` is limited to evdev metadata queries.
 
 ## Feature gating
 

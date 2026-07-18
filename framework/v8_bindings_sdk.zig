@@ -1,5 +1,5 @@
 const std = @import("std");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 const v8rt = @import("v8_runtime.zig");
 
@@ -40,6 +40,19 @@ var g_page_pending: ?std.AutoHashMap(u32, []u8) = null;
 var g_browse_init_done: bool = false;
 var g_browse_pending: ?std.AutoHashMap(u32, []u8) = null;
 
+fn ensureHttp(host: *HostContext) bool {
+    if (g_http_init_done) return true;
+    net_http.init(host.io, host.environ) catch return false;
+    g_http_init_done = true;
+    return true;
+}
+
+fn ensureBrowse(io: std.Io) bool {
+    if (g_browse_init_done) return true;
+    browse_bridge.init(io) catch return false;
+    g_browse_init_done = true;
+    return true;
+}
 
 fn callbackCtx(info: v8.FunctionCallbackInfo) struct { iso: v8.Isolate, ctx: v8.Context } {
     const iso = info.getIsolate();
@@ -166,19 +179,17 @@ fn parseHttpReq(parsed: *const std.json.Parsed(std.json.Value)) ?HttpReq {
     };
 }
 
-fn httpSyncViaClient(req: HttpReq) ![]u8 {
+fn httpSyncViaClient(host: *HostContext, req: HttpReq) ![]u8 {
     const alloc = std.heap.page_allocator;
 
     const uri = try std.Uri.parse(req.url);
-    const method: std.http.Method = if (std.ascii.eqlIgnoreCase(req.method, "POST")) .POST
-        else if (std.ascii.eqlIgnoreCase(req.method, "PUT")) .PUT
-        else if (std.ascii.eqlIgnoreCase(req.method, "DELETE")) .DELETE
-        else if (std.ascii.eqlIgnoreCase(req.method, "PATCH")) .PATCH
-        else if (std.ascii.eqlIgnoreCase(req.method, "HEAD")) .HEAD
-        else .GET;
+    const method: std.http.Method = if (std.ascii.eqlIgnoreCase(req.method, "POST")) .POST else if (std.ascii.eqlIgnoreCase(req.method, "PUT")) .PUT else if (std.ascii.eqlIgnoreCase(req.method, "DELETE")) .DELETE else if (std.ascii.eqlIgnoreCase(req.method, "PATCH")) .PATCH else if (std.ascii.eqlIgnoreCase(req.method, "HEAD")) .HEAD else .GET;
 
-    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host.io };
     defer client.deinit();
+    var proxy_arena = std.heap.ArenaAllocator.init(alloc);
+    defer proxy_arena.deinit();
+    client.initDefaultProxies(proxy_arena.allocator(), host.environ) catch {};
 
     var extra_headers: std.ArrayList(std.http.Header) = .empty;
     defer extra_headers.deinit(alloc);
@@ -306,35 +317,20 @@ fn buildHttpRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) !
     return out.toOwnedSlice(alloc);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 fn hostFetch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 1) return setReturnUndefined(info, cx.iso);
     const url = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(url);
 
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host.io };
     defer client.deinit();
+    var proxy_arena = std.heap.ArenaAllocator.init(alloc);
+    defer proxy_arena.deinit();
+    client.initDefaultProxies(proxy_arena.allocator(), host.environ) catch {};
 
     var body_alloc = std.Io.Writer.Allocating.init(alloc);
     defer body_alloc.deinit();
@@ -361,6 +357,7 @@ fn hostFetch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostHttpRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     const json = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"bad request json\"}");
     defer std.heap.page_allocator.free(json);
 
@@ -369,7 +366,7 @@ fn hostHttpRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer parsed.deinit();
     const req = parseHttpReq(&parsed) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"bad request\"}");
-    const resp_json = httpSyncViaClient(req) catch |err| {
+    const resp_json = httpSyncViaClient(host, req) catch |err| {
         var buf: [256]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, "{{\"status\":0,\"headers\":{{}},\"body\":\"\",\"error\":\"{s}\"}}", .{@errorName(err)}) catch
             return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"request failed\"}");
@@ -381,16 +378,14 @@ fn hostHttpRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 
 fn dispatchHttpRequest(info: v8.FunctionCallbackInfo, stream: bool) void {
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 2) return setReturnUndefined(info, cx.iso);
     const spec = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(spec);
     const rid = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(rid);
 
-    if (!g_http_init_done) {
-        net_http.init();
-        g_http_init_done = true;
-    }
+    if (!ensureHttp(host)) return setReturnUndefined(info, cx.iso);
 
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, spec, .{}) catch return setReturnUndefined(info, cx.iso);
     defer parsed.deinit();
@@ -416,7 +411,7 @@ fn dispatchHttpRequest(info: v8.FunctionCallbackInfo, stream: bool) void {
         }
         opts.headers = hdrs_buf[0..n];
     }
-    _ = net_http.request(id, opts);
+    _ = net_http.request(host.io, id, opts);
     setReturnUndefined(info, cx.iso);
 }
 
@@ -443,6 +438,7 @@ fn hostHttpStreamOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 fn hostHttpDownloadToFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 3) return setReturnUndefined(info, cx.iso);
     const alloc = std.heap.page_allocator;
 
@@ -453,10 +449,7 @@ fn hostHttpDownloadToFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const rid = jsStringArg(alloc, info, 2) orelse return setReturnUndefined(info, cx.iso);
     defer alloc.free(rid);
 
-    if (!g_http_init_done) {
-        net_http.init();
-        g_http_init_done = true;
-    }
+    if (!ensureHttp(host)) return setReturnUndefined(info, cx.iso);
 
     const parsed = std.json.parseFromSlice(std.json.Value, alloc, spec, .{}) catch return setReturnUndefined(info, cx.iso);
     defer parsed.deinit();
@@ -483,7 +476,7 @@ fn hostHttpDownloadToFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         }
         opts.headers = hdrs_buf[0..n];
     }
-    _ = net_http.request(id, opts);
+    _ = net_http.request(host.io, id, opts);
     setReturnUndefined(info, cx.iso);
 }
 
@@ -509,6 +502,7 @@ fn hostHttpStreamClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 fn hostBrowserPageSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     const spec = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"finalUrl\":\"\",\"contentType\":\"\",\"body\":\"\",\"error\":\"missing request\"}");
     defer std.heap.page_allocator.free(spec);
 
@@ -517,7 +511,7 @@ fn hostBrowserPageSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer parsed.deinit();
     const url = parsePageReq(&parsed) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"finalUrl\":\"\",\"contentType\":\"\",\"body\":\"\",\"error\":\"bad request\"}");
-    const resp = net_http.fetchSync(.{ .url = url });
+    const resp = net_http.fetchSync(host.io, host.environ, .{ .url = url });
     const payload = buildPageRespJson(&resp, std.heap.page_allocator) catch return setReturnString(info, cx.iso, "{\"status\":0,\"finalUrl\":\"\",\"contentType\":\"\",\"body\":\"\",\"error\":\"serialize failed\"}");
     defer std.heap.page_allocator.free(payload);
     setReturnString(info, cx.iso, payload);
@@ -526,16 +520,14 @@ fn hostBrowserPageSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 fn hostBrowserPageAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 2) return setReturnUndefined(info, cx.iso);
     const spec = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(spec);
     const rid = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(rid);
 
-    if (!g_http_init_done) {
-        net_http.init();
-        g_http_init_done = true;
-    }
+    if (!ensureHttp(host)) return setReturnUndefined(info, cx.iso);
 
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, spec, .{}) catch return setReturnUndefined(info, cx.iso);
     defer parsed.deinit();
@@ -546,16 +538,17 @@ fn hostBrowserPageAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         std.heap.page_allocator.free(rid_copy);
         return setReturnUndefined(info, cx.iso);
     };
-    _ = net_http.request(id, .{ .url = url });
+    _ = net_http.request(host.io, id, .{ .url = url });
     setReturnUndefined(info, cx.iso);
 }
 
 fn hostBrowseRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const io = v8rt.hostContext(cx.iso).io;
     const body = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnString(info, cx.iso, "{\"ok\":false,\"error\":\"missing body\"}");
     defer std.heap.page_allocator.free(body);
-    const resp = browse_bridge.requestSync(body);
+    const resp = browse_bridge.requestSync(io, body);
     defer std.heap.page_allocator.free(resp.body);
     setReturnString(info, cx.iso, resp.body);
 }
@@ -563,16 +556,14 @@ fn hostBrowseRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 fn hostBrowseRequestAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const io = v8rt.hostContext(cx.iso).io;
     if (info.length() < 2) return setReturnUndefined(info, cx.iso);
     const body = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(body);
     const rid = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(rid);
 
-    if (!g_browse_init_done) {
-        browse_bridge.init();
-        g_browse_init_done = true;
-    }
+    if (!ensureBrowse(io)) return setReturnUndefined(info, cx.iso);
 
     const id = hashReqId(rid);
     const rid_copy = std.heap.page_allocator.dupe(u8, rid) catch return setReturnUndefined(info, cx.iso);
@@ -580,7 +571,7 @@ fn hostBrowseRequestAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         std.heap.page_allocator.free(rid_copy);
         return setReturnUndefined(info, cx.iso);
     };
-    _ = browse_bridge.request(std.heap.page_allocator, id, body);
+    _ = browse_bridge.request(io, std.heap.page_allocator, id, body);
     setReturnUndefined(info, cx.iso);
 }
 
@@ -662,7 +653,7 @@ fn hostRecStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const rows = vterm_mod.getRows();
     const cols = vterm_mod.getCols();
-    vterm_mod.startRecording(rows, cols);
+    vterm_mod.startRecording(v8rt.hostContext(info.getIsolate()).io, rows, cols);
     setReturnUndefined(info, callbackCtx(info).iso);
 }
 
@@ -677,7 +668,7 @@ fn hostRecToggle(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (vterm_mod.isRecording()) {
         vterm_mod.stopRecording();
     } else {
-        vterm_mod.startRecording(vterm_mod.getRows(), vterm_mod.getCols());
+        vterm_mod.startRecording(v8rt.hostContext(info.getIsolate()).io, vterm_mod.getRows(), vterm_mod.getCols());
     }
     setReturnNum(info, callbackCtx(info).iso, if (vterm_mod.isRecording()) 1 else 0);
 }
@@ -687,7 +678,7 @@ fn hostRecSave(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const cx = callbackCtx(info);
     const path = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnNum(info, cx.iso, 0);
     defer std.heap.page_allocator.free(path);
-    const ok = vterm_mod.saveRecording(path);
+    const ok = vterm_mod.saveRecording(v8rt.hostContext(info.getIsolate()).io, path);
     setReturnNum(info, cx.iso, if (ok) 1 else 0);
 }
 
@@ -704,29 +695,16 @@ fn hostRecFrameCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnNum(info, callbackCtx(info).iso, @floatFromInt(rec.frame_count));
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 fn hostIpcConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 2) return setReturnNum(info, cx.iso, 0);
     const port_i = jsI32Arg(info, 0) orelse return setReturnNum(info, cx.iso, 0);
     if (port_i <= 0 or port_i > 65535) return setReturnNum(info, cx.iso, 0);
-    const key = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnNum(info, cx.iso, 0);
-    defer std.heap.page_allocator.free(key);
-    const ok = debug_client.connect(@intCast(port_i), key);
+    const key = jsStringArg(host.gpa, info, 1) orelse return setReturnNum(info, cx.iso, 0);
+    defer host.gpa.free(key);
+    const ok = debug_client.connect(host.gpa, host.io, @intCast(port_i), key);
     setReturnNum(info, cx.iso, if (ok) 1 else 0);
 }
 
@@ -738,7 +716,8 @@ fn hostIpcDisconnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn hostIpcPoll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, if (debug_client.poll()) 1 else 0);
+    const cx = callbackCtx(info);
+    setReturnNum(info, cx.iso, if (debug_client.poll()) 1 else 0);
 }
 
 fn hostIpcStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -754,20 +733,23 @@ fn hostIpcStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostIpcSubmitCode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 1) return setReturnNum(info, cx.iso, 0);
-    const code = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnNum(info, cx.iso, 0);
-    defer std.heap.page_allocator.free(code);
+    const code = jsStringArg(host.gpa, info, 0) orelse return setReturnNum(info, cx.iso, 0);
+    defer host.gpa.free(code);
     const ok = debug_client.submitCode(code);
     setReturnNum(info, cx.iso, if (ok) 1 else 0);
 }
 
 fn hostIpcRequest(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) return setReturnUndefined(info, callbackCtx(info).iso);
-    const method = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, callbackCtx(info).iso);
-    defer std.heap.page_allocator.free(method);
+    const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
+    if (info.length() < 1) return setReturnUndefined(info, cx.iso);
+    const method = jsStringArg(host.gpa, info, 0) orelse return setReturnUndefined(info, cx.iso);
+    defer host.gpa.free(method);
     debug_client.request(method);
-    setReturnUndefined(info, callbackCtx(info).iso);
+    setReturnUndefined(info, cx.iso);
 }
 
 fn hostIpcRequestNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1062,7 +1044,7 @@ fn hostSemBuildGraph(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnUndefined(info, cx.iso);
 }
 
-fn emitChannelPayload(channel: []const u8, payload: []const u8) void {
+fn emitChannelPayload(host: *HostContext, channel: []const u8, payload: []const u8) void {
     const alloc = std.heap.page_allocator;
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
@@ -1076,7 +1058,7 @@ fn emitChannelPayload(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8rt.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8rt.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 /// Register a Zig-side streaming HTTP consumer. The request runs through
@@ -1089,11 +1071,13 @@ fn emitChannelPayload(channel: []const u8, payload: []const u8) void {
 /// need to retain the id — it's used only for routing the response.
 /// Callbacks fire on the main thread (during tickDrain).
 pub fn httpStartZigStream(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     opts: net_http.RequestOpts,
     callbacks: HttpZigCallbacks,
 ) ?u32 {
     if (!g_http_init_done) {
-        net_http.init();
+        net_http.init(io, environ) catch return null;
         g_http_init_done = true;
     }
     g_http_zig_next_id +%= 1;
@@ -1109,7 +1093,7 @@ pub fn httpStartZigStream(
         alloc.free(rid_copy);
         return null;
     };
-    if (!net_http.request(id, opts)) {
+    if (!net_http.request(io, id, opts)) {
         if (httpPending().fetchRemove(id)) |entry| alloc.free(entry.value.rid);
         return null;
     }
@@ -1117,10 +1101,10 @@ pub fn httpStartZigStream(
 }
 
 // Call this from the V8 app's main loop per tick.
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     if (g_http_init_done) {
         var buf: [8]net_http.Response = undefined;
-        const n = net_http.poll(&buf);
+        const n = net_http.poll(host.io, &buf);
         const alloc = std.heap.page_allocator;
         for (buf[0..n]) |resp| {
             var ch_buf: [256]u8 = undefined;
@@ -1150,13 +1134,13 @@ pub fn tickDrain() void {
                     switch (resp.response_type) {
                         .progress => {
                             const ch = std.fmt.bufPrint(&ch_buf, "http-download-progress:{s}", .{pending.rid}) catch continue;
-                            emitChannelPayload(ch, resp.bodySlice());
+                            emitChannelPayload(host, ch, resp.bodySlice());
                         },
                         .complete => {
                             var payload_buf: [64]u8 = undefined;
                             const payload = std.fmt.bufPrint(&payload_buf, "{{\"status\":{d}}}", .{resp.status}) catch continue;
                             const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
-                            emitChannelPayload(ch, payload);
+                            emitChannelPayload(host, ch, payload);
                             if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                         },
                         .err => {
@@ -1166,7 +1150,7 @@ pub fn tickDrain() void {
                             jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
                             out.append(alloc, '}') catch continue;
                             const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
-                            emitChannelPayload(ch, out.items);
+                            emitChannelPayload(host, ch, out.items);
                             if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                         },
                         .chunk => {}, // not produced by download mode
@@ -1181,7 +1165,7 @@ pub fn tickDrain() void {
                     const payload = buildHttpRespJson(&resp, alloc) catch continue;
                     defer alloc.free(payload);
                     const ch = std.fmt.bufPrint(&ch_buf, "http:{s}", .{rid.value.rid}) catch continue;
-                    emitChannelPayload(ch, payload);
+                    emitChannelPayload(host, ch, payload);
                     continue;
                 }
 
@@ -1190,13 +1174,13 @@ pub fn tickDrain() void {
                 switch (resp.response_type) {
                     .chunk => {
                         const ch = std.fmt.bufPrint(&ch_buf, "http-stream:{s}", .{pending.rid}) catch continue;
-                        emitChannelPayload(ch, resp.bodySlice());
+                        emitChannelPayload(host, ch, resp.bodySlice());
                     },
                     .complete => {
                         var payload_buf: [64]u8 = undefined;
                         const payload = std.fmt.bufPrint(&payload_buf, "{{\"status\":{d}}}", .{resp.status}) catch continue;
                         const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
-                        emitChannelPayload(ch, payload);
+                        emitChannelPayload(host, ch, payload);
                         if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                     },
                     .err => {
@@ -1206,7 +1190,7 @@ pub fn tickDrain() void {
                         jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
                         out.append(alloc, '}') catch continue;
                         const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
-                        emitChannelPayload(ch, out.items);
+                        emitChannelPayload(host, ch, out.items);
                         if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                     },
                     .progress => {},
@@ -1220,7 +1204,7 @@ pub fn tickDrain() void {
                 const payload = buildPageRespJson(&resp, alloc) catch continue;
                 defer alloc.free(payload);
                 const ch = std.fmt.bufPrint(&ch_buf, "browser-page:{s}", .{rid.value}) catch continue;
-                emitChannelPayload(ch, payload);
+                emitChannelPayload(host, ch, payload);
                 continue;
             }
         }
@@ -1228,7 +1212,7 @@ pub fn tickDrain() void {
 
     if (g_browse_init_done) {
         var buf: [8]browse_bridge.Response = undefined;
-        const n = browse_bridge.poll(&buf);
+        const n = browse_bridge.poll(host.io, &buf);
         const alloc = std.heap.page_allocator;
         for (buf[0..n]) |resp| {
             defer alloc.free(resp.body);
@@ -1236,7 +1220,7 @@ pub fn tickDrain() void {
             defer alloc.free(rid.value);
             var ch_buf: [256]u8 = undefined;
             const ch = std.fmt.bufPrint(&ch_buf, "browse:{s}", .{rid.value}) catch continue;
-            emitChannelPayload(ch, resp.body);
+            emitChannelPayload(host, ch, resp.body);
         }
     }
 }

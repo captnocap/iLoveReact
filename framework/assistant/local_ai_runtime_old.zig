@@ -8,13 +8,12 @@
 //!
 //! This initial version is chat-oriented and intentionally narrow:
 //!   - one long-lived model/context per session
-//!   - background thread handles all prompt formatting + decode work
+//!   - a concurrent I/O task handles all prompt formatting + decode work
 //!   - main thread only submits text and polls events
 //!   - designed so future task kinds (embed, summarize_file, rag_answer)
 //!     can reuse the same queue/session infrastructure
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const RingBuffer = @import("../net/ring_buffer.zig").RingBuffer;
 
 // Authoritative llama.cpp types via @cImport — struct layouts come straight
@@ -62,8 +61,6 @@ const llama_chat_message = c.struct_llama_chat_message;
 //
 // Hot-path performance is the same as link-time once loaded — every call
 // goes through a fn-pointer in the LlamaApi struct, no per-call dlsym.
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 extern "c" fn dlopen(filename: ?[*:0]const u8, flags: c_int) ?*anyopaque;
 extern "c" fn dlerror() ?[*:0]const u8;
 const RTLD_NOW: c_int = 2;
@@ -75,13 +72,12 @@ const cuda_vendor_dir = lmstudio_backends_root ++ "/vendor/linux-llama-cuda-vend
 
 const BackendKind = enum { rocm, cuda12, vulkan, cpu };
 
-fn pickBackendDirAlloc(allocator: std.mem.Allocator) ![:0]u8 {
-    if (getenv("RJIT_LLM_BACKEND_DIR")) |dir| {
-        return try allocator.dupeZ(u8, std.mem.span(dir));
+fn pickBackendDirAlloc(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator) ![:0]u8 {
+    if (environ.get("RJIT_LLM_BACKEND_DIR")) |dir| {
+        return try allocator.dupeZ(u8, dir);
     }
     const want: BackendKind = blk: {
-        if (getenv("RJIT_LLM_BACKEND")) |v| {
-            const s = std.mem.span(v);
+        if (environ.get("RJIT_LLM_BACKEND")) |s| {
             if (std.mem.eql(u8, s, "rocm")) break :blk .rocm;
             if (std.mem.eql(u8, s, "cuda12")) break :blk .cuda12;
             if (std.mem.eql(u8, s, "cuda")) break :blk .cuda12;
@@ -96,12 +92,12 @@ fn pickBackendDirAlloc(allocator: std.mem.Allocator) ![:0]u8 {
         .vulkan => "llama.cpp-linux-x86_64-vulkan-avx2-",
         .cpu => "llama.cpp-linux-x86_64-avx2-",
     };
-    var dir = try std.fs.openDirAbsolute(lmstudio_backends_root, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.openDirAbsolute(io, lmstudio_backends_root, .{ .iterate = true });
+    defer dir.close(io);
     var it = dir.iterate();
     var best: ?[]u8 = null;
     errdefer if (best) |b| allocator.free(b);
-    while (try it.next()) |entry| {
+    while (try it.next(io)) |entry| {
         if (entry.kind != .directory) continue;
         if (!std.mem.startsWith(u8, entry.name, prefix)) continue;
         if (best) |prev| {
@@ -130,14 +126,14 @@ fn vendorDirFor(backend_dir: []const u8) ?[]const u8 {
 // process LD_LIBRARY_PATH caching quirks. We deliberately skip libllama.so
 // itself; that one gets a separate dlopen with RTLD_LOCAL so its symbols
 // don't collide with framework/embed.zig's link-time libllama_ffi.
-fn preloadDir(allocator: std.mem.Allocator, dir_path: []const u8) !void {
-    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch |err| {
+fn preloadDir(io: std.Io, allocator: std.mem.Allocator, dir_path: []const u8) !void {
+    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch |err| {
         std.log.warn("[localai] preload: openDir {s}: {s}", .{ dir_path, @errorName(err) });
         return;
     };
-    defer dir.close();
+    defer dir.close(io);
     var it = dir.iterate();
-    while (try it.next()) |entry| {
+    while (try it.next(io)) |entry| {
         if (entry.kind != .file and entry.kind != .sym_link) continue;
         if (std.mem.indexOf(u8, entry.name, ".so") == null) continue;
         if (std.mem.eql(u8, entry.name, "libllama.so")) continue;
@@ -265,8 +261,8 @@ const LlamaApi = struct {
     backend_dir: [:0]u8,
     allocator: std.mem.Allocator,
 
-    fn load(allocator: std.mem.Allocator, _: ?[]const u8) !LlamaApi {
-        const backend_dir = try pickBackendDirAlloc(allocator);
+    fn load(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, _: ?[]const u8) !LlamaApi {
+        const backend_dir = try pickBackendDirAlloc(io, environ, allocator);
         errdefer allocator.free(backend_dir);
 
         std.log.info("[localai] dlopen backend: {s}", .{backend_dir});
@@ -276,9 +272,9 @@ const LlamaApi = struct {
         // the libllama.so dlopen finds the SONAMEs already loaded and
         // skips the disk search entirely.
         if (vendorDirFor(backend_dir)) |vdir| {
-            try preloadDir(allocator, vdir);
+            try preloadDir(io, allocator, vdir);
         }
-        try preloadDir(allocator, backend_dir);
+        try preloadDir(io, allocator, backend_dir);
 
         const libllama_path = try std.fmt.allocPrintSentinel(allocator, "{s}/libllama.so", .{backend_dir}, 0);
         defer allocator.free(libllama_path);
@@ -332,6 +328,8 @@ const LlamaApi = struct {
 };
 
 const WorkerState = struct {
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     allocator: std.mem.Allocator,
     options: SessionOptions,
     api: ?LlamaApi = null,
@@ -342,11 +340,13 @@ const WorkerState = struct {
     chat_template: ?[:0]u8 = null,
     history: std.ArrayList(HistoryMessage),
 
-    fn init(allocator: std.mem.Allocator, options: SessionOptions) WorkerState {
+    fn init(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, options: SessionOptions) WorkerState {
         return .{
+            .io = io,
+            .environ = environ,
             .allocator = allocator,
             .options = options,
-            .history = .{},
+            .history = .empty,
         };
     }
 
@@ -365,7 +365,7 @@ const WorkerState = struct {
     }
 
     fn load(self: *WorkerState) !void {
-        var api = try LlamaApi.load(self.allocator, self.options.cwd);
+        var api = try LlamaApi.load(self.io, self.environ, self.allocator, self.options.cwd);
         errdefer api.close();
 
         self.resolved_model_path = try resolveModelPathAlloc(self.allocator, self.options.cwd, self.options.model_path);
@@ -477,7 +477,10 @@ const WorkerState = struct {
         api.sampler_chain_add(sampler, api.sampler_init_min_p(0.05, 1) orelse return error.SamplerInitFailed);
         api.sampler_chain_add(sampler, api.sampler_init_temp(0.7) orelse return error.SamplerInitFailed);
         api.sampler_chain_add(sampler, api.sampler_init_penalties(64, 1.1, 0, 0) orelse return error.SamplerInitFailed);
-        api.sampler_chain_add(sampler, api.sampler_init_dist(@intCast(@mod(host_io.milliTimestamp(), std.math.maxInt(u32)))) orelse return error.SamplerInitFailed);
+        var seed_bytes: [@sizeOf(u32)]u8 = undefined;
+        session.io.random(&seed_bytes);
+        const seed = std.mem.readInt(u32, &seed_bytes, .little);
+        api.sampler_chain_add(sampler, api.sampler_init_dist(seed) orelse return error.SamplerInitFailed);
 
         var out: std.ArrayList(u8) = .empty;
         defer out.deinit(self.allocator);
@@ -546,30 +549,34 @@ const WorkerState = struct {
             return buf[0..@intCast(written)];
         }
 
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(self.allocator);
+        var buf = std.Io.Writer.Allocating.init(self.allocator);
+        defer buf.deinit();
 
         for (self.history.items) |msg| {
-            try buf.writer(self.allocator).print("{s}: {s}\n", .{ roleName(msg.role), msg.content });
+            try buf.writer.print("{s}: {s}\n", .{ roleName(msg.role), msg.content });
         }
-        try buf.appendSlice(self.allocator, "assistant: ");
-        return try buf.toOwnedSlice(self.allocator);
+        try buf.writer.writeAll("assistant: ");
+        return try buf.toOwnedSlice();
     }
 };
 
 pub const Session = struct {
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     allocator: std.mem.Allocator,
     options: SessionOptions,
     requests: RingBuffer(Request, 32) = .{},
     events: RingBuffer(OwnedEvent, 1024) = .{},
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     should_stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-    pub fn create(allocator: std.mem.Allocator, options: SessionOptions) !*Session {
+    pub fn create(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, options: SessionOptions) !*Session {
         const session = try allocator.create(Session);
         errdefer allocator.destroy(session);
 
         session.* = .{
+            .io = io,
+            .environ = environ,
             .allocator = allocator,
             .options = .{
                 .cwd = if (options.cwd) |value| try allocator.dupe(u8, value) else null,
@@ -588,7 +595,7 @@ pub const Session = struct {
         };
         errdefer session.deinitInternal();
 
-        session.worker = try std.Thread.spawn(.{ .stack_size = 4 * 1024 * 1024 }, workerMain, .{session});
+        try session.tasks.concurrent(session.io, workerMain, .{session});
         return session;
     }
 
@@ -600,10 +607,7 @@ pub const Session = struct {
 
     pub fn close(self: *Session) void {
         self.should_stop.store(true, .seq_cst);
-        if (self.worker) |thread| {
-            thread.join();
-            self.worker = null;
-        }
+        self.tasks.cancel(self.io);
     }
 
     pub fn submit(self: *Session, options: SubmitOptions) !void {
@@ -617,11 +621,11 @@ pub const Session = struct {
         };
         errdefer req.deinit(self.allocator);
 
-        if (!self.requests.push(req)) return error.QueueFull;
+        if (!self.requests.push(self.io, req)) return error.QueueFull;
     }
 
     pub fn poll(self: *Session) ?OwnedEvent {
-        return self.events.pop();
+        return self.events.pop(self.io);
     }
 
     fn pushAssistantPart(self: *Session, text: []const u8) !void {
@@ -659,7 +663,7 @@ pub const Session = struct {
     fn pushEvent(self: *Session, event: OwnedEvent) !void {
         var owned = event;
         owned.allocator = self.allocator;
-        if (!self.events.push(owned)) {
+        if (!self.events.push(self.io, owned)) {
             owned.deinit();
             return error.QueueFull;
         }
@@ -671,19 +675,19 @@ pub const Session = struct {
         if (self.options.session_id) |value| self.allocator.free(value);
         if (self.options.system_prompt) |value| self.allocator.free(value);
 
-        while (self.requests.pop()) |req| {
+        while (self.requests.pop(self.io)) |req| {
             var owned = req;
             owned.deinit(self.allocator);
         }
-        while (self.events.pop()) |evt| {
+        while (self.events.pop(self.io)) |evt| {
             var owned = evt;
             owned.deinit();
         }
     }
 };
 
-fn workerMain(session: *Session) void {
-    var state = WorkerState.init(session.allocator, session.options);
+fn workerMain(session: *Session) std.Io.Cancelable!void {
+    var state = WorkerState.init(session.io, session.environ, session.allocator, session.options);
     defer state.deinit();
 
     session.pushStatus("loading local model...", false) catch {};
@@ -709,7 +713,7 @@ fn workerMain(session: *Session) void {
     session.pushStatus("local model ready", false) catch {};
 
     while (!session.should_stop.load(.seq_cst)) {
-        if (session.requests.pop()) |req| {
+        if (session.requests.pop(session.io)) |req| {
             var owned = req;
             defer owned.deinit(session.allocator);
 
@@ -731,7 +735,7 @@ fn workerMain(session: *Session) void {
                 session.pushResult(null, false) catch {};
             }
         } else {
-            std.Thread.sleep(1 * std.time.ns_per_ms);
+            try std.Io.sleep(session.io, .fromMilliseconds(1), .awake);
         }
     }
 }

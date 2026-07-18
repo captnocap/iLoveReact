@@ -665,15 +665,16 @@ real child run by itself.
 
 ```zig
 pub const AgentPool = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     agents: std.StringHashMap(*ForkedAgent),
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 };
 ```
 
 Operations:
 
-- `init(allocator)`
+- `init(io, allocator)`
 - `deinit()`
 - `spawn(parent_session, config)`
 - `get(agent_id)`
@@ -807,13 +808,14 @@ The built-in tools use static string literals.
 
 ```zig
 pub const ToolExecutor = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
-    queue: std.ArrayList(QueuedTool),
-    mutex: std.Thread.Mutex,
-    cond: std.Thread.Condition,
+    pending_tools: std.ArrayList(QueuedTool),
+    tasks: std.Io.Group,
+    mutex: std.Io.Mutex,
     has_errored: bool = false,
     errored_tool_description: ?[]const u8 = null,
-    should_abort: bool = false,
+    should_abort: std.atomic.Value(bool) = .init(false),
     on_progress: ?*const fn (...) = null,
     on_complete: ?*const fn (...) = null,
 };
@@ -825,8 +827,7 @@ pub const ToolExecutor = struct {
 2. Duplicates the input JSON.
 3. Creates a `ToolContext`.
 4. Appends a queued item.
-5. Signals the condition variable.
-6. Calls `processQueue()`.
+5. Calls `processQueue()`.
 
 `canExecute(tool, input_json)`:
 
@@ -845,7 +846,7 @@ pub const ToolExecutor = struct {
 
 1. Marks the item executing.
 2. Reports progress.
-3. Spawns a Zig thread with `std.Thread.spawn`.
+3. Submits the work to the executor's injected-I/O `std.Io.Group`.
 4. Calls the tool's `execute(input_json, context)`.
 5. Stores result and marks completed.
 6. If the tool name begins with `bash` and returned an error, sets sibling

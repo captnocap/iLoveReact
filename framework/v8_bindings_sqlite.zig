@@ -93,6 +93,7 @@ fn sqlDbs() *std.AutoHashMap(u32, *sqlite_mod.Database) {
 
 fn sqlOpenCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8rt.hostContext(info.getIsolate()).io;
     const alloc = std.heap.page_allocator;
     const path = argOwnedUtf8(alloc, info, 0) orelse {
         setNumberReturn(info, 0);
@@ -103,7 +104,7 @@ fn sqlOpenCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setNumberReturn(info, 0);
         return;
     };
-    db_ptr.* = sqlite_mod.Database.open(path) catch {
+    db_ptr.* = sqlite_mod.Database.open(io, path) catch {
         alloc.destroy(db_ptr);
         setNumberReturn(info, 0);
         return;

@@ -13,7 +13,6 @@ const c = @import("../c.zig").imports;
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const rects = @import("rects.zig");
-const host_io = @import("../host_io.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Types
@@ -122,6 +121,7 @@ var g_text_bind_group: ?*wgpu.BindGroup = null;
 var g_text_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_atlas_texture: ?*wgpu.Texture = null;
 var g_atlas_view: ?*wgpu.TextureView = null;
+var g_glyph_trace: bool = false;
 
 /// Glyph atlas texture bytes (ATLAS_SIZE² × RGBA8), resident once created.
 /// Shell-side (UI text); device-local (VRAM). Fixed once allocated.
@@ -385,7 +385,8 @@ fn loadFontFamily(id: u8, regular_paths: []const [*:0]const u8, bold_paths: []co
 // ════════════════════════════════════════════════════════════════════════
 
 /// Initialize text rendering. Call after gpu.init() and after TextEngine is created.
-pub fn initText(library: c.FT_Library, face: c.FT_Face, fallbacks: anytype, fallback_count: usize) void {
+pub fn initText(environ: *const std.process.Environ.Map, library: c.FT_Library, face: c.FT_Face, fallbacks: anytype, fallback_count: usize) void {
+    g_glyph_trace = environ.get("HMSC_GLYPH_TRACE") != null;
     g_ft_library = library;
     g_ft_face = face;
     g_font_families[0] = .{ .regular = face, .bold = g_ft_face_bold };
@@ -1372,8 +1373,8 @@ fn cacheGlyph(codepoint: u32, size_px: u16) ?*const AtlasGlyphInfo {
     // (codepoint, size_px, font) never seen before. After warmup this should be
     // ~0 per frame; a steady stream means some text is re-rendering at changing
     // sizes, which is the CPU paint spike. Logs the char + size to find it.
-    if (host_io.getenv("HMSC_GLYPH_TRACE") != null) {
-        std.debug.print("[glyph-raster] cp={d} '{c}' size={d} font={d} atlas_total={d}\n", .{
+    if (g_glyph_trace) {
+        log.print("[glyph-raster] cp={d} '{c}' size={d} font={d} atlas_total={d}\n", .{
             codepoint,
             if (codepoint >= 32 and codepoint < 127) @as(u8, @intCast(codepoint)) else @as(u8, '?'),
             size_px,

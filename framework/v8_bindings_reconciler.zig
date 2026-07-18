@@ -23,11 +23,11 @@
 //! implementations.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const host_tree = @import("host_tree.zig");
 const event_bus = @import("diag/event_bus.zig");
+const HostContext = @import("host_context.zig");
 
 pub const Mode = enum { sync, queue };
 
@@ -71,6 +71,7 @@ fn argToStringAlloc(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
 
 fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     if (info.length() < 1) return;
     const payload = argToStringAlloc(info, 0) orelse return;
 
@@ -91,9 +92,9 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     switch (g_mode) {
         .sync => {
             defer std.heap.c_allocator.free(payload);
-            const t0 = host_io.microTimestamp();
-            host_tree.applyCommandBatch(payload);
-            const t1 = host_io.microTimestamp();
+            const t0 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
+            host_tree.applyCommandBatch(host, host.io, host.environ, payload);
+            const t1 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
             g_last_drain_batches = 1;
             g_last_drain_bytes = @intCast(payload.len);
             g_last_drain_us = @intCast(@max(0, t1 - t0));
@@ -119,9 +120,9 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// (which forwards to host_tree.applyCommandBatch plus per-batch
 /// diagnostics + IPC forwarding to .independent windows). Each batch's
 /// memory is freed after the call.
-pub const ApplyFn = *const fn (bytes: []const u8) void;
+pub const ApplyFn = *const fn (*HostContext, bytes: []const u8) void;
 
-pub fn drainPending(apply: ApplyFn) void {
+pub fn drainPending(host: *HostContext, apply: ApplyFn) void {
     if (g_pending.items.len == 0) {
         g_last_drain_batches = 0;
         g_last_drain_bytes = 0;
@@ -132,13 +133,13 @@ pub fn drainPending(apply: ApplyFn) void {
     const byte_count = g_pending_bytes;
     const batches = g_pending.toOwnedSlice(std.heap.c_allocator) catch return;
     g_pending_bytes = 0;
-    const t0 = host_io.microTimestamp();
+    const t0 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
     defer {
         for (batches) |b| std.heap.c_allocator.free(b);
         std.heap.c_allocator.free(batches);
     }
-    for (batches) |b| apply(b);
-    const t1 = host_io.microTimestamp();
+    for (batches) |b| apply(host, b);
+    const t1 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
     g_last_drain_batches = batch_count;
     g_last_drain_bytes = byte_count;
     g_last_drain_us = @intCast(@max(0, t1 - t0));

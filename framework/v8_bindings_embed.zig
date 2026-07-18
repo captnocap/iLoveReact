@@ -155,10 +155,10 @@ fn parseFloatArray(alloc: std.mem.Allocator, json: []const u8) ![]f32 {
 /// Ensure g_query_ctx exists. Lazy-creates from g_shared on first use so
 /// just having the cart open doesn't allocate ~900 MB of KV cache for a
 /// query path the user may never exercise.
-fn ensureQueryCtx() bool {
+fn ensureQueryCtx(io: std.Io) bool {
     if (g_query_ctx != null) return true;
     if (g_shared == null) return false;
-    g_query_ctx = g_shared.?.newWorker(8192) catch return false;
+    g_query_ctx = g_shared.?.newWorker(io, 8192) catch return false;
     return true;
 }
 
@@ -210,8 +210,9 @@ fn hostNDim(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostEmbedText(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const a = allocator();
-    if (!ensureQueryCtx()) {
+    if (!ensureQueryCtx(host.io)) {
         setString(info, "null");
         return;
     }
@@ -238,8 +239,9 @@ fn hostEmbedText(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostEmbedBatch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const a = allocator();
-    if (!ensureQueryCtx()) {
+    if (!ensureQueryCtx(host.io)) {
         setString(info, "[]");
         return;
     }
@@ -364,6 +366,7 @@ fn hostRerank(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostStoreOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const a = allocator();
     const slug = argStringAlloc(a, info, 0) orelse {
         setNumber(info, 0);
@@ -379,7 +382,7 @@ fn hostStoreOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         s.close();
         g_store = null;
     }
-    g_store = embed.Store.open(a, slug, @intCast(dim_i)) catch {
+    g_store = embed.Store.open(host.io, host.environ, a, slug, @intCast(dim_i)) catch {
         setNumber(info, 0);
         return;
     };
@@ -678,6 +681,7 @@ fn ensureSharedModel(model_path: []const u8) bool {
 /// not using a structured kind.
 fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const a = allocator();
 
     const root_path = argStringAlloc(a, info, 0) orelse {
@@ -775,7 +779,7 @@ fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         s.close();
         g_store = null;
     }
-    g_store = embed.Store.open(a, slug, dim) catch {
+    g_store = embed.Store.open(host.io, host.environ, a, slug, dim) catch {
         setNumber(info, 0);
         return;
     };
@@ -786,6 +790,7 @@ fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const sess_alloc = std.heap.c_allocator;
     const model_id = std.fs.path.basename(model_path);
     const sess = embed.IngestSession.start(
+        host.io,
         sess_alloc,
         &g_shared.?,
         &g_store.?,
@@ -835,7 +840,8 @@ fn hostIngestProgress(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const snap = g_ingest.?.snapshot();
     var buf = std.array_list.Managed(u8).init(a);
     defer buf.deinit();
-    managedPrint(&buf,
+    managedPrint(
+        &buf,
         "{{\"running\":true,\"files_total\":{d},\"files_done\":{d},\"chunks_done\":{d},\"embed_ms_sum\":{d},\"done\":{},\"cancelled\":{},\"current_file\":",
         .{ snap.files_total, snap.files_done, snap.chunks_done, snap.embed_ms_sum, snap.done, snap.cancelled },
     ) catch {

@@ -6,44 +6,46 @@ fn blankKeypoints() [mailbox.KEYPOINTS]mailbox.Keypoint {
 }
 
 test "submitted camera pixels are owned by the worker" {
-    var queue = mailbox.Queue.init(std.testing.allocator);
+    var queue: mailbox.Queue = undefined;
+    queue.init(std.testing.allocator);
     defer {
-        queue.stop();
-        queue.deinit();
+        queue.stop(std.testing.io);
+        queue.deinit(std.testing.io);
     }
 
     var source = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(41, &source, 1, 2));
+    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(std.testing.io, 41, &source, 1, 2));
     source[0] = 99;
 
-    var owned = queue.tryTake() orelse return error.ExpectedOwnedFrame;
+    var owned = queue.tryTake(std.testing.io) orelse return error.ExpectedOwnedFrame;
     defer owned.deinit();
     try std.testing.expectEqual(@as(u8, 1), owned.rgba[0]);
     try std.testing.expectEqual(@as(u32, 41), owned.request_id);
 }
 
 test "one pending working or undrained result applies backpressure" {
-    var queue = mailbox.Queue.init(std.testing.allocator);
+    var queue: mailbox.Queue = undefined;
+    queue.init(std.testing.allocator);
     defer {
-        queue.stop();
-        queue.deinit();
+        queue.stop(std.testing.io);
+        queue.deinit(std.testing.io);
     }
     const source = [_]u8{ 1, 2, 3, 4 };
 
-    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(1, &source, 1, 1));
-    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(2, &source, 1, 1));
+    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(std.testing.io, 1, &source, 1, 1));
+    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(std.testing.io, 2, &source, 1, 1));
 
-    var owned = queue.tryTake() orelse return error.ExpectedWorkingFrame;
+    var owned = queue.tryTake(std.testing.io) orelse return error.ExpectedWorkingFrame;
     owned.deinit();
-    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(2, &source, 1, 1));
+    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(std.testing.io, 2, &source, 1, 1));
 
-    try std.testing.expect(queue.publish(mailbox.Result.success(1, blankKeypoints(), 63)));
-    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(2, &source, 1, 1));
+    try std.testing.expect(queue.publish(std.testing.io, mailbox.Result.success(1, blankKeypoints(), 63)));
+    try std.testing.expectEqual(mailbox.SubmitStatus.busy, queue.submitCopy(std.testing.io, 2, &source, 1, 1));
 
-    const result = queue.poll() orelse return error.ExpectedResult;
+    const result = queue.poll(std.testing.io) orelse return error.ExpectedResult;
     try std.testing.expect(result.ok);
     try std.testing.expectEqual(@as(u32, 63), result.elapsed_ms);
-    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(2, &source, 1, 1));
+    try std.testing.expectEqual(mailbox.SubmitStatus.queued, queue.submitCopy(std.testing.io, 2, &source, 1, 1));
 }
 
 test "failure text is bounded and shutdown rejects new frames" {
@@ -52,11 +54,12 @@ test "failure text is bounded and shutdown rejects new frames" {
     try std.testing.expect(!result.ok);
     try std.testing.expectEqual(mailbox.MAX_ERROR_BYTES, result.errorText().len);
 
-    var queue = mailbox.Queue.init(std.testing.allocator);
-    defer queue.deinit();
-    queue.stop();
+    var queue: mailbox.Queue = undefined;
+    queue.init(std.testing.allocator);
+    defer queue.deinit(std.testing.io);
+    queue.stop(std.testing.io);
     const source = [_]u8{ 1, 2, 3, 4 };
-    try std.testing.expectEqual(mailbox.SubmitStatus.stopped, queue.submitCopy(1, &source, 1, 1));
-    try std.testing.expect(queue.tryTake() == null);
-    try std.testing.expect(queue.poll() == null);
+    try std.testing.expectEqual(mailbox.SubmitStatus.stopped, queue.submitCopy(std.testing.io, 1, &source, 1, 1));
+    try std.testing.expect(queue.tryTake(std.testing.io) == null);
+    try std.testing.expect(queue.poll(std.testing.io) == null);
 }

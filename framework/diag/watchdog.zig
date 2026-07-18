@@ -6,7 +6,6 @@
 //! Also detects frozen processes via heartbeat file staleness.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("log.zig");
 const builtin = @import("builtin");
 
@@ -20,7 +19,7 @@ var g_initialized: bool = false;
 
 /// Spawn the watchdog.sh script as a detached background process.
 /// Linux only — /proc filesystem is required.
-pub fn init() void {
+pub fn init(io: std.Io) void {
     if (comptime builtin.os.tag != .linux) return;
     if (g_initialized) return;
     g_initialized = true;
@@ -37,11 +36,11 @@ pub fn init() void {
     g_clean_exit_path_len = ce.len;
 
     // Clean stale files
-    std.Io.Dir.cwd().deleteFile(host_io.io(), hb) catch {};
-    std.Io.Dir.cwd().deleteFile(host_io.io(), ce) catch {};
+    std.Io.Dir.cwd().deleteFile(io, hb) catch {};
+    std.Io.Dir.cwd().deleteFile(io, ce) catch {};
 
     // Find watchdog.sh
-    const script = findScript() orelse {
+    const script = findScript(io) orelse {
         log.print("[WATCHDOG] watchdog.sh not found, disabled\n", .{});
         return;
     };
@@ -62,39 +61,39 @@ pub fn init() void {
 
 /// Write current timestamp to the heartbeat file.
 /// Call every ~1 second from the main loop.
-pub fn heartbeat() void {
+pub fn heartbeat(io: std.Io) void {
     if (!g_initialized or g_heartbeat_path_len == 0) return;
 
-    const ts = host_io.timestamp();
+    const ts = std.Io.Clock.now(.real, io).toSeconds();
     var buf: [20]u8 = undefined;
     const ts_str = std.fmt.bufPrint(&buf, "{d}", .{ts}) catch return;
 
     // Write directly (not atomic — watchdog tolerates truncated reads)
     const path = g_heartbeat_path_buf[0..g_heartbeat_path_len];
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return;
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), ts_str) catch {};
+    const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+    defer file.close(io);
+    file.writeStreamingAll(io, ts_str) catch {};
 }
 
 /// Write the clean exit marker so the watchdog knows we shut down normally.
-pub fn markCleanExit() void {
+pub fn markCleanExit(io: std.Io) void {
     if (!g_initialized or g_clean_exit_path_len == 0) return;
 
     const path = g_clean_exit_path_buf[0..g_clean_exit_path_len];
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return;
-    file.close(host_io.io());
+    const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+    file.close(io);
 
     // Clean up heartbeat
-    std.Io.Dir.cwd().deleteFile(host_io.io(), g_heartbeat_path_buf[0..g_heartbeat_path_len]) catch {};
+    std.Io.Dir.cwd().deleteFile(io, g_heartbeat_path_buf[0..g_heartbeat_path_len]) catch {};
 }
 
-fn findScript() ?[]const u8 {
+fn findScript(io: std.Io) ?[]const u8 {
     const candidates = [_][]const u8{
         "scripts/watchdog.sh",
         "../scripts/watchdog.sh",
     };
     for (candidates) |path| {
-        std.Io.Dir.cwd().access(host_io.io(), path, .{}) catch continue;
+        std.Io.Dir.cwd().access(io, path, .{}) catch continue;
         return path;
     }
     return null;

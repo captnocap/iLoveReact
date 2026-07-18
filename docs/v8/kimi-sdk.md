@@ -273,7 +273,8 @@ and optional flags are appended:
 ```
 
 The child process uses piped stdin/stdout. Stderr is inherited by default.
-Stdout is set nonblocking after spawn.
+Stdout ownership moves to the shared `ChildStdout` injected-Io reader task and
+bounded queue after spawn; no descriptor flags are changed.
 
 ### Initialize
 
@@ -359,9 +360,11 @@ JSON-RPC id, `request_type`, arbitrary JSON `payload`, and exposes
 optional `result`, and optional `error_code` / `error_message`.
 
 `poll()` first drains queued inbound messages, then drains complete lines from
-`ReadBuffer`, then reads more bytes from nonblocking stdout. Invalid JSON lines
-are ignored. Oversized lines return `error.LineTooLong` once the buffer exceeds
-`max_line_bytes`.
+`ReadBuffer`, then drains bytes already available from the shared
+`ChildStdout` owner. Its cancelable `std.Io.Group` reader task feeds a bounded
+`std.Io.Queue`, so frame-facing polling never changes descriptor flags or waits
+on fd readiness. Invalid JSON lines are ignored. Oversized lines return
+`error.LineTooLong` once the buffer exceeds `max_line_bytes`.
 
 `waitForResponse(request_id)` repeatedly calls `poll()`, returns the matching
 response, and queues nonmatching inbound messages for later polling. It sleeps

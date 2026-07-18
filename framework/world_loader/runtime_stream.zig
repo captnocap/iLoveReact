@@ -43,7 +43,6 @@ const PhysicsColliders = m_state.PhysicsColliders;
 const clamp = m_state.clamp;
 const nowNs = m_state.nowNs;
 const keyDown = m_state.keyDown;
-const forceGaitEnv = m_player_assets.forceGaitEnv;
 const LIVE_POSE_STALE_FRAMES = m_player_assets.LIVE_POSE_STALE_FRAMES;
 const pendingPoseFor = m_player_assets.pendingPoseFor;
 const instanceYawRadians = m_instances.instanceYawRadians;
@@ -431,8 +430,8 @@ pub fn cameraColliderSet(self: anytype) ?PhysicsColliders {
     return null;
 }
 
-pub fn stepNow(self: anytype) void {
-    const ns = nowNs();
+pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
+    const ns = nowNs(io);
     const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
     self.last_ns = ns;
 
@@ -482,7 +481,7 @@ pub fn stepNow(self: anytype) void {
     const seated = self.player.posture != .none;
     // RJIT_FORCE_GAIT=1 drives the walk clip with no input — the headless
     // animation-repro hook (req_2781): `rjit shot` frames land mid-stride.
-    const moving = forceGaitEnv() or (!seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001);
+    const moving = self.force_gait or (!seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001);
     const airborne = !seated and (!self.player.grounded or @abs(self.player.vy) > 0.05);
     updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
     stepInteract(self, dt);
@@ -526,6 +525,6 @@ pub fn stepNow(self: anytype) void {
     // LIVEMESH req_1812: re-append the live mesh-prop draws AFTER the stream tail
     // (refreshStreamNodes truncated to stream_tail_start, dropping last frame's), so a
     // just-placed pepes/genmesh prop shows instantly by referencing its resident mesh.
-    applyLiveMeshProps(self);
+    applyLiveMeshProps(self, io, environ);
     self.frame += 1;
 }

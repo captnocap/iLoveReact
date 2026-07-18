@@ -13,7 +13,6 @@
 //! to `queueForPaint(node, rect)` which queues a quad via gpu.images.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const gpu = @import("gpu.zig");
@@ -102,8 +101,8 @@ fn decodeDataUrl(src: []const u8, alloc: std.mem.Allocator) ?[]u8 {
 }
 
 /// Read a file path's contents. Caller frees.
-fn readFile(path: []const u8, alloc: std.mem.Allocator) ?[]u8 {
-    return std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(64 * 1024 * 1024)) catch null;
+fn readFile(io: std.Io, path: []const u8, alloc: std.mem.Allocator) ?[]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(64 * 1024 * 1024)) catch null;
 }
 
 /// Bilinear box-downscale of an RGBA8 buffer into `dst` (dw×dh). Source-edge
@@ -144,7 +143,7 @@ fn resampleRgba(src: []const u8, sw: u32, sh: u32, dst: []u8, dw: u32, dh: u32) 
     }
 }
 
-fn load(src: []const u8) ?*Entry {
+fn load(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8) ?*Entry {
     if (g_count >= MAX_ENTRIES) return null;
     const device = gpu.getDevice() orelse return null;
     const queue = gpu.getQueue() orelse return null;
@@ -154,7 +153,7 @@ fn load(src: []const u8) ?*Entry {
         if (std.mem.startsWith(u8, src, "data:")) {
             break :blk decodeDataUrl(src, alloc) orelse return null;
         }
-        break :blk readFile(src, alloc) orelse return null;
+        break :blk readFile(io, src, alloc) orelse return null;
     };
     defer alloc.free(raw);
 
@@ -240,7 +239,7 @@ fn load(src: []const u8) ?*Entry {
     }
 
     const post_top_hash = std.hash.Wyhash.hash(0, pixels_slice[0..row_bytes]);
-    if (host_io.getenv("REACTJIT_VERBOSE_IMAGE_CACHE") != null) {
+    if (environ.get("REACTJIT_VERBOSE_IMAGE_CACHE") != null) {
         const tag_len: usize = @min(src.len, 48);
         log.print(
             "[image_cache] load src=\"{s}\" {d}x{d} fmt={s} pre_top={x} pre_bot={x} post_top={x} flipped={}\n",
@@ -307,13 +306,13 @@ fn load(src: []const u8) ?*Entry {
 /// Memoized get — decodes on first call, returns the cached entry thereafter.
 /// Returns null on decode failure (and marks a negative-cache slot so we
 /// don't re-decode a broken source every frame).
-fn getOrLoad(src: []const u8) ?*Entry {
+fn getOrLoad(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8) ?*Entry {
     if (src.len == 0) return null;
     if (find(src)) |entry| {
         if (entry.failed) return null;
         return entry;
     }
-    if (load(src)) |entry| return entry;
+    if (load(io, environ, src)) |entry| return entry;
     // Reserve a negative-cache slot so we don't re-attempt the decode every
     // frame. Reuse the source pointer as key.
     if (g_count < MAX_ENTRIES) {
@@ -332,8 +331,8 @@ fn getOrLoad(src: []const u8) ?*Entry {
 /// No-op when decode fails — the Image node renders as an empty rect (its
 /// parent's background shows through). Intrinsic sizing (w/h=0 inputs) is
 /// handled by the caller.
-pub fn queueQuad(src: []const u8, x: f32, y: f32, w: f32, h: f32, opacity: f32) void {
-    const entry = getOrLoad(src) orelse return;
+pub fn queueQuad(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8, x: f32, y: f32, w: f32, h: f32, opacity: f32) void {
+    const entry = getOrLoad(io, environ, src) orelse return;
     if (entry.bind_group) |bg| {
         images.queueQuad(x, y, w, h, opacity, bg);
     }
@@ -341,7 +340,7 @@ pub fn queueQuad(src: []const u8, x: f32, y: f32, w: f32, h: f32, opacity: f32) 
 
 /// Natural pixel dimensions of the decoded image. Used by layout for
 /// intrinsic sizing when an <Image> has no explicit width/height.
-pub fn measure(src: []const u8) struct { w: f32, h: f32 } {
-    const entry = getOrLoad(src) orelse return .{ .w = 0, .h = 0 };
+pub fn measure(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8) struct { w: f32, h: f32 } {
+    const entry = getOrLoad(io, environ, src) orelse return .{ .w = 0, .h = 0 };
     return .{ .w = @floatFromInt(entry.width), .h = @floatFromInt(entry.height) };
 }

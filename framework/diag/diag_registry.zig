@@ -103,7 +103,10 @@ pub fn severityFromStr(s: []const u8) Severity {
 /// shape recentJson emits per element). The v8 binding installs one that
 /// forwards to `__ffiEmit(DIAG_FEED_CHANNEL, json)` + event_bus.emit. Pure
 /// pointer → the registry stays free of V8/sqlite for the unit test.
-pub const FeedSink = *const fn (line_json: []const u8) void;
+pub const FeedSink = struct {
+    context: ?*anyopaque,
+    write: *const fn (context: ?*anyopaque, line_json: []const u8) void,
+};
 var g_sink: ?FeedSink = null;
 
 pub fn setFeedSink(sink: ?FeedSink) void {
@@ -237,7 +240,7 @@ pub fn setSampleDiv(id: []const u8, div: u32) void {
 /// Order is deliberately cheapest-gate-first: channel lookup, enabled check,
 /// then the sampling counter — only a line that clears all three touches the
 /// ring or the sink.
-pub fn emit(channel_id: []const u8, severity: Severity, msg: []const u8, fields_json: []const u8) u64 {
+pub fn emit(io: std.Io, channel_id: []const u8, severity: Severity, msg: []const u8, fields_json: []const u8) u64 {
     if (!g_inited) init();
     const idx = findOrCreate(channel_id) orelse return 0;
     var ch = &g_channels[idx];
@@ -260,7 +263,7 @@ pub fn emit(channel_id: []const u8, severity: Severity, msg: []const u8, fields_
     const slot: usize = @intCast(g_ring_count % RING_SIZE);
     var e = &g_ring[slot];
     e.seq = seq;
-    e.ts_ms = std.Io.Clock.now(.real, std.Io.Threaded.global_single_threaded.io()).toMilliseconds();
+    e.ts_ms = std.Io.Clock.now(.real, io).toMilliseconds();
     e.severity = severity;
     e.ch_idx = @intCast(idx);
 
@@ -284,15 +287,15 @@ pub fn emit(channel_id: []const u8, severity: Severity, msg: []const u8, fields_
         writeEntryJson(&writer, e, ch.idSlice()) catch {
             return seq; // sink skipped on overflow; ring already has the line
         };
-        sink(writer.buffered());
+        sink.write(sink.context, writer.buffered());
     }
 
     return seq;
 }
 
 /// String-severity convenience for the v8 binding (the JS door passes a string).
-pub fn emitStr(channel_id: []const u8, severity_str: []const u8, msg: []const u8, fields_json: []const u8) u64 {
-    return emit(channel_id, severityFromStr(severity_str), msg, fields_json);
+pub fn emitStr(io: std.Io, channel_id: []const u8, severity_str: []const u8, msg: []const u8, fields_json: []const u8) u64 {
+    return emit(io, channel_id, severityFromStr(severity_str), msg, fields_json);
 }
 
 // ── Serialization ───────────────────────────────────────────────────────────

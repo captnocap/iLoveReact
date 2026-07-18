@@ -335,7 +335,7 @@ INSERT OR REPLACE INTO store (namespace, key, value, updated_at)
 VALUES (?, ?, ?, ?)
 ```
 
-`updated_at` is `std.time.timestamp()`.
+`updated_at` is `std.Io.Clock.now(.real, io).toSeconds()`.
 
 The schema is created during `localstore.init()`:
 

@@ -84,7 +84,7 @@ export const agentMemoryMockData: {
       filename: 'behavior.md',
       name: 'Behavior',
       description:
-        'Cross-cutting rules: no Explore agent, Zig 0.15.2, git main-only, regenerate don\'t port.',
+        'Cross-cutting rules: no Explore agent, Zig 0.16.0, git main-only, regenerate don\'t port.',
       type: 'feedback',
       body:
         'Rule: never invoke Explore in this repo. Why: it produced materially false feature reports; direct reads are faster and correct. How to apply: use Read/Grep/Glob/Bash directly.',

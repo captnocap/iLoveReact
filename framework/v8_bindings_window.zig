@@ -67,6 +67,7 @@ fn windowIsMaximized(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn openWindow(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const alloc = std.heap.page_allocator;
     const title_buf = argStringAlloc(alloc, info, 0) orelse {
         setUndefined(info);
@@ -90,7 +91,7 @@ fn openWindow(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const copy_len = @min(title_buf.len, 255);
     @memcpy(title_buf_z[0..copy_len], title_buf[0..copy_len]);
     title_buf_z[copy_len] = 0;
-    _ = windows.open(.{
+    _ = windows.open(host.io, host.environ, .{
         .title = &title_buf_z,
         .width = width,
         .height = height,

@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
+const HostContext = @import("framework/host_context.zig");
 const v8 = @import("v8");
 
 comptime {
@@ -32,18 +33,19 @@ fn hostLog(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     std.debug.print("[js] {s}\n", .{out.items});
 }
 
-pub fn main() !void {
-    v8rt.initVM();
+pub fn main(init: std.process.Init) !void {
+    var host = HostContext.fromInit(init);
+    v8rt.initVM(&host);
     defer v8rt.teardownVM();
 
     v8rt.registerHostFn("hostLog", hostLog);
 
-    v8rt.evalScript(
+    v8rt.evalScript(&host,
         \\hostLog('hello from v8', 1 + 2, 'pi=' + Math.PI);
         \\globalThis.__tick = function(n) { hostLog('tick', n); };
     );
 
-    v8rt.callGlobalInt("__tick", 42);
+    v8rt.callGlobalInt(&host, "__tick", 42);
 
     // ── GC-binding proof (req_0301 GAP 1) ───────────────────────────────────
     // Allocate hard in JS to force V8 to collect, then read the shim's counters.
@@ -52,7 +54,7 @@ pub fn main() !void {
     // the real bug (wrong isolate handle / mangled name / callbacks not invoked).
     _ = v8rt.gcTakeNs();
     _ = v8rt.gcTakeCount();
-    v8rt.evalScript(
+    v8rt.evalScript(&host,
         \\(function () {
         \\  var sink = [];
         \\  for (var i = 0; i < 2000000; i++) {

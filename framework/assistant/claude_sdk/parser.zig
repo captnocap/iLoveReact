@@ -1,7 +1,7 @@
 //! NDJSON line → Message parser for the Claude Code SDK.
 //!
 //! Ported from codeberg/duhnist/claude-code-sdk-zig parser.zig.
-//! Adjusted for Zig 0.15.2 unmanaged ArrayList API.
+//! Adjusted for Zig 0.16's unmanaged ArrayList API.
 //! All strings in the returned Message are allocated from the caller's arena.
 
 const std = @import("std");
@@ -263,7 +263,7 @@ fn dupeStr(arena: std.mem.Allocator, s: []const u8) ![]const u8 {
 }
 
 /// Serialize a std.json.Value back to its JSON string representation.
-/// Uses std.json.Stringify.valueAlloc on 0.15.2.
+/// Uses std.json.Stringify.valueAlloc from the pinned standard library.
 fn stringifyAlloc(arena: std.mem.Allocator, value: std.json.Value) ![]const u8 {
     return std.json.Stringify.valueAlloc(arena, value, .{});
 }

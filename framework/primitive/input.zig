@@ -48,11 +48,12 @@ pub const InputState = struct {
 };
 
 var inputs: [MAX_INPUTS]InputState = [_]InputState{.{}} ** MAX_INPUTS;
-var on_change_callbacks: [MAX_INPUTS]?*const fn () void = [_]?*const fn () void{null} ** MAX_INPUTS;
-var on_submit_callbacks: [MAX_INPUTS]?*const fn () void = [_]?*const fn () void{null} ** MAX_INPUTS;
-var on_focus_callbacks: [MAX_INPUTS]?*const fn () void = [_]?*const fn () void{null} ** MAX_INPUTS;
-var on_blur_callbacks: [MAX_INPUTS]?*const fn () void = [_]?*const fn () void{null} ** MAX_INPUTS;
-var on_key_callbacks: [MAX_INPUTS]?*const fn (key: c_int, mods: u16) void = [_]?*const fn (key: c_int, mods: u16) void{null} ** MAX_INPUTS;
+var callback_contexts: [MAX_INPUTS]?*anyopaque = [_]?*anyopaque{null} ** MAX_INPUTS;
+var on_change_callbacks: [MAX_INPUTS]?*const fn (?*anyopaque) void = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+var on_submit_callbacks: [MAX_INPUTS]?*const fn (?*anyopaque) void = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+var on_focus_callbacks: [MAX_INPUTS]?*const fn (?*anyopaque) void = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+var on_blur_callbacks: [MAX_INPUTS]?*const fn (?*anyopaque) void = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+var on_key_callbacks: [MAX_INPUTS]?*const fn (?*anyopaque, key: c_int, mods: u16) void = [_]?*const fn (?*anyopaque, key: c_int, mods: u16) void{null} ** MAX_INPUTS;
 var focused_id: ?u8 = null;
 
 // ── Submit event bus ────────────────────────────────────────────────────
@@ -112,19 +113,23 @@ pub fn registerMultiline(id: u8) void {
     inputs[id].multiline = true;
 }
 
-pub fn setOnChange(id: u8, cb: *const fn () void) void {
+pub fn setCallbackContext(id: u8, context: ?*anyopaque) void {
+    if (id < MAX_INPUTS) callback_contexts[id] = context;
+}
+
+pub fn setOnChange(id: u8, cb: *const fn (?*anyopaque) void) void {
     if (id < MAX_INPUTS) on_change_callbacks[id] = cb;
 }
-pub fn setOnSubmit(id: u8, cb: *const fn () void) void {
+pub fn setOnSubmit(id: u8, cb: *const fn (?*anyopaque) void) void {
     if (id < MAX_INPUTS) on_submit_callbacks[id] = cb;
 }
-pub fn setOnFocus(id: u8, cb: *const fn () void) void {
+pub fn setOnFocus(id: u8, cb: *const fn (?*anyopaque) void) void {
     if (id < MAX_INPUTS) on_focus_callbacks[id] = cb;
 }
-pub fn setOnBlur(id: u8, cb: *const fn () void) void {
+pub fn setOnBlur(id: u8, cb: *const fn (?*anyopaque) void) void {
     if (id < MAX_INPUTS) on_blur_callbacks[id] = cb;
 }
-pub fn setOnKey(id: u8, cb: *const fn (c_int, u16) void) void {
+pub fn setOnKey(id: u8, cb: *const fn (?*anyopaque, c_int, u16) void) void {
     if (id < MAX_INPUTS) on_key_callbacks[id] = cb;
 }
 
@@ -145,6 +150,7 @@ pub fn unregister(id: u8) void {
     on_focus_callbacks[id] = null;
     on_blur_callbacks[id] = null;
     on_key_callbacks[id] = null;
+    callback_contexts[id] = null;
     inputs[id] = .{};
 }
 
@@ -167,20 +173,20 @@ pub fn focus(id: u8) void {
     }
     if (focused_id) |prev| {
         if (prev < MAX_INPUTS) {
-            if (on_blur_callbacks[prev]) |cb| cb();
+            if (on_blur_callbacks[prev]) |cb| cb(callback_contexts[prev]);
         }
     }
     focused_id = id;
     cursor_blink = 0;
     cursor_visible = true;
-    if (on_focus_callbacks[id]) |cb| cb();
+    if (on_focus_callbacks[id]) |cb| cb(callback_contexts[id]);
 }
 
 pub fn unfocus() void {
     if (focused_id) |prev| {
         focused_id = null;
         if (prev < MAX_INPUTS) {
-            if (on_blur_callbacks[prev]) |cb| cb();
+            if (on_blur_callbacks[prev]) |cb| cb(callback_contexts[prev]);
         }
         return;
     }
@@ -202,7 +208,9 @@ pub fn getFocusedId() ?u8 {
 
 // ── UTF-8 continuation-byte walkers ─────────────────────────────────
 
-fn isContByte(b: u8) bool { return b >= 0x80 and b < 0xC0; }
+fn isContByte(b: u8) bool {
+    return b >= 0x80 and b < 0xC0;
+}
 
 /// Step one codepoint left from `pos` in `buf`. Returns the new byte position.
 fn stepLeft(buf: []const u8, pos: u32) u32 {
@@ -474,7 +482,10 @@ pub fn handleTextInput(text: [*:0]const u8) void {
     // Strip newlines in single-line mode
     if (!inp.multiline) {
         var has_newline = false;
-        for (bytes) |b| if (b == '\n' or b == '\r') { has_newline = true; break; };
+        for (bytes) |b| if (b == '\n' or b == '\r') {
+            has_newline = true;
+            break;
+        };
         if (has_newline) {
             pushUndo(id, inp);
             var changed = false;
@@ -484,8 +495,9 @@ pub fn handleTextInput(text: [*:0]const u8) void {
                 var tmp: [1]u8 = .{b};
                 changed = insertBytes(inp, tmp[0..]) or changed;
             }
-            cursor_blink = 0; cursor_visible = true;
-            if (on_change_callbacks[id]) |cb| cb();
+            cursor_blink = 0;
+            cursor_visible = true;
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
             if (changed) dispatchInputChange(id);
             return;
         }
@@ -494,8 +506,9 @@ pub fn handleTextInput(text: [*:0]const u8) void {
     pushUndo(id, inp);
     if (inp.has_selection) _ = deleteSelection(inp);
     if (insertBytes(inp, bytes)) {
-        cursor_blink = 0; cursor_visible = true;
-        if (on_change_callbacks[id]) |cb| cb();
+        cursor_blink = 0;
+        cursor_visible = true;
+        if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         dispatchInputChange(id);
     }
 }
@@ -503,7 +516,7 @@ pub fn handleTextInput(text: [*:0]const u8) void {
 pub fn handleKey(sym: c_int, mods: u16) bool {
     const id = focused_id orelse return false;
     if (id >= MAX_INPUTS) return false;
-    if (on_key_callbacks[id]) |cb| cb(sym, mods);
+    if (on_key_callbacks[id]) |cb| cb(callback_contexts[id], sym, mods);
     const inp = &inputs[id];
     const prev_len = inp.len;
     const shift = (mods & c.SDL_KMOD_SHIFT) != 0;
@@ -519,7 +532,8 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             inp.cursor = stepLeft(inp.buf[0..inp.len], inp.cursor);
         }
         if (shift) updateSelectionEnd(inp) else if (!inp.has_selection) clearSelection(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
     if (sym == c.SDLK_RIGHT) {
@@ -532,21 +546,24 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             inp.cursor = stepRight(inp.buf[0..inp.len], inp.cursor);
         }
         if (shift) updateSelectionEnd(inp) else if (!inp.has_selection) clearSelection(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
     if (sym == c.SDLK_HOME) {
         if (shift) startOrExtendSelection(inp) else clearSelection(inp);
         inp.cursor = 0;
         if (shift) updateSelectionEnd(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
     if (sym == c.SDLK_END) {
         if (shift) startOrExtendSelection(inp) else clearSelection(inp);
         inp.cursor = inp.len;
         if (shift) updateSelectionEnd(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
 
@@ -560,16 +577,17 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
                     g_last_submit_len = inp.len;
                     g_last_submit_id = @intCast(id);
                 }
-                if (on_submit_callbacks[id]) |cb| cb();
+                if (on_submit_callbacks[id]) |cb| cb(callback_contexts[id]);
                 return true;
             }
             pushUndo(id, inp);
             if (inp.has_selection) _ = deleteSelection(inp);
             var nl: [1]u8 = .{'\n'};
             _ = insertBytes(inp, nl[0..]);
-            cursor_blink = 0; cursor_visible = true;
+            cursor_blink = 0;
+            cursor_visible = true;
             if (inp.len != prev_len) {
-                if (on_change_callbacks[id]) |cb| cb();
+                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
             }
             return true;
         }
@@ -581,7 +599,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             g_last_submit_len = inp.len;
             g_last_submit_id = @intCast(id);
         }
-        if (on_submit_callbacks[id]) |cb| cb();
+        if (on_submit_callbacks[id]) |cb| cb(callback_contexts[id]);
         return true;
     }
 
@@ -590,11 +608,12 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
         if (inp.multiline and inp.editable) {
             pushUndo(id, inp);
             if (inp.has_selection) _ = deleteSelection(inp);
-            var spaces: [4]u8 = .{' ',' ',' ',' '};
+            var spaces: [4]u8 = .{ ' ', ' ', ' ', ' ' };
             _ = insertBytes(inp, spaces[0..]);
-            cursor_blink = 0; cursor_visible = true;
+            cursor_blink = 0;
+            cursor_visible = true;
             if (inp.len != prev_len) {
-                if (on_change_callbacks[id]) |cb| cb();
+                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
             }
             return true;
         }
@@ -640,9 +659,10 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             inp.len -= del_len;
             inp.cursor = new_pos;
         }
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
@@ -660,9 +680,10 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             }
             inp.len -= del_len;
         }
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
@@ -673,7 +694,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
 pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
     const id = focused_id orelse return false;
     if (id >= MAX_INPUTS) return false;
-    if (on_key_callbacks[id]) |cb| cb(sym, mods);
+    if (on_key_callbacks[id]) |cb| cb(callback_contexts[id], sym, mods);
     const inp = &inputs[id];
     const shift = (mods & c.SDL_KMOD_SHIFT) != 0;
     const prev_len = inp.len;
@@ -683,14 +704,16 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
         if (shift) startOrExtendSelection(inp) else clearSelection(inp);
         wordJumpLeft(inp);
         if (shift) updateSelectionEnd(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
     if (sym == c.SDLK_RIGHT) {
         if (shift) startOrExtendSelection(inp) else clearSelection(inp);
         wordJumpRight(inp);
         if (shift) updateSelectionEnd(inp);
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         return true;
     }
 
@@ -730,7 +753,7 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
                 _ = c.SDL_SetClipboardText(@ptrCast(&clip_buf));
                 pushUndo(id, inp);
                 _ = deleteSelection(inp);
-                if (on_change_callbacks[id]) |cb| cb();
+                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
             }
         }
         return true;
@@ -760,9 +783,10 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
                 } else {
                     _ = insertBytes(inp, span);
                 }
-                cursor_blink = 0; cursor_visible = true;
+                cursor_blink = 0;
+                cursor_visible = true;
                 if (inp.len != prev_len) {
-                    if (on_change_callbacks[id]) |cb| cb();
+                    if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
                 }
             }
         }
@@ -774,14 +798,14 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
         if (!inp.editable) return true;
         const did = if (shift) doRedo(id, inp) else doUndo(id, inp);
         if (did) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
     if (sym == c.SDLK_Y) {
         if (!inp.editable) return true;
         if (doRedo(id, inp)) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
@@ -803,9 +827,10 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
             }
             inp.len -= del_len;
         }
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
@@ -828,9 +853,10 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
             }
             inp.len -= del_len;
         }
-        cursor_blink = 0; cursor_visible = true;
+        cursor_blink = 0;
+        cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb();
+            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
         }
         return true;
     }
@@ -857,11 +883,12 @@ pub fn clear(id: u8) void {
 /// slot ids are mount-order indices, not stable across reloads.
 pub fn clearAll() void {
     inputs = [_]InputState{.{}} ** MAX_INPUTS;
-    on_change_callbacks = [_]?*const fn () void{null} ** MAX_INPUTS;
-    on_submit_callbacks = [_]?*const fn () void{null} ** MAX_INPUTS;
-    on_focus_callbacks = [_]?*const fn () void{null} ** MAX_INPUTS;
-    on_blur_callbacks = [_]?*const fn () void{null} ** MAX_INPUTS;
-    on_key_callbacks = [_]?*const fn (key: c_int, mods: u16) void{null} ** MAX_INPUTS;
+    callback_contexts = [_]?*anyopaque{null} ** MAX_INPUTS;
+    on_change_callbacks = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+    on_submit_callbacks = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+    on_focus_callbacks = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+    on_blur_callbacks = [_]?*const fn (?*anyopaque) void{null} ** MAX_INPUTS;
+    on_key_callbacks = [_]?*const fn (?*anyopaque, key: c_int, mods: u16) void{null} ** MAX_INPUTS;
     focused_id = null;
     undo_input_id = null;
 }

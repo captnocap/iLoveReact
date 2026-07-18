@@ -1,22 +1,21 @@
-//! HTTP/HTTPS client — std.http.Client worker pool with ring buffer communication.
+//! HTTP/HTTPS client — std.http.Client worker pool with bounded Io queues.
 //!
-//! Replaces the previous libcurl implementation. Same architecture: worker threads
-//! block on the HTTP request, main thread polls responses each frame.
+//! Replaces the previous libcurl implementation. Worker tasks block on the
+//! HTTP request through the injected I/O implementation, while the main task
+//! polls responses each frame.
 //!
 //! Usage from generated code:
 //!   const http = @import("net/http.zig");
-//!   http.init();
-//!   http.request(1, .{ .url = "https://example.com" });
+//!   try http.init(io, environ_map);
+//!   http.request(io, 1, .{ .url = "https://example.com" });
 //!   // each frame:
 //!   var responses: [16]http.Response = undefined;
-//!   const n = http.poll(&responses);
+//!   const n = http.poll(io, &responses);
 //!   for (responses[0..n]) |resp| { ... }
 //!   // on shutdown:
-//!   http.destroy();
+//!   http.destroy(io);
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -104,29 +103,40 @@ const Request = struct {
     stream: bool = false,
     download_path: [MAX_URL]u8 = undefined,
     download_path_len: usize = 0,
-    shutdown: bool = false, // sentinel to tell worker to exit
 };
 
 // ── Module state ─────────────────────────────────────────────────────────
 
-var request_queue: RingBuffer(Request, QUEUE_SIZE) = .{};
-var response_queue: RingBuffer(Response, QUEUE_SIZE) = .{};
-var workers: [MAX_WORKERS]?std.Thread = .{ null, null, null, null };
+var request_storage: [QUEUE_SIZE]Request = undefined;
+var response_storage: [QUEUE_SIZE]Response = undefined;
+var request_queue: std.Io.Queue(Request) = .init(&request_storage);
+var response_queue: std.Io.Queue(Response) = .init(&response_storage);
+var worker_tasks: std.Io.Group = .init;
 var initialized = false;
+
+const WorkerContext = struct {
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+};
 
 // ── Public API ───────────────────────────────────────────────────────────
 
-/// Initialize the HTTP client. Spawns worker threads.
-pub fn init() void {
+/// Initialize the HTTP client. Starts cancelable workers on the injected I/O
+/// implementation; no process-global executor or raw thread handles are used.
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map) !void {
     if (initialized) return;
-    for (0..MAX_WORKERS) |i| {
-        workers[i] = std.Thread.spawn(.{}, workerMain, .{}) catch null;
+    request_queue = .init(&request_storage);
+    response_queue = .init(&response_storage);
+    worker_tasks = .init;
+    errdefer worker_tasks.cancel(io);
+    for (0..MAX_WORKERS) |_| {
+        try worker_tasks.concurrent(io, workerMain, .{WorkerContext{ .io = io, .environ = environ }});
     }
     initialized = true;
 }
 
 /// Queue an HTTP request. Non-blocking. Returns false if queue is full.
-pub fn request(id: u32, opts: RequestOpts) bool {
+pub fn request(io: std.Io, id: u32, opts: RequestOpts) bool {
     var req = Request{};
     req.id = id;
 
@@ -173,18 +183,18 @@ pub fn request(id: u32, opts: RequestOpts) bool {
         req.download_path_len = dlen;
     }
 
-    return request_queue.push(req);
+    return (request_queue.putUncancelable(io, &.{req}, 0) catch 0) == 1;
 }
 
 /// Perform a synchronous HTTP request on the calling thread.
 /// Returns a fully populated Response including final_url and content_type.
-pub fn fetchSync(opts: RequestOpts) Response {
+pub fn fetchSync(io: std.Io, environ: *const std.process.Environ.Map, opts: RequestOpts) Response {
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
+    var client: std.http.Client = .{ .allocator = alloc, .io = io };
     defer client.deinit();
-    if (host_io.environ().createMap(alloc)) |*env_map| {
-        client.initDefaultProxies(alloc, env_map) catch {};
-    } else |_| {}
+    var proxy_arena = std.heap.ArenaAllocator.init(alloc);
+    defer proxy_arena.deinit();
+    client.initDefaultProxies(proxy_arena.allocator(), environ) catch {};
 
     var req = Request{};
     req.id = 0;
@@ -222,57 +232,36 @@ pub fn fetchSync(opts: RequestOpts) Response {
 }
 
 /// Poll for completed responses. Non-blocking — returns count.
-pub fn poll(out: []Response) usize {
-    return response_queue.drain(out);
+pub fn poll(io: std.Io, out: []Response) usize {
+    return response_queue.getUncancelable(io, out, 0) catch 0;
 }
 
 /// Shutdown all workers and cleanup.
-pub fn destroy() void {
+pub fn destroy(io: std.Io) void {
     if (!initialized) return;
-    // Send shutdown sentinels — retry until all are queued
-    var sent: usize = 0;
-    while (sent < MAX_WORKERS) {
-        var sentinel = Request{};
-        sentinel.shutdown = true;
-        if (request_queue.push(sentinel)) {
-            sent += 1;
-        } else {
-            // Queue full — drain responses to make room
-            var discard: [16]Response = undefined;
-            _ = response_queue.drain(&discard);
-            host_io.sleep(1_000_000); // 1ms
-        }
-    }
-    // Join all threads
-    for (0..MAX_WORKERS) |i| {
-        if (workers[i]) |t| t.join();
-        workers[i] = null;
-    }
+    worker_tasks.cancel(io);
     initialized = false;
 }
 
 // ── Worker thread ────────────────────────────────────────────────────────
 
-fn workerMain() void {
+fn workerMain(context: WorkerContext) std.Io.Cancelable!void {
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
+    const io = context.io;
+    var client: std.http.Client = .{ .allocator = alloc, .io = io };
     defer client.deinit();
-    if (host_io.environ().createMap(alloc)) |*env_map| {
-        client.initDefaultProxies(alloc, env_map) catch {};
-    } else |_| {}
+    var proxy_arena = std.heap.ArenaAllocator.init(alloc);
+    defer proxy_arena.deinit();
+    client.initDefaultProxies(proxy_arena.allocator(), context.environ) catch {};
 
     while (true) {
-        const req = blk: {
-            while (true) {
-                if (request_queue.pop()) |r| break :blk r;
-                host_io.sleep(1_000_000); // 1ms
-            }
+        const req = request_queue.getOne(io) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            error.Closed => return,
         };
 
-        if (req.shutdown) return;
-
         if (req.stream or req.download_path_len > 0) {
-            executeStreamOrDownload(&client, &req);
+            try executeStreamOrDownload(io, &client, &req);
             continue;
         }
 
@@ -280,16 +269,17 @@ fn workerMain() void {
         var resp = Response{};
         resp.id = req.id;
         executeRequestOnClient(&client, &req, &resp) catch |err| {
+            if (err == error.Canceled) return error.Canceled;
             resp.response_type = .err;
             const msg = @errorName(err);
             const elen = @min(msg.len, MAX_ERROR);
             @memcpy(resp.error_msg[0..elen], msg[0..elen]);
             resp.error_len = elen;
         };
-        // Retry push until response is queued (don't drop responses)
-        while (!response_queue.push(resp)) {
-            host_io.sleep(1_000_000); // 1ms backoff
-        }
+        response_queue.putOne(io, resp) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            error.Closed => return,
+        };
     }
 }
 
@@ -313,6 +303,13 @@ fn buildExtraHeaders(req: *const Request) [MAX_HEADERS]std.http.Header {
         };
     }
     return extra_headers;
+}
+
+fn queueResponse(io: std.Io, response: Response) std.Io.Cancelable!void {
+    response_queue.putOne(io, response) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
+        error.Closed => return,
+    };
 }
 
 fn executeRequestOnClient(client: *std.http.Client, req: *const Request, resp: *Response) !void {
@@ -408,7 +405,7 @@ fn executeRequestOnClient(client: *std.http.Client, req: *const Request, resp: *
 // read, real streaming preserved) AND atomic responses that arrive and
 // close at once (one chunk, then done) — e.g. the claudewrap bridge, whose
 // MCP/transcript reply lands all at once with nothing to stream.
-fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_out: *u16) !void {
+fn streamRequestOnClient(io: std.Io, client: *std.http.Client, req: *const Request, status_out: *u16) !void {
     const url = req.url[0..req.url_len];
     const method = methodFromReq(req);
     var extra_headers = buildExtraHeaders(req);
@@ -451,9 +448,7 @@ fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_o
             const to_copy = @min(n - off, MAX_BODY);
             @memcpy(chunk.body[0..to_copy], buf[off .. off + to_copy]);
             chunk.body_len = to_copy;
-            while (!response_queue.push(chunk)) {
-                host_io.sleep(1_000_000); // 1ms backoff if queue full
-            }
+            try queueResponse(io, chunk);
             off += to_copy;
         }
     }
@@ -462,14 +457,16 @@ fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_o
 // ── Download ─────────────────────────────────────────────────────────────
 
 const DownloadWriter = struct {
+    io: std.Io,
     req_id: u32,
     file: std.Io.File,
     bytes_written: usize = 0,
     last_emit_ms: i64 = 0,
     interface: std.Io.Writer,
 
-    pub fn init(req_id: u32, file: std.Io.File) DownloadWriter {
+    pub fn init(io: std.Io, req_id: u32, file: std.Io.File) DownloadWriter {
         return .{
+            .io = io,
             .req_id = req_id,
             .file = file,
             .interface = .{
@@ -488,11 +485,11 @@ const DownloadWriter = struct {
         var s: usize = 0;
         while (s < splat) : (s += 1) {
             for (data) |slice| {
-                self.file.writeStreamingAll(host_io.io(), slice) catch return error.WriteFailed;
+                self.file.writeStreamingAll(self.io, slice) catch return error.WriteFailed;
                 total += slice.len;
                 self.bytes_written += slice.len;
 
-                const now_ms = host_io.milliTimestamp();
+                const now_ms = std.Io.Clock.now(.real, self.io).toMilliseconds();
                 if (now_ms - self.last_emit_ms >= 100) {
                     self.last_emit_ms = now_ms;
                     var pr = Response{};
@@ -500,7 +497,7 @@ const DownloadWriter = struct {
                     pr.response_type = .progress;
                     const written = std.fmt.bufPrint(&pr.body, "{{\"d\":{d},\"t\":0}}", .{self.bytes_written}) catch return error.WriteFailed;
                     pr.body_len = written.len;
-                    _ = response_queue.push(pr); // drop on full — progress is best-effort
+                    _ = response_queue.putUncancelable(self.io, &.{pr}, 0) catch 0; // best-effort
                 }
             }
         }
@@ -510,7 +507,7 @@ const DownloadWriter = struct {
 
 // ── Streaming + Download execution ───────────────────────────────────────
 
-fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
+fn executeStreamOrDownload(io: std.Io, client: *std.http.Client, req: *const Request) std.Io.Cancelable!void {
     const url = req.url[0..req.url_len];
     const method = methodFromReq(req);
     var extra_headers = buildExtraHeaders(req);
@@ -518,7 +515,7 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
 
     if (req.stream) {
         var status: u16 = 0;
-        const result = streamRequestOnClient(client, req, &status);
+        const result = streamRequestOnClient(io, client, req, &status);
 
         var done = Response{};
         done.id = req.id;
@@ -526,18 +523,18 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             done.response_type = .complete;
             done.status = status;
         } else |err| {
+            if (err == error.Canceled) return error.Canceled;
             done.response_type = .err;
             const msg = @errorName(err);
             const elen = @min(msg.len, MAX_ERROR);
             @memcpy(done.error_msg[0..elen], msg[0..elen]);
             done.error_len = elen;
         }
-        while (!response_queue.push(done)) {
-            host_io.sleep(1_000_000);
-        }
+        try queueResponse(io, done);
     } else {
         // Download mode
-        const file = std.Io.Dir.cwd().createFile(host_io.io(), req.download_path[0..req.download_path_len], .{}) catch |err| {
+        const file = std.Io.Dir.cwd().createFile(io, req.download_path[0..req.download_path_len], .{}) catch |err| {
+            if (err == error.Canceled) return error.Canceled;
             var done = Response{};
             done.id = req.id;
             done.response_type = .err;
@@ -545,14 +542,12 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             const elen = @min(msg.len, MAX_ERROR);
             @memcpy(done.error_msg[0..elen], msg[0..elen]);
             done.error_len = elen;
-            while (!response_queue.push(done)) {
-                host_io.sleep(1_000_000);
-            }
+            try queueResponse(io, done);
             return;
         };
-        defer file.close(host_io.io());
+        defer file.close(io);
 
-        var dl_writer = DownloadWriter.init(req.id, file);
+        var dl_writer = DownloadWriter.init(io, req.id, file);
         const result = client.fetch(.{
             .location = .{ .url = url },
             .method = method,
@@ -569,14 +564,25 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             done.response_type = .complete;
             done.status = @intFromEnum(r.status);
         } else |err| {
+            if (err == error.Canceled) return error.Canceled;
             done.response_type = .err;
             const msg = @errorName(err);
             const elen = @min(msg.len, MAX_ERROR);
             @memcpy(done.error_msg[0..elen], msg[0..elen]);
             done.error_len = elen;
         }
-        while (!response_queue.push(done)) {
-            host_io.sleep(1_000_000);
-        }
+        try queueResponse(io, done);
     }
+}
+
+test "public HTTP API compiles" {
+    std.testing.refAllDecls(@This());
+}
+
+test "idle HTTP workers cancel without sentinels" {
+    var environ = try std.testing.environ.createMap(std.testing.allocator);
+    defer environ.deinit();
+
+    try init(std.testing.io, &environ);
+    destroy(std.testing.io);
 }

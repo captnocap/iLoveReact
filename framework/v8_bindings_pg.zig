@@ -55,13 +55,14 @@ fn setString(info: v8.FunctionCallbackInfo, s: []const u8) void {
 
 fn hostConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const a = std.heap.page_allocator;
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const a = host.gpa;
     const uri = argStringAlloc(a, info, 0) orelse {
         setNumber(info, 0);
         return;
     };
     defer a.free(uri);
-    const handle = fpg.connect(uri);
+    const handle = fpg.connect(host.io, host.environ, uri);
     setNumber(info, @intCast(handle));
 }
 
@@ -74,7 +75,7 @@ fn hostClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostExec(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const a = std.heap.page_allocator;
+    const a = v8_runtime.hostContext(info.getIsolate()).gpa;
     const h = argI32(info, 0, 0);
     if (h <= 0) {
         setBool(info, false);
@@ -92,7 +93,7 @@ fn hostExec(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostQueryJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const a = std.heap.page_allocator;
+    const a = v8_runtime.hostContext(info.getIsolate()).gpa;
     const h = argI32(info, 0, 0);
     if (h <= 0) {
         setString(info, "[]");

@@ -27,433 +27,453 @@
 //!   ← {"ok":true,"alive":true}
 
 const std = @import("std");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
 const log = @import("../diag/log.zig");
+const transport = @import("../net/transport.zig");
 const vterm_mod = @import("vterm.zig");
 const classifier = @import("classifier.zig");
-const posix = @import("../net/sysx.zig");
-const host_io = @import("../host_io.zig");
 
 const MAX_CLIENTS = 4;
 const READ_BUF_SIZE = 4096;
 const WRITE_BUF_SIZE = 32 * 1024;
 
-var g_server_fd: ?posix.fd_t = null;
-var g_clients: [MAX_CLIENTS]?posix.fd_t = .{null} ** MAX_CLIENTS;
-var g_client_bufs: [MAX_CLIENTS][READ_BUF_SIZE]u8 = undefined;
-var g_client_buf_lens: [MAX_CLIENTS]usize = .{0} ** MAX_CLIENTS;
-var g_initialized = false;
-var g_sock_path_buf: [256]u8 = undefined;
-var g_sock_path_len: usize = 0;
+pub const Server = struct {
+    allocator: std.mem.Allocator,
+    listener: ?transport.ListenerPump = null,
+    clients: [MAX_CLIENTS]?transport.StreamPump = .{null} ** MAX_CLIENTS,
+    client_bufs: [MAX_CLIENTS][READ_BUF_SIZE]u8 = undefined,
+    client_buf_lens: [MAX_CLIENTS]usize = .{0} ** MAX_CLIENTS,
+    initialized: bool = false,
+    sock_path_buf: [256]u8 = undefined,
+    sock_path_len: usize = 0,
 
-pub fn init() void {
-    if (g_initialized) return;
-
-    // Linux-only: PTY remote control socket lives in /run/user/<uid>/
-    if (comptime @import("builtin").os.tag != .linux) return;
-
-    // Build socket path
-    const uid = std.os.linux.getuid();
-    g_sock_path_len = (std.fmt.bufPrint(&g_sock_path_buf, "/run/user/{d}/claude-sessions/supervisor.sock", .{uid}) catch return).len;
-    g_sock_path_buf[g_sock_path_len] = 0;
-    const path_z: [*:0]const u8 = @ptrCast(g_sock_path_buf[0..g_sock_path_len]);
-
-    // Remove stale socket
-    _ = std.Io.Dir.cwd().deleteFile(host_io.io(), g_sock_path_buf[0..g_sock_path_len]) catch {};
-
-    // Create unix socket
-    const fd = posix.socket(posix.AF.UNIX, posix.SOCK.STREAM | posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC, 0) catch |err| {
-        log.print("[pty_remote] socket failed: {}\n", .{err});
-        return;
-    };
-
-    // Bind
-    var addr: posix.sockaddr.un = .{ .family = posix.AF.UNIX, .path = undefined };
-    @memset(&addr.path, 0);
-    @memcpy(addr.path[0..g_sock_path_len], g_sock_path_buf[0..g_sock_path_len]);
-
-    posix.bind(fd, @ptrCast(&addr), @sizeOf(posix.sockaddr.un)) catch |err| {
-        log.print("[pty_remote] bind failed: {}\n", .{err});
-        posix.close(fd);
-        return;
-    };
-
-    // Listen
-    posix.listen(fd, 4) catch |err| {
-        log.print("[pty_remote] listen failed: {}\n", .{err});
-        posix.close(fd);
-        return;
-    };
-
-    g_server_fd = fd;
-    g_initialized = true;
-    log.print("[pty_remote] listening on {s}\n", .{path_z});
-}
-
-pub fn deinit() void {
-    for (&g_clients) |*c| {
-        if (c.*) |fd| {
-            posix.close(fd);
-            c.* = null;
-        }
+    pub fn init(allocator: std.mem.Allocator) Server {
+        return .{ .allocator = allocator };
     }
-    if (g_server_fd) |fd| {
-        posix.close(fd);
-        g_server_fd = null;
-    }
-    if (g_sock_path_len > 0) {
-        _ = std.Io.Dir.cwd().deleteFile(host_io.io(), g_sock_path_buf[0..g_sock_path_len]) catch {};
-    }
-    g_initialized = false;
-}
 
-/// Call once per frame from engine main loop.
-pub fn poll() void {
-    if (!g_initialized) return;
-    acceptNewClients();
-    readClients();
-}
+    pub fn start(self: *Server, io: std.Io) void {
+        if (self.initialized) return;
 
-fn acceptNewClients() void {
-    const server = g_server_fd orelse return;
-    // Accept up to MAX_CLIENTS
-    for (&g_clients) |*slot| {
-        if (slot.* != null) continue;
-        const result = posix.accept(server, null, null, posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC) catch return;
-        slot.* = result;
-        log.print("[pty_remote] client connected\n", .{});
-        return;
-    }
-}
+        // Linux-only: PTY remote control socket lives in /run/user/<uid>/
+        if (comptime @import("builtin").os.tag != .linux) return;
 
-fn readClients() void {
-    for (0..MAX_CLIENTS) |i| {
-        const fd = g_clients[i] orelse continue;
-        // Read available data
-        const n = posix.read(fd, g_client_bufs[i][g_client_buf_lens[i]..]) catch |err| {
-            if (err == error.WouldBlock) continue;
-            // Client disconnected
-            posix.close(fd);
-            g_clients[i] = null;
-            g_client_buf_lens[i] = 0;
-            log.print("[pty_remote] client disconnected\n", .{});
-            continue;
+        // Build socket path
+        const uid = std.os.linux.getuid();
+        self.sock_path_len = (std.fmt.bufPrint(&self.sock_path_buf, "/run/user/{d}/claude-sessions/supervisor.sock", .{uid}) catch return).len;
+        const path = self.sock_path_buf[0..self.sock_path_len];
+
+        // Remove stale socket
+        std.Io.Dir.deleteFileAbsolute(io, path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => {
+                log.print("[pty_remote] unlink failed: {}\n", .{err});
+                return;
+            },
         };
-        if (n == 0) {
-            // EOF
-            posix.close(fd);
-            g_clients[i] = null;
-            g_client_buf_lens[i] = 0;
-            continue;
-        }
-        g_client_buf_lens[i] += n;
 
-        // Process complete lines (NDJSON)
-        processLines(i);
+        const address = std.Io.net.UnixAddress.init(path) catch |err| {
+            log.print("[pty_remote] address failed: {}\n", .{err});
+            return;
+        };
+        var server = address.listen(io, .{ .kernel_backlog = MAX_CLIENTS }) catch |err| {
+            log.print("[pty_remote] bind/listen failed: {}\n", .{err});
+            return;
+        };
+        const listener = transport.ListenerPump.init(self.allocator, io, server) catch |err| {
+            server.deinit(io);
+            log.print("[pty_remote] listener task failed: {}\n", .{err});
+            return;
+        };
+
+        self.listener = listener;
+        self.initialized = true;
+        log.print("[pty_remote] listening on {s}\n", .{path});
     }
-}
 
-fn processLines(client_idx: usize) void {
-    var buf = g_client_bufs[client_idx][0..g_client_buf_lens[client_idx]];
-    while (true) {
-        const nl = std.mem.indexOf(u8, buf, "\n") orelse break;
-        const line = buf[0..nl];
-        if (line.len > 0) {
-            handleCommand(client_idx, line);
+    pub fn deinit(self: *Server, io: std.Io) void {
+        for (&self.clients) |*c| {
+            if (c.*) |*stream| {
+                stream.deinit();
+                c.* = null;
+            }
         }
-        // Shift remaining data
-        const remaining = buf[nl + 1 ..];
-        if (remaining.len > 0) {
-            std.mem.copyForwards(u8, &g_client_bufs[client_idx], remaining);
+        if (self.listener) |*listener| {
+            listener.deinit();
+            self.listener = null;
         }
-        g_client_buf_lens[client_idx] = remaining.len;
-        buf = g_client_bufs[client_idx][0..g_client_buf_lens[client_idx]];
+        if (self.sock_path_len > 0) {
+            std.Io.Dir.deleteFileAbsolute(io, self.sock_path_buf[0..self.sock_path_len]) catch {};
+        }
+        self.sock_path_len = 0;
+        self.initialized = false;
     }
-    // Prevent buffer overflow
-    if (g_client_buf_lens[client_idx] >= READ_BUF_SIZE - 1) {
-        g_client_buf_lens[client_idx] = 0;
+
+    /// Call once per frame from engine main loop.
+    pub fn poll(self: *Server, io: std.Io) void {
+        if (!self.initialized) return;
+        self.acceptNewClients(io);
+        self.readClients();
     }
-}
 
-fn handleCommand(client_idx: usize, line: []const u8) void {
-    var out_buf: [WRITE_BUF_SIZE]u8 = undefined;
+    fn acceptNewClients(self: *Server, io: std.Io) void {
+        const listener = if (self.listener) |*active| active else return;
+        // Accept up to MAX_CLIENTS
+        for (&self.clients) |*slot| {
+            if (slot.* != null) continue;
+            const accepted = listener.accept() orelse return;
+            slot.* = transport.StreamPump.init(self.allocator, io, accepted) catch {
+                accepted.close(io);
+                return;
+            };
+            log.print("[pty_remote] client connected\n", .{});
+            return;
+        }
+    }
 
-    // Minimal JSON parsing — extract "op" and "slot" fields
-    const op = extractString(line, "\"op\"");
-    const slot = extractInt(line, "\"slot\"");
+    fn readClients(self: *Server) void {
+        for (0..MAX_CLIENTS) |i| {
+            const client = if (self.clients[i]) |*active| active else continue;
+            // Read available data
+            const n = switch (client.drain(self.client_bufs[i][self.client_buf_lens[i]..])) {
+                .empty => continue,
+                .data => |count| count,
+                .closed, .failed => {
+                    self.closeClient(i);
+                    log.print("[pty_remote] client disconnected\n", .{});
+                    continue;
+                },
+            };
+            self.client_buf_lens[i] += n;
 
-    if (std.mem.eql(u8, op, "list")) {
-        const resp = listTerminals(&out_buf);
-        sendResponse(client_idx, resp);
-    } else if (std.mem.eql(u8, op, "write")) {
-        const data = extractString(line, "\"data\"");
-        if (slot < vterm_mod.MAX_TERMINALS and data.len > 0) {
-            var unescape_buf: [4096]u8 = undefined;
-            const unescaped = jsonUnescape(&unescape_buf, data);
-            vterm_mod.writePtyIdx(@intCast(slot), unescaped);
-            sendResponse(client_idx, "{\"ok\":true}\n");
-        } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot or data\"}\n");
+            // Process complete lines (NDJSON)
+            self.processLines(i);
         }
-    } else if (std.mem.eql(u8, op, "read")) {
-        if (slot < vterm_mod.MAX_TERMINALS) {
-            const resp = readTerminal(@intCast(slot), &out_buf);
-            sendResponse(client_idx, resp);
-        } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+    }
+
+    fn processLines(self: *Server, client_idx: usize) void {
+        var buf = self.client_bufs[client_idx][0..self.client_buf_lens[client_idx]];
+        while (true) {
+            const nl = std.mem.indexOf(u8, buf, "\n") orelse break;
+            const line = buf[0..nl];
+            if (line.len > 0) {
+                self.handleCommand(client_idx, line);
+            }
+            // Shift remaining data
+            const remaining = buf[nl + 1 ..];
+            if (remaining.len > 0) {
+                std.mem.copyForwards(u8, &self.client_bufs[client_idx], remaining);
+            }
+            self.client_buf_lens[client_idx] = remaining.len;
+            buf = self.client_bufs[client_idx][0..self.client_buf_lens[client_idx]];
         }
-    } else if (std.mem.eql(u8, op, "read_row")) {
-        const row = extractInt(line, "\"row\"");
-        if (slot < vterm_mod.MAX_TERMINALS) {
-            const resp = readRow(@intCast(slot), @intCast(row), &out_buf);
-            sendResponse(client_idx, resp);
-        } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+        // Prevent buffer overflow
+        if (self.client_buf_lens[client_idx] >= READ_BUF_SIZE - 1) {
+            self.client_buf_lens[client_idx] = 0;
         }
-    } else if (std.mem.eql(u8, op, "state")) {
-        if (slot < vterm_mod.MAX_TERMINALS) {
-            const resp = termState(@intCast(slot), &out_buf);
-            sendResponse(client_idx, resp);
-        } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
-        }
-    } else if (std.mem.eql(u8, op, "resize")) {
-        const rows_val = extractInt(line, "\"rows\"");
-        const cols_val = extractInt(line, "\"cols\"");
-        if (slot < vterm_mod.MAX_TERMINALS and rows_val > 0 and cols_val > 0) {
-            vterm_mod.resizeVtermIdx(@intCast(slot), @intCast(rows_val), @intCast(cols_val));
-            sendResponse(client_idx, "{\"ok\":true}\n");
-        } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid params\"}\n");
-        }
-    } else if (std.mem.eql(u8, op, "alive")) {
-        if (slot < vterm_mod.MAX_TERMINALS) {
-            const alive = vterm_mod.ptyAliveIdx(@intCast(slot));
-            if (alive) {
-                sendResponse(client_idx, "{\"ok\":true,\"alive\":true}\n");
+    }
+
+    fn handleCommand(self: *Server, client_idx: usize, line: []const u8) void {
+        var out_buf: [WRITE_BUF_SIZE]u8 = undefined;
+
+        // Minimal JSON parsing — extract "op" and "slot" fields
+        const op = extractString(line, "\"op\"");
+        const slot = extractInt(line, "\"slot\"");
+
+        if (std.mem.eql(u8, op, "list")) {
+            const resp = listTerminals(&out_buf);
+            self.sendResponse(client_idx, resp);
+        } else if (std.mem.eql(u8, op, "write")) {
+            const data = extractString(line, "\"data\"");
+            if (slot < vterm_mod.MAX_TERMINALS and data.len > 0) {
+                var unescape_buf: [4096]u8 = undefined;
+                const unescaped = jsonUnescape(&unescape_buf, data);
+                vterm_mod.writePtyIdx(@intCast(slot), unescaped);
+                self.sendResponse(client_idx, "{\"ok\":true}\n");
             } else {
-                sendResponse(client_idx, "{\"ok\":true,\"alive\":false}\n");
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot or data\"}\n");
+            }
+        } else if (std.mem.eql(u8, op, "read")) {
+            if (slot < vterm_mod.MAX_TERMINALS) {
+                const resp = readTerminal(@intCast(slot), &out_buf);
+                self.sendResponse(client_idx, resp);
+            } else {
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+            }
+        } else if (std.mem.eql(u8, op, "read_row")) {
+            const row = extractInt(line, "\"row\"");
+            if (slot < vterm_mod.MAX_TERMINALS) {
+                const resp = readRow(@intCast(slot), @intCast(row), &out_buf);
+                self.sendResponse(client_idx, resp);
+            } else {
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+            }
+        } else if (std.mem.eql(u8, op, "state")) {
+            if (slot < vterm_mod.MAX_TERMINALS) {
+                const resp = termState(@intCast(slot), &out_buf);
+                self.sendResponse(client_idx, resp);
+            } else {
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+            }
+        } else if (std.mem.eql(u8, op, "resize")) {
+            const rows_val = extractInt(line, "\"rows\"");
+            const cols_val = extractInt(line, "\"cols\"");
+            if (slot < vterm_mod.MAX_TERMINALS and rows_val > 0 and cols_val > 0) {
+                vterm_mod.resizeVtermIdx(@intCast(slot), @intCast(rows_val), @intCast(cols_val));
+                self.sendResponse(client_idx, "{\"ok\":true}\n");
+            } else {
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid params\"}\n");
+            }
+        } else if (std.mem.eql(u8, op, "alive")) {
+            if (slot < vterm_mod.MAX_TERMINALS) {
+                const alive = vterm_mod.ptyAliveIdx(@intCast(slot));
+                if (alive) {
+                    self.sendResponse(client_idx, "{\"ok\":true,\"alive\":true}\n");
+                } else {
+                    self.sendResponse(client_idx, "{\"ok\":true,\"alive\":false}\n");
+                }
+            } else {
+                self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
             }
         } else {
-            sendResponse(client_idx, "{\"ok\":false,\"error\":\"invalid slot\"}\n");
+            self.sendResponse(client_idx, "{\"ok\":false,\"error\":\"unknown op\"}\n");
         }
-    } else {
-        sendResponse(client_idx, "{\"ok\":false,\"error\":\"unknown op\"}\n");
     }
-}
 
-fn sendResponse(client_idx: usize, data: []const u8) void {
-    const fd = g_clients[client_idx] orelse return;
-    _ = posix.write(fd, data) catch {};
-}
+    fn sendResponse(self: *Server, client_idx: usize, data: []const u8) void {
+        const client = if (self.clients[client_idx]) |*active| active else return;
+        client.send(data) catch self.closeClient(client_idx);
+    }
 
-// ── Response builders ───────────────────────────────────────────
+    fn closeClient(self: *Server, client_idx: usize) void {
+        if (self.clients[client_idx]) |*client| client.deinit();
+        self.clients[client_idx] = null;
+        self.client_buf_lens[client_idx] = 0;
+    }
 
-fn listTerminals(buf: []u8) []const u8 {
-    var pos: usize = 0;
-    pos += copyTo(buf[pos..], "{\"ok\":true,\"terminals\":[");
-    var first = true;
-    for (0..vterm_mod.MAX_TERMINALS) |i| {
-        const idx: u8 = @intCast(i);
-        const alive = vterm_mod.ptyAliveIdx(idx);
-        if (!alive and vterm_mod.getRowsIdx(idx) == 0) continue;
-        if (!first) {
-            pos += copyTo(buf[pos..], ",");
+    // ── Response builders ───────────────────────────────────────────
+
+    fn listTerminals(buf: []u8) []const u8 {
+        var pos: usize = 0;
+        pos += copyTo(buf[pos..], "{\"ok\":true,\"terminals\":[");
+        var first = true;
+        for (0..vterm_mod.MAX_TERMINALS) |i| {
+            const idx: u8 = @intCast(i);
+            const alive = vterm_mod.ptyAliveIdx(idx);
+            if (!alive and vterm_mod.getRowsIdx(idx) == 0) continue;
+            if (!first) {
+                pos += copyTo(buf[pos..], ",");
+            }
+            first = false;
+            const rows = vterm_mod.getRowsIdx(idx);
+            const cols = vterm_mod.getColsIdx(idx);
+            pos += (std.fmt.bufPrint(buf[pos..], "{{\"slot\":{d},\"alive\":{s},\"rows\":{d},\"cols\":{d}}}", .{
+                i,
+                if (alive) "true" else "false",
+                rows,
+                cols,
+            }) catch return buf[0..0]).len;
         }
-        first = false;
-        const rows = vterm_mod.getRowsIdx(idx);
-        const cols = vterm_mod.getColsIdx(idx);
-        pos += (std.fmt.bufPrint(buf[pos..], "{{\"slot\":{d},\"alive\":{s},\"rows\":{d},\"cols\":{d}}}", .{
-            i,
+        pos += copyTo(buf[pos..], "]}\n");
+        return buf[0..pos];
+    }
+
+    fn readTerminal(slot: u8, buf: []u8) []const u8 {
+        const rows = vterm_mod.getRowsIdx(slot);
+        const cols = vterm_mod.getColsIdx(slot);
+        var pos: usize = 0;
+        pos += (std.fmt.bufPrint(buf[pos..], "{{\"ok\":true,\"rows\":{d},\"cols\":{d},\"lines\":[", .{ rows, cols }) catch return buf[0..0]).len;
+
+        var r: u16 = 0;
+        while (r < rows) : (r += 1) {
+            if (r > 0) {
+                pos += copyTo(buf[pos..], ",");
+            }
+            const text = vterm_mod.getRowTextIdx(slot, r);
+            pos += copyTo(buf[pos..], "\"");
+            pos += jsonEscape(buf[pos..], text);
+            pos += copyTo(buf[pos..], "\"");
+            if (pos >= buf.len - 100) break;
+        }
+        pos += copyTo(buf[pos..], "]}\n");
+        return buf[0..pos];
+    }
+
+    fn readRow(slot: u8, row: u16, buf: []u8) []const u8 {
+        const text = vterm_mod.getRowTextIdx(slot, row);
+        const token = classifier.getRowTokenIdx(slot, row);
+        const token_name = @tagName(token);
+        var pos: usize = 0;
+        pos += copyTo(buf[pos..], "{\"ok\":true,\"text\":\"");
+        pos += jsonEscape(buf[pos..], text);
+        pos += copyTo(buf[pos..], "\",\"token\":\"");
+        pos += copyTo(buf[pos..], token_name);
+        pos += copyTo(buf[pos..], "\"}\n");
+        return buf[0..pos];
+    }
+
+    fn termState(slot: u8, buf: []u8) []const u8 {
+        const mode = classifier.getModeIdx(slot);
+        const mode_name = @tagName(mode);
+        const alive = vterm_mod.ptyAliveIdx(slot);
+        const rows = vterm_mod.getRowsIdx(slot);
+        const cols = vterm_mod.getColsIdx(slot);
+        var pos: usize = 0;
+        pos += (std.fmt.bufPrint(buf[pos..], "{{\"ok\":true,\"mode\":\"{s}\",\"alive\":{s},\"rows\":{d},\"cols\":{d}}}\n", .{
+            mode_name,
             if (alive) "true" else "false",
             rows,
             cols,
         }) catch return buf[0..0]).len;
+        return buf[0..pos];
     }
-    pos += copyTo(buf[pos..], "]}\n");
-    return buf[0..pos];
-}
 
-fn readTerminal(slot: u8, buf: []u8) []const u8 {
-    const rows = vterm_mod.getRowsIdx(slot);
-    const cols = vterm_mod.getColsIdx(slot);
-    var pos: usize = 0;
-    pos += (std.fmt.bufPrint(buf[pos..], "{{\"ok\":true,\"rows\":{d},\"cols\":{d},\"lines\":[", .{ rows, cols }) catch return buf[0..0]).len;
+    // ── Helpers ─────────────────────────────────────────────────────
 
-    var r: u16 = 0;
-    while (r < rows) : (r += 1) {
-        if (r > 0) {
-            pos += copyTo(buf[pos..], ",");
+    fn copyTo(dest: []u8, src: []const u8) usize {
+        const n = @min(src.len, dest.len);
+        @memcpy(dest[0..n], src[0..n]);
+        return n;
+    }
+
+    /// Unescape JSON string: \n → newline, \t → tab, \\ → \, \" → "
+    fn jsonUnescape(dest: []u8, src: []const u8) []const u8 {
+        var pos: usize = 0;
+        var i: usize = 0;
+        while (i < src.len and pos < dest.len) {
+            if (src[i] == '\\' and i + 1 < src.len) {
+                switch (src[i + 1]) {
+                    'n' => {
+                        dest[pos] = '\n';
+                        pos += 1;
+                        i += 2;
+                    },
+                    'r' => {
+                        dest[pos] = '\r';
+                        pos += 1;
+                        i += 2;
+                    },
+                    't' => {
+                        dest[pos] = '\t';
+                        pos += 1;
+                        i += 2;
+                    },
+                    '\\' => {
+                        dest[pos] = '\\';
+                        pos += 1;
+                        i += 2;
+                    },
+                    '"' => {
+                        dest[pos] = '"';
+                        pos += 1;
+                        i += 2;
+                    },
+                    else => {
+                        dest[pos] = src[i];
+                        pos += 1;
+                        i += 1;
+                    },
+                }
+            } else {
+                dest[pos] = src[i];
+                pos += 1;
+                i += 1;
+            }
         }
-        const text = vterm_mod.getRowTextIdx(slot, r);
-        pos += copyTo(buf[pos..], "\"");
-        pos += jsonEscape(buf[pos..], text);
-        pos += copyTo(buf[pos..], "\"");
-        if (pos >= buf.len - 100) break;
+        return dest[0..pos];
     }
-    pos += copyTo(buf[pos..], "]}\n");
-    return buf[0..pos];
-}
 
-fn readRow(slot: u8, row: u16, buf: []u8) []const u8 {
-    const text = vterm_mod.getRowTextIdx(slot, row);
-    const token = classifier.getRowTokenIdx(slot, row);
-    const token_name = @tagName(token);
-    var pos: usize = 0;
-    pos += copyTo(buf[pos..], "{\"ok\":true,\"text\":\"");
-    pos += jsonEscape(buf[pos..], text);
-    pos += copyTo(buf[pos..], "\",\"token\":\"");
-    pos += copyTo(buf[pos..], token_name);
-    pos += copyTo(buf[pos..], "\"}\n");
-    return buf[0..pos];
-}
-
-fn termState(slot: u8, buf: []u8) []const u8 {
-    const mode = classifier.getModeIdx(slot);
-    const mode_name = @tagName(mode);
-    const alive = vterm_mod.ptyAliveIdx(slot);
-    const rows = vterm_mod.getRowsIdx(slot);
-    const cols = vterm_mod.getColsIdx(slot);
-    var pos: usize = 0;
-    pos += (std.fmt.bufPrint(buf[pos..], "{{\"ok\":true,\"mode\":\"{s}\",\"alive\":{s},\"rows\":{d},\"cols\":{d}}}\n", .{
-        mode_name,
-        if (alive) "true" else "false",
-        rows,
-        cols,
-    }) catch return buf[0..0]).len;
-    return buf[0..pos];
-}
-
-// ── Helpers ─────────────────────────────────────────────────────
-
-fn copyTo(dest: []u8, src: []const u8) usize {
-    const n = @min(src.len, dest.len);
-    @memcpy(dest[0..n], src[0..n]);
-    return n;
-}
-
-/// Unescape JSON string: \n → newline, \t → tab, \\ → \, \" → "
-fn jsonUnescape(dest: []u8, src: []const u8) []const u8 {
-    var pos: usize = 0;
-    var i: usize = 0;
-    while (i < src.len and pos < dest.len) {
-        if (src[i] == '\\' and i + 1 < src.len) {
-            switch (src[i + 1]) {
-                'n' => {
-                    dest[pos] = '\n';
-                    pos += 1;
-                    i += 2;
-                },
-                'r' => {
-                    dest[pos] = '\r';
-                    pos += 1;
-                    i += 2;
-                },
-                't' => {
-                    dest[pos] = '\t';
-                    pos += 1;
-                    i += 2;
+    fn jsonEscape(dest: []u8, src: []const u8) usize {
+        var pos: usize = 0;
+        for (src) |ch| {
+            if (pos >= dest.len - 6) break;
+            switch (ch) {
+                '"' => {
+                    dest[pos] = '\\';
+                    dest[pos + 1] = '"';
+                    pos += 2;
                 },
                 '\\' => {
                     dest[pos] = '\\';
-                    pos += 1;
-                    i += 2;
+                    dest[pos + 1] = '\\';
+                    pos += 2;
                 },
-                '"' => {
-                    dest[pos] = '"';
-                    pos += 1;
-                    i += 2;
+                '\n' => {
+                    dest[pos] = '\\';
+                    dest[pos + 1] = 'n';
+                    pos += 2;
                 },
-                else => {
-                    dest[pos] = src[i];
-                    pos += 1;
-                    i += 1;
+                '\r' => {
+                    dest[pos] = '\\';
+                    dest[pos + 1] = 'r';
+                    pos += 2;
+                },
+                '\t' => {
+                    dest[pos] = '\\';
+                    dest[pos + 1] = 't';
+                    pos += 2;
+                },
+                else => |c| {
+                    if (c < 0x20) {
+                        // Skip control chars
+                    } else {
+                        dest[pos] = c;
+                        pos += 1;
+                    }
                 },
             }
-        } else {
-            dest[pos] = src[i];
-            pos += 1;
-            i += 1;
         }
+        return pos;
     }
-    return dest[0..pos];
+
+    /// Extract a string value from JSON: "key":"value" → "value"
+    fn extractString(json: []const u8, key: []const u8) []const u8 {
+        const key_pos = std.mem.indexOf(u8, json, key) orelse return "";
+        const after_key = json[key_pos + key.len ..];
+        // Skip :"
+        const colon = std.mem.indexOf(u8, after_key, "\"") orelse return "";
+        const val_start = after_key[colon + 1 ..];
+        // Handle escape sequences in the value
+        var end: usize = 0;
+        while (end < val_start.len) : (end += 1) {
+            if (val_start[end] == '\\' and end + 1 < val_start.len) {
+                end += 1; // skip escaped char
+                continue;
+            }
+            if (val_start[end] == '"') break;
+        }
+        return val_start[0..end];
+    }
+
+    /// Extract an integer value from JSON: "key":42 → 42
+    fn extractInt(json: []const u8, key: []const u8) i32 {
+        const key_pos = std.mem.indexOf(u8, json, key) orelse return 0;
+        const after_key = json[key_pos + key.len ..];
+        // Skip :
+        const colon = std.mem.indexOf(u8, after_key, ":") orelse return 0;
+        const val_start = std.mem.trimStart(u8, after_key[colon + 1 ..], " ");
+        // Parse digits
+        var end: usize = 0;
+        if (end < val_start.len and val_start[end] == '-') end += 1;
+        while (end < val_start.len and val_start[end] >= '0' and val_start[end] <= '9') : (end += 1) {}
+        if (end == 0) return 0;
+        return std.fmt.parseInt(i32, val_start[0..end], 10) catch 0;
+    }
+};
+
+test "Server owns state without storing an Io handle" {
+    inline for (@typeInfo(Server).@"struct".fields) |field| {
+        try std.testing.expect(field.type != std.Io);
+        try std.testing.expect(field.type != ?std.Io);
+    }
+
+    var server = Server.init(std.testing.allocator);
+    server.poll(std.testing.io);
+    server.deinit(std.testing.io);
 }
 
-fn jsonEscape(dest: []u8, src: []const u8) usize {
-    var pos: usize = 0;
-    for (src) |ch| {
-        if (pos >= dest.len - 6) break;
-        switch (ch) {
-            '"' => {
-                dest[pos] = '\\';
-                dest[pos + 1] = '"';
-                pos += 2;
-            },
-            '\\' => {
-                dest[pos] = '\\';
-                dest[pos + 1] = '\\';
-                pos += 2;
-            },
-            '\n' => {
-                dest[pos] = '\\';
-                dest[pos + 1] = 'n';
-                pos += 2;
-            },
-            '\r' => {
-                dest[pos] = '\\';
-                dest[pos + 1] = 'r';
-                pos += 2;
-            },
-            '\t' => {
-                dest[pos] = '\\';
-                dest[pos + 1] = 't';
-                pos += 2;
-            },
-            else => |c| {
-                if (c < 0x20) {
-                    // Skip control chars
-                } else {
-                    dest[pos] = c;
-                    pos += 1;
-                }
-            },
-        }
-    }
-    return pos;
-}
+test "remote command JSON helpers remain local to the owner" {
+    try std.testing.expectEqualStrings("write", Server.extractString("{\"op\":\"write\",\"slot\":2}", "\"op\""));
+    try std.testing.expectEqual(@as(i32, 2), Server.extractInt("{\"op\":\"write\",\"slot\":2}", "\"slot\""));
 
-/// Extract a string value from JSON: "key":"value" → "value"
-fn extractString(json: []const u8, key: []const u8) []const u8 {
-    const key_pos = std.mem.indexOf(u8, json, key) orelse return "";
-    const after_key = json[key_pos + key.len ..];
-    // Skip :"
-    const colon = std.mem.indexOf(u8, after_key, "\"") orelse return "";
-    const val_start = after_key[colon + 1 ..];
-    // Handle escape sequences in the value
-    var end: usize = 0;
-    while (end < val_start.len) : (end += 1) {
-        if (val_start[end] == '\\' and end + 1 < val_start.len) {
-            end += 1; // skip escaped char
-            continue;
-        }
-        if (val_start[end] == '"') break;
-    }
-    return val_start[0..end];
-}
-
-/// Extract an integer value from JSON: "key":42 → 42
-fn extractInt(json: []const u8, key: []const u8) i32 {
-    const key_pos = std.mem.indexOf(u8, json, key) orelse return 0;
-    const after_key = json[key_pos + key.len ..];
-    // Skip :
-    const colon = std.mem.indexOf(u8, after_key, ":") orelse return 0;
-    const val_start = std.mem.trimStart(u8, after_key[colon + 1 ..], " ");
-    // Parse digits
-    var end: usize = 0;
-    if (end < val_start.len and val_start[end] == '-') end += 1;
-    while (end < val_start.len and val_start[end] >= '0' and val_start[end] <= '9') : (end += 1) {}
-    if (end == 0) return 0;
-    return std.fmt.parseInt(i32, val_start[0..end], 10) catch 0;
+    var buffer: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("line\nnext", Server.jsonUnescape(&buffer, "line\\nnext"));
 }

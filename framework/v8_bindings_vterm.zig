@@ -13,7 +13,7 @@
 //! under the __rec_*, __play_*, __sem_* prefixes.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const vterm = @import("terminal/vterm.zig");
@@ -90,7 +90,7 @@ fn hostTerminalSetCwd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
 var g_shell_buf: [512]u8 = undefined;
 
-fn resolveShell(arg: ?[]const u8) [*:0]const u8 {
+fn resolveShell(environ: *const std.process.Environ.Map, arg: ?[]const u8) [*:0]const u8 {
     // Arg wins if non-empty.
     if (arg) |s| {
         if (s.len > 0 and s.len < g_shell_buf.len) {
@@ -100,14 +100,13 @@ fn resolveShell(arg: ?[]const u8) [*:0]const u8 {
         }
     }
     // Fall back to $SHELL.
-    if (host_io.getEnvVarOwned(std.heap.c_allocator, "SHELL")) |env| {
-        defer std.heap.c_allocator.free(env);
+    if (environ.get("SHELL")) |env| {
         if (env.len > 0 and env.len < g_shell_buf.len) {
             @memcpy(g_shell_buf[0..env.len], env);
             g_shell_buf[env.len] = 0;
             return @ptrCast(&g_shell_buf);
         }
-    } else |_| {}
+    }
     // Last resort.
     const fallback = "/bin/sh";
     @memcpy(g_shell_buf[0..fallback.len], fallback);
@@ -117,6 +116,7 @@ fn resolveShell(arg: ?[]const u8) [*:0]const u8 {
 
 fn hostVtermOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const name = argSessionAlloc(info) orelse {
         setReturnNum(info, -1);
         return;
@@ -133,8 +133,8 @@ fn hostVtermOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     }
 
-    const shell_z = resolveShell(shell_arg);
-    vterm.spawnShellByName(name, shell_z, rows, cols);
+    const shell_z = resolveShell(host.environ, shell_arg);
+    vterm.spawnShellByName(v8_runtime.hostContext(info.getIsolate()).io, name, shell_z, rows, cols);
 
     if (!vterm.ptyAliveByName(name)) {
         setReturnNum(info, -1);
@@ -160,12 +160,13 @@ fn hostVtermClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostVtermPoll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const name = argSessionAlloc(info) orelse {
         setReturnNum(info, 0);
         return;
     };
     defer std.heap.c_allocator.free(name);
-    const drained = vterm.pollPtyByName(name);
+    const drained = vterm.pollPtyByName(io, name);
     if (drained) classifier.markDirtyByName(name);
     setReturnNum(info, if (drained) 1 else 0);
 }
@@ -391,14 +392,14 @@ pub fn registerAll() void {
     registerVterm({});
 }
 
-pub fn tickDrain() bool {
+pub fn tickDrain(host: *HostContext) bool {
     // Drain every live pipe; classifier dirties each one on its own.
     var any = false;
     var it = vterm.pipeIterator();
     while (it.next()) |pp| {
         const p = pp.*;
         if (!p.ptyAlive()) continue;
-        if (p.pollPty()) {
+        if (p.pollPty(host.io)) {
             any = true;
             classifier.markDirtyByName(p.name);
         }

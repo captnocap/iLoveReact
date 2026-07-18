@@ -27,7 +27,7 @@ const HAS_GPU = if (@hasDecl(build_options, "has_gpu")) build_options.has_gpu el
 const HEADLESS = IS_LIB or !HAS_GPU;
 
 const layout = @import("framework/layout.zig");
-const host_io = @import("framework/host_io.zig");
+const HostContext = @import("framework/host_context.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
@@ -55,11 +55,15 @@ const input = if (HEADLESS) struct {
     pub fn setOnFocus(_: anytype, _: anytype) void {}
     pub fn setOnBlur(_: anytype, _: anytype) void {}
     pub fn setOnKey(_: anytype, _: anytype) void {}
+    pub fn setCallbackContext(_: anytype, _: anytype) void {}
 } else @import("framework/primitive/input.zig");
 const state = @import("framework/state/dirty.zig");
 const events = @import("framework/events.zig");
 const context_menu = if (HEADLESS) struct {
-    pub const MenuItem = struct { label: []const u8 = "" };
+    pub const MenuItem = struct {
+        label: []const u8 = "",
+        handler: *const fn (?*anyopaque) void,
+    };
     pub fn activeNodeId() u32 {
         return 0;
     }
@@ -106,7 +110,7 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
     }
 };
 const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("framework/world_loader.zig") else struct {
-    pub fn unmount(_: u32) void {}
+    pub fn unmount(_: std.Io, _: u32) void {}
 };
 const latches = @import("framework/state/latches.zig");
 // Pure string assembly (no GPU deps) — the ONE Effect shader assembler, shared
@@ -125,15 +129,15 @@ const paintable = if (HEADLESS) struct {
 const windows = if (HEADLESS) struct {
     pub const WindowKind = enum { window, notification };
     const Slot = opaque {};
-    pub fn open(_: anytype) !usize {
+    pub fn open(_: anytype, _: anytype, _: anytype) !usize {
         return 0;
     }
-    pub fn close(_: anytype) void {}
+    pub fn close(_: anytype, _: anytype) void {}
     pub fn getSlot(_: anytype) ?*Slot {
         return null;
     }
-    pub fn sendLineToChild(_: anytype, _: anytype) void {}
-    pub fn setJsDispatchFn(_: anytype) void {}
+    pub fn sendLineToChild(_: anytype, _: anytype, _: anytype) void {}
+    pub fn setJsDispatchFn(_: anytype, _: anytype) void {}
     pub fn setRoot(_: anytype) void {}
     pub fn tickIndependent() void {}
 } else @import("framework/primitive/windows.zig");
@@ -160,6 +164,7 @@ const host_tree = @import("framework/host_tree.zig");
 // catalog; everything else lives behind `ingredients`.
 const ingredients = @import("framework/v8_ingredients.zig");
 const event_bus = @import("framework/diag/event_bus.zig");
+const diag_log = @import("framework/diag/log.zig");
 
 // ── Headless shell imports ──────────────────────────────────────────
 // Used only by runHeadless() when HEADLESS=true (mirrors v8_tui_app's
@@ -175,8 +180,9 @@ const host_window = if (@hasDecl(build_options, "has_window") and build_options.
 else
     struct {
         pub fn register() void {}
-        pub fn init(_: std.mem.Allocator) !void {}
-        pub fn tickDrain() void {}
+        pub fn init(_: *HostContext, _: std.mem.Allocator) !void {}
+        pub fn tickDrain(_: *HostContext) void {}
+        pub fn deinit(_: std.Io) void {}
     };
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
@@ -310,6 +316,7 @@ pub fn devReloadRevision() u64 {
 }
 
 const dev_ipc = @import("framework/diag/dev_ipc.zig");
+var g_dev_ipc = dev_ipc.Server.init(std.heap.page_allocator, DEV_BUILD_ID);
 
 /// A dev-mode tab. Each tab has a human-readable name (cart name) and a
 /// heap-owned bundle. The active tab is the one currently evaluated in QJS;
@@ -329,18 +336,23 @@ var g_active_tab: usize = 0;
 
 const MAX_TABS = 16;
 
+fn hostFromCallbackContext(context: ?*anyopaque) ?*HostContext {
+    return @ptrCast(@alignCast(context orelse return null));
+}
+
 /// Comptime-generated per-tab click handler. We can't close over an index at
 /// runtime in Zig, so we specialize one callback per slot ahead of time.
-fn makeTabClickCallback(comptime idx: usize) *const fn () void {
+fn makeTabClickCallback(comptime idx: usize) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            if (idx < g_tabs.items.len and idx != g_active_tab) switchToTab(idx);
+        fn callback(context: ?*anyopaque) void {
+            const host = hostFromCallbackContext(context) orelse return;
+            if (idx < g_tabs.items.len and idx != g_active_tab) switchToTab(host, idx);
         }
     }.callback;
 }
 
 const g_tab_click_callbacks = blk: {
-    var arr: [MAX_TABS]*const fn () void = undefined;
+    var arr: [MAX_TABS]*const fn (?*anyopaque) void = undefined;
     for (0..MAX_TABS) |i| arr[i] = makeTabClickCallback(i);
     break :blk arr;
 };
@@ -352,7 +364,8 @@ const g_tab_click_callbacks = blk: {
 // reads the coords back into the JS payload. qjs_runtime's own dispatcher
 // uses callGlobal which is comptime-no-op when QuickJS isn't compiled in,
 // so under V8-only builds we need this parallel path.
-fn dispatchV8RightClick(x: f32, y: f32) void {
+fn dispatchV8RightClick(context: ?*anyopaque, x: f32, y: f32) void {
+    const host = hostFromCallbackContext(context) orelse return;
     const id = prepared_input.g_prepared_node_event_id;
     if (id == 0) return;
     prepared_input.g_prepared_node_event_id = 0;
@@ -360,7 +373,7 @@ fn dispatchV8RightClick(x: f32, y: f32) void {
     prepared_input.g_prepared_mouse_y = y;
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchRightClick({d})", .{id}) catch return;
-    v8_runtime.evalScript(expr);
+    v8_runtime.evalScript(host, expr);
     state.markDirty();
 }
 
@@ -372,13 +385,14 @@ fn dispatchV8RightClick(x: f32, y: f32) void {
 // v8_bindings_core.zig:1200). Without this, onScroll handlers attached
 // to a ScrollView never fire under V8 — content scrolls visually but
 // no JS event is delivered.
-fn dispatchV8Scroll() void {
+fn dispatchV8Scroll(context: ?*anyopaque) void {
+    const host = hostFromCallbackContext(context) orelse return;
     const id = prepared_input.g_prepared_node_event_id;
     if (id == 0) return;
     prepared_input.g_prepared_node_event_id = 0;
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchScroll({d})", .{id}) catch return;
-    v8_runtime.evalScript(expr);
+    v8_runtime.evalScript(host, expr);
 }
 
 // ── Context menu item trampolines ────────────────────────
@@ -388,24 +402,25 @@ fn dispatchV8Scroll() void {
 // up the active node id from context_menu and dispatch back to React.
 const MAX_MENU_ITEMS = 16;
 
-fn dispatchContextMenuClick(item_idx: usize) void {
+fn dispatchContextMenuClick(context: ?*anyopaque, item_idx: usize) void {
+    const host = hostFromCallbackContext(context) orelse return;
     const node_id = context_menu.activeNodeId();
     if (node_id == 0) return;
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchEvent({d},'onContextMenu',{d})\x00", .{ node_id, item_idx }) catch return;
-    v8_runtime.evalScript(expr);
+    v8_runtime.evalScript(host, expr);
 }
 
-fn makeMenuItemHandler(comptime idx: usize) *const fn () void {
+fn makeMenuItemHandler(comptime idx: usize) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            dispatchContextMenuClick(idx);
+        fn callback(context: ?*anyopaque) void {
+            dispatchContextMenuClick(context, idx);
         }
     }.callback;
 }
 
 const g_menu_item_handlers = blk: {
-    var arr: [MAX_MENU_ITEMS]*const fn () void = undefined;
+    var arr: [MAX_MENU_ITEMS]*const fn (?*anyopaque) void = undefined;
     for (0..MAX_MENU_ITEMS) |i| arr[i] = makeMenuItemHandler(i);
     break :blk arr;
 };
@@ -591,88 +606,90 @@ fn fontFamilyIdFor(raw: []const u8) u8 {
     return 0;
 }
 
-fn dispatchInputEvent(slot: u8, global_name: [*:0]const u8) void {
+fn dispatchInputEvent(context: ?*anyopaque, slot: u8, global_name: [*:0]const u8) void {
+    const host = hostFromCallbackContext(context) orelse return;
     const node_id = g_node_id_by_input_slot[slot];
     if (node_id == 0) return;
-    v8_runtime.callGlobal("__beginJsEvent");
-    v8_runtime.callGlobal2Int(global_name, @intCast(node_id), @intCast(slot));
-    v8_runtime.callGlobal("__endJsEvent");
+    v8_runtime.callGlobal(host, "__beginJsEvent");
+    v8_runtime.callGlobal2Int(host, global_name, @intCast(node_id), @intCast(slot));
+    v8_runtime.callGlobal(host, "__endJsEvent");
 }
 
-fn makeInputChangeCallback(comptime slot: u8) *const fn () void {
+fn makeInputChangeCallback(comptime slot: u8) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            dispatchInputEvent(slot, "__dispatchInputChange");
+        fn callback(context: ?*anyopaque) void {
+            dispatchInputEvent(context, slot, "__dispatchInputChange");
         }
     }.callback;
 }
 
-fn makeInputSubmitCallback(comptime slot: u8) *const fn () void {
+fn makeInputSubmitCallback(comptime slot: u8) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            dispatchInputEvent(slot, "__dispatchInputSubmit");
+        fn callback(context: ?*anyopaque) void {
+            dispatchInputEvent(context, slot, "__dispatchInputSubmit");
         }
     }.callback;
 }
 
-fn makeInputFocusCallback(comptime slot: u8) *const fn () void {
+fn makeInputFocusCallback(comptime slot: u8) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            dispatchInputEvent(slot, "__dispatchInputFocus");
+        fn callback(context: ?*anyopaque) void {
+            dispatchInputEvent(context, slot, "__dispatchInputFocus");
         }
     }.callback;
 }
 
-fn makeInputBlurCallback(comptime slot: u8) *const fn () void {
+fn makeInputBlurCallback(comptime slot: u8) *const fn (?*anyopaque) void {
     return struct {
-        fn callback() void {
-            dispatchInputEvent(slot, "__dispatchInputBlur");
+        fn callback(context: ?*anyopaque) void {
+            dispatchInputEvent(context, slot, "__dispatchInputBlur");
         }
     }.callback;
 }
 
-fn dispatchInputKeyEvent(slot: u8, key: c_int, mods: u16) void {
+fn dispatchInputKeyEvent(context: ?*anyopaque, slot: u8, key: c_int, mods: u16) void {
+    const host = hostFromCallbackContext(context) orelse return;
     const node_id = g_node_id_by_input_slot[slot];
     if (node_id == 0) return;
-    v8_runtime.callGlobal("__beginJsEvent");
-    v8_runtime.callGlobal3Int("__dispatchInputKey", @intCast(node_id), key, mods);
-    v8_runtime.callGlobal("__endJsEvent");
+    v8_runtime.callGlobal(host, "__beginJsEvent");
+    v8_runtime.callGlobal3Int(host, "__dispatchInputKey", @intCast(node_id), key, mods);
+    v8_runtime.callGlobal(host, "__endJsEvent");
 }
 
-fn makeInputKeyCallback(comptime slot: u8) *const fn (key: c_int, mods: u16) void {
+fn makeInputKeyCallback(comptime slot: u8) *const fn (?*anyopaque, key: c_int, mods: u16) void {
     return struct {
-        fn callback(key: c_int, mods: u16) void {
-            dispatchInputKeyEvent(slot, key, mods);
+        fn callback(context: ?*anyopaque, key: c_int, mods: u16) void {
+            dispatchInputKeyEvent(context, slot, key, mods);
         }
     }.callback;
 }
 
 const g_input_change_callbacks = blk: {
-    var arr: [input.MAX_INPUTS]*const fn () void = undefined;
+    var arr: [input.MAX_INPUTS]*const fn (?*anyopaque) void = undefined;
     for (0..input.MAX_INPUTS) |i| arr[i] = makeInputChangeCallback(@intCast(i));
     break :blk arr;
 };
 
 const g_input_submit_callbacks = blk: {
-    var arr: [input.MAX_INPUTS]*const fn () void = undefined;
+    var arr: [input.MAX_INPUTS]*const fn (?*anyopaque) void = undefined;
     for (0..input.MAX_INPUTS) |i| arr[i] = makeInputSubmitCallback(@intCast(i));
     break :blk arr;
 };
 
 const g_input_focus_callbacks = blk: {
-    var arr: [input.MAX_INPUTS]*const fn () void = undefined;
+    var arr: [input.MAX_INPUTS]*const fn (?*anyopaque) void = undefined;
     for (0..input.MAX_INPUTS) |i| arr[i] = makeInputFocusCallback(@intCast(i));
     break :blk arr;
 };
 
 const g_input_blur_callbacks = blk: {
-    var arr: [input.MAX_INPUTS]*const fn () void = undefined;
+    var arr: [input.MAX_INPUTS]*const fn (?*anyopaque) void = undefined;
     for (0..input.MAX_INPUTS) |i| arr[i] = makeInputBlurCallback(@intCast(i));
     break :blk arr;
 };
 
 const g_input_key_callbacks = blk: {
-    var arr: [input.MAX_INPUTS]*const fn (key: c_int, mods: u16) void = undefined;
+    var arr: [input.MAX_INPUTS]*const fn (?*anyopaque, key: c_int, mods: u16) void = undefined;
     for (0..input.MAX_INPUTS) |i| arr[i] = makeInputKeyCallback(@intCast(i));
     break :blk arr;
 };
@@ -1563,7 +1580,7 @@ fn applyTypeDefaults(node: *Node, id: u32, type_name: []const u8) void {
     ensureInputSlot(node, id, type_name);
 }
 
-fn openHostWindowForNode(id: u32, type_name: []const u8, props: ?std.json.Value) void {
+fn openHostWindowForNode(io: std.Io, environ: *const std.process.Environ.Map, id: u32, type_name: []const u8, props: ?std.json.Value) void {
     if (g_window_by_node_id.contains(id)) return;
     if (!std.mem.eql(u8, type_name, "Window") and !std.mem.eql(u8, type_name, "Notification")) return;
 
@@ -1628,7 +1645,7 @@ fn openHostWindowForNode(id: u32, type_name: []const u8, props: ?std.json.Value)
         }
         break :blk .independent;
     };
-    const slot = windows.open(.{
+    const slot = windows.open(io, environ, .{
         .title = title.ptr,
         .width = @intCast(@max(1, width)),
         .height = @intCast(@max(1, height)),
@@ -1651,7 +1668,7 @@ fn openHostWindowForNode(id: u32, type_name: []const u8, props: ?std.json.Value)
         .kind = kind,
         .title = title,
     }) catch {
-        windows.close(slot);
+        windows.close(io, slot);
         g_alloc.free(title);
         return;
     };
@@ -1668,7 +1685,7 @@ fn commandWindowId(cmd: std.json.Value) ?u32 {
     return null;
 }
 
-fn routeCommandToHostWindow(cmd: std.json.Value) void {
+fn routeCommandToHostWindow(environ: *const std.process.Environ.Map, cmd: std.json.Value) void {
     const explicit_window_id = commandWindowId(cmd);
     const window_id = explicit_window_id orelse blk: {
         if (cmd != .object) return;
@@ -1751,7 +1768,7 @@ fn routeCommandToHostWindow(cmd: std.json.Value) void {
     // Per-mutation log — gated behind ZIGOS_TRACE_IPC=1 to avoid drowning
     // the rest of the host log on a fat initial cart paint.
     const trace_ipc = blk: {
-        const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
+        const env = environ.get("ZIGOS_TRACE_IPC") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
     if (trace_ipc) {
@@ -1761,7 +1778,7 @@ fn routeCommandToHostWindow(cmd: std.json.Value) void {
             std.debug.print("[window-route/parent] window={d} slot={d} op={s} bytes={d}\n", .{ window_id, binding.slot, op_str, line.items.len });
         }
     }
-    windows.sendLineToChild(binding.slot, line.items);
+    windows.sendLineToChild(environ, binding.slot, line.items);
 }
 
 fn noteCommandWindowOwner(cmd: std.json.Value) void {
@@ -2555,11 +2572,13 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
 // node_key = node.scroll_persist_slot, see effects.zig instanceKey). That id
 // is what handlerRegistry maps to the user's onRender closure.
 fn v8_effect_shim(ctx: *effect_ctx.EffectContext) void {
+    const host = hostFromCallbackContext(ctx.callback_context) orelse return;
     const id_u: usize = ctx.user_data;
     if (id_u == 0) return;
     const id: u32 = @intCast(id_u);
     const buf_len: usize = @as(usize, ctx.height) * @as(usize, ctx.stride);
     v8_runtime.dispatchEffectRender(
+        host,
         id,
         ctx.buf,
         buf_len,
@@ -2606,7 +2625,9 @@ fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
     return sz.ptr;
 }
 
-fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
+fn applyHandlerFlags(context: *anyopaque, node: *Node, id: u32, cmd: std.json.Value) void {
+    node.handlers.context = context;
+    if (node.input_id) |slot| input.setCallbackContext(slot, context);
     node.handlers.js_on_press = null;
     node.handlers.js_on_middle_click = null;
     node.handlers.js_on_mouse_down = null;
@@ -2618,6 +2639,7 @@ fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     node.handlers.on_right_click = null;
     node.canvas_move_draggable = false;
     node.effect_render = null;
+    node.effect_render_context = null;
     node.has_on_layout = false;
     if (cmdHasHandlerName(cmd, "onLayout")) {
         node.has_on_layout = true;
@@ -2661,6 +2683,7 @@ fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     // and read back from ctx.user_data inside v8_effect_shim.
     if (cmdHasHandlerName(cmd, "onRender")) {
         node.effect_render = &v8_effect_shim;
+        node.effect_render_context = context;
     } else if (node.effect_shader != null) {
         // Shader-only effect — paintCustomEffect gates on effect_render being
         // non-null. The GPU pipeline (shouldTryGpu → renderGpu) fires before
@@ -2680,10 +2703,11 @@ fn setCanvasNodePosition(id: u32, gx: f32, gy: f32) void {
     }
 }
 
-fn dispatchWindowEvent(id: u32, handler: []const u8) void {
+fn dispatchWindowEvent(context: *anyopaque, id: u32, handler: []const u8) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     var buf: [160]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchEvent({d},'{s}')", .{ id, handler }) catch return;
-    v8_runtime.evalScript(expr);
+    v8_runtime.evalScript(host, expr);
 }
 
 fn writeJsonString(out: *std.ArrayList(u8), value: []const u8) !void {
@@ -2780,7 +2804,8 @@ fn childWindowIntercept(cmd: std.json.Value, op: []const u8) bool {
     return false;
 }
 
-fn beforeNodeDestroy(node: *Node, _: u32) void {
+fn beforeNodeDestroy(context: *anyopaque, node: *Node, _: u32) void {
+    const host: *HostContext = @ptrCast(@alignCast(context));
     // Release GPU resources tied to per-node fields before the Node
     // itself is freed. Add new releases here when more handle-typed
     // fields land — the order doesn't matter, all branches are
@@ -2795,7 +2820,7 @@ fn beforeNodeDestroy(node: *Node, _: u32) void {
         node.paintable_id = null;
     }
     game_camera.unbindNode(node.id);
-    if (node.world_loader) world_loader.unmount(node.id);
+    if (node.world_loader) world_loader.unmount(host.io, node.id);
     if (node.world_loader_game_file) |s| {
         g_alloc.free(s);
         node.world_loader_game_file = null;
@@ -2833,18 +2858,18 @@ fn installHostTreeHooks() void {
 /// GPU-specific concerns), then runs v8_app-only diagnostics and the
 /// detached-node sweep. Called by the reconciler binding via
 /// v8_bindings_reconciler.drainPending().
-fn applyCommandBatch(json_bytes: []const u8) void {
-    const t0 = host_io.microTimestamp();
-    host_tree.applyCommandBatch(json_bytes);
-    const t1 = host_io.microTimestamp();
-    cleanupDetachedNodes();
-    const t2 = host_io.microTimestamp();
+fn applyCommandBatch(host: *HostContext, json_bytes: []const u8) void {
+    const t0 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
+    host_tree.applyCommandBatch(host, host.io, host.environ, json_bytes);
+    const t1 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
+    cleanupDetachedNodes(host.io);
+    const t2 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
 
     const trace_ops = blk: {
-        const env = host_io.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
+        const env = host.environ.get("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
-    const verbose = host_io.getenv("REACTJIT_VERBOSE_BATCHES") != null;
+    const verbose = host.environ.get("REACTJIT_VERBOSE_BATCHES") != null;
     if (!trace_ops and !verbose) return;
 
     // Re-parse for diagnostics. Gated behind env vars, so the double-parse
@@ -2951,8 +2976,8 @@ fn contentStoreTake(id: u32) ?[]u8 {
     return v8_bindings_core.contentStoreTake(id);
 }
 
-fn drainPendingFlushes() void {
-    v8_bindings_reconciler.drainPending(applyCommandBatch);
+fn drainPendingFlushes(host: *HostContext) void {
+    v8_bindings_reconciler.drainPending(host, applyCommandBatch);
 }
 
 /// Pre-frame sync: write current latch values into the corresponding
@@ -3113,13 +3138,13 @@ fn markReachable(reachable: *std.AutoHashMap(u32, void), id: u32) void {
     }
 }
 
-fn destroyDetachedNode(id: u32) void {
+fn destroyDetachedNode(io: std.Io, id: u32) void {
     if (g_window_by_node_id.fetchRemove(id)) |entry| {
         if (entry.value.is_popout) {
             panel_window.close();
             if (g_popout_node_id == id) g_popout_node_id = 0;
         } else {
-            windows.close(entry.value.slot);
+            windows.close(io, entry.value.slot);
         }
         if (entry.value.title) |title| g_alloc.free(title);
     }
@@ -3132,7 +3157,7 @@ fn destroyDetachedNode(id: u32) void {
     }
     _ = g_children_ids.remove(id);
     if (g_node_by_id.get(id)) |node| {
-        if (node.world_loader) world_loader.unmount(node.id);
+        if (node.world_loader) world_loader.unmount(io, node.id);
         // Per-mesh diffuse texture buffer is owned by g_alloc — free
         // before the node memory itself is destroyed so the bytes don't
         // orphan when a textured mesh unmounts (route change / parent
@@ -3146,7 +3171,7 @@ fn destroyDetachedNode(id: u32) void {
     _ = g_node_by_id.remove(id);
 }
 
-fn cleanupDetachedNodes() void {
+fn cleanupDetachedNodes(io: std.Io) void {
     var reachable = std.AutoHashMap(u32, void).init(g_alloc);
     defer reachable.deinit();
     for (g_root_child_ids.items) |child_id| {
@@ -3165,11 +3190,11 @@ fn cleanupDetachedNodes() void {
     }
 
     for (stale.items) |id| {
-        destroyDetachedNode(id);
+        destroyDetachedNode(io, id);
     }
 }
 
-fn cleanupClosedHostWindows() void {
+fn cleanupClosedHostWindows(host: *HostContext) void {
     var stale: std.ArrayList(u32) = .empty;
     defer stale.deinit(g_alloc);
 
@@ -3183,7 +3208,7 @@ fn cleanupClosedHostWindows() void {
     for (stale.items) |id| {
         if (g_window_by_node_id.fetchRemove(id)) |entry| {
             const handler = if (entry.value.kind == .notification) "onDismiss" else "onClose";
-            dispatchWindowEvent(id, handler);
+            dispatchWindowEvent(host, id, handler);
             if (entry.value.title) |title| g_alloc.free(title);
         }
     }
@@ -3202,17 +3227,17 @@ fn snapshotRuntimeState() void {
 /// Build the dev-mode tab strip as a row of arena-allocated Nodes. Returns
 /// a single Node (the row container) whose children are the individual tab
 /// buttons. Callers prepend this to g_root.children in rebuildTree.
-fn onWinMinimize() void {
+fn onWinMinimize(_: ?*anyopaque) void {
     engine.windowMinimize();
 }
-fn onWinMaximize() void {
+fn onWinMaximize(_: ?*anyopaque) void {
     engine.windowMaximize();
 }
-fn onWinClose() void {
+fn onWinClose(_: ?*anyopaque) void {
     engine.windowClose();
 }
 
-fn buildChromeNode(arena: std.mem.Allocator) ?Node {
+fn buildChromeNode(host: *HostContext, arena: std.mem.Allocator) ?Node {
     // Filter out the "main" bootstrap tab (a duplicate of whatever was first pushed)
     var visible: std.ArrayList(usize) = .empty;
     defer visible.deinit(arena);
@@ -3247,6 +3272,7 @@ fn buildChromeNode(arena: std.mem.Allocator) ?Node {
             layout.Color.rgb(17, 22, 30);
         children[i].hoverable = true;
         if (tab_idx < MAX_TABS) {
+            children[i].handlers.context = host;
             children[i].handlers.on_press = g_tab_click_callbacks[tab_idx];
         }
     }
@@ -3257,7 +3283,7 @@ fn buildChromeNode(arena: std.mem.Allocator) ?Node {
 
     // Window controls. Using unicode dashes/squares/X so we don't need icons.
     const ctrl_labels = [_][]const u8{ "\u{2013}", "\u{25A1}", "\u{00D7}" };
-    const ctrl_handlers = [_]*const fn () void{ onWinMinimize, onWinMaximize, onWinClose };
+    const ctrl_handlers = [_]*const fn (?*anyopaque) void{ onWinMinimize, onWinMaximize, onWinClose };
     const ctrl_hover_bg = [_]layout.Color{
         layout.Color.rgb(40, 46, 56),
         layout.Color.rgb(40, 46, 56),
@@ -3279,6 +3305,7 @@ fn buildChromeNode(arena: std.mem.Allocator) ?Node {
         children[idx].style.border_top_left_radius = 4;
         children[idx].style.border_top_right_radius = 4;
         children[idx].hoverable = true;
+        children[idx].handlers.context = host;
         children[idx].handlers.on_press = ctrl_handlers[k];
     }
 
@@ -3348,7 +3375,7 @@ fn buildResizeEdges(arena: std.mem.Allocator) ?[]Node {
     return edges;
 }
 
-fn rebuildTree() void {
+fn rebuildTree(host: *HostContext) void {
     _ = g_arena.reset(.retain_capacity);
     const arena = g_arena.allocator();
 
@@ -3376,7 +3403,7 @@ fn rebuildTree() void {
         }
     }
 
-    const chrome_opt = if (DEV_MODE) buildChromeNode(arena) else null;
+    const chrome_opt = if (DEV_MODE) buildChromeNode(host, arena) else null;
     const resize_edges = if (BORDERLESS_MODE) buildResizeEdges(arena) else null;
     var cart_child_count: usize = 0;
     for (g_root_child_ids.items) |cid| {
@@ -3459,27 +3486,27 @@ fn rebuildTree() void {
 
 // ── Dev reload helpers ──────────────────────────────────────────
 
-fn readBundleFromDisk() ![]u8 {
-    const file = try std.Io.Dir.cwd().openFile(host_io.io(), DEV_BUNDLE_PATH, .{});
-    defer file.close(host_io.io());
-    const stat = try file.stat(host_io.io());
+fn readBundleFromDisk(io: std.Io) ![]u8 {
+    const file = try std.Io.Dir.cwd().openFile(io, DEV_BUNDLE_PATH, .{});
+    defer file.close(io);
+    const stat = try file.stat(io);
     const buf = try g_alloc.alloc(u8, stat.size);
     errdefer g_alloc.free(buf);
-    const n = try file.readPositionalAll(host_io.io(), buf, 0);
+    const n = try file.readPositionalAll(io, buf, 0);
     return buf[0..n];
 }
 
-fn bundleMtimeOrZero() i128 {
-    const s = std.Io.Dir.cwd().statFile(host_io.io(), DEV_BUNDLE_PATH, .{}) catch return 0;
+fn bundleMtimeOrZero(io: std.Io) i128 {
+    const s = std.Io.Dir.cwd().statFile(io, DEV_BUNDLE_PATH, .{}) catch return 0;
     return @intCast(s.mtime.toNanoseconds());
 }
 
-fn maybeScheduleReload() void {
+fn maybeScheduleReload(io: std.Io) void {
     if (!DEV_MODE) return;
     g_mtime_poll_counter +%= 1;
     // Poll every 16 ticks (~250ms at 60fps) — cheap, responsive enough.
     if (g_mtime_poll_counter & 0xF != 0) return;
-    const mt = bundleMtimeOrZero();
+    const mt = bundleMtimeOrZero(io);
     if (mt != 0 and mt != g_last_bundle_mtime) {
         g_last_bundle_mtime = mt;
         g_dev_reload_revision +%= 1;
@@ -3487,7 +3514,7 @@ fn maybeScheduleReload() void {
     }
 }
 
-fn clearTreeStateForReload() void {
+fn clearTreeStateForReload(host: *HostContext) void {
     // Drop the engine's reference to the current node tree BEFORE freeing any
     // memory it points into. The engine paints from g_root.children each
     // frame — leave it pointing at stale memory and we SIGSEGV on paint.
@@ -3514,7 +3541,7 @@ fn clearTreeStateForReload() void {
 
     var win_it = g_window_by_node_id.valueIterator();
     while (win_it.next()) |binding| {
-        windows.close(binding.slot);
+        windows.close(host.io, binding.slot);
         if (binding.title) |title| g_alloc.free(title);
     }
     g_window_by_node_id.clearRetainingCapacity();
@@ -3524,7 +3551,7 @@ fn clearTreeStateForReload() void {
     // ownership is mixed (some g_alloc dupes, some slices into
     // framework/input.zig's buffers) so the text leaks for dev-mode
     // safety — kilobytes per reload, acceptable.
-    host_tree.clearAll();
+    host_tree.clearAll(host);
     g_latch_height_nodes.clearRetainingCapacity();
     g_latch_width_nodes.clearRetainingCapacity();
     g_latch_left_nodes.clearRetainingCapacity();
@@ -3554,33 +3581,33 @@ fn clearTreeStateForReload() void {
     g_dirty.* = true;
 }
 
-fn performReload() void {
+fn performReload(host: *HostContext) void {
     // Re-read the active tab's source file. Only the first tab ("main") has a
     // disk-backed source; others come from IPC pushes and have no disk file.
     if (g_active_tab != 0) return;
-    const new_bundle = readBundleFromDisk() catch |e| {
+    const new_bundle = readBundleFromDisk(host.io) catch |e| {
         std.log.warn("[dev] bundle read failed: {}, skipping reload", .{e});
         return;
     };
     replaceActiveTabBundle(new_bundle);
-    evalActiveTab();
+    evalActiveTab(host);
     std.log.info("[dev] reloaded '{s}' ({d} bytes)", .{ tabName(g_active_tab), new_bundle.len });
 }
 
-fn applyScheduledReload() void {
+fn applyScheduledReload(host: *HostContext) void {
     // Give the currently mounted application one synchronous checkpoint edge.
     // The callback is optional and must only copy in-process state; the policy
     // gate has already decided that this context is about to be replaced.
-    _ = v8_runtime.evalScriptChecked("if(typeof globalThis.__beforeDevReload==='function')globalThis.__beforeDevReload();");
+    _ = v8_runtime.evalScriptChecked(host, "if(typeof globalThis.__beforeDevReload==='function')globalThis.__beforeDevReload();");
     if (g_pending_push_tab) |idx| {
         g_pending_push_tab = null;
         if (idx >= g_tabs.items.len) return;
         g_active_tab = idx;
-        evalActiveTab();
+        evalActiveTab(host);
         std.log.info("[dev] applied pushed update for '{s}'", .{tabName(idx)});
         return;
     }
-    performReload();
+    performReload(host);
 }
 
 /// Swap the active tab's stored bundle bytes for `new_bundle`. Frees the old
@@ -3599,16 +3626,16 @@ fn replaceActiveTabBundle(new_bundle: []u8) void {
 /// process), so we keep the Isolate and Platform alive and only rebuild the
 /// Context + top-level HandleScope. appInit() re-registers host funcs onto
 /// the fresh context.
-fn evalActiveTab() void {
+fn evalActiveTab(host: *HostContext) void {
     std.log.info("[dev] evalActiveTab: clearing tree", .{});
-    clearTreeStateForReload();
+    clearTreeStateForReload(host);
     std.log.info("[dev] evalActiveTab: resetting context", .{});
-    v8_runtime.resetContextForReload();
+    v8_runtime.resetContextForReload(host);
     std.log.info("[dev] evalActiveTab: appInit", .{});
-    appInit();
+    appInit(host);
     const tab = &g_tabs.items[g_active_tab];
     std.log.info("[dev] evalActiveTab: evalScript ({d} bytes)", .{tab.bundle.len});
-    const ok = v8_runtime.evalScriptChecked(tab.bundle);
+    const ok = v8_runtime.evalScriptChecked(host, tab.bundle);
     if (ok) {
         // Snapshot this bundle as the rollback target for the next reload.
         if (tab.last_good) |lg| g_alloc.free(lg);
@@ -3623,10 +3650,10 @@ fn evalActiveTab() void {
     // the window blank and log — there's nothing better to do.
     if (tab.last_good) |lg| {
         std.log.warn("[dev] bundle failed — restoring last good ({d} bytes)", .{lg.len});
-        clearTreeStateForReload();
-        v8_runtime.resetContextForReload();
-        appInit();
-        _ = v8_runtime.evalScriptChecked(lg);
+        clearTreeStateForReload(host);
+        v8_runtime.resetContextForReload(host);
+        appInit(host);
+        _ = v8_runtime.evalScriptChecked(host, lg);
     } else {
         std.log.warn("[dev] bundle failed — no last good to restore", .{});
     }
@@ -3657,16 +3684,16 @@ fn upsertTab(name: []u8, bundle: []u8) !usize {
     return g_tabs.items.len - 1;
 }
 
-fn switchToTab(idx: usize) void {
+fn switchToTab(host: *HostContext, idx: usize) void {
     if (idx >= g_tabs.items.len) return;
     g_active_tab = idx;
-    evalActiveTab();
+    evalActiveTab(host);
     std.log.info("[dev] active tab: '{s}'", .{tabName(idx)});
 }
 
 /// Pull any pending IPC push messages and act on them. Called each tick.
-fn processIncomingPushes() void {
-    while (dev_ipc.takeNext()) |msg| {
+fn processIncomingPushes(host: *HostContext) void {
+    while (g_dev_ipc.takeNext()) |msg| {
         switch (msg) {
             .push => |push| {
                 const idx = upsertTab(push.name, push.bundle) catch |e| {
@@ -3681,14 +3708,14 @@ fn processIncomingPushes() void {
                 g_dev_reload.onBundleChanged();
             },
             .notice => |notice| {
-                emitDevNotice(notice.json);
+                emitDevNotice(host, notice.json);
                 g_alloc.free(notice.json);
             },
         }
     }
 }
 
-fn emitDevNotice(json: []const u8) void {
+fn emitDevNotice(host: *HostContext, json: []const u8) void {
     var parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json, .{}) catch |e| {
         std.log.warn("[dev] notice JSON parse failed: {}", .{e});
         return;
@@ -3710,12 +3737,12 @@ fn emitDevNotice(json: []const u8) void {
         return;
     };
     defer g_alloc.free(script);
-    _ = v8_runtime.evalScriptChecked(script);
+    _ = v8_runtime.evalScriptChecked(host, script);
 }
 
 // ── init / tick ─────────────────────────────────────────────────
 
-fn appInit() void {
+fn appInit(host: *HostContext) void {
     // QJS VM is already initialized by engine before this is called (engine calls
     // v8_runtime.initVM() then evalScript(js_logic)). But we need __hostFlush
     // registered BEFORE evalScript runs. Engine order matters — see below.
@@ -3729,7 +3756,7 @@ fn appInit() void {
     // register only when the cart's bundle ordered them. See
     // framework/v8_ingredients.zig for the contract (one row + one
     // build option + one scripts/ship grep).
-    ingredients.registerAll();
+    ingredients.registerAll(host);
     // process.argv/env/cwd for GPU-host carts. TUI carts already register the
     // CLI surface before eval; shipped GUI carts need the same package-argument
     // contract without pulling in Node.
@@ -3738,21 +3765,21 @@ fn appInit() void {
     // Mode was set to `.queue` in main() so per-commit payloads go into
     // the queue and the engine drains them at the right frame phase.
     v8_bindings_reconciler.register();
-    windows.setJsDispatchFn(dispatchWindowEvent);
+    windows.setJsDispatchFn(host, dispatchWindowEvent);
 
     // Bridge the dev-mode flag to JS so runtime/index.tsx can wrap the
     // active cart's tree with a sibling eventlog Window. Keep it small —
     // just a single boolean global; runtime checks it once at mount time.
     if (DEV_MODE) {
-        v8_runtime.evalScript("globalThis.__DEV_MODE = true;");
+        v8_runtime.evalScript(host, "globalThis.__DEV_MODE = true;");
     } else {
-        v8_runtime.evalScript("globalThis.__DEV_MODE = false;");
+        v8_runtime.evalScript(host, "globalThis.__DEV_MODE = false;");
     }
 
     // Polyfills — V8 has no setTimeout/setInterval/console.log. QJS path
     // installs an equivalent block from qjs_runtime.initVM; mirror the minimal
     // subset here so the bundle boot (React + runtime/index.tsx) succeeds.
-    v8_runtime.evalScript(
+    v8_runtime.evalScript(host,
         \\globalThis.console = {
         \\  log: function(){ var s=''; for (var i=0;i<arguments.length;i++){ if(i)s+=' '; s+=String(arguments[i]); } __hostLog(0, s); },
         \\  warn: function(){ var s=''; for (var i=0;i<arguments.length;i++){ if(i)s+=' '; s+=String(arguments[i]); } __hostLog(1, s); },
@@ -3807,8 +3834,8 @@ fn appInit() void {
 
     // Persistent-store substrate for runtime/hooks/localstore. Best-effort —
     // if init fails the hooks gracefully no-op (see qjs_bindings.storeGet etc.).
-    fs_mod.init("reactjit") catch |e| std.log.warn("fs init failed: {}", .{e});
-    localstore.init() catch |e| std.log.warn("localstore init failed: {}", .{e});
+    fs_mod.init(host.io, host.environ, "reactjit") catch |e| std.log.warn("fs init failed: {}", .{e});
+    localstore.init(host.io) catch |e| std.log.warn("localstore init failed: {}", .{e});
 
     // Window-child mode: install no-op stubs for the runtime dispatch
     // globals. The cart bundle (which normally defines these in
@@ -3826,7 +3853,7 @@ fn appInit() void {
     // they're stubs here and would need their own engine callbacks to
     // round-trip back to the parent's React handlers.
     if (g_is_window_child) {
-        v8_runtime.evalScript(
+        v8_runtime.evalScript(host,
             \\globalThis.__dispatchEvent = function(){};
             \\globalThis.__dispatchLayout = function(){};
             \\globalThis.__dispatchInputChange = function(){};
@@ -3842,7 +3869,7 @@ fn appInit() void {
     }
 }
 
-fn appTick(now: u32) void {
+fn appTick(host: *HostContext, now: u32) void {
     // Bridge framework-side state.markDirty() into v8_app's g_dirty so that
     // SDL-event-driven dispatches (filedrop, router, system_signals, …) cause
     // a React re-render on the next tick. Without this, polling hooks like
@@ -3857,12 +3884,12 @@ fn appTick(now: u32) void {
     // check the active tab's disk source for mtime-triggered reloads. Either
     // path tears down the JS world and re-evals before the rest of the frame.
     if (DEV_MODE) {
-        dev_ipc.pollOnce();
-        processIncomingPushes();
+        g_dev_ipc.pollOnce(host.io);
+        processIncomingPushes(host);
     }
-    maybeScheduleReload();
+    maybeScheduleReload(host.io);
     if (g_dev_reload.takeReload()) {
-        applyScheduledReload();
+        applyScheduledReload(host);
         return;
     }
 
@@ -3870,16 +3897,16 @@ fn appTick(now: u32) void {
     // ~260ms place cost; appTick is opaque, so split it. __jsTick fires JS timers
     // AND drains the V8 microtask queue (where React's deferred render + passive
     // effects run) — bridge time lands here. Name which sub-step burns the frame.
-    const _at0 = host_io.microTimestamp();
+    const _at0 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
     _ = v8_runtime.gcTakeNs(); // GCPROBE (req_1995): reset, then read after __jsTick to get GC ns during the drain
     // Fire any JS timers whose due-time has arrived. setTimeout/setInterval
     // in the bundle are implemented against this — see runtime/index.tsx.
     // This may append new batches to g_pending_flush via React commits triggered
     // from handlers that ran inside timers. Drain after.
-    v8_runtime.callGlobalInt("__jsTick", @intCast(now));
+    v8_runtime.callGlobalInt(host, "__jsTick", @intCast(now));
     const _gc_ns_jstick = v8_runtime.gcTakeNs();
     const _gc_count_jstick = v8_runtime.gcTakeCount();
-    const _at1 = host_io.microTimestamp();
+    const _at1 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
 
     // Per-tick drains for every binding domain that defines tickDrain().
     // Required bindings (core, websocket) and opt-in bindings (httpsrv,
@@ -3891,13 +3918,13 @@ fn appTick(now: u32) void {
     // return is the vterm-drained signal the TUI shell uses to repaint
     // without polling latency; engine.run owns its own repaint cadence,
     // so the GPU shell discards it.
-    _ = ingredients.tickDrain();
-    const _at2 = host_io.microTimestamp();
+    _ = ingredients.tickDrain(host);
+    const _at2 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
 
     // Apply any CMD batches that accumulated during press events since last tick.
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
-    drainPendingFlushes();
-    const _at3 = host_io.microTimestamp();
+    drainPendingFlushes(host);
+    const _at3 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
     // V23 native game camera: when a cart opts a Scene3D.Camera node into
     // native ownership, the host solves/smooths that node's camera before
     // layout/paint. Carts that never opt in stay on the declarative JS-props
@@ -3916,26 +3943,26 @@ fn appTick(now: u32) void {
     // current values into latches; syncLatchesToNodes then propagates
     // those into node.style. Cart-side `useHostAnimation` registers
     // animations via __anim_register / __anim_unregister.
-    const _now_ms_for_anim: i64 = @as(i64, @truncate(@divFloor(host_io.nanoTimestamp(), 1_000_000)));
+    const _now_ms_for_anim = std.Io.Clock.now(.awake, host.io).toMilliseconds();
     animations.tickAll(_now_ms_for_anim);
     syncLatchesToNodes();
     windows.tickIndependent();
-    cleanupClosedHostWindows();
+    cleanupClosedHostWindows(host);
 
     var _snap_us: i64 = 0;
     var _rebuild_us: i64 = 0;
     if (g_dirty.*) {
-        const t0 = host_io.microTimestamp();
+        const t0 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
         snapshotRuntimeState();
-        const t1 = host_io.microTimestamp();
-        rebuildTree();
-        const t2 = host_io.microTimestamp();
+        const t1 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
+        rebuildTree(host);
+        const t2 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
         layout.markLayoutDirty();
         g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
         _snap_us = t1 - t0;
         _rebuild_us = t2 - t1;
-        if (host_io.getenv("REACTJIT_VERBOSE_BATCHES") != null) {
+        if (host.environ.get("REACTJIT_VERBOSE_BATCHES") != null) {
             // Count the tree size for context.
             var node_count: usize = 0;
             var kid_it = g_children_ids.valueIterator();
@@ -3949,7 +3976,7 @@ fn appTick(now: u32) void {
     // an opaque "appTick". jsTick includes the V8 microtask drain (React render +
     // passive effects). dirty = snapshotRuntimeState + rebuildTree (the host tree
     // rebuild). Units: ms.
-    const _at4 = host_io.microTimestamp();
+    const _at4 = std.Io.Clock.now(.awake, host.io).toMicroseconds();
     const _jstick_ms = @as(f64, @floatFromInt(_at1 - _at0)) / 1000.0;
     const _drain_ms = @as(f64, @floatFromInt(_at2 - _at1)) / 1000.0;
     const _flush_ms = @as(f64, @floatFromInt(_at3 - _at2)) / 1000.0;
@@ -3960,15 +3987,15 @@ fn appTick(now: u32) void {
     }
 }
 
-fn childTitle() [*:0]const u8 {
-    if (host_io.getenv("ZIGOS_WINDOW_TITLE")) |title| {
+fn childTitle(environ: *const std.process.Environ.Map) [*:0]const u8 {
+    if (environ.get("ZIGOS_WINDOW_TITLE")) |title| {
         const owned = g_alloc.dupeZ(u8, title) catch return "Window";
         return owned.ptr;
     }
     return "Window";
 }
 
-fn childInit() void {
+fn childInit(host: *HostContext) void {
     // Install no-op stubs for the runtime dispatch globals. The cart
     // bundle (runtime/index.tsx) defines these in the main process but
     // never loads in the child — without these stubs the framework's
@@ -3983,7 +4010,7 @@ fn childInit() void {
     // Click events still round-trip correctly because runJsHandlerExpr
     // (engine.zig:1071) goes through the dispatch_js_event callback
     // (childDispatchEvent) — that path is independent of these globals.
-    v8_runtime.evalScript(
+    v8_runtime.evalScript(host,
         \\globalThis.__dispatchEvent = function(){};
         \\globalThis.__dispatchLayout = function(){};
         \\globalThis.__dispatchInputChange = function(){};
@@ -3997,20 +4024,20 @@ fn childInit() void {
         \\globalThis.__ffiEmit = function(){};
     );
 
-    const port_s = host_io.getenv("ZIGOS_IPC_PORT") orelse return;
+    const port_s = host.environ.get("ZIGOS_IPC_PORT") orelse return;
     const port = std.fmt.parseInt(u16, port_s, 10) catch return;
     std.debug.print("[window-child] init port={d} window_id={d}\n", .{ port, g_child_window_id });
-    g_child_client = ipc.Client.connect(port) catch |err| {
+    g_child_client = ipc.Client.connect(g_alloc, host.io, port) catch |err| {
         std.debug.print("[window-child] IPC connect failed: {}\n", .{err});
         return;
     };
     if (g_child_client) |*client| {
         _ = client.sendLine("{\"type\":\"ready\"}");
     }
-    if (host_io.getenv("ZIGOS_WINDOW_AUTO_DISMISS_MS")) |dismiss_s| {
+    if (host.environ.get("ZIGOS_WINDOW_AUTO_DISMISS_MS")) |dismiss_s| {
         g_child_auto_dismiss_ms = std.fmt.parseInt(u32, dismiss_s, 10) catch 0;
     }
-    g_child_started_ms = @truncate(host_io.milliTimestamp());
+    g_child_started_ms = std.Io.Clock.now(.awake, host.io).toMilliseconds();
 }
 
 fn childDispatchEvent(id: u32, handler: []const u8) void {
@@ -4025,10 +4052,10 @@ fn childDispatchEvent(id: u32, handler: []const u8) void {
     _ = client.sendLine(line.items);
 }
 
-fn childApplyMessage(line: []const u8) void {
+fn childApplyMessage(host: *HostContext, line: []const u8) void {
     // Per-message recv/apply lines gated behind ZIGOS_TRACE_IPC=1.
     const trace = blk: {
-        const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
+        const env = host.environ.get("ZIGOS_TRACE_IPC") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
     if (trace) std.debug.print("[window-child] recv bytes={d} {s}\n", .{ line.len, line });
@@ -4044,12 +4071,12 @@ fn childApplyMessage(line: []const u8) void {
     const commands_v = parsed.value.object.get("commands") orelse return;
     if (commands_v != .array) return;
     if (trace) std.debug.print("[window-child] apply commands={d}\n", .{commands_v.array.items.len});
-    for (commands_v.array.items) |cmd| host_tree.applyCommand(cmd) catch |err| {
+    for (commands_v.array.items) |cmd| host_tree.applyCommand(host, host.io, host.environ, cmd) catch |err| {
         std.debug.print("[window-child] apply error: {s}\n", .{@errorName(err)});
     };
 }
 
-fn childTick(_: u32) void {
+fn childTick(host: *HostContext, _: u32) void {
     var client = &(g_child_client orelse return);
     // Drain the WHOLE socket backlog this tick. ipc.Client.poll() is
     // capped at MAX_MESSAGES_PER_POLL (32) per call to keep msg_out small,
@@ -4060,10 +4087,10 @@ fn childTick(_: u32) void {
     while (true) {
         const messages = client.poll();
         if (messages.len == 0) break;
-        for (messages) |msg| childApplyMessage(msg.data);
+        for (messages) |msg| childApplyMessage(host, msg.data);
     }
     if (g_child_auto_dismiss_ms > 0 and g_child_started_ms > 0) {
-        const now_ms = host_io.milliTimestamp();
+        const now_ms = std.Io.Clock.now(.awake, host.io).toMilliseconds();
         if (now_ms - g_child_started_ms >= @as(i64, @intCast(g_child_auto_dismiss_ms))) {
             std.process.exit(0);
         }
@@ -4071,7 +4098,7 @@ fn childTick(_: u32) void {
 
     if (g_dirty.*) {
         snapshotRuntimeState();
-        rebuildTree();
+        rebuildTree(host);
         std.debug.print("[window-child] rebuild root_children={d} rendered={d} nodes={d}\n", .{
             g_root_child_ids.items.len,
             g_root.children.len,
@@ -4083,7 +4110,7 @@ fn childTick(_: u32) void {
     }
 }
 
-fn childShutdown() void {
+fn childShutdown(_: *HostContext) void {
     if (g_child_client) |*client| {
         var line: std.ArrayList(u8) = .empty;
         defer line.deinit(g_alloc);
@@ -4098,14 +4125,14 @@ fn childShutdown() void {
     }
 }
 
-fn appShutdown() void {
+fn appShutdown(host: *HostContext) void {
     var win_it = g_window_by_node_id.valueIterator();
     while (win_it.next()) |binding| {
         if (binding.title) |title| g_alloc.free(title);
     }
     g_window_by_node_id.clearRetainingCapacity();
-    localstore.deinit();
-    fs_mod.deinit();
+    localstore.deinit(host.io);
+    fs_mod.deinit(host.io);
 }
 
 // ── Headless shell — TUI/ANSI main body ─────────────────────────────
@@ -4123,10 +4150,11 @@ fn appShutdown() void {
 
 fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const drained = ingredients.tickDrain();
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const drained = ingredients.tickDrain(host);
     // SDL3 event pump + paint for any <Window> nodes the cart opened
     // — no-op when has_window is false (stub above).
-    host_window.tickDrain();
+    host_window.tickDrain(host);
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (drained) @as(f64, 1) else @as(f64, 0)));
 }
 
@@ -4138,31 +4166,31 @@ fn hostPanelWindowStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (panel_window.isOpen()) @as(f64, 1) else @as(f64, 0)));
 }
 
-fn runHeadless() !void {
+fn runHeadless(host: *HostContext) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
     // process.argv[0] = bundle name; argv[1..] = the user's args.
-    const raw_argv = try host_io.argsAlloc(alloc);
-    defer host_io.argsFree(alloc, raw_argv);
+    const raw_argv = try host.args.toSlice(host.arena.allocator());
     const script_argv = try alloc.alloc([]const u8, raw_argv.len);
     defer alloc.free(script_argv);
     script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
     for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;
 
-    v8_runtime.initVM();
+    v8_runtime.initVM(host);
     defer v8_runtime.teardownVM();
 
     cli_bindings.setArgv(@constCast(script_argv));
     cli_bindings.registerAll();
+    cli_bindings.registerTerminal();
     cli_bindings.installSignalHandlers();
 
     // INGREDIENTS catalog — same source of truth the GPU shell uses.
     // Stubs `core` + `window` because has_gpu=false; the rest of the
     // opt-in bindings (pg/embed/fs/process/etc.) compile in based on
     // the cart's metafile gate, same as the GPU shell.
-    ingredients.registerAll();
+    ingredients.registerAll(host);
 
     // host_tree owns the React tree state across both shells. Initialize
     // its hashmaps BEFORE the reconciler registers __hostFlush — in
@@ -4188,7 +4216,8 @@ fn runHeadless() !void {
     // host_window — opt-in <Window>/<Notification> support for TUI
     // carts that want to paint a real SDL3 surface from inside an
     // otherwise-ANSI binary. No-op when has_window=false.
-    try host_window.init(std.heap.c_allocator);
+    try host_window.init(host, std.heap.c_allocator);
+    defer host_window.deinit(host.io);
     host_window.register();
 
     v8_runtime.registerHostFn("__tickDrain", hostTickDrain);
@@ -4196,7 +4225,7 @@ fn runHeadless() !void {
 
     // Same console + process shim v8_cli installs. The cart bundle
     // then layers tui/v8-preamble.js on top via its first line.
-    v8_runtime.evalScript(
+    v8_runtime.evalScript(host,
         \\globalThis.console = {
         \\  log:   (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
         \\  info:  (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
@@ -4219,14 +4248,14 @@ fn runHeadless() !void {
         \\};
     );
 
-    const ok = v8_runtime.evalScriptChecked(BUNDLE_BYTES);
-    if (!ok) std.process.exit(1);
+    const ok = v8_runtime.evalScriptChecked(host, BUNDLE_BYTES);
+    if (!ok) return error.ScriptEvaluationFailed;
 }
 
 // ── main ────────────────────────────────────────────────────────
 
 pub fn main(init: std.process.Init) !void {
-    host_io.args = init.minimal.args;
+    var host = HostContext.fromInit(init);
     if (IS_LIB) return;
 
     // Bring up the observability bus before anything else so that boot-time
@@ -4234,13 +4263,23 @@ pub fn main(init: std.process.Init) !void {
     // land in the log instead of vanishing pre-bus. Best-effort — failure
     // (e.g. no $HOME) leaves emit() as a no-op and the runtime keeps going.
     event_bus.init();
+    diag_log.init(host.environ);
+    var diag_sink = diag_log.open(host.io, host.environ);
+    defer {
+        _ = diag_sink.close(host.io);
+        diag_log.deinit();
+        event_bus.deinit();
+    }
 
     // Headless (TUI) branch — bypass the entire GPU init + engine.run
     // path. Substrate dispatched at compile time via the has_gpu
     // build option so each binary only carries the substrate it
     // shipped with.
     if (HEADLESS) {
-        try runHeadless();
+        var terminal_host: cli_bindings.TerminalHost = undefined;
+        try terminal_host.init(host);
+        defer terminal_host.deinit();
+        try runHeadless(&terminal_host.host);
         return;
     }
 
@@ -4285,28 +4324,30 @@ pub fn main(init: std.process.Init) !void {
     // process.argv for GPU-host carts. The headless/TUI path already installs
     // this before eval; the GUI shell needs the same argv contract so shipped
     // carts can receive package paths and other runtime arguments.
-    const raw_argv = try host_io.argsAlloc(g_alloc);
+    const raw_argv = try host.args.toSlice(host.arena.allocator());
     const script_argv = try g_alloc.alloc([]const u8, raw_argv.len);
     script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
     for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;
     cli_bindings.setArgv(@constCast(script_argv));
 
-    if (host_io.getenv("ZIGOS_WINDOW_CHILD") != null) {
+    if (host.environ.get("ZIGOS_WINDOW_CHILD") != null) {
         g_is_window_child = true;
-        if (host_io.getenv("ZIGOS_WINDOW_ID")) |id_s| {
+        if (host.environ.get("ZIGOS_WINDOW_ID")) |id_s| {
             g_child_window_id = std.fmt.parseInt(u32, id_s, 10) catch 0;
         }
         try engine.run(.{
-            .title = childTitle(),
+            .host = &host,
+            .diag_sink = &diag_sink,
+            .title = childTitle(host.environ),
             .root = &g_root,
             .js_logic = "",
             .lua_logic = "",
             .init = childInit,
             .tick = childTick,
             .shutdown = childShutdown,
-            .borderless = host_io.getenv("ZIGOS_WINDOW_BORDERLESS") != null,
-            .always_on_top = host_io.getenv("ZIGOS_WINDOW_ALWAYS_ON_TOP") != null,
-            .not_focusable = host_io.getenv("ZIGOS_WINDOW_NOT_FOCUSABLE") != null,
+            .borderless = host.environ.get("ZIGOS_WINDOW_BORDERLESS") != null,
+            .always_on_top = host.environ.get("ZIGOS_WINDOW_ALWAYS_ON_TOP") != null,
+            .not_focusable = host.environ.get("ZIGOS_WINDOW_NOT_FOCUSABLE") != null,
             .dispatch_js_event = childDispatchEvent,
             .set_canvas_node_position = setCanvasNodePosition,
         });
@@ -4314,11 +4355,11 @@ pub fn main(init: std.process.Init) !void {
     }
 
     const initial_bundle: []const u8 = if (DEV_MODE) blk: {
-        g_dev_bundle_buf = readBundleFromDisk() catch |e| {
+        g_dev_bundle_buf = readBundleFromDisk(host.io) catch |e| {
             std.log.err("[dev] initial bundle.js read failed: {}", .{e});
             return e;
         };
-        g_last_bundle_mtime = bundleMtimeOrZero();
+        g_last_bundle_mtime = bundleMtimeOrZero(host.io);
 
         // Seed the tab registry with the disk-backed "main" tab. Pre-seed
         // last_good with a dupe of the boot bundle so the first post-boot
@@ -4337,15 +4378,17 @@ pub fn main(init: std.process.Init) !void {
         // dev_ipc must allocate push buffers with the SAME allocator qjs_app
         // uses when it later frees them via upsertTab. Cross-allocator free is
         // UB — this caller caused the SIGSEGV on re-push (2026-04-19 fix).
-        dev_ipc.setAllocator(g_alloc);
-        dev_ipc.setBuildId(DEV_BUILD_ID);
-        dev_ipc.start();
+        g_dev_ipc = dev_ipc.Server.init(g_alloc, DEV_BUILD_ID);
+        g_dev_ipc.start(host.io);
 
         std.log.info("[dev] dev mode — watching {s} ({d} bytes), IPC @ {s}", .{ DEV_BUNDLE_PATH, g_dev_bundle_buf.len, dev_ipc.SOCKET_PATH });
         break :blk g_dev_bundle_buf;
     } else BUNDLE_BYTES;
+    defer if (DEV_MODE) g_dev_ipc.deinit(host.io);
 
     try engine.run(.{
+        .host = &host,
+        .diag_sink = &diag_sink,
         .title = WINDOW_TITLE,
         .root = &g_root,
         .js_logic = initial_bundle,

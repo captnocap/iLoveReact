@@ -6,8 +6,6 @@
 //! shader quad).
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const builtin = @import("builtin");
 
 // ── doomgeneric public surface ───────────────────────────────────────────
 //
@@ -37,11 +35,7 @@ const KeyEvent = packed struct(u32) { code: u8, pressed: u8, _pad: u16 = 0 };
 var queue: [QUEUE_CAP]KeyEvent = undefined;
 var queue_head: usize = 0; // read
 var queue_tail: usize = 0; // write
-var queue_mu: host_io.Mutex = .{};
-
 pub fn pushKey(code: u8, pressed: bool) void {
-    queue_mu.lock();
-    defer queue_mu.unlock();
     const next = (queue_tail + 1) % QUEUE_CAP;
     if (next == queue_head) {
         // queue full — drop oldest
@@ -52,8 +46,6 @@ pub fn pushKey(code: u8, pressed: bool) void {
 }
 
 fn popKey() ?KeyEvent {
-    queue_mu.lock();
-    defer queue_mu.unlock();
     if (queue_head == queue_tail) return null;
     const e = queue[queue_head];
     queue_head = (queue_head + 1) % QUEUE_CAP;
@@ -67,8 +59,17 @@ fn popKey() ?KeyEvent {
 
 var start_ns: i128 = 0;
 
+/// doomgeneric fixes these callbacks at the C ABI, so an Io parameter cannot
+/// cross this boundary. Use the platform primitives directly here instead of
+/// hiding a process-global `std.Io` behind the callback.
+fn nativeNowNs() i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
+}
+
 fn nowMs() u32 {
-    const delta_ns: i128 = host_io.nanoTimestamp() - start_ns;
+    const delta_ns: i128 = nativeNowNs() - start_ns;
     if (delta_ns < 0) return 0;
     return @as(u32, @intCast(@divTrunc(delta_ns, std.time.ns_per_ms) & 0xFFFF_FFFF));
 }
@@ -84,7 +85,7 @@ var argv_ptrs: [5][*c]u8 = undefined;
 /// twice is a no-op so the cart can rehydrate without restarting the host.
 pub fn init(allocator: std.mem.Allocator, wad_path: []const u8) !bool {
     if (initialised) return false;
-    start_ns = host_io.nanoTimestamp();
+    start_ns = nativeNowNs();
 
     // Build argv: ["doom", "-iwad", "<path>", "-nomusic"] — sound is stubbed
     // out by linking i_sound.c against null DG_*sound modules, but -nomusic
@@ -122,7 +123,7 @@ export fn DG_Init() void {
     // We allocate the screen buffer in doomgeneric.c (it does malloc on
     // create). All we do here is reset our timer baseline in case it
     // wasn't set yet (e.g. somebody calls doomgeneric_Create directly).
-    if (start_ns == 0) start_ns = host_io.nanoTimestamp();
+    if (start_ns == 0) start_ns = nativeNowNs();
 }
 
 export fn DG_DrawFrame() void {
@@ -131,7 +132,12 @@ export fn DG_DrawFrame() void {
 }
 
 export fn DG_SleepMs(ms: u32) void {
-    host_io.sleep(@as(u64, ms) * std.time.ns_per_ms);
+    const ns: u64 = @as(u64, ms) * std.time.ns_per_ms;
+    var remaining: std.c.timespec = .{
+        .sec = @intCast(ns / std.time.ns_per_s),
+        .nsec = @intCast(ns % std.time.ns_per_s),
+    };
+    while (std.c.nanosleep(&remaining, &remaining) != 0) {}
 }
 
 export fn DG_GetTicksMs() u32 {

@@ -9,7 +9,6 @@
 //! results back through the `apply_*` mutators below.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const Rng = @import("rng.zig").Rng;
 const market_mod = @import("market.zig");
 const basecoin_mod = @import("basecoin.zig");
@@ -18,7 +17,6 @@ const pool_mod = @import("pool.zig");
 const tape_mod = @import("tape.zig");
 const wallet_mod = @import("wallet.zig");
 const npc_mod = @import("npc.zig");
-const v8_runtime = @import("../v8_runtime.zig");
 
 const MAX_TOKENS: usize = 256;
 
@@ -35,33 +33,25 @@ const Token = struct {
 
 fn chainPoolDepthUsd(chain: basecoin_mod.Chain) f64 {
     return switch (chain) {
-        .ethereum  => 300_000.0,
-        .bsc       => 80_000.0,
-        .solana    => 100_000.0,
-        .arbitrum  => 60_000.0,
-        .base      => 40_000.0,
-        .polygon   => 50_000.0,
+        .ethereum => 300_000.0,
+        .bsc => 80_000.0,
+        .solana => 100_000.0,
+        .arbitrum => 60_000.0,
+        .base => 40_000.0,
+        .polygon => 50_000.0,
         .avalanche => 30_000.0,
-        .tron      => 20_000.0,
-        .cardano   => 10_000.0,
-        .fantom    => 8_000.0,
-        .bitcoin   => 100_000.0,
-        .litecoin  => 5_000.0,
-        .monero    => 2_000.0,
+        .tron => 20_000.0,
+        .cardano => 10_000.0,
+        .fantom => 8_000.0,
+        .bitcoin => 100_000.0,
+        .litecoin => 5_000.0,
+        .monero => 2_000.0,
     };
 }
 
 fn chainFromRoll(roll: f64) basecoin_mod.Chain {
     const r = roll;
-    return if (r < 0.25) .bsc
-        else if (r < 0.45) .ethereum
-        else if (r < 0.65) .solana
-        else if (r < 0.75) .polygon
-        else if (r < 0.80) .arbitrum
-        else if (r < 0.85) .base
-        else if (r < 0.90) .avalanche
-        else if (r < 0.95) .fantom
-        else .tron;
+    return if (r < 0.25) .bsc else if (r < 0.45) .ethereum else if (r < 0.65) .solana else if (r < 0.75) .polygon else if (r < 0.80) .arbitrum else if (r < 0.85) .base else if (r < 0.90) .avalanche else if (r < 0.95) .fantom else .tron;
 }
 
 const SimState = struct {
@@ -100,11 +90,11 @@ const SeedToken = struct {
     sym: []const u8,
 };
 const DEFAULT_SEEDS = [_]SeedToken{
-    .{ .sym = "SHIT"  },
+    .{ .sym = "SHIT" },
     .{ .sym = "DEGEN" },
-    .{ .sym = "MOON"  },
-    .{ .sym = "RUG"   },
-    .{ .sym = "WGMI"  },
+    .{ .sym = "MOON" },
+    .{ .sym = "RUG" },
+    .{ .sym = "WGMI" },
 };
 
 const STARTUP_TOKEN_COUNT: usize = 256;
@@ -136,9 +126,7 @@ fn seedOne(i: usize) void {
     const seed: u64 = g_state.run_id ^ 0xA5A5_C0DE_0000_0000 ^ @as(u64, @intCast(i));
     var r = Rng.init(seed);
     const a_class = r.float();
-    const anchor: f64 = if (a_class < 0.25) 0.000001 + r.float() * 0.0001
-        else if (a_class < 0.6)  0.001  + r.float() * 0.5
-        else                     0.5    + r.float() * 4.5;
+    const anchor: f64 = if (a_class < 0.25) 0.000001 + r.float() * 0.0001 else if (a_class < 0.6) 0.001 + r.float() * 0.5 else 0.5 + r.float() * 4.5;
     const bv: f64 = 0.02 + r.float() * 0.10;
     const rug: f64 = r.float() * r.float() * 0.0005;
     const chain_roll = r.float();
@@ -186,18 +174,11 @@ fn seedN(n_in: usize) void {
     g_state.seeded = true;
 }
 
-fn freshRunId() u64 {
-    var bytes: [8]u8 = undefined;
-    host_io.io().random(&bytes);
-    return std.mem.readInt(u64, &bytes, .little);
-}
-
-fn primeState() void {
-    if (g_state.run_id == 0) g_state.run_id = freshRunId();
+fn primeState(wallet_address: [20]u8) void {
     g_state.rng = Rng.init(g_state.run_id);
     g_state.market = market_mod.init();
     basecoin_mod.initAll(&g_state.base_coins);
-    g_state.wallet = wallet_mod.init(1000.0);
+    g_state.wallet = wallet_mod.init(1000.0, wallet_address);
     if (!g_state.seeded) seedN(STARTUP_TOKEN_COUNT) else {
         seedN(g_state.token_count);
     }
@@ -205,14 +186,37 @@ fn primeState() void {
 }
 
 fn ensureInit() void {
-    if (g_state.initialized) return;
-    primeState();
+    std.debug.assert(g_state.initialized);
+}
+
+const INIT_ENTROPY_BYTES = 8 + 20;
+
+fn initializeFromEntropy(entropy: [INIT_ENTROPY_BYTES]u8) void {
+    var run_id = std.mem.readInt(u64, entropy[0..8], .little);
+    // Zero is the sentinel used by the persisted-run-id path. Preserve the
+    // caller's entropy without leaving the state looking uninitialized.
+    if (run_id == 0) run_id = 0x5349_4d5f_5255_4e31;
+
+    g_state.run_id = run_id;
+    primeState(entropy[8..28].*);
     g_live_read = 0;
     g_live_write = 0;
+    g_host_event_read = 0;
+    g_host_event_write = 0;
     g_state.initialized = true;
     emitTokensInit();
     emitPlayerInit();
     emitNpcInit();
+}
+
+/// Initialize the simulation from the process-owned Zig 0.16 I/O capability.
+/// Randomness is consumed once at this boundary; the hot simulation path is
+/// deterministic and does not retain an I/O handle.
+pub fn init(io: std.Io) void {
+    if (g_state.initialized) return;
+    var entropy: [INIT_ENTROPY_BYTES]u8 = undefined;
+    io.random(&entropy);
+    initializeFromEntropy(entropy);
 }
 
 // ── Live tape ring ──────────────────────────────────────────────────────
@@ -222,7 +226,7 @@ const LIVE_RING_SIZE: u32 = 16384;
 const LiveTapeEvent = struct {
     real_ms: u32,
     id: u16,
-    kind: u8,  // 'b', 's', or 'r'
+    kind: u8, // 'b', 's', or 'r'
     pat: u8,
     base: f32,
     usd: f32,
@@ -426,34 +430,76 @@ fn scheduleNextEvent(t: *Token, now_ms: u32) void {
     t.next_event_at_ms = now_ms + interval_ms;
 }
 
-// ── Init emits (one-shot JSON payloads for cart-side string maps) ──────
+// ── Host event outbox (one-shot JSON for cart-side string maps) ──
+//
+// The simulation does not know about V8. The host-aware zigcall boundary
+// drains these bounded, owned records after reflected calls.
+
+const HOST_EVENT_CAPACITY: u32 = 8;
+const HOST_EVENT_CHANNEL_MAX: usize = 32;
+const HOST_EVENT_PAYLOAD_MAX: usize = 16_384;
+
+/// Owned data crossing from the pure simulation into its host. The extra byte
+/// in each buffer is a sentinel for foreign-runtime string APIs.
+pub const HostEvent = struct {
+    channel: [HOST_EVENT_CHANNEL_MAX + 1]u8,
+    channel_len: u8,
+    payload: [HOST_EVENT_PAYLOAD_MAX + 1]u8,
+    payload_len: u16,
+
+    pub fn channelZ(self: *const HostEvent) [:0]const u8 {
+        return self.channel[0..self.channel_len :0];
+    }
+
+    pub fn payloadZ(self: *const HostEvent) [:0]const u8 {
+        return self.payload[0..self.payload_len :0];
+    }
+};
+
+var g_host_events: [HOST_EVENT_CAPACITY]HostEvent = undefined;
+var g_host_event_read: u32 = 0;
+var g_host_event_write: u32 = 0;
 
 fn emit(channel: []const u8, payload: []const u8) void {
-    var chan_arr: std.ArrayList(u8) = .empty;
-    defer chan_arr.deinit(std.heap.c_allocator);
-    chan_arr.appendSlice(std.heap.c_allocator, channel) catch return;
-    chan_arr.append(std.heap.c_allocator, 0) catch return;
-    const chan_z = chan_arr.items[0 .. chan_arr.items.len - 1 :0];
+    if (channel.len > HOST_EVENT_CHANNEL_MAX or payload.len > HOST_EVENT_PAYLOAD_MAX) return;
 
-    var payload_arr: std.ArrayList(u8) = .empty;
-    defer payload_arr.deinit(std.heap.c_allocator);
-    payload_arr.appendSlice(std.heap.c_allocator, payload) catch return;
-    payload_arr.append(std.heap.c_allocator, 0) catch return;
-    const payload_z = payload_arr.items[0 .. payload_arr.items.len - 1 :0];
+    if (g_host_event_write - g_host_event_read >= HOST_EVENT_CAPACITY) {
+        g_host_event_read += 1;
+    }
+    const event = &g_host_events[g_host_event_write % HOST_EVENT_CAPACITY];
+    event.channel_len = @intCast(channel.len);
+    @memcpy(event.channel[0..channel.len], channel);
+    event.channel[channel.len] = 0;
+    event.payload_len = @intCast(payload.len);
+    @memcpy(event.payload[0..payload.len], payload);
+    event.payload[payload.len] = 0;
+    g_host_event_write += 1;
+}
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+/// Copy the next event into host-owned storage. The explicit output pointer
+/// keeps this plumbing outside the generic reflected simulation surface.
+pub fn popHostEvent(out: *HostEvent) bool {
+    if (g_host_event_read == g_host_event_write) return false;
+    out.* = g_host_events[g_host_event_read % HOST_EVENT_CAPACITY];
+    g_host_event_read += 1;
+    return true;
 }
 
 fn emitTokensInit() void {
     var payload: [16384]u8 = undefined;
     var pos: usize = 0;
-    payload[pos] = '['; pos += 1;
+    payload[pos] = '[';
+    pos += 1;
     var i: u32 = 0;
     while (i < g_state.token_count) : (i += 1) {
-        if (i > 0) { payload[pos] = ','; pos += 1; }
+        if (i > 0) {
+            payload[pos] = ',';
+            pos += 1;
+        }
         const t = &g_state.tokens[i];
         const sym = t.symbol[0..t.symbol_len];
-        const w = std.fmt.bufPrint(payload[pos..],
+        const w = std.fmt.bufPrint(
+            payload[pos..],
             "{{\"id\":{d},\"sym\":\"{s}\"}}",
             .{ i, sym },
         ) catch return;
@@ -461,7 +507,8 @@ fn emitTokensInit() void {
         if (pos + 64 >= payload.len) break;
     }
     if (pos + 1 >= payload.len) return;
-    payload[pos] = ']'; pos += 1;
+    payload[pos] = ']';
+    pos += 1;
     emit("sim:tokens", payload[0..pos]);
 }
 
@@ -487,12 +534,16 @@ fn emitPlayerInit() void {
 fn emitNpcInit() void {
     var payload: [16384]u8 = undefined;
     var pos: usize = 0;
-    payload[pos] = '['; pos += 1;
+    payload[pos] = '[';
+    pos += 1;
     const hex = "0123456789abcdef";
     var i: usize = 0;
     while (i < npc_mod.NPC_ROSTER_SIZE) : (i += 1) {
         if (pos + 96 >= payload.len) break;
-        if (i > 0) { payload[pos] = ','; pos += 1; }
+        if (i > 0) {
+            payload[pos] = ',';
+            pos += 1;
+        }
         const npc = &g_state.npcs[i];
         const head = "{\"id\":";
         @memcpy(payload[pos .. pos + head.len], head);
@@ -518,14 +569,17 @@ fn emitNpcInit() void {
         pos += tail.len;
     }
     if (pos + 1 >= payload.len) return;
-    payload[pos] = ']'; pos += 1;
+    payload[pos] = ']';
+    pos += 1;
     emit("sim:npcs:init", payload[0..pos]);
 }
 
 // ── Tick ────────────────────────────────────────────────────────────────
 
 pub fn tick(dt_ms: u32) void {
-    ensureInit();
+    // The engine ticks all compiled subsystems. A source-gated sim with no
+    // registered host owner stays dormant instead of discovering capabilities.
+    if (!g_state.initialized) return;
     g_state.real_time_ms += dt_ms;
 
     const now_ms: u32 = if (g_state.real_time_ms > std.math.maxInt(u32))
@@ -668,7 +722,7 @@ const DRAIN_TAPE_MAX: u32 = 128;
 
 pub const TapeRow = struct {
     id: u32,
-    kind: u32,    // 0=buy, 1=sell, 2=rug
+    kind: u32, // 0=buy, 1=sell, 2=rug
     pat: u32,
     base: f64,
     usd: f64,
@@ -971,7 +1025,7 @@ pub fn quote_sell(token_id: u32, base_in: f64) QuoteResult {
 }
 
 pub const TradeResult = struct {
-    ok: u32,    // 0/1
+    ok: u32, // 0/1
     output: f64,
     impact: f64,
     fee: f64,
@@ -1189,6 +1243,10 @@ pub fn wallet_debit_holding(token_id: u32, amount: f64) OkRow {
 // ── Reset ──────────────────────────────────────────────────────────────
 
 pub fn reset() void {
+    ensureInit();
+    var entropy: [INIT_ENTROPY_BYTES]u8 = undefined;
+    g_state.rng.prng.random().bytes(&entropy);
+
     g_state.initialized = false;
     g_state.seeded = false;
     g_state.run_id = 0;
@@ -1205,6 +1263,34 @@ pub fn reset() void {
     g_tps_count = 0;
     g_heat = 0.0;
     g_difficulty = 1.0;
-    ensureInit();
+    initializeFromEntropy(entropy);
     emit("sim:trade:reset", "{}");
+}
+
+test "simulation consumes entropy at init and exposes only data events" {
+    var entropy = [_]u8{0} ** INIT_ENTROPY_BYTES;
+    std.mem.writeInt(u64, entropy[0..8], 0x0807_0605_0403_0201, .little);
+    @memset(entropy[8..], 0xa5);
+
+    initializeFromEntropy(entropy);
+
+    try std.testing.expectEqual(@as(u64, 0x0807_0605_0403_0201), g_state.run_id);
+    try std.testing.expectEqualSlices(u8, entropy[8..], &g_state.wallet.address);
+
+    const expected_channels = [_][]const u8{
+        "sim:tokens",
+        "sim:player",
+        "sim:npcs:init",
+    };
+    for (expected_channels) |expected| {
+        var event: HostEvent = undefined;
+        try std.testing.expect(popHostEvent(&event));
+        try std.testing.expectEqualStrings(expected, event.channelZ());
+        try std.testing.expect(event.payload_len > 0);
+    }
+    var event: HostEvent = undefined;
+    try std.testing.expect(!popHostEvent(&event));
+
+    tick(16);
+    try std.testing.expectEqual(@as(u64, 16), g_state.real_time_ms);
 }

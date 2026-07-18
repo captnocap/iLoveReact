@@ -35,7 +35,7 @@ var g_sink_hits: usize = 0;
 var g_last_line_buf: [2048]u8 = undefined;
 var g_last_line_len: usize = 0;
 
-fn captureSink(line_json: []const u8) void {
+fn captureSink(_: ?*anyopaque, line_json: []const u8) void {
     g_sink_hits += 1;
     const n = @min(line_json.len, g_last_line_buf.len);
     @memcpy(g_last_line_buf[0..n], line_json[0..n]);
@@ -51,8 +51,8 @@ fn resetAll() void {
 
 test "emit records a line and assigns a monotonic seq" {
     resetAll();
-    const s1 = diag.emit("editor.place", .info, "placed wall", "{\"ms\":3}");
-    const s2 = diag.emit("editor.place", .warn, "slow place", "{\"ms\":40}");
+    const s1 = diag.emit(std.testing.io, "editor.place", .info, "placed wall", "{\"ms\":3}");
+    const s2 = diag.emit(std.testing.io, "editor.place", .warn, "slow place", "{\"ms\":40}");
     try testing.expect(s1 == 1);
     try testing.expect(s2 == 2);
     try testing.expectEqual(@as(u64, 2), diag.ringCount());
@@ -63,13 +63,13 @@ test "emit records a line and assigns a monotonic seq" {
 test "disabled channel is a cheap no-op — nothing reaches the ring" {
     resetAll();
     diag.setEnabled("editor.hot", false);
-    const seq = diag.emit("editor.hot", .debug, "noise", "{}");
+    const seq = diag.emit(std.testing.io, "editor.hot", .debug, "noise", "{}");
     try testing.expectEqual(@as(u64, 0), seq);
     try testing.expectEqual(@as(u64, 0), diag.ringCount());
     try testing.expectEqual(@as(u64, 0), diag.emittedFor("editor.hot"));
 
     diag.setEnabled("editor.hot", true);
-    const seq2 = diag.emit("editor.hot", .debug, "now on", "{}");
+    const seq2 = diag.emit(std.testing.io, "editor.hot", .debug, "now on", "{}");
     try testing.expect(seq2 == 1);
     try testing.expectEqual(@as(u64, 1), diag.ringCount());
 }
@@ -80,7 +80,7 @@ test "cost-tier sampling keeps 1 of every N accepted lines" {
     var i: usize = 0;
     var kept: usize = 0;
     while (i < 12) : (i += 1) {
-        const seq = diag.emit("editor.frame", .trace, "tick", "{}");
+        const seq = diag.emit(std.testing.io, "editor.frame", .trace, "tick", "{}");
         if (seq != 0) kept += 1;
     }
     // 12 emits, divisor 4 → lines 4, 8, 12 survive.
@@ -94,7 +94,7 @@ test "divisor of 1 keeps everything" {
     resetAll();
     diag.setSampleDiv("editor.cheap", 1);
     var i: usize = 0;
-    while (i < 5) : (i += 1) _ = diag.emit("editor.cheap", .info, "x", "{}");
+    while (i < 5) : (i += 1) _ = diag.emit(std.testing.io, "editor.cheap", .info, "x", "{}");
     try testing.expectEqual(@as(u64, 5), diag.emittedFor("editor.cheap"));
     try testing.expectEqual(@as(u64, 0), diag.droppedFor("editor.cheap"));
 }
@@ -106,7 +106,7 @@ test "ring evicts oldest, recentJson returns the last window chronologically" {
     while (i < total) : (i += 1) {
         var msg_buf: [32]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "n{d}", .{i}) catch unreachable;
-        _ = diag.emit("editor.bulk", .info, msg, "{}");
+        _ = diag.emit(std.testing.io, "editor.bulk", .info, msg, "{}");
     }
     try testing.expectEqual(@as(u64, total), diag.ringCount());
 
@@ -129,10 +129,10 @@ test "ring evicts oldest, recentJson returns the last window chronologically" {
 
 test "installed sink sees every accepted line, not sampled-out ones" {
     resetAll();
-    diag.setFeedSink(captureSink);
+    diag.setFeedSink(.{ .context = null, .write = captureSink });
     diag.setSampleDiv("editor.s", 3);
     var i: usize = 0;
-    while (i < 9) : (i += 1) _ = diag.emit("editor.s", .info, "z", "{}");
+    while (i < 9) : (i += 1) _ = diag.emit(std.testing.io, "editor.s", .info, "z", "{}");
     // 9 emits / div 3 → 3 accepted → 3 sink hits.
     try testing.expectEqual(@as(usize, 3), g_sink_hits);
     // Last line JSON carries the channel + severity contract fields.
@@ -144,7 +144,7 @@ test "installed sink sees every accepted line, not sampled-out ones" {
 
 test "msg JSON-escapes quotes and control chars" {
     resetAll();
-    _ = diag.emit("editor.esc", .info, "he said \"hi\"\n", "{}");
+    _ = diag.emit(std.testing.io, "editor.esc", .info, "he said \"hi\"\n", "{}");
     const json = try diag.recentJson(testing.allocator, 1);
     defer testing.allocator.free(json);
     try testing.expect(std.mem.indexOf(u8, json, "\\\"hi\\\"") != null);
@@ -154,8 +154,8 @@ test "msg JSON-escapes quotes and control chars" {
 test "channelsJson reports per-channel host state" {
     resetAll();
     diag.setSampleDiv("editor.a", 2);
-    _ = diag.emit("editor.a", .info, "x", "{}");
-    _ = diag.emit("editor.a", .info, "y", "{}"); // 1 kept, 1 dropped
+    _ = diag.emit(std.testing.io, "editor.a", .info, "x", "{}");
+    _ = diag.emit(std.testing.io, "editor.a", .info, "y", "{}"); // 1 kept, 1 dropped
     diag.setEnabled("editor.b", false);
     const json = try diag.channelsJson(testing.allocator);
     defer testing.allocator.free(json);

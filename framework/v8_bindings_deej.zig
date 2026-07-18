@@ -39,15 +39,16 @@ fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
 
 fn hostDeejStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const port = argToStringAlloc(info, 0);
     defer if (port) |p| std.heap.c_allocator.free(p);
     const baud: u32 = if (argToF64(info, 1)) |b| @intFromFloat(@max(0, b)) else 0;
     const port_slice: ?[]const u8 = if (port) |p| (if (p.len > 0) p else null) else null;
-    setReturnNumber(info, if (deej.start(port_slice, baud)) 1 else 0);
+    setReturnNumber(info, if (deej.start(host.io, host.environ, host.gpa, port_slice, baud)) 1 else 0);
 }
 
 fn hostDeejStop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    _ = info_c;
+    _ = v8.FunctionCallbackInfo.initFromV8(info_c);
     deej.stop();
 }
 
@@ -58,7 +59,8 @@ fn hostDeejIsAvailable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 
 fn hostDeejPoll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(deej.poll()));
+    const host = v8_runtime.hostContext(info.getIsolate());
+    setReturnNumber(info, @floatFromInt(deej.poll(host.io, host.environ)));
 }
 
 fn hostDeejStateJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

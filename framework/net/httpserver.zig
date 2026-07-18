@@ -5,7 +5,7 @@
 //!
 //! Usage:
 //!   var server: httpserver.HttpServer = undefined;
-//!   try server.listen(8080, &[_]httpserver.Route{
+//!   try server.listen(allocator, io, environ_map, 8080, &[_]httpserver.Route{
 //!       .{ .path = "/static", .route_type = .static, .root = "/var/www" },
 //!       .{ .path = "/api", .route_type = .handler },
 //!   });
@@ -18,12 +18,7 @@
 //!   server.close();
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const netx = @import("netx.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
+const transport = @import("transport.zig");
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -45,13 +40,8 @@ const MAX_ROUTES = 16;
 // Writes to stderr. Run the cart with `2>/tmp/srv.log` to capture cleanly
 // without corrupting a TUI's stdout. Temporary instrument for the
 // "accepted-but-never-read" investigation.
-var g_dbg_checked: bool = false;
 var g_dbg: bool = false;
 fn dbg(comptime fmt: []const u8, args: anytype) void {
-    if (!g_dbg_checked) {
-        g_dbg_checked = true;
-        g_dbg = sysx.getenv("REACTJIT_HTTPSRV_DEBUG") != null;
-    }
     if (g_dbg) std.debug.print("[httpsrv] " ++ fmt ++ "\n", args);
 }
 
@@ -90,7 +80,7 @@ const ClientState = enum { reading, done, closed };
 const HttpClient = struct {
     active: bool = false,
     id: u32 = 0,
-    stream: ?netx.Stream = null,
+    stream: ?transport.StreamPump = null,
     state: ClientState = .closed,
     req_buf: [MAX_REQ]u8 = undefined,
     req_len: usize = 0,
@@ -99,7 +89,9 @@ const HttpClient = struct {
 // ── Server ───────────────────────────────────────────────────────────────
 
 pub const HttpServer = struct {
-    listener: sysx.socket_t,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    listener: transport.ListenerPump,
     clients: [MAX_CLIENTS]HttpClient = [_]HttpClient{.{}} ** MAX_CLIENTS,
     next_id: u32 = 1,
     routes: [MAX_ROUTES]Route = undefined,
@@ -115,17 +107,21 @@ pub const HttpServer = struct {
     /// Initialize an in-place HttpServer. Storage for routes lives inside
     /// `self`; routes[].path slices in this struct point at self.route_path_storage,
     /// so the struct must NOT be moved/copied after this returns.
-    pub fn listen(self: *HttpServer, port: u16, routes: []const Route) !void {
-        const addr = try netx.Address.parseIp4("0.0.0.0", port);
-        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
-        errdefer sysx.close(fd);
+    pub fn listen(
+        self: *HttpServer,
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        environ: *const std.process.Environ.Map,
+        port: u16,
+        routes: []const Route,
+    ) !void {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .unspecified(port) };
+        var server = try address.listen(io, .{ .kernel_backlog = 16, .reuse_address = true });
+        errdefer server.deinit(io);
+        const listener = try transport.ListenerPump.init(allocator, io, server);
 
-        const optval: c_int = 1;
-        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
-        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
-        try sysx.listen(fd, 16);
-
-        self.* = HttpServer{ .listener = fd };
+        self.* = .{ .allocator = allocator, .io = io, .listener = listener };
+        g_dbg = environ.get("REACTJIT_HTTPSRV_DEBUG") != null;
         const rcount = @min(routes.len, MAX_ROUTES);
         for (0..rcount) |i| {
             const src = routes[i];
@@ -152,22 +148,23 @@ pub const HttpServer = struct {
 
         // Accept new connections
         while (true) {
-            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch |err| {
-                if (err != error.WouldBlock) dbg("accept ERR={s}", .{@errorName(err)});
+            const accepted = self.listener.accept() orelse break;
+            const slot = self.findSlot() orelse {
+                dbg("accept NO FREE SLOT (closing)", .{});
+                accepted.close(self.io);
                 break;
             };
-            const slot = self.findSlot() orelse {
-                dbg("accept fd={d} NO FREE SLOT (closing)", .{accepted});
-                sysx.close(accepted);
+            const pump = transport.StreamPump.init(self.allocator, self.io, accepted) catch {
+                accepted.close(self.io);
                 break;
             };
             self.clients[slot] = .{
                 .active = true,
                 .id = self.next_id,
-                .stream = .{ .handle = accepted },
+                .stream = pump,
                 .state = .reading,
             };
-            dbg("accept fd={d} -> slot={d} id={d}", .{ accepted, slot, self.next_id });
+            dbg("accept -> slot={d} id={d}", .{ slot, self.next_id });
             self.next_id += 1;
         }
 
@@ -184,19 +181,21 @@ pub const HttpServer = struct {
     pub fn respond(self: *HttpServer, client_id: u32, status: u16, content_type: []const u8, body: []const u8) void {
         for (&self.clients) |*client| {
             if (client.active and client.id == client_id) {
-                if (client.stream) |stream| {
+                if (client.stream) |*stream| {
                     const status_text = statusText(status);
                     var hdr_buf: [512]u8 = undefined;
-                    const hdr = std.fmt.bufPrint(&hdr_buf,
+                    const hdr = std.fmt.bufPrint(
+                        &hdr_buf,
                         "HTTP/1.1 {d} {s}\r\n" ++
                             "Content-Type: {s}\r\n" ++
                             "Content-Length: {d}\r\n" ++
                             "Connection: close\r\n\r\n",
                         .{ status, status_text, content_type, body.len },
                     ) catch "";
-                    stream.writeAll(hdr) catch {};
-                    stream.writeAll(body) catch {};
-                    stream.close();
+                    stream.send(hdr) catch {};
+                    stream.send(body) catch {};
+                    stream.deinit();
+                    client.stream = null;
                 }
                 client.active = false;
                 return;
@@ -208,32 +207,40 @@ pub const HttpServer = struct {
     pub fn close(self: *HttpServer) void {
         for (&self.clients) |*client| {
             if (client.active) {
-                if (client.stream) |s| s.close();
+                if (client.stream) |*stream| stream.deinit();
+                client.stream = null;
                 client.active = false;
             }
         }
-        sysx.close(self.listener);
+        self.listener.deinit();
     }
 
     // ── Internal ─────────────────────────────────────────────────────
 
     fn processClient(self: *HttpServer, client: *HttpClient, out: []HttpEvent) void {
-        const stream = client.stream orelse return;
-        const n = stream.read(client.req_buf[client.req_len..]) catch |err| {
-            if (err == error.WouldBlock) {
-                dbg("read id={d} WOULDBLOCK req_len={d}", .{ client.id, client.req_len });
+        const stream = if (client.stream) |*pump| pump else return;
+        const n = switch (stream.drain(client.req_buf[client.req_len..])) {
+            .empty => {
+                dbg("read id={d} QUEUE_EMPTY req_len={d}", .{ client.id, client.req_len });
                 if (client.req_len > 0) self.tryParseRequest(client, out);
                 return;
-            }
-            dbg("read id={d} ERR={s}", .{ client.id, @errorName(err) });
-            client.active = false;
-            return;
+            },
+            .data => |count| count,
+            .closed => {
+                dbg("read id={d} EOF (closing)", .{client.id});
+                stream.deinit();
+                client.stream = null;
+                client.active = false;
+                return;
+            },
+            .failed => |err| {
+                dbg("read id={d} ERR={s}", .{ client.id, @errorName(err) });
+                stream.deinit();
+                client.stream = null;
+                client.active = false;
+                return;
+            },
         };
-        if (n == 0) {
-            dbg("read id={d} EOF n=0 (closing)", .{client.id});
-            client.active = false;
-            return;
-        }
         client.req_len += n;
         dbg("read id={d} n={d} req_len={d}", .{ client.id, n, client.req_len });
         self.tryParseRequest(client, out);
@@ -341,47 +348,51 @@ pub const HttpServer = struct {
         @memcpy(fs_path[root_len .. root_len + slen], suffix_to_use);
 
         // Read file
-        const file = std.Io.Dir.openFileAbsolute(host_io.io(), fs_path[0 .. root_len + slen], .{}) catch {
+        const file = std.Io.Dir.openFileAbsolute(self.io, fs_path[0 .. root_len + slen], .{}) catch {
             self.respondDirect(client, 404, "Not Found");
             return;
         };
-        defer file.close(host_io.io());
+        defer file.close(self.io);
         var body: [MAX_RESP]u8 = undefined;
-        const file_len = file.readPositionalAll(host_io.io(), &body, 0) catch {
+        const file_len = file.readPositionalAll(self.io, &body, 0) catch {
             self.respondDirect(client, 500, "Read Error");
             return;
         };
 
         const content_type = mimeType(suffix_to_use);
-        const stream = client.stream orelse return;
+        const stream = if (client.stream) |*pump| pump else return;
         var hdr_buf: [512]u8 = undefined;
-        const hdr = std.fmt.bufPrint(&hdr_buf,
+        const hdr = std.fmt.bufPrint(
+            &hdr_buf,
             "HTTP/1.1 200 OK\r\n" ++
                 "Content-Type: {s}\r\n" ++
                 "Content-Length: {d}\r\n" ++
                 "Connection: close\r\n\r\n",
             .{ content_type, file_len },
         ) catch "";
-        stream.writeAll(hdr) catch {};
-        stream.writeAll(body[0..file_len]) catch {};
-        stream.close();
+        stream.send(hdr) catch {};
+        stream.send(body[0..file_len]) catch {};
+        stream.deinit();
+        client.stream = null;
         client.active = false;
     }
 
     fn respondDirect(self: *HttpServer, client: *HttpClient, status: u16, body: []const u8) void {
         _ = self;
-        if (client.stream) |stream| {
+        if (client.stream) |*stream| {
             var hdr_buf: [512]u8 = undefined;
-            const hdr = std.fmt.bufPrint(&hdr_buf,
+            const hdr = std.fmt.bufPrint(
+                &hdr_buf,
                 "HTTP/1.1 {d} {s}\r\n" ++
                     "Content-Type: text/plain\r\n" ++
                     "Content-Length: {d}\r\n" ++
                     "Connection: close\r\n\r\n",
                 .{ status, statusText(status), body.len },
             ) catch "";
-            stream.writeAll(hdr) catch {};
-            stream.writeAll(body) catch {};
-            stream.close();
+            stream.send(hdr) catch {};
+            stream.send(body) catch {};
+            stream.deinit();
+            client.stream = null;
         }
         client.active = false;
     }
@@ -473,4 +484,8 @@ fn parseContentLength(headers: []const u8) usize {
         } else break;
     }
     return 0;
+}
+
+test "public HTTP server API compiles" {
+    std.testing.refAllDecls(@This());
 }

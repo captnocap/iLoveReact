@@ -167,12 +167,12 @@ fn compile(allocator: std.mem.Allocator, spec: Spec) ![]u8 {
     });
 }
 
-fn nanoNow() i128 {
-    return std.Io.Clock.now(.awake, std.Io.Threaded.global_single_threaded.io()).toNanoseconds();
+fn nanoNow(io: std.Io) i128 {
+    return std.Io.Clock.now(.awake, io).toNanoseconds();
 }
 
 pub fn main(init: std.process.Init) !void {
-    const io = std.Io.Threaded.global_single_threaded.io();
+    const io = init.io;
     var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -191,7 +191,7 @@ pub fn main(init: std.process.Init) !void {
         return error.MissingOut;
     };
 
-    const t0 = nanoNow();
+    const t0 = nanoNow(io);
     const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
     defer allocator.free(source);
     const spec = try parseSource(source);
@@ -203,7 +203,7 @@ pub fn main(init: std.process.Init) !void {
     try file.sync(io);
     file.close(io);
 
-    const elapsed_ns = nanoNow() - t0;
+    const elapsed_ns = nanoNow(io) - t0;
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     var stdout_buffer: [256]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);

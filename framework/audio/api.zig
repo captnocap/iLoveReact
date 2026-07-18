@@ -1,7 +1,6 @@
 //! Audio subsystem — public API, beat scheduling, and command processing.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const types = @import("types.zig");
 const state = @import("state.zig");
@@ -457,8 +456,8 @@ fn findChunk(data: []const u8, name: *const [4]u8) ?[]const u8 {
     return null;
 }
 
-fn decodeWavToMonoF32(path: []const u8) ?SampleData {
-    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(256 * 1024 * 1024)) catch return null;
+fn decodeWavToMonoF32(io: std.Io, path: []const u8) ?SampleData {
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, std.heap.c_allocator, .limited(256 * 1024 * 1024)) catch return null;
     defer std.heap.c_allocator.free(bytes);
 
     const fmt = findChunk(bytes, "fmt ") orelse return null;
@@ -1534,8 +1533,8 @@ pub fn createAudioSlice(sound_spec: []const u8, slice_start_raw: f64, slice_end_
     });
 }
 
-pub fn loadSound(path: []const u8) u32 {
-    const decoded = decodeWavToMonoF32(path) orelse return 0;
+pub fn loadSound(io: std.Io, path: []const u8) u32 {
+    const decoded = decodeWavToMonoF32(io, path) orelse return 0;
     const sample_buffer = decoded.samples orelse return 0;
     const sample_id = allocateSample(sample_buffer, decoded.sample_rate, decoded.channels);
     if (sample_id == 0) {
@@ -1556,9 +1555,9 @@ pub fn loadSound(path: []const u8) u32 {
     return handle;
 }
 
-pub fn loadSample(module_id: u32, slot_raw: i32, path: []const u8, mode: []const u8) bool {
+pub fn loadSample(io: std.Io, module_id: u32, slot_raw: i32, path: []const u8, mode: []const u8) bool {
     if (slot_raw < 1 or slot_raw > @as(i32, @intCast(MAX_SAMPLER_SLOTS))) return false;
-    const decoded = decodeWavToMonoF32(path) orelse return false;
+    const decoded = decodeWavToMonoF32(io, path) orelse return false;
     const sample_buffer = decoded.samples orelse return false;
     const sample_id = allocateSample(sample_buffer, decoded.sample_rate, decoded.channels);
     if (sample_id == 0) {

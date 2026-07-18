@@ -174,7 +174,7 @@ pub fn dressPaintGizmo(runtime: anytype, node: *Node, hover: [3]f32, tool: map_p
 /// reserved node + collider (dirty-coalesced), poll the hover gizmo, and dress
 /// the gizmo node. Runs unconditionally — with no painted chunks and paint
 /// disarmed it is a cheap slot scan.
-pub fn applyPaintLayer(runtime: anytype) void {
+pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
     const first = runtime.paint_kids_first orelse return;
     const map_replaced = reconcileMapRevision(runtime);
 
@@ -438,7 +438,7 @@ pub fn applyPaintLayer(runtime: anytype) void {
     // req_2864: apply finished worker regens + feed the worker its next job.
     // The regen itself runs OFF this thread — a paint frame spends microseconds
     // here no matter how much of the world is planted.
-    pollFoliageRegen(runtime);
+    pollFoliageRegen(runtime, io);
 
     // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {

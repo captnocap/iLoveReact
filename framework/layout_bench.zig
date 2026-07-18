@@ -150,6 +150,7 @@ fn percentileMedian(samples: []u64) f64 {
 
 /// Time `f` over a warmup window then a measure window. Returns per-call stats.
 fn timeIt(
+    io: std.Io,
     comptime f: anytype,
     ctx: anytype,
     warmup_ms: u64,
@@ -157,22 +158,21 @@ fn timeIt(
     samples: *std.ArrayList(u64),
     gpa: std.mem.Allocator,
 ) !Stats {
-    var timer = try std.time.Timer.start();
     // Warmup.
     const warm_ns = warmup_ms * std.time.ns_per_ms;
-    while (timer.read() < warm_ns) {
+    const warm_start = std.Io.Clock.Timestamp.now(io, .awake);
+    while (elapsedNs(warm_start, io) < warm_ns) {
         f(ctx);
     }
     // Measure.
     samples.clearRetainingCapacity();
-    timer.reset();
     const meas_ns = measure_ms * std.time.ns_per_ms;
     var total: u128 = 0;
-    var call_timer = try std.time.Timer.start();
-    while (timer.read() < meas_ns) {
-        call_timer.reset();
+    const measure_start = std.Io.Clock.Timestamp.now(io, .awake);
+    while (elapsedNs(measure_start, io) < meas_ns) {
+        const call_start = std.Io.Clock.Timestamp.now(io, .awake);
         f(ctx);
-        const dt = call_timer.read();
+        const dt = elapsedNs(call_start, io);
         try samples.append(gpa, dt);
         total += dt;
     }
@@ -183,6 +183,10 @@ fn timeIt(
         .mean_ns = @as(f64, @floatCast(@as(f64, @floatFromInt(@as(u64, @intCast(total)))) / @as(f64, @floatFromInt(samples.items.len)))),
         .iters = samples.items.len,
     };
+}
+
+fn elapsedNs(start: std.Io.Clock.Timestamp, io: std.Io) u64 {
+    return std.math.lossyCast(u64, @max(0, start.untilNow(io).raw.toNanoseconds()));
 }
 
 // Context structs for the timed closures.
@@ -215,15 +219,17 @@ fn layoutOnly(ctx: *LayoutCtx) void {
     layout.layout(ctx.root, 0, 0, ctx.cols, ctx.rows);
 }
 
-pub fn main() !void {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
 
     var samples: std.ArrayList(u64) = .empty;
     defer samples.deinit(gpa);
 
-    const out = std.fs.File.stdout().deprecatedWriter();
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    const out = &stdout_writer.interface;
+    defer stdout_writer.flush() catch {};
 
     // Persistent arena for the layout-only trees (built once).
     var persist = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -250,7 +256,7 @@ pub fn main() !void {
 
     try out.print("\n  -- build + layout (tree constructed fresh each pass) --\n", .{});
     for (build_scenarios) |s| {
-        const st = try timeIt(buildAndLayout, s.ctx, WARM, MEAS, &samples, gpa);
+        const st = try timeIt(io, buildAndLayout, s.ctx, WARM, MEAS, &samples, gpa);
         try printRow(out, s.name, st);
     }
 
@@ -259,27 +265,27 @@ pub fn main() !void {
     {
         const root = try buildTiny(pa);
         var c = LayoutCtx{ .root = root, .cols = 80, .rows = 24 };
-        try printRow(out, "tiny (10 nodes)", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "tiny (10 nodes)", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
     {
         const root = try buildRealistic(pa);
         var c = LayoutCtx{ .root = root, .cols = 120, .rows = 40 };
-        try printRow(out, "realistic (~100)", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "realistic (~100)", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
     {
         const root = try buildGrid(pa, 200, 100, 50, 20);
         var c = LayoutCtx{ .root = root, .cols = 200, .rows = 100 };
-        try printRow(out, "stress (~1000)", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "stress (~1000)", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
     {
         const root = try buildGrid(pa, 400, 200, 50, 100);
         var c = LayoutCtx{ .root = root, .cols = 400, .rows = 200 };
-        try printRow(out, "big (~5000)", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "big (~5000)", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
     {
         const root = try buildGrid(pa, 400, 400, 100, 100);
         var c = LayoutCtx{ .root = root, .cols = 400, .rows = 400 };
-        try printRow(out, "huge (~10000)", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "huge (~10000)", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
 
     // ---- hot-relayout (persistent 1k tree, mutate one leaf flex per pass) ----
@@ -288,13 +294,13 @@ pub fn main() !void {
         const root = try buildGrid(pa, 200, 100, 50, 20);
         const target = &root.children[0].children[0];
         var c = LayoutCtx{ .root = root, .cols = 200, .rows = 100, .target = target };
-        try printRow(out, "hot-relayout", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "hot-relayout", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
     {
         const root = try buildGridBoundary(pa, 200, 100, 50, 20);
         const target = &root.children[0].children[0];
         var c = LayoutCtx{ .root = root, .cols = 200, .rows = 100, .target = target };
-        try printRow(out, "hot-relayout+boundary", try timeIt(layoutOnly, &c, WARM, MEAS, &samples, gpa));
+        try printRow(out, "hot-relayout+boundary", try timeIt(io, layoutOnly, &c, WARM, MEAS, &samples, gpa));
     }
 
     try out.print("\n", .{});

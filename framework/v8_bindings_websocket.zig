@@ -13,9 +13,9 @@
 //!   __ffiEmit('ws:error:<id>', message)
 
 const std = @import("std");
-const netx = @import("net/netx.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const websocket = @import("net/websocket.zig");
 
 const alloc = std.heap.c_allocator;
@@ -27,17 +27,9 @@ const Conn = struct {
     ws: websocket.WebSocket,
 };
 
-var g_conns: std.ArrayList(Conn) = undefined;
-
-fn ensureConns() void {
-    if (g_conns.items.len == 0 and g_conns.capacity == 0) {
-        // Lazy init: first use triggers capacity allocation.
-        // In Zig 0.15, ArrayList is initialized with .{} and methods take allocator.
-    }
-}
+var g_conns: std.ArrayList(Conn) = .empty;
 
 fn findConn(id: u32) ?*Conn {
-    ensureConns();
     for (g_conns.items) |*c| {
         if (c.id == id) return c;
     }
@@ -104,21 +96,7 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     return if (v >= 0) @intCast(v) else null;
 }
 
-// Reuse isolate from v8_runtime globals for callbacks
-var g_iso_for_emit: ?v8.Isolate = null;
-var g_ctx_for_emit: ?v8.Context = null;
-
-fn ensureEmitContext() void {
-    if (g_iso_for_emit == null) {
-        // v8_runtime keeps its isolate/context alive for the session.
-        // We'll grab them lazily on first emit; they're stable pointers.
-        // Access via v8_runtime's globals isn't exported, so we rely on
-        // the fact that __ffiEmit is already installed by JS and we can
-        // call it through v8_runtime.callGlobal2Str.
-    }
-}
-
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     // Build nul-terminated strings for v8_runtime.callGlobal2Str
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
@@ -132,7 +110,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 // ── Host callbacks ─────────────────────────────────────────────────
@@ -140,6 +118,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
 fn hostWsOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 2) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = info.getArg(0).toI32(info.getIsolate().getCurrentContext()) catch return;
     if (id < 0) return;
     const url = argToStringAlloc(info, 1) orelse return;
@@ -148,26 +127,16 @@ fn hostWsOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const parsed = parseWsUrl(url) orelse {
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
-        emitEvent(chan, "invalid ws:// URL");
+        emitEvent(host, chan, "invalid ws:// URL");
         return;
     };
 
-    const stream = netx.tcpConnectToHost(alloc, parsed.host, parsed.port) catch |e| {
+    const ws = websocket.WebSocket.connectTcp(alloc, host.io, parsed.host, parsed.port, parsed.path) catch |e| {
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
         var msg_buf: [256]u8 = undefined;
-        const msg = std.fmt.bufPrint(&msg_buf, "tcp connect failed: {s}", .{@errorName(e)}) catch return;
-        emitEvent(chan, msg);
-        return;
-    };
-
-    const ws = websocket.WebSocket.init(stream, parsed.host, parsed.port, parsed.path) catch |e| {
-        stream.close();
-        var chan_buf: [64]u8 = undefined;
-        const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
-        var msg_buf: [256]u8 = undefined;
-        const msg = std.fmt.bufPrint(&msg_buf, "ws handshake failed: {s}", .{@errorName(e)}) catch return;
-        emitEvent(chan, msg);
+        const msg = std.fmt.bufPrint(&msg_buf, "websocket connect failed: {s}", .{@errorName(e)}) catch return;
+        emitEvent(host, chan, msg);
         return;
     };
 
@@ -177,7 +146,7 @@ fn hostWsOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         c.ws.shutdown();
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
-        emitEvent(chan, "out of memory");
+        emitEvent(host, chan, "out of memory");
         return;
     };
 }
@@ -185,6 +154,7 @@ fn hostWsOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostWsSend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 2) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = info.getArg(0).toI32(info.getIsolate().getCurrentContext()) catch return;
     if (id < 0) return;
     const data = argToStringAlloc(info, 1) orelse return;
@@ -196,7 +166,7 @@ fn hostWsSend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "send failed: {s}", .{@errorName(e)}) catch return;
-        emitEvent(chan, msg);
+        emitEvent(host, chan, msg);
     };
 }
 
@@ -215,33 +185,33 @@ fn hostWsClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 // ── Tick drain (called each frame from appTick) ────────────────────
 
-fn emitWsOpen(id: u32) void {
+fn emitWsOpen(host: *HostContext, id: u32) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "ws:open:{d}", .{id}) catch return;
-    emitEvent(chan, "{}");
+    emitEvent(host, chan, "{}");
 }
 
-fn emitWsMessage(id: u32, data: []const u8) void {
+fn emitWsMessage(host: *HostContext, id: u32, data: []const u8) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "ws:message:{d}", .{id}) catch return;
-    emitEvent(chan, data);
+    emitEvent(host, chan, data);
 }
 
-fn emitWsClose(id: u32, code: u16, reason: []const u8) void {
+fn emitWsClose(host: *HostContext, id: u32, code: u16, reason: []const u8) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "ws:close:{d}", .{id}) catch return;
     var payload_buf: [512]u8 = undefined;
     const payload = std.fmt.bufPrint(&payload_buf, "{{\"code\":{d},\"reason\":\"{s}\"}}", .{ code, reason }) catch return;
-    emitEvent(chan, payload);
+    emitEvent(host, chan, payload);
 }
 
-fn emitWsError(id: u32, msg: []const u8) void {
+fn emitWsError(host: *HostContext, id: u32, msg: []const u8) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{id}) catch return;
-    emitEvent(chan, msg);
+    emitEvent(host, chan, msg);
 }
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     var i: usize = 0;
     while (i < g_conns.items.len) {
         var conn = &g_conns.items[i];
@@ -249,17 +219,17 @@ pub fn tickDrain() void {
 
         while (conn.ws.update()) |event| {
             switch (event) {
-                .open => emitWsOpen(conn.id),
-                .message => |msg| emitWsMessage(conn.id, msg),
+                .open => emitWsOpen(host, conn.id),
+                .message => |msg| emitWsMessage(host, conn.id, msg),
                 .close => |c| {
-                    emitWsClose(conn.id, c.code, c.reason);
+                    emitWsClose(host, conn.id, c.code, c.reason);
                     conn.ws.shutdown();
                     _ = g_conns.orderedRemove(i);
                     // Don't increment i; next element shifted into i.
                     break;
                 },
                 .err => |msg| {
-                    emitWsError(conn.id, msg);
+                    emitWsError(host, conn.id, msg);
                     conn.ws.shutdown();
                     _ = g_conns.orderedRemove(i);
                     break;

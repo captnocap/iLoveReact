@@ -7,7 +7,7 @@
 //!     so renderer wgpu/Vulkan never fights with llama's compute path.
 //!   - We talk to it over stdin/stdout in a tiny line-delimited
 //!     protocol (LOAD/CHAT/READY/TOK/DONE/ERR — see llm_worker.cpp).
-//!   - The Session's worker thread translates between the host-side
+//!   - The Session's concurrent I/O task translates between the host-side
 //!     request queue / event ring and the subprocess pipes.
 //!
 //! Public API (SessionOptions, SubmitOptions, EventKind, OwnedEvent,
@@ -23,8 +23,6 @@
 //!   4. zig-out/bin/rjit-llm-worker — repo dev fallback
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const sysx = @import("../net/sysx.zig");
 const log = @import("../diag/log.zig");
 const RingBuffer = @import("../net/ring_buffer.zig").RingBuffer;
 
@@ -111,32 +109,41 @@ const ToolReply = struct {
 };
 
 pub const Session = struct {
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
     allocator: std.mem.Allocator,
     options: SessionOptions,
     requests: RingBuffer(Request, 32) = .{},
     events: RingBuffer(OwnedEvent, 1024) = .{},
     tool_replies: RingBuffer(ToolReply, 16) = .{},
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     should_stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     // Pending tools schema to send to worker before next CHAT.
     // Mutex-protected so set_tools from JS thread doesn't race the worker
-    // thread reading + clearing it.
-    tools_mutex: host_io.Mutex = .{},
+    // task reading + clearing it.
+    tools_mutex: std.Io.Mutex = .init,
     tools_json: ?[]u8 = null, // owned, freed when consumed or session destroyed
     tools_dirty: bool = false, // true after setTools, false after worker sends
 
     // Hot-reload reuse: when the cart re-mounts (V8 context reset wiped
     // the React tree), we keep the loaded model alive and just clear the
     // worker subprocess's chat history. JS calls reset(); the worker
-    // thread sees this flag at the top of its main loop, sends "RESET\n"
+    // task sees this flag at the top of its main loop, sends "RESET\n"
     // to the subprocess, and waits for the "READY" ack.
     reset_pending: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-    pub fn create(allocator: std.mem.Allocator, options: SessionOptions) !*Session {
+    pub fn create(
+        io: std.Io,
+        environ_map: *const std.process.Environ.Map,
+        allocator: std.mem.Allocator,
+        options: SessionOptions,
+    ) !*Session {
         const session = try allocator.create(Session);
         errdefer allocator.destroy(session);
 
         session.* = .{
+            .io = io,
+            .environ_map = environ_map,
             .allocator = allocator,
             .options = .{
                 .cwd = if (options.cwd) |value| try allocator.dupe(u8, value) else null,
@@ -155,7 +162,7 @@ pub const Session = struct {
         };
         errdefer session.deinitInternal();
 
-        session.worker = try std.Thread.spawn(.{ .stack_size = 4 * 1024 * 1024 }, workerMain, .{session});
+        try session.tasks.concurrent(session.io, workerMain, .{session});
         return session;
     }
 
@@ -167,10 +174,7 @@ pub const Session = struct {
 
     pub fn close(self: *Session) void {
         self.should_stop.store(true, .seq_cst);
-        if (self.worker) |thread| {
-            thread.join();
-            self.worker = null;
-        }
+        self.tasks.cancel(self.io);
     }
 
     pub fn submit(self: *Session, options: SubmitOptions) !void {
@@ -184,7 +188,7 @@ pub const Session = struct {
         };
         errdefer req.deinit(self.allocator);
 
-        if (!self.requests.push(req)) return error.QueueFull;
+        if (!self.requests.push(self.io, req)) return error.QueueFull;
     }
 
     /// Replace the pending tools schema. Worker will send TOOLS to the
@@ -192,14 +196,14 @@ pub const Session = struct {
     pub fn setTools(self: *Session, tools_json: []const u8) !void {
         if (self.should_stop.load(.seq_cst)) return error.SessionClosed;
         const owned = try self.allocator.dupe(u8, tools_json);
-        self.tools_mutex.lock();
-        defer self.tools_mutex.unlock();
+        self.tools_mutex.lockUncancelable(self.io);
+        defer self.tools_mutex.unlock(self.io);
         if (self.tools_json) |old| self.allocator.free(old);
         self.tools_json = owned;
         self.tools_dirty = true;
     }
 
-    /// Queue a chat-history reset. Worker thread sends "RESET\n" to the
+    /// Queue a chat-history reset. Worker task sends "RESET\n" to the
     /// subprocess at the top of its next loop iteration; the model
     /// (weights, KV cache allocation, GPU layers) stays loaded — only
     /// the conversation buffer is cleared. Cheap to call, idempotent.
@@ -217,11 +221,11 @@ pub const Session = struct {
             .body = try self.allocator.dupe(u8, body),
         };
         errdefer reply.deinit(self.allocator);
-        if (!self.tool_replies.push(reply)) return error.QueueFull;
+        if (!self.tool_replies.push(self.io, reply)) return error.QueueFull;
     }
 
     pub fn poll(self: *Session) ?OwnedEvent {
-        return self.events.pop();
+        return self.events.pop(self.io);
     }
 
     fn pushAssistantPart(self: *Session, text: []const u8) !void {
@@ -268,7 +272,7 @@ pub const Session = struct {
     fn pushEvent(self: *Session, event: OwnedEvent) !void {
         var owned = event;
         owned.allocator = self.allocator;
-        if (!self.events.push(owned)) {
+        if (!self.events.push(self.io, owned)) {
             owned.deinit();
             return error.EventQueueFull;
         }
@@ -280,15 +284,15 @@ pub const Session = struct {
         if (self.options.session_id) |value| self.allocator.free(value);
         if (self.options.system_prompt) |value| self.allocator.free(value);
 
-        while (self.requests.pop()) |item| {
+        while (self.requests.pop(self.io)) |item| {
             var req = item;
             req.deinit(self.allocator);
         }
-        while (self.events.pop()) |item| {
+        while (self.events.pop(self.io)) |item| {
             var evt = item;
             evt.deinit();
         }
-        while (self.tool_replies.pop()) |item| {
+        while (self.tool_replies.pop(self.io)) |item| {
             var reply = item;
             reply.deinit(self.allocator);
         }
@@ -298,12 +302,15 @@ pub const Session = struct {
 
 // ── worker binary path resolution ────────────────────────────────────
 
-fn resolveWorkerPathAlloc(allocator: std.mem.Allocator) ![]u8 {
-    if (host_io.getEnvVarOwned(allocator, "RJIT_LLM_WORKER")) |p| {
-        return p;
-    } else |_| {}
+fn resolveWorkerPathAlloc(
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    allocator: std.mem.Allocator,
+) ![]u8 {
+    if (environ_map.get("RJIT_LLM_WORKER")) |path|
+        return allocator.dupe(u8, path);
 
-    const exe_path = try std.process.executablePathAlloc(host_io.io(), allocator);
+    const exe_path = try std.process.executablePathAlloc(io, allocator);
     defer allocator.free(exe_path);
     const exe_dir = std.fs.path.dirname(exe_path) orelse return error.NoExeDir;
 
@@ -314,12 +321,12 @@ fn resolveWorkerPathAlloc(allocator: std.mem.Allocator) ![]u8 {
 
     for (candidates) |rel| {
         const path = try std.fs.path.join(allocator, &.{ exe_dir, rel });
-        if (std.Io.Dir.cwd().access(host_io.io(), path, .{})) |_| return path else |_| allocator.free(path);
+        if (std.Io.Dir.cwd().access(io, path, .{})) |_| return path else |_| allocator.free(path);
     }
 
     // Repo dev fallback.
     const dev_path = "/home/siah/creative/reactjit/zig-out/bin/rjit-llm-worker";
-    if (std.Io.Dir.cwd().access(host_io.io(), dev_path, .{})) |_| return allocator.dupe(u8, dev_path) else |_| {}
+    if (std.Io.Dir.cwd().access(io, dev_path, .{})) |_| return allocator.dupe(u8, dev_path) else |_| {}
 
     return error.WorkerBinaryNotFound;
 }
@@ -327,6 +334,7 @@ fn resolveWorkerPathAlloc(allocator: std.mem.Allocator) ![]u8 {
 // ── stdout reader: line-buffered stream from child process ───────────
 
 const LineReader = struct {
+    io: std.Io,
     file: std.Io.File,
     buf: [16 * 1024]u8 = undefined,
     head: usize = 0, // start of next unread byte
@@ -345,7 +353,7 @@ const LineReader = struct {
     /// wrong-but-similar text. Now uses head/tail indices and only
     /// compacts when the buffer fills, keeping the returned slice valid
     /// until the next call.
-    fn next(self: *LineReader) ?[]const u8 {
+    fn next(self: *LineReader) !?[]const u8 {
         while (true) {
             // Look for newline in unread region
             var i: usize = self.head;
@@ -384,9 +392,12 @@ const LineReader = struct {
                 self.tail = remaining;
             }
 
-            const read = sysx.read(self.file.handle, self.buf[self.tail..]) catch {
-                self.eof = true;
-                continue;
+            const read = self.file.readStreaming(self.io, &.{self.buf[self.tail..]}) catch |err| switch (err) {
+                error.EndOfStream => {
+                    self.eof = true;
+                    continue;
+                },
+                else => |e| return e,
             };
             if (read == 0) {
                 self.eof = true;
@@ -423,10 +434,12 @@ fn unescapePieceAlloc(allocator: std.mem.Allocator, piece: []const u8) ![]u8 {
     return try out.toOwnedSlice(allocator);
 }
 
-// ── worker thread main ──────────────────────────────────────────────
+// ── worker task main ──────────────────────────────────────────────────
 
-fn workerMain(session: *Session) void {
+fn workerMain(session: *Session) std.Io.Cancelable!void {
     workerMainInner(session) catch |err| {
+        if (err == error.Canceled) return error.Canceled;
+        if (session.should_stop.load(.seq_cst)) return;
         const msg = std.fmt.allocPrint(session.allocator, "worker fatal: {s}", .{@errorName(err)}) catch return;
         defer session.allocator.free(msg);
         session.pushStatus(msg, true) catch {};
@@ -435,7 +448,7 @@ fn workerMain(session: *Session) void {
 }
 
 fn workerMainInner(session: *Session) !void {
-    const worker_path = resolveWorkerPathAlloc(session.allocator) catch |err| {
+    const worker_path = resolveWorkerPathAlloc(session.io, session.environ_map, session.allocator) catch |err| {
         const msg = try std.fmt.allocPrint(session.allocator, "worker binary missing: {s}", .{@errorName(err)});
         defer session.allocator.free(msg);
         try session.pushStatus(msg, true);
@@ -453,7 +466,7 @@ fn workerMainInner(session: *Session) !void {
     // dir as the cart's libs (next to the worker). In dev they live
     // under deps/llama.cpp-fresh/build/bin. We prepend both, then
     // anything already on LD_LIBRARY_PATH.
-    var env_map = host_io.environ().createMap(session.allocator) catch std.process.Environ.Map.init(session.allocator);
+    var env_map = try session.environ_map.clone(session.allocator);
     defer env_map.deinit();
 
     var ld_paths: std.ArrayList(u8) = .empty;
@@ -466,7 +479,7 @@ fn workerMainInner(session: *Session) !void {
 
     // Dev fallback (the cmake build output).
     const dev_lib = "/home/siah/creative/reactjit/deps/llama.cpp-fresh/build/bin";
-    if (std.Io.Dir.cwd().access(host_io.io(), dev_lib, .{})) |_| {
+    if (std.Io.Dir.cwd().access(session.io, dev_lib, .{})) |_| {
         try ld_paths.append(session.allocator, ':');
         try ld_paths.appendSlice(session.allocator, dev_lib);
     } else |_| {}
@@ -478,7 +491,7 @@ fn workerMainInner(session: *Session) !void {
         }
     }
     env_map.put("LD_LIBRARY_PATH", ld_paths.items) catch {};
-    var child = std.process.spawn(host_io.io(), .{
+    var child = std.process.spawn(session.io, .{
         .argv = &argv,
         .stdin = .pipe,
         .stdout = .pipe,
@@ -492,12 +505,12 @@ fn workerMainInner(session: *Session) !void {
         return;
     };
     defer {
-        child.kill(host_io.io());
+        child.kill(session.io);
     }
 
     const stdin_file = child.stdin orelse return error.NoStdin;
     const stdout_file = child.stdout orelse return error.NoStdout;
-    var reader = LineReader{ .file = stdout_file };
+    var reader = LineReader{ .io = session.io, .file = stdout_file };
 
     // Send LOAD with absolute path
     const resolved_path = try resolveModelPathAlloc(session.allocator, session.options.cwd, session.options.model_path);
@@ -512,14 +525,14 @@ fn workerMainInner(session: *Session) !void {
         // numeric prefix is present.
         const cmd = try std.fmt.allocPrint(session.allocator, "LOAD {d} {s}\n", .{ session.options.n_ctx, resolved_path });
         defer session.allocator.free(cmd);
-        try stdin_file.writeStreamingAll(host_io.io(), cmd);
+        try stdin_file.writeStreamingAll(session.io, cmd);
     }
 
     try session.pushStatus("loading model into VRAM...", false);
 
     // Wait for READY
     while (true) {
-        const line = reader.next() orelse {
+        const line = try reader.next() orelse {
             try session.pushStatus("worker EOF before READY", true);
             try session.pushResult("worker EOF before READY", true);
             return;
@@ -549,7 +562,7 @@ fn workerMainInner(session: *Session) !void {
         // the worker subprocess has the latest schema for the upcoming turn.
         try flushPendingTools(session, stdin_file, &reader);
 
-        if (session.requests.pop()) |req| {
+        if (session.requests.pop(session.io)) |req| {
             var owned = req;
             defer owned.deinit(session.allocator);
 
@@ -561,7 +574,7 @@ fn workerMainInner(session: *Session) !void {
                 .{ owned.max_tokens, sys_prompt, owned.text },
             );
             defer session.allocator.free(cmd);
-            try stdin_file.writeStreamingAll(host_io.io(), cmd);
+            try stdin_file.writeStreamingAll(session.io, cmd);
 
             // Stream tokens until DONE or ERR. TOOL_CALL lines pause the
             // stream — we wait for a matching TOOL_RESULT from JS, write
@@ -570,7 +583,7 @@ fn workerMainInner(session: *Session) !void {
             defer assistant_buf.deinit(session.allocator);
 
             while (true) {
-                const line = reader.next() orelse {
+                const line = try reader.next() orelse {
                     try session.pushStatus("worker EOF mid-generation", true);
                     try session.pushResult("worker EOF mid-generation", true);
                     return;
@@ -606,7 +619,7 @@ fn workerMainInner(session: *Session) !void {
                     const id = try session.allocator.dupe(u8, line[10..]);
                     defer session.allocator.free(id);
 
-                    const name_line = reader.next() orelse {
+                    const name_line = try reader.next() orelse {
                         try session.pushStatus("worker EOF after TOOL_CALL header", true);
                         try session.pushResult("worker EOF after TOOL_CALL header", true);
                         return;
@@ -617,7 +630,7 @@ fn workerMainInner(session: *Session) !void {
                     var args_buf: std.ArrayList(u8) = .empty;
                     defer args_buf.deinit(session.allocator);
                     while (true) {
-                        const al = reader.next() orelse {
+                        const al = try reader.next() orelse {
                             try session.pushStatus("worker EOF mid TOOL_CALL args", true);
                             try session.pushResult("worker EOF mid TOOL_CALL args", true);
                             return;
@@ -645,19 +658,19 @@ fn workerMainInner(session: *Session) !void {
                         .{ owned_reply.id, owned_reply.body },
                     );
                     defer session.allocator.free(tr_cmd);
-                    try stdin_file.writeStreamingAll(host_io.io(), tr_cmd);
+                    try stdin_file.writeStreamingAll(session.io, tr_cmd);
                     continue;
                 }
                 // Unknown line type — log and ignore
             }
         } else {
-            host_io.sleep(2 * std.time.ns_per_ms);
+            try std.Io.sleep(session.io, .fromMilliseconds(2), .awake);
         }
     }
 
     // Clean shutdown
-    stdin_file.writeStreamingAll(host_io.io(), "QUIT\n") catch {};
-    _ = child.wait(host_io.io()) catch {};
+    try stdin_file.writeStreamingAll(session.io, "QUIT\n");
+    _ = try child.wait(session.io);
 }
 
 // Send RESET\n to the worker subprocess if Session.reset() was called.
@@ -666,13 +679,13 @@ fn flushPendingReset(session: *Session, stdin_file: std.Io.File, reader: *LineRe
     if (!session.reset_pending.swap(false, .seq_cst)) return;
 
     log.print("[zig-session] flushing RESET to subprocess\n", .{});
-    try stdin_file.writeStreamingAll(host_io.io(), "RESET\n");
+    try stdin_file.writeStreamingAll(session.io, "RESET\n");
 
     // Drain the READY (or ERR) ack. The worker only emits one of those
     // for RESET, so a single line is enough — but we keep the loop in
     // case stray lines from a prior turn are still buffered.
     while (true) {
-        const line = reader.next() orelse return error.WorkerEofDuringReset;
+        const line = try reader.next() orelse return error.WorkerEofDuringReset;
         if (std.mem.eql(u8, line, "READY")) {
             log.print("[zig-session] RESET ack: READY\n", .{});
             // Re-emit the same "ready" status the cart sees on first
@@ -697,8 +710,8 @@ fn flushPendingReset(session: *Session, stdin_file: std.Io.File, reader: *LineRe
 fn flushPendingTools(session: *Session, stdin_file: std.Io.File, reader: *LineReader) !void {
     var pending: ?[]u8 = null;
     {
-        session.tools_mutex.lock();
-        defer session.tools_mutex.unlock();
+        session.tools_mutex.lockUncancelable(session.io);
+        defer session.tools_mutex.unlock(session.io);
         if (!session.tools_dirty) return;
         if (session.tools_json) |json| {
             pending = try session.allocator.dupe(u8, json);
@@ -712,11 +725,11 @@ fn flushPendingTools(session: *Session, stdin_file: std.Io.File, reader: *LineRe
     log.print("[zig-session] flushing TOOLS to subprocess ({d} bytes)\n", .{json_body.len});
     const cmd = try std.fmt.allocPrint(session.allocator, "TOOLS\n{s}\n.\n", .{json_body});
     defer session.allocator.free(cmd);
-    try stdin_file.writeStreamingAll(host_io.io(), cmd);
+    try stdin_file.writeStreamingAll(session.io, cmd);
 
     // Drain the READY (or ERR) ack
     while (true) {
-        const line = reader.next() orelse return error.WorkerEofDuringTools;
+        const line = try reader.next() orelse return error.WorkerEofDuringTools;
         if (std.mem.eql(u8, line, "READY")) {
             log.print("[zig-session] TOOLS ack: READY\n", .{});
             return;
@@ -735,7 +748,7 @@ fn flushPendingTools(session: *Session, stdin_file: std.Io.File, reader: *LineRe
 // an error so the caller can abort the CHAT loop.
 fn awaitToolReply(session: *Session, want_id: []const u8) !ToolReply {
     while (!session.should_stop.load(.seq_cst)) {
-        if (session.tool_replies.pop()) |reply| {
+        if (session.tool_replies.pop(session.io)) |reply| {
             if (std.mem.eql(u8, reply.id, want_id)) return reply;
             // ID mismatch — drop on the floor; the dispatcher should
             // pair calls and replies correctly. (Could re-queue if we
@@ -744,7 +757,7 @@ fn awaitToolReply(session: *Session, want_id: []const u8) !ToolReply {
             stale.deinit(session.allocator);
             continue;
         }
-        host_io.sleep(2 * std.time.ns_per_ms);
+        try std.Io.sleep(session.io, .fromMilliseconds(2), .awake);
     }
     return error.SessionClosed;
 }

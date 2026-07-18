@@ -27,6 +27,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const rcon_mod = @import("net/rcon.zig");
 const a2s_mod = @import("net/a2s.zig");
 
@@ -94,7 +95,7 @@ fn argU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     return if (v >= 0) @intCast(v) else null;
 }
 
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
@@ -107,7 +108,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 fn jsonEscape(out: *std.ArrayList(u8), s: []const u8) !void {
@@ -135,6 +136,7 @@ fn jsonEscape(out: *std.ArrayList(u8), s: []const u8) !void {
 fn hostRconOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 4) return;
+    const runtime_host = v8_runtime.hostContext(info.getIsolate());
     const id = argU32(info, 0) orelse return;
     const host = argStr(info, 1) orelse return;
     defer alloc.free(host);
@@ -145,13 +147,13 @@ fn hostRconOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (findRcon(id) != null) return;
 
     const client = alloc.create(rcon_mod.RconClient) catch return;
-    client.* = rcon_mod.RconClient.connect(host, @intCast(port), password, alloc) catch |e| {
+    client.* = rcon_mod.RconClient.connect(runtime_host.io, host, @intCast(port), password, alloc) catch |e| {
         alloc.destroy(client);
         var buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&buf, "rcon:error:{d}", .{id}) catch return;
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "connect: {s}", .{@errorName(e)}) catch "connect failed";
-        emitEvent(chan, msg);
+        emitEvent(runtime_host, chan, msg);
         return;
     };
     g_rcon.append(alloc, .{ .id = id, .client = client }) catch {
@@ -163,6 +165,7 @@ fn hostRconOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostRconCommand(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argU32(info, 0) orelse return;
     const req_id_hint = argU32(info, 1) orelse 0;
     const cmd = argStr(info, 2) orelse return;
@@ -174,7 +177,7 @@ fn hostRconCommand(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         // command was dropped (typically: auth hasn't completed).
         var buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&buf, "rcon:error:{d}", .{id}) catch return;
-        emitEvent(chan, "command rejected: not authenticated");
+        emitEvent(host, chan, "command rejected: not authenticated");
         return;
     };
     _ = req_id_hint; // hook bumps its own counter; we use the wire-side one
@@ -192,6 +195,7 @@ fn hostRconClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostA2sOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
+    const runtime_host = v8_runtime.hostContext(info.getIsolate());
     const id = argU32(info, 0) orelse return;
     const host = argStr(info, 1) orelse return;
     defer alloc.free(host);
@@ -200,13 +204,13 @@ fn hostA2sOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (findA2s(id) != null) return;
 
     const client = alloc.create(a2s_mod.A2sClient) catch return;
-    client.* = a2s_mod.A2sClient.open(host, @intCast(port)) catch |e| {
+    client.* = a2s_mod.A2sClient.open(alloc, runtime_host.io, host, @intCast(port)) catch |e| {
         alloc.destroy(client);
         var buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&buf, "a2s:error:{d}", .{id}) catch return;
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "open: {s}", .{@errorName(e)}) catch "open failed";
-        emitEvent(chan, msg);
+        emitEvent(runtime_host, chan, msg);
         return;
     };
     g_a2s.append(alloc, .{ .id = id, .client = client }) catch {
@@ -248,7 +252,7 @@ fn listPrint(buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype
     try writer.writer.print(format, args);
 }
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     var i: usize = 0;
     while (i < g_rcon.items.len) {
         const e = g_rcon.items[i];
@@ -259,11 +263,11 @@ pub fn tickDrain() void {
             switch (g_rcon_ev[0]) {
                 .auth_ok => {
                     const chan = std.fmt.bufPrint(&chan_buf, "rcon:auth:{d}", .{e.id}) catch break;
-                    emitEvent(chan, "{\"ok\":true}");
+                    emitEvent(host, chan, "{\"ok\":true}");
                 },
                 .auth_fail => {
                     const chan = std.fmt.bufPrint(&chan_buf, "rcon:auth:{d}", .{e.id}) catch break;
-                    emitEvent(chan, "{\"ok\":false}");
+                    emitEvent(host, chan, "{\"ok\":false}");
                 },
                 .response => |r| {
                     var payload: std.ArrayList(u8) = .empty;
@@ -282,16 +286,16 @@ pub fn tickDrain() void {
                     };
                     alloc.free(r.body);
                     const chan = std.fmt.bufPrint(&chan_buf, "rcon:response:{d}", .{e.id}) catch continue;
-                    emitEvent(chan, payload.items);
+                    emitEvent(host, chan, payload.items);
                 },
                 .closed => {
                     const chan = std.fmt.bufPrint(&chan_buf, "rcon:close:{d}", .{e.id}) catch break;
-                    emitEvent(chan, "{}");
+                    emitEvent(host, chan, "{}");
                     break;
                 },
                 .err => |msg| {
                     const chan = std.fmt.bufPrint(&chan_buf, "rcon:error:{d}", .{e.id}) catch break;
-                    emitEvent(chan, msg);
+                    emitEvent(host, chan, msg);
                     break;
                 },
             }
@@ -316,7 +320,7 @@ pub fn tickDrain() void {
                         alloc.free(json);
                         continue;
                     };
-                    emitEvent(chan, json);
+                    emitEvent(host, chan, json);
                     alloc.free(json);
                 },
                 .players_json => |json| {
@@ -324,7 +328,7 @@ pub fn tickDrain() void {
                         alloc.free(json);
                         continue;
                     };
-                    emitEvent(chan, json);
+                    emitEvent(host, chan, json);
                     alloc.free(json);
                 },
                 .rules_json => |json| {
@@ -332,12 +336,12 @@ pub fn tickDrain() void {
                         alloc.free(json);
                         continue;
                     };
-                    emitEvent(chan, json);
+                    emitEvent(host, chan, json);
                     alloc.free(json);
                 },
                 .err => |msg| {
                     const chan = std.fmt.bufPrint(&chan_buf, "a2s:error:{d}", .{e.id}) catch break;
-                    emitEvent(chan, msg);
+                    emitEvent(host, chan, msg);
                 },
             }
         }

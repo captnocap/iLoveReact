@@ -451,7 +451,7 @@ Field intent:
 | `status_text` | Provider status/type/method string. |
 | `cost_usd_delta` | Cost delta or terminal total, depending on provider. |
 | `usage_delta` | Token usage delta for this event. |
-| `created_at_ms` | Host timestamp from `std.time.milliTimestamp()`. |
+| `created_at_ms` | Host timestamp from `realMillis(io)`, backed by `std.Io.Clock`'s real-time clock. |
 
 `appendEvent` duplicates every optional string. It does not deduplicate repeated
 model/session/status strings across events.
@@ -1158,7 +1158,7 @@ turn id or provider timestamp.
 
 ```zig
 id = next_event_id
-created_at_ms = std.time.milliTimestamp()
+created_at_ms = realMillis(self.io)
 ```
 
 Then increments `next_event_id`.

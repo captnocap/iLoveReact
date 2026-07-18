@@ -46,8 +46,7 @@ fn hostStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostStop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    _ = info;
-    voice.stop();
+    voice.stop(v8_runtime.hostContext(info.getIsolate()));
 }
 
 fn hostSetMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

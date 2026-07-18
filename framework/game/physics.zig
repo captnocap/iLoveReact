@@ -39,10 +39,6 @@
 //! framework/testing/unit/game_physics.zig.
 
 const std = @import("std");
-
-fn getenv(name: [:0]const u8) ?[]const u8 {
-    return if (std.c.getenv(name.ptr)) |value| std.mem.span(value) else null;
-}
 pub const movement = @import("movement.zig");
 
 pub const MAX_ENTITIES: usize = 128;
@@ -176,16 +172,14 @@ var g_camera_occlusion_oriented_count: usize = 0;
 // the locomotion step directly from the Zig sim. Gated behind RJIT_STAIRLOG so
 // it costs nothing in normal play; set the env var and the player's intent vs.
 // the actual horizontal delta — and WHICH branch zeroed the move — prints per
-// frame while they walk. -1 = env unread yet, 0 = off, 1 = on.
-var g_stairlog_state: i8 = -1;
+// frame while they walk. The application root resolves environment settings
+// once through configureDiagnostics; the physics hot path never reaches into
+// process-global state.
+var g_stairlog_enabled = false;
 var g_stairlog_frame: u64 = 0;
 
 fn stairlogOn() bool {
-    if (g_stairlog_state < 0) {
-        const v = getenv("RJIT_STAIRLOG") orelse "";
-        g_stairlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
-    }
-    return g_stairlog_state == 1;
+    return g_stairlog_enabled;
 }
 
 // --- Collider diagnostic (RJIT_COLLIDERLOG=1) ---
@@ -196,15 +190,24 @@ fn stairlogOn() bool {
 //   inside=0 next to a visible prop  → NO collider was baked for it (a bake bug).
 //   inside>0 while push≈0 and moving → a collider exists but isn't stopping you
 //                                       (a resolution/band bug) — tagged THROUGH.
-var g_colliderlog_state: i8 = -1;
+var g_colliderlog_enabled = false;
 var g_colliderlog_tick: u64 = 0;
 
 fn colliderlogOn() bool {
-    if (g_colliderlog_state < 0) {
-        const v = getenv("RJIT_COLLIDERLOG") orelse "";
-        g_colliderlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
-    }
-    return g_colliderlog_state == 1;
+    return g_colliderlog_enabled;
+}
+
+fn environmentFlag(environ: *const std.process.Environ.Map, name: []const u8) bool {
+    const value = environ.get(name) orelse return false;
+    return value.len > 0 and value[0] != '0';
+}
+
+/// Resolve optional diagnostics at an application boundary. This deliberately
+/// converts environment capability access into plain configuration before any
+/// per-frame physics work begins.
+pub fn configureDiagnostics(environ: *const std.process.Environ.Map) void {
+    g_stairlog_enabled = environmentFlag(environ, "RJIT_STAIRLOG");
+    g_colliderlog_enabled = environmentFlag(environ, "RJIT_COLLIDERLOG");
 }
 
 /// Count the SOLID colliders whose band + XZ footprint the player capsule

@@ -15,6 +15,9 @@ const BufferPool = struct {
 };
 
 pub var g_engine: struct {
+    /// Capability installed by the audio owner before SDL starts the callback.
+    /// SDL passes a pointer to this value back through its C callback userdata.
+    io: std.Io = undefined,
     device_id: sdl.c.SDL_AudioDeviceID = 0,
     stream: ?*sdl.c.SDL_AudioStream = null,
 

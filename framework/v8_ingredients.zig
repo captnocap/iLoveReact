@@ -48,9 +48,10 @@
 
 const std = @import("std");
 const build_options = @import("build_options");
+const HostContext = @import("host_context.zig");
 
 // `enabledFor("X")` returns `build_options.has_X` when the decl exists,
-// else false. `@import` requires a string literal in Zig 0.15 so the
+// else false. `@import` requires a string literal in Zig 0.16, so the
 // path can't move into the helper — but the gate-check ladder can.
 // `@hasDecl` short-circuits to false so binaries whose build_options
 // omits a flag still compile (the binding falls through to the stub).
@@ -125,7 +126,7 @@ const v8_bindings_fs = if (enabledFor("fs")) @import("v8_bindings_fs.zig") else 
 };
 const v8_bindings_websocket = if (enabledFor("websocket")) @import("v8_bindings_websocket.zig") else struct {
     pub fn registerWebSocket(_: anytype) void {}
-    pub fn tickDrain() void {}
+    pub fn tickDrain(_: *HostContext) void {}
 };
 const v8_bindings_telemetry = if (enabledFor("telemetry")) @import("v8_bindings_telemetry.zig") else struct {
     pub fn registerTelemetry(_: anytype) void {}
@@ -145,11 +146,11 @@ const v8_bindings_zigcall = if (enabledFor("zigcall")) @import("v8_bindings_zigc
 };
 const v8_bindings_httpserver = if (enabledFor("httpsrv")) @import("v8_bindings_httpserver.zig") else struct {
     pub fn registerHttpServer(_: anytype) void {}
-    pub fn tickDrain() void {}
+    pub fn tickDrain(_: *HostContext) void {}
 };
 const v8_bindings_wsserver = if (enabledFor("wssrv")) @import("v8_bindings_wsserver.zig") else struct {
     pub fn registerWsServer(_: anytype) void {}
-    pub fn tickDrain() void {}
+    pub fn tickDrain(_: *HostContext) void {}
 };
 const v8_bindings_process = if (enabledFor("process")) @import("v8_bindings_process.zig") else struct {
     pub fn registerProcess(_: anytype) void {}
@@ -157,7 +158,7 @@ const v8_bindings_process = if (enabledFor("process")) @import("v8_bindings_proc
 };
 const v8_bindings_net = if (enabledFor("net")) @import("v8_bindings_net.zig") else struct {
     pub fn registerNet(_: anytype) void {}
-    pub fn tickDrain() void {}
+    pub fn tickDrain(_: *HostContext) void {}
 };
 // Source RCON + A2S Source Query — gated alongside has_net since they sit
 // on top of net/tcp.zig and net/udp.zig and ride the useConnection
@@ -166,7 +167,7 @@ const v8_bindings_net = if (enabledFor("net")) @import("v8_bindings_net.zig") el
 // flag is needed.
 const v8_bindings_gameserver = if (enabledFor("net")) @import("v8_bindings_gameserver.zig") else struct {
     pub fn registerGameServer(_: anytype) void {}
-    pub fn tickDrain() void {}
+    pub fn tickDrain(_: *HostContext) void {}
 };
 const v8_bindings_tor = if (enabledFor("tor")) @import("v8_bindings_tor.zig") else struct {
     pub fn registerTor(_: anytype) void {}
@@ -401,8 +402,8 @@ pub const INGREDIENTS = [_]Ingredient{
 /// Call once at shell init, after v8_runtime.initVM() and before the
 /// cart bundle evaluates. Real binding for opted-in ingredients, no-op
 /// stub for the rest.
-pub fn registerAll() void {
-    inline for (INGREDIENTS) |ing| @field(ing.mod, ing.reg_fn)({});
+pub fn registerAll(host: *HostContext) void {
+    inline for (INGREDIENTS) |ing| @field(ing.mod, ing.reg_fn)(host);
 }
 
 /// Pump every ingredient's per-tick work — accept new HTTP connections,
@@ -416,16 +417,27 @@ pub fn registerAll() void {
 /// __onVtermUpdate so the ANSI walker repaints without polling latency).
 /// The GPU shell discards the bool because engine.run owns its own
 /// repaint cadence; the TUI shell forwards it to JS.
-pub fn tickDrain() bool {
+pub fn tickDrain(host: *HostContext) bool {
     var signaled: bool = false;
     inline for (INGREDIENTS) |ing| {
         if (@hasDecl(ing.mod, "tickDrain")) {
             const td = @field(ing.mod, "tickDrain");
-            const RetT = @typeInfo(@TypeOf(td)).@"fn".return_type orelse void;
-            if (RetT == bool) {
-                if (td()) signaled = true;
+            const fn_info = @typeInfo(@TypeOf(td)).@"fn";
+            const RetT = fn_info.return_type orelse void;
+            if (comptime fn_info.params.len == 0) {
+                if (RetT == bool) {
+                    if (td()) signaled = true;
+                } else {
+                    _ = td();
+                }
+            } else if (comptime fn_info.params.len == 1) {
+                if (RetT == bool) {
+                    if (td(host)) signaled = true;
+                } else {
+                    _ = td(host);
+                }
             } else {
-                _ = td();
+                @compileError("ingredient tickDrain must accept zero args or *HostContext");
             }
         }
     }

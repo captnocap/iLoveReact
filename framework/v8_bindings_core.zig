@@ -1,5 +1,4 @@
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const build_options = @import("build_options");
 
@@ -8,6 +7,7 @@ comptime {
 }
 
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const state = @import("state/dirty.zig");
 const input = @import("primitive/input.zig");
 const selection = @import("state/selection.zig");
@@ -44,6 +44,7 @@ const c = @import("engine.zig").c;
 var g_content_store: std.AutoHashMap(u32, []u8) = undefined;
 var g_content_store_inited: bool = false;
 var g_content_store_next_id: u32 = 1;
+var g_exec_executor: exec_async.Executor = .{};
 
 fn ensureContentStore() void {
     if (!g_content_store_inited) {
@@ -196,6 +197,7 @@ fn hostGetInputTextForNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
 
 fn hostLoadFileToBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     if (info.length() < 1) {
         setReturnNumber(info, 0);
         return;
@@ -211,7 +213,7 @@ fn hostLoadFileToBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     }
 
     ensureContentStore();
-    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(64 * 1024 * 1024)) catch |e| {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, std.heap.c_allocator, .limited(64 * 1024 * 1024)) catch |e| {
         std.log.warn("[content-store] read failed path={s}: {}", .{ path, e });
         setReturnNumber(info, 0);
         return;
@@ -302,7 +304,8 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         return;
     }
 
-    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    var mesh = mesh_import.loadFile(io, std.heap.c_allocator, path) catch |e| {
         std.log.warn("[mesh-load] {s}: {}", .{ path, e });
         setReturnString(info, "");
         return;
@@ -367,7 +370,8 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         return;
     }
 
-    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    var mesh = mesh_import.loadFile(io, std.heap.c_allocator, path) catch |e| {
         std.log.warn("[mesh-preview] {s}: {}", .{ path, e });
         setReturnString(info, "");
         return;
@@ -1314,7 +1318,8 @@ fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         return;
     };
     defer std.heap.c_allocator.free(path);
-    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    var mesh = mesh_import.loadFile(io, std.heap.c_allocator, path) catch |e| {
         std.log.warn("[mesh-append] {s}: {}", .{ path, e });
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1416,8 +1421,12 @@ fn hostMeshPaintStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 /// __mesh_undo style). Drops/re-appends one stroke-journal unit and RE-RUNS the stroke
 /// program onto the atlas — geometry never changes, so no mesh key rides the answer.
 fn hostMeshPaintUndoRedo(info: v8.FunctionCallbackInfo, redo: bool) void {
+    const host = v8_runtime.hostContext(info.getIsolate());
     const label = if (redo) scene3d.paintRedoLabel() else scene3d.paintUndoLabel();
-    const ok = if (redo) scene3d.paintStrokeRedo() else scene3d.paintStrokeUndo();
+    const ok = if (redo)
+        scene3d.paintStrokeRedo(host.io, host.environ)
+    else
+        scene3d.paintStrokeUndo(host.io, host.environ);
     if (!ok) {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1510,6 +1519,7 @@ fn hostMeshPaintLayers(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 /// the program (visibility off = skip that layer's strokes — the ruling's replay law).
 fn hostMeshPaintLayerOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const op = argToStringAlloc(info, 0) orelse {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1520,13 +1530,13 @@ fn hostMeshPaintLayerOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     if (std.mem.eql(u8, op, "add")) {
         ok = scene3d.paintLayerAdd() != 0;
     } else if (std.mem.eql(u8, op, "delete")) {
-        ok = scene3d.paintLayerDelete(id);
+        ok = scene3d.paintLayerDelete(host.io, host.environ, id);
     } else if (std.mem.eql(u8, op, "up")) {
-        ok = scene3d.paintLayerMove(id, true);
+        ok = scene3d.paintLayerMove(host.io, host.environ, id, true);
     } else if (std.mem.eql(u8, op, "down")) {
-        ok = scene3d.paintLayerMove(id, false);
+        ok = scene3d.paintLayerMove(host.io, host.environ, id, false);
     } else if (std.mem.eql(u8, op, "visible")) {
-        ok = scene3d.paintLayerSetVisible(id, (argToI32(info, 2) orelse 0) != 0);
+        ok = scene3d.paintLayerSetVisible(host.io, host.environ, id, (argToI32(info, 2) orelse 0) != 0);
     } else if (std.mem.eql(u8, op, "active")) {
         ok = scene3d.paintLayerSetActive(id);
     } else if (std.mem.eql(u8, op, "rename")) {
@@ -1535,7 +1545,7 @@ fn hostMeshPaintLayerOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
             ok = scene3d.paintLayerRename(id, name);
         }
     } else if (std.mem.eql(u8, op, "mergedown")) {
-        ok = scene3d.paintLayerMergeDown(id);
+        ok = scene3d.paintLayerMergeDown(host.io, host.environ, id);
     }
     if (!ok) {
         setReturnString(info, "{\"ok\":0}");
@@ -1722,6 +1732,7 @@ fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 /// it to persist a painted atlas as a real, copy-anywhere image (req_2523).
 fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
@@ -1737,9 +1748,7 @@ fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     defer alloc.free(rgba);
     dec.decode(rgba, b64) catch return setReturnNumber(info, 0);
 
-    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
-    defer alloc.free(pathz);
-    setReturnNumber(info, if (capture.writeRgbaPng(pathz.ptr, rgba, w, h)) 1 else 0);
+    setReturnNumber(info, if (capture.writeRgbaPng(io, path, rgba, w, h)) 1 else 0);
 }
 
 /// __model_mesh_write(path) → 1 on success. Writes the active model's full-res mesh
@@ -1748,6 +1757,7 @@ fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 /// count = filesize / 32.
 fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
@@ -1755,9 +1765,9 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(io, pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(io);
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
     setReturnNumber(info, 1);
 }
 
@@ -1769,6 +1779,7 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 /// the painted model exactly as the editor shows it.
 fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
@@ -1776,9 +1787,9 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close(host_io.io());
-    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(io, pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(io);
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
     setReturnNumber(info, 1);
 }
 
@@ -1792,6 +1803,7 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 /// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
 fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
@@ -1805,17 +1817,17 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close(host_io.io());
+    const file = std.Io.Dir.cwd().createFile(io, pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(io);
     const glass_first_vertex = @min(scene3d.modelGlassFirstVertex(), vert_count);
     const header = [7]u32{ 0x444D4A52, 2, vert_count, face_count, has_groups, range_count, glass_first_vertex };
-    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
-    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
     if (has_groups == 1) {
-        file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
     }
     if (range_count > 0) {
-        file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
     }
     setReturnNumber(info, 1);
 }
@@ -1904,6 +1916,7 @@ fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 /// every dab/fill deposits the material's look instead of a flat colour, until _material_clear.
 fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const key = argToStringAlloc(info, 0) orelse {
         setReturnNumber(info, 0);
         return;
@@ -1928,7 +1941,7 @@ fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     }
     // bakePixels returns readbackStaticSurface's layout: 8-byte header (u32 w, u32 h LE) + RGBA,
     // page-allocated — we own it and free after copying the pixels into the paint module.
-    const raw = material_tex.bakePixels(key, wgsl, data, size) orelse {
+    const raw = material_tex.bakePixels(host.io, host.environ, key, wgsl, data, size) orelse {
         setReturnNumber(info, 0);
         return;
     };
@@ -2172,6 +2185,7 @@ fn hostModelPaintProgramRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 /// inks from their embedded WGSL). The self-contained restore that replaces atlas-blit.
 fn hostModelPaintProgramApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const alloc = std.heap.c_allocator;
     const b64 = argToStringAlloc(info, 0) orelse {
         setReturnNumber(info, 0);
@@ -2192,7 +2206,7 @@ fn hostModelPaintProgramApply(info_c: ?*const v8.c.FunctionCallbackInfo) callcon
         setReturnNumber(info, 0);
         return;
     };
-    const ok = scene3d.paintProgramApply(blob);
+    const ok = scene3d.paintProgramApply(host.io, host.environ, blob);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -2202,12 +2216,13 @@ fn hostModelPaintProgramApply(info_c: ?*const v8.c.FunctionCallbackInfo) callcon
 /// not the filename — a renamed or re-downloaded copy resolves to the same entry.
 fn hostFileSha256(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const path = argToStringAlloc(info, 0) orelse {
         setReturnString(info, "");
         return;
     };
     defer std.heap.c_allocator.free(path);
-    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(512 * 1024 * 1024)) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, std.heap.c_allocator, .limited(512 * 1024 * 1024)) catch {
         setReturnString(info, "");
         return;
     };
@@ -2410,7 +2425,7 @@ fn hostAnimRegister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         if (std.mem.eql(u8, loop_name, "pingpong")) break :blk .pingpong;
         break :blk .cycle;
     };
-    const now_ms: i64 = @as(i64, @truncate(@divFloor(host_io.nanoTimestamp(), 1_000_000)));
+    const now_ms = std.Io.Clock.now(.awake, v8_runtime.hostContext(info.getIsolate()).io).toMilliseconds();
     const id = animations.register(
         key,
         curve,
@@ -2626,8 +2641,8 @@ fn hostGetPreparedScroll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     info.getReturnValue().set(obj);
 }
 
-// Async exec — __exec_async(cmd, rid). Spawns a detached thread that runs the
-// command via popen; result is drained by execTickDrain() and delivered to JS
+// Async exec — __exec_async(cmd, rid). Runs the command in the root-injected
+// Io executor; the result is drained by tickDrain() and delivered to JS
 // via __ffiEmit('exec:<rid>', JSON.stringify({stdout, code})).
 fn hostExecAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2636,10 +2651,10 @@ fn hostExecAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer std.heap.c_allocator.free(cmd);
     const rid = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(rid);
-    exec_async.spawn(rid, cmd);
+    _ = g_exec_executor.spawn(rid, cmd);
 }
 
-fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
+fn emitExecResult(host: *HostContext, rid: []const u8, stdout: []const u8, code: i32) void {
     // Build JSON payload. Only escape the couple of chars we need for stdout;
     // stdout can be arbitrary text with quotes/newlines/backslashes.
     var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
@@ -2674,7 +2689,7 @@ fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
     payload_arr.append(std.heap.c_allocator, 0) catch return;
     const payload_z = payload_arr.items[0 .. payload_arr.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 /// Per-frame drain. Currently emits results from completed async exec calls
@@ -2682,8 +2697,8 @@ fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
 /// listener actually runs on the *next* __jsTick — no ordering dependency
 /// vs __jsTick itself). Renamed from execTickDrain to fit the uniform
 /// tickDrain() name that INGREDIENTS in v8_app.zig expects.
-pub fn tickDrain() void {
-    exec_async.drain(emitExecResult);
+pub fn tickDrain(host: *HostContext) void {
+    g_exec_executor.drain(host, emitExecResult);
 }
 
 // The pending-flush queue + drain + reload-clear moved to
@@ -2764,6 +2779,7 @@ var g_localstore_keys_json_buf: [64 * 1024]u8 = undefined;
 
 fn hostLocalstoreGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse {
         setReturnString(info, "");
         return;
@@ -2774,7 +2790,7 @@ fn hostLocalstoreGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         return;
     };
     defer std.heap.c_allocator.free(key);
-    const value = localstore.getAlloc(std.heap.c_allocator, ns, key) catch {
+    const value = localstore.getAlloc(io, std.heap.c_allocator, ns, key) catch {
         setReturnString(info, "");
         return;
     };
@@ -2788,6 +2804,7 @@ fn hostLocalstoreGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn hostLocalstoreHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse {
         setReturnNumber(info, 0);
         return;
@@ -2798,7 +2815,7 @@ fn hostLocalstoreHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         return;
     };
     defer std.heap.c_allocator.free(key);
-    const found = localstore.has(ns, key) catch {
+    const found = localstore.has(io, ns, key) catch {
         setReturnNumber(info, 0);
         return;
     };
@@ -2807,13 +2824,14 @@ fn hostLocalstoreHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn hostLocalstoreSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(key);
     const value = argToStringAlloc(info, 2) orelse return;
     defer std.heap.c_allocator.free(value);
-    localstore.set(ns, key, value) catch |err| {
+    localstore.set(io, ns, key, value) catch |err| {
         // a swallowed set is invisible data loss (the 8KB-cap bug hid behind
         // exactly this catch) — fail loud on stderr
         std.debug.print("[localstore] SET FAILED ns={s} key={s} len={d}: {s}\n", .{ ns, key, value.len, @errorName(err) });
@@ -2822,30 +2840,33 @@ fn hostLocalstoreSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn hostLocalstoreDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(key);
-    localstore.delete(ns, key) catch {};
+    localstore.delete(io, ns, key) catch {};
 }
 
 fn hostLocalstoreClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     if (info.length() < 1) {
-        localstore.clear(null) catch {};
+        localstore.clear(io, null) catch {};
         return;
     }
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
     if (ns.len == 0) {
-        localstore.clear(null) catch {};
+        localstore.clear(io, null) catch {};
     } else {
-        localstore.clear(ns) catch {};
+        localstore.clear(io, ns) catch {};
     }
 }
 
 fn hostLocalstoreKeysJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse {
         setReturnString(info, "[]");
         return;
@@ -2853,7 +2874,7 @@ fn hostLocalstoreKeysJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     defer std.heap.c_allocator.free(ns);
 
     var entries: [localstore.MAX_KEYS]localstore.KeyEntry = undefined;
-    const count = localstore.keys(ns, &entries) catch {
+    const count = localstore.keys(io, ns, &entries) catch {
         setReturnString(info, "[]");
         return;
     };
@@ -2908,6 +2929,7 @@ var g_fswatch_drain_buf: [128 * 1024]u8 = undefined;
 
 fn hostFswatchAdd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const path = argToStringAlloc(info, 0) orelse {
         setReturnNumber(info, -1);
         return;
@@ -2922,7 +2944,7 @@ fn hostFswatchAdd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     }
     defer if (pat_owned) |p| std.heap.c_allocator.free(p);
 
-    const id = fswatch.addWatcher(.{
+    const id = fswatch.addWatcher(io, .{
         .path = path,
         .recursive = recursive,
         .interval_ms = interval_ms,
@@ -2993,8 +3015,8 @@ fn hostFswatchDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, g_fswatch_drain_buf[0..pos]);
 }
 
-pub fn registerCore(vm: anytype) void {
-    _ = vm;
+pub fn registerCore(host: *HostContext) void {
+    g_exec_executor.init(host.io, std.heap.c_allocator);
     ensureContentStore();
     v8_runtime.registerHostFn("__dev_reload_set_policy", hostDevReloadSetPolicy);
     v8_runtime.registerHostFn("__dev_reload_waiting", hostDevReloadWaiting);

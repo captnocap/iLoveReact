@@ -5,23 +5,6 @@
 //! Application Support conventions independently.
 
 const std = @import("std");
-// Dual-context file (app module member AND standalone test root): cannot
-// import host_io.zig by relative path, so reach the SAME process-wide Io
-// instance via the std global.
-const host_io = struct {
-    fn io() std.Io {
-        return std.Io.Threaded.global_single_threaded.io();
-    }
-    fn getEnvVarOwned(alloc: std.mem.Allocator, name: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound }![]u8 {
-        var it: usize = 0;
-        while (std.c.environ[it]) |entry_ptr| : (it += 1) {
-            const entry = std.mem.span(entry_ptr);
-            const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
-            if (std.mem.eql(u8, entry[0..eq], name)) return alloc.dupe(u8, entry[eq + 1 ..]);
-        }
-        return error.EnvironmentVariableNotFound;
-    }
-};
 
 pub const ResolveError = error{
     AppNameRequired,
@@ -79,20 +62,18 @@ pub fn resolveFrom(
     };
 }
 
-/// Resolve from the current process environment.
-pub fn resolve(alloc: std.mem.Allocator, app_name: []const u8) (ResolveError || std.mem.Allocator.Error)![]u8 {
-    const xdg = host_io.getEnvVarOwned(alloc, "XDG_CONFIG_HOME") catch null;
-    defer if (xdg) |value| alloc.free(value);
-    const app_data = host_io.getEnvVarOwned(alloc, "APPDATA") catch null;
-    defer if (app_data) |value| alloc.free(value);
-    const home = host_io.getEnvVarOwned(alloc, "HOME") catch null;
-    defer if (home) |value| alloc.free(value);
+/// Resolve from an explicitly supplied process environment.
+pub fn resolve(
+    alloc: std.mem.Allocator,
+    environ: *const std.process.Environ.Map,
+    app_name: []const u8,
+) (ResolveError || std.mem.Allocator.Error)![]u8 {
     return resolveFrom(
         alloc,
         @import("builtin").os.tag,
         app_name,
-        xdg,
-        app_data,
-        home,
+        environ.get("XDG_CONFIG_HOME"),
+        environ.get("APPDATA"),
+        environ.get("HOME"),
     );
 }

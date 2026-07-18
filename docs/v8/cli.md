@@ -23,7 +23,7 @@ Current local tool payloads:
 
 - `tools/v8cli`: V8-based script runner used for build scripts.
 - `tools/esbuild`: local esbuild binary used by `scripts/cart-bundle.js`.
-- `tools/zig/zig`: Zig 0.15.2 compiler.
+- `tools/zig/zig`: Zig 0.16.0 compiler.
 - `tools/zig/lib`: Zig standard library and compiler support files.
 - `tools/zig/cache/p`: packed Zig package cache used so builds do not fetch
   remote Zig dependencies.

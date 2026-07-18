@@ -52,7 +52,8 @@ fn hostMount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer std.heap.c_allocator.free(store_dir);
 
-    world_loader.mount(std.heap.c_allocator, node_id, game_file, store_dir) catch |e| {
+    const host = v8_runtime.hostContext(info.getIsolate());
+    world_loader.mount(host.io, host.environ, std.heap.c_allocator, node_id, game_file, store_dir) catch |e| {
         var buf: [96]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "error:{s}", .{@errorName(e)}) catch "error:mount";
         setReturnString(info, msg);
@@ -69,7 +70,7 @@ fn hostMount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostUnmount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (argToNodeId(info, 0)) |node_id| world_loader.unmount(node_id);
+    if (argToNodeId(info, 0)) |node_id| world_loader.unmount(v8_runtime.hostContext(info.getIsolate()).io, node_id);
     setReturnString(info, "ok");
 }
 
@@ -507,7 +508,8 @@ fn hostWindowOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const width: u32 = if (argToF64(info, 2)) |w| @intFromFloat(@max(0.0, w)) else 1280;
     const height: u32 = if (argToF64(info, 3)) |h| @intFromFloat(@max(0.0, h)) else 800;
 
-    world_window.open(game_file, store_dir, width, height) catch |e| {
+    const host = v8_runtime.hostContext(info.getIsolate());
+    world_window.open(host.io, host.environ, game_file, store_dir, width, height) catch |e| {
         var buf: [96]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "error:{s}", .{@errorName(e)}) catch "error:open";
         setReturnString(info, msg);
@@ -523,7 +525,7 @@ fn hostWindowOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostWindowClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    world_window.close();
+    world_window.close(v8_runtime.hostContext(info.getIsolate()).io);
     setReturnString(info, "ok");
 }
 

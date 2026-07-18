@@ -18,9 +18,7 @@
 //!   };
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
-const Process = @import("../process.zig").Process;
 const PTY = @import("../terminal/pty.zig");
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -36,29 +34,32 @@ pub const ToolInputSchema = struct {
 pub const ToolResult = struct {
     content: []const u8,
     is_error: bool = false,
-    
+
     pub fn deinit(self: *ToolResult, allocator: std.mem.Allocator) void {
         allocator.free(self.content);
     }
 };
 
 pub const ProgressUpdate = struct {
+    pub const Status = enum { pending, running, progress, completed, error_ };
+
     tool_use_id: []const u8,
-    status: enum { pending, running, progress, completed, error_ },
+    status: Status,
     message: ?[]const u8 = null,
     percent: ?u8 = null,
 };
 
 /// Tool execution context - passed to every tool call
 pub const ToolContext = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     work_dir: ?[]const u8,
     tool_use_id: []const u8,
-    
+
     /// Send progress update (streaming to UI)
     on_progress: ?*const fn (ctx: ?*anyopaque, update: ProgressUpdate) void,
     on_progress_ctx: ?*anyopaque,
-    
+
     /// Check if we should abort (sibling error or user cancel)
     should_abort: *const fn (ctx: ?*anyopaque) bool,
     should_abort_ctx: ?*anyopaque,
@@ -93,24 +94,24 @@ pub const Tool = struct {
     name: []const u8,
     description: []const u8,
     input_schema: ToolInputSchema,
-    
-    /// Execute the tool (called in worker thread)
+
+    /// Execute the tool (called in a concurrent I/O task)
     execute: ToolExecuteFn,
-    
+
     /// Validate input before execution (optional)
     validate: ?ToolValidateFn = null,
-    
+
     /// Can this tool run concurrently with other concurrent-safe tools?
     /// - true: Can run in parallel with other concurrent-safe tools
     /// - false: Must execute exclusively (blocks other tools)
     isConcurrencySafeFn: *const fn (input_json: []const u8) bool,
-    
+
     /// Does this tool read files (for permission tracking)?
     isReadOnlyFn: *const fn (input_json: []const u8) bool,
-    
+
     /// Is this tool destructive (delete, overwrite)?
     isDestructiveFn: ?*const fn (input_json: []const u8) bool = null,
-    
+
     /// For bash-like tools: does this command modify shell state (cd, export)?
     modifiesShellStateFn: ?*const fn (input_json: []const u8) bool = null,
 
@@ -177,102 +178,107 @@ pub const QueuedTool = struct {
     tool: Tool,
     tool_use_id: []const u8,
     input_json: []const u8,
+    work_dir: ?[]u8,
     context: ToolContext,
     status: enum { queued, executing, completed, yielded },
     result: ?ToolResult,
-    promise: ?std.Thread,
 };
 
 pub const ToolExecutor = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
-    queue: std.ArrayList(QueuedTool),
-    mutex: std.Thread.Mutex,
-    cond: std.Thread.Condition,
-    
+    pending_tools: std.ArrayList(QueuedTool),
+    tasks: std.Io.Group,
+    mutex: std.Io.Mutex,
+
     /// Abort state
     has_errored: bool = false,
     errored_tool_description: ?[]const u8 = null,
-    should_abort: bool = false,
-    
+    should_abort: std.atomic.Value(bool) = .init(false),
+
     /// Callbacks
     on_progress: ?*const fn (ctx: ?*anyopaque, update: ProgressUpdate) void = null,
     on_progress_ctx: ?*anyopaque = null,
     on_complete: ?*const fn (ctx: ?*anyopaque, tool_use_id: []const u8, result: ToolResult) void = null,
     on_complete_ctx: ?*anyopaque = null,
 
-    pub fn init(allocator: std.mem.Allocator) ToolExecutor {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator) ToolExecutor {
         return .{
+            .io = io,
             .allocator = allocator,
-            .queue = std.ArrayList(QueuedTool).init(allocator),
-            .mutex = .{},
-            .cond = .{},
+            .pending_tools = .empty,
+            .tasks = .init,
+            .mutex = .init,
         };
     }
 
     pub fn deinit(self: *ToolExecutor) void {
-        for (self.queue.items) |*item| {
+        self.should_abort.store(true, .seq_cst);
+        self.tasks.cancel(self.io);
+        for (self.pending_tools.items) |*item| {
             self.allocator.free(item.tool_use_id);
             self.allocator.free(item.input_json);
+            if (item.work_dir) |work_dir| self.allocator.free(work_dir);
             if (item.result) |*r| r.deinit(self.allocator);
         }
-        self.queue.deinit();
+        if (self.errored_tool_description) |description| self.allocator.free(description);
+        self.pending_tools.deinit(self.allocator);
     }
 
     /// Queue a tool for execution. Returns immediately.
     pub fn queue(self: *ToolExecutor, tool: Tool, tool_use_id: []const u8, input_json: []const u8, work_dir: ?[]const u8) !void {
         const id_copy = try self.allocator.dupe(u8, tool_use_id);
         errdefer self.allocator.free(id_copy);
-        
+
         const input_copy = try self.allocator.dupe(u8, input_json);
         errdefer self.allocator.free(input_copy);
 
+        const work_dir_copy = if (work_dir) |path| try self.allocator.dupe(u8, path) else null;
+        errdefer if (work_dir_copy) |path| self.allocator.free(path);
+
         const context = ToolContext{
+            .io = self.io,
             .allocator = self.allocator,
-            .work_dir = work_dir,
+            .work_dir = work_dir_copy,
             .tool_use_id = id_copy,
             .on_progress = self.on_progress,
             .on_progress_ctx = self.on_progress_ctx,
             .should_abort = struct {
                 fn check(ctx: ?*anyopaque) bool {
                     const exec = @as(*ToolExecutor, @ptrCast(@alignCast(ctx)));
-                    return exec.should_abort;
+                    return exec.should_abort.load(.seq_cst);
                 }
             }.check,
             .should_abort_ctx = self,
         };
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
-        try self.queue.append(.{
+        try self.pending_tools.append(self.allocator, .{
             .tool = tool,
             .tool_use_id = id_copy,
             .input_json = input_copy,
+            .work_dir = work_dir_copy,
             .context = context,
             .status = .queued,
             .result = null,
-            .promise = null,
         });
 
-        // Notify worker thread
-        self.cond.signal();
-        
         // Start processing if not already running
         self.processQueue();
     }
 
     /// Check if we can execute a tool based on concurrency rules
-    fn canExecute(self: *ToolExecutor, tool: Tool, input_json: []const u8) bool {
+    /// Caller holds `mutex`; queue state must remain stable through the check.
+    fn canExecuteLocked(self: *ToolExecutor, tool: Tool, input_json: []const u8) bool {
         const is_safe = tool.isConcurrencySafe(input_json);
-        
-        self.mutex.lock();
-        defer self.mutex.unlock();
 
         // Count executing tools
         var executing_count: usize = 0;
         var has_exclusive = false;
-        
-        for (self.queue.items) |item| {
+
+        for (self.pending_tools.items) |item| {
             if (item.status == .executing) {
                 executing_count += 1;
                 if (!item.tool.isConcurrencySafe(item.input_json)) {
@@ -282,20 +288,22 @@ pub const ToolExecutor = struct {
         }
 
         if (executing_count == 0) return true;
-        
+
         // Concurrent-safe tools can run with other concurrent-safe tools
         if (is_safe and !has_exclusive) return true;
-        
+
         return false;
     }
 
     /// Process the queue, starting tools when conditions allow
     fn processQueue(self: *ToolExecutor) void {
-        for (self.queue.items) |*item| {
+        if (self.should_abort.load(.seq_cst)) return;
+
+        for (self.pending_tools.items, 0..) |item, item_index| {
             if (item.status != .queued) continue;
 
-            if (self.canExecute(item.tool, item.input_json)) {
-                self.executeTool(item);
+            if (self.canExecuteLocked(item.tool, item.input_json)) {
+                self.executeTool(item_index);
             } else {
                 // Can't execute this tool yet
                 // If it's not concurrent-safe, stop here (maintain order)
@@ -304,7 +312,8 @@ pub const ToolExecutor = struct {
         }
     }
 
-    fn executeTool(self: *ToolExecutor, item: *QueuedTool) void {
+    fn executeTool(self: *ToolExecutor, item_index: usize) void {
+        const item = &self.pending_tools.items[item_index];
         item.status = .executing;
         item.context.reportProgress(.running, "Starting...", 0);
 
@@ -321,69 +330,82 @@ pub const ToolExecutor = struct {
         item.context.on_progress = progress_wrapper;
         item.context.on_progress_ctx = self;
 
-        // Spawn thread for tool execution
-        const thread = std.Thread.spawn(.{}, struct {
-            fn run(exec: *ToolExecutor, tool_item: *QueuedTool) void {
-                const result = tool_item.tool.execute(tool_item.input_json, &tool_item.context) catch |err| {
-                    const err_msg = std.fmt.allocPrint(exec.allocator, "Tool error: {s}", .{@errorName(err)}) catch "Unknown error";
-                    return ToolResult{
-                        .content = err_msg,
-                        .is_error = true,
-                    };
-                };
-
-                exec.mutex.lock();
-                defer exec.mutex.unlock();
-
-                tool_item.result = result;
-                tool_item.status = .completed;
-
-                // Check for bash errors - trigger sibling abort
-                if (tool_item.tool.name.len >= 4 and 
-                    std.mem.eql(u8, tool_item.tool.name[0..4], "bash") and 
-                    result.is_error) {
-                    exec.has_errored = true;
-                    exec.errored_tool_description = exec.allocator.dupe(u8, tool_item.tool.name) catch null;
-                    exec.should_abort = true;
-                }
-
-                // Notify completion
-                if (exec.on_complete) |cb| {
-                    cb(exec.on_complete_ctx, tool_item.tool_use_id, result);
-                }
-
-                // Continue processing queue
-                exec.processQueue();
-            }
-        }.run, .{ self, item }) catch |err| {
-            log.err(.tool, "Failed to spawn tool thread: {s}", .{@errorName(err)});
+        // ArrayList storage can move when another tool is queued. Pass an
+        // index to the task and copy the immutable call data while holding
+        // the executor mutex instead of retaining an element pointer.
+        self.tasks.concurrent(self.io, runTool, .{ self, item_index }) catch |err| {
+            log.err(.engine, "Failed to start tool task: {s}", .{@errorName(err)});
             item.status = .completed;
-            item.result = .{
-                .content = "Failed to spawn tool execution",
-                .is_error = true,
-            };
+            const content = self.allocator.dupe(u8, "Failed to start tool execution") catch return;
+            item.result = .{ .content = content, .is_error = true };
             return;
         };
-
-        item.promise = thread;
     }
 
     /// Wait for all queued tools to complete
     pub fn waitAll(self: *ToolExecutor) void {
-        for (self.queue.items) |*item| {
-            if (item.promise) |thread| {
-                thread.join();
-                item.promise = null;
+        self.tasks.await(self.io) catch {};
+    }
+
+    fn runTool(exec: *ToolExecutor, item_index: usize) std.Io.Cancelable!void {
+        exec.mutex.lockUncancelable(exec.io);
+        const item = &exec.pending_tools.items[item_index];
+        const tool = item.tool;
+        const input_json = item.input_json;
+        const context = item.context;
+        exec.mutex.unlock(exec.io);
+
+        const result = tool.execute(input_json, &context) catch |err| result: {
+            if (err == error.Canceled) return error.Canceled;
+            const err_msg = std.fmt.allocPrint(exec.allocator, "Tool error: {s}", .{@errorName(err)}) catch {
+                exec.finishWithoutResult(item_index);
+                return;
+            };
+            break :result ToolResult{
+                .content = err_msg,
+                .is_error = true,
+            };
+        };
+
+        exec.mutex.lockUncancelable(exec.io);
+        defer exec.mutex.unlock(exec.io);
+
+        const completed_item = &exec.pending_tools.items[item_index];
+        completed_item.result = result;
+        completed_item.status = .completed;
+
+        // Check for bash errors - trigger sibling abort.
+        if (tool.name.len >= 4 and
+            std.mem.eql(u8, tool.name[0..4], "bash") and
+            result.is_error)
+        {
+            exec.has_errored = true;
+            if (exec.errored_tool_description == null) {
+                exec.errored_tool_description = exec.allocator.dupe(u8, tool.name) catch null;
             }
+            exec.should_abort.store(true, .seq_cst);
         }
+
+        if (exec.on_complete) |cb| {
+            cb(exec.on_complete_ctx, completed_item.tool_use_id, result);
+        }
+
+        exec.processQueue();
+    }
+
+    fn finishWithoutResult(self: *ToolExecutor, item_index: usize) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        self.pending_tools.items[item_index].status = .completed;
+        self.processQueue();
     }
 
     /// Get result for a specific tool_use_id
     pub fn getResult(self: *ToolExecutor, tool_use_id: []const u8) ?ToolResult {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
-        for (self.queue.items) |item| {
+        for (self.pending_tools.items) |item| {
             if (std.mem.eql(u8, item.tool_use_id, tool_use_id)) {
                 if (item.result) |r| {
                     // Return a copy
@@ -399,33 +421,46 @@ pub const ToolExecutor = struct {
 
     /// Cancel all pending and executing tools
     pub fn cancelAll(self: *ToolExecutor) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        
-        self.should_abort = true;
-        
+        self.mutex.lockUncancelable(self.io);
+        self.should_abort.store(true, .seq_cst);
+
         // Signal all executing tools to check abort
-        for (self.queue.items) |*item| {
+        for (self.pending_tools.items) |*item| {
             if (item.status == .executing) {
                 item.context.reportProgress(.error_, "Cancelled", 0);
+            } else if (item.status == .queued) {
+                item.status = .yielded;
             }
+        }
+        self.mutex.unlock(self.io);
+
+        // Cancellation is also delivered to native I/O cancellation points,
+        // then all task resources are joined before returning.
+        self.tasks.cancel(self.io);
+
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        for (self.pending_tools.items) |*item| {
+            if (item.status == .executing) item.status = .yielded;
         }
     }
 
     /// Reset state for new turn
     pub fn reset(self: *ToolExecutor) void {
         self.waitAll();
-        
-        for (self.queue.items) |*item| {
+
+        for (self.pending_tools.items) |*item| {
             self.allocator.free(item.tool_use_id);
             self.allocator.free(item.input_json);
+            if (item.work_dir) |work_dir| self.allocator.free(work_dir);
             if (item.result) |*r| r.deinit(self.allocator);
         }
-        
-        self.queue.clearRetainingCapacity();
+
+        self.pending_tools.clearRetainingCapacity();
         self.has_errored = false;
+        if (self.errored_tool_description) |description| self.allocator.free(description);
         self.errored_tool_description = null;
-        self.should_abort = false;
+        self.should_abort.store(false, .seq_cst);
     }
 
     pub fn setOnProgress(self: *ToolExecutor, cb: ?*const fn (ctx: ?*anyopaque, update: ProgressUpdate) void, ctx: ?*anyopaque) void {
@@ -441,13 +476,16 @@ pub const ToolExecutor = struct {
     /// Execute a single tool synchronously (for simple cases)
     pub fn execute(self: *ToolExecutor, tool: Tool, input_json: []const u8, work_dir: ?[]const u8) ![]const u8 {
         const context = ToolContext{
+            .io = self.io,
             .allocator = self.allocator,
             .work_dir = work_dir,
             .tool_use_id = "sync",
             .on_progress = null,
             .on_progress_ctx = null,
             .should_abort = struct {
-                fn check(_: ?*anyopaque) bool { return false; }
+                fn check(_: ?*anyopaque) bool {
+                    return false;
+                }
             }.check,
             .should_abort_ctx = null,
         };
@@ -495,7 +533,7 @@ pub const BuiltInTools = struct {
         ctx.reportProgress(.running, "Executing...", 10);
 
         // Use existing PTY system
-        var pty = try PTY.openPty(.{
+        var pty = try PTY.openPty(ctx.allocator, ctx.io, .{
             .shell = "bash",
             .cwd = if (ctx.work_dir) |wd| wd.ptr else null,
             .rows = 40,
@@ -506,32 +544,31 @@ pub const BuiltInTools = struct {
         // Send command
         const cmd_with_nl = try std.fmt.allocPrint(ctx.allocator, "{s}\n", .{cmd});
         defer ctx.allocator.free(cmd_with_nl);
-        
+
         _ = pty.writeData(cmd_with_nl);
 
         ctx.reportProgress(.running, "Waiting for output...", 50);
 
         // Collect output with timeout
-        var output_buffer = std.ArrayList(u8).init(ctx.allocator);
-        defer output_buffer.deinit();
+        var output_buffer: std.ArrayList(u8) = .empty;
+        defer output_buffer.deinit(ctx.allocator);
 
-        const start_time = host_io.milliTimestamp();
-        while (host_io.milliTimestamp() - start_time < timeout) {
+        const start_time = std.Io.Clock.now(.awake, ctx.io).toMilliseconds();
+        while (std.Io.Clock.now(.awake, ctx.io).toMilliseconds() - start_time < timeout) {
             if (ctx.checkAbort()) {
-                pty.closePty();
                 return ToolResult{
-                    .content = "Cancelled by sibling error",
+                    .content = try ctx.allocator.dupe(u8, "Cancelled by sibling error"),
                     .is_error = true,
                 };
             }
 
             if (pty.readData()) |data| {
-                try output_buffer.appendSlice(data);
+                try output_buffer.appendSlice(ctx.allocator, data);
             }
 
             if (!pty.alive()) break;
 
-            std.Thread.sleep(10 * std.time.ns_per_ms);
+            try std.Io.sleep(ctx.io, .fromMilliseconds(10), .awake);
         }
 
         ctx.reportProgress(.completed, "Done", 100);
@@ -541,7 +578,7 @@ pub const BuiltInTools = struct {
         const is_error = exit_code != 0;
 
         return ToolResult{
-            .content = try output_buffer.toOwnedSlice(),
+            .content = try output_buffer.toOwnedSlice(ctx.allocator),
             .is_error = is_error,
         };
     }
@@ -554,15 +591,15 @@ pub const BuiltInTools = struct {
         defer parsed.deinit();
 
         const cmd = parsed.value.command;
-        
+
         // Commands with && or ; should run sequentially, not concurrently
         if (std.mem.indexOf(u8, cmd, "&&") != null) return false;
         if (std.mem.indexOf(u8, cmd, ";") != null) return false;
-        
+
         // Commands that modify shell state are not concurrent-safe
         if (std.mem.startsWith(u8, cmd, "cd ")) return false;
         if (std.mem.startsWith(u8, cmd, "export ")) return false;
-        
+
         return true;
     }
 
@@ -573,13 +610,13 @@ pub const BuiltInTools = struct {
         defer parsed.deinit();
 
         const cmd = parsed.value.command;
-        
+
         // Read-only commands (safe to run anytime)
-        const read_cmds = &.{ "ls", "cat", "grep", "find", "head", "tail", "echo", "pwd", "which" };
+        const read_cmds = [_][]const u8{ "ls", "cat", "grep", "find", "head", "tail", "echo", "pwd", "which" };
         for (read_cmds) |rc| {
             if (std.mem.startsWith(u8, cmd, rc)) return true;
         }
-        
+
         return false;
     }
 
@@ -590,13 +627,13 @@ pub const BuiltInTools = struct {
         defer parsed.deinit();
 
         const cmd = parsed.value.command;
-        
+
         // Destructive commands
-        const destructive = &.{ "rm", "mv", "cp", "dd", ">", ">>" };
+        const destructive = [_][]const u8{ "rm", "mv", "cp", "dd", ">", ">>" };
         for (destructive) |d| {
             if (std.mem.indexOf(u8, cmd, d) != null) return true;
         }
-        
+
         return false;
     }
 
@@ -607,8 +644,8 @@ pub const BuiltInTools = struct {
         defer parsed.deinit();
 
         const cmd = parsed.value.command;
-        return std.mem.startsWith(u8, cmd, "cd ") or 
-               std.mem.startsWith(u8, cmd, "export ");
+        return std.mem.startsWith(u8, cmd, "cd ") or
+            std.mem.startsWith(u8, cmd, "export ");
     }
 };
 
@@ -628,15 +665,15 @@ export fn tool_registry_destroy(registry: *ToolRegistry) void {
     std.heap.c_allocator.destroy(registry);
 }
 
-export fn tool_registry_register(registry: *ToolRegistry, tool: Tool) c_int {
+pub fn tool_registry_register(registry: *ToolRegistry, tool: Tool) c_int {
     registry.register(tool) catch return 0;
     return 1;
 }
 
-export fn tool_executor_create() ?*ToolExecutor {
+export fn tool_executor_create(io: *const std.Io) ?*ToolExecutor {
     const allocator = std.heap.c_allocator;
     const exec = allocator.create(ToolExecutor) catch return null;
-    exec.* = ToolExecutor.init(allocator);
+    exec.* = ToolExecutor.init(io.*, allocator);
     return exec;
 }
 
@@ -645,7 +682,7 @@ export fn tool_executor_destroy(exec: *ToolExecutor) void {
     std.heap.c_allocator.destroy(exec);
 }
 
-export fn tool_executor_queue(exec: *ToolExecutor, tool: Tool, tool_use_id: [*c]const u8, input_json: [*c]const u8, work_dir: ?[*c]const u8) c_int {
+pub fn tool_executor_queue(exec: *ToolExecutor, tool: Tool, tool_use_id: [*c]const u8, input_json: [*c]const u8, work_dir: ?[*c]const u8) c_int {
     exec.queue(tool, std.mem.span(tool_use_id), std.mem.span(input_json), if (work_dir) |wd| std.mem.span(wd) else null) catch return 0;
     return 1;
 }

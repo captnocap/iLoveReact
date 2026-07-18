@@ -5,7 +5,7 @@
 //! Reads camera/light/mesh props from the 3D.View node's children.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
+const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
@@ -506,6 +506,7 @@ inline fn vpLocalY(my: f32) f32 {
     return my - g_paint_vp_y;
 }
 var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
+var g_paint_probe_enabled: bool = false;
 var g_edit_key_hash: u64 = 0;
 var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
@@ -1396,7 +1397,7 @@ fn ensureDisjointPartRanges(context: []const u8) bool {
         }
     }
     if (!overlap) return false;
-    std.debug.print("[mesh] part ranges OVERLAP after {s} — face ownership was ambiguous; repairing: contested group ids go to the latest containing part, partition renormalized (req_3032)\n", .{context});
+    log.print("[mesh] part ranges OVERLAP after {s} — face ownership was ambiguous; repairing: contested group ids go to the latest containing part, partition renormalized (req_3032)\n", .{context});
     const fc = g_edit_count / 3;
     if (fc == 0 or model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return false;
     const face_part = std.heap.c_allocator.alloc(u32, fc) catch return false;
@@ -2166,7 +2167,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
                 std.heap.c_allocator.free(cut.positions);
                 std.heap.c_allocator.free(cut.src_face);
                 if (cut.groups) |g| std.heap.c_allocator.free(g);
-                std.debug.print("[mesh] loop cut ring skips faces in the cut's path; using the plane comb for a full slice\n", .{});
+                log.print("[mesh] loop cut ring skips faces in the cut's path; using the plane comb for a full slice\n", .{});
                 break :ring;
             }
             defer std.heap.c_allocator.free(cut.positions);
@@ -2212,7 +2213,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             }
             return lcInstallSoup(cut.positions, cut.tri_count, cut.groups, colors);
         } else {
-            std.debug.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
+            log.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
         }
     }
 
@@ -3148,7 +3149,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     // that has them silently un-parts the model — the save then persists a doc that
     // reopens merged. Name it when it happens.
     if (e.part_ranges == null and model_source.partRanges() != null) {
-        std.debug.print("[mesh] undo/redo restored a snapshot WITHOUT part ranges over a mesh that had {d} parts — ranges cleared (req_3049)\n", .{model_source.partRanges().?.len / 2});
+        log.print("[mesh] undo/redo restored a snapshot WITHOUT part ranges over a mesh that had {d} parts — ranges cleared (req_3049)\n", .{model_source.partRanges().?.len / 2});
     }
     model_source.setPartRanges(e.part_ranges orelse &.{});
     if (e.colors) |c| {
@@ -5863,7 +5864,7 @@ pub fn meshEditSetPartRanges(pairs: []const u32) void {
     // persisted a doc that reopens with every part merged. An empty push over a mesh
     // that HAS ranges is the one legal way to clear them — name it when it happens.
     if (pairs.len < 2 and model_source.partRanges() != null) {
-        std.debug.print("[mesh] part ranges CLEARED by an empty cart push over a mesh that had {d} parts — if unintended this is the req_3049 merged-outliner save corruption\n", .{model_source.partRanges().?.len / 2});
+        log.print("[mesh] part ranges CLEARED by an empty cart push over a mesh that had {d} parts — if unintended this is the req_3049 merged-outliner save corruption\n", .{model_source.partRanges().?.len / 2});
     }
     model_source.setPartRanges(pairs);
     _ = ensureDisjointPartRanges("cart range push");
@@ -5971,7 +5972,7 @@ pub fn paintProgramRead() ?[]u8 {
 /// the recipe. Sets the program's detail first (re-tessellate + re-upload the mesh — which
 /// the paint module can't do) so face+bary dabs land at the resolution they were made.
 /// False if there's no resident mesh or the blob is malformed.
-pub fn paintProgramApply(blob: []const u8) bool {
+pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
     if (g_edit_verts == null or g_edit_count == 0) return false;
     // The replay overwrites atlas texels wholesale — lift any selection tint first so
     // the replayed paint is TRUE paint, then re-tint over it (depth-counted, so the
@@ -5981,7 +5982,7 @@ pub fn paintProgramApply(blob: []const u8) bool {
     if (paint_program.programDetail(blob)) |d| {
         if (@as(u32, d) != model_paint.detail()) _ = setPaintDetail(@intCast(d));
     }
-    return paint_program.apply(blob);
+    return paint_program.apply(io, environ, blob);
 }
 
 // ── Stroke journal + paint layers (req_2672) ────────────────────────────────────────
@@ -5996,15 +5997,15 @@ pub fn paintStrokeEnd() bool {
 
 /// Undo/redo ONE stroke-journal unit (a stroke or a structural layer op) by program
 /// replay. False when the journal side is empty.
-pub fn paintStrokeUndo() bool {
+pub fn paintStrokeUndo(io: std.Io, environ: *const std.process.Environ.Map) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.undoStroke();
+    return paint_program.undoStroke(io, environ);
 }
-pub fn paintStrokeRedo() bool {
+pub fn paintStrokeRedo(io: std.Io, environ: *const std.process.Environ.Map) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.redoStroke();
+    return paint_program.redoStroke(io, environ);
 }
 pub fn paintHistoryCounts() [2]u32 {
     return paint_program.historyCounts();
@@ -6031,20 +6032,20 @@ pub fn paintActiveLayer() u32 {
 pub fn paintLayerAdd() u32 {
     return paint_program.layerAdd();
 }
-pub fn paintLayerDelete(id: u32) bool {
+pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerDelete(id);
+    return paint_program.layerDelete(io, environ, id);
 }
-pub fn paintLayerMove(id: u32, up: bool) bool {
+pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerMove(id, up);
+    return paint_program.layerMove(io, environ, id, up);
 }
-pub fn paintLayerSetVisible(id: u32, on: bool) bool {
+pub fn paintLayerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerSetVisible(id, on);
+    return paint_program.layerSetVisible(io, environ, id, on);
 }
 pub fn paintLayerSetActive(id: u32) bool {
     return paint_program.layerSetActive(id);
@@ -6052,10 +6053,10 @@ pub fn paintLayerSetActive(id: u32) bool {
 pub fn paintLayerRename(id: u32, name: []const u8) bool {
     return paint_program.layerRename(id, name);
 }
-pub fn paintLayerMergeDown(id: u32) bool {
+pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerMergeDown(id);
+    return paint_program.layerMergeDown(io, environ, id);
 }
 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
@@ -6471,13 +6472,13 @@ var g_frame_pool_warned: bool = false;
 fn staticRetainWarn(pool: []const u8, what: []const u8, rows: u32, used: u32) void {
     if (g_static_retain_warned) return;
     g_static_retain_warned = true;
-    std.debug.print("[r3d] static {s} instance {s} FULL ({d}-row batch refused, {d} rows retained) — the pool could NOT grow further (device maxBufferSize, or every cache entry was used this render). The batch degrades to per-frame staging and can VANISH if the per-frame pool also fills (req_2843: pools are elastic, this is the machine's wall).\n", .{ pool, what, rows, used });
+    log.print("[r3d] static {s} instance {s} FULL ({d}-row batch refused, {d} rows retained) — the pool could NOT grow further (device maxBufferSize, or every cache entry was used this render). The batch degrades to per-frame staging and can VANISH if the per-frame pool also fills (req_2843: pools are elastic, this is the machine's wall).\n", .{ pool, what, rows, used });
 }
 
 fn framePoolWarn(pool: []const u8) void {
     if (g_frame_pool_warned) return;
     g_frame_pool_warned = true;
-    std.debug.print("[r3d] per-frame {s} instance pool FULL — the remaining instance groups this frame were DROPPED (foliage/props visibly missing). Raise MAX_INSTANCES in framework/gpu/3d.zig or free the static pools.\n", .{pool});
+    log.print("[r3d] per-frame {s} instance pool FULL — the remaining instance groups this frame were DROPPED (foliage/props visibly missing). Raise MAX_INSTANCES in framework/gpu/3d.zig or free the static pools.\n", .{pool});
 }
 
 /// Grow a retained instance pool to hold `needed_rows` (req_2843). The new
@@ -6517,7 +6518,7 @@ fn growStaticPool(device: *wgpu.Device, queue: *wgpu.Queue, buf: *?*wgpu.Buffer,
     old.release();
     buf.* = new_buf;
     cap_rows.* = @intCast(new_cap);
-    std.debug.print("[r3d] {s} pool GREW to {d} rows ({d} MiB) — elastic pools, the device is the wall (req_2843)\n", .{ label, new_cap, new_cap * row_bytes / (1024 * 1024) });
+    log.print("[r3d] {s} pool GREW to {d} rows ({d} MiB) — elastic pools, the device is the wall (req_2843)\n", .{ label, new_cap, new_cap * row_bytes / (1024 * 1024) });
     return true;
 }
 
@@ -6744,24 +6745,18 @@ fn drawStaticInstanceRange(pass: *wgpu.RenderPassEncoder, group_verts: u32, sd_o
 // Opt-in per-frame perf readout (RJIT_PERFLOG=1). cpu_draw_us measures CPU command
 // encoding + instance re-staging only — async GPU shading (overdraw) is NOT in it, so
 // the two numbers together separate a CPU re-stage choke from a GPU overdraw choke.
-var g_perflog_on: ?bool = null;
+var g_perflog_on: bool = false;
 var g_perf_frame: u64 = 0;
 fn perfLogOn() bool {
-    if (g_perflog_on) |v| return v;
-    const on = host_io.getenv("RJIT_PERFLOG") != null;
-    g_perflog_on = on;
-    return on;
+    return g_perflog_on;
 }
 
 // req_1933: the [r3d-census] / [ground-pass] diagnostics (req_0727) printed every 120 frames
 // UNCONDITIONALLY and spammed the dev terminal. Opt-in now — set RJIT_R3D_CENSUS=1 to bring them
 // back when debugging the instanced-mesh / ground pass.
-var g_census_on: ?bool = null;
+var g_census_on: bool = false;
 fn censusOn() bool {
-    if (g_census_on) |v| return v;
-    const on = host_io.getenv("RJIT_R3D_CENSUS") != null;
-    g_census_on = on;
-    return on;
+    return g_census_on;
 }
 
 // On-screen fps HUD (RJIT_FPS=1, or RJIT_PERFLOG=1). Queued from render() — which
@@ -6771,30 +6766,16 @@ fn censusOn() bool {
 // reflects GPU overdraw stalls and the 60fps SDL cap, unlike draw_us which is
 // CPU-encode only; the telemetry shown is the PREVIOUS frame's, a harmless 1-frame
 // lag). req_1674.
-var g_fpshud_on: ?bool = null;
+var g_fpshud_on: bool = false;
 var g_last_flush_us: i64 = 0;
 var g_fps_ema: f32 = 0;
 fn fpsHudOn() bool {
-    if (g_fpshud_on) |v| return v;
-    // Default ON for the compiled no-V8 game (this is its window — an fps counter is
-    // always wanted there), OFF for the V8 editor. RJIT_FPS=0 force-hides; RJIT_FPS or
-    // RJIT_PERFLOG (any value) force-shows. req_1677: the user couldn't find the HUD
-    // because it required an env var — make it just appear in the game.
-    const fps_env = host_io.getenv("RJIT_FPS");
-    if (fps_env) |v| {
-        const off = std.mem.eql(u8, v, "0") or std.mem.eql(u8, v, "");
-        g_fpshud_on = !off;
-        return !off;
-    }
-    const default_on = if (@hasDecl(build_options, "use_v8")) !build_options.use_v8 else false;
-    const on = default_on or host_io.getenv("RJIT_PERFLOG") != null;
-    g_fpshud_on = on;
-    return on;
+    return g_fpshud_on;
 }
 
-pub fn drawFpsHud() void {
+pub fn drawFpsHud(io: std.Io) void {
     if (!fpsHudOn()) return;
-    const now = host_io.microTimestamp();
+    const now = std.Io.Clock.now(.awake, io).toMicroseconds();
     if (g_last_flush_us != 0) {
         const dt_us = now - g_last_flush_us;
         if (dt_us > 0) {
@@ -6820,7 +6801,16 @@ pub fn telemetryStats() TelemetryStats {
 // Init / deinit (same as before — pipeline, bind groups, sampler)
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn init() void {
+pub fn init(environ: *const std.process.Environ.Map) void {
+    g_perflog_on = environ.get("RJIT_PERFLOG") != null;
+    g_census_on = environ.get("RJIT_R3D_CENSUS") != null;
+    g_paint_probe_enabled = environ.get("RJIT_PAINTPROBE") != null;
+    if (environ.get("RJIT_FPS")) |value| {
+        g_fpshud_on = !std.mem.eql(u8, value, "0") and !std.mem.eql(u8, value, "");
+    } else {
+        const default_on = if (@hasDecl(build_options, "use_v8")) !build_options.use_v8 else false;
+        g_fpshud_on = default_on or g_perflog_on;
+    }
     const device = core.getDevice() orelse return;
     const shader_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_shader", .code = shaders.scene3d_wgsl });
     const shader_module = device.createShaderModule(&shader_desc) orelse return;
@@ -7515,7 +7505,7 @@ fn acquireRt(w: u32, h: u32) ?*Rt {
     if (g_rt_cursor >= MAX_RT_POOL) {
         if (!g_rt_pool_warned) {
             g_rt_pool_warned = true;
-            std.debug.print("[r3d-rt] RT POOL EXHAUSTED: >{d} Scene3D views in one frame — views past the cap (incl. the build pane if painted last) get no render target and stay blank.\n", .{MAX_RT_POOL});
+            log.print("[r3d-rt] RT POOL EXHAUSTED: >{d} Scene3D views in one frame — views past the cap (incl. the build pane if painted last) get no render target and stay blank.\n", .{MAX_RT_POOL});
         }
         return null;
     }
@@ -7524,7 +7514,7 @@ fn acquireRt(w: u32, h: u32) ?*Rt {
     const rt = ensureRt(slot, w, h);
     if (rt == null and !g_rt_alloc_warned) {
         g_rt_alloc_warned = true;
-        std.debug.print("[r3d-rt] RT TEXTURE ALLOC FAILED at {d}x{d} — GPU could not create the render target (out of memory from this map's capture surfaces/geometry?). That view stays blank.\n", .{ w, h });
+        log.print("[r3d-rt] RT TEXTURE ALLOC FAILED at {d}x{d} — GPU could not create the render target (out of memory from this map's capture surfaces/geometry?). That view stays blank.\n", .{ w, h });
     }
     return rt;
 }
@@ -8048,7 +8038,7 @@ fn existingDyn(s: *const DynSlot) ?GeoSlice {
 fn dynWarnFull(what: []const u8, cap: u64) void {
     if (g_dyn_warned) return;
     g_dyn_warned = true;
-    std.debug.print("[r3d] dynamic geometry {s} FULL (cap {d}) — a ground/live/imported mesh was DROPPED and will not draw. Raise DYN_META_SLOTS or DYN_REGION_VERTS in framework/gpu/3d.zig.\n", .{ what, cap });
+    log.print("[r3d] dynamic geometry {s} FULL (cap {d}) — a ground/live/imported mesh was DROPPED and will not draw. Raise DYN_META_SLOTS or DYN_REGION_VERTS in framework/gpu/3d.zig.\n", .{ what, cap });
 }
 
 /// Resolve a dynamic key "~dyn~<slotId>~<version>" to its reused entry, overwriting
@@ -8283,7 +8273,7 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
 /// Resolve a "~hf~<slotId>~<version>" key: generate the heightfield mesh from the
 /// streamed height grid into the reused slot, overwriting on version change. The
 /// grid is the same one the collider takes, so render == collide.
-fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave, depths: ?[]const f32) ?GeoSlice {
+fn resolveDynamicHeightfield(io: std.Io, queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave, depths: ?[]const f32) ?GeoSlice {
     const loc = dynSlotLocate("~hf~".len, key) orelse return null;
     const s = &g_dyn_slots[loc.i];
     // A wave heightfield (bodies of water) re-bakes EVERY frame from the host
@@ -8291,7 +8281,7 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
     const animated = hfWaveActive(wave);
     if (animated or s.version_hash != loc.ver_hash or s.count == 0) {
         const hs = heights orelse return existingDyn(s);
-        const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
+        const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(std.Io.Clock.now(.awake, io).toMilliseconds(), 1_000_000))) / 1000.0 else 0;
         const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t, depths);
         if (cnt == 0) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
@@ -8321,8 +8311,8 @@ pub fn update(_: f32) void {
 }
 
 /// Render a 3D.View node: walk children for 3D.Camera/Light/Mesh, draw to offscreen, composite.
-pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
-    if (!g_initialized) init();
+pub fn render(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
+    if (!g_initialized) init(environ);
     if (!g_initialized) return false;
     const iw: u32 = @intFromFloat(@max(1, w));
     const ih: u32 = @intFromFloat(@max(1, h));
@@ -8348,7 +8338,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
         // image compositor applies (correct for top-down sprite sources)
         // would invert the scene.
         images.queueQuadNoFlip(x, y, w, h, opacity, bg);
-        drawFpsHud(); // self-gated (RJIT_FPS); queued here so it lands before gpu.frame's text upload
+        drawFpsHud(io); // self-gated (RJIT_FPS); queued here so it lands before gpu.frame's text upload
         return true;
     }
     return false;
@@ -8357,16 +8347,16 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
 // Draw every scene recorded by render() this frame. Called once from
 // gpu.frame(), after StaticSurface captures and before the main 2D pass, so
 // textureKey-sampled surfaces are already populated for this frame.
-pub fn flushPending() void {
+pub fn flushPending(io: std.Io, environ: *const std.process.Environ.Map) void {
     g_telemetry = .{ .scene_count = @intCast(g_pending_count) };
-    const started = host_io.microTimestamp();
-    for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.x, p.y, p.w, p.h);
-    const ended = host_io.microTimestamp();
+    const started = std.Io.Clock.now(.awake, io).toMicroseconds();
+    for (g_pending[0..g_pending_count]) |p| drawScene(io, environ, p.node, p.slot, p.x, p.y, p.w, p.h);
+    const ended = std.Io.Clock.now(.awake, io).toMicroseconds();
     g_telemetry.draw_us = @intCast(@max(0, ended - started));
     if (perfLogOn()) {
         g_perf_frame += 1;
         if (g_perf_frame % 30 == 0)
-            std.debug.print("[r3d-perf] cpu_draw_us={d} instances={d} restaged={d} draw_calls={d} | cpu_draw_us=encode+restage (GPU overdraw NOT counted): high here = re-stage choke, low+laggy = overdraw\n", .{ g_telemetry.draw_us, g_telemetry.instances, g_telemetry.staged_dynamic, g_telemetry.draw_calls });
+            log.print("[r3d-perf] cpu_draw_us={d} instances={d} restaged={d} draw_calls={d} | cpu_draw_us=encode+restage (GPU overdraw NOT counted): high here = re-stage choke, low+laggy = overdraw\n", .{ g_telemetry.draw_us, g_telemetry.instances, g_telemetry.staged_dynamic, g_telemetry.draw_calls });
     }
     g_pending_count = 0;
 }
@@ -8395,14 +8385,14 @@ pub const DetachedTarget = struct {
 /// Render one scene into a detached target IMMEDIATELY (drawScene submits its
 /// own command buffer) and return the color view to blit/sample. Resizes the
 /// target when the requested dims changed.
-pub fn renderDetached(target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wgpu.TextureView {
-    if (!g_initialized) init();
+pub fn renderDetached(io: std.Io, environ: *const std.process.Environ.Map, target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wgpu.TextureView {
+    if (!g_initialized) init(environ);
     if (!g_initialized) return null;
     const iw: u32 = @intFromFloat(@max(1, w));
     const ih: u32 = @intFromFloat(@max(1, h));
     const slot = ensureRt(&target.slot, iw, ih) orelse return null;
     // Detached targets are their own window/surface — the scene fills it, origin (0,0).
-    drawScene(node, slot, 0, 0, w, h);
+    drawScene(io, environ, node, slot, 0, 0, w, h);
     return slot.color_view;
 }
 
@@ -8410,7 +8400,7 @@ pub fn renderDetached(target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wg
 // pixel's world ray from inv(vp) in the shader, so the only data it needs is
 // that inverse, the camera position, a wrapped wall-clock for cloud drift, and
 // the sky colour/sun/haze/cloud/night params off the Scene3D node.
-fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_pos: math.Vec3) void {
+fn drawSky(io: std.Io, pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_pos: math.Vec3) void {
     const sky_pipeline = g_sky_pipeline orelse return;
     const sky_bg = g_sky_bind_group orelse return;
     const sky_buf = g_sky_uniform_buffer orelse return;
@@ -8418,7 +8408,7 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
 
     // Wrap the clock so float32 keeps cloud-noise precision (a raw epoch in
     // seconds is ~1.7e9 and quantises the drift to a stutter).
-    const t: f32 = @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0;
+    const t: f32 = @as(f32, @floatFromInt(@mod(std.Io.Clock.now(.awake, io).toMilliseconds(), 1_000_000))) / 1000.0;
 
     const u = SkyUniforms{
         .inv_vp = inv_vp,
@@ -8666,7 +8656,7 @@ fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: [
 // assembled module = scene3d_ground_prefix + effect_math (fbm/snoise) + the
 // shipped formula (hf_ground_rgb + helpers) + scene3d_ground_epilogue. The
 // formula is identical across chunks, so this runs exactly once.
-fn ensureGroundPipeline(formula: []const u8) void {
+fn ensureGroundPipeline(io: std.Io, environ: *const std.process.Environ.Map, formula: []const u8) void {
     // Rebuild when the formula CHANGES, not just once: a TSX hot-reload (e.g. a
     // tile-material fix) ships a new formula string, and a cached pipeline would
     // keep running the stale shader (roads reading as concrete). Hash-gate it so
@@ -8684,7 +8674,7 @@ fn ensureGroundPipeline(formula: []const u8) void {
     const wgsl = std.fmt.allocPrint(std.heap.c_allocator, "{s}\n{s}\n{s}\n{s}", .{
         shaders.scene3d_ground_prefix, effect_assemble.MATH, formula, shaders.scene3d_ground_epilogue,
     }) catch {
-        std.debug.print("[r3d-ground] ERROR: out of memory assembling the ground shader ({d}B formula, hash {x}) — the GROUND PIPELINE never builds and ALL painted ground is INVISIBLE until this is fixed.\n", .{ formula.len, h });
+        log.print("[r3d-ground] ERROR: out of memory assembling the ground shader ({d}B formula, hash {x}) — the GROUND PIPELINE never builds and ALL painted ground is INVISIBLE until this is fixed.\n", .{ formula.len, h });
         return;
     };
     defer std.heap.c_allocator.free(wgsl);
@@ -8692,11 +8682,11 @@ fn ensureGroundPipeline(formula: []const u8) void {
     // formula is megashader-class, and this call blocks the render thread with
     // zero output otherwise (req_2692).
     var progress = compile_progress.CompileProgress{};
-    progress.start(wgsl.len);
+    progress.start(io, environ, wgsl.len);
     defer progress.stop();
     const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
     const sm = device.createShaderModule(&sm_desc) orelse {
-        std.debug.print("[r3d-ground] ERROR: ground formula WGSL FAILED TO COMPILE (formula hash {x}, {d}B) — createShaderModule returned null; the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until the formula is fixed. Check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
+        log.print("[r3d-ground] ERROR: ground formula WGSL FAILED TO COMPILE (formula hash {x}, {d}B) — createShaderModule returned null; the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until the formula is fixed. Check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
         return;
     };
     defer sm.release();
@@ -8751,11 +8741,11 @@ fn ensureGroundPipeline(formula: []const u8) void {
         g_ground_formula_hash = h;
         progress.finishOk();
     } else {
-        std.debug.print("[r3d-ground] ERROR: createRenderPipeline returned null for the ground formula (hash {x}) — the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until this is fixed.\n", .{h});
+        log.print("[r3d-ground] ERROR: createRenderPipeline returned null for the ground formula (hash {x}) — the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until this is fixed.\n", .{h});
     }
 }
 
-fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
+fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
 
@@ -8872,7 +8862,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                         }
                         n_placed += 1;
                     } else {
-                        std.debug.print("[r3d-light] placed-light overflow — MAX_LIGHTS ({d}) reached, dropping the rest. Raise MAX_LIGHTS in framework/gpu/3d.zig.\n", .{MAX_LIGHTS});
+                        log.print("[r3d-light] placed-light overflow — MAX_LIGHTS ({d}) reached, dropping the rest. Raise MAX_LIGHTS in framework/gpu/3d.zig.\n", .{MAX_LIGHTS});
                     }
                 }
             }
@@ -8990,7 +8980,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     // four known colours, so a headless shot shows exactly where each ray lands vs the
     // pixel it came from — ground truth for the hit-test, independent of live mouse
     // delivery. Red=centre, green=right, blue=top, yellow=left.
-    if (model_paint.hasTarget() and !g_paint_probed and host_io.getenv("RJIT_PAINTPROBE") != null) {
+    if (model_paint.hasTarget() and !g_paint_probed and g_paint_probe_enabled) {
         g_paint_probed = true;
         const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
         // Small offsets that STAY on the model, so right/up/aspect terms are exercised
@@ -9001,7 +8991,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
             const px = w * pr[0];
             const py = h * pr[1];
             const fc = model_paint.pick(cam, w, h, px, py);
-            std.debug.print("[paintprobe] vp={d:.0}x{d:.0} fov={d:.0} eye=({d:.2},{d:.2},{d:.2}) target=({d:.2},{d:.2},{d:.2}) px=({d:.0},{d:.0}) -> face {d}\n", .{ w, h, g_paint_fov, g_paint_eye[0], g_paint_eye[1], g_paint_eye[2], g_paint_target[0], g_paint_target[1], g_paint_target[2], px, py, fc });
+            log.print("[paintprobe] vp={d:.0}x{d:.0} fov={d:.0} eye=({d:.2},{d:.2},{d:.2}) target=({d:.2},{d:.2},{d:.2}) px=({d:.0},{d:.0}) -> face {d}\n", .{ w, h, g_paint_fov, g_paint_eye[0], g_paint_eye[1], g_paint_eye[2], g_paint_target[0], g_paint_target[1], g_paint_target[2], px, py, fc });
             if (fc >= 0) model_paint.paintFace(@intCast(fc), col);
         }
     }
@@ -9202,7 +9192,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     };
 
     // ── Skybox first: fills the whole target behind the meshes ──
-    if (sky_node) |s| drawSky(pass, queue, s, vp, cam_pos);
+    if (sky_node) |s| drawSky(io, pass, queue, s, vp, cam_pos);
 
     pass.setPipeline(g_pipeline.?);
 
@@ -9210,7 +9200,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     //    model matrix + color moved into per-instance vertex attributes below. ──
     // Wrapped wall-clock (mod 1e6 s) so float32 keeps precision — the grass
     // pipeline's wind reads S.time. Same wrap drawSky uses for cloud drift.
-    const scene_time: f32 = @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0;
+    const scene_time: f32 = @as(f32, @floatFromInt(@mod(std.Io.Clock.now(.awake, io).toMilliseconds(), 1_000_000))) / 1000.0;
     // Upload the placed lights collected above. The shader loops light_count of
     // them; an empty frame writes nothing and the loop runs zero times.
     if (n_placed > 0) {
@@ -9296,6 +9286,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
             // the host bakes the mesh verts into the slot (topology is fixed, only y
             // moves). Far cheaper across the bridge than re-shipping ~86k verts/sculpt.
             maybe_slot = resolveDynamicHeightfield(
+                io,
                 queue,
                 key,
                 child.scene3d_heights,
@@ -9419,7 +9410,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     g_dbg_frame += 1;
     if (censusOn() and g_dbg_frame % 120 == 1) {
         const retained_kverts = g_retained_top / @sizeOf(Vertex) / 1000;
-        std.debug.print("[r3d-census] children={d} inst_seen={d} inst_collected={d} mcount={d} tcount={d} geo_cache_len={d} retained={d}k/{d}k verts\n", .{ scene_node.children.len, dbg_inst_seen, dbg_inst_collected, mcount, tcount, g_geo_cache_len, retained_kverts, MAX_RETAINED_VERTS / 1000 });
+        log.print("[r3d-census] children={d} inst_seen={d} inst_collected={d} mcount={d} tcount={d} geo_cache_len={d} retained={d}k/{d}k verts\n", .{ scene_node.children.len, dbg_inst_seen, dbg_inst_collected, mcount, tcount, g_geo_cache_len, retained_kverts, MAX_RETAINED_VERTS / 1000 });
     }
 
     // ── Pass 2: group by (slot.offset, tex_bg) and issue ONE instanced draw per
@@ -9704,7 +9695,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     // chunk, indexed by gp_i), so a view full of foliage that exhausted the shared
     // per-frame inst_top can no longer starve the ground — the floor always draws (req_1659).
     if (gcount > 0 and g_ground_inst_buf != null and scene_node.children[gidx[0]].scene3d_ground_formula != null) {
-        ensureGroundPipeline(scene_node.children[gidx[0]].scene3d_ground_formula.?);
+        ensureGroundPipeline(io, environ, scene_node.children[gidx[0]].scene3d_ground_formula.?);
         if (g_ground_pipeline) |gp| {
             pass.setPipeline(gp);
             pass.setBindGroup(0, g_bind_group.?, 0, null);
@@ -9721,7 +9712,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                     // when the map engine's layout grows.
                     if (d.len > GROUND_DATA_FLOATS and !g_ground_truncate_warned) {
                         g_ground_truncate_warned = true;
-                        std.debug.print("[r3d-ground] ERROR: ground D stream is {d} floats but the pooled buffer caps at {d} — the tail (per-cell materials) is CUT and painted looks stop at a hard line. Raise GROUND_DATA_FLOATS in 3d.zig.\n", .{ d.len, GROUND_DATA_FLOATS });
+                        log.print("[r3d-ground] ERROR: ground D stream is {d} floats but the pooled buffer caps at {d} — the tail (per-cell materials) is CUT and painted looks stop at a hard line. Raise GROUND_DATA_FLOATS in 3d.zig.\n", .{ d.len, GROUND_DATA_FLOATS });
                     }
                     // req_0842: this upload once computed its size as `n * @sizeOf(f32)`
                     // WITHOUT a wide cast — for n=14528 that overflowed to 25344 instead
@@ -9759,7 +9750,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
         }
     }
     if (censusOn() and g_dbg_frame % 120 == 1) {
-        std.debug.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
+        log.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
     }
 
     // Glass and other alpha<1 meshes, drawn after every opaque draw so they read

@@ -57,6 +57,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("../v8_runtime.zig");
+const HostContext = @import("../host_context.zig");
 const editor_bus = @import("editor_bus.zig");
 
 const alloc = std.heap.c_allocator;
@@ -89,11 +90,12 @@ fn setReturnString(info: v8.FunctionCallbackInfo, text: []const u8) void {
 
 // ── Confirmed-event broadcaster (core → JS via host __ffiEmit) ──────────────
 
-fn broadcast(json: []const u8) void {
+fn broadcast(context: ?*anyopaque, json: []const u8) void {
+    const host: *HostContext = @ptrCast(@alignCast(context orelse return));
     // callGlobal2Str needs nul-terminated strings.
     const z = alloc.dupeZ(u8, json) catch return;
     defer alloc.free(z);
-    v8_runtime.callGlobal2Str("__ffiEmit", editor_bus.CHANNEL, z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", editor_bus.CHANNEL, z);
 }
 
 // ── Host doors ──────────────────────────────────────────────────────────────
@@ -123,9 +125,9 @@ fn hostHead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnNumber(info, @floatFromInt(editor_bus.head()));
 }
 
-pub fn registerEditorBus(_: anytype) void {
+pub fn registerEditorBus(host: *HostContext) void {
     editor_bus.init();
-    editor_bus.setBroadcaster(broadcast);
+    editor_bus.setBroadcaster(.{ .context = host, .send = broadcast });
     v8_runtime.registerHostFn("__editor_bus_emit", hostEmit);
     v8_runtime.registerHostFn("__editor_bus_since", hostSince);
     v8_runtime.registerHostFn("__editor_bus_head", hostHead);

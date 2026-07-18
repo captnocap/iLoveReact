@@ -12,18 +12,18 @@
 //     arbitrates the underlying device
 //
 // Lifecycle:
-//   init(allocator)          at boot, alongside voice.init
-//   tick(_)                  every frame, drains SDL3 stream into accumulator
-//   startRecording()         opens SDL3 input device + begins streaming
-//   stopRecording(out_path)  writes WAV at out_path, frees accumulator
-//   deinit()                 closes device + frees accumulator
+//   init(allocator)              at boot, alongside voice.init
+//   tick(host, _)                every frame, drains SDL3 stream into accumulator
+//   startRecording()             opens SDL3 input device + begins streaming
+//   stopRecording(io, out_path)  writes WAV at out_path, frees accumulator
+//   deinit()                     closes device + frees accumulator
 //
 // The level meter fires via __rawCapture_onLevel(level_x100) once per
 // tick while recording, on the same 0..10000 peak-dBFS scale voice uses.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
+const HostContext = @import("../host_context.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 
 // ── Tunables ──────────────────────────────────────────────────────────
@@ -130,14 +130,14 @@ pub fn startRecording(device_id: u32) bool {
 /// Stop recording and write the accumulator to a 16-bit PCM WAV at
 /// out_path. Returns true on success. Buffer is cleared regardless of
 /// success so a write failure doesn't pin the memory.
-pub fn stopRecording(out_path: []const u8) bool {
+pub fn stopRecording(io: std.Io, out_path: []const u8) bool {
     if (!S.initialized) return false;
     if (!S.recording) return false;
 
     closeStream();
     S.recording = false;
 
-    const ok = writeWav(out_path, S.buffer.items) catch false;
+    const ok = writeWav(io, out_path, S.buffer.items) catch false;
     S.buffer.clearRetainingCapacity();
     return ok;
 }
@@ -171,7 +171,7 @@ pub fn wasCapped() bool {
 
 // ── Tick — drain SDL stream into accumulator ──────────────────────────
 
-pub fn tick(_: u32) void {
+pub fn tick(host: *HostContext, _: u32) void {
     if (!S.initialized or !S.recording) return;
     const stream = S.stream orelse return;
 
@@ -222,15 +222,15 @@ pub fn tick(_: u32) void {
     }
 
     if (any_drained) {
-        v8_runtime.callGlobalInt("__rawCapture_onLevel", @intCast(S.last_level_x100));
+        v8_runtime.callGlobalInt(host, "__rawCapture_onLevel", @intCast(S.last_level_x100));
     }
 }
 
 // ── WAV writer (16-bit PCM mono) ──────────────────────────────────────
 
-fn writeWav(out_path: []const u8, samples: []const f32) !bool {
-    var file = std.Io.Dir.cwd().createFile(host_io.io(), out_path, .{ .truncate = true }) catch return false;
-    defer file.close(host_io.io());
+fn writeWav(io: std.Io, out_path: []const u8, samples: []const f32) !bool {
+    var file = std.Io.Dir.cwd().createFile(io, out_path, .{ .truncate = true }) catch return false;
+    defer file.close(io);
 
     const channels: u16 = @intCast(CHANNELS);
     const bits_per_sample: u16 = 16;
@@ -246,7 +246,7 @@ fn writeWav(out_path: []const u8, samples: []const f32) !bool {
     @memcpy(header[8..12], "WAVE");
     @memcpy(header[12..16], "fmt ");
     std.mem.writeInt(u32, header[16..20], 16, .little); // fmt chunk size
-    std.mem.writeInt(u16, header[20..22], 1, .little);  // PCM
+    std.mem.writeInt(u16, header[20..22], 1, .little); // PCM
     std.mem.writeInt(u16, header[22..24], channels, .little);
     std.mem.writeInt(u32, header[24..28], sample_rate, .little);
     std.mem.writeInt(u32, header[28..32], byte_rate, .little);
@@ -255,7 +255,7 @@ fn writeWav(out_path: []const u8, samples: []const f32) !bool {
     @memcpy(header[36..40], "data");
     std.mem.writeInt(u32, header[40..44], data_size, .little);
 
-    file.writeStreamingAll(host_io.io(), &header) catch return false;
+    file.writeStreamingAll(io, &header) catch return false;
 
     // Convert f32 → i16 in small chunks so we don't allocate a parallel
     // buffer the size of the recording.
@@ -269,7 +269,7 @@ fn writeWav(out_path: []const u8, samples: []const f32) !bool {
             scratch[k] = @intFromFloat(clamped * 32767.0);
         }
         const bytes = std.mem.sliceAsBytes(scratch[0..n]);
-        file.writeStreamingAll(host_io.io(), bytes) catch return false;
+        file.writeStreamingAll(io, bytes) catch return false;
         i += n;
     }
 

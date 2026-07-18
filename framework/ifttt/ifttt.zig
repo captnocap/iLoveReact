@@ -22,6 +22,7 @@
 // callbacks here.
 
 const std = @import("std");
+const HostContext = @import("../host_context.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 const key_pack = @import("../key_pack.zig");
 
@@ -193,7 +194,7 @@ pub fn lastDispatchedKey() i64 {
     return last_dispatched_key;
 }
 
-fn dispatchKey(packed_key: i64, is_keyup: bool) void {
+fn dispatchKey(host: *HostContext, packed_key: i64, is_keyup: bool) void {
     // Full-width (mod << 32 | sym) layout — see framework/key_pack.zig.
     const sym: u32 = key_pack.symOf(packed_key);
     const mod: u32 = key_pack.modOf(packed_key);
@@ -219,19 +220,19 @@ fn dispatchKey(packed_key: i64, is_keyup: bool) void {
         if (k.want_alt != has_alt) continue;
         if (k.want_meta != has_meta) continue;
         if (!fired_any) {
-            v8_runtime.callGlobal("__beginJsEvent");
+            v8_runtime.callGlobal(host, "__beginJsEvent");
             fired_any = true;
         }
-        v8_runtime.callGlobalInt("__ifttt_dispatch_key", @intCast(k.dispatch_wire));
+        v8_runtime.callGlobalInt(host, "__ifttt_dispatch_key", @intCast(k.dispatch_wire));
     }
-    if (fired_any) v8_runtime.callGlobal("__endJsEvent");
+    if (fired_any) v8_runtime.callGlobal(host, "__endJsEvent");
 }
 
-pub fn dispatchKeyDown(packed_key: i64) void {
-    dispatchKey(packed_key, false);
+pub fn dispatchKeyDown(host: *HostContext, packed_key: i64) void {
+    dispatchKey(host, packed_key, false);
 }
-pub fn dispatchKeyUp(packed_key: i64) void {
-    dispatchKey(packed_key, true);
+pub fn dispatchKeyUp(host: *HostContext, packed_key: i64) void {
+    dispatchKey(host, packed_key, true);
 }
 
 fn compactKeyMatches() void {
@@ -245,7 +246,7 @@ fn compactKeyMatches() void {
     key_matches.shrinkRetainingCapacity(write);
 }
 
-pub fn tick(dt_ms: u32) void {
+pub fn tick(host: *HostContext, dt_ms: u32) void {
     clock_ms += dt_ms;
 
     // Fire any due timers. Snapshot length so re-entry from JS dispatch
@@ -270,9 +271,9 @@ pub fn tick(dt_ms: u32) void {
             }
         }
 
-        v8_runtime.callGlobal("__beginJsEvent");
-        v8_runtime.callGlobalInt("__ifttt_dispatch_timer", @intCast(wire));
-        v8_runtime.callGlobal("__endJsEvent");
+        v8_runtime.callGlobal(host, "__beginJsEvent");
+        v8_runtime.callGlobalInt(host, "__ifttt_dispatch_timer", @intCast(wire));
+        v8_runtime.callGlobal(host, "__endJsEvent");
     }
 
     // Compact dead rows occasionally to keep the lists bounded. Cheap

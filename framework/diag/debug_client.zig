@@ -10,7 +10,6 @@
 //! Used by the Tools inspector to attach to running .tsz apps.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("log.zig");
 const ipc = @import("../net/ipc.zig");
 const app_crypto = @import("../privacy/crypto.zig");
@@ -76,14 +75,14 @@ var telemetry_streaming: bool = false;
 
 /// Connect to a debug server. server_pubkey_hex is the 64-char hex pubkey
 /// from the session file (~/.tsz/sessions/<pid>.json).
-pub fn connect(port: u16, server_pubkey_hex: []const u8) bool {
+pub fn connect(allocator: std.mem.Allocator, io: std.Io, port: u16, server_pubkey_hex: []const u8) bool {
     if (client != null) disconnect();
     if (server_pubkey_hex.len != 64) return false;
 
     _ = app_crypto.hexToBytes(server_pubkey_hex, &server_pubkey) catch return false;
-    our_keypair = X25519.KeyPair.generate(host_io.io());
+    our_keypair = X25519.KeyPair.generate(io);
 
-    var c = ipc.Client.connect(port) catch return false;
+    var c = ipc.Client.connect(allocator, io, port) catch return false;
 
     // Send our pubkey as the handshake initiation
     var pubkey_hex: [64]u8 = undefined;

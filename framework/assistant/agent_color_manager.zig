@@ -19,8 +19,8 @@ pub const ColorName = enum {
 
 /// All available colors
 pub const ALL_COLORS: []const ColorName = &.{
-    .red, .blue, .green, .yellow,
-    .purple, .orange, .pink, .cyan,
+    .red,    .blue,   .green, .yellow,
+    .purple, .orange, .pink,  .cyan,
 };
 
 /// Maps color names to theme color keys
@@ -37,15 +37,17 @@ pub const COLOR_TO_THEME = std.enums.EnumMap(ColorName, []const u8).init(.{
 
 /// Color manager for assigning and tracking agent colors
 pub const ColorManager = struct {
+    io: std.Io,
     allocator: Allocator,
     color_map: StringHashMap(ColorName),
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 
-    pub fn init(allocator: Allocator) ColorManager {
+    pub fn init(io: std.Io, allocator: Allocator) ColorManager {
         return .{
+            .io = io,
             .allocator = allocator,
             .color_map = StringHashMap(ColorName).init(allocator),
-            .mutex = .{},
+            .mutex = .init,
         };
     }
 
@@ -61,8 +63,8 @@ pub const ColorManager = struct {
             return null;
         }
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         const entry = self.color_map.get(agent_type);
         if (entry) |color| {
@@ -73,8 +75,8 @@ pub const ColorManager = struct {
 
     /// Set the color for an agent type
     pub fn setAgentColor(self: *ColorManager, agent_type: []const u8, color: ?ColorName) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         if (color) |c| {
             try self.color_map.put(agent_type, c);
@@ -108,7 +110,7 @@ pub const ColorManager = struct {
 
 test "ColorManager - basic operations" {
     const allocator = std.testing.allocator;
-    var manager = ColorManager.init(allocator);
+    var manager = ColorManager.init(std.testing.io, allocator);
     defer manager.deinit();
 
     // Test general-purpose has no color

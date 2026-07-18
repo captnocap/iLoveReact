@@ -8,6 +8,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const localstore = @import("storage/localstore.zig");
 const fs = @import("fs/fs.zig");
 
@@ -40,11 +41,12 @@ fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
 
 fn hostGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return setReturnString(info, "");
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return setReturnString(info, "");
     defer std.heap.c_allocator.free(key);
-    const value = localstore.getAlloc(std.heap.c_allocator, ns, key) catch return setReturnString(info, "");
+    const value = localstore.getAlloc(io, std.heap.c_allocator, ns, key) catch return setReturnString(info, "");
     if (value) |v| {
         defer std.heap.c_allocator.free(v);
         setReturnString(info, v);
@@ -53,23 +55,25 @@ fn hostGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostHas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return setReturnNumber(info, 0);
     defer std.heap.c_allocator.free(key);
-    const found = localstore.has(ns, key) catch return setReturnNumber(info, 0);
+    const found = localstore.has(io, ns, key) catch return setReturnNumber(info, 0);
     setReturnNumber(info, if (found) 1 else 0);
 }
 
 fn hostSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(key);
     const value = argToStringAlloc(info, 2) orelse return;
     defer std.heap.c_allocator.free(value);
-    localstore.set(ns, key, value) catch |err| {
+    localstore.set(io, ns, key, value) catch |err| {
         // a swallowed set is invisible data loss (the 8KB-cap bug hid behind
         // exactly this catch) — fail loud on stderr
         std.debug.print("[localstore] SET FAILED ns={s} key={s} len={d}: {s}\n", .{ ns, key, value.len, @errorName(err) });
@@ -78,27 +82,30 @@ fn hostSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
     const key = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(key);
-    localstore.delete(ns, key) catch {};
+    localstore.delete(io, ns, key) catch {};
 }
 
 fn hostClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) return localstore.clear(null) catch {};
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    if (info.length() < 1) return localstore.clear(io, null) catch {};
     const ns = argToStringAlloc(info, 0) orelse return;
     defer std.heap.c_allocator.free(ns);
-    if (ns.len == 0) localstore.clear(null) catch {} else localstore.clear(ns) catch {};
+    if (ns.len == 0) localstore.clear(io, null) catch {} else localstore.clear(io, ns) catch {};
 }
 
 fn hostKeysJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     const ns = argToStringAlloc(info, 0) orelse return setReturnString(info, "[]");
     defer std.heap.c_allocator.free(ns);
     var entries: [localstore.MAX_KEYS]localstore.KeyEntry = undefined;
-    const count = localstore.keys(ns, &entries) catch return setReturnString(info, "[]");
+    const count = localstore.keys(io, ns, &entries) catch return setReturnString(info, "[]");
     var pos: usize = 0;
     g_keys_json_buf[pos] = '[';
     pos += 1;
@@ -136,9 +143,9 @@ fn hostKeysJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// Open localstore.db under the app data dir. Inits fs("reactjit") so the path
 /// matches the editor host's. Best-effort: on failure the host fns return empty
 /// (a script reads as if the store is empty), never crashing the bake.
-pub fn initStore() void {
-    fs.init("reactjit") catch {};
-    localstore.init() catch {};
+pub fn initStore(host: *HostContext) void {
+    fs.init(host.io, host.environ, "reactjit") catch {};
+    localstore.init(host.io) catch {};
 }
 
 pub fn registerLocalstore(_: anytype) void {

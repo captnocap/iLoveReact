@@ -27,7 +27,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const layout = @import("../layout.zig");
 const state_mod = @import("../state/dirty.zig");
@@ -85,11 +84,13 @@ pub const WindowSlot = struct {
 
 var slots: [MAX_WINDOWS]WindowSlot = [_]WindowSlot{.{}} ** MAX_WINDOWS;
 var slot_count: usize = 0;
-var g_js_dispatch_fn: ?*const fn (u32, []const u8) void = null;
+var g_js_dispatch_context: ?*anyopaque = null;
+var g_js_dispatch_fn: ?*const fn (*anyopaque, u32, []const u8) void = null;
 var g_sdl_inited: bool = false;
 const WrappedLine = struct { start: usize, end: usize };
 
-pub fn setJsDispatchFn(f: *const fn (u32, []const u8) void) void {
+pub fn setJsDispatchFn(context: *anyopaque, f: *const fn (*anyopaque, u32, []const u8) void) void {
+    g_js_dispatch_context = context;
     g_js_dispatch_fn = f;
 }
 
@@ -121,26 +122,28 @@ pub fn shutdownSdl() void {
 
 /// Pump every queued SDL3 event into routeEvent. Drains the queue.
 /// Returns when SDL_PollEvent has no more events to deliver.
-pub fn pumpEvents() void {
+pub fn pumpEvents(io: std.Io) void {
     if (!g_sdl_inited) return;
     var event: c.SDL_Event = undefined;
     while (c.SDL_PollEvent(&event)) {
-        _ = routeEvent(&event);
+        _ = routeEvent(io, &event);
     }
 }
 
 fn dispatchJs(node: *Node, handler: []const u8) bool {
     const f = g_js_dispatch_fn orelse return false;
+    const context = g_js_dispatch_context orelse return false;
     if (node.scroll_persist_slot == 0) return false;
-    f(node.scroll_persist_slot, handler);
+    f(context, node.scroll_persist_slot, handler);
     state_mod.markDirty();
     return true;
 }
 
 fn dispatchJsById(id: u32, handler: []const u8) bool {
     const f = g_js_dispatch_fn orelse return false;
+    const context = g_js_dispatch_context orelse return false;
     if (id == 0) return false;
-    f(id, handler);
+    f(context, id, handler);
     state_mod.markDirty();
     return true;
 }
@@ -178,7 +181,7 @@ pub fn isRootOpen(root: *Node) bool {
 }
 
 /// Open a new window. Returns slot index, or null on failure.
-pub fn open(opts: OpenOptions) ?usize {
+pub fn open(io: std.Io, environ: *const std.process.Environ.Map, opts: OpenOptions) ?usize {
     // Find a free slot
     var idx: usize = 0;
     while (idx < MAX_WINDOWS) : (idx += 1) {
@@ -191,7 +194,7 @@ pub fn open(opts: OpenOptions) ?usize {
 
     switch (opts.kind) {
         .in_process, .notification => return openInProcess(idx, opts),
-        .independent => return openIndependent(idx, opts),
+        .independent => return openIndependent(io, environ, idx, opts),
     }
 }
 
@@ -271,20 +274,20 @@ fn openInProcess(idx: usize, opts: OpenOptions) ?usize {
     return idx;
 }
 
-fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
-    var server = ipc.Server.bind(0) catch |err| {
+fn openIndependent(io: std.Io, environ: *const std.process.Environ.Map, idx: usize, opts: OpenOptions) ?usize {
+    var server = ipc.Server.bind(std.heap.c_allocator, io, 0) catch |err| {
         log.err(.engine, "windows: independent IPC bind failed: {}", .{err});
         return null;
     };
     errdefer server.close();
 
     const alloc = std.heap.c_allocator;
-    const exe_path = std.process.executablePathAlloc(host_io.io(), alloc) catch |err| {
+    const exe_path = std.process.executablePathAlloc(io, alloc) catch |err| {
         log.err(.engine, "windows: self exe path failed: {}", .{err});
         return null;
     };
     defer alloc.free(exe_path);
-    const launcher_path = findChildLauncher(alloc, exe_path) catch |err| {
+    const launcher_path = findChildLauncher(io, alloc, exe_path) catch |err| {
         log.err(.engine, "windows: child launcher resolve failed: {}", .{err});
         return null;
     };
@@ -299,7 +302,7 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     var id_buf: [16]u8 = undefined;
     const id_s = std.fmt.bufPrint(&id_buf, "{d}", .{opts.window_id}) catch return null;
 
-    var env = host_io.environ().createMap(alloc) catch |err| {
+    var env = cloneEnvironment(alloc, environ) catch |err| {
         log.err(.engine, "windows: child env inherit failed: {}", .{err});
         return null;
     };
@@ -331,7 +334,7 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     }
 
     const argv = [_][]const u8{ launcher_path, "--window-child" };
-    const child = std.process.spawn(host_io.io(), .{
+    const child = std.process.spawn(io, .{
         .argv = &argv,
         .environ_map = &env,
         .stdin = .ignore,
@@ -369,10 +372,17 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     return idx;
 }
 
-fn findChildLauncher(alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
+fn cloneEnvironment(alloc: std.mem.Allocator, source: *const std.process.Environ.Map) !std.process.Environ.Map {
+    var result = std.process.Environ.Map.init(alloc);
+    errdefer result.deinit();
+    for (source.keys(), source.values()) |key, value| try result.put(key, value);
+    return result;
+}
+
+fn findChildLauncher(io: std.Io, alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
     const dir = std.fs.path.dirname(exe_path) orelse return alloc.dupe(u8, exe_path);
     const run_path = try std.fs.path.join(alloc, &.{ dir, "run" });
-    if (std.Io.Dir.accessAbsolute(host_io.io(), run_path, .{})) |_| {
+    if (std.Io.Dir.accessAbsolute(io, run_path, .{})) |_| {
         return run_path;
     } else |_| {
         alloc.free(run_path);
@@ -383,7 +393,7 @@ fn findChildLauncher(alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
     // runnable entrypoint is one directory above that loader.
     const parent = std.fs.path.dirname(dir) orelse return alloc.dupe(u8, exe_path);
     const parent_run_path = try std.fs.path.join(alloc, &.{ parent, "run" });
-    if (std.Io.Dir.accessAbsolute(host_io.io(), parent_run_path, .{})) |_| {
+    if (std.Io.Dir.accessAbsolute(io, parent_run_path, .{})) |_| {
         return parent_run_path;
     } else |_| {
         alloc.free(parent_run_path);
@@ -392,7 +402,7 @@ fn findChildLauncher(alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
 }
 
 /// Close a window by slot index.
-pub fn close(idx: usize) void {
+pub fn close(io: std.Io, idx: usize) void {
     if (idx >= MAX_WINDOWS or !slots[idx].active) return;
 
     switch (slots[idx].kind) {
@@ -407,7 +417,7 @@ pub fn close(idx: usize) void {
                 server.close();
             }
             if (slots[idx].child) |*child| {
-                child.kill(host_io.io());
+                child.kill(io);
             }
             slots[idx].pending.deinit(std.heap.c_allocator);
         },
@@ -419,9 +429,9 @@ pub fn close(idx: usize) void {
 }
 
 /// Close all windows.
-pub fn deinitAll() void {
+pub fn deinitAll(io: std.Io) void {
     for (0..MAX_WINDOWS) |i| {
-        if (slots[i].active) close(i);
+        if (slots[i].active) close(io, i);
     }
 }
 
@@ -440,15 +450,15 @@ pub fn setRoot(idx: usize, root: *Node) void {
 /// initial cart paint is ~3000 mutations and the per-line logs drown
 /// everything else. Once-per-window logs (spawn/accept/flush/recv) stay
 /// on unconditionally.
-fn ipcTracePerMessage() bool {
-    const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse return false;
+fn ipcTracePerMessage(environ: *const std.process.Environ.Map) bool {
+    const env = environ.get("ZIGOS_TRACE_IPC") orelse return false;
     return env.len > 0 and env[0] != '0';
 }
 
 /// Queue or send one NDJSON message to an independent child window.
-pub fn sendLineToChild(idx: usize, line: []const u8) void {
+pub fn sendLineToChild(environ: *const std.process.Environ.Map, idx: usize, line: []const u8) void {
     if (idx >= MAX_WINDOWS or !slots[idx].active or slots[idx].kind != .independent) return;
-    const trace = ipcTracePerMessage();
+    const trace = ipcTracePerMessage(environ);
     if (slots[idx].server) |*server| {
         if (server.connected() and server.sendLine(line)) {
             if (trace) log.print("[window-ipc/parent] send slot={d} bytes={d}\n", .{ idx, line.len });
@@ -521,12 +531,12 @@ pub fn findByWindowId(sdl_window_id: u32) ?usize {
 /// Route an SDL event to the correct window. Returns true if the event was consumed.
 /// The engine should call this before its own event handling — if it returns true,
 /// the event belongs to a secondary window and the engine should skip it.
-pub fn routeEvent(event: *c.SDL_Event) bool {
+pub fn routeEvent(io: std.Io, event: *c.SDL_Event) bool {
     switch (event.type) {
         c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
             const win_id = event.window.windowID;
             const idx = findByWindowId(win_id) orelse return false;
-            close(idx);
+            close(io, idx);
             return true;
         },
         c.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED => {
@@ -573,11 +583,11 @@ fn handleMouseMotion(idx: usize, mx: f32, my: f32) void {
         slots[idx].hovered = events.hitTestHoverable(root, mx, my);
         if (prev != slots[idx].hovered) {
             if (prev) |p| {
-                if (p.handlers.on_hover_exit) |h| h();
+                if (p.handlers.on_hover_exit) |h| h(p.handlers.context);
                 if (p.handlers.js_on_hover_exit != null) _ = dispatchJs(p, "onHoverExit");
             }
             if (slots[idx].hovered) |n| {
-                if (n.handlers.on_hover_enter) |h| h();
+                if (n.handlers.on_hover_enter) |h| h(n.handlers.context);
                 if (n.handlers.js_on_hover_enter != null) _ = dispatchJs(n, "onHoverEnter");
             }
         }
@@ -588,7 +598,7 @@ fn handleClick(idx: usize, mx: f32, my: f32) void {
     if (idx >= MAX_WINDOWS or !slots[idx].active) return;
     if (slots[idx].root) |root| {
         if (events.hitTest(root, mx, my)) |node| {
-            if (node.handlers.on_press) |handler| handler() else if (node.handlers.js_on_press != null) _ = dispatchJs(node, "onClick");
+            if (node.handlers.on_press) |handler| handler(node.handlers.context) else if (node.handlers.js_on_press != null) _ = dispatchJs(node, "onClick");
         }
     }
 }
@@ -624,7 +634,7 @@ pub fn layoutAll() void {
 // ════════════════════════════════════════════════════════════════════════
 
 /// Paint and present all active in-process windows.
-pub fn paintAndPresent() void {
+pub fn paintAndPresent(io: std.Io) void {
     const now: u32 = @truncate(c.SDL_GetTicks());
 
     for (0..MAX_WINDOWS) |i| {
@@ -633,7 +643,7 @@ pub fn paintAndPresent() void {
 
         // Notification lifecycle: fade in, hold, fade out, auto-close
         if (slots[i].kind == .notification) {
-            if (!tickNotification(i, now)) continue; // was closed
+            if (!tickNotification(io, i, now)) continue; // was closed
         }
 
         const rend = slots[i].renderer orelse continue;
@@ -964,14 +974,14 @@ const FADE_IN_MS: u32 = 200;
 const FADE_OUT_MS: u32 = 300;
 
 /// Tick a notification window's lifecycle. Returns false if the window was closed.
-fn tickNotification(idx: usize, now: u32) bool {
+fn tickNotification(io: std.Io, idx: usize, now: u32) bool {
     const slot = &slots[idx];
     const age = now -| slot.created_at;
     const dismiss = slot.auto_dismiss_ms;
 
     if (dismiss > 0 and age >= dismiss + FADE_OUT_MS) {
         // Expired — close it
-        close(idx);
+        close(io, idx);
         return false;
     }
 

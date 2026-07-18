@@ -1,7 +1,6 @@
 //! Audio subsystem — SDL3 audio callback (interrupt thread entry point).
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const sdl = @import("sdl.zig").c; // was: @cImport({
 const types = @import("types.zig");
 const state = @import("state.zig");
@@ -62,10 +61,13 @@ const TEMPO_FLAG_END_MEASURE = types.TEMPO_FLAG_END_MEASURE;
 const TRACK_FLAG_RANGE = types.TRACK_FLAG_RANGE;
 
 pub fn audioCallback(userdata: ?*anyopaque, stream: ?*sdl.SDL_AudioStream, additional_amount: c_int, _: c_int) callconv(.c) void {
-    _ = userdata;
     if (additional_amount <= 0) return;
 
-    const t0 = host_io.microTimestamp();
+    // SDL fixes this foreign ABI, so the owning audio engine injects its Io
+    // capability through SDL's userdata slot when registering the callback.
+    const io_ptr: *const std.Io = @ptrCast(@alignCast(userdata orelse return));
+    const io = io_ptr.*;
+    const t0 = std.Io.Clock.now(.awake, io);
 
     // Process pending commands from QuickJS
     api.processCommands();
@@ -164,6 +166,6 @@ pub fn audioCallback(userdata: ?*anyopaque, stream: ?*sdl.SDL_AudioStream, addit
         const seconds = @as(f64, @floatFromInt(num_samples)) / @as(f64, @floatFromInt(SAMPLE_RATE));
         state.g_engine.transport_measure += (state.g_engine.current_tempo / 60.0) * seconds / BEATS_PER_MEASURE;
     }
-    const t1 = host_io.microTimestamp();
-    state.g_engine.callback_us.store(@intCast(@max(0, t1 - t0)), .monotonic);
+    const elapsed_us = t0.durationTo(std.Io.Clock.now(.awake, io)).toMicroseconds();
+    state.g_engine.callback_us.store(@intCast(@max(0, elapsed_us)), .monotonic);
 }

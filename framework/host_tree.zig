@@ -197,9 +197,9 @@ pub fn nodesValueIter() NodeValueIterator {
 /// list. Caller is responsible for any per-cart-feature teardown on the
 /// Node's fields (gpu buffers, input slots, etc.) BEFORE calling — those
 /// concerns live in the consumer shell, not here.
-pub fn destroyNode(id: u32) void {
+pub fn destroyNode(context: *anyopaque, id: u32) void {
     if (g_node_by_id.get(id)) |n| {
-        if (g_hooks.before_destroy) |f| f(n, id);
+        if (g_hooks.before_destroy) |f| f(context, n, id);
     }
     if (g_children_ids.getPtr(id)) |list| list.deinit(g_alloc);
     _ = g_children_ids.remove(id);
@@ -214,10 +214,10 @@ pub fn destroyNode(id: u32) void {
 /// ownership is mixed (some g_alloc dupes, some slices into framework input
 /// buffers) so we intentionally leak the text — kilobytes per reload, fine
 /// for a dev-mode safety net.
-pub fn clearAll() void {
+pub fn clearAll(context: *anyopaque) void {
     if (g_hooks.before_destroy) |f| {
         var pre_it = g_node_by_id.iterator();
-        while (pre_it.next()) |entry| f(entry.value_ptr.*, entry.key_ptr.*);
+        while (pre_it.next()) |entry| f(context, entry.value_ptr.*, entry.key_ptr.*);
     }
     var nodes_it = g_node_by_id.valueIterator();
     while (nodes_it.next()) |np| g_alloc.destroy(np.*);
@@ -468,12 +468,12 @@ pub const Hooks = struct {
 
     /// CREATE/UPDATE: extract event handler flags (onPress, onMouseDown,
     /// etc.) from the command and register them with the event system.
-    apply_handler_flags: ?*const fn (*Node, u32, std.json.Value) void = null,
+    apply_handler_flags: ?*const fn (*anyopaque, *Node, u32, std.json.Value) void = null,
 
     /// CREATE with type=Window/Notification: open the host window.
     /// Wraps `framework/primitive/windows.zig` calls. v8_app's
     /// installer also tracks the slot in its window-by-id map.
-    open_host_window: ?*const fn (u32, []const u8, ?std.json.Value) void = null,
+    open_host_window: ?*const fn (std.Io, *const std.process.Environ.Map, u32, []const u8, ?std.json.Value) void = null,
 
     /// Every applyCommand call: note which window owns this command.
     /// v8_app uses this for .independent window IPC routing; v8_tui_app
@@ -482,7 +482,7 @@ pub const Hooks = struct {
 
     /// After every applyCommand in a batch: maybe forward the command
     /// across an IPC boundary for .independent windows. v8_app-only.
-    route_to_window: ?*const fn (std.json.Value) void = null,
+    route_to_window: ?*const fn (*const std.process.Environ.Map, std.json.Value) void = null,
 
     /// UPDATE: remove keys from props/style (when a prop is unset by
     /// the reconciler diff). v8_app's handlers clean up latch tracking
@@ -500,7 +500,7 @@ pub const Hooks = struct {
     /// per-cart-feature teardown (paintable textures, GPU buffers,
     /// input slots, etc.) gets a chance to run with the Node's fields
     /// still valid. Also called from `clearAll` for every live node.
-    before_destroy: ?*const fn (*Node, u32) void = null,
+    before_destroy: ?*const fn (*anyopaque, *Node, u32) void = null,
 };
 
 var g_hooks: Hooks = .{};
@@ -524,7 +524,7 @@ fn cmdId(cmd: std.json.Value, key: []const u8) ?u32 {
     return @intCast(i);
 }
 
-pub fn applyCommand(cmd: std.json.Value) !void {
+pub fn applyCommand(context: *anyopaque, io: std.Io, environ: *const std.process.Environ.Map, cmd: std.json.Value) !void {
     if (cmd != .object) return;
     if (g_hooks.note_window_owner) |f| f(cmd);
 
@@ -549,7 +549,7 @@ pub fn applyCommand(cmd: std.json.Value) !void {
             if (g_hooks.apply_props) |f| f(n, props, type_name);
         }
         if (type_name) |tn| {
-            if (g_hooks.open_host_window) |f| f(id, tn, cmd.object.get("props"));
+            if (g_hooks.open_host_window) |f| f(io, environ, id, tn, cmd.object.get("props"));
         }
         // debugName / debugSource are emitted as top-level siblings to
         // props by renderer/hostConfig.ts. Capture so witness/autotest
@@ -559,7 +559,7 @@ pub fn applyCommand(cmd: std.json.Value) !void {
                 n.debug_name = owned;
             } else |_| {}
         };
-        if (g_hooks.apply_handler_flags) |f| f(n, id, cmd);
+        if (g_hooks.apply_handler_flags) |f| f(context, n, id, cmd);
         markSubtreeDirty(id);
         g_dirty = true;
     } else if (std.mem.eql(u8, op, "CREATE_TEXT")) {
@@ -607,7 +607,7 @@ pub fn applyCommand(cmd: std.json.Value) !void {
             if (cmd.object.get("props")) |props| {
                 if (g_hooks.apply_props) |f| f(n, props, null);
             }
-            if (g_hooks.apply_handler_flags) |f| f(n, id, cmd);
+            if (g_hooks.apply_handler_flags) |f| f(context, n, id, cmd);
             // Propagate typography to bare text children so dynamic
             // fontSize changes on the parent flow through to the child
             // TextInstances.
@@ -633,14 +633,14 @@ pub fn applyCommand(cmd: std.json.Value) !void {
 /// array of command objects emitted by renderer/hostConfig.ts. Errors
 /// per-command are caught and logged so a single bad command can't
 /// freeze the whole frame; parse failure aborts the whole batch.
-pub fn applyCommandBatch(json_bytes: []const u8) void {
+pub fn applyCommandBatch(context: *anyopaque, io: std.Io, environ: *const std.process.Environ.Map, json_bytes: []const u8) void {
     const parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json_bytes, .{}) catch |err| {
         std.log.scoped(.host_tree).err("parse error: {s}", .{@errorName(err)});
         return;
     };
     defer parsed.deinit();
     if (parsed.value != .array) return;
-    for (parsed.value.array.items) |cmd| applyCommand(cmd) catch |err| {
+    for (parsed.value.array.items) |cmd| applyCommand(context, io, environ, cmd) catch |err| {
         std.log.scoped(.host_tree).err("apply error: {s}", .{@errorName(err)});
     };
     // .independent windows: forward the batch's commands across the IPC
@@ -648,6 +648,6 @@ pub fn applyCommandBatch(json_bytes: []const u8) void {
     // doesn't use .independent (no need for crash isolation when the
     // window is in-process SDL3 anyway).
     if (g_hooks.route_to_window) |f| {
-        for (parsed.value.array.items) |cmd| f(cmd);
+        for (parsed.value.array.items) |cmd| f(environ, cmd);
     }
 }

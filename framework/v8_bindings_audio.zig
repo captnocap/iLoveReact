@@ -505,7 +505,8 @@ fn hostAudioLoadSound(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         return;
     };
     defer std.heap.c_allocator.free(path);
-    setReturnNumber(info, @floatFromInt(api.loadSound(path)));
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    setReturnNumber(info, @floatFromInt(api.loadSound(io, path)));
 }
 
 fn hostAudioLoadSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -528,7 +529,8 @@ fn hostAudioLoadSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         return;
     };
     defer std.heap.c_allocator.free(mode);
-    setReturnNumber(info, if (api.loadSample(@intCast(@max(0, id)), slot, path, mode)) 1 else 0);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    setReturnNumber(info, if (api.loadSample(io, @intCast(@max(0, id)), slot, path, mode)) 1 else 0);
 }
 
 fn hostAudioClearSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -577,7 +579,7 @@ fn hostAudioIsPlaying(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
 fn hostAudioInit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, if (engine.init()) 1 else 0);
+    setReturnNumber(info, if (engine.init(v8_runtime.hostContext(info.getIsolate()).io)) 1 else 0);
 }
 
 fn hostAudioDeinit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

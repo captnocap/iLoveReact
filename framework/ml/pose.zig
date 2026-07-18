@@ -27,18 +27,6 @@ const stb = @cImport({
 
 const log = std.log.scoped(.pose);
 
-fn io() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
-}
-
-fn milliTimestamp() i64 {
-    return std.Io.Clock.now(.real, io()).toMilliseconds();
-}
-
-fn getenv(name: [:0]const u8) ?[]const u8 {
-    return if (std.c.getenv(name.ptr)) |value| std.mem.span(value) else null;
-}
-
 pub const INPUT_SIZE: usize = 192;
 pub const KEYPOINTS: usize = pose_mailbox.KEYPOINTS;
 pub const Keypoint = pose_mailbox.Keypoint;
@@ -54,8 +42,14 @@ var g_init_error: ?[]u8 = null;
 var g_inference_mutex: std.Io.Mutex = .init;
 
 var g_async_initialized: bool = false;
-var g_async_queue: pose_mailbox.Queue = undefined;
-var g_async_thread: ?std.Thread = null;
+var g_async: AsyncState = undefined;
+
+const AsyncState = struct {
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    queue: pose_mailbox.Queue,
+    tasks: std.Io.Group = .init,
+};
 
 const page_alloc = std.heap.page_allocator;
 
@@ -83,17 +77,17 @@ fn recordOrtErr(api: *const c.OrtApi, status: ?*c.OrtStatus, where: []const u8) 
     log.err("{s}: {s}", .{ where, msg });
 }
 
-fn modelPath(alloc: std.mem.Allocator) ?[]u8 {
-    const home = getenv("HOME") orelse return null;
+fn modelPath(io: std.Io, environ: *const std.process.Environ.Map, alloc: std.mem.Allocator) ?[]u8 {
+    const home = environ.get("HOME") orelse return null;
     const path = std.fmt.allocPrint(alloc, "{s}/.reactjit/models/movenet_lightning.onnx", .{home}) catch return null;
-    std.Io.Dir.cwd().access(io(), path, .{}) catch {
+    std.Io.Dir.cwd().access(io, path, .{}) catch {
         alloc.free(path);
         return null;
     };
     return path;
 }
 
-fn ensureInit() bool {
+fn ensureInit(io: std.Io, environ: *const std.process.Environ.Map) bool {
     if (g_init_done and g_session != null) return true;
     if (g_init_failed) return false;
     g_init_done = true;
@@ -135,7 +129,7 @@ fn ensureInit() bool {
             return false;
         }
     }
-    const path = modelPath(page_alloc) orelse {
+    const path = modelPath(io, environ, page_alloc) orelse {
         recordInitErr("pose model not found at ~/.reactjit/models/movenet_lightning.onnx — download via scripts/fetch-pose-models");
         return false;
     };
@@ -159,54 +153,57 @@ fn ensureInit() bool {
 
 // ── Bounded live-inference worker ──────────────────────────────────────
 
-pub fn init(allocator: std.mem.Allocator) void {
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator) void {
     if (g_async_initialized) return;
-    g_async_queue = pose_mailbox.Queue.init(allocator);
-    g_async_thread = std.Thread.spawn(.{}, asyncWorkerLoop, .{}) catch null;
-    if (g_async_thread == null) {
-        g_async_queue.stop();
-        g_async_queue.deinit();
+    g_async = .{
+        .io = io,
+        .environ = environ,
+        .queue = undefined,
+    };
+    g_async.queue.init(allocator);
+    g_async.tasks.concurrent(io, asyncWorkerLoop, .{&g_async}) catch {
+        g_async.queue.stop(io);
+        g_async.queue.deinit(io);
         return;
-    }
+    };
     g_async_initialized = true;
 }
 
-pub fn deinit() void {
+pub fn deinit(io: std.Io) void {
     if (!g_async_initialized) return;
-    g_async_queue.stop();
-    if (g_async_thread) |thread| thread.join();
-    g_async_thread = null;
-    g_async_queue.deinit();
+    g_async.queue.stop(io);
+    g_async.tasks.cancel(io);
+    g_async.queue.deinit(io);
     releaseOrt();
     g_async_initialized = false;
 }
 
 /// Main-thread boundary: validate + copy one render-surface frame, then return.
 /// Busy is backpressure, never an instruction to grow a frame queue.
-pub fn enqueueRgba(request_id: u32, rgba: []const u8, width: u32, height: u32) SubmitStatus {
+pub fn enqueueRgba(io: std.Io, request_id: u32, rgba: []const u8, width: u32, height: u32) SubmitStatus {
     if (!g_async_initialized) return .stopped;
-    return g_async_queue.submitCopy(request_id, rgba, width, height);
+    return g_async.queue.submitCopy(io, request_id, rgba, width, height);
 }
 
 /// Engine-tick boundary: non-blocking take of the worker's completed result.
-pub fn pollAsync() ?AsyncResult {
+pub fn pollAsync(io: std.Io) ?AsyncResult {
     if (!g_async_initialized) return null;
-    return g_async_queue.poll();
+    return g_async.queue.poll(io);
 }
 
-fn asyncWorkerLoop() void {
-    while (g_async_queue.waitTake()) |owned_frame_value| {
+fn asyncWorkerLoop(state: *AsyncState) std.Io.Cancelable!void {
+    while (try state.queue.waitTake(state.io)) |owned_frame_value| {
         var owned_frame = owned_frame_value;
         defer owned_frame.deinit();
-        const started_ms = milliTimestamp();
-        const estimate = estimateRgba(owned_frame.rgba, owned_frame.width, owned_frame.height);
-        const elapsed_i64 = @max(0, milliTimestamp() - started_ms);
+        const started_ms = std.Io.Clock.now(.awake, state.io).toMilliseconds();
+        const estimate = estimateRgba(state.io, state.environ, owned_frame.rgba, owned_frame.width, owned_frame.height);
+        const elapsed_i64 = @max(0, std.Io.Clock.now(.awake, state.io).toMilliseconds() - started_ms);
         const elapsed_ms: u32 = @intCast(@min(elapsed_i64, @as(i64, std.math.maxInt(u32))));
         const result = if (estimate) |keypoints|
             AsyncResult.success(owned_frame.request_id, keypoints, elapsed_ms)
         else
             AsyncResult.failure(owned_frame.request_id, initError() orelse "pose inference failed", elapsed_ms);
-        _ = g_async_queue.publish(result);
+        _ = state.queue.publish(state.io, result);
     }
 }
 
@@ -227,10 +224,16 @@ fn releaseOrt() void {
 
 /// Estimate the pose in an RGBA frame (top-down, stride w*4). Returns the 17
 /// COCO keypoints in model order, or null when the model/init is unavailable.
-pub fn estimateRgba(rgba: []const u8, width: u32, height: u32) ?[KEYPOINTS]Keypoint {
-    g_inference_mutex.lockUncancelable(io());
-    defer g_inference_mutex.unlock(io());
-    if (!ensureInit()) return null;
+pub fn estimateRgba(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    rgba: []const u8,
+    width: u32,
+    height: u32,
+) ?[KEYPOINTS]Keypoint {
+    g_inference_mutex.lockUncancelable(io);
+    defer g_inference_mutex.unlock(io);
+    if (!ensureInit(io, environ)) return null;
     if (width == 0 or height == 0) return null;
     const api = onnx.api() orelse return null;
 
@@ -278,7 +281,8 @@ pub fn estimateRgba(rgba: []const u8, width: u32, height: u32) ?[KEYPOINTS]Keypo
     {
         const run_fn = api.Run orelse return null;
         const status = run_fn(
-            g_session, null,
+            g_session,
+            null,
             @as([*c]const [*c]const u8, @ptrCast(&in_names)),
             @as([*c]const ?*const c.OrtValue, @ptrCast(&inputs)),
             in_names.len,
@@ -317,7 +321,7 @@ pub fn estimateRgba(rgba: []const u8, width: u32, height: u32) ?[KEYPOINTS]Keypo
 }
 
 /// Estimate from an image FILE (stb) — the headless verification door.
-pub fn estimateImage(path: [*:0]const u8) ?[KEYPOINTS]Keypoint {
+pub fn estimateImage(io: std.Io, environ: *const std.process.Environ.Map, path: [*:0]const u8) ?[KEYPOINTS]Keypoint {
     var sw: c_int = 0;
     var sh: c_int = 0;
     var comp: c_int = 0;
@@ -328,5 +332,5 @@ pub fn estimateImage(path: [*:0]const u8) ?[KEYPOINTS]Keypoint {
     defer stb.stbi_image_free(pixels);
     const w: u32 = @intCast(sw);
     const h: u32 = @intCast(sh);
-    return estimateRgba(pixels[0 .. @as(usize, w) * @as(usize, h) * 4], w, h);
+    return estimateRgba(io, environ, pixels[0 .. @as(usize, w) * @as(usize, h) * 4], w, h);
 }

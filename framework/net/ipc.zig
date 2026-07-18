@@ -19,7 +19,7 @@
 //!     {"type":"ready"}                           — Connection established
 //!
 //! Usage (server / parent side):
-//!   var server = try ipc.Server.bind(0);       // port 0 = OS-assigned
+//!   var server = try ipc.Server.bind(allocator, io, 0); // port 0 = OS-assigned
 //!   const port = server.getPort();             // tell child this port
 //!   // per-frame:
 //!   server.acceptClient();                     // non-blocking
@@ -28,17 +28,13 @@
 //!   server.close();
 //!
 //! Usage (client / child side):
-//!   var client = try ipc.Client.connect(port);
+//!   var client = try ipc.Client.connect(allocator, io, port);
 //!   client.send("{\"type\":\"ready\"}\n");
 //!   var msgs = client.poll();
 //!   client.close();
 
 const std = @import("std");
-const netx = @import("netx.zig");
-// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
-// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
-// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
-const sysx = @import("sysx.zig");
+const transport = @import("transport.zig");
 const log = @import("../diag/log.zig");
 const event_bus = @import("../diag/event_bus.zig");
 
@@ -175,37 +171,26 @@ const RecvBuffer = struct {
 // ════════════════════════════════════════════════════════════════════════
 
 pub const Server = struct {
-    listener: sysx.socket_t,
-    client_fd: ?sysx.socket_t = null,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    listener: transport.ListenerPump,
+    client: ?transport.StreamPump = null,
     recv_buf: RecvBuffer = .{},
     msg_out: [MAX_MESSAGES_PER_POLL]Message = undefined,
     port: u16 = 0,
     dead: bool = false,
 
     /// Bind a TCP server on localhost. Pass port=0 to let the OS pick a free port.
-    pub fn bind(port: u16) !Server {
-        const addr = try netx.Address.parseIp4("127.0.0.1", port);
-        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
-        errdefer sysx.close(fd);
-
-        // SO_REUSEADDR
-        const optval: c_int = 1;
-        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
-
-        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
-        try sysx.listen(fd, 1); // single client expected
-
-        // Read back the assigned port
-        var bound_addr: sysx.sockaddr = undefined;
-        var addr_len: sysx.socklen_t = @sizeOf(sysx.sockaddr);
-        try sysx.getsockname(fd, &bound_addr, &addr_len);
-        // Extract port from the sockaddr_in
-        const sa_in: *const sysx.sockaddr.in = @ptrCast(@alignCast(&bound_addr));
-        const assigned_port = std.mem.bigToNative(u16, sa_in.port);
-
-        return Server{
-            .listener = fd,
-            .port = assigned_port,
+    pub fn bind(allocator: std.mem.Allocator, io: std.Io, port: u16) !Server {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
+        var server = try address.listen(io, .{ .kernel_backlog = 1, .reuse_address = true });
+        errdefer server.deinit(io);
+        var listener = try transport.ListenerPump.init(allocator, io, server);
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .port = listener.port(),
+            .listener = listener,
         };
     }
 
@@ -216,26 +201,30 @@ pub const Server = struct {
 
     /// Non-blocking accept. Call once per frame. Returns true if a client connected.
     pub fn acceptClient(self: *Server) bool {
-        if (self.client_fd != null) return true; // already connected
-        const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch return false;
-        // TCP_NODELAY
-        const optval: c_int = 1;
-        sysx.setsockopt(accepted, sysx.IPPROTO.TCP, sysx.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
-        self.client_fd = accepted;
+        if (self.client != null and !self.dead) return true;
+        if (self.client) |*stale| stale.deinit();
+        self.client = null;
+        const accepted = self.listener.accept() orelse return false;
+        self.client = transport.StreamPump.init(self.allocator, self.io, accepted) catch {
+            accepted.close(self.io);
+            return false;
+        };
+        self.dead = false;
         return true;
     }
 
     /// Non-blocking poll for messages. Returns a slice of complete NDJSON lines.
     /// Sets self.dead = true if the connection was closed by the remote end.
     pub fn poll(self: *Server) []const Message {
-        const fd = self.client_fd orelse return self.msg_out[0..0];
-        return pollFd(fd, &self.recv_buf, &self.msg_out, &self.dead);
+        const client = if (self.client) |*pump| pump else return self.msg_out[0..0];
+        return pollPump(client, &self.recv_buf, &self.msg_out, &self.dead);
     }
 
     /// Send a raw NDJSON line (must include trailing \n).
     pub fn send(self: *Server, data: []const u8) bool {
-        const fd = self.client_fd orelse return false;
-        return sendAll(fd, data);
+        const client = if (self.client) |*pump| pump else return false;
+        client.send(data) catch return false;
+        return true;
     }
 
     /// Send a message string and append \n.
@@ -246,16 +235,16 @@ pub const Server = struct {
 
     /// Is a client connected?
     pub fn connected(self: *const Server) bool {
-        return self.client_fd != null and !self.dead;
+        return self.client != null and !self.dead;
     }
 
     /// Close the server and any connected client.
     pub fn close(self: *Server) void {
-        if (self.client_fd) |fd| {
-            sysx.close(fd);
-            self.client_fd = null;
+        if (self.client) |*client| {
+            client.deinit();
+            self.client = null;
         }
-        sysx.close(self.listener);
+        self.listener.deinit();
         self.dead = true;
     }
 };
@@ -265,41 +254,28 @@ pub const Server = struct {
 // ════════════════════════════════════════════════════════════════════════
 
 pub const Client = struct {
-    fd: sysx.socket_t,
+    pump: transport.StreamPump,
     recv_buf: RecvBuffer = .{},
     msg_out: [MAX_MESSAGES_PER_POLL]Message = undefined,
     dead: bool = false,
 
-    /// Connect to a server on localhost:port. Blocking connect, then sets non-blocking.
-    pub fn connect(port: u16) !Client {
-        const addr = try netx.Address.parseIp4("127.0.0.1", port);
-        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0);
-        errdefer sysx.close(fd);
-
-        try sysx.connect(fd, &addr.any, addr.getOsSockLen());
-
-        // Set non-blocking after connect (raw POSIX constants for Zig 0.15)
-        const F_GETFL: i32 = 3;
-        const F_SETFL: i32 = 4;
-        const O_NONBLOCK: usize = 0x800;
-        const cur_flags = sysx.fcntl(fd, F_GETFL, @as(usize, 0)) catch 0;
-        _ = sysx.fcntl(fd, F_SETFL, cur_flags | O_NONBLOCK) catch {};
-
-        // TCP_NODELAY
-        const optval: c_int = 1;
-        sysx.setsockopt(fd, sysx.IPPROTO.TCP, sysx.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
-
-        return Client{ .fd = fd };
+    /// Connect to a server on localhost:port and start its cancelable read pump.
+    pub fn connect(allocator: std.mem.Allocator, io: std.Io, port: u16) !Client {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
+        const stream = try address.connect(io, .{ .mode = .stream, .protocol = .tcp });
+        errdefer stream.close(io);
+        return .{ .pump = try .init(allocator, io, stream) };
     }
 
     /// Non-blocking poll for messages.
     pub fn poll(self: *Client) []const Message {
-        return pollFd(self.fd, &self.recv_buf, &self.msg_out, &self.dead);
+        return pollPump(&self.pump, &self.recv_buf, &self.msg_out, &self.dead);
     }
 
     /// Send a raw NDJSON line (must include trailing \n).
     pub fn send(self: *Client, data: []const u8) bool {
-        return sendAll(self.fd, data);
+        self.pump.send(data) catch return false;
+        return true;
     }
 
     /// Send a message string and append \n.
@@ -310,7 +286,7 @@ pub const Client = struct {
 
     /// Close the connection.
     pub fn close(self: *Client) void {
-        sysx.close(self.fd);
+        self.pump.deinit();
         self.dead = true;
     }
 };
@@ -319,28 +295,24 @@ pub const Client = struct {
 // Shared helpers
 // ════════════════════════════════════════════════════════════════════════
 
-/// Non-blocking read + line extraction on a socket fd.
-fn pollFd(
-    fd: sysx.socket_t,
+/// Drain completed reads and extract complete lines.
+fn pollPump(
+    pump: *transport.StreamPump,
     recv_buf: *RecvBuffer,
     msg_out: []Message,
     dead: *bool,
 ) []const Message {
-    // Read all available data
+    // Drain all currently available data.
     var tmp: [READ_BUF_SIZE]u8 = undefined;
     while (true) {
-        const n = sysx.read(fd, &tmp) catch |err| switch (err) {
-            error.WouldBlock => break,
-            else => {
+        switch (pump.drain(&tmp)) {
+            .empty => break,
+            .data => |n| recv_buf.append(tmp[0..n]),
+            .closed, .failed => {
                 dead.* = true;
                 break;
             },
-        };
-        if (n == 0) {
-            dead.* = true; // EOF — remote closed
-            break;
         }
-        recv_buf.append(tmp[0..n]);
     }
 
     // Extract complete lines
@@ -348,13 +320,6 @@ fn pollFd(
     return msg_out[0..count];
 }
 
-/// Blocking write-all on a socket fd. Returns false on error.
-fn sendAll(fd: sysx.socket_t, data: []const u8) bool {
-    var written: usize = 0;
-    while (written < data.len) {
-        const n = sysx.write(fd, data[written..]) catch return false;
-        if (n == 0) return false;
-        written += n;
-    }
-    return true;
+test "public IPC API compiles" {
+    std.testing.refAllDecls(@This());
 }

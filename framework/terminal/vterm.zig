@@ -323,13 +323,13 @@ pub const Pipe = struct {
         self.spawn_cwd_len = len;
     }
 
-    pub fn spawnShell(self: *Pipe, shell: [*:0]const u8, rows: u16, cols: u16) void {
+    pub fn spawnShell(self: *Pipe, io: std.Io, shell: [*:0]const u8, rows: u16, cols: u16) void {
         if (self.pty != null) self.closePty();
         if (rows != self.rows or cols != self.cols) self.resizeTerminal(rows, cols);
 
         const cwd: ?[*:0]const u8 =
             if (self.spawn_cwd_len > 0) @ptrCast(&self.spawn_cwd_buf) else null;
-        self.pty = pty_mod.openPty(.{
+        self.pty = pty_mod.openPty(g_alloc, io, .{
             .shell = shell,
             .rows = rows,
             .cols = cols,
@@ -344,7 +344,7 @@ pub const Pipe = struct {
     /// Drain PTY → vterm → flush vterm responses back. Returns true if new
     /// data was received. Loops up to 32×8KB to absorb large redraws (Claude
     /// Code's full-screen output is 100KB+ in one go).
-    pub fn pollPty(self: *Pipe) bool {
+    pub fn pollPty(self: *Pipe, io: std.Io) bool {
         var p = &(self.pty orelse return false);
         var got_data = false;
         var iters: u32 = 0;
@@ -352,7 +352,10 @@ pub const Pipe = struct {
             const data = p.readData() orelse break;
             got_data = true;
             if (self.recording_active) {
-                if (self.recorder) |r| r.capture(data);
+                if (self.recorder) |r| {
+                    const now_us: u64 = @intCast(@max(0, std.Io.Clock.now(.awake, io).toMicroseconds()));
+                    r.capture(now_us, data);
+                }
             }
             self.feedData(data);
         }
@@ -489,12 +492,13 @@ pub const Pipe = struct {
 
     // ── Recording ───────────────────────────────────────────────────
 
-    pub fn startRecording(self: *Pipe) void {
+    pub fn startRecording(self: *Pipe, io: std.Io) void {
         if (self.recorder == null) {
             self.recorder = g_alloc.create(rec_mod.Recorder) catch return;
             self.recorder.?.* = .{};
         }
-        self.recorder.?.start(self.rows, self.cols);
+        const now_us: u64 = @intCast(@max(0, std.Io.Clock.now(.awake, io).toMicroseconds()));
+        self.recorder.?.start(now_us, self.rows, self.cols);
         self.recording_active = true;
     }
 
@@ -503,9 +507,9 @@ pub const Pipe = struct {
         self.recording_active = false;
     }
 
-    pub fn saveRecording(self: *Pipe, path: []const u8) bool {
+    pub fn saveRecording(self: *Pipe, io: std.Io, path: []const u8) bool {
         const r = self.recorder orelse return false;
-        return r.save(path);
+        return r.save(io, path);
     }
 
     fn deinit(self: *Pipe) void {
@@ -827,13 +831,13 @@ pub fn setSpawnCwd(path: []const u8) void {
     p.setSpawnCwd(path);
 }
 
-pub fn spawnShell(shell: [*:0]const u8, rows: u16, cols: u16) void {
+pub fn spawnShell(io: std.Io, shell: [*:0]const u8, rows: u16, cols: u16) void {
     const p = defaultOrCreate(rows, cols) orelse return;
-    p.spawnShell(shell, rows, cols);
+    p.spawnShell(io, shell, rows, cols);
 }
 
-pub fn pollPty() bool {
-    if (getPipe(DEFAULT_SESSION)) |p| return p.pollPty();
+pub fn pollPty(io: std.Io) bool {
+    if (getPipe(DEFAULT_SESSION)) |p| return p.pollPty(io);
     return false;
 }
 
@@ -896,16 +900,16 @@ pub fn copySelectedText(
 }
 
 // Recording (default session — legacy entry points)
-pub fn startRecording(rows: u16, cols: u16) void {
+pub fn startRecording(io: std.Io, rows: u16, cols: u16) void {
     const p = defaultOrCreate(rows, cols) orelse return;
-    p.startRecording();
+    p.startRecording(io);
 }
 pub fn stopRecording() void {
     if (getPipe(DEFAULT_SESSION)) |p| p.stopRecording();
 }
-pub fn saveRecording(path: []const u8) bool {
+pub fn saveRecording(io: std.Io, path: []const u8) bool {
     const p = getPipe(DEFAULT_SESSION) orelse return false;
-    return p.saveRecording(path);
+    return p.saveRecording(io, path);
 }
 pub fn isRecording() bool {
     if (getPipe(DEFAULT_SESSION)) |p| return p.recording_active;
@@ -931,14 +935,14 @@ pub fn ensurePipe(name: []const u8, rows: u16, cols: u16) ?*Pipe {
     return getOrCreatePipe(name, rows, cols);
 }
 
-pub fn spawnShellByName(name: []const u8, shell: [*:0]const u8, rows: u16, cols: u16) void {
+pub fn spawnShellByName(io: std.Io, name: []const u8, shell: [*:0]const u8, rows: u16, cols: u16) void {
     const p = getOrCreatePipe(name, rows, cols) orelse return;
-    p.spawnShell(shell, rows, cols);
+    p.spawnShell(io, shell, rows, cols);
 }
 
-pub fn pollPtyByName(name: []const u8) bool {
+pub fn pollPtyByName(io: std.Io, name: []const u8) bool {
     const p = getPipe(name) orelse return false;
-    return p.pollPty();
+    return p.pollPty(io);
 }
 
 pub fn writePtyByName(name: []const u8, data: []const u8) void {
@@ -1075,14 +1079,14 @@ pub fn scrollUpIdx(idx: u8, n: u16) void {
 pub fn scrollDownIdx(idx: u8, n: u16) void {
     scrollDownByName(nameForIdx(idx), n);
 }
-pub fn spawnShellIdx(idx: u8, shell: [*:0]const u8, rows: u16, cols: u16) void {
-    spawnShellByName(nameForIdx(idx), shell, rows, cols);
+pub fn spawnShellIdx(io: std.Io, idx: u8, shell: [*:0]const u8, rows: u16, cols: u16) void {
+    spawnShellByName(io, nameForIdx(idx), shell, rows, cols);
 }
 pub fn resizeVtermIdx(idx: u8, rows: u16, cols: u16) void {
     resizeByName(nameForIdx(idx), rows, cols);
 }
-pub fn pollPtyIdx(idx: u8) bool {
-    return pollPtyByName(nameForIdx(idx));
+pub fn pollPtyIdx(io: std.Io, idx: u8) bool {
+    return pollPtyByName(io, nameForIdx(idx));
 }
 pub fn ptyAliveIdx(idx: u8) bool {
     return ptyAliveByName(nameForIdx(idx));

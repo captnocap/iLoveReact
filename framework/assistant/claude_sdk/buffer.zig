@@ -4,7 +4,7 @@
 //! Drains one line at a time via drain(), returning null when no complete
 //! line is available. Data after the last newline stays buffered.
 //!
-//! Ported from codeberg/duhnist/claude-code-sdk-zig. Zig 0.15.2 unmanaged
+//! Ported from codeberg/duhnist/claude-code-sdk-zig. Zig 0.16 unmanaged
 //! ArrayList pattern; no arena allocator (not needed — line slice borrows
 //! from internal buffer until next append()).
 
@@ -23,6 +23,7 @@ pub const ReadBuffer = struct {
 
     pub fn deinit(self: *ReadBuffer) void {
         self.buffer.deinit(self.allocator);
+        self.last_line.deinit(self.allocator);
     }
 
     pub fn append(self: *ReadBuffer, data: []const u8) !void {

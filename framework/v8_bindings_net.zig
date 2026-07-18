@@ -24,6 +24,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const tcp = @import("net/tcp.zig");
 const udp = @import("net/udp.zig");
 const uds = @import("net/uds.zig");
@@ -142,7 +143,7 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     return if (v >= 0) @intCast(v) else null;
 }
 
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
@@ -155,7 +156,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 // ── TCP host fns ───────────────────────────────────────────────────
@@ -163,6 +164,8 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
 fn hostTcpConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
+    const runtime_host = v8_runtime.hostContext(info.getIsolate());
+    const io = runtime_host.io;
     const id = argToU32(info, 0) orelse return;
     const host = argToStringAlloc(info, 1) orelse return;
     defer alloc.free(host);
@@ -188,43 +191,55 @@ fn hostTcpConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
             if (std.mem.eql(u8, kind, "tor")) {
                 if (!tor_lib.isRunning()) {
-                    emitTcpError(id, "via tor: not running");
+                    emitTcpError(runtime_host, id, "via tor: not running");
                     alloc.destroy(client);
                     return;
                 }
                 const proxy_port = tor_lib.getProxyPort();
-                const stream = socks5.connect("127.0.0.1", proxy_port, host, @intCast(port), null, null) catch |e| {
+                const stream = socks5.connect(io, "127.0.0.1", proxy_port, host, @intCast(port), null, null) catch |e| {
                     alloc.destroy(client);
                     var msg_buf: [128]u8 = undefined;
                     const msg = std.fmt.bufPrint(&msg_buf, "via tor: {s}", .{@errorName(e)}) catch "via tor failed";
-                    emitTcpError(id, msg);
+                    emitTcpError(runtime_host, id, msg);
                     return;
                 };
-                break :blk tcp.TcpClient.fromStream(stream);
+                break :blk tcp.TcpClient.fromStream(alloc, io, stream) catch |e| {
+                    alloc.destroy(client);
+                    var msg_buf: [128]u8 = undefined;
+                    const msg = std.fmt.bufPrint(&msg_buf, "via tor transport: {s}", .{@errorName(e)}) catch "via tor transport failed";
+                    emitTcpError(runtime_host, id, msg);
+                    return;
+                };
             } else if (std.mem.eql(u8, kind, "socks5")) {
                 const spec = findSocks5(via_id_u) orelse {
-                    emitTcpError(id, "via socks5: handle not registered");
+                    emitTcpError(runtime_host, id, "via socks5: handle not registered");
                     alloc.destroy(client);
                     return;
                 };
-                const stream = socks5.connect(spec.host, spec.port, host, @intCast(port), spec.user, spec.pass) catch |e| {
+                const stream = socks5.connect(io, spec.host, spec.port, host, @intCast(port), spec.user, spec.pass) catch |e| {
                     alloc.destroy(client);
                     var msg_buf: [128]u8 = undefined;
                     const msg = std.fmt.bufPrint(&msg_buf, "via socks5: {s}", .{@errorName(e)}) catch "via socks5 failed";
-                    emitTcpError(id, msg);
+                    emitTcpError(runtime_host, id, msg);
                     return;
                 };
-                break :blk tcp.TcpClient.fromStream(stream);
+                break :blk tcp.TcpClient.fromStream(alloc, io, stream) catch |e| {
+                    alloc.destroy(client);
+                    var msg_buf: [128]u8 = undefined;
+                    const msg = std.fmt.bufPrint(&msg_buf, "via socks5 transport: {s}", .{@errorName(e)}) catch "via socks5 transport failed";
+                    emitTcpError(runtime_host, id, msg);
+                    return;
+                };
             }
             // Unknown via.kind — fall through to direct connect rather than fail
             // hard; the caller's hook will see the connection succeed and the
             // via field can be wired backend-by-backend without breaking carts.
         };
-        break :blk tcp.TcpClient.connect(host, @intCast(port)) catch |e| {
+        break :blk tcp.TcpClient.connect(alloc, io, host, @intCast(port)) catch |e| {
             alloc.destroy(client);
             var msg_buf: [128]u8 = undefined;
             const msg = std.fmt.bufPrint(&msg_buf, "connect: {s}", .{@errorName(e)}) catch "connect failed";
-            emitTcpError(id, msg);
+            emitTcpError(runtime_host, id, msg);
             return;
         };
     };
@@ -235,10 +250,10 @@ fn hostTcpConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
 }
 
-fn emitTcpError(id: u32, msg: []const u8) void {
+fn emitTcpError(host: *HostContext, id: u32, msg: []const u8) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "tcp:error:{d}", .{id}) catch return;
-    emitEvent(chan, msg);
+    emitEvent(host, chan, msg);
 }
 
 // ── SOCKS5 spec registry — the JS side calls these so a `via:` lookup
@@ -345,6 +360,7 @@ fn hostTcpClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostUdpOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
+    const runtime_host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const host = argToStringAlloc(info, 1) orelse return;
     defer alloc.free(host);
@@ -353,13 +369,13 @@ fn hostUdpOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (findUdp(id) != null) return;
 
     const sock = alloc.create(udp.UdpSocket) catch return;
-    sock.* = udp.UdpSocket.openConnected(host, @intCast(port)) catch |e| {
+    sock.* = udp.UdpSocket.openConnected(alloc, runtime_host.io, host, @intCast(port)) catch |e| {
         alloc.destroy(sock);
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "udp:error:{d}", .{id}) catch return;
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "open: {s}", .{@errorName(e)}) catch "open failed";
-        emitEvent(chan, msg);
+        emitEvent(runtime_host, chan, msg);
         return;
     };
     g_udp.append(alloc, .{ .id = id, .sock = sock }) catch {
@@ -408,6 +424,7 @@ fn hostUdpClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostUdsListen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 2) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const path = argToStringAlloc(info, 1) orelse return;
     defer alloc.free(path);
@@ -415,13 +432,13 @@ fn hostUdsListen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (findUds(id) != null) return;
 
     const server = alloc.create(uds.UdsServer) catch return;
-    server.* = uds.UdsServer.listen(path) catch |e| {
+    server.* = uds.UdsServer.listen(alloc, host.io, path) catch |e| {
         alloc.destroy(server);
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "uds:listen-error:{d}", .{id}) catch return;
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "listen {s}: {s}", .{ path, @errorName(e) }) catch "listen failed";
-        emitEvent(chan, msg);
+        emitEvent(host, chan, msg);
         return;
     };
     g_uds.append(alloc, .{ .id = id, .server = server }) catch {
@@ -484,6 +501,7 @@ const workspace = @import("sync/workspace.zig");
 fn hostUdsSetWorkspaceRoot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 2) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const cwd = argToStringAlloc(info, 1) orelse return;
     defer alloc.free(cwd);
@@ -493,18 +511,19 @@ fn hostUdsSetWorkspaceRoot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
         const chan = std.fmt.bufPrint(&chan_buf, "uds:workspace-error:{d}", .{id}) catch return;
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "set-root: {s}", .{@errorName(err)}) catch "set-root failed";
-        emitEvent(chan, msg);
+        emitEvent(host, chan, msg);
     };
 }
 
-fn emitFrameErr(server_id: u32, conn_id: u32, msg: []const u8) void {
+fn emitFrameErr(host: *HostContext, server_id: u32, conn_id: u32, msg: []const u8) void {
     var chan_buf: [96]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "uds:error:{d}:{d}", .{ server_id, conn_id }) catch return;
-    emitEvent(chan, msg);
+    emitEvent(host, chan, msg);
 }
 
 fn hostUdsSendWorkspaceInit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     if (info.length() < 3) return;
     const id = argToU32(info, 0) orelse return;
     const conn_id = argToU32(info, 1) orelse return;
@@ -512,15 +531,16 @@ fn hostUdsSendWorkspaceInit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     defer alloc.free(cwd);
     const e = findUds(id) orelse return;
     const w = uds.writerForConn(e.server, conn_id);
-    workspace.writeInitTar(w, alloc, cwd, "/workspace") catch |err| {
+    workspace.writeInitTar(host.io, host.environ, w, alloc, cwd, "/workspace") catch |err| {
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "init-tar: {s}", .{@errorName(err)}) catch "init-tar failed";
-        emitFrameErr(id, conn_id, msg);
+        emitFrameErr(host, id, conn_id, msg);
     };
 }
 
 fn hostUdsSendFileFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     if (info.length() < 4) return;
     const id = argToU32(info, 0) orelse return;
     const conn_id = argToU32(info, 1) orelse return;
@@ -530,16 +550,17 @@ fn hostUdsSendFileFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     defer alloc.free(local);
     const e = findUds(id) orelse return;
     const w = uds.writerForConn(e.server, conn_id);
-    workspace.writeSetFromFile(w, rel, local) catch |err| {
+    workspace.writeSetFromFile(host.io, w, rel, local) catch |err| {
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "set-file {s}: {s}", .{ rel, @errorName(err) }) catch "set-file failed";
-        emitFrameErr(id, conn_id, msg);
+        emitFrameErr(host, id, conn_id, msg);
     };
 }
 
 fn hostUdsSendMsgFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 3) return;
+    const host = v8_runtime.hostContext(info.getIsolate());
     const id = argToU32(info, 0) orelse return;
     const conn_id = argToU32(info, 1) orelse return;
     const op = argToStringAlloc(info, 2) orelse return;
@@ -551,7 +572,7 @@ fn hostUdsSendMsgFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     workspace.writeMsgFrame(w, op, arg) catch |err| {
         var msg_buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "msg-frame {s}: {s}", .{ op, @errorName(err) }) catch "msg-frame failed";
-        emitFrameErr(id, conn_id, msg);
+        emitFrameErr(host, id, conn_id, msg);
     };
 }
 
@@ -563,13 +584,13 @@ var g_tcp_ev_buf: [1]tcp.Event = undefined;
 var g_udp_ev_buf: [1]udp.Event = undefined;
 var g_uds_ev_buf: [4]uds.Event = undefined;
 
-pub fn tickDrain() void {
+pub fn tickDrain(host: *HostContext) void {
     // TCP
     var i: usize = 0;
     while (i < g_tcp.items.len) {
         const e = g_tcp.items[i];
         var chan_buf: [64]u8 = undefined;
-        // Drain until WouldBlock (n==0).
+        // Drain already-completed transport events until the queue is empty.
         while (true) {
             const n = e.client.update(&g_tcp_ev_buf);
             if (n == 0) break;
@@ -577,16 +598,16 @@ pub fn tickDrain() void {
             switch (ev) {
                 .data => |bytes| {
                     const chan = std.fmt.bufPrint(&chan_buf, "tcp:data:{d}", .{e.id}) catch continue;
-                    emitEvent(chan, bytes);
+                    emitEvent(host, chan, bytes);
                 },
                 .closed => {
                     const chan = std.fmt.bufPrint(&chan_buf, "tcp:close:{d}", .{e.id}) catch break;
-                    emitEvent(chan, "{}");
+                    emitEvent(host, chan, "{}");
                     break;
                 },
                 .err => |msg| {
                     const chan = std.fmt.bufPrint(&chan_buf, "tcp:error:{d}", .{e.id}) catch break;
-                    emitEvent(chan, msg);
+                    emitEvent(host, chan, msg);
                     break;
                 },
             }
@@ -610,11 +631,11 @@ pub fn tickDrain() void {
             switch (ev) {
                 .packet => |bytes| {
                     const chan = std.fmt.bufPrint(&chan_buf, "udp:packet:{d}", .{e.id}) catch continue;
-                    emitEvent(chan, bytes);
+                    emitEvent(host, chan, bytes);
                 },
                 .err => |msg| {
                     const chan = std.fmt.bufPrint(&chan_buf, "udp:error:{d}", .{e.id}) catch break;
-                    emitEvent(chan, msg);
+                    emitEvent(host, chan, msg);
                     break;
                 },
             }
@@ -639,19 +660,19 @@ pub fn tickDrain() void {
                         const chan = std.fmt.bufPrint(&chan_buf, "uds:accept:{d}", .{e.id}) catch continue;
                         var payload_buf: [16]u8 = undefined;
                         const payload = std.fmt.bufPrint(&payload_buf, "{d}", .{conn_id}) catch continue;
-                        emitEvent(chan, payload);
+                        emitEvent(host, chan, payload);
                     },
                     .data => |d| {
                         const chan = std.fmt.bufPrint(&chan_buf, "uds:data:{d}:{d}", .{ e.id, d.conn_id }) catch continue;
-                        emitEvent(chan, d.bytes);
+                        emitEvent(host, chan, d.bytes);
                     },
                     .closed => |conn_id| {
                         const chan = std.fmt.bufPrint(&chan_buf, "uds:close:{d}:{d}", .{ e.id, conn_id }) catch continue;
-                        emitEvent(chan, "{}");
+                        emitEvent(host, chan, "{}");
                     },
                     .err => |er| {
                         const chan = std.fmt.bufPrint(&chan_buf, "uds:error:{d}:{d}", .{ e.id, er.conn_id }) catch continue;
-                        emitEvent(chan, er.msg);
+                        emitEvent(host, chan, er.msg);
                     },
                 }
             }

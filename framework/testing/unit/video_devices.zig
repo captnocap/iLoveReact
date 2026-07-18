@@ -16,7 +16,7 @@ test "capture capabilities exclude metadata-only nodes" {
 }
 
 test "discovered devices are usable capture nodes in stable order" {
-    var devices = try video_devices.list(std.testing.allocator);
+    var devices = try video_devices.list(std.testing.io, std.testing.allocator);
     defer devices.deinit();
     var previous: ?u32 = null;
     for (devices.items) |device| {

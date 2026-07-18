@@ -141,7 +141,13 @@ const SO_NAMES = [_][*:0]const u8{
 var g_lib: ?Lib = null;
 var g_tried: bool = false;
 
-fn loadLib() ?*Lib {
+fn report(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    var buf: [256]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    std.Io.File.stderr().writeStreamingAll(io, line) catch {};
+}
+
+fn loadLib(io: std.Io) ?*Lib {
     if (g_lib) |*l| return l;
     if (g_tried) return null;
     g_tried = true;
@@ -152,7 +158,7 @@ fn loadLib() ?*Lib {
         if (handle != null) break;
     }
     if (handle == null) {
-        std.debug.print("[sqlite] libsqlite3 not found (tried {} names) — disabled\n", .{SO_NAMES.len});
+        report(io, "[sqlite] libsqlite3 not found (tried {} names) — disabled\n", .{SO_NAMES.len});
         return null;
     }
     const h = handle.?;
@@ -185,7 +191,7 @@ fn loadLib() ?*Lib {
         .{ "errmsg", "sqlite3_errmsg", FnErrMsg },
     }) |entry| {
         const raw = dlsym(h, entry[1]) orelse {
-            std.debug.print("[sqlite] missing symbol {s} — disabled\n", .{entry[1]});
+            report(io, "[sqlite] missing symbol {s} — disabled\n", .{entry[1]});
             return null;
         };
         @field(&lib, entry[0]) = @ptrCast(@alignCast(raw));
@@ -219,39 +225,40 @@ fn mapColumnType(t: c_int) ColumnType {
 }
 
 pub const Statement = struct {
+    io: std.Io,
     stmt: *Sqlite3Stmt,
 
     pub fn deinit(self: *Statement) void {
-        const lib = loadLib() orelse return;
+        const lib = loadLib(self.io) orelse return;
         _ = lib.finalize(self.stmt);
     }
 
     pub fn bindText(self: *Statement, idx: c_int, text: []const u8) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.bind_text(self.stmt, idx, text.ptr, @intCast(text.len), SQLITE_TRANSIENT);
         if (rc != SQLITE_OK) return SqliteError.Bind;
     }
 
     pub fn bindInt(self: *Statement, idx: c_int, val: i64) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.bind_int64(self.stmt, idx, val);
         if (rc != SQLITE_OK) return SqliteError.Bind;
     }
 
     pub fn bindFloat(self: *Statement, idx: c_int, val: f64) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.bind_double(self.stmt, idx, val);
         if (rc != SQLITE_OK) return SqliteError.Bind;
     }
 
     pub fn bindNull(self: *Statement, idx: c_int) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.bind_null(self.stmt, idx);
         if (rc != SQLITE_OK) return SqliteError.Bind;
     }
 
     pub fn step(self: *Statement) SqliteError!bool {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.step(self.stmt);
         if (rc == SQLITE_ROW) return true;
         if (rc == SQLITE_DONE) return false;
@@ -259,14 +266,14 @@ pub const Statement = struct {
     }
 
     pub fn reset(self: *Statement) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         const rc = lib.reset(self.stmt);
         if (rc != SQLITE_OK) return mapError(rc);
         _ = lib.clear_bindings(self.stmt);
     }
 
     pub fn columnText(self: *const Statement, idx: c_int) ?[]const u8 {
-        const lib = loadLib() orelse return null;
+        const lib = loadLib(self.io) orelse return null;
         const ptr = lib.col_text(self.stmt, idx) orelse return null;
         const len = lib.col_bytes(self.stmt, idx);
         if (len <= 0) return "";
@@ -274,37 +281,38 @@ pub const Statement = struct {
     }
 
     pub fn columnInt(self: *const Statement, idx: c_int) i64 {
-        const lib = loadLib() orelse return 0;
+        const lib = loadLib(self.io) orelse return 0;
         return lib.col_int64(self.stmt, idx);
     }
 
     pub fn columnFloat(self: *const Statement, idx: c_int) f64 {
-        const lib = loadLib() orelse return 0;
+        const lib = loadLib(self.io) orelse return 0;
         return lib.col_double(self.stmt, idx);
     }
 
     pub fn columnType(self: *const Statement, idx: c_int) ColumnType {
-        const lib = loadLib() orelse return .null_val;
+        const lib = loadLib(self.io) orelse return .null_val;
         return mapColumnType(lib.col_type(self.stmt, idx));
     }
 
     pub fn columnCount(self: *const Statement) c_int {
-        const lib = loadLib() orelse return 0;
+        const lib = loadLib(self.io) orelse return 0;
         return lib.col_count(self.stmt);
     }
 
     pub fn columnName(self: *const Statement, idx: c_int) ?[]const u8 {
-        const lib = loadLib() orelse return null;
+        const lib = loadLib(self.io) orelse return null;
         const ptr = lib.col_name(self.stmt, idx) orelse return null;
         return std.mem.span(ptr);
     }
 };
 
 pub const Database = struct {
+    io: std.Io,
     db: *Sqlite3,
 
-    pub fn open(path: []const u8) !Database {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+    pub fn open(io: std.Io, path: []const u8) !Database {
+        const lib = loadLib(io) orelse return SqliteError.Unavailable;
 
         var path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
         if (path.len >= path_buf.len) return error.NameTooLong;
@@ -320,7 +328,7 @@ pub const Database = struct {
         }
         const db = db_ptr orelse return SqliteError.CantOpen;
 
-        var self = Database{ .db = db };
+        var self = Database{ .io = io, .db = db };
         // Host functions run on the UI thread — no busy waiting.
         _ = lib.busy_timeout(db, 0);
         self.exec("PRAGMA journal_mode=WAL") catch {};
@@ -328,17 +336,17 @@ pub const Database = struct {
         return self;
     }
 
-    pub fn openMemory() !Database {
-        return open(":memory:");
+    pub fn openMemory(io: std.Io) !Database {
+        return open(io, ":memory:");
     }
 
     pub fn close(self: *Database) void {
-        const lib = loadLib() orelse return;
+        const lib = loadLib(self.io) orelse return;
         _ = lib.close(self.db);
     }
 
     pub fn exec(self: *Database, sql_str: [*:0]const u8) SqliteError!void {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         var errmsg: [*c]u8 = null;
         const rc = lib.exec(self.db, sql_str, null, null, &errmsg);
         if (errmsg != null) lib.free(errmsg);
@@ -346,25 +354,25 @@ pub const Database = struct {
     }
 
     pub fn prepare(self: *Database, sql_str: [*:0]const u8) SqliteError!Statement {
-        const lib = loadLib() orelse return SqliteError.Unavailable;
+        const lib = loadLib(self.io) orelse return SqliteError.Unavailable;
         var stmt_ptr: ?*Sqlite3Stmt = null;
         const rc = lib.prepare_v2(self.db, sql_str, -1, &stmt_ptr, null);
         if (rc != SQLITE_OK) return SqliteError.Prepare;
-        return Statement{ .stmt = stmt_ptr orelse return SqliteError.Prepare };
+        return Statement{ .io = self.io, .stmt = stmt_ptr orelse return SqliteError.Prepare };
     }
 
     pub fn changes(self: *const Database) i32 {
-        const lib = loadLib() orelse return 0;
+        const lib = loadLib(self.io) orelse return 0;
         return lib.changes(self.db);
     }
 
     pub fn lastInsertRowId(self: *const Database) i64 {
-        const lib = loadLib() orelse return 0;
+        const lib = loadLib(self.io) orelse return 0;
         return lib.last_insert(self.db);
     }
 
     pub fn errMsg(self: *const Database) [*:0]const u8 {
-        const lib = loadLib() orelse return "sqlite unavailable (libsqlite3 not loaded)";
+        const lib = loadLib(self.io) orelse return "sqlite unavailable (libsqlite3 not loaded)";
         return lib.errmsg(self.db);
     }
 
@@ -382,6 +390,6 @@ pub const Database = struct {
 };
 
 /// Returns true if libsqlite3 is loadable on this system.
-pub fn available() bool {
-    return loadLib() != null;
+pub fn available(io: std.Io) bool {
+    return loadLib(io) != null;
 }

@@ -30,6 +30,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("../v8_runtime.zig");
+const HostContext = @import("../host_context.zig");
 const diag = @import("diag_registry.zig");
 const event_bus = @import("event_bus.zig");
 
@@ -38,7 +39,6 @@ const alloc = std.heap.c_allocator;
 // Stack scratch for one null-terminated feed line. Comfortably above the
 // registry's per-line serialization cap.
 const FEED_LINE_CAP: usize = 2048;
-
 // ── arg helpers (mirrors v8_bindings_eventbus.zig) ──────────────────────────
 
 fn argToStringAlloc(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
@@ -69,7 +69,8 @@ fn setReturnString(info: v8.FunctionCallbackInfo, text: []const u8) void {
 
 // ── The sink: each accepted line goes to the console feed + event_bus ───────
 
-fn feedSink(line_json: []const u8) void {
+fn feedSink(context: ?*anyopaque, line_json: []const u8) void {
+    const host: *HostContext = @ptrCast(@alignCast(context orelse return));
     // (a) Live-tail to the in-app console. __ffiEmit wants null-terminated
     //     strings; copy into a stack buffer (lines are bounded by the
     //     registry's LINE_JSON_CAP).
@@ -78,7 +79,7 @@ fn feedSink(line_json: []const u8) void {
         @memcpy(buf[0..line_json.len], line_json);
         buf[line_json.len] = 0;
         const z: [*:0]const u8 = @ptrCast(&buf);
-        v8_runtime.callGlobal2Str("__ffiEmit", diag.DIAG_FEED_CHANNEL, z);
+        v8_runtime.callGlobal2Str(host, "__ffiEmit", diag.DIAG_FEED_CHANNEL, z);
     }
     // (b) Mirror to the observability bus as a secondary sink. The whole line
     //     is already JSON; tag it so eventlog can find diag traffic.
@@ -89,6 +90,7 @@ fn feedSink(line_json: []const u8) void {
 
 fn hostDiagEmit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const channel = argToStringAlloc(info, 0) orelse return;
     defer alloc.free(channel);
     const severity = argToStringAlloc(info, 1) orelse return;
@@ -96,11 +98,11 @@ fn hostDiagEmit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const msg = argToStringAlloc(info, 2) orelse return;
     defer alloc.free(msg);
     const fields = argToStringAlloc(info, 3) orelse {
-        _ = diag.emitStr(channel, severity, msg, "{}");
+        _ = diag.emitStr(host.io, channel, severity, msg, "{}");
         return;
     };
     defer alloc.free(fields);
-    _ = diag.emitStr(channel, severity, msg, fields);
+    _ = diag.emitStr(host.io, channel, severity, msg, fields);
 }
 
 fn hostDiagSetEnabled(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -140,9 +142,9 @@ fn hostDiagChannelsState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, json);
 }
 
-pub fn register() void {
+pub fn register(host: *HostContext) void {
     diag.init();
-    diag.setFeedSink(feedSink);
+    diag.setFeedSink(.{ .context = host, .write = feedSink });
     v8_runtime.registerHostFn("__diag_emit", hostDiagEmit);
     v8_runtime.registerHostFn("__diag_set_enabled", hostDiagSetEnabled);
     v8_runtime.registerHostFn("__diag_set_sample", hostDiagSetSample);
@@ -153,6 +155,6 @@ pub fn register() void {
 /// INGREDIENTS-catalog entry point (matches the reg_fn(anytype) convention used
 /// by v8_ingredients.zig). Diagnostics are always-on observability, like the
 /// eventbus — so this rides the always-on (required=true) block.
-pub fn registerEditorDiag(_: anytype) void {
-    register();
+pub fn registerEditorDiag(host: *HostContext) void {
+    register(host);
 }

@@ -17,6 +17,7 @@
 const std = @import("std");
 const c = @import("../c.zig").imports;
 const v8_runtime = @import("../v8_runtime.zig");
+const HostContext = @import("../host_context.zig");
 
 const fvad = @cImport({
     @cInclude("fvad.h");
@@ -120,9 +121,9 @@ pub fn init(allocator: std.mem.Allocator) void {
     // Stream + fvad created lazily on first start().
 }
 
-pub fn deinit() void {
+pub fn deinit(host: *HostContext) void {
     if (!S.initialized) return;
-    stop();
+    stop(host);
     if (S.fvad_inst) |inst| fvad.fvad_free(inst);
     S.fvad_inst = null;
     S.utterance.deinit();
@@ -170,7 +171,7 @@ pub fn start() bool {
     return true;
 }
 
-pub fn stop() void {
+pub fn stop(host: *HostContext) void {
     if (!S.listening) return;
     S.listening = false;
     if (S.stream) |stream| {
@@ -179,7 +180,7 @@ pub fn stop() void {
     }
     // If we were mid-utterance, finalise so whisper sees the last bit.
     if (S.phase == .speaking or S.phase == .candidate_silence) {
-        finaliseUtterance();
+        finaliseUtterance(host);
     }
     resetPhase();
 }
@@ -271,7 +272,7 @@ pub fn playbackDevicesJson(out: []u8) []const u8 {
 
 // ── Tick — drain SDL stream, run VAD, fire events ─────────────────────
 
-pub fn tick(_: u32) void {
+pub fn tick(host: *HostContext, _: u32) void {
     if (!S.initialized or !S.listening) return;
     const stream = S.stream orelse return;
 
@@ -303,7 +304,7 @@ pub fn tick(_: u32) void {
                 S.utterance.appendSlice(&S.frame) catch {};
             } else {
                 // Force-close.
-                finaliseUtterance();
+                finaliseUtterance(host);
                 resetPhase();
                 continue;
             }
@@ -320,7 +321,7 @@ pub fn tick(_: u32) void {
                 S.consec_speech += 1;
                 if (S.consec_speech >= SPEECH_START_FRAMES) {
                     S.phase = .speaking;
-                    v8_runtime.callGlobal("__voice_onSpeechStart");
+                    v8_runtime.callGlobal(host, "__voice_onSpeechStart");
                 }
             } else {
                 resetPhase();
@@ -335,7 +336,7 @@ pub fn tick(_: u32) void {
             } else {
                 S.consec_silence += 1;
                 if (S.consec_silence >= SILENCE_END_FRAMES) {
-                    finaliseUtterance();
+                    finaliseUtterance(host);
                     resetPhase();
                 }
             },
@@ -352,7 +353,7 @@ pub fn tick(_: u32) void {
             S.frames_in_speech +%= 1;
             S.frames_since_preview +%= 1;
             if (S.preview_stride_frames > 0 and S.frames_in_speech >= S.preview_min_frames and S.frames_since_preview >= S.preview_stride_frames) {
-                snapshotPreview();
+                snapshotPreview(host);
                 S.frames_since_preview = 0;
             }
         }
@@ -365,13 +366,14 @@ pub fn tick(_: u32) void {
     // user can tell amplitude transients (keyboard clicks) from speech-class
     // verdicts (the GMM saying "this looks like a vowel").
     v8_runtime.callGlobal2Int(
+        host,
         "__voice_onLevel",
         @intCast(S.last_rms_x100),
         @intCast(S.last_vad_verdict),
     );
 }
 
-fn finaliseUtterance() void {
+fn finaliseUtterance(host: *HostContext) void {
     if (S.utterance.items.len == 0) return;
     const id = S.next_buf_id;
     S.next_buf_id +%= 1;
@@ -382,6 +384,7 @@ fn finaliseUtterance() void {
         return;
     };
     v8_runtime.callGlobal2Int(
+        host,
         "__voice_onSpeechEnd",
         @intCast(id),
         @intCast(owned.len),
@@ -393,7 +396,7 @@ fn finaliseUtterance() void {
 /// model for a live-preview UX. The snapshot is a copy, so the main
 /// engine thread can keep extending S.utterance while whisper's worker
 /// reads the slice.
-fn snapshotPreview() void {
+fn snapshotPreview(host: *HostContext) void {
     if (S.utterance.items.len == 0) return;
     const id = S.next_buf_id;
     S.next_buf_id +%= 1;
@@ -404,6 +407,7 @@ fn snapshotPreview() void {
         return;
     };
     v8_runtime.callGlobal2Int(
+        host,
         "__voice_onPreviewReady",
         @intCast(id),
         @intCast(owned.len),

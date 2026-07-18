@@ -48,6 +48,10 @@ pub const EffectContext = struct {
     // this to carry the React node id so the render shim can look up the JS
     // closure registered via handlerRegistry.
     user_data: usize = 0,
+    /// Explicit owner for host-backed render shims. The effect instance copies
+    /// this from its Node before invoking `RenderFn`; pure native effects leave
+    /// it null.
+    callback_context: ?*anyopaque = null,
 
     // ── Source buffer (mask mode only) ──
     // When non-null, this is the captured parent content for post-processing.
@@ -434,7 +438,12 @@ pub const EffectContext = struct {
                 const rx = gx + ox - f.x;
                 const ry = gy + oy - f.y;
                 const d = rx * rx + ry * ry;
-                if (d < md) { md2 = md; md = d; } else if (d < md2) { md2 = d; }
+                if (d < md) {
+                    md2 = md;
+                    md = d;
+                } else if (d < md2) {
+                    md2 = d;
+                }
             }
         }
         return .{ @sqrt(md), @sqrt(md2) };

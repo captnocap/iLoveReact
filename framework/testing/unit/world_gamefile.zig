@@ -95,7 +95,7 @@ test "asset vocabulary installs into the content store and references resolve" {
     defer tmp.cleanup();
 
     // the dependency gate: verify + install + resolve, all green.
-    try file.installAndValidate(testing.allocator, tmp.dir);
+    try file.installAndValidate(testing.io, testing.allocator, tmp.dir);
 
     // each blob landed in the store keyed by hex(sha256), bytes intact.
     for (file.blobs) |blob| {
@@ -147,7 +147,7 @@ test "manifest-only asset resolves when its content-addressed bytes are already 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     try writeInstalledAsset(tmp.dir, payload);
-    try file.installAndValidate(testing.allocator, tmp.dir);
+    try file.installAndValidate(testing.io, testing.allocator, tmp.dir);
 }
 
 test "negative control: a corrupted asset blob fails the hash check loudly" {
@@ -168,7 +168,7 @@ test "negative control: a corrupted asset blob fails the hash check loudly" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try testing.expectError(gamefile.Error.BadAssetHash, file.installAndValidate(testing.allocator, tmp.dir));
+    try testing.expectError(gamefile.Error.BadAssetHash, file.installAndValidate(testing.io, testing.allocator, tmp.dir));
 }
 
 test "negative control: a dangling stream reference fails loudly" {
@@ -190,5 +190,5 @@ test "negative control: a dangling stream reference fails loudly" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try testing.expectError(gamefile.Error.MissingReference, file.installAndValidate(testing.allocator, tmp.dir));
+    try testing.expectError(gamefile.Error.MissingReference, file.installAndValidate(testing.io, testing.allocator, tmp.dir));
 }

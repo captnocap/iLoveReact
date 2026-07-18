@@ -17,7 +17,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const host_io = @import("../host_io.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
@@ -150,13 +149,10 @@ const GpuUniforms = extern struct {
     mouse_inside: f32,
 };
 
-var g_paisley_debug_enabled: ?bool = null;
+var g_paisley_debug_enabled: bool = false;
 
 fn paisleyDebugEnabled() bool {
-    if (g_paisley_debug_enabled == null) {
-        g_paisley_debug_enabled = host_io.getenv("ZIGOS_PAISLEY_DEBUG") != null;
-    }
-    return g_paisley_debug_enabled.?;
+    return g_paisley_debug_enabled;
 }
 
 fn isPaisleyName(name: []const u8) bool {
@@ -196,6 +192,7 @@ const Instance = struct {
     // Identity — one of these is set, not both
     effect_type: []const u8 = "", // registry path
     render_fn: ?RenderFn = null, // custom render path
+    render_context: ?*anyopaque = null,
     shader_desc: ?GpuShaderDesc = null, // optional GPU path for custom effects
     node_key: usize = 0, // stable identity for custom effects
     // Node-less keyed identity: a material shader materialized via
@@ -569,9 +566,9 @@ var g_dt: f32 = 0;
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-fn parseBackendPref() BackendPref {
+fn parseBackendPref(environ: *const std.process.Environ.Map) BackendPref {
     if (builtin.cpu.arch == .wasm32) return .cpu;
-    const env = host_io.getenv("ZIGOS_EFFECTS_BACKEND") orelse return .auto;
+    const env = environ.get("ZIGOS_EFFECTS_BACKEND") orelse return .auto;
     if (std.mem.eql(u8, env, "cpu")) return .cpu;
     if (std.mem.eql(u8, env, "gpu")) return .gpu;
     return .auto;
@@ -744,7 +741,7 @@ fn pipelineCacheKey(shader_hash: u64, wants_textures: bool) u64 {
 // Slow-compile narration (req_2692) — shared with the 3d ground pipeline.
 const CompileProgress = @import("compile_progress.zig").CompileProgress;
 
-fn getOrCreatePipeline(device: *wgpu.Device, bgl: *wgpu.BindGroupLayout, wgsl: []const u8, shader_hash: u64, wants_textures: bool) ?*wgpu.RenderPipeline {
+fn getOrCreatePipeline(io: std.Io, environ: *const std.process.Environ.Map, device: *wgpu.Device, bgl: *wgpu.BindGroupLayout, wgsl: []const u8, shader_hash: u64, wants_textures: bool) ?*wgpu.RenderPipeline {
     const key = pipelineCacheKey(shader_hash, wants_textures);
     if (g_pipeline_cache.get(key)) |cached| {
         cached.addRef();
@@ -752,7 +749,7 @@ fn getOrCreatePipeline(device: *wgpu.Device, bgl: *wgpu.BindGroupLayout, wgsl: [
     }
 
     var progress = CompileProgress{};
-    progress.start(wgsl.len);
+    progress.start(io, environ, wgsl.len);
     defer progress.stop();
 
     const module_desc = wgpu.shaderModuleWGSLDescriptor(.{
@@ -803,7 +800,7 @@ fn getOrCreatePipeline(device: *wgpu.Device, bgl: *wgpu.BindGroupLayout, wgsl: [
     return pipeline;
 }
 
-fn ensureGpuPipeline(self: *Instance) bool {
+fn ensureGpuPipeline(io: std.Io, environ: *const std.process.Environ.Map, self: *Instance) bool {
     const shader_desc = self.shader_desc orelse return false;
 
     // If the WGSL source has changed since the cached pipeline was built,
@@ -924,7 +921,7 @@ fn ensureGpuPipeline(self: *Instance) bool {
     self.gpu_textures_hash = new_tex_hash;
     self.gpu_textures_generation = paintable_mod.generation();
 
-    const pipeline = getOrCreatePipeline(device, bgl, shader_desc.wgsl, new_hash, wants_textures) orelse {
+    const pipeline = getOrCreatePipeline(io, environ, device, bgl, shader_desc.wgsl, new_hash, wants_textures) orelse {
         effect_bg.release();
         return false;
     };
@@ -1028,6 +1025,7 @@ fn renderCpuNow(self: *Instance) bool {
         .mouse_inside = mouse.inside,
         .frame = self.frame_count,
         .user_data = self.node_key,
+        .callback_context = self.render_context,
     };
     render(&ctx);
     self.dirty = true;
@@ -1038,8 +1036,9 @@ fn renderCpuNow(self: *Instance) bool {
     return false;
 }
 
-pub fn init() void {
-    g_backend_pref = parseBackendPref();
+pub fn init(environ: *const std.process.Environ.Map) void {
+    g_backend_pref = parseBackendPref(environ);
+    g_paisley_debug_enabled = environ.get("ZIGOS_PAISLEY_DEBUG") != null;
 }
 
 pub fn deinit() void {
@@ -1197,12 +1196,13 @@ pub fn paintEffect(effect_type: []const u8, x: f32, y: f32, w: f32, h: f32, opac
 
 /// Paint a custom effect (node has effect_render and optional effect_shader).
 /// GPU is used when a shader-safe lowering exists; otherwise this falls back to CPU.
-pub fn paintCustomEffect(node: *const Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
+pub fn paintCustomEffect(io: std.Io, environ: *const std.process.Environ.Map, node: *const Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     var inst = findInstanceByNode(node);
     if (inst == null) {
         inst = createCustomInstance(node);
     }
     const i = inst orelse return false;
+    i.render_context = node.effect_render_context;
     i.active = true;
     i.last_painted_frame = g_effect_frame;
     i.screen_x = x;
@@ -1254,7 +1254,7 @@ pub fn paintCustomEffect(node: *const Node, x: f32, y: f32, w: f32, h: f32, opac
         g_frame_effect_pixels += resolved.pixels;
         i.backend = .gpu;
         const size_ok = ensureGpuSize(i, resolved.width, resolved.height);
-        const pipe_ok = size_ok and ensureGpuPipeline(i);
+        const pipe_ok = size_ok and ensureGpuPipeline(io, environ, i);
         const render_ok = pipe_ok and renderGpu(i);
         if (!g_effect_gpu_result_logged) {
             g_effect_gpu_result_logged = true;
@@ -1399,6 +1399,7 @@ fn createCustomInstance(node: *const Node) ?*Instance {
     inst.* = .{
         .active = true,
         .render_fn = render_fn,
+        .render_context = node.effect_render_context,
         .shader_desc = node.effect_shader,
         .node_key = instanceKey(node),
         .last_painted_frame = g_effect_frame,
@@ -1429,7 +1430,7 @@ fn ensureMaterialInstance(key_hash: u64) ?*Instance {
 /// retains ownership, cached by `key_hash` for the host's lifetime). The shared
 /// shader→texture primitive (gpu/material_tex.zig) wraps this with the surface
 /// install so 3D faces sample it via scene3d_tex_key.
-pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
+pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map, key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
     const inst = ensureMaterialInstance(key_hash) orelse return null;
     // The shipped recipe is the fragment body; assemble it with the SAME fixed
     // header + math prelude the V8 host injects (U/VsOut/vs_main/fbm/…), so the
@@ -1444,7 +1445,7 @@ pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32
     inst.shader_desc = .{ .wgsl = full };
     inst.gpu_data_pending = data;
     inst.setDisplaySize(@floatFromInt(size), @floatFromInt(size));
-    const ok = ensureGpuSize(inst, size, size) and ensureGpuPipeline(inst) and renderGpu(inst);
+    const ok = ensureGpuSize(inst, size, size) and ensureGpuPipeline(io, environ, inst) and renderGpu(inst);
     inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
     if (!ok) return null;
     return inst.texture_view;
@@ -1456,8 +1457,8 @@ pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32
 /// surface registry canNOT do this readback: materialize installs a BORROWED
 /// view there, and readbackStaticSurface rejects borrowed entries — the
 /// instance's own texture is the only readable handle.
-pub fn renderShaderToPixels(key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
-    if (renderShaderToTexture(key_hash, wgsl, data, size) == null) return null;
+pub fn renderShaderToPixels(io: std.Io, environ: *const std.process.Environ.Map, key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
+    if (renderShaderToTexture(io, environ, key_hash, wgsl, data, size) == null) return null;
     const inst = ensureMaterialInstance(key_hash) orelse return null;
     const tex = inst.texture orelse return null;
     // Effect targets are created rgba8_unorm (ensureTarget) — no BGRA swizzle.
@@ -1516,6 +1517,7 @@ pub fn paintNamedEffect(node: *const Node, effect_name: []const u8, x: f32, y: f
         inst = createCustomInstance(node);
     }
     const i = inst orelse return false;
+    i.render_context = node.effect_render_context;
     i.active = true;
     i.last_painted_frame = g_effect_frame;
     i.backend = .cpu;

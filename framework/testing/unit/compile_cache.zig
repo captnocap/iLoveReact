@@ -249,6 +249,25 @@ test "storage layout builds the documented paths" {
     try testing.expectEqualStrings("current/city.manifest", current_path);
 }
 
+test "storage layout creates its directories through injected io" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try cache.Layout.ensure(testing.io, tmp.dir);
+
+    inline for (.{
+        cache.Layout.manifests_dir,
+        cache.Layout.chunks_dir,
+        cache.Layout.summaries_dir,
+        cache.Layout.assets_dir,
+        cache.Layout.history_dir,
+        cache.Layout.current_dir,
+    }) |name| {
+        var dir = try tmp.dir.openDir(testing.io, name, .{});
+        dir.close(testing.io);
+    }
+}
+
 test "telemetry tallies reuse vs rebuild and hit rate" {
     var tel = cache.Telemetry{};
     tel.recordReused(1000);

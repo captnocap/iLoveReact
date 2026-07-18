@@ -1,5 +1,5 @@
 //! Claude Code Agent SDK — subprocess wrapper around the `claude` CLI in
-//! stream-json mode. Zig 0.15.2 port, inspired by
+//! stream-json mode. Zig 0.16 port, inspired by
 //! codeberg/duhnist/claude-code-sdk-zig.
 //!
 //! Model:

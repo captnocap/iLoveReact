@@ -51,6 +51,9 @@ const FoliageMailbox = m_foliage_preview.FoliageMailbox;
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     node_id: u32 = 0,
+    force_gait: bool = false,
+    live_log: bool = false,
+    traffic_log: bool = false,
     scene: constructor.Scene,
     fallback: ?[]f32 = null,
     insts: []const f32 = &.{},
@@ -326,7 +329,8 @@ pub const Runtime = struct {
     /// per-chunk segments (req_2859) into the row set the renderer is NOT
     /// displaying; poll swaps the finished set in. Strictly serial: one job in
     /// flight, stroke bursts coalesce through `foliage_want`.
-    foliage_worker: ?std.Thread = null,
+    foliage_tasks: std.Io.Group = .init,
+    foliage_worker_started: bool = false,
     foliage_box: FoliageMailbox = .{},
     foliage_sets: [2]FoliageRowSet = .{ .{}, .{} },
     foliage_display: u8 = 0,
@@ -354,16 +358,24 @@ pub const Runtime = struct {
     paint_last_w: f32 = 0,
     paint_last_h: f32 = 0,
 
-    pub fn create(allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
+    fn foliageWorkerEntry(self: *Runtime, io: std.Io) std.Io.Cancelable!void {
+        return m_foliage_preview.foliageWorkerMain(self, io);
+    }
+
+    pub fn startFoliageWorker(self: *Runtime, io: std.Io) std.Io.ConcurrentError!void {
+        try self.foliage_tasks.concurrent(io, foliageWorkerEntry, .{ self, io });
+    }
+
+    pub fn create(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
         const self = try allocator.create(Runtime);
         errdefer allocator.destroy(self);
-        try self.initInPlace(allocator, path, store_dir, node_id);
+        try self.initInPlace(io, environ, allocator, path, store_dir, node_id);
         return self;
     }
 
-    pub fn destroy(self: *Runtime) void {
+    pub fn destroy(self: *Runtime, io: std.Io) void {
         const allocator = self.allocator;
-        self.deinit();
+        self.deinit(io);
         allocator.destroy(self);
     }
 
@@ -428,8 +440,8 @@ pub const Runtime = struct {
     const stepInteract = runtime_interaction.stepInteract;
     const drawHud = runtime_interaction.drawHud;
 
-    pub fn sceneNodeForFrame(self: *Runtime) *Node {
-        self.stepNow();
+    pub fn sceneNodeForFrame(self: *Runtime, io: std.Io) *Node {
+        self.stepNow(io);
         return &self.root;
     }
 

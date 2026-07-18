@@ -20,7 +20,6 @@
 //! whose decoded layout is `salt(16) || nonce(24) || ciphertext+tag`.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const sodium = @import("sodium.zig");
 
 const file_magic = "KRG1".*;
@@ -52,6 +51,7 @@ pub const KeyEntry = struct {
 };
 
 pub const Keyring = struct {
+    io: std.Io,
     path: []u8, // owned
     master_password: []u8, // owned, lifetime-coupled
     entries: std.ArrayList(KeyEntry),
@@ -120,7 +120,7 @@ fn unwrap(alloc: std.mem.Allocator, password: []const u8, blob: []const u8) ![]u
 // File serialization
 // ════════════════════════════════════════════════════════════════════════
 
-fn writeKeyringFile(path: []const u8, password: []const u8, json_blob: []const u8, alloc: std.mem.Allocator) !void {
+fn writeKeyringFile(io: std.Io, path: []const u8, password: []const u8, json_blob: []const u8, alloc: std.mem.Allocator) !void {
     var file_salt: [16]u8 = undefined;
     sodium.randomBytes(&file_salt);
     var file_nonce: [24]u8 = undefined;
@@ -134,17 +134,17 @@ fn writeKeyringFile(path: []const u8, password: []const u8, json_blob: []const u
     defer alloc.free(ct);
     _ = try sodium.xchachaEncrypt(ct, json_blob, "", &file_nonce, &kek);
 
-    const f = try std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true });
-    defer f.close(host_io.io());
-    try f.writeStreamingAll(host_io.io(), &file_magic);
-    try f.writeStreamingAll(host_io.io(), &[_]u8{file_version});
-    try f.writeStreamingAll(host_io.io(), &file_salt);
-    try f.writeStreamingAll(host_io.io(), &file_nonce);
-    try f.writeStreamingAll(host_io.io(), ct);
+    const f = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    defer f.close(io);
+    try f.writeStreamingAll(io, &file_magic);
+    try f.writeStreamingAll(io, &[_]u8{file_version});
+    try f.writeStreamingAll(io, &file_salt);
+    try f.writeStreamingAll(io, &file_nonce);
+    try f.writeStreamingAll(io, ct);
 }
 
-fn readKeyringFile(alloc: std.mem.Allocator, path: []const u8, password: []const u8) ![]u8 {
-    const raw = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(16 * 1024 * 1024));
+fn readKeyringFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8, password: []const u8) ![]u8 {
+    const raw = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(16 * 1024 * 1024));
     defer alloc.free(raw);
     if (raw.len < 4 + 1 + 16 + 24 + 16) return error.InvalidKeyring;
     if (!std.mem.eql(u8, raw[0..4], &file_magic)) return error.InvalidKeyring;
@@ -340,10 +340,11 @@ fn hexDigit(c: u8) !u8 {
 // Public API (mirrors privacy.lua's keyring* functions)
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn create(alloc: std.mem.Allocator, path: []const u8, master_password: []const u8) !Keyring {
+pub fn create(io: std.Io, alloc: std.mem.Allocator, path: []const u8, master_password: []const u8) !Keyring {
     if (!sodium.ready()) _ = sodium.init();
 
     var ring: Keyring = .{
+        .io = io,
         .path = try alloc.dupe(u8, path),
         .master_password = try alloc.dupe(u8, master_password),
         .entries = .empty,
@@ -353,19 +354,20 @@ pub fn create(alloc: std.mem.Allocator, path: []const u8, master_password: []con
 
     const json = try serializeEntries(alloc, ring.entries.items);
     defer alloc.free(json);
-    try writeKeyringFile(path, master_password, json, alloc);
+    try writeKeyringFile(io, path, master_password, json, alloc);
 
     return ring;
 }
 
-pub fn open(alloc: std.mem.Allocator, path: []const u8, master_password: []const u8) !Keyring {
+pub fn open(io: std.Io, alloc: std.mem.Allocator, path: []const u8, master_password: []const u8) !Keyring {
     if (!sodium.ready()) _ = sodium.init();
-    const json_blob = try readKeyringFile(alloc, path, master_password);
+    const json_blob = try readKeyringFile(io, alloc, path, master_password);
     defer alloc.free(json_blob);
 
     const entries = try parseEntries(alloc, json_blob);
 
     return .{
+        .io = io,
         .path = try alloc.dupe(u8, path),
         .master_password = try alloc.dupe(u8, master_password),
         .entries = entries,
@@ -376,7 +378,7 @@ pub fn open(alloc: std.mem.Allocator, path: []const u8, master_password: []const
 pub fn save(ring: *Keyring) !void {
     const json = try serializeEntries(ring.alloc, ring.entries.items);
     defer ring.alloc.free(json);
-    try writeKeyringFile(ring.path, ring.master_password, json, ring.alloc);
+    try writeKeyringFile(ring.io, ring.path, ring.master_password, json, ring.alloc);
 }
 
 pub const GenerateOpts = struct {
@@ -386,14 +388,15 @@ pub const GenerateOpts = struct {
 };
 
 pub fn generateKey(ring: *Keyring, opts: GenerateOpts) ![16]u8 {
+    const now = std.Io.Clock.now(.real, ring.io).toSeconds();
     var entry: KeyEntry = .{
         .id = undefined,
         .key_type = opts.key_type,
         .label = if (opts.label) |l| try ring.alloc.dupe(u8, l) else null,
         .public_key = undefined,
         .encrypted_private = &.{},
-        .created = host_io.timestamp(),
-        .expires = if (opts.expires_in) |e| host_io.timestamp() + e else null,
+        .created = now,
+        .expires = if (opts.expires_in) |e| now + e else null,
     };
     sodium.randomBytes(&entry.id);
 
@@ -449,7 +452,7 @@ pub fn rotateKey(ring: *Keyring, id: [16]u8) ![16]u8 {
 pub fn revokeKey(ring: *Keyring, id: [16]u8, reason: []const u8) !void {
     for (ring.entries.items) |*e| {
         if (std.mem.eql(u8, &e.id, &id)) {
-            e.revoked = host_io.timestamp();
+            e.revoked = std.Io.Clock.now(.real, ring.io).toSeconds();
             if (e.revoke_reason) |r| ring.alloc.free(r);
             e.revoke_reason = try ring.alloc.dupe(u8, reason);
             try save(ring);

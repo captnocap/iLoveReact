@@ -17,19 +17,16 @@
 //!   ZIGOS_WITNESS=replay ./app          # replay and verify
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const testdriver = @import("driver.zig");
 const query = @import("query.zig");
 const gpu = @import("../gpu/gpu.zig");
+const capture = @import("../gpu/capture.zig");
 const input_mod = @import("../primitive/input.zig");
 
 const page_alloc = std.heap.page_allocator;
-
-// stbi_write_png — compiled via stb_image_write_impl.c, linked in build.zig
-extern fn stbi_write_png(filename: [*:0]const u8, w: c_int, h: c_int, comp: c_int, data: ?*const anyopaque, stride: c_int) c_int;
 
 const MAX_ACTIONS = 256;
 const MAX_TREE_NODES = 2048;
@@ -270,8 +267,8 @@ var witness_path: ?[]const u8 = null;
 
 // ── Init ────────────────────────────────────────────────────────────────
 
-pub fn init() void {
-    const env = host_io.getenv("ZIGOS_WITNESS") orelse return;
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map) void {
+    const env = environ.get("ZIGOS_WITNESS") orelse return;
 
     if (std.mem.eql(u8, env, "record")) {
         mode = .record;
@@ -288,7 +285,7 @@ pub fn init() void {
     }
 
     // Witness file path
-    if (host_io.getenv("ZIGOS_WITNESS_FILE")) |p| {
+    if (environ.get("ZIGOS_WITNESS_FILE")) |p| {
         if (p.len < witness_path_buf.len) {
             @memcpy(witness_path_buf[0..p.len], p);
             witness_path = witness_path_buf[0..p.len];
@@ -296,9 +293,9 @@ pub fn init() void {
     }
 
     if (mode == .replay) {
-        loadWitness();
+        loadWitness(io);
     } else if (mode == .autotest) {
-        loadAutotest();
+        loadAutotest(io);
     }
 }
 
@@ -574,7 +571,7 @@ pub fn recordScroll(mx: f32, my: f32, wx: f32, wy: f32) void {
 // ── Tick — called every frame from engine ────────────────────────────────
 
 /// Returns true if the app should exit (replay complete).
-pub fn tick(root: *Node) bool {
+pub fn tick(io: std.Io, environ: *const std.process.Environ.Map, root: *Node) bool {
     frame_count += 1;
 
     if (mode == .record) {
@@ -653,11 +650,11 @@ pub fn tick(root: *Node) bool {
     }
 
     if (mode == .autotest) {
-        return autotestTick(root);
+        return autotestTick(io, environ, root);
     }
 
     if (mode == .snapshot) {
-        return snapshotTick(root);
+        return snapshotTick(io, root);
     }
 
     return false;
@@ -845,21 +842,21 @@ fn countLiveNodes(node: *Node, count: *u16) void {
 
 // ── Autotest logic ─────────────────────────────────────────────────────
 
-fn loadAutotest() void {
+fn loadAutotest(io: std.Io) void {
     const path = witness_path orelse {
         log.print("[autotest] ERROR: no test file (set ZIGOS_WITNESS_FILE)\n", .{});
         return;
     };
-    const file = std.Io.Dir.cwd().openFile(host_io.io(), path, .{}) catch {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch {
         log.print("[autotest] ERROR: cannot open {s}\n", .{path});
         return;
     };
-    defer file.close(host_io.io());
+    defer file.close(io);
 
     // Must fit the entire .autotest file. Sweatshop-scale snapshots emit
     // ~800 steps / ~30KB; leave headroom for growth.
     var buf: [262144]u8 = undefined;
-    const len = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
+    const len = file.readPositionalAll(io, &buf, 0) catch return;
     const content = buf[0..len];
 
     var lines = std.mem.splitScalar(u8, content, '\n');
@@ -1777,7 +1774,7 @@ fn findFirstChildText(node: *Node) ?[]const u8 {
     return null;
 }
 
-fn snapshotTick(root: *Node) bool {
+fn snapshotTick(io: std.Io, root: *Node) bool {
     if (frame_count < 8 and snap_phase == .wait_settle) return false;
 
     switch (snap_phase) {
@@ -1918,13 +1915,13 @@ fn snapshotTick(root: *Node) bool {
             return false;
         },
         .done => {
-            snapWriteFile();
+            snapWriteFile(io);
             return true;
         },
     }
 }
 
-fn snapWriteFile() void {
+fn snapWriteFile(io: std.Io) void {
     const path = witness_path orelse {
         log.print("[snapshot] no ZIGOS_WITNESS_FILE, printing to stderr\n", .{});
         for (0..snap_line_count) |i| {
@@ -1933,11 +1930,11 @@ fn snapWriteFile() void {
         return;
     };
 
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch |err| {
         log.print("[snapshot] cannot create {s}: {}\n", .{ path, err });
         return;
     };
-    defer file.close(host_io.io());
+    defer file.close(io);
 
     // Derive test name
     var test_name: []const u8 = path;
@@ -1970,7 +1967,7 @@ fn snapWriteFile() void {
         if (line.len > 6 and std.mem.startsWith(u8, line, "click ")) click_count += 1;
     }
 
-    file.writeStreamingAll(host_io.io(), out_buf[0..pos]) catch {};
+    file.writeStreamingAll(io, out_buf[0..pos]) catch {};
     if (snap_nil_count > 0) {
         log.print("[snapshot] wrote {d} expects + {d} clicks + {d} FAILS to {s}\n", .{ expect_count, click_count, snap_nil_count, path });
     } else {
@@ -1978,7 +1975,7 @@ fn snapWriteFile() void {
     }
 }
 
-fn autotestTick(root: *Node) bool {
+fn autotestTick(io: std.Io, environ: *const std.process.Environ.Map, root: *Node) bool {
     if (frame_count < 8) return false; // wait for settle
 
     if (!auto_started) {
@@ -2020,7 +2017,7 @@ fn autotestTick(root: *Node) bool {
 
     if (auto_idx >= auto_step_count) {
         // Audits: verify source texts render + check colors
-        auditSourceTexts(root);
+        auditSourceTexts(io, environ, root);
         auditColors(root);
 
         // Write final result to manifest THEN print
@@ -2030,7 +2027,7 @@ fn autotestTick(root: *Node) bool {
         const written = std.fmt.bufPrint(remaining, "RESULT|{d}|{d}|{s}\n", .{ auto_passed, total, result_str }) catch "";
         auto_manifest_len += written.len;
 
-        finishAutotest();
+        finishAutotest(io);
         log.print("\n\xe2\x95\x90\xe2\x95\x90 AUTOTEST RESULT: {d}/{d} passed \xe2\x95\x90\xe2\x95\x90\n\n", .{ auto_passed, total });
         return true; // signal exit
     }
@@ -2513,7 +2510,7 @@ fn autotestTick(root: *Node) bool {
     // Flush manifest to disk incrementally so a SIGKILL (via `timeout -s KILL`)
     // still leaves a partial proof grid instead of wiping the run. finishAutotest
     // is idempotent — it just rewrites the full buffer.
-    finishAutotest();
+    finishAutotest(io);
 
     auto_idx += 1;
     hunt_started_for_step = false;
@@ -2543,7 +2540,7 @@ fn autotestTick(root: *Node) bool {
 
 var auto_capture_idx: u16 = 0;
 
-fn onAutotestCapture(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
+fn onAutotestCapture(io: std.Io, pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
     // Stop continuous capture — we only want one frame per request
     gpu.stopCapture();
 
@@ -2575,7 +2572,7 @@ fn onAutotestCapture(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
 
     // Ensure directory exists
     if (auto_capture_idx == 0) {
-        std.Io.Dir.cwd().createDirPath(host_io.io(), dir_path) catch {};
+        std.Io.Dir.cwd().createDirPath(io, dir_path) catch {};
     }
 
     // Convert BGRA → RGBA
@@ -2596,7 +2593,7 @@ fn onAutotestCapture(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
         }
     }
 
-    _ = stbi_write_png(path.ptr, @intCast(w), @intCast(h), 4, rgba.ptr, @intCast(w * 4));
+    _ = capture.writeRgbaPng(io, path, rgba, w, h);
     auto_capture_idx += 1;
     auto_capture_pending = false;
 }
@@ -2636,7 +2633,7 @@ fn appendManifest(idx: u16, step: *const AutoStep, passed: bool, node_result: ?q
     }
 }
 
-fn finishAutotest() void {
+fn finishAutotest(io: std.Io) void {
     if (auto_manifest_len == 0) return;
 
     // Derive dir from witness path
@@ -2660,9 +2657,9 @@ fn finishAutotest() void {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "tests/screenshots/{s}/manifest.txt", .{dir_name}) catch return;
 
-    const f = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return;
-    defer f.close(host_io.io());
-    f.writeStreamingAll(host_io.io(), auto_manifest_buf[0..auto_manifest_len]) catch {};
+    const f = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+    defer f.close(io);
+    f.writeStreamingAll(io, auto_manifest_buf[0..auto_manifest_len]) catch {};
 }
 
 fn collectSeenTexts(node: *Node) void {
@@ -2815,10 +2812,10 @@ fn diffStyles(before: *const [MAX_STYLE_ENTRIES]StyleEntry, before_count: u16, a
     return diffs;
 }
 
-fn auditSourceTexts(root: *Node) void {
+fn auditSourceTexts(io: std.Io, environ: *const std.process.Environ.Map, root: *Node) void {
     // Read the .tsz source files and extract quoted strings.
     // Compare against what's actually rendering. Missing text = FAIL.
-    const source_env = host_io.getenv("ZIGOS_SOURCE") orelse return;
+    const source_env = environ.get("ZIGOS_SOURCE") orelse return;
 
     // Read all source files (colon-separated)
     var src_buf: [32768]u8 = undefined;
@@ -2826,10 +2823,10 @@ fn auditSourceTexts(root: *Node) void {
     var paths = std.mem.splitScalar(u8, source_env, ':');
     while (paths.next()) |source_path| {
         if (source_path.len == 0) continue;
-        const file = std.Io.Dir.cwd().openFile(host_io.io(), source_path, .{}) catch continue;
-        defer file.close(host_io.io());
+        const file = std.Io.Dir.cwd().openFile(io, source_path, .{}) catch continue;
+        defer file.close(io);
         const remaining = src_buf[total_len..];
-        const read = file.readPositionalAll(host_io.io(), remaining, 0) catch 0;
+        const read = file.readPositionalAll(io, remaining, 0) catch 0;
         total_len += read;
         if (total_len < src_buf.len) {
             src_buf[total_len] = '\n';
@@ -3033,7 +3030,7 @@ fn printStateDiff(expected: *const StateSnapshot, actual: *const StateSnapshot) 
 // ── File I/O ────────────────────────────────────────────────────────────
 
 /// Write the witness recording to disk.
-pub fn flush() void {
+pub fn flush(io: std.Io) void {
     if (mode != .record) return;
     if (!tree_captured and action_count == 0) return;
 
@@ -3042,41 +3039,41 @@ pub fn flush() void {
         return;
     };
 
-    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true }) catch |err| {
+    const file = std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true }) catch |err| {
         log.print("[witness] cannot create {s}: {}\n", .{ path, err });
         return;
     };
-    defer file.close(host_io.io());
+    defer file.close(io);
 
     var buf: [4096]u8 = undefined;
 
     // Header
-    emit(file, &buf, "WITNESS v1\n", .{});
-    emit(file, &buf, "SLOTS {d}\n", .{initial_state.count});
+    emit(io, file, &buf, "WITNESS v1\n", .{});
+    emit(io, file, &buf, "SLOTS {d}\n", .{initial_state.count});
 
     // Initial state (zig slots)
-    emit(file, &buf, "STATE_INIT\n", .{});
-    writeStateToFile(file, &buf, &initial_state);
-    emit(file, &buf, "END\n", .{});
+    emit(io, file, &buf, "STATE_INIT\n", .{});
+    writeStateToFile(io, file, &buf, &initial_state);
+    emit(io, file, &buf, "END\n", .{});
 
     // Initial visible text
-    emit(file, &buf, "TEXTS_INIT {d}\n", .{initial_texts.count});
-    writeTextsToFile(file, &buf, &initial_texts);
-    emit(file, &buf, "END\n", .{});
+    emit(io, file, &buf, "TEXTS_INIT {d}\n", .{initial_texts.count});
+    writeTextsToFile(io, file, &buf, &initial_texts);
+    emit(io, file, &buf, "END\n", .{});
 
     // Tree
     if (tree_captured) {
-        emit(file, &buf, "TREE {d}\n", .{tree_node_count});
+        emit(io, file, &buf, "TREE {d}\n", .{tree_node_count});
         for (0..tree_node_count) |i| {
             const tn = &tree_nodes[i];
             const name = tn.name_buf[0..tn.name_len];
             const txt = tn.text_buf[0..tn.text_len];
-            emit(file, &buf, "N {d} {d:.0} {d:.0} {d:.0} {d:.0} {d} {d}:{s} {d}:{s}\n", .{
+            emit(io, file, &buf, "N {d} {d:.0} {d:.0} {d:.0} {d:.0} {d} {d}:{s} {d}:{s}\n", .{
                 tn.depth,                              tn.x,     tn.y, tn.w,    tn.h,
                 @as(u8, if (tn.has_handler) 1 else 0), name.len, name, txt.len, txt,
             });
         }
-        emit(file, &buf, "END\n", .{});
+        emit(io, file, &buf, "END\n", .{});
     }
 
     // Actions
@@ -3086,54 +3083,54 @@ pub fn flush() void {
             .click => {
                 const aname = a.target_name[0..a.target_name_len];
                 const atxt = a.target_text[0..a.target_text_len];
-                emit(file, &buf, "CLICK {d} {d}:{s} {d}:{s} P{d:.0},{d:.0}\n", .{
+                emit(io, file, &buf, "CLICK {d} {d}:{s} {d}:{s} P{d:.0},{d:.0}\n", .{
                     a.frame, aname.len, aname, atxt.len, atxt, a.target_x, a.target_y,
                 });
-                emit(file, &buf, "STATE_AFTER\n", .{});
-                writeStateToFile(file, &buf, &a.state_after);
-                emit(file, &buf, "END\n", .{});
-                emit(file, &buf, "TEXTS_AFTER {d}\n", .{a.texts_after.count});
-                writeTextsToFile(file, &buf, &a.texts_after);
-                emit(file, &buf, "END\n", .{});
+                emit(io, file, &buf, "STATE_AFTER\n", .{});
+                writeStateToFile(io, file, &buf, &a.state_after);
+                emit(io, file, &buf, "END\n", .{});
+                emit(io, file, &buf, "TEXTS_AFTER {d}\n", .{a.texts_after.count});
+                writeTextsToFile(io, file, &buf, &a.texts_after);
+                emit(io, file, &buf, "END\n", .{});
             },
             .scroll => {
-                emit(file, &buf, "SCROLL {d} {d:.1} {d:.1} {d:.0} {d:.0}\n", .{
+                emit(io, file, &buf, "SCROLL {d} {d:.1} {d:.1} {d:.0} {d:.0}\n", .{
                     a.frame, a.scroll_x, a.scroll_y, a.mouse_x, a.mouse_y,
                 });
             },
         }
     }
 
-    emit(file, &buf, "DONE\n", .{});
+    emit(io, file, &buf, "DONE\n", .{});
 
     log.print("[witness] saved {d} tree nodes + {d} actions to {s}\n", .{
         tree_node_count, action_count, path,
     });
 }
 
-fn emit(file: std.Io.File, buf: []u8, comptime fmt: []const u8, args: anytype) void {
+fn emit(io: std.Io, file: std.Io.File, buf: []u8, comptime fmt: []const u8, args: anytype) void {
     const s = std.fmt.bufPrint(buf, fmt, args) catch return;
-    file.writeStreamingAll(host_io.io(), s) catch {};
+    file.writeStreamingAll(io, s) catch {};
 }
 
-fn writeTextsToFile(file: std.Io.File, buf: []u8, snap: *const TextSnapshot) void {
+fn writeTextsToFile(io: std.Io, file: std.Io.File, buf: []u8, snap: *const TextSnapshot) void {
     for (0..snap.count) |i| {
         const t = &snap.texts[i];
         const tv = t.buf[0..t.len];
-        emit(file, buf, "T {d}:{s}\n", .{ tv.len, tv });
+        emit(io, file, buf, "T {d}:{s}\n", .{ tv.len, tv });
     }
 }
 
-fn writeStateToFile(file: std.Io.File, buf: []u8, snap: *const StateSnapshot) void {
+fn writeStateToFile(io: std.Io, file: std.Io.File, buf: []u8, snap: *const StateSnapshot) void {
     for (0..snap.count) |i| {
         const s = &snap.slots[i];
         switch (s.kind) {
-            .int => emit(file, buf, "I {d}\n", .{s.int_val}),
-            .float => emit(file, buf, "F {d:.6}\n", .{s.float_val}),
-            .boolean => emit(file, buf, "B {d}\n", .{@as(u8, if (s.bool_val) 1 else 0)}),
+            .int => emit(io, file, buf, "I {d}\n", .{s.int_val}),
+            .float => emit(io, file, buf, "F {d:.6}\n", .{s.float_val}),
+            .boolean => emit(io, file, buf, "B {d}\n", .{@as(u8, if (s.bool_val) 1 else 0)}),
             .string => {
                 const sv = s.str_buf[0..s.str_len];
-                emit(file, buf, "S {d}:{s}\n", .{ sv.len, sv });
+                emit(io, file, buf, "S {d}:{s}\n", .{ sv.len, sv });
             },
         }
     }
@@ -3141,14 +3138,14 @@ fn writeStateToFile(file: std.Io.File, buf: []u8, snap: *const StateSnapshot) vo
 
 // ── Load witness file for replay ────────────────────────────────────────
 
-fn loadWitness() void {
+fn loadWitness(io: std.Io) void {
     const path = witness_path orelse {
         log.print("[witness] no ZIGOS_WITNESS_FILE set for replay\n", .{});
         mode = .off;
         return;
     };
 
-    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.page_allocator, .limited(4 * 1024 * 1024)) catch |err| {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, std.heap.page_allocator, .limited(4 * 1024 * 1024)) catch |err| {
         log.print("[witness] cannot read {s}: {}\n", .{ path, err });
         mode = .off;
         return;

@@ -66,21 +66,25 @@ fn warpForFilter(node: *Node, r: layout.LayoutRect, mx: f32, my: f32) FilterWarp
 // ── Event Handler ────────────────────────────────────────────────────────
 
 pub const EventHandler = struct {
-    on_press: ?*const fn () void = null,
-    on_mouse_down: ?*const fn () void = null,
-    on_mouse_move: ?*const fn () void = null,
-    on_mouse_up: ?*const fn () void = null,
-    on_hover_enter: ?*const fn () void = null,
-    on_hover_exit: ?*const fn () void = null,
+    /// Owner supplied to every native callback below. V8-backed handlers use
+    /// this for their root-owned HostContext; pure native handlers may ignore
+    /// a null context.
+    context: ?*anyopaque = null,
+    on_press: ?*const fn (?*anyopaque) void = null,
+    on_mouse_down: ?*const fn (?*anyopaque) void = null,
+    on_mouse_move: ?*const fn (?*anyopaque) void = null,
+    on_mouse_up: ?*const fn (?*anyopaque) void = null,
+    on_hover_enter: ?*const fn (?*anyopaque) void = null,
+    on_hover_exit: ?*const fn (?*anyopaque) void = null,
     js_on_hover_enter: ?[*:0]const u8 = null,
     lua_on_hover_enter: ?[*:0]const u8 = null,
     js_on_hover_exit: ?[*:0]const u8 = null,
     lua_on_hover_exit: ?[*:0]const u8 = null,
-    on_key: ?*const fn (key: c_int, mods: u16) void = null,
-    on_change_text: ?*const fn () void = null,
-    on_submit: ?*const fn () void = null,
-    on_scroll: ?*const fn () void = null,
-    on_right_click: ?*const fn (x: f32, y: f32) void = null,
+    on_key: ?*const fn (?*anyopaque, key: c_int, mods: u16) void = null,
+    on_change_text: ?*const fn (?*anyopaque) void = null,
+    on_submit: ?*const fn (?*anyopaque) void = null,
+    on_scroll: ?*const fn (?*anyopaque) void = null,
+    on_right_click: ?*const fn (?*anyopaque, x: f32, y: f32) void = null,
     js_on_scroll: ?[*:0]const u8 = null,
     js_on_press: ?[*:0]const u8 = null,
     js_on_mouse_down: ?[*:0]const u8 = null,

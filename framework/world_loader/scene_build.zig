@@ -3,7 +3,6 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
@@ -112,7 +111,7 @@ fn buildRampSlab() [36 * 8]f32 {
     return m_geometry.buildRampSlab(m_config.RAMP_SLAB_THICKNESS_RATIO);
 }
 
-pub fn build(self: anytype) !void {
+pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) !void {
     self.insts = self.scene.instances;
     self.inst_count = self.scene.instance_count;
     self.stride = if (self.scene.instance_stride > 0) self.scene.instance_stride else INSTANCE_STRIDE;
@@ -260,7 +259,7 @@ pub fn build(self: anytype) !void {
     var spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
     // [traffic-diag req_2056] RJIT_TRAFFIC_SPAWN=1 drops the player onto the
     // first baked vehicle's route so a headless shot frames moving traffic.
-    if (host_io.getenv("RJIT_TRAFFIC_SPAWN") != null) {
+    if (environ.get("RJIT_TRAFFIC_SPAWN") != null) {
         if (self.scene.traffic) |tr| {
             if (tr.vehicles.len > 0 and tr.vehicles[0].route.len >= 2) {
                 const veh = tr.vehicles[0];
@@ -392,9 +391,9 @@ pub fn build(self: anytype) !void {
     // outgrows the detail radius (auto), or RJIT_STREAM=1 forces it; tiny
     // maps keep the exact monolithic path. RJIT_STREAM=0 kills it. Setup
     // failure leaves stream null and the monolithic path takes over.
-    self.stream_radius = streamRadiusFromEnv();
+    self.stream_radius = streamRadiusFromEnv(environ);
     const full_bounds = instanceBounds(self.insts, self.inst_count, self.stride);
-    const want_stream = switch (streamModeFromEnv()) {
+    const want_stream = switch (streamModeFromEnv(environ)) {
         .off => false,
         .force => self.inst_count > 0,
         .auto => full_bounds.radius > self.stream_radius,
@@ -956,7 +955,7 @@ pub fn build(self: anytype) !void {
             }
         }
         self.traffic_path_count = pi;
-        self.traffic_paths_on = host_io.getenv("RJIT_TRAFFICPATHS") != null;
+        self.traffic_paths_on = environ.get("RJIT_TRAFFICPATHS") != null;
         self.traffic_path_node = self.kid_list.items.len;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = true,
@@ -1424,5 +1423,5 @@ pub fn build(self: anytype) !void {
     // Seed the bubble at spawn and assemble the first draw tail — the very
     // first rendered frame already streams (the camera was just solved).
     refreshStreamNodes(self);
-    self.last_ns = nowNs();
+    self.last_ns = nowNs(io);
 }

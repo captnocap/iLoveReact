@@ -18,7 +18,6 @@
 //! Event-rate only (one block per click) — never in a per-frame path.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 
@@ -40,19 +39,19 @@ const Near = struct { node: *Node, dist: f32 };
 var near_buf: [MAX_NEAR]Near = undefined;
 var near_n: usize = 0;
 
-fn ensureFile() void {
+fn ensureFile(io: std.Io, environ: *const std.process.Environ.Map) void {
     if (file_init) return;
     file_init = true;
-    log_file = std.Io.Dir.createFileAbsolute(host_io.io(), LOG_PATH, .{ .truncate = true }) catch null;
-    stderr_on = host_io.getenv("ZIGOS_HIT_TRACE") != null;
+    log_file = std.Io.Dir.createFileAbsolute(io, LOG_PATH, .{ .truncate = true }) catch null;
+    stderr_on = environ.get("ZIGOS_HIT_TRACE") != null;
 }
 
 /// Write one formatted chunk to the log file (and stderr when opted in).
-fn out(comptime fmt: []const u8, args: anytype) void {
+fn out(io: std.Io, comptime fmt: []const u8, args: anytype) void {
     var buf: [1024]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    if (stderr_on) std.debug.print("{s}", .{s});
-    if (log_file) |f| f.writeStreamingAll(host_io.io(), s) catch {};
+    if (stderr_on) std.Io.File.stderr().writeStreamingAll(io, s) catch {};
+    if (log_file) |f| f.writeStreamingAll(io, s) catch {};
 }
 
 /// Mirrors layout.zig's private hasHandlers + the href/input/canvas/blocker extras —
@@ -203,37 +202,37 @@ fn walk(node: *Node, mx: f32, my: f32, depth: u32) void {
 }
 
 /// Call once per left mouse-down, right after layout.hitTest.
-pub fn trace(root: *Node, mx: f32, my: f32, winner: ?*Node) void {
-    ensureFile();
+pub fn trace(io: std.Io, environ: *const std.process.Environ.Map, root: *Node, mx: f32, my: f32, winner: ?*Node) void {
+    ensureFile(io, environ);
     contains_n = 0;
     contains_overflow = false;
     near_n = 0;
     walk(root, mx, my, 0);
 
     var dbuf: [512]u8 = undefined;
-    out("[hit] click ({d:.0},{d:.0})\n", .{ mx, my });
+    out(io, "[hit] click ({d:.0},{d:.0})\n", .{ mx, my });
     if (winner) |w| {
-        out("  winner: {s}\n", .{describe(w, &dbuf)});
+        out(io, "  winner: {s}\n", .{describe(w, &dbuf)});
         if (!pressCapable(w)) {
-            out("  !! winner has NO press/down/up/move handler — engine SWALLOWS this click\n", .{});
+            out(io, "  !! winner has NO press/down/up/move handler — engine SWALLOWS this click\n", .{});
         }
-        if (w.filter_name != null) out("  !! winner carries filter '{s}' (warp not replicated in trace)\n", .{w.filter_name.?});
+        if (w.filter_name != null) out(io, "  !! winner carries filter '{s}' (warp not replicated in trace)\n", .{w.filter_name.?});
     } else {
-        out("  winner: NONE\n", .{});
+        out(io, "  winner: NONE\n", .{});
     }
     var k: usize = 0;
     while (k < contains_n) : (k += 1) {
         const e = contains_buf[k];
-        out("  in[{d}] depth={d} {s}\n", .{ k, e.depth, describe(e.node, &dbuf) });
+        out(io, "  in[{d}] depth={d} {s}\n", .{ k, e.depth, describe(e.node, &dbuf) });
     }
-    if (contains_overflow) out("  in[...] more than {d} containing nodes — list truncated\n", .{MAX_CONTAINS});
+    if (contains_overflow) out(io, "  in[...] more than {d} containing nodes — list truncated\n", .{MAX_CONTAINS});
     if (contains_n == 0 or winner == null) {
         if (near_n == 0) {
-            out("  nearest: none within {d:.0}px\n", .{NEAR_RADIUS});
+            out(io, "  nearest: none within {d:.0}px\n", .{NEAR_RADIUS});
         } else {
             var m: usize = 0;
             while (m < near_n) : (m += 1) {
-                out("  near[{d}] dist={d:.0} {s}\n", .{ m, near_buf[m].dist, describe(near_buf[m].node, &dbuf) });
+                out(io, "  near[{d}] dist={d:.0} {s}\n", .{ m, near_buf[m].dist, describe(near_buf[m].node, &dbuf) });
             }
         }
     }

@@ -160,8 +160,7 @@ Plus the **emitted strings** that `cli/commands/ship.ts` and `cli/commands/ship-
 | `__writeStdout` | `(text: string)` | `void` | Raw write to stdout (no trailing newline added). |
 | `__writeStderr` | `(text: string)` | `void` | Raw write to stderr. |
 | `__setStdinRaw` | `(enable: number)` | `boolean` | Toggle terminal raw mode (no echo, no canonical). |
-| `__readStdin` | `()` | `string` | Non-blocking poll read of stdin. |
-| `__pollFds` | `(fdsJson: string, timeoutMs: number)` | `string` (JSON array) | Multi-fd poll. Returns ready indices. |
+| `__readStdin` | `()` | `string` | Non-blocking drain of the host-owned stdin queue. |
 | `__termSize` | `()` | `string` (JSON `[cols, rows]`) | TIOCGWINSZ. |
 | `__spawnSync` | `(cmd: string, argsJson: string, stdin: string)` | `string` (JSON `{code, stdout, stderr}`) | Blocking subprocess. |
 | `__spawn` | `(cmd: string, argsJson: string)` | `number` | Async subprocess. Returns child id, or `-1`. |
@@ -657,11 +656,8 @@ declare global {
   /** Toggle terminal raw mode. enable=1 turns off echo + canonical. */
   function __setStdinRaw(enable: number): boolean;
 
-  /** Non-blocking poll-read of stdin. Returns "" when no data ready. */
+  /** Non-blocking drain of stdin. Returns "" when no data is queued. */
   function __readStdin(): string;
-
-  /** Multi-fd poll. fdsJson = JSON.stringify(number[]). Returns JSON.stringify(readyIndices). */
-  function __pollFds(fdsJson: string, timeoutMs: number): string;
 
   /** Terminal size via TIOCGWINSZ. Returns JSON.stringify([cols, rows]). */
   function __termSize(): string;

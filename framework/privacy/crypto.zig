@@ -12,8 +12,6 @@
 //!   - Envelope encryption (XChaCha20-Poly1305)
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const log = @import("../diag/log.zig");
 const crypto = std.crypto;
 const HmacSha256 = crypto.auth.hmac.sha2.HmacSha256;
 const XChaCha20Poly1305 = crypto.aead.chacha_poly.XChaCha20Poly1305;
@@ -214,6 +212,7 @@ fn gf256LagrangeInterp0(xs: []const u8, ys: []const u8) u8 {
 /// Split a secret (hex string) into n shares with threshold k.
 /// Returns shares as (index, hex) pairs. index is 1-based.
 pub fn shamirSplit(
+    io: std.Io,
     secret_hex: []const u8,
     n: u8,
     k: u8,
@@ -225,7 +224,9 @@ pub fn shamirSplit(
     const secret_len = try hexToBytes(secret_hex, &secret_buf);
 
     // For each byte of the secret, generate random polynomial of degree k-1
-    var rng = std.Random.DefaultPrng.init(@bitCast(host_io.nanoTimestamp()));
+    var seed: u64 = undefined;
+    io.random(std.mem.asBytes(&seed));
+    var rng = std.Random.DefaultPrng.init(seed);
     const random = rng.random();
 
     for (0..secret_len) |bi| {
@@ -303,14 +304,14 @@ pub const Envelope = struct {
     data_nonce: [nonce_length]u8,
 };
 
-pub fn envelopeEncrypt(plaintext: []const u8, kek: *const [key_length]u8) Envelope {
+pub fn envelopeEncrypt(io: std.Io, plaintext: []const u8, kek: *const [key_length]u8) Envelope {
     var env: Envelope = undefined;
 
     // Generate random DEK + nonces
     var dek: [key_length]u8 = undefined;
-    host_io.io().random(&dek);
-    host_io.io().random(&env.dek_nonce);
-    host_io.io().random(&env.data_nonce);
+    io.random(&dek);
+    io.random(&env.dek_nonce);
+    io.random(&env.data_nonce);
 
     // Encrypt DEK with KEK
     XChaCha20Poly1305.encrypt(&env.encrypted_dek, &env.dek_tag, &dek, "", env.dek_nonce, kek.*);
@@ -490,22 +491,28 @@ pub fn sanitizeHtml(input: []const u8, out: []u8) usize {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// FFI test runner — callable from .tsz carts via @ffi <crypto_test.h>
-// Runs all known-answer vectors, prints green/red to terminal.
+// Native test runner. The caller supplies the I/O capability used for
+// randomness and diagnostics.
 // Returns number of tests passed (0..13).
 // ════════════════════════════════════════════════════════════════════════
 
-fn printPass(name: [*:0]const u8) void {
-    log.print("\x1b[32m  \xe2\x9c\x93 {s}\x1b[0m\n", .{name});
-}
-fn printFail(name: [*:0]const u8) void {
-    log.print("\x1b[31m  \xe2\x9c\x97 {s}\x1b[0m\n", .{name});
+fn report(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    var buf: [512]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    std.Io.File.stderr().writeStreamingAll(io, line) catch {};
 }
 
-export fn crypto_run_all_tests() callconv(.c) c_int {
+fn printPass(io: std.Io, name: [*:0]const u8) void {
+    report(io, "\x1b[32m  \xe2\x9c\x93 {s}\x1b[0m\n", .{name});
+}
+fn printFail(io: std.Io, name: [*:0]const u8) void {
+    report(io, "\x1b[31m  \xe2\x9c\x97 {s}\x1b[0m\n", .{name});
+}
+
+pub fn runAllTests(io: std.Io) c_int {
     var passed: c_int = 0;
 
-    log.print("\n\x1b[1mCrypto Test Suite\x1b[0m\n", .{});
+    report(io, "\n\x1b[1mCrypto Test Suite\x1b[0m\n", .{});
 
     // 1. HMAC-SHA256 RFC 4231
     {
@@ -513,9 +520,9 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         var hex: [64]u8 = undefined;
         bytesToHex(&mac, &hex);
         if (std.mem.eql(u8, "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", &hex)) {
-            printPass("HMAC-SHA256 RFC 4231 known vector");
+            printPass(io, "HMAC-SHA256 RFC 4231 known vector");
             passed += 1;
-        } else printFail("HMAC-SHA256 RFC 4231 known vector");
+        } else printFail(io, "HMAC-SHA256 RFC 4231 known vector");
     }
 
     // 2. HKDF RFC 5869 test case 1
@@ -529,10 +536,10 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
             &out,
         )) |_| {
             if (std.mem.eql(u8, "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865", out[0..84])) {
-                printPass("HKDF RFC 5869 test case 1");
+                printPass(io, "HKDF RFC 5869 test case 1");
                 passed += 1;
-            } else printFail("HKDF RFC 5869 test case 1");
-        } else |_| printFail("HKDF RFC 5869 test case 1");
+            } else printFail(io, "HKDF RFC 5869 test case 1");
+        } else |_| printFail(io, "HKDF RFC 5869 test case 1");
     }
 
     // 3. HKDF RFC 5869 test case 2
@@ -546,10 +553,10 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
             &out,
         )) |_| {
             if (std.mem.eql(u8, "b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb41c65e590e09da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87", out[0..164])) {
-                printPass("HKDF RFC 5869 test case 2");
+                printPass(io, "HKDF RFC 5869 test case 2");
                 passed += 1;
-            } else printFail("HKDF RFC 5869 test case 2");
-        } else |_| printFail("HKDF RFC 5869 test case 2");
+            } else printFail(io, "HKDF RFC 5869 test case 2");
+        } else |_| printFail(io, "HKDF RFC 5869 test case 2");
     }
 
     // 4. HKDF RFC 5869 test case 3 (empty salt/info)
@@ -557,10 +564,10 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         var out: [168]u8 = undefined;
         if (hkdfDeriveHex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", "", "", 42, &out)) |_| {
             if (std.mem.eql(u8, "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8", out[0..84])) {
-                printPass("HKDF RFC 5869 test case 3 (empty salt/info)");
+                printPass(io, "HKDF RFC 5869 test case 3 (empty salt/info)");
                 passed += 1;
-            } else printFail("HKDF RFC 5869 test case 3 (empty salt/info)");
-        } else |_| printFail("HKDF RFC 5869 test case 3 (empty salt/info)");
+            } else printFail(io, "HKDF RFC 5869 test case 3 (empty salt/info)");
+        } else |_| printFail(io, "HKDF RFC 5869 test case 3 (empty salt/info)");
     }
 
     // 5. HKDF rejects overlong output
@@ -568,9 +575,9 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         var out: [1024]u8 = undefined;
         const result = hkdfDeriveHex("aa", "", "", 8161, &out);
         if (result) |_| {
-            printFail("HKDF rejects overlong output");
+            printFail(io, "HKDF rejects overlong output");
         } else |_| {
-            printPass("HKDF rejects overlong output");
+            printPass(io, "HKDF rejects overlong output");
             passed += 1;
         }
     }
@@ -583,9 +590,9 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         const ys = [_]u8{ 0xCC, 0x3E, 0xB0 };
         const recovered = gf256LagrangeInterp0(&xs, &ys);
         if (eval_ok and recovered == 0x42) {
-            printPass("Shamir GF(256) hardcoded vector");
+            printPass(io, "Shamir GF(256) hardcoded vector");
             passed += 1;
-        } else printFail("Shamir GF(256) hardcoded vector");
+        } else printFail(io, "Shamir GF(256) hardcoded vector");
     }
 
     // 7. Shamir combine hex API
@@ -595,24 +602,24 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         var out: [4]u8 = undefined;
         if (shamirCombine(&indices, &shares, &out)) |_| {
             if (std.mem.eql(u8, "42", out[0..2])) {
-                printPass("Shamir combine hex API");
+                printPass(io, "Shamir combine hex API");
                 passed += 1;
-            } else printFail("Shamir combine hex API");
-        } else |_| printFail("Shamir combine hex API");
+            } else printFail(io, "Shamir combine hex API");
+        } else |_| printFail(io, "Shamir combine hex API");
     }
 
     // 8. Envelope encrypt/decrypt round trip
     {
         const kek = [_]u8{0x11} ** 32;
         const pt = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE };
-        const env = envelopeEncrypt(&pt, &kek);
+        const env = envelopeEncrypt(io, &pt, &kek);
         var dec: [8]u8 = undefined;
         if (envelopeDecrypt(&env, &kek, &dec)) |len| {
             if (len == 8 and std.mem.eql(u8, &pt, dec[0..8])) {
-                printPass("Envelope encrypt/decrypt round trip");
+                printPass(io, "Envelope encrypt/decrypt round trip");
                 passed += 1;
-            } else printFail("Envelope encrypt/decrypt round trip");
-        } else |_| printFail("Envelope encrypt/decrypt round trip");
+            } else printFail(io, "Envelope encrypt/decrypt round trip");
+        } else |_| printFail(io, "Envelope encrypt/decrypt round trip");
     }
 
     // 9. Envelope rejects wrong KEK
@@ -620,12 +627,12 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         const kek_a = [_]u8{0x11} ** 32;
         const kek_b = [_]u8{0x22} ** 32;
         const pt = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
-        const env = envelopeEncrypt(&pt, &kek_a);
+        const env = envelopeEncrypt(io, &pt, &kek_a);
         var out: [4]u8 = undefined;
         if (envelopeDecrypt(&env, &kek_b, &out)) |_| {
-            printFail("Envelope rejects wrong KEK");
+            printFail(io, "Envelope rejects wrong KEK");
         } else |_| {
-            printPass("Envelope rejects wrong KEK");
+            printPass(io, "Envelope rejects wrong KEK");
             passed += 1;
         }
     }
@@ -634,15 +641,15 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
     {
         const kek = [_]u8{0xEF} ** 32;
         const pt = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
-        const env1 = envelopeEncrypt(&pt, &kek);
-        const env2 = envelopeEncrypt(&pt, &kek);
+        const env1 = envelopeEncrypt(io, &pt, &kek);
+        const env2 = envelopeEncrypt(io, &pt, &kek);
         if (!std.mem.eql(u8, &env1.dek_nonce, &env2.dek_nonce) and
             !std.mem.eql(u8, &env1.data_nonce, &env2.data_nonce) and
             !std.mem.eql(u8, &env1.encrypted_dek, &env2.encrypted_dek))
         {
-            printPass("Envelope uses fresh randomness");
+            printPass(io, "Envelope uses fresh randomness");
             passed += 1;
-        } else printFail("Envelope uses fresh randomness");
+        } else printFail(io, "Envelope uses fresh randomness");
     }
 
     // 11. PII detection: email + SSN
@@ -657,9 +664,9 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
             if (m.pii_type == .ssn and std.mem.eql(u8, "123-45-6789", input[m.start..m.end])) ssn_found = true;
         }
         if (email_found and ssn_found) {
-            printPass("PII detection: email + SSN");
+            printPass(io, "PII detection: email + SSN");
             passed += 1;
-        } else printFail("PII detection: email + SSN");
+        } else printFail(io, "PII detection: email + SSN");
     }
 
     // 12. PII redaction
@@ -671,9 +678,9 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         if (std.mem.indexOf(u8, redacted, "bob@example.com") == null and
             std.mem.indexOf(u8, redacted, "4111 1111 1111 1111") == null)
         {
-            printPass("PII redaction removes values");
+            printPass(io, "PII redaction removes values");
             passed += 1;
-        } else printFail("PII redaction removes values");
+        } else printFail(io, "PII redaction removes values");
     }
 
     // 13. HTML sanitization
@@ -685,13 +692,13 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
         if (std.mem.indexOf(u8, sanitized, "<script>") == null and
             std.mem.indexOf(u8, sanitized, "&lt;script&gt;") != null)
         {
-            printPass("HTML sanitization prevents XSS");
+            printPass(io, "HTML sanitization prevents XSS");
             passed += 1;
-        } else printFail("HTML sanitization prevents XSS");
+        } else printFail(io, "HTML sanitization prevents XSS");
     }
 
     const color = if (passed == 13) "\x1b[32m" else "\x1b[33m";
-    log.print("\n{s}{d}/13 tests passed\x1b[0m\n\n", .{ color, passed });
+    report(io, "\n{s}{d}/13 tests passed\x1b[0m\n\n", .{ color, passed });
     return passed;
 }
 
@@ -699,9 +706,13 @@ export fn crypto_run_all_tests() callconv(.c) c_int {
 // Tests — RFC known-answer vectors
 // ════════════════════════════════════════════════════════════════════════
 
-fn expectHex(expected: []const u8, actual: []const u8) !void {
+test "native test runner receives its io capability" {
+    try std.testing.expectEqual(@as(c_int, 13), runAllTests(std.testing.io));
+}
+
+fn expectHex(io: std.Io, expected: []const u8, actual: []const u8) !void {
     if (!std.mem.eql(u8, expected, actual)) {
-        log.print("expected: {s}\n  actual: {s}\n", .{ expected, actual });
+        report(io, "expected: {s}\n  actual: {s}\n", .{ expected, actual });
         return error.TestMismatch;
     }
 }
@@ -711,7 +722,7 @@ test "HMAC-SHA256 RFC 4231 known vector" {
     const mac = hmacSha256("key", "The quick brown fox jumps over the lazy dog");
     var hex: [64]u8 = undefined;
     bytesToHex(&mac, &hex);
-    try expectHex("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", &hex);
+    try expectHex(std.testing.io, "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", &hex);
 }
 
 test "HKDF RFC 5869 test case 1" {
@@ -724,6 +735,7 @@ test "HKDF RFC 5869 test case 1" {
         &out,
     );
     try expectHex(
+        std.testing.io,
         "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
         out[0..84],
     );
@@ -739,6 +751,7 @@ test "HKDF RFC 5869 test case 2" {
         &out,
     );
     try expectHex(
+        std.testing.io,
         "b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb41c65e590e09da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87",
         out[0..164],
     );
@@ -754,6 +767,7 @@ test "HKDF RFC 5869 test case 3 (empty salt/info)" {
         &out,
     );
     try expectHex(
+        std.testing.io,
         "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8",
         out[0..84],
     );
@@ -785,7 +799,7 @@ test "Shamir combine hex API matches Love2D vector" {
     const shares = [_][]const u8{ "cc", "3e", "b0" };
     var out: [4]u8 = undefined;
     _ = try shamirCombine(&indices, &shares, &out);
-    try expectHex("42", out[0..2]);
+    try expectHex(std.testing.io, "42", out[0..2]);
 }
 
 test "Envelope encrypt/decrypt round trip" {
@@ -794,7 +808,7 @@ test "Envelope encrypt/decrypt round trip" {
     var pt_bytes: [8]u8 = undefined;
     _ = try hexToBytes(plaintext, &pt_bytes);
 
-    const env = envelopeEncrypt(&pt_bytes, &kek);
+    const env = envelopeEncrypt(std.testing.io, &pt_bytes, &kek);
 
     var decrypted: [8]u8 = undefined;
     const pt_len = try envelopeDecrypt(&env, &kek, &decrypted);
@@ -807,7 +821,7 @@ test "Envelope rejects wrong KEK" {
     const kek_b = [_]u8{0x22} ** 32;
     const plaintext = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
 
-    const env = envelopeEncrypt(&plaintext, &kek_a);
+    const env = envelopeEncrypt(std.testing.io, &plaintext, &kek_a);
 
     var out: [4]u8 = undefined;
     const result = envelopeDecrypt(&env, &kek_b, &out);
@@ -818,8 +832,8 @@ test "Envelope uses fresh randomness" {
     const kek = [_]u8{0xEF} ** 32;
     const plaintext = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
 
-    const env1 = envelopeEncrypt(&plaintext, &kek);
-    const env2 = envelopeEncrypt(&plaintext, &kek);
+    const env1 = envelopeEncrypt(std.testing.io, &plaintext, &kek);
+    const env2 = envelopeEncrypt(std.testing.io, &plaintext, &kek);
 
     try std.testing.expect(!std.mem.eql(u8, &env1.dek_nonce, &env2.dek_nonce));
     try std.testing.expect(!std.mem.eql(u8, &env1.data_nonce, &env2.data_nonce));

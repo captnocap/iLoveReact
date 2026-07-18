@@ -26,7 +26,6 @@ pub const sdf_icons = @import("sdf_icons.zig");
 const scene3d = @import("3d.zig");
 pub const filters = @import("filters.zig");
 const log = @import("../diag/log.zig");
-const host_io = @import("../host_io.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Re-exports — callers use gpu.drawRect(), gpu.RectInstance, etc.
@@ -93,6 +92,7 @@ pub var g_gpu_ops: u32 = 0;
 
 var g_instance: ?*wgpu.Instance = null;
 var g_surface: ?*wgpu.Surface = null;
+var g_vsync_off: bool = false;
 
 // KMS / no-display-server mode: render surfaceless into an offscreen texture
 // and scan the result out via DRM (framework/render/kms.zig). Set by the
@@ -487,7 +487,7 @@ pub fn getFormat() wgpu.TextureFormat {
 
 /// Callback receives: pixel data (BGRA8), width, height, stride.
 /// The pixel data is only valid for the duration of the callback.
-pub const CaptureCallback = *const fn (pixels: [*]const u8, w: u32, h: u32, stride: u32) void;
+pub const CaptureCallback = *const fn (io: std.Io, pixels: [*]const u8, w: u32, h: u32, stride: u32) void;
 var g_capture_cb: ?CaptureCallback = null;
 var g_capture_requested: bool = false;
 
@@ -516,7 +516,7 @@ pub fn isCapturing() bool {
 /// Perform the actual readback. Called inside frame() after queue.submit(),
 /// before surface.present(). Uses a second encoder to copy texture→buffer,
 /// maps synchronously, and delivers pixels to the callback.
-fn performCapture(device: *wgpu.Device, q: *wgpu.Queue, texture: *wgpu.Texture) void {
+fn performCapture(io: std.Io, device: *wgpu.Device, q: *wgpu.Queue, texture: *wgpu.Texture) void {
     const cb = g_capture_cb orelse return;
     const w = g_width;
     const h = g_height;
@@ -560,7 +560,7 @@ fn performCapture(device: *wgpu.Device, q: *wgpu.Queue, texture: *wgpu.Texture) 
     const mapped: [*]const u8 = @ptrCast(mapped_ptr);
 
     // Deliver to callback (pixels are BGRA8, may have row padding)
-    cb(mapped, w, h, bytes_per_row);
+    cb(io, mapped, w, h, bytes_per_row);
 
     staging.unmap();
 
@@ -1994,7 +1994,7 @@ fn requestAdapterCallback(status: wgpu.RequestAdapterStatus, adapter: ?*wgpu.Ada
     completed.* = true;
 }
 
-fn requestAdapterSync(instance: *wgpu.Instance, options: ?*const wgpu.RequestAdapterOptions, polling_interval_nanoseconds: u64) wgpu.RequestAdapterResponse {
+fn requestAdapterSync(io: std.Io, instance: *wgpu.Instance, options: ?*const wgpu.RequestAdapterOptions, polling_interval_nanoseconds: u64) std.Io.Cancelable!wgpu.RequestAdapterResponse {
     var response: wgpu.RequestAdapterResponse = undefined;
     var completed = false;
     _ = instance.requestAdapter(options, .{
@@ -2004,7 +2004,7 @@ fn requestAdapterSync(instance: *wgpu.Instance, options: ?*const wgpu.RequestAda
     });
     instance.processEvents();
     while (!completed) {
-        std.Io.sleep(host_io.io(), .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake) catch continue;
+        try std.Io.sleep(io, .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake);
         instance.processEvents();
     }
     return response;
@@ -2021,7 +2021,7 @@ fn requestDeviceCallback(status: wgpu.RequestDeviceStatus, device: ?*wgpu.Device
     completed.* = true;
 }
 
-fn requestDeviceSync(adapter: *wgpu.Adapter, instance: *wgpu.Instance, descriptor: ?*const wgpu.DeviceDescriptor, polling_interval_nanoseconds: u64) wgpu.RequestDeviceResponse {
+fn requestDeviceSync(io: std.Io, adapter: *wgpu.Adapter, instance: *wgpu.Instance, descriptor: ?*const wgpu.DeviceDescriptor, polling_interval_nanoseconds: u64) std.Io.Cancelable!wgpu.RequestDeviceResponse {
     var response: wgpu.RequestDeviceResponse = undefined;
     var completed = false;
     _ = adapter.requestDevice(descriptor, .{
@@ -2031,13 +2031,13 @@ fn requestDeviceSync(adapter: *wgpu.Adapter, instance: *wgpu.Instance, descripto
     });
     instance.processEvents();
     while (!completed) {
-        std.Io.sleep(host_io.io(), .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake) catch continue;
+        try std.Io.sleep(io, .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake);
         instance.processEvents();
     }
     return response;
 }
 
-pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
+pub fn init(io: std.Io, environ: *const std.process.Environ.Map, window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     if (is_web) @compileError("Use initWeb() on wasm32 targets");
 
     // Create wgpu instance — Metal on macOS, Vulkan on Linux
@@ -2064,7 +2064,7 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     }
 
     // Request adapter (no compatible surface in KMS mode)
-    const adapter_response = requestAdapterSync(instance, &.{
+    const adapter_response = try requestAdapterSync(io, instance, &.{
         .compatible_surface = g_surface,
         .power_preference = .high_performance,
     }, 200_000_000);
@@ -2092,10 +2092,10 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     const have_adapter_limits = adapter.getLimits(&adapter_limits) == .success;
     adapter_limits.next_in_chain = null;
     const limits_desc = wgpu.DeviceDescriptor{ .required_limits = &adapter_limits };
-    var device_response = requestDeviceSync(adapter, instance, if (have_adapter_limits) &limits_desc else null, 200_000_000);
+    var device_response = try requestDeviceSync(io, adapter, instance, if (have_adapter_limits) &limits_desc else null, 200_000_000);
     if (device_response.status != .success and have_adapter_limits) {
         log.print("[gpu] device request with adapter limits failed — retrying with WebGPU defaults\n", .{});
-        device_response = requestDeviceSync(adapter, instance, null, 200_000_000);
+        device_response = try requestDeviceSync(io, adapter, instance, null, 200_000_000);
     }
     if (device_response.status != .success) {
         log.print("wgpu device request failed\n", .{});
@@ -2118,6 +2118,7 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     g_width = @intCast(w);
     g_height = @intCast(h);
 
+    g_vsync_off = if (environ.get("ZIGOS_VSYNC")) |value| std.mem.eql(u8, value, "0") else false;
     if (g_kms) {
         // No swapchain to configure — pick the readback-friendly format and
         // allocate the offscreen scanout target instead.
@@ -2352,7 +2353,7 @@ pub fn releasePanelTarget() void {
 /// the offscreen RT and never touches a surface. Globals + g_width/g_height are
 /// swapped to the panel's dims for the pass and restored before returning, so
 /// the next main frame is unaffected.
-pub fn renderPanelInto(w: u32, h: u32, paint_cb: *const fn () void) ?*wgpu.TextureView {
+pub fn renderPanelInto(io: std.Io, environ: *const std.process.Environ.Map, w: u32, h: u32, paint_cb: *const fn (std.Io, *const std.process.Environ.Map) void) ?*wgpu.TextureView {
     const device = g_device orelse return null;
     const queue = g_queue orelse return null;
     const target = ensurePanelTarget(w, h) orelse return null;
@@ -2377,7 +2378,7 @@ pub fn renderPanelInto(w: u32, h: u32, paint_cb: *const fn () void) ?*wgpu.Textu
 
     // Paint the panel subtree → fills the batches + queues its static/effect
     // captures + records scissor boundaries.
-    paint_cb();
+    paint_cb(io, environ);
 
     // Force-upload everything (the panel is small; skip the dirty-hash gate).
     writeGlobals(queue, w, h);
@@ -2391,7 +2392,7 @@ pub fn renderPanelInto(w: u32, h: u32, paint_cb: *const fn () void) ?*wgpu.Textu
     if (gcurve_fill.count() > 0) gcurve_fill.upload(queue);
 
     renderStaticSurfaceCaptures(device, queue);
-    scene3d.flushPending();
+    scene3d.flushPending(io, environ);
 
     const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("panel_rt") }) orelse {
         restorePanelGlobals(saved_w, saved_h);
@@ -2447,7 +2448,7 @@ fn restorePanelGlobals(saved_w: u32, saved_h: u32) void {
 }
 
 /// Render all queued primitives and present.
-pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
+pub fn frame(io: std.Io, environ: *const std.process.Environ.Map, bg_r: f64, bg_g: f64, bg_b: f64) void {
     const device = g_device orelse return;
     const queue = g_queue orelse return;
 
@@ -2471,9 +2472,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     const view: *wgpu.TextureView = blk: {
         if (g_kms) break :blk g_offscreen_view orelse return;
         const surface = g_surface orelse return;
-        const acquire_t0 = host_io.microTimestamp();
+        const acquire_t0 = std.Io.Clock.now(.awake, io).toMicroseconds();
         surface.getCurrentTexture(&surface_texture);
-        g_present_wait_us += @intCast(@max(0, host_io.microTimestamp() - acquire_t0));
+        g_present_wait_us += @intCast(@max(0, std.Io.Clock.now(.awake, io).toMicroseconds() - acquire_t0));
         if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) {
             if (surface_texture.texture) |t| t.release();
             if (g_width > 0 and g_height > 0) configureSurface(g_width, g_height);
@@ -2569,7 +2570,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     // samples a captured surface via textureKey reads THIS frame's content
     // (billboards / screens), and BEFORE the main pass so the composite quad
     // queued during the paint walk samples a freshly-rendered 3D RT.
-    scene3d.flushPending();
+    scene3d.flushPending(io, environ);
 
     const encoder = device.createCommandEncoder(&.{}) orelse return;
 
@@ -2614,7 +2615,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     // Sync readback requires device.poll() — not available on web.
     if (!is_web and g_capture_requested) {
         const cap_t = if (g_kms) g_offscreen else capture_tex;
-        if (cap_t) |t| performCapture(device, queue, t);
+        if (cap_t) |t| performCapture(io, device, queue, t);
     }
 
     if (g_kms) {
@@ -2622,9 +2623,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         presentKms();
     } else if (!is_web) {
         if (g_surface) |s| {
-            const present_t0 = host_io.microTimestamp();
+            const present_t0 = std.Io.Clock.now(.awake, io).toMicroseconds();
             _ = s.present();
-            g_present_wait_us += @intCast(@max(0, host_io.microTimestamp() - present_t0));
+            g_present_wait_us += @intCast(@max(0, std.Io.Clock.now(.awake, io).toMicroseconds() - present_t0));
         }
     }
 
@@ -2764,14 +2765,13 @@ fn configureSurface(width: u32, height: u32) void {
         }
     }
 
-    const vsync_off = if (is_web) false else if (host_io.getenv("ZIGOS_VSYNC")) |v| std.mem.eql(u8, v, "0") else false;
     const config = wgpu.SurfaceConfiguration{
         .device = device,
         .format = g_format,
         .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.copy_src,
         .width = width,
         .height = height,
-        .present_mode = if (vsync_off) .immediate else .fifo,
+        .present_mode = if (g_vsync_off) .immediate else .fifo,
         .alpha_mode = .auto,
     };
     surface.configure(&config);

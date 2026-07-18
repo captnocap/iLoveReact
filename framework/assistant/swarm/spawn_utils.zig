@@ -3,7 +3,6 @@
 //! Shared utilities for spawning teammates across different backends.
 
 const std = @import("std");
-const host_io = @import("../../host_io.zig");
 const constants = @import("constants.zig");
 
 /// Environment variables to forward to spawned teammates
@@ -43,16 +42,12 @@ pub const CliFlagOptions = struct {
 
 /// Get the command to use for spawning team members
 /// Checks TEAMMATE_COMMAND_ENV_VAR first, then falls back to default
-pub fn getTeammateCommand() ?[]const u8 {
+pub fn getTeammateCommand(environ_map: *const std.process.Environ.Map) ?[]const u8 {
     // Check environment variable first
-    if (host_io.getEnvVarOwned(std.heap.page_allocator, constants.TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
-        return cmd;
-    } else |_| {}
+    if (environ_map.get(constants.TEAMMATE_COMMAND_ENV_VAR)) |cmd| return cmd;
 
     // Try legacy env var
-    if (host_io.getEnvVarOwned(std.heap.page_allocator, constants.LEGACY_TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
-        return cmd;
-    } else |_| {}
+    if (environ_map.get(constants.LEGACY_TEAMMATE_COMMAND_ENV_VAR)) |cmd| return cmd;
 
     return null;
 }
@@ -62,15 +57,15 @@ pub fn buildInheritedCliFlags(
     allocator: std.mem.Allocator,
     options: CliFlagOptions,
 ) error{OutOfMemory}![]const u8 {
-    var flags = std.ArrayList([]const u8).init(allocator);
-    defer flags.deinit();
+    var flags: std.ArrayList(u8) = .empty;
+    defer flags.deinit(allocator);
 
     // Permission mode flags
     if (!options.plan_mode_required) {
         if (options.permission_mode) |mode| {
             switch (mode) {
-                .bypass_permissions => try flags.append("--dangerously-skip-permissions"),
-                .accept_edits => try flags.append("--permission-mode acceptEdits"),
+                .bypass_permissions => try appendPart(allocator, &flags, "--dangerously-skip-permissions"),
+                .accept_edits => try appendPart(allocator, &flags, "--permission-mode acceptEdits"),
                 else => {},
             }
         }
@@ -78,46 +73,59 @@ pub fn buildInheritedCliFlags(
 
     // Model override
     if (options.model_override) |model| {
-        try flags.append(try std.fmt.allocPrint(allocator, "--model {s}", .{model}));
+        const flag = try std.fmt.allocPrint(allocator, "--model {s}", .{model});
+        defer allocator.free(flag);
+        try appendPart(allocator, &flags, flag);
     }
 
     // Settings path
     if (options.settings_path) |path| {
-        try flags.append(try std.fmt.allocPrint(allocator, "--settings {s}", .{path}));
+        const flag = try std.fmt.allocPrint(allocator, "--settings {s}", .{path});
+        defer allocator.free(flag);
+        try appendPart(allocator, &flags, flag);
     }
 
     // Chrome flag
     if (options.chrome_override) |chrome| {
         if (chrome) {
-            try flags.append("--chrome");
+            try appendPart(allocator, &flags, "--chrome");
         } else {
-            try flags.append("--no-chrome");
+            try appendPart(allocator, &flags, "--no-chrome");
         }
     }
 
-    return try std.mem.join(allocator, " ", flags.items);
+    return try flags.toOwnedSlice(allocator);
 }
 
 /// Build environment variable string for teammate spawn
-pub fn buildInheritedEnvVars(allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
-    var env_vars = std.ArrayList([]const u8).init(allocator);
-    defer env_vars.deinit();
+pub fn buildInheritedEnvVars(
+    environ_map: *const std.process.Environ.Map,
+    allocator: std.mem.Allocator,
+) error{OutOfMemory}![]const u8 {
+    var env_vars: std.ArrayList(u8) = .empty;
+    defer env_vars.deinit(allocator);
 
     // Base env vars
-    try env_vars.append("AGENTCODE=1");
-    try env_vars.append("AGENT_EXPERIMENTAL_TEAMS=1");
+    try appendPart(allocator, &env_vars, "AGENTCODE=1");
+    try appendPart(allocator, &env_vars, "AGENT_EXPERIMENTAL_TEAMS=1");
 
     // Forward configured env vars
     for (TEAMMATE_ENV_VARS) |key| {
-        if (host_io.getEnvVarOwned(allocator, key)) |value| {
-            defer allocator.free(value);
-            try env_vars.append(try std.fmt.allocPrint(allocator, "{s}={s}", .{ key, value }));
-        } else |_| {
+        if (environ_map.get(key)) |value| {
+            const assignment = try std.fmt.allocPrint(allocator, "{s}={s}", .{ key, value });
+            defer allocator.free(assignment);
+            try appendPart(allocator, &env_vars, assignment);
+        } else {
             // Env var not set, skip
         }
     }
 
-    return try std.mem.join(allocator, " ", env_vars.items);
+    return try env_vars.toOwnedSlice(allocator);
+}
+
+fn appendPart(allocator: std.mem.Allocator, out: *std.ArrayList(u8), part: []const u8) !void {
+    if (out.items.len > 0) try out.append(allocator, ' ');
+    try out.appendSlice(allocator, part);
 }
 
 /// Quote a string for shell safety (simplified)
@@ -136,20 +144,20 @@ pub fn shellQuote(allocator: std.mem.Allocator, s: []const u8) error{OutOfMemory
     }
 
     // Use single quotes and escape any single quotes in the string
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result: std.ArrayList(u8) = .empty;
+    defer result.deinit(allocator);
 
-    try result.append('\'');
+    try result.append(allocator, '\'');
     for (s) |c| {
         if (c == '\'') {
-            try result.appendSlice("'\"'\"'");
+            try result.appendSlice(allocator, "'\"'\"'");
         } else {
-            try result.append(c);
+            try result.append(allocator, c);
         }
     }
-    try result.append('\'');
+    try result.append(allocator, '\'');
 
-    return try result.toOwnedSlice();
+    return try result.toOwnedSlice(allocator);
 }
 
 // =============================================================================

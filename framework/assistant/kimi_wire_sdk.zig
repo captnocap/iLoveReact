@@ -14,9 +14,8 @@
 //! structured turn, status, tool, and replay events directly.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
-const posix = @import("../net/sysx.zig");
 const ReadBuffer = @import("claude_sdk/buffer.zig").ReadBuffer;
+const ChildStdout = @import("claude_sdk/child_stdout.zig").ChildStdout;
 
 pub const VERSION = "0.1.0";
 pub const default_kimi_bin = "kimi";
@@ -85,10 +84,10 @@ pub const Event = struct {
     pub fn statusUsage(self: *const Event) TokenUsage {
         if (!std.mem.eql(u8, self.event_type, "StatusUpdate")) return .{};
         return .{
-            .input_tokens = uintFromPath(self.payload, &.{"token_usage", "input_other"}) orelse 0,
-            .output_tokens = uintFromPath(self.payload, &.{"token_usage", "output"}) orelse 0,
-            .cache_creation_input_tokens = uintFromPath(self.payload, &.{"token_usage", "input_cache_creation"}) orelse 0,
-            .cache_read_input_tokens = uintFromPath(self.payload, &.{"token_usage", "input_cache_read"}) orelse 0,
+            .input_tokens = uintFromPath(self.payload, &.{ "token_usage", "input_other" }) orelse 0,
+            .output_tokens = uintFromPath(self.payload, &.{ "token_usage", "output" }) orelse 0,
+            .cache_creation_input_tokens = uintFromPath(self.payload, &.{ "token_usage", "input_cache_creation" }) orelse 0,
+            .cache_read_input_tokens = uintFromPath(self.payload, &.{ "token_usage", "input_cache_read" }) orelse 0,
         };
     }
 };
@@ -172,50 +171,56 @@ pub const TokenUsage = struct {
 };
 
 pub const Session = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     options: SessionOptions,
     child: std.process.Child,
+    stdout: ?ChildStdout,
     line_buf: ReadBuffer,
     chunk: [8192]u8 = undefined,
     pending_inbound: std.ArrayList(OwnedInbound) = .empty,
     next_request_seq: u64 = 1,
     last_rpc_error: ?[]u8 = null,
     closed: bool = false,
+    reaped: bool = false,
 
-    pub fn init(allocator: std.mem.Allocator, options: SessionOptions) !Session {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, options: SessionOptions) !Session {
         if (options.continue_session and options.session_id != null) return error.InvalidOptions;
 
         var argv = try buildArgv(allocator, options);
         defer argv.deinit(allocator);
 
-        const child = std.process.spawn(host_io.io(), .{
+        var child = std.process.spawn(io, .{
             .argv = argv.items,
             .cwd = if (options.cwd) |c| .{ .path = c } else .inherit,
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = if (options.inherit_stderr) .inherit else .ignore,
         }) catch return error.SpawnFailed;
-        if (child.stdout) |stdout| {
-            setNonBlocking(stdout.handle) catch {};
-        }
+        errdefer child.kill(io);
+        const stdout_file = child.stdout orelse return error.SpawnFailed;
+        child.stdout = null;
+        const stdout = try ChildStdout.init(allocator, io, stdout_file);
 
         return .{
+            .io = io,
             .allocator = allocator,
             .options = options,
             .child = child,
+            .stdout = stdout,
             .line_buf = ReadBuffer.init(allocator),
         };
     }
 
     pub fn deinit(self: *Session) void {
-        if (!self.closed) {
-            if (self.child.stdin) |stdin| {
-                stdin.close(host_io.io());
-                self.child.stdin = null;
-            }
-            self.child.kill(host_io.io());
-            self.closed = true;
+        if (self.child.stdin) |stdin| {
+            stdin.close(self.io);
+            self.child.stdin = null;
         }
+        self.stopStdout();
+        if (!self.reaped) self.child.kill(self.io);
+        self.closed = true;
+        self.reaped = true;
         for (self.pending_inbound.items) |*owned| owned.deinit();
         self.pending_inbound.deinit(self.allocator);
         self.line_buf.deinit();
@@ -223,13 +228,16 @@ pub const Session = struct {
     }
 
     pub fn close(self: *Session) !void {
-        if (self.closed) return;
+        if (self.reaped) return;
         self.closed = true;
         if (self.child.stdin) |stdin| {
-            stdin.close(host_io.io());
+            stdin.close(self.io);
             self.child.stdin = null;
         }
-        _ = self.child.wait(host_io.io()) catch {};
+        if (self.stdout) |*stdout| stdout.discard();
+        defer self.stopStdout();
+        _ = try self.child.wait(self.io);
+        self.reaped = true;
     }
 
     pub fn initialize(self: *Session, options: InitializeOptions) !InitializeResult {
@@ -245,15 +253,15 @@ pub const Session = struct {
 
         const result = owned.response.result orelse return error.InvalidResponse;
         const protocol_version = getStringPath(result, &.{"protocol_version"}) orelse return error.InvalidResponse;
-        const server_name = getStringPath(result, &.{"server", "name"}) orelse return error.InvalidResponse;
-        const server_version = getStringPath(result, &.{"server", "version"}) orelse return error.InvalidResponse;
+        const server_name = getStringPath(result, &.{ "server", "name" }) orelse return error.InvalidResponse;
+        const server_version = getStringPath(result, &.{ "server", "version" }) orelse return error.InvalidResponse;
 
         return .{
             .arena = owned.arena,
             .protocol_version = protocol_version,
             .server_name = server_name,
             .server_version = server_version,
-            .supports_question = boolFromPath(result, &.{"capabilities", "supports_question"}) orelse false,
+            .supports_question = boolFromPath(result, &.{ "capabilities", "supports_question" }) orelse false,
         };
     }
 
@@ -296,21 +304,23 @@ pub const Session = struct {
                 return parsed;
             }
 
-            const stdout = self.child.stdout orelse return null;
-            const n = posix.read(stdout.handle, &self.chunk) catch |err| switch (err) {
-                error.WouldBlock => return null,
-                else => return error.ReadError,
-            };
-            if (n == 0) {
-                self.closed = true;
-                if (self.child.stdin) |stdin| {
-                    stdin.close(host_io.io());
-                    self.child.stdin = null;
-                }
-                return null;
+            const stdout = if (self.stdout) |*value| value else return null;
+            switch (stdout.drain(&self.chunk)) {
+                .empty => return null,
+                .data => |n| {
+                    try self.line_buf.append(self.chunk[0..n]);
+                    if (self.line_buf.buffer.items.len > self.options.max_line_bytes)
+                        return error.LineTooLong;
+                },
+                .closed => {
+                    self.finishStdout();
+                    return null;
+                },
+                .failed => {
+                    self.finishStdout();
+                    return error.ReadError;
+                },
             }
-            try self.line_buf.append(self.chunk[0..n]);
-            if (self.line_buf.buffer.items.len > self.options.max_line_bytes) return error.LineTooLong;
         }
     }
 
@@ -338,7 +348,7 @@ pub const Session = struct {
                 }
             }
             if (self.closed) return error.SessionClosed;
-            host_io.sleep(1 * std.time.ns_per_ms);
+            try std.Io.sleep(self.io, .fromMilliseconds(1), .awake);
         }
     }
 
@@ -459,7 +469,7 @@ pub const Session = struct {
     fn writeLine(self: *Session, line: []const u8) !void {
         if (self.closed) return error.SessionClosed;
         const stdin = self.child.stdin orelse return error.SessionClosed;
-        stdin.writeStreamingAll(host_io.io(), line) catch return error.WriteError;
+        stdin.writeStreamingAll(self.io, line) catch return error.WriteError;
     }
 
     fn requireOk(self: *Session, response: *const Response) !void {
@@ -467,6 +477,20 @@ pub const Session = struct {
         if (self.last_rpc_error) |value| self.allocator.free(value);
         self.last_rpc_error = try dupOpt(self.allocator, response.error_message);
         return error.RemoteError;
+    }
+
+    fn finishStdout(self: *Session) void {
+        self.closed = true;
+        if (self.child.stdin) |stdin| {
+            stdin.close(self.io);
+            self.child.stdin = null;
+        }
+        self.stopStdout();
+    }
+
+    fn stopStdout(self: *Session) void {
+        if (self.stdout) |*stdout| stdout.deinit();
+        self.stdout = null;
     }
 };
 
@@ -617,11 +641,6 @@ fn buildUserInputParamsJson(allocator: std.mem.Allocator, input: UserInput) ![]u
     return try buf.toOwnedSlice(allocator);
 }
 
-fn setNonBlocking(fd: posix.fd_t) !void {
-    const flags = try posix.fcntl(fd, posix.F.GETFL, 0);
-    _ = try posix.fcntl(fd, posix.F.SETFL, flags | @as(u32, @bitCast(posix.O{ .NONBLOCK = true })));
-}
-
 fn appendJsonKeyValueString(
     allocator: std.mem.Allocator,
     buf: *std.ArrayList(u8),
@@ -767,8 +786,7 @@ test "buildArgv adds wire and session controls" {
 
 test "parseInboundJson parses event envelopes" {
     const allocator = std.testing.allocator;
-    var owned = try parseInboundJson(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"text\",\"text\":\"hello\"}}}");
+    var owned = try parseInboundJson(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"ContentPart\",\"payload\":{\"type\":\"text\",\"text\":\"hello\"}}}");
     defer owned.deinit();
 
     switch (owned.msg) {
@@ -783,8 +801,7 @@ test "parseInboundJson parses event envelopes" {
 
 test "parseInboundJson parses request envelopes" {
     const allocator = std.testing.allocator;
-    var owned = try parseInboundJson(allocator,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"request\",\"id\":\"abc\",\"params\":{\"type\":\"ToolCallRequest\",\"payload\":{\"id\":\"tc-1\",\"name\":\"open_in_ide\"}}}");
+    var owned = try parseInboundJson(allocator, "{\"jsonrpc\":\"2.0\",\"method\":\"request\",\"id\":\"abc\",\"params\":{\"type\":\"ToolCallRequest\",\"payload\":{\"id\":\"tc-1\",\"name\":\"open_in_ide\"}}}");
     defer owned.deinit();
 
     switch (owned.msg) {
@@ -799,8 +816,7 @@ test "parseInboundJson parses request envelopes" {
 
 test "parseInboundJson parses response envelopes" {
     const allocator = std.testing.allocator;
-    var owned = try parseInboundJson(allocator,
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"result\":{\"status\":\"finished\"}}");
+    var owned = try parseInboundJson(allocator, "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"result\":{\"status\":\"finished\"}}");
     defer owned.deinit();
 
     switch (owned.msg) {
@@ -811,4 +827,32 @@ test "parseInboundJson parses response envelopes" {
         },
         else => return error.UnexpectedMessageType,
     }
+}
+
+test "Session observes child stdout EOF through injected Io" {
+    const io = std.testing.io;
+    var session = try Session.init(io, std.testing.allocator, .{
+        .launch_args_override = &.{"/bin/true"},
+        .inherit_stderr = false,
+    });
+    defer session.deinit();
+
+    for (0..1_000) |_| {
+        try std.testing.expect((try session.poll()) == null);
+        if (session.closed) break;
+        try std.Io.sleep(io, .fromMilliseconds(1), .awake);
+    } else return error.SessionDidNotObserveEof;
+}
+
+test "Session close keeps draining output until child exit" {
+    const io = std.testing.io;
+    var session = try Session.init(io, std.testing.allocator, .{
+        .launch_args_override = &.{ "/usr/bin/head", "-c", "1048576", "/dev/zero" },
+        .inherit_stderr = false,
+    });
+    defer session.deinit();
+
+    try session.close();
+    try std.testing.expect(session.reaped);
+    try std.testing.expect(session.stdout == null);
 }

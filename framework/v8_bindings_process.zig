@@ -16,18 +16,14 @@
 //!   __ffiEmit('proc:exit:<pid>', '{"code":N,"signal":null}')
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
 const builtin = @import("builtin");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const process = @import("process/process.zig");
 const event_bus = @import("diag/event_bus.zig");
 
 const alloc = std.heap.c_allocator;
-
-extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
-extern fn close(fd: c_int) c_int;
-extern fn read(fd: c_int, buf: [*]u8, count: usize) isize;
 
 // ── Registry ───────────────────────────────────────────────────────
 
@@ -41,6 +37,8 @@ const Entry = struct {
     out_len: usize = 0,
     err_buf: [STDERR_BUF]u8 = undefined,
     err_len: usize = 0,
+    stdout_done: bool,
+    stderr_done: bool,
 };
 
 var g_entries: std.ArrayList(*Entry) = .empty;
@@ -52,16 +50,13 @@ fn findEntry(pid: c_int) ?*Entry {
     return null;
 }
 
-fn removeEntry(pid: c_int) void {
+fn removeEntry(io: std.Io, pid: c_int) void {
     var i: usize = g_entries.items.len;
     while (i > 0) {
         i -= 1;
         if (g_entries.items[i].pid == pid) {
             const e = g_entries.items[i];
-            if (e.piped.stdin_fd >= 0) _ = close(e.piped.stdin_fd);
-            if (e.piped.stdout_fd >= 0) _ = close(e.piped.stdout_fd);
-            if (e.piped.stderr_fd >= 0) _ = close(e.piped.stderr_fd);
-            e.piped.process.closeProccess();
+            e.piped.deinit(io);
             alloc.destroy(e);
             _ = g_entries.orderedRemove(i);
             return;
@@ -88,7 +83,7 @@ fn argToI32(info: v8.FunctionCallbackInfo, idx: u32) ?i32 {
     return info.getArg(idx).toI32(ctx) catch null;
 }
 
-fn emitEvent(channel: []const u8, payload: []const u8) void {
+fn emitEvent(host: *HostContext, channel: []const u8, payload: []const u8) void {
     var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
@@ -101,7 +96,7 @@ fn emitEvent(channel: []const u8, payload: []const u8) void {
     payload_buf.append(alloc, 0) catch return;
     const payload_z = payload_buf.items[0 .. payload_buf.items.len - 1 :0];
 
-    v8_runtime.callGlobal2Str("__ffiEmit", chan_z, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", chan_z, payload_z);
 }
 
 // ── Spec JSON parsing ──────────────────────────────────────────────
@@ -166,22 +161,13 @@ fn parseArgsArray(json: []const u8) ?[][:0]u8 {
 
 fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     if (info.length() < 1) return;
     const spec_json = argToStringAlloc(info, 0) orelse return;
     defer alloc.free(spec_json);
 
     const cmd_slice = extractStringField(spec_json, "cmd") orelse return;
-    const cmd_z = alloc.allocSentinel(u8, cmd_slice.len, 0) catch return;
-    @memcpy(cmd_z[0..cmd_slice.len], cmd_slice);
-    defer alloc.free(cmd_z);
-
     const cwd_slice = extractStringField(spec_json, "cwd");
-    const cwd_z: ?[:0]u8 = if (cwd_slice) |c| blk: {
-        const z = alloc.allocSentinel(u8, c.len, 0) catch break :blk null;
-        @memcpy(z[0..c.len], c);
-        break :blk z;
-    } else null;
-    defer if (cwd_z) |z| alloc.free(z);
 
     const args = parseArgsArray(spec_json);
     defer if (args) |a| {
@@ -189,7 +175,6 @@ fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         alloc.free(a);
     };
 
-    // Build a null-terminated argv pointer array (excluding argv[0]; spawnPiped adds exe).
     // The previous cap of 32 silently truncated longer commands — magick
     // chains in cart/cutout/backends/flood.ts blow this when the user
     // accumulates ~25+ click masks, and the partial command then fails with
@@ -197,27 +182,28 @@ fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     // magick because trailing args got dropped. 1024 covers any realistic
     // cart and is still well under POSIX ARG_MAX (~131072).
     const MAX_ARGV: usize = 1024;
-    var argv_buf: [MAX_ARGV + 1]?[*:0]const u8 = undefined;
+    var native_argv: [MAX_ARGV + 1][]const u8 = undefined;
+    native_argv[0] = cmd_slice;
     var argv_count: usize = 0;
     if (args) |a| {
         for (a) |s| {
             if (argv_count >= MAX_ARGV) break;
-            argv_buf[argv_count] = s.ptr;
+            native_argv[argv_count + 1] = s;
             argv_count += 1;
         }
     }
-    argv_buf[argv_count] = null;
 
     const stdin_mode = extractStringField(spec_json, "stdin") orelse "pipe";
     const pipe_stdin = std.mem.eql(u8, stdin_mode, "pipe");
 
-    const piped = process.spawnPiped(.{
-        .exe = cmd_z.ptr,
-        .args = if (argv_count > 0) @as([*]const ?[*:0]const u8, &argv_buf) else null,
-        .cwd = if (cwd_z) |z| z.ptr else null,
-        .pipe_stdin = pipe_stdin,
-        .pipe_stdout = true,
-        .pipe_stderr = true,
+    const piped = process.spawnPiped(alloc, host.io, .{
+        .argv = native_argv[0 .. argv_count + 1],
+        .cwd = if (cwd_slice) |cwd| .{ .path = cwd } else .inherit,
+        .environ_map = host.environ,
+        .pgid = 0,
+        .stdin = if (pipe_stdin) .pipe else if (std.mem.eql(u8, stdin_mode, "ignore")) .ignore else .inherit,
+        .stdout = .pipe,
+        .stderr = .pipe,
     }) catch {
         var pbuf: [512]u8 = undefined;
         if (std.fmt.bufPrint(&pbuf, "{{\"cmd\":\"{s}\",\"argc\":{d}}}", .{ cmd_slice, argv_count })) |p| {
@@ -241,14 +227,21 @@ fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         _ = event_bus.emit("proc.spawn", "v8_bindings_process", null, "{}");
     }
 
+    var owned_piped = piped;
     const e = alloc.create(Entry) catch {
-        // Best effort cleanup; the process is already spawned.
+        owned_piped.deinit(host.io);
         const ret = info.getReturnValue();
         ret.set(v8.Integer.initI32(info.getIsolate(), 0));
         return;
     };
-    e.* = .{ .pid = piped.process.pid, .piped = piped };
+    e.* = .{
+        .pid = owned_piped.process.pid,
+        .piped = owned_piped,
+        .stdout_done = !owned_piped.hasStdout(),
+        .stderr_done = !owned_piped.hasStderr(),
+    };
     g_entries.append(alloc, e) catch {
+        e.piped.deinit(host.io);
         alloc.destroy(e);
         const ret = info.getReturnValue();
         ret.set(v8.Integer.initI32(info.getIsolate(), 0));
@@ -256,7 +249,7 @@ fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
 
     const ret = info.getReturnValue();
-    ret.set(v8.Integer.initI32(info.getIsolate(), piped.process.pid));
+    ret.set(v8.Integer.initI32(info.getIsolate(), e.pid));
 }
 
 fn hostKill(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -279,6 +272,7 @@ fn hostKill(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostStdinWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     if (info.length() < 2) return;
     const pid = argToI32(info, 0) orelse return;
     const data = argToStringAlloc(info, 1) orelse return;
@@ -289,47 +283,48 @@ fn hostStdinWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         ret.set(v8.Boolean.init(info.getIsolate(), false));
         return;
     };
-    if (e.piped.stdin_fd < 0) {
-        const ret = info.getReturnValue();
-        ret.set(v8.Boolean.init(info.getIsolate(), false));
-        return;
-    }
-    const n = write(e.piped.stdin_fd, data.ptr, data.len);
     const ret = info.getReturnValue();
-    ret.set(v8.Boolean.init(info.getIsolate(), n >= 0));
+    ret.set(v8.Boolean.init(info.getIsolate(), e.piped.writeStdin(io, data)));
 }
 
 fn hostStdinClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
     if (info.length() < 1) return;
     const pid = argToI32(info, 0) orelse return;
     const e = findEntry(pid) orelse return;
-    if (e.piped.stdin_fd >= 0) {
-        _ = close(e.piped.stdin_fd);
-        e.piped.stdin_fd = -1;
-    }
+    e.piped.closeStdin(io);
 }
 
 // ── Tick drain ─────────────────────────────────────────────────────
 
-/// Drain pipe into entry buffer, emit complete lines on the given channel.
-fn drainPipe(fd: c_int, buf: []u8, len: *usize, channel: []const u8) void {
-    if (fd < 0) return;
+const PipeKind = enum { stdout, stderr };
+
+/// Drain a native file-pump queue into the line buffer. Returns true once the
+/// pipe has reached EOF (or failed), after all queued bytes were consumed.
+fn drainPipe(host: *HostContext, piped: *process.PipedProcess, kind: PipeKind, buf: []u8, len: *usize, channel: []const u8) bool {
     while (true) {
         if (len.* >= buf.len) {
             // Buffer full with no newline — flush as-is to keep moving.
-            emitEvent(channel, buf[0..len.*]);
+            emitEvent(host, channel, buf[0..len.*]);
             len.* = 0;
         }
-        const n = read(fd, buf.ptr + len.*, buf.len - len.*);
-        if (n <= 0) break;
-        len.* += @intCast(n);
+        const result = switch (kind) {
+            .stdout => piped.drainStdout(buf[len.*..]),
+            .stderr => piped.drainStderr(buf[len.*..]),
+        };
+        const n = switch (result) {
+            .empty => return false,
+            .closed, .failed => return true,
+            .data => |count| count,
+        };
+        len.* += n;
 
         // Emit each complete line.
         while (true) {
             const slice = buf[0..len.*];
             const nl = std.mem.indexOfScalar(u8, slice, '\n') orelse break;
-            emitEvent(channel, buf[0..nl]);
+            emitEvent(host, channel, buf[0..nl]);
             const remaining = len.* - (nl + 1);
             if (remaining > 0) std.mem.copyForwards(u8, buf[0..remaining], buf[nl + 1 .. len.*]);
             len.* = remaining;
@@ -337,51 +332,66 @@ fn drainPipe(fd: c_int, buf: []u8, len: *usize, channel: []const u8) void {
     }
 }
 
-pub fn tickDrain() void {
+fn formatTermination(buffer: []u8, term: ?process.Term) ?[]const u8 {
+    const native_term = term orelse return std.fmt.bufPrint(buffer, "{{\"code\":-1,\"signal\":null}}", .{}) catch null;
+    return switch (native_term) {
+        .exited => |code| std.fmt.bufPrint(buffer, "{{\"code\":{d},\"signal\":null}}", .{code}) catch null,
+        .signal => |signal| std.fmt.bufPrint(buffer, "{{\"code\":-1,\"signal\":\"SIG{s}\"}}", .{@tagName(signal)}) catch null,
+        .stopped => |signal| std.fmt.bufPrint(buffer, "{{\"code\":-1,\"signal\":\"SIG{s}\"}}", .{@tagName(signal)}) catch null,
+        .unknown => std.fmt.bufPrint(buffer, "{{\"code\":-1,\"signal\":null}}", .{}) catch null,
+    };
+}
+
+pub fn tickDrain(host: *HostContext) void {
     var i: usize = 0;
     while (i < g_entries.items.len) {
         const e = g_entries.items[i];
         var chan_buf: [64]u8 = undefined;
 
-        if (std.fmt.bufPrint(&chan_buf, "proc:stdout:{d}", .{e.pid})) |chan| {
-            drainPipe(e.piped.stdout_fd, &e.out_buf, &e.out_len, chan);
-        } else |_| {}
+        if (!e.stdout_done) {
+            if (std.fmt.bufPrint(&chan_buf, "proc:stdout:{d}", .{e.pid})) |chan| {
+                e.stdout_done = drainPipe(host, &e.piped, .stdout, &e.out_buf, &e.out_len, chan);
+            } else |_| {}
+        }
 
-        if (std.fmt.bufPrint(&chan_buf, "proc:stderr:{d}", .{e.pid})) |chan| {
-            drainPipe(e.piped.stderr_fd, &e.err_buf, &e.err_len, chan);
-        } else |_| {}
+        if (!e.stderr_done) {
+            if (std.fmt.bufPrint(&chan_buf, "proc:stderr:{d}", .{e.pid})) |chan| {
+                e.stderr_done = drainPipe(host, &e.piped, .stderr, &e.err_buf, &e.err_len, chan);
+            } else |_| {}
+        }
 
-        // Check if the process has exited. alive() reaps zombie if so.
-        if (!e.piped.process.alive()) {
+        // The waiter task publishes termination independently of the two file
+        // pumps. Do not emit exit until both queues have reached EOF, or the
+        // final bytes could be lost behind the exit event.
+        if (!e.piped.process.alive() and e.stdout_done and e.stderr_done) {
             // Flush any trailing data without trailing newlines.
             if (e.out_len > 0) {
                 if (std.fmt.bufPrint(&chan_buf, "proc:stdout:{d}", .{e.pid})) |chan| {
-                    emitEvent(chan, e.out_buf[0..e.out_len]);
+                    emitEvent(host, chan, e.out_buf[0..e.out_len]);
                 } else |_| {}
                 e.out_len = 0;
             }
             if (e.err_len > 0) {
                 if (std.fmt.bufPrint(&chan_buf, "proc:stderr:{d}", .{e.pid})) |chan| {
-                    emitEvent(chan, e.err_buf[0..e.err_len]);
+                    emitEvent(host, chan, e.err_buf[0..e.err_len]);
                 } else |_| {}
                 e.err_len = 0;
             }
 
-            const code = e.piped.process.exitCode();
             var pl: [64]u8 = undefined;
             if (std.fmt.bufPrint(&chan_buf, "proc:exit:{d}", .{e.pid})) |chan| {
-                if (std.fmt.bufPrint(&pl, "{{\"code\":{d},\"signal\":null}}", .{code})) |payload| {
-                    emitEvent(chan, payload);
-                } else |_| {}
+                if (formatTermination(&pl, e.piped.process.termination())) |payload| {
+                    emitEvent(host, chan, payload);
+                }
             } else |_| {}
 
-            removeEntry(e.pid);
+            removeEntry(host.io, e.pid);
             // Don't increment i; next entry shifted into position.
             continue;
         }
         i += 1;
     }
-    tickWatches();
+    tickWatches(host);
 }
 
 // ── Per-process memory + cpu watcher ───────────────────────────────
@@ -436,13 +446,13 @@ fn parseFirstU64(line: []const u8) u64 {
     return std.fmt.parseInt(u64, line[start..p], 10) catch 0;
 }
 
-fn systemMemTotal() u64 {
+fn systemMemTotal(io: std.Io) u64 {
     if (g_mem_total > 0) return g_mem_total;
     if (comptime builtin.os.tag != .linux) return 0;
-    var file = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/meminfo", .{}) catch return 0;
-    defer file.close(host_io.io());
+    var file = std.Io.Dir.openFileAbsolute(io, "/proc/meminfo", .{}) catch return 0;
+    defer file.close(io);
     var buf: [4096]u8 = undefined;
-    const n = file.readStreaming(host_io.io(), &.{&buf}) catch return 0;
+    const n = file.readStreaming(io, &.{&buf}) catch return 0;
     var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
     while (line_iter.next()) |line| {
         if (std.mem.startsWith(u8, line, "MemTotal:")) {
@@ -455,7 +465,7 @@ fn systemMemTotal() u64 {
 
 const ProcSample = struct { rss: u64, vsize: u64, utime: u64, stime: u64 };
 
-fn readProcSample(pid: c_int) ?ProcSample {
+fn readProcSample(io: std.Io, pid: c_int) ?ProcSample {
     if (comptime builtin.os.tag != .linux) return null;
     if (pid <= 0) return null;
     var path_buf: [64]u8 = undefined;
@@ -465,10 +475,10 @@ fn readProcSample(pid: c_int) ?ProcSample {
     var rss: u64 = 0;
     var vsize: u64 = 0;
     {
-        var file = std.Io.Dir.openFileAbsolute(host_io.io(), status_path, .{}) catch return null;
-        defer file.close(host_io.io());
+        var file = std.Io.Dir.openFileAbsolute(io, status_path, .{}) catch return null;
+        defer file.close(io);
         var buf: [8192]u8 = undefined;
-        const n = file.readStreaming(host_io.io(), &.{&buf}) catch return null;
+        const n = file.readStreaming(io, &.{&buf}) catch return null;
         var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
         while (line_iter.next()) |line| {
             if (std.mem.startsWith(u8, line, "VmRSS:")) rss = parseFirstU64(line) * 1024 else if (std.mem.startsWith(u8, line, "VmSize:")) vsize = parseFirstU64(line) * 1024;
@@ -482,10 +492,10 @@ fn readProcSample(pid: c_int) ?ProcSample {
     var utime: u64 = 0;
     var stime: u64 = 0;
     {
-        var file = std.Io.Dir.openFileAbsolute(host_io.io(), stat_path, .{}) catch return null;
-        defer file.close(host_io.io());
+        var file = std.Io.Dir.openFileAbsolute(io, stat_path, .{}) catch return null;
+        defer file.close(io);
         var buf: [4096]u8 = undefined;
-        const n = file.readStreaming(host_io.io(), &.{&buf}) catch return null;
+        const n = file.readStreaming(io, &.{&buf}) catch return null;
         const slice = buf[0..n];
         const close_paren = std.mem.lastIndexOfScalar(u8, slice, ')') orelse return null;
         var p = close_paren + 1;
@@ -507,7 +517,7 @@ fn readProcSample(pid: c_int) ?ProcSample {
     return .{ .rss = rss, .vsize = vsize, .utime = utime, .stime = stime };
 }
 
-fn emitRamSample(pid: c_int, rss: u64, vsize: u64, total: u64) void {
+fn emitRamSample(host: *HostContext, pid: c_int, rss: u64, vsize: u64, total: u64) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "proc:ram:{d}", .{pid}) catch return;
     var pl_buf: [256]u8 = undefined;
@@ -517,10 +527,10 @@ fn emitRamSample(pid: c_int, rss: u64, vsize: u64, total: u64) void {
         "{{\"pid\":{d},\"id\":{d},\"rss\":{d},\"vsize\":{d},\"memTotal\":{d},\"percent\":{d}.{d:0>3}}}",
         .{ pid, pid, rss, vsize, total, percent_thousand / 1000, percent_thousand % 1000 },
     ) catch return;
-    emitEvent(chan, pl);
+    emitEvent(host, chan, pl);
 }
 
-fn emitCpuSample(pid: c_int, utime: u64, stime: u64, delta: u64, interval_ms: u32) void {
+fn emitCpuSample(host: *HostContext, pid: c_int, utime: u64, stime: u64, delta: u64, interval_ms: u32) void {
     var chan_buf: [64]u8 = undefined;
     const chan = std.fmt.bufPrint(&chan_buf, "proc:cpu:{d}", .{pid}) catch return;
     var pl_buf: [192]u8 = undefined;
@@ -529,11 +539,11 @@ fn emitCpuSample(pid: c_int, utime: u64, stime: u64, delta: u64, interval_ms: u3
         "{{\"pid\":{d},\"id\":{d},\"utime\":{d},\"stime\":{d},\"delta\":{d},\"intervalMs\":{d}}}",
         .{ pid, pid, utime, stime, delta, interval_ms },
     ) catch return;
-    emitEvent(chan, pl);
+    emitEvent(host, chan, pl);
 }
 
-fn currentDtMs() u32 {
-    const now = host_io.milliTimestamp();
+fn currentDtMs(io: std.Io) u32 {
+    const now = std.Io.Clock.now(.awake, io).toMilliseconds();
     if (g_last_tick_ms == 0) {
         g_last_tick_ms = now;
         return 0;
@@ -544,12 +554,12 @@ fn currentDtMs() u32 {
     return @intCast(dt);
 }
 
-fn tickWatches() void {
+fn tickWatches(host: *HostContext) void {
     if (g_watches.items.len == 0) {
         g_last_tick_ms = 0; // reset so the first sample after re-arming has dt=0
         return;
     }
-    const dt = currentDtMs();
+    const dt = currentDtMs(host.io);
     if (dt == 0) return;
 
     var i: usize = 0;
@@ -558,22 +568,22 @@ fn tickWatches() void {
         w.accum_ms += dt;
         if (w.accum_ms < w.interval_ms) continue;
         w.accum_ms = 0;
-        const sample = readProcSample(w.pid) orelse continue;
-        const total = systemMemTotal();
+        const sample = readProcSample(host.io, w.pid) orelse continue;
+        const total = systemMemTotal(host.io);
         if (!w.initialized) {
             w.initialized = true;
             w.last_rss = sample.rss;
             w.last_vsize = sample.vsize;
             w.last_utime = sample.utime;
             w.last_stime = sample.stime;
-            emitRamSample(w.pid, sample.rss, sample.vsize, total);
+            emitRamSample(host, w.pid, sample.rss, sample.vsize, total);
             continue;
         }
         // RAM event: fire on noticeable change (>1MB or >0.5% of total).
         const noise: u64 = @max(1024 * 1024, total / 200);
         const drss = if (sample.rss > w.last_rss) sample.rss - w.last_rss else w.last_rss - sample.rss;
         if (drss >= noise) {
-            emitRamSample(w.pid, sample.rss, sample.vsize, total);
+            emitRamSample(host, w.pid, sample.rss, sample.vsize, total);
             w.last_rss = sample.rss;
             w.last_vsize = sample.vsize;
         }
@@ -583,7 +593,7 @@ fn tickWatches() void {
         const dst = if (sample.stime > w.last_stime) sample.stime - w.last_stime else 0;
         const dcpu = dut + dst;
         if (dcpu > 0) {
-            emitCpuSample(w.pid, sample.utime, sample.stime, dcpu, w.interval_ms);
+            emitCpuSample(host, w.pid, sample.utime, sample.stime, dcpu, w.interval_ms);
             w.last_utime = sample.utime;
             w.last_stime = sample.stime;
         }
@@ -592,14 +602,15 @@ fn tickWatches() void {
 
 fn hostProcStat(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     if (info.length() < 1) return;
     const pid = argToI32(info, 0) orelse return;
-    const sample = readProcSample(pid) orelse {
+    const sample = readProcSample(host.io, pid) orelse {
         info.getReturnValue().set(v8.initNull(info.getIsolate()).toValue());
         return;
     };
     var json_buf: [256]u8 = undefined;
-    const total = systemMemTotal();
+    const total = systemMemTotal(host.io);
     const percent_thousand: u64 = if (total > 0) (sample.rss * 1000) / total else 0;
     const json = std.fmt.bufPrint(
         &json_buf,

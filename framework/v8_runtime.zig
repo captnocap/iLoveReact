@@ -10,7 +10,7 @@
 //! → JSValue pattern — callers must provide v8-shaped versions.
 
 const std = @import("std");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 
 // ── V8 GC timing shim (framework/ffi/v8_gc_shim.cpp) ────────────────────────
@@ -100,7 +100,19 @@ var g_hscope_storage: v8.HandleScope = undefined;
 var g_hscope_alive: bool = false;
 var g_context: ?v8.Context = null;
 
-pub fn initVM() void {
+const host_context_slot = 0;
+
+/// Recover the process capabilities installed by the application root. V8's
+/// C callback ABI cannot carry Zig parameters, so the isolate embedder slot is
+/// the explicit callback boundary; ordinary Zig functions still receive the
+/// context in their signatures.
+pub fn hostContext(isolate: v8.Isolate) *HostContext {
+    const raw = isolate.getData(host_context_slot) orelse
+        @panic("V8 isolate has no HostContext");
+    return @ptrCast(@alignCast(raw));
+}
+
+pub fn initVM(host: *HostContext) void {
     if (g_isolate != null) return;
 
     const platform = v8.Platform.initDefault(0, true);
@@ -113,6 +125,7 @@ pub fn initVM() void {
 
     var isolate = v8.Isolate.init(&g_isolate_params);
     isolate.enter();
+    isolate.setData(host_context_slot, host);
     // ── V8 stack budget ────────────────────────────────────────────────
     // Without this call V8 falls back to a tiny default budget (~700KB)
     // measured downward from whatever the C++ SP happens to be at isolate
@@ -172,10 +185,10 @@ pub const deinit = teardownVM;
 /// bindings are installed on the global template per Context, so the caller
 /// must re-run its `registerHostFn(...)` sequence after this returns (v8_app's
 /// appInit() already does this).
-pub fn resetContextForReload() void {
+pub fn resetContextForReload(host: *HostContext) void {
     if (g_isolate == null) {
         // Nothing running yet — fall back to a full init.
-        initVM();
+        initVM(host);
         return;
     }
     if (g_context) |ctx| {
@@ -241,14 +254,14 @@ pub fn registerHostFn(name: [*:0]const u8, callback: v8.c.FunctionCallback) void
     _ = global.setValue(ctx, key, func);
 }
 
-pub fn evalScript(js_logic: []const u8) void {
-    _ = evalScriptChecked(js_logic);
+pub fn evalScript(host: *HostContext, js_logic: []const u8) void {
+    _ = evalScriptChecked(host, js_logic);
 }
 
 /// Like evalScript, but returns true iff compile+run both succeeded with no
 /// uncaught JS exception. Used by the dev host to detect a bad hot-reload and
 /// roll back to the last good bundle.
-pub fn evalScriptChecked(js_logic: []const u8) bool {
+pub fn evalScriptChecked(host: *HostContext, js_logic: []const u8) bool {
     const iso = g_isolate orelse {
         std.log.err("[v8 evalScriptChecked] g_isolate is null — VM not initialized or torn down", .{});
         return false;
@@ -268,19 +281,19 @@ pub fn evalScriptChecked(js_logic: []const u8) bool {
 
     const src = v8.String.initUtf8(iso, js_logic);
     const script = v8.Script.compile(ctx, src, null) catch {
-        logException(iso, ctx, try_catch, "compile");
+        logException(host, iso, ctx, try_catch, "compile");
         return false;
     };
     _ = script.run(ctx) catch {
-        logException(iso, ctx, try_catch, "run");
+        logException(host, iso, ctx, try_catch, "run");
         return false;
     };
     return true;
 }
 
-pub fn evalExpr(code: []const u8) void {
+pub fn evalExpr(host: *HostContext, code: []const u8) void {
     if (code.len == 0) return;
-    evalScript(code);
+    evalScript(host, code);
 }
 
 pub fn evalToString(code: []const u8, buf: []u8) []const u8 {
@@ -315,7 +328,7 @@ pub fn hasGlobal(name: [*:0]const u8) bool {
     return !val.isUndefined();
 }
 
-fn callGlobalWithArgs(name: [*:0]const u8, argv: []const v8.Value) void {
+fn callGlobalWithArgs(host: *HostContext, name: [*:0]const u8, argv: []const v8.Value) void {
     const iso = g_isolate orelse return;
     const ctx = g_context orelse return;
 
@@ -330,11 +343,11 @@ fn callGlobalWithArgs(name: [*:0]const u8, argv: []const v8.Value) void {
     const func = val.castTo(v8.Function);
     // Time the whole cross-into-JS (call + microtask drain) so the spikewatch
     // can attribute frame time to the bridge with a measured number.
-    const bridge_t0 = host_io.microTimestamp();
+    const bridge_t0 = std.Io.Clock.Timestamp.now(host.io, .awake);
     const ret = func.call(ctx, global.toValue(), argv);
     if (ret == null) {
-        g_bridge_us_accum += @max(0, host_io.microTimestamp() - bridge_t0);
-        logException(iso, ctx, try_catch, std.mem.span(name));
+        g_bridge_us_accum += @max(0, bridge_t0.untilNow(host.io).raw.toMicroseconds());
+        logException(host, iso, ctx, try_catch, std.mem.span(name));
         return;
     }
     // Explicit microtask drain (kExplicit policy set in initVM). Promises
@@ -342,95 +355,95 @@ fn callGlobalWithArgs(name: [*:0]const u8, argv: []const v8.Value) void {
     // continuations to run here on our central stack, dodging V8 14's auto-
     // drain IsOnCentralStack check.
     iso.performMicrotasksCheckpoint();
-    g_bridge_us_accum += @max(0, host_io.microTimestamp() - bridge_t0);
+    g_bridge_us_accum += @max(0, bridge_t0.untilNow(host.io).raw.toMicroseconds());
 }
 
-pub fn callGlobal(name: [*:0]const u8) void {
+pub fn callGlobal(host: *HostContext, name: [*:0]const u8) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{});
+    callGlobalWithArgs(host, name, &.{});
 }
 
-pub fn callGlobalStr(name: [*:0]const u8, arg: [*:0]const u8) void {
+pub fn callGlobalStr(host: *HostContext, name: [*:0]const u8, arg: [*:0]const u8) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
     const s = v8.String.initUtf8(iso, std.mem.span(arg));
-    callGlobalWithArgs(name, &.{s.toValue()});
+    callGlobalWithArgs(host, name, &.{s.toValue()});
 }
 
-pub fn callGlobal2Str(name: [*:0]const u8, a: [*:0]const u8, b: [*:0]const u8) void {
+pub fn callGlobal2Str(host: *HostContext, name: [*:0]const u8, a: [*:0]const u8, b: [*:0]const u8) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{
+    callGlobalWithArgs(host, name, &.{
         v8.String.initUtf8(iso, std.mem.span(a)).toValue(),
         v8.String.initUtf8(iso, std.mem.span(b)).toValue(),
     });
 }
 
-pub fn callGlobalInt(name: [*:0]const u8, arg: i64) void {
+pub fn callGlobalInt(host: *HostContext, name: [*:0]const u8, arg: i64) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
     const n = v8.Number.init(iso, @floatFromInt(arg));
-    callGlobalWithArgs(name, &.{n.toValue()});
+    callGlobalWithArgs(host, name, &.{n.toValue()});
 }
 
-pub fn callGlobal2Int(name: [*:0]const u8, a: i64, b: i64) void {
+pub fn callGlobal2Int(host: *HostContext, name: [*:0]const u8, a: i64, b: i64) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{
+    callGlobalWithArgs(host, name, &.{
         v8.Number.init(iso, @floatFromInt(a)).toValue(),
         v8.Number.init(iso, @floatFromInt(b)).toValue(),
     });
 }
 
-pub fn callGlobalFloat(name: [*:0]const u8, arg: f32) void {
+pub fn callGlobalFloat(host: *HostContext, name: [*:0]const u8, arg: f32) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
     const n = v8.Number.init(iso, @floatCast(arg));
-    callGlobalWithArgs(name, &.{n.toValue()});
+    callGlobalWithArgs(host, name, &.{n.toValue()});
 }
 
-pub fn callGlobal2Float(name: [*:0]const u8, a: f32, b: f32) void {
+pub fn callGlobal2Float(host: *HostContext, name: [*:0]const u8, a: f32, b: f32) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{
+    callGlobalWithArgs(host, name, &.{
         v8.Number.init(iso, @floatCast(a)).toValue(),
         v8.Number.init(iso, @floatCast(b)).toValue(),
     });
 }
 
-pub fn callGlobal3Int(name: [*:0]const u8, a: i64, b: i64, c: i64) void {
+pub fn callGlobal3Int(host: *HostContext, name: [*:0]const u8, a: i64, b: i64, c: i64) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{
+    callGlobalWithArgs(host, name, &.{
         v8.Number.init(iso, @floatFromInt(a)).toValue(),
         v8.Number.init(iso, @floatFromInt(b)).toValue(),
         v8.Number.init(iso, @floatFromInt(c)).toValue(),
     });
 }
 
-pub fn callGlobal5Int(name: [*:0]const u8, a: i64, b: i64, c: i64, d: i64, e: i64) void {
+pub fn callGlobal5Int(host: *HostContext, name: [*:0]const u8, a: i64, b: i64, c: i64, d: i64, e: i64) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
     hscope.init(iso);
     defer hscope.deinit();
-    callGlobalWithArgs(name, &.{
+    callGlobalWithArgs(host, name, &.{
         v8.Number.init(iso, @floatFromInt(a)).toValue(),
         v8.Number.init(iso, @floatFromInt(b)).toValue(),
         v8.Number.init(iso, @floatFromInt(c)).toValue(),
@@ -454,6 +467,7 @@ fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c
 /// detach) in practice: instances are swept after STALE_INSTANCE_GRACE frames,
 /// so JS holding a stale ref reads live pixels, not freed memory.
 pub fn dispatchEffectRender(
+    host: *HostContext,
     id: u32,
     buf_ptr: [*]u8,
     buf_len: usize,
@@ -512,14 +526,14 @@ pub fn dispatchEffectRender(
         v8.Integer.initU32(iso, frame).toValue(),
     };
     _ = func.call(ctx, global.toValue(), &args) orelse {
-        logException(iso, ctx, try_catch, "__dispatchEffectRender");
+        logException(host, iso, ctx, try_catch, "__dispatchEffectRender");
         return;
     };
 }
 
-fn appendV8ErrorLog(tag: []const u8, message: []const u8) void {
-    const io = host_io.io();
-    const home = host_io.getenv("HOME") orelse return;
+fn appendV8ErrorLog(host: *HostContext, tag: []const u8, message: []const u8) void {
+    const io = host.io;
+    const home = host.environ.get("HOME") orelse return;
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir_path = std.fmt.bufPrint(&path_buf, "{s}/.cache/reactjit", .{home}) catch return;
     std.Io.Dir.cwd().createDirPath(io, dir_path) catch {};
@@ -532,9 +546,10 @@ fn appendV8ErrorLog(tag: []const u8, message: []const u8) void {
     defer file.close(io);
     // Compose the whole JSONL line, then one positional write at EOF (0.16 has
     // no seekFromEnd on File; append = stat size + positional write).
-    var line_buf: [4096]u8 = undefined;
-    var w = std.Io.Writer.fixed(&line_buf);
-    const ts = host_io.milliTimestamp();
+    var allocating = std.Io.Writer.Allocating.init(host.gpa);
+    defer allocating.deinit();
+    const w = &allocating.writer;
+    const ts = std.Io.Clock.now(.real, io).toMilliseconds();
     w.print("{{\"ts\":{d},\"tag\":\"{s}\",\"msg\":\"", .{ ts, tag }) catch return;
     for (message) |ch| {
         switch (ch) {
@@ -549,10 +564,10 @@ fn appendV8ErrorLog(tag: []const u8, message: []const u8) void {
     }
     w.writeAll("\"}}\n") catch return;
     const end = (file.stat(io) catch return).size;
-    file.writePositionalAll(io, w.buffered(), end) catch return;
+    file.writePositionalAll(io, allocating.written(), end) catch return;
 }
 
-fn logException(iso: v8.Isolate, ctx: v8.Context, try_catch: v8.TryCatch, tag: []const u8) void {
+fn logException(host: *HostContext, iso: v8.Isolate, ctx: v8.Context, try_catch: v8.TryCatch, tag: []const u8) void {
     std.log.err("[v8 {s}] failure detected (hasCaught={})", .{ tag, try_catch.hasCaught() });
 
     const ex_opt = try_catch.getException();
@@ -571,7 +586,7 @@ fn logException(iso: v8.Isolate, ctx: v8.Context, try_catch: v8.TryCatch, tag: [
             const n = @min(str.lenUtf8(iso), buf.len);
             _ = str.writeUtf8(iso, buf[0..n]);
             std.log.err("[v8 {s}] {s}", .{ tag, buf[0..n] });
-            appendV8ErrorLog(tag, buf[0..n]);
+            appendV8ErrorLog(host, tag, buf[0..n]);
         } else |err| {
             std.log.err("[v8 {s}] exception toString() failed: {s} — falling back to type tags", .{ tag, @errorName(err) });
             std.log.err("[v8 {s}] ex isObject={} isString={} isNumber={} isNull={} isUndefined={}", .{

@@ -23,7 +23,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const host_io = @import("host_io.zig");
+const HostContext = @import("host_context.zig");
 const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
 const pose = @import("ml/pose.zig");
@@ -99,6 +99,7 @@ fn argI32(info: v8.FunctionCallbackInfo, idx: u32, default: i32) i32 {
 
 fn hostSegmentOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -110,7 +111,7 @@ fn hostSegmentOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     // segment.openImage owns long-lived storage via std.heap.c_allocator (matches the
     // worker/whisper pattern). Pass that allocator, not the arena (which goes
     // out of scope at return).
-    const handle = segment.openImage(std.heap.c_allocator, path);
+    const handle = segment.openImage(host.io, host.environ, std.heap.c_allocator, path);
     info.getReturnValue().set(v8.Integer.initI32(info.getIsolate(), handle));
 }
 
@@ -145,9 +146,7 @@ fn parseClicks(alloc: std.mem.Allocator, json: []const u8) ?[]segment.ClickIn {
                     const num_start = i;
                     while (i < json.len and (json[i] == '-' or json[i] == '.' or (json[i] >= '0' and json[i] <= '9'))) i += 1;
                     const num = std.fmt.parseFloat(f32, json[num_start..i]) catch return null;
-                    if (std.mem.eql(u8, key, "x")) x = num
-                    else if (std.mem.eql(u8, key, "y")) y = num
-                    else if (std.mem.eql(u8, key, "l")) l = if (num > 0.5) 1 else 0;
+                    if (std.mem.eql(u8, key, "x")) x = num else if (std.mem.eql(u8, key, "y")) y = num else if (std.mem.eql(u8, key, "l")) l = if (num > 0.5) 1 else 0;
                 } else {
                     i += 1;
                 }
@@ -190,21 +189,22 @@ fn parseOpts(json: []const u8) segment.RefineOpts {
 /// Encode the mask as a P5 binary PGM (maxval=1) to disk. Bytes 0/1 land
 /// as single-byte UTF-8 — the cart's JS side knows how to read this format
 /// (same encoding as cart/cutout/magick.ts:encodeMaskPGM).
-fn writeMaskPGM(path: []const u8, mask: []const u8, w: u32, h: u32) bool {
-    std.Io.Dir.cwd().createDirPath(host_io.io(), std.fs.path.dirname(path) orelse ".") catch {};
-    var file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true }) catch return false;
-    defer file.close(host_io.io());
+fn writeMaskPGM(io: std.Io, path: []const u8, mask: []const u8, w: u32, h: u32) bool {
+    std.Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(path) orelse ".") catch {};
+    var file = std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true }) catch return false;
+    defer file.close(io);
     var hdr_buf: [64]u8 = undefined;
     const hdr = std.fmt.bufPrint(&hdr_buf, "P5\n{d} {d}\n1\n", .{ w, h }) catch return false;
-    file.writeStreamingAll(host_io.io(), hdr) catch return false;
+    file.writeStreamingAll(io, hdr) catch return false;
     // segment.refineSegment returns 1=in-selection (erased), 0=keep. Our
     // P5 maxval=1 convention is identical — write the bytes as-is.
-    file.writeStreamingAll(host_io.io(), mask) catch return false;
+    file.writeStreamingAll(io, mask) catch return false;
     return true;
 }
 
 fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -246,7 +246,7 @@ fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         setReturnString(info, "err:alloc path");
         return;
     };
-    if (!writeMaskPGM(out_path, mask, dims.w, dims.h)) {
+    if (!writeMaskPGM(host.io, out_path, mask, dims.w, dims.h)) {
         setReturnString(info, "err:write pgm failed");
         return;
     }
@@ -308,6 +308,7 @@ fn setPoseRequestStatus(info: v8.FunctionCallbackInfo, status: PoseRequestStatus
 
 fn hostPoseEstimateAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -330,12 +331,13 @@ fn hostPoseEstimateAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setPoseRequestStatus(info, .no_live_frame);
         return;
     };
-    const status = pose.enqueueRgba(@intCast(request_i32), frame.rgba, frame.width, frame.height);
+    const status = pose.enqueueRgba(host.io, @intCast(request_i32), frame.rgba, frame.width, frame.height);
     setPoseRequestStatus(info, @enumFromInt(@intFromEnum(status)));
 }
 
 fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -347,15 +349,16 @@ fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
         return;
     };
-    poseReply(info, alloc, pose.estimateImage(path_z.ptr));
+    poseReply(info, alloc, pose.estimateImage(host.io, host.environ, path_z.ptr));
 }
 
 fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
-    var devices = video_devices.list(alloc) catch {
+    var devices = video_devices.list(host.io, alloc) catch {
         setReturnString(info, "{\"ok\":false,\"error\":\"camera discovery failed\",\"devices\":[]}");
         return;
     };
@@ -391,7 +394,7 @@ pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__pose_camera_devices", hostPoseCameraDevices);
 }
 
-fn emitPoseResult(result: *const pose.AsyncResult) void {
+fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -423,12 +426,12 @@ fn emitPoseResult(result: *const pose.AsyncResult) void {
     var channel_buf: [64]u8 = undefined;
     const channel = std.fmt.bufPrintZ(&channel_buf, "pose:{d}", .{result.request_id}) catch return;
     const payload_z = alloc.dupeZ(u8, payload) catch return;
-    v8_runtime.callGlobal2Str("__ffiEmit", channel, payload_z);
+    v8_runtime.callGlobal2Str(host, "__ffiEmit", channel, payload_z);
 }
 
-pub fn tickDrain() void {
-    while (pose.pollAsync()) |result_value| {
+pub fn tickDrain(host: *HostContext) void {
+    while (pose.pollAsync(host.io)) |result_value| {
         const result = result_value;
-        emitPoseResult(&result);
+        emitPoseResult(host, &result);
     }
 }

@@ -142,29 +142,29 @@ fn extractDomain(url: []const u8) []const u8 {
 
 /// Convert a dictionary (from JSON) back into PageContent
 pub fn dictToPageContent(allocator: Allocator, data: std.json.Value) error{OutOfMemory}!PageContent {
-    var links = std.ArrayList(Link).init(allocator);
-    defer links.deinit();
+    var links: std.ArrayList(Link) = .empty;
+    defer links.deinit(allocator);
 
     if (data.object.get("links")) |links_arr| {
         for (links_arr.array.items) |link_data| {
-            try links.append(.{
+            try links.append(allocator, .{
                 .text = try allocator.dupe(u8, link_data.object.get("text").?.string),
                 .href = try allocator.dupe(u8, link_data.object.get("href").?.string),
             });
         }
     }
 
-    var forms = std.ArrayList(Form).init(allocator);
-    defer forms.deinit();
+    var forms: std.ArrayList(Form) = .empty;
+    defer forms.deinit(allocator);
 
     if (data.object.get("forms")) |forms_arr| {
         for (forms_arr.array.items) |form_data| {
-            var fields = std.ArrayList(FormField).init(allocator);
-            defer fields.deinit();
+            var fields: std.ArrayList(FormField) = .empty;
+            defer fields.deinit(allocator);
 
             if (form_data.object.get("fields")) |fields_arr| {
                 for (fields_arr.array.items) |field_data| {
-                    try fields.append(.{
+                    try fields.append(allocator, .{
                         .name = try allocator.dupe(u8, field_data.object.get("name").?.string),
                         .field_type = try allocator.dupe(u8, field_data.object.get("type").?.string),
                         .value = if (field_data.object.get("value")) |v| try allocator.dupe(u8, v.string) else try allocator.dupe(u8, ""),
@@ -173,10 +173,10 @@ pub fn dictToPageContent(allocator: Allocator, data: std.json.Value) error{OutOf
                 }
             }
 
-            try forms.append(.{
+            try forms.append(allocator, .{
                 .action = try allocator.dupe(u8, form_data.object.get("action").?.string),
                 .method = try allocator.dupe(u8, form_data.object.get("method").?.string),
-                .fields = try fields.toOwnedSlice(),
+                .fields = try fields.toOwnedSlice(allocator),
             });
         }
     }
@@ -196,8 +196,8 @@ pub fn dictToPageContent(allocator: Allocator, data: std.json.Value) error{OutOf
         .url = try allocator.dupe(u8, data.object.get("url").?.string),
         .title = try allocator.dupe(u8, data.object.get("title").?.string),
         .text = try allocator.dupe(u8, data.object.get("text").?.string),
-        .links = try links.toOwnedSlice(),
-        .forms = try forms.toOwnedSlice(),
+        .links = try links.toOwnedSlice(allocator),
+        .forms = try forms.toOwnedSlice(allocator),
         .meta = meta,
     };
 }

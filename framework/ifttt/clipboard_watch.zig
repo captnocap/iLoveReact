@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const c = @import("../c.zig").imports;
+const HostContext = @import("../host_context.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 
 const POLL_MS: u32 = 250;
@@ -26,7 +27,7 @@ pub fn init() void {
     last_hash = 0;
 }
 
-pub fn tick(dt_ms: u32) void {
+pub fn tick(host: *HostContext, dt_ms: u32) void {
     accum_ms += dt_ms;
     if (accum_ms < POLL_MS) return;
     accum_ms = 0;
@@ -52,7 +53,7 @@ pub fn tick(dt_ms: u32) void {
     last_hash = hash;
 
     // Fire JS handler. Handler reads live text via clipboard.get().
-    v8_runtime.callGlobal("__beginJsEvent");
-    v8_runtime.evalExpr("__ifttt_onClipboardChange()");
-    v8_runtime.callGlobal("__endJsEvent");
+    v8_runtime.callGlobal(host, "__beginJsEvent");
+    v8_runtime.evalExpr(host, "__ifttt_onClipboardChange()");
+    v8_runtime.callGlobal(host, "__endJsEvent");
 }

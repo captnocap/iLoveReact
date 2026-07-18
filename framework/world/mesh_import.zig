@@ -19,23 +19,6 @@
 //! material; the Studio import path is where texturing lives.
 
 const std = @import("std");
-// Dual-context file (app module member AND standalone test root): cannot
-// import host_io.zig by relative path, so reach the SAME process-wide Io
-// instance via the std global.
-const host_io = struct {
-    fn io() std.Io {
-        return std.Io.Threaded.global_single_threaded.io();
-    }
-    fn getEnvVarOwned(alloc: std.mem.Allocator, name: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound }![]u8 {
-        var it: usize = 0;
-        while (std.c.environ[it]) |entry_ptr| : (it += 1) {
-            const entry = std.mem.span(entry_ptr);
-            const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
-            if (std.mem.eql(u8, entry[0..eq], name)) return alloc.dupe(u8, entry[eq + 1 ..]);
-        }
-        return error.EnvironmentVariableNotFound;
-    }
-};
 
 /// Interleaved vertex, byte-identical to `Vertex` in framework/gpu/3d.zig. Kept as a
 /// local mirror so this module has no dependency on the GPU layer (it stays headless-
@@ -71,8 +54,8 @@ pub const Error = error{
 // ── public entry: sniff by extension, read, dispatch ────────────────────────────
 /// Read `path` and parse it into a ParsedMesh. Caller owns the result (deinit). The
 /// extension picks the parser; `.glb`/`.gltf` → GLB, everything else → OBJ.
-pub fn loadFile(alloc: std.mem.Allocator, path: []const u8) Error!ParsedMesh {
-    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(256 * 1024 * 1024)) catch {
+pub fn loadFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8) Error!ParsedMesh {
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(256 * 1024 * 1024)) catch {
         return Error.MalformedGlb;
     };
     defer alloc.free(bytes);
@@ -418,10 +401,10 @@ fn nodeMatrix(node: std.json.Value) Mat4 {
     const wy = w * y;
     const wz = w * z;
     return .{
-        (1 - 2 * (yy + zz)) * s[0], (2 * (xy + wz)) * s[0],      (2 * (xz - wy)) * s[0],      0,
-        (2 * (xy - wz)) * s[1],     (1 - 2 * (xx + zz)) * s[1],  (2 * (yz + wx)) * s[1],      0,
-        (2 * (xz + wy)) * s[2],     (2 * (yz - wx)) * s[2],      (1 - 2 * (xx + yy)) * s[2],  0,
-        t[0],                       t[1],                        t[2],                        1,
+        (1 - 2 * (yy + zz)) * s[0], (2 * (xy + wz)) * s[0],     (2 * (xz - wy)) * s[0],     0,
+        (2 * (xy - wz)) * s[1],     (1 - 2 * (xx + zz)) * s[1], (2 * (yz + wx)) * s[1],     0,
+        (2 * (xz + wy)) * s[2],     (2 * (yz - wx)) * s[2],     (1 - 2 * (xx + yy)) * s[2], 0,
+        t[0],                       t[1],                       t[2],                       1,
     };
 }
 
@@ -911,8 +894,8 @@ test "interleaved cooked triangle data adopts as a parsed mesh" {
     const alloc = std.testing.allocator;
     const verts = [_]f32{
         -1, 0, -2, 0, 1, 0, 0, 0,
-        3, 0, -2, 0, 1, 0, 1, 0,
-        -1, 2, 2, 0, 1, 0, 0, 1,
+        3,  0, -2, 0, 1, 0, 1, 0,
+        -1, 2, 2,  0, 1, 0, 0, 1,
     };
     var mesh = try fromInterleaved(alloc, &verts, 3);
     defer mesh.deinit(alloc);

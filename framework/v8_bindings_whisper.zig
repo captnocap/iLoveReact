@@ -44,7 +44,7 @@ fn hostTranscribe(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (buf_id < 0) return;
     const model_path = argToStringAlloc(info, 1) orelse return;
     defer alloc.free(model_path);
-    const ok = whisper.enqueueTranscribe(@intCast(buf_id), model_path);
+    const ok = whisper.enqueueTranscribe(v8_runtime.hostContext(info.getIsolate()).io, @intCast(buf_id), model_path);
     info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), ok));
 }
 

@@ -64,7 +64,7 @@ fn hostStop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), false));
         return;
     };
-    const ok = audio_input.stopRecording(path);
+    const ok = audio_input.stopRecording(v8_runtime.hostContext(info.getIsolate()).io, path);
     info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), ok));
 }
 

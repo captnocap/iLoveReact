@@ -11,25 +11,23 @@
 
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
-const host_io = @import("framework/host_io.zig");
-const sysx = @import("framework/net/sysx.zig");
+const HostContext = @import("framework/host_context.zig");
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const fs_bindings = @import("framework/v8_bindings_fs.zig");
 const sqlite_bindings = @import("framework/v8_bindings_sqlite.zig");
 const localstore_bindings = @import("framework/v8_bindings_localstore.zig");
 
 pub fn main(init: std.process.Init) !void {
-    host_io.args = init.minimal.args;
+    const host = HostContext.fromInit(init);
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    const raw_argv = try host_io.argsAlloc(alloc);
-    defer host_io.argsFree(alloc, raw_argv);
+    const raw_argv = try host.args.toSlice(init.arena.allocator());
 
     if (raw_argv.len < 2) {
         const msg = "usage: v8cli <script.js> [args...]\n";
-        _ = sysx.write(2, msg) catch {};
+        std.Io.File.stderr().writeStreamingAll(host.io, msg) catch {};
         std.process.exit(2);
     }
 
@@ -39,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
     // (process.argv[0] = runtime, [1] = script, [2..] = args); we drop [0]
     // entirely since scripts don't need the cli binary path.
     const script_argv = alloc.alloc([]const u8, raw_argv.len - 1) catch {
-        _ = sysx.write(2, "v8cli: oom\n") catch {};
+        std.Io.File.stderr().writeStreamingAll(host.io, "v8cli: oom\n") catch {};
         std.process.exit(1);
     };
     defer alloc.free(script_argv);
@@ -48,20 +46,24 @@ pub fn main(init: std.process.Init) !void {
     // Read the script. No module/import resolution; scripts must be
     // self-contained. (The three scripts we're porting are ~100 lines each
     // and don't import anything internal.)
-    const source = std.Io.Dir.cwd().readFileAlloc(host_io.io(), script_path, alloc, .limited(32 * 1024 * 1024)) catch |e| {
+    const source = std.Io.Dir.cwd().readFileAlloc(host.io, script_path, alloc, .limited(32 * 1024 * 1024)) catch |e| {
         var buf: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "v8cli: cannot read {s}: {s}\n", .{ script_path, @errorName(e) }) catch "v8cli: read error\n";
-        _ = sysx.write(2, msg) catch {};
+        std.Io.File.stderr().writeStreamingAll(host.io, msg) catch {};
         std.process.exit(1);
     };
     defer alloc.free(source);
 
     // Boot V8 + install bindings, then eval the script.
-    v8rt.initVM();
-    defer v8rt.teardownVM();
+    var terminal_host: cli_bindings.TerminalHost = undefined;
+    try terminal_host.init(host);
+    const terminal_context = &terminal_host.host;
+
+    v8rt.initVM(terminal_context);
 
     cli_bindings.setArgv(@constCast(script_argv));
     cli_bindings.registerAll();
+    cli_bindings.registerTerminal();
     // Build scripts always need fs. cli no longer shadows __fs_* with
     // un-prefixed names, so register fs explicitly here.
     fs_bindings.registerFs({});
@@ -74,7 +76,7 @@ pub fn main(init: std.process.Init) !void {
     // __localstore* over the SAME localstore.db the editor host writes — lets a
     // headless script (the rjit game bake compile pipeline) read editor state
     // like custom Materialized materials. Best-effort: empty store if unopenable.
-    localstore_bindings.initStore();
+    localstore_bindings.initStore(terminal_context);
     localstore_bindings.registerLocalstore({});
     // SIGINT/SIGTERM/SIGHUP → kill tracked children before exiting. Prevents
     // Ctrl-C on scripts/dev from orphaning the esbuild watch child.
@@ -82,7 +84,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Install a minimal `console` shim so scripts can use console.log/error.
     // The underlying writes go to __writeStdout / __writeStderr.
-    v8rt.evalScript(
+    v8rt.evalScript(terminal_context,
         \\globalThis.console = {
         \\  log:   (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
         \\  info:  (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
@@ -105,6 +107,8 @@ pub fn main(init: std.process.Init) !void {
         \\};
     );
 
-    const ok = v8rt.evalScriptChecked(source);
-    if (!ok) std.process.exit(1);
+    const ok = v8rt.evalScriptChecked(terminal_context, source);
+    terminal_host.deinit();
+    v8rt.teardownVM();
+    std.process.exit(if (ok) 0 else 1);
 }

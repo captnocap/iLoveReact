@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const constructor = @import("../world/constructor.zig");
-const host_io = @import("../host_io.zig");
 const geometry = @import("geometry.zig");
 const log = std.debug;
 const buildCube = geometry.buildCube;
@@ -273,17 +272,6 @@ pub fn pendingPlayerAnimationCopy(allocator: std.mem.Allocator, model_len: usize
         clips[ci] = .{ .id = sclip.id, .duration = sclip.duration, .looping = sclip.looping, .keyframes = keys };
     }
     return .{ .node_count = src.node_count, .content_hash = [_]u8{0} ** 32, .clips = clips };
-}
-
-/// RJIT_FORCE_GAIT=1 forces the walk gait with no input — headless animation
-/// repro (req_2781). Read once, cached (same idiom as streamModeFromEnv).
-var g_force_gait: ?bool = null;
-pub fn forceGaitEnv() bool {
-    if (g_force_gait) |v| return v;
-    const s = host_io.getenv("RJIT_FORCE_GAIT");
-    const v = s != null and s.?.len > 0 and s.?[0] == '1';
-    g_force_gait = v;
-    return v;
 }
 
 // ── the LIVE player pose (req_2786 — webcam capture drives the body) ────────

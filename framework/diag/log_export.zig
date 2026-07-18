@@ -7,7 +7,7 @@
 //! Stateless: no init/deinit needed. All functions take entries + writer.
 //!
 //! Usage from Zig:
-//!   try log_export.exportToFile(entries[0..n], .json, "/tmp/logs.json");
+//!   try log_export.exportToFile(io, entries[0..n], .json, "/tmp/logs.json");
 //!   const len = try log_export.exportToBuffer(entries[0..n], .md, &buf);
 //!
 //! QuickJS bridge: register via qjs_runtime.registerHostFn. See docs/LOG_EXPORT.md.
@@ -96,25 +96,31 @@ pub fn format(entries: []const LogEntry, fmt: Format, writer: anytype) !void {
 // ── Output targets ──────────────────────────────────────────────────
 
 /// Write formatted entries to a file. Creates or truncates.
-pub fn exportToFile(entries: []const LogEntry, fmt: Format, path: []const u8) !void {
+pub fn exportToFile(io: std.Io, entries: []const LogEntry, fmt: Format, path: []const u8) !void {
     const file = if (path.len > 0 and path[0] == '/')
-        try std.fs.createFileAbsolute(path, .{ .truncate = true })
+        try std.Io.Dir.createFileAbsolute(io, path, .{ .truncate = true })
     else
-        try std.fs.cwd().createFile(path, .{ .truncate = true });
-    defer file.close();
-    try format(entries, fmt, file.writer());
+        try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    defer file.close(io);
+    var buffer: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    try format(entries, fmt, &file_writer.interface);
+    try file_writer.flush();
 }
 
 /// Format entries into a buffer. Returns bytes written.
 pub fn exportToBuffer(entries: []const LogEntry, fmt: Format, buf: []u8) !usize {
-    var fbs = std.io.fixedBufferStream(buf);
-    try format(entries, fmt, fbs.writer());
-    return fbs.pos;
+    var writer: std.Io.Writer = .fixed(buf);
+    try format(entries, fmt, &writer);
+    return writer.buffered().len;
 }
 
 /// Write formatted entries to stdout.
-pub fn exportToStdout(entries: []const LogEntry, fmt: Format) !void {
-    try format(entries, fmt, std.io.getStdOut().writer());
+pub fn exportToStdout(io: std.Io, entries: []const LogEntry, fmt: Format) !void {
+    var buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &buffer);
+    try format(entries, fmt, &stdout_writer.interface);
+    try stdout_writer.flush();
 }
 
 // ── JSON ────────────────────────────────────────────────────────────

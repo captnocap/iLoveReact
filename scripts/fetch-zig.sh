@@ -1,5 +1,5 @@
 #!/bin/bash
-# fetch-zig — download Zig 0.15.2 into tools/zig/ if absent.
+# fetch-zig — download the repository's pinned Zig 0.16.0 toolchain.
 #
 # Run once after cloning the repo:
 #   scripts/fetch-zig.sh
@@ -10,7 +10,7 @@
 # which already has zig embedded.
 set -euo pipefail
 
-ZIG_VERSION="0.15.2"
+ZIG_VERSION="0.16.0"
 ZIG_TARBALL="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
 ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/${ZIG_TARBALL}"
 

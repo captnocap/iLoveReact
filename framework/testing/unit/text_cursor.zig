@@ -13,8 +13,11 @@ fn initMonospaceTextEngine() !TextEngine {
 test "editable-text caret and hit-test share the painted glyph advances" {
     var text_engine = try initMonospaceTextEngine();
     defer text_engine.deinit();
+    var environ = try std.testing.environ.createMap(std.testing.allocator);
+    defer environ.deinit();
 
     gpu_text.initText(
+        &environ,
         text_engine.library,
         text_engine.face,
         text_engine.fallback_faces,

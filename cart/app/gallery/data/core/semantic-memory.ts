@@ -19,7 +19,7 @@ import type { GalleryDataReference, JsonObject } from '../../types';
 
 export type SemanticFactKind =
   | 'invariant' // always true ("useHotState does not persist across remount")
-  | 'convention' // what the project does ("Zig 0.15.2, LF line endings")
+  | 'convention' // what the project does ("Zig 0.16.0, LF line endings")
   | 'domain_term' // terminology ("cart = .tsx app")
   | 'relation' // X is related to Y ("Smith compiler is frozen under tsz/")
   | 'policy' // rule with a reason ("commit and push to main only")
@@ -50,7 +50,7 @@ export const semanticMemoryMockData: SemanticMemoryEntry[] = [
     workspaceId: 'ws_reactjit',
     kind: 'convention',
     subject: 'Zig toolchain',
-    statement: 'Repo compiles with Zig 0.15.2; newer compilers introduce breaking stdlib changes.',
+    statement: 'Repo compiles with pinned Zig 0.16.0; use tools/zig/zig and its bundled standard library as the API authority.',
     confidence: 0.98,
     firstLearnedAt: '2026-03-01T00:00:00Z',
     lastReinforcedAt: '2026-04-18T00:00:00Z',

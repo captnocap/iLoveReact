@@ -296,13 +296,13 @@ pub fn applyResidentMeshes(self: anytype) void {
 
 // LIVESKIN req_1843: materialize the editor's queued face-skin recipes (GPU is up by
 // render time), once per hash, into "live-mat:<hash>" tiles a live mesh ref then samples.
-pub fn ensureLiveMaterials(self: anytype) void {
+pub fn ensureLiveMaterials(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     const pm = pendingLiveMatsFor(self.node_id) orelse return;
     for (pm.mats.items) |m| {
         if (self.live_mat_keys.contains(m.hash)) continue;
         const key = std.fmt.allocPrint(self.allocator, "live-mat:{x}", .{m.hash}) catch continue;
         const data: ?[]const f32 = if (m.data.len > 0) m.data else null;
-        const ok = if (m.kind == 0) material_tex.materialize(key, m.wgsl, data, MATERIAL_TILE_PX) else false;
+        const ok = if (m.kind == 0) material_tex.materialize(io, environ, key, m.wgsl, data, MATERIAL_TILE_PX) else false;
         if (!ok) {
             self.allocator.free(key);
             continue;
@@ -529,9 +529,8 @@ pub fn appendLiveSkinBoxes(self: anytype) void {
         const start = self.skin_box_buf.items.len;
         if (flat) {
             self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{
-                b.cx, b.cy, b.cz, 0, b.yaw, 0,
-                if (flat_x) 1 else b.sx, if (flat_y) 1 else b.sy, if (flat_z) 1 else b.sz,
-                1, 1, 1,
+                b.cx,                    b.cy,                    b.cz,                    0, b.yaw, 0,
+                if (flat_x) 1 else b.sx, if (flat_y) 1 else b.sy, if (flat_z) 1 else b.sz, 1, 1,     1,
             });
         } else {
             self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{ b.cx, b.cy, b.cz, 0, b.yaw, 0, b.sx + out, b.sy + out, b.sz + out, 1, 1, 1 });
@@ -551,10 +550,10 @@ pub fn appendLiveSkinBoxes(self: anytype) void {
     }
 }
 
-pub fn applyLiveMeshProps(self: anytype) void {
+pub fn applyLiveMeshProps(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
     defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
-    ensureLiveMaterials(self);
+    ensureLiveMaterials(self, io, environ);
     applyResidentMeshes(self); // FULLRES: install the editor's pushed cooked-asset catalog (once per gen)
     // RESKIN req_1845: un-hide whatever we hid last frame before re-evaluating, so a
     // reverted/reloaded prop shows its baked render again.

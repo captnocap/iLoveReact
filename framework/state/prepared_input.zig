@@ -30,23 +30,6 @@ pub fn prepareScrollEvent(slot: u32, scroll_x: f32, scroll_y: f32, dx: f32, dy: 
     g_prepared_scroll_dy = dy;
 }
 
-// ── Open-window callback hook ─────────────────────────────────────────
-// Lets engine.zig hand the windows subsystem an "open new window" entry
-// point at startup. Lives here for the same reason as the prepared-input
-// globals — was previously housed in qjs_runtime.zig because someone
-// needed a single global home.
-
-pub const OpenWindowFn = *const fn (title: [*:0]const u8, w: c_int, h: c_int) void;
-var g_open_window_fn: ?OpenWindowFn = null;
-
-pub fn setOpenWindowFn(f: OpenWindowFn) void {
-    g_open_window_fn = f;
-}
-
-pub fn openWindow(title: [*:0]const u8, w: c_int, h: c_int) void {
-    if (g_open_window_fn) |f| f(title, w, h);
-}
-
 // ── Terminal dock resize (sweatshop / IDE-style carts) ────────────────
 
 var g_dock_resize_active: bool = false;

@@ -60,7 +60,11 @@ pub const ArchiveError = error{
 
 // -- Helpers --
 
-fn openArchive(path: []const u8) ArchiveError!*ar.archive {
+fn openArchive(io: std.Io, path: []const u8) ArchiveError!*ar.archive {
+    // libarchive performs its own blocking reads; accepting the capability at
+    // this boundary keeps that authority explicit even though the C library
+    // cannot consume std.Io directly.
+    _ = io;
     const a = ar.archive_read_new() orelse return ArchiveError.OpenFailed;
     _ = ar.archive_read_support_format_all(a);
     _ = ar.archive_read_support_filter_all(a);
@@ -108,8 +112,8 @@ fn fillEntry(entry: *ar.archive_entry, out: *ArchiveEntry) void {
 // -- Phase 6A: Inspection --
 
 /// List all entries in an archive. Returns count written to `out`.
-pub fn list(path: []const u8, out: []ArchiveEntry) ArchiveError!usize {
-    const a = try openArchive(path);
+pub fn list(io: std.Io, path: []const u8, out: []ArchiveEntry) ArchiveError!usize {
+    const a = try openArchive(io, path);
     defer closeArchive(a);
 
     var count: usize = 0;
@@ -125,8 +129,8 @@ pub fn list(path: []const u8, out: []ArchiveEntry) ArchiveError!usize {
 }
 
 /// Read a single entry's data from the archive. Returns bytes read.
-pub fn readEntry(path: []const u8, entry_path: []const u8, buf: []u8) ArchiveError!usize {
-    const a = try openArchive(path);
+pub fn readEntry(io: std.Io, path: []const u8, entry_path: []const u8, buf: []u8) ArchiveError!usize {
+    const a = try openArchive(io, path);
     defer closeArchive(a);
 
     var entry: ?*ar.archive_entry = null;
@@ -158,8 +162,8 @@ pub fn readEntry(path: []const u8, entry_path: []const u8, buf: []u8) ArchiveErr
 }
 
 /// Search entries by name substring (case-insensitive). Returns count.
-pub fn search(path: []const u8, query: []const u8, out: []ArchiveEntry) ArchiveError!usize {
-    const a = try openArchive(path);
+pub fn search(io: std.Io, path: []const u8, query: []const u8, out: []ArchiveEntry) ArchiveError!usize {
+    const a = try openArchive(io, path);
     defer closeArchive(a);
 
     var count: usize = 0;
@@ -183,8 +187,8 @@ pub fn search(path: []const u8, query: []const u8, out: []ArchiveEntry) ArchiveE
 }
 
 /// Get archive-level metadata.
-pub fn info(path: []const u8) ArchiveError!ArchiveInfo {
-    const a = try openArchive(path);
+pub fn info(io: std.Io, path: []const u8) ArchiveError!ArchiveInfo {
+    const a = try openArchive(io, path);
     defer closeArchive(a);
 
     var result = ArchiveInfo{};
@@ -230,8 +234,8 @@ pub fn info(path: []const u8) ArchiveError!ArchiveInfo {
 /// - Paths containing ".." traversal are rejected
 /// - Only regular files and directories are extracted
 /// - All output stays confined under dest_dir
-pub fn extractAll(archive_path: []const u8, dest_dir: std.fs.Dir) !u32 {
-    const a = try openArchive(archive_path);
+pub fn extractAll(io: std.Io, archive_path: []const u8, dest_dir: std.Io.Dir) !u32 {
+    const a = try openArchive(io, archive_path);
     defer closeArchive(a);
 
     var extracted: u32 = 0;
@@ -253,22 +257,22 @@ pub fn extractAll(archive_path: []const u8, dest_dir: std.fs.Dir) !u32 {
 
         if (is_dir) {
             // Create directory
-            dest_dir.makePath(entry_path) catch continue;
+            dest_dir.createDirPath(io, entry_path) catch continue;
         } else if (is_file) {
             // Ensure parent directory exists
             if (std.fs.path.dirname(entry_path)) |parent| {
-                dest_dir.makePath(parent) catch continue;
+                dest_dir.createDirPath(io, parent) catch continue;
             }
 
             // Extract file
-            const file = dest_dir.createFile(entry_path, .{ .truncate = true }) catch continue;
-            defer file.close();
+            const file = dest_dir.createFile(io, entry_path, .{ .truncate = true }) catch continue;
+            defer file.close(io);
 
             var buf: [BLOCK_SIZE]u8 = undefined;
             while (true) {
                 const n = ar.archive_read_data(a, &buf, buf.len);
                 if (n <= 0) break;
-                file.writeAll(buf[0..@intCast(n)]) catch break;
+                file.writeStreamingAll(io, buf[0..@intCast(n)]) catch break;
             }
 
             extracted += 1;
@@ -294,7 +298,7 @@ fn containsInsensitive(haystack: []const u8, needle: []const u8) bool {
 // -- Tests --
 
 test "open nonexistent archive returns error" {
-    const result = list("/tmp/nonexistent.tar.gz", &[_]ArchiveEntry{});
+    const result = list(std.testing.io, "/tmp/nonexistent.tar.gz", &[_]ArchiveEntry{});
     try std.testing.expectError(ArchiveError.OpenFailed, result);
 }
 
@@ -304,61 +308,65 @@ test "list tar archive" {
     defer tmp_dir.cleanup();
 
     // Create test files
-    var f1 = try tmp_dir.dir.createFile("hello.txt", .{});
-    try f1.writeAll("hello world");
-    f1.close();
-    var f2 = try tmp_dir.dir.createFile("data.bin", .{});
-    try f2.writeAll("binary data here");
-    f2.close();
+    var f1 = try tmp_dir.dir.createFile(std.testing.io, "hello.txt", .{});
+    try f1.writeStreamingAll(std.testing.io, "hello world");
+    f1.close(std.testing.io);
+    var f2 = try tmp_dir.dir.createFile(std.testing.io, "data.bin", .{});
+    try f2.writeStreamingAll(std.testing.io, "binary data here");
+    f2.close(std.testing.io);
 
     // Get real path for tar command
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp_dir.dir.realpath(".", &path_buf);
+    const dir_path_len = try tmp_dir.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..dir_path_len];
 
     // Create tar archive using shell
     var tar_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tar_path = std.fmt.bufPrint(&tar_path_buf, "{s}/test.tar", .{dir_path}) catch unreachable;
 
-    // Use std.process.Child to run tar
+    // Use the injected 0.16 process API to run tar.
     var cmd_buf: [std.fs.max_path_bytes * 2]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "tar cf {s} -C {s} hello.txt data.bin", .{ tar_path, dir_path }) catch unreachable;
 
     // Shell out to create tar
     const argv = [_][]const u8{ "sh", "-c", cmd };
-    var child = std.process.Child.init(&argv, std.heap.page_allocator);
-    const term = try child.spawnAndWait();
-    if (term.Exited != 0) return error.TarFailed;
+    var child = try std.process.spawn(std.testing.io, .{ .argv = &argv });
+    const term = try child.wait(std.testing.io);
+    switch (term) {
+        .exited => |code| if (code != 0) return error.TarFailed,
+        else => return error.TarFailed,
+    }
 
     // Now test listing
     var entries: [16]ArchiveEntry = undefined;
-    const count = try list(tar_path, &entries);
+    const count = try list(std.testing.io, tar_path, &entries);
     try std.testing.expect(count >= 2);
 
     // Test info
-    const i = try info(tar_path);
+    const i = try info(std.testing.io, tar_path);
     try std.testing.expect(i.file_count >= 2);
 
     // Test readEntry
     var buf: [256]u8 = undefined;
-    const n = try readEntry(tar_path, "hello.txt", &buf);
+    const n = try readEntry(std.testing.io, tar_path, "hello.txt", &buf);
     try std.testing.expectEqualStrings("hello world", buf[0..n]);
 
     // Test search
     var search_results: [16]ArchiveEntry = undefined;
-    const scount = try search(tar_path, "hello", &search_results);
+    const scount = try search(std.testing.io, tar_path, "hello", &search_results);
     try std.testing.expectEqual(@as(usize, 1), scount);
 
     // Test safe extraction
     var extract_tmp = std.testing.tmpDir(.{});
     defer extract_tmp.cleanup();
-    const extracted = try extractAll(tar_path, extract_tmp.dir);
+    const extracted = try extractAll(std.testing.io, tar_path, extract_tmp.dir);
     try std.testing.expectEqual(@as(u32, 2), extracted);
 
     // Verify extracted content
     var verify_buf: [256]u8 = undefined;
-    const vf = try extract_tmp.dir.openFile("hello.txt", .{});
-    defer vf.close();
-    const vn = try vf.readAll(&verify_buf);
+    const vf = try extract_tmp.dir.openFile(std.testing.io, "hello.txt", .{});
+    defer vf.close(std.testing.io);
+    const vn = try vf.readPositionalAll(std.testing.io, &verify_buf, 0);
     try std.testing.expectEqualStrings("hello world", verify_buf[0..vn]);
 }
 

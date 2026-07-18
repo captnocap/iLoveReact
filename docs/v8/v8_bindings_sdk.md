@@ -156,9 +156,11 @@ Cross-file call summary
 - `v8_bindings_sdk.tickDrain()` is the per-frame bridge: reads async queues from both modules and emits JS events.
 - `v8_runtime` provides function registration and event callback dispatch (`__ffiEmit`) used by the SDK emitter path.
 
-## framework/claude_sdk/session.zig
+## framework/assistant/claude_sdk/session.zig
 
-- `Session` is the core process bridge to the `claude` CLI. It stores allocator-bound state plus an active `std.process.Child` (`child`), stdin writer, and a non-blocking stdout reader buffer.
+- `Session` is the core process bridge to the `claude` CLI. It stores the
+  injected `std.Io`, an active `std.process.Child`, a `ChildStdout` owner, and
+  the NDJSON `ReadBuffer`.
 - `SessionOptions` configures:
   - `path` (optional binary path override)
   - `instruction` text
@@ -166,23 +168,31 @@ Cross-file call summary
   - `allowedTools` / `disallowedTools`
   - `maxTurns` and `model`
   - `permissionMode` and `permissionPromptToolName`
-- `init(allocator, options)`:
+- `init(io, environ_map, allocator, options)`:
   - resolves executable: uses explicit `options.path` or default `PATH` lookup for `claude`
-  - builds argv via `options.asArgv()` and spawns child with `stdin` and `stdout` pipes
-  - switches stdout to non-blocking mode through `std.posix.fcntl`
-  - initializes `ReadBuffer`/`LineBuffer` state used by polling.
+  - builds argv and calls `std.process.spawn(io, ...)` with stdin/stdout pipes
+  - transfers stdout ownership to `ChildStdout`, whose cancelable
+    `std.Io.Group` reader task publishes bytes through a fixed-capacity
+    `std.Io.Queue`
+  - initializes the `ReadBuffer` used by frame-facing polling; it does not set
+    descriptor flags or poll raw fd readiness.
 - `send(prompt)`:
   - writes a JSON envelope using NDJSON framing:
     - `{"type":"user","message":...}`
     - message content is escaped using `appendJsonString`
-  - appends newline terminator and flushes `stdin`.
+  - appends newline terminator and writes it with
+    `std.Io.File.writeStreamingAll(io, ...)`.
 - `interrupt()`:
-  - writes an interrupt JSON envelope (`{"type":"interrupt"}\n`) to stdin and flushes.
+  - writes an interrupt JSON envelope (`{"type":"interrupt"}\n`) through the
+    injected I/O capability.
 - `poll() : ?types.OwnedMessage`:
   - drains currently available complete lines via `line_buffer` first.
-  - when no buffered line remains, reads raw bytes from stdout into an internal chunk buffer and appends to `ReadBuffer`.
+  - when no buffered line remains, drains bytes already available in
+    `ChildStdout`'s bounded queue into an internal chunk and appends them to
+    `ReadBuffer`.
   - repeatedly parses complete lines and returns the first valid message; returns `null` when no message is currently ready.
-  - treats read EOF (`0` bytes) as process closure and sets `closed = true` after closing stdin.
+  - treats the reader task's EOF/failure state as process closure and closes
+    stdin.
 - `close()` and `deinit()`:
   - `close()` closes stdin and synchronously waits for process completion.
   - `deinit()` is idempotent cleanup: closes stdin, kills child if running, then destroys line buffer and marks closed.
@@ -191,7 +201,7 @@ Cross-file call summary
   - invalid JSON/log lines are caught, logged with `std.log.warn`, and ignored by returning `null`.
 - Test coverage in-file checks happy path for JSON parsing and that `Session` can initialize/shutdown in constrained scenarios.
 
-## framework/claude_sdk/parser.zig
+## framework/assistant/claude_sdk/parser.zig
 
 - Implements `parseMessage` for NDJSON event lines emitted by the Claude child process and converts them into strongly-typed `types.Message` unions.
 - Public entrypoint:
@@ -229,7 +239,7 @@ Cross-file call summary
 - Ownership model:
   - all returned strings/slices are arena-allocated, matching session/poller expectations.
 
-## framework/claude_sdk/types.zig
+## framework/assistant/claude_sdk/types.zig
 
 - Defines the message schema used across Claude SDK runtime:
   - `TextBlock`, `ThinkingBlock`, `ToolUseBlock` are simple payload structs.
@@ -247,7 +257,7 @@ Cross-file call summary
   - `OwnedMessage` wraps `msg` and an `ArenaAllocator`.
   - `deinit()` on `OwnedMessage` is required to free arena-backed strings/arrays allocated during parse.
 
-## framework/claude_sdk/options.zig
+## framework/assistant/claude_sdk/options.zig
 
 - Defines runtime configuration for `claude` subprocess sessions.
 - `PermissionMode` enum maps programmatic modes to CLI strings:
@@ -272,7 +282,7 @@ Cross-file call summary
   - `inherit_stderr`: optional forwarding of subprocess stderr for debug/auth failures
 - This module is consumed by `mod.zig` re-exports and `session.zig` launch/argument construction.
 
-## framework/claude_sdk/buffer.zig
+## framework/assistant/claude_sdk/buffer.zig
 
 - Implements an in-memory NDJSON accumulator for stream-safe reading from `claude` stdout.
 - `ReadBuffer` fields:
@@ -282,7 +292,7 @@ Cross-file call summary
 - API:
   - `init(allocator)` → zeroed `ReadBuffer`
   - `deinit()` releases `buffer` memory (currently `last_line` is intentionally not explicitly deinitialized in this impl)
-  - `append(data)` appends byte chunks as they arrive from non-blocking reads
+  - `append(data)` appends byte chunks drained from `ChildStdout`'s bounded queue
   - `drain()` returns next full line (without trailing `\n`) or `null` if no complete line exists
 - Line handling:
   - Finds first newline index
@@ -292,7 +302,7 @@ Cross-file call summary
 - Internal helper `consume(n)` shifts buffer contents left and shrinks capacity safely when n >= len.
 - Tests cover empty input, partial writes, multiple lines, and empty-line skipping.
 
-## framework/claude_sdk/argv.zig
+## framework/assistant/claude_sdk/argv.zig
 
 - Provides subprocess argument construction and binary lookup for `Session` startup.
 - `findBinary(allocator, cli_path)`:
@@ -318,7 +328,7 @@ Cross-file call summary
 - `freeArgv` deallocates each argument and the outer slice.
 - Construction is written to match stream-json constraints and current agent-facing CLI behavior; MCP-related flags are intentionally deferred.
 
-## framework/claude_sdk/mod.zig
+## framework/assistant/claude_sdk/mod.zig
 
 - Module entrypoint for the Claude Code Agent SDK.
 - Re-exports:
@@ -446,11 +456,11 @@ Cross-file call summary
   - holds `StringHashMap(Tool)`
   - init/register/get/unregister/list
 - `ToolExecutor` concurrency model:
-  - maintains queue of `QueuedTool` (`queued|executing|completed|yielded`) with thread, result, context
+  - maintains queue of `QueuedTool` (`queued|executing|completed|yielded`) with task, result, context
   - `queue()` stores deep-copied inputs, assigns `tool_use_id`, creates `ToolContext` with internal abort checker, signals and calls `processQueue()`.
   - `canExecute()` enforces exclusivity: unsafe tools block concurrent execution; safe tools can run in parallel only when no unsafe runner active.
   - `processQueue()` walks queue FIFO and starts runnable tools.
-  - `executeTool()` runs tool in dedicated thread via `std.Thread.spawn`, updates progress/completion, invokes `on_complete` callback, and propagates bash failures to sibling-abort (`has_errored` + `should_abort`).
+  - `executeTool()` runs the tool in the executor's injected-I/O `std.Io.Group`, updates progress/completion, invokes `on_complete`, and propagates bash failures to sibling-abort (`has_errored` + `should_abort`).
   - `getResult(tool_use_id)` returns copied `ToolResult` if available.
   - `waitAll()`, `cancelAll()`, `reset()` manage lifecycle.
 - Built-in tool:
@@ -461,26 +471,25 @@ Cross-file call summary
 - Exposed C exports for registry/executor creation, queue, wait, reset, and destroy.
 - Note: there are TODO comments in schema completeness and synchronous path remains minimal (`execute` returns output content only).
 
-## framework/process.zig
+## framework/process/process.zig
 
-- Provides low-level child-process management for POSIX: spawn normal and piped children, track registry, and perform deterministic cleanup.
-- Low-level setup:
-  - Wraps libc `fork`, `execvp`, `waitpid`, `kill`, `pipe2`, `dup2`, etc.
-  - Own constants for `Signal`, process wait flags, and open flags.
-- `Process` handle fields: `pid`, `closed`, `exited`, `exit_code`.
+- Tracks children on Zig 0.16's native `std.process` and injected `std.Io`, with
+  normal and piped spawn helpers plus deterministic registry cleanup.
+- `spawn(allocator, io, std.process.SpawnOptions)` calls
+  `std.process.spawn(io, options)`. A cancelable `std.Io.Group` waiter task owns
+  `child.wait(io)` and publishes the native `Child.Term` through atomic state and
+  an `std.Io.Event`.
 - `Process` methods:
-  - `alive()` performs non-blocking `waitpid(WNOHANG)` and updates exit state/code.
-  - `exitCode()` returns cached code.
-  - `sendSignal(.term|.kill_)` emits SIGTERM or SIGKILL.
-  - `closeProccess()` (typoed name preserved): graceful terminate (SIGTERM + wait loop + SIGKILL fallback), reaps, marks closed, and deregisters PID.
-- Spawn models:
-  - `spawn(SpawnOptions)`:
-    - forks; child optionally `setsid`, `chdir`, sets env vars, builds argv (bounded to 33 positional args + exe) and execs.
-    - parent registers pid in global registry.
-  - `spawnPiped(PipedSpawnOptions)`:
-    - creates stdin/stdout/stderr pipes as requested,
-    - child wires pipe ends to fd 0/1/2 with `dup2`,
-    - parent returns `PipedProcess` with parent FDs (stdout/stderr non-blocking).
+  - `alive()` reads the state published by that waiter task; it does not call
+    `waitpid(WNOHANG)`.
+  - `termination()`/`exitCode()` expose the cached native terminal state.
+  - `sendSignal(.term|.kill_)` is the narrow POSIX boundary used to signal
+    without stealing wait/reap ownership from the native task.
+  - `closeProcess(io)` performs graceful terminate, waits on the completion
+    event, joins the task group, and deregisters the child.
+- `spawnPiped` transfers native stdin/stdout/stderr `std.Io.File` values out of
+  the spawned child. Each output file gets a cancelable reader task and a fixed
+  128 KiB `std.Io.Queue`; frame-facing drain methods only consume queued bytes.
 - Registry infrastructure:
   - fixed-size PID list (`MAX_CHILDREN = 32`) with path `/tmp/tsz_children_<PARENT_PID>`.
   - `register`/`deregister` keep array updated and persist `writeRegistryFile()`.
@@ -488,7 +497,9 @@ Cross-file call summary
   - `cleanup()` removes PID registry file.
   - helper getters: `count()`, `getPid(index)`.
 - Exposed primarily to tool/bash execution and subprocess orchestration paths.
-- Note: public `PipedProcess` includes fd fields and wrapped `Process`, but no own close helper method here (must manage via `Process.closeProccess()` and fd cleanup externally).
+- `PipedProcess.deinit(io)` closes stdin, closes the tracked process, cancels the
+  file pumps, and closes their native files. No descriptor flags or raw
+  readiness loop are involved.
 
 ## framework/agent_core.zig
 
@@ -570,24 +581,23 @@ Cross-file call summary
   - `forked_agent_send_message`, `forked_agent_terminate`, `forked_agent_get_status`
 - This confirms full subagent orchestration path: `agent_core` calls into `AgentPool`, and `ForkedAgent` handles message enqueue/resume and termination semantics.
 
-## framework/pty.zig
+## framework/terminal/pty.zig
 
 - Implements pseudo-terminal lifecycle and shell-backed interactive execution.
-- Uses direct libc PTY APIs:
-  - `posix_openpt`, `grantpt`, `unlockpt`, `ptsname_r`, `fork`, `setsid`, `dup2`, `execvp`, `ioctl`, `waitpid`, `kill`.
-- `Pty` struct state:
-  - `pid`, `masterfd`, `closed`, `exited`, `child_exited`, `exit_code`, fixed `read_buf`.
+- Direct libc is confined to PTY/session setup and control:
+  `posix_openpt`, `grantpt`, `unlockpt`, `ptsname_r`, child `fork`/`setsid`/
+  `dup2`/`execvp`, and `ioctl` for controlling-terminal/window-size operations.
+- `openPty(allocator, io, opts)` wraps the parent master as `std.Io.File` and
+  starts cancelable reader, writer, and child-wait tasks in an `std.Io.Group`.
+  Fixed-capacity `std.Io.Queue` instances carry output bytes and pending writes.
 - Core runtime methods:
-  - `readData()`:
-    - non-blocking loop over `read(masterfd)` into internal buffer, handles `EAGAIN`, `EINTR`, `EIO` and EOF/child-exited transitions.
-    - returns slice view into internal buffer.
-  - `writeData()` writes full payload with retry on EAGAIN/EINTR and marks child exited on `EIO`.
-  - `resize(rows, cols)` updates terminal size via `TIOCSWINSZ`.
-  - `alive()` checks `waitpid(WNOHANG)` and updates `exit_code` when process reaps.
-  - `exitCode()` accessor.
-  - `closePty()` closes fd and performs SIGTERM then SIGKILL fallback + final reap.
-- `openPty(opts)` flow:
-  - open master, grant/unlock, resolve slave name
-  - fork; child creates session, binds slave to stdin/out/err, sets cwd/env, execs shell.
-  - parent sets window size, sets master non-blocking, returns `Pty{pid, masterfd}`.
+  - `readData()` drains bytes already published by the reader task without
+    waiting on a descriptor.
+  - `writeData()` copies and queues a write for the injected-Io writer task.
+  - `resize(rows, cols)` is the PTY-specific `TIOCSWINSZ` ioctl boundary.
+  - `alive()`/`exitCode()` read state published by the `child.wait(io)` task.
+  - `closePty()` closes queues, cancels the task group, terminates/reaps through
+    `std.Io`, and closes the native master file.
+- Steady-state I/O does not use `O_NONBLOCK`, raw `read`/`write`, or an fd
+  readiness loop.
 - This module is primarily used by `tool_framework.bash` and `tools_builtin.bash` for interactive shell semantics.

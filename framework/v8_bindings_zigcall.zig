@@ -21,17 +21,19 @@
 
 const std = @import("std");
 const v8 = @import("v8");
+const HostContext = @import("host_context.zig");
 const v8_runtime = @import("v8_runtime.zig");
+const sim = @import("sim/root.zig");
 
 // ── Module whitelist ────────────────────────────────────────────────────
 // Each entry is a comptime `.{ "name", @import("path.zig") }` pair. Adding
 // a new module here is the full wiring — no boilerplate per function.
 const MODULES = .{
-    .{ "math",       @import("math/root.zig") },
-    .{ "easing",     @import("math/easing.zig") },
-    .{ "random",     @import("math/random.zig") },
+    .{ "math", @import("math/root.zig") },
+    .{ "easing", @import("math/easing.zig") },
+    .{ "random", @import("math/random.zig") },
     .{ "transition", @import("gpu/transition.zig") },
-    .{ "sim",        @import("sim/root.zig") },
+    .{ "sim", sim },
 };
 
 // ── Type support predicate ──────────────────────────────────────────────
@@ -69,7 +71,13 @@ fn fnIsSupported(comptime FT: type) bool {
 
 // ── V8 value ↔ Zig value conversion ─────────────────────────────────────
 
-fn argFromV8(comptime T: type, iso: v8.Isolate, ctx: v8.Context, val: v8.Value) !T {
+fn argFromV8(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    iso: v8.Isolate,
+    ctx: v8.Context,
+    val: v8.Value,
+) !T {
     return switch (@typeInfo(T)) {
         .bool => val.toBool(iso),
         .int => |i| blk: {
@@ -83,7 +91,7 @@ fn argFromV8(comptime T: type, iso: v8.Isolate, ctx: v8.Context, val: v8.Value) 
         .void => {},
         .optional => |o| blk: {
             if (val.isNull() or val.isUndefined()) break :blk null;
-            break :blk try argFromV8(o.child, iso, ctx, val);
+            break :blk try argFromV8(o.child, allocator, iso, ctx, val);
         },
         .@"struct" => |s| blk: {
             const obj = val.castTo(v8.Object);
@@ -91,7 +99,7 @@ fn argFromV8(comptime T: type, iso: v8.Isolate, ctx: v8.Context, val: v8.Value) 
             inline for (s.fields) |f| {
                 const key = v8.String.initUtf8(iso, f.name);
                 const sub = try obj.getValue(ctx, key);
-                @field(out, f.name) = try argFromV8(f.type, iso, ctx, sub);
+                @field(out, f.name) = try argFromV8(f.type, allocator, iso, ctx, sub);
             }
             break :blk out;
         },
@@ -101,12 +109,12 @@ fn argFromV8(comptime T: type, iso: v8.Isolate, ctx: v8.Context, val: v8.Value) 
             const len_key = v8.String.initUtf8(iso, "length");
             const len_v = try arr_obj.getValue(ctx, len_key);
             const len_n: usize = @intFromFloat(try len_v.toF64(ctx));
-            const buf = try std.heap.c_allocator.alloc(p.child, len_n);
-            errdefer std.heap.c_allocator.free(buf);
+            const buf = try allocator.alloc(p.child, len_n);
+            errdefer allocator.free(buf);
             var i: u32 = 0;
             while (i < @as(u32, @intCast(len_n))) : (i += 1) {
                 const elem = try arr_obj.getAtIndex(ctx, i);
-                buf[@intCast(i)] = try argFromV8(p.child, iso, ctx, elem);
+                buf[@intCast(i)] = try argFromV8(p.child, allocator, iso, ctx, elem);
             }
             break :blk buf;
         },
@@ -114,10 +122,10 @@ fn argFromV8(comptime T: type, iso: v8.Isolate, ctx: v8.Context, val: v8.Value) 
     };
 }
 
-fn argFreeIfAllocated(comptime T: type, val: T) void {
+fn argFreeIfAllocated(allocator: std.mem.Allocator, comptime T: type, val: T) void {
     switch (@typeInfo(T)) {
         .pointer => |p| {
-            if (p.size == .slice) std.heap.c_allocator.free(val);
+            if (p.size == .slice) allocator.free(val);
         },
         else => {},
     }
@@ -164,7 +172,7 @@ fn readCstring(iso: v8.Isolate, ctx: v8.Context, val: v8.Value, buf: []u8) ?[]co
     return buf[0..n];
 }
 
-fn callOne(comptime F: anytype, info: v8.FunctionCallbackInfo) void {
+fn callOne(host: *HostContext, comptime F: anytype, info: v8.FunctionCallbackInfo) void {
     const FT = @TypeOf(F);
     const fi = @typeInfo(FT).@"fn";
     const iso = info.getIsolate();
@@ -182,13 +190,13 @@ fn callOne(comptime F: anytype, info: v8.FunctionCallbackInfo) void {
             return;
         }
         const av = info.getArg(@as(u32, @intCast(i)) + ARG_OFFSET);
-        args[i] = argFromV8(PT, iso, ctx, av) catch {
+        args[i] = argFromV8(PT, host.gpa, iso, ctx, av) catch {
             info.getReturnValue().set(v8.initNull(iso));
             return;
         };
     }
     defer inline for (fi.params, 0..) |p, i| {
-        argFreeIfAllocated(p.type.?, args[i]);
+        argFreeIfAllocated(host.gpa, p.type.?, args[i]);
     };
 
     const result = @call(.auto, F, args);
@@ -197,7 +205,7 @@ fn callOne(comptime F: anytype, info: v8.FunctionCallbackInfo) void {
     info.getReturnValue().set(ret);
 }
 
-fn dispatchModule(comptime Mod: type, fn_name: []const u8, info: v8.FunctionCallbackInfo) bool {
+fn dispatchModule(host: *HostContext, comptime Mod: type, fn_name: []const u8, info: v8.FunctionCallbackInfo) bool {
     @setEvalBranchQuota(200000);
     inline for (@typeInfo(Mod).@"struct".decls) |decl| {
         const val = @field(Mod, decl.name);
@@ -205,16 +213,24 @@ fn dispatchModule(comptime Mod: type, fn_name: []const u8, info: v8.FunctionCall
         if (comptime @typeInfo(VT) != .@"fn") continue;
         if (comptime !fnIsSupported(VT)) continue;
         if (std.mem.eql(u8, decl.name, fn_name)) {
-            callOne(val, info);
+            callOne(host, val, info);
             return true;
         }
     }
     return false;
 }
 
+fn flushSimEvents(host: *HostContext) void {
+    var event: sim.HostEvent = undefined;
+    while (sim.popHostEvent(&event)) {
+        v8_runtime.callGlobal2Str(host, "__ffiEmit", event.channelZ(), event.payloadZ());
+    }
+}
+
 fn zigCall(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const iso = info.getIsolate();
+    const host = v8_runtime.hostContext(iso);
     const ctx = iso.getCurrentContext();
     if (info.length() < 2) {
         info.getReturnValue().set(v8.initNull(iso));
@@ -235,7 +251,12 @@ fn zigCall(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         const name = entry[0];
         const Mod = entry[1];
         if (std.mem.eql(u8, name, mod_name)) {
-            if (dispatchModule(Mod, fn_name, info)) return;
+            if (dispatchModule(host, Mod, fn_name, info)) {
+                if (std.mem.eql(u8, name, "sim")) {
+                    flushSimEvents(host);
+                }
+                return;
+            }
             break;
         }
     }
@@ -244,7 +265,8 @@ fn zigCall(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 // ── Registration ────────────────────────────────────────────────────────
 
-pub fn registerZigCall(_: anytype) void {
+pub fn registerZigCall(host: *HostContext) void {
+    sim.init(host.io);
     v8_runtime.registerHostFn("__zig_call", zigCall);
 }
 
@@ -257,37 +279,38 @@ fn listCallable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     @setEvalBranchQuota(200000);
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const iso = info.getIsolate();
+    const host = v8_runtime.hostContext(iso);
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    buf.append(std.heap.c_allocator, '{') catch return;
+    defer buf.deinit(host.gpa);
+    buf.append(host.gpa, '{') catch return;
     var first_mod = true;
     inline for (MODULES) |entry| {
         const name = entry[0];
         const Mod = entry[1];
-        if (!first_mod) buf.append(std.heap.c_allocator, ',') catch return;
+        if (!first_mod) buf.append(host.gpa, ',') catch return;
         first_mod = false;
-        buf.append(std.heap.c_allocator, '"') catch return;
-        buf.appendSlice(std.heap.c_allocator, name) catch return;
-        buf.appendSlice(std.heap.c_allocator, "\":[") catch return;
+        buf.append(host.gpa, '"') catch return;
+        buf.appendSlice(host.gpa, name) catch return;
+        buf.appendSlice(host.gpa, "\":[") catch return;
         var first_fn = true;
         inline for (@typeInfo(Mod).@"struct".decls) |decl| {
             const val = @field(Mod, decl.name);
             const VT = @TypeOf(val);
             if (comptime @typeInfo(VT) != .@"fn") continue;
             if (comptime !fnIsSupported(VT)) continue;
-            if (!first_fn) buf.append(std.heap.c_allocator, ',') catch return;
+            if (!first_fn) buf.append(host.gpa, ',') catch return;
             first_fn = false;
-            buf.append(std.heap.c_allocator, '"') catch return;
-            buf.appendSlice(std.heap.c_allocator, decl.name) catch return;
-            buf.append(std.heap.c_allocator, '"') catch return;
+            buf.append(host.gpa, '"') catch return;
+            buf.appendSlice(host.gpa, decl.name) catch return;
+            buf.append(host.gpa, '"') catch return;
         }
-        buf.append(std.heap.c_allocator, ']') catch return;
+        buf.append(host.gpa, ']') catch return;
     }
-    buf.append(std.heap.c_allocator, '}') catch return;
+    buf.append(host.gpa, '}') catch return;
 
     info.getReturnValue().set(v8.String.initUtf8(iso, buf.items));
 }
 
-pub fn registerZigCallList(_: anytype) void {
+pub fn registerZigCallList(_: *HostContext) void {
     v8_runtime.registerHostFn("__zig_call_list", listCallable);
 }

@@ -22,7 +22,6 @@
 //! ingest function — handled in a follow-on phase.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
 const v8 = @import("v8");
 const v8rt = @import("../v8_runtime.zig");
 
@@ -35,45 +34,43 @@ const openai_compat_sdk = @import("openai_compat_sdk.zig");
 
 const Backend = worker_contract.Backend;
 
-// ── Codex session (threaded) ────────────────────────────────────────────
+// ── Codex session (concurrent I/O task) ────────────────────────────────
 //
 // Codex's app-server speaks JSON-RPC over stdio with no non-blocking
 // poll path. To stay friendly to the JS event loop, each CodexSession
-// owns a background thread that runs turn.next() while `__worker_poll`
+// owns a concurrent I/O task that runs turn.next() while `__worker_poll`
 // non-blocking-drains the resulting Notifications.
 
 const CodexSession = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     codex: codex_sdk.Codex,
     thread: codex_sdk.Thread,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: host_io.Mutex = .{},
+    pending_mutex: std.Io.Mutex = .init,
     pending_signal: std.Io.Event = .unset,
 
     inbox: std.ArrayList(codex_sdk.Notification) = .empty,
-    inbox_mutex: host_io.Mutex = .{},
+    inbox_mutex: std.Io.Mutex = .init,
 
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn destroy(self: *CodexSession) void {
         self.stop.store(true, .seq_cst);
-        self.pending_signal.set(host_io.io());
-        if (self.worker) |t| {
-            t.join();
-            self.worker = null;
-        }
+        self.pending_signal.set(self.io);
+        self.tasks.cancel(self.io);
 
-        self.pending_mutex.lock();
+        self.pending_mutex.lockUncancelable(self.io);
         for (self.pending.items) |item| self.allocator.free(item);
         self.pending.deinit(self.allocator);
-        self.pending_mutex.unlock();
+        self.pending_mutex.unlock(self.io);
 
-        self.inbox_mutex.lock();
+        self.inbox_mutex.lockUncancelable(self.io);
         for (self.inbox.items) |*notification| notification.deinit();
         self.inbox.deinit(self.allocator);
-        self.inbox_mutex.unlock();
+        self.inbox_mutex.unlock(self.io);
 
         self.thread.deinit();
         self.codex.deinit();
@@ -84,30 +81,30 @@ const CodexSession = struct {
     pub fn enqueue(self: *CodexSession, text: []const u8) !void {
         const dup = try self.allocator.dupe(u8, text);
         errdefer self.allocator.free(dup);
-        self.pending_mutex.lock();
-        defer self.pending_mutex.unlock();
+        self.pending_mutex.lockUncancelable(self.io);
+        defer self.pending_mutex.unlock(self.io);
         try self.pending.append(self.allocator, dup);
-        self.pending_signal.set(host_io.io());
+        self.pending_signal.set(self.io);
     }
 
     pub fn drainInbox(self: *CodexSession) ![]codex_sdk.Notification {
-        self.inbox_mutex.lock();
-        defer self.inbox_mutex.unlock();
+        self.inbox_mutex.lockUncancelable(self.io);
+        defer self.inbox_mutex.unlock(self.io);
         return self.inbox.toOwnedSlice(self.allocator);
     }
 
-    fn workerEntry(self: *CodexSession) void {
+    fn workerEntry(self: *CodexSession) std.Io.Cancelable!void {
         while (!self.stop.load(.seq_cst)) {
-            self.pending_signal.waitUncancelable(host_io.io());
+            self.pending_signal.waitUncancelable(self.io);
             self.pending_signal.reset();
 
             while (!self.stop.load(.seq_cst)) {
-                self.pending_mutex.lock();
+                self.pending_mutex.lockUncancelable(self.io);
                 const text_opt: ?[]u8 = if (self.pending.items.len > 0)
                     self.pending.orderedRemove(0)
                 else
                     null;
-                self.pending_mutex.unlock();
+                self.pending_mutex.unlock(self.io);
 
                 const text = text_opt orelse break;
                 defer self.allocator.free(text);
@@ -118,13 +115,13 @@ const CodexSession = struct {
                 while (true) {
                     const maybe = handle.next() catch break;
                     var notif = maybe orelse break;
-                    self.inbox_mutex.lock();
+                    self.inbox_mutex.lockUncancelable(self.io);
                     self.inbox.append(self.allocator, notif) catch {
                         notif.deinit();
-                        self.inbox_mutex.unlock();
+                        self.inbox_mutex.unlock(self.io);
                         continue;
                     };
-                    self.inbox_mutex.unlock();
+                    self.inbox_mutex.unlock(self.io);
                     if (handle.completed) break;
                 }
             }
@@ -137,7 +134,7 @@ const CodexSession = struct {
 // ── Streaming-backend sessions (claude / kimi / local) ─────────────────
 //
 // Same shape across all three: a heap-allocated wrapper that owns the
-// SDK Session plus a worker thread which drives init, send, and poll
+// SDK Session plus a concurrent I/O task which drives init, send, and poll
 // off the JS thread. JS-side __worker_start returns immediately;
 // __worker_send pushes into a mutex'd queue; __worker_poll drains the
 // mutex'd inbox of raw SDK messages and ingests each through the
@@ -147,32 +144,30 @@ const CodexSession = struct {
 // are continuous-stream backends.
 
 const ClaudeSession = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     inner: claude_sdk.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: host_io.Mutex = .{},
+    pending_mutex: std.Io.Mutex = .init,
 
     inbox: std.ArrayList(claude_sdk.OwnedMessage) = .empty,
-    inbox_mutex: host_io.Mutex = .{},
+    inbox_mutex: std.Io.Mutex = .init,
 
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn destroy(self: *ClaudeSession) void {
         self.stop.store(true, .seq_cst);
-        if (self.worker) |t| {
-            t.join();
-            self.worker = null;
-        }
-        self.pending_mutex.lock();
+        self.tasks.cancel(self.io);
+        self.pending_mutex.lockUncancelable(self.io);
         for (self.pending.items) |p| self.allocator.free(p);
         self.pending.deinit(self.allocator);
-        self.pending_mutex.unlock();
-        self.inbox_mutex.lock();
+        self.pending_mutex.unlock(self.io);
+        self.inbox_mutex.lockUncancelable(self.io);
         for (self.inbox.items) |*m| m.deinit();
         self.inbox.deinit(self.allocator);
-        self.inbox_mutex.unlock();
+        self.inbox_mutex.unlock(self.io);
         self.inner.close() catch {};
         self.inner.deinit();
         const allocator = self.allocator;
@@ -182,18 +177,18 @@ const ClaudeSession = struct {
     pub fn enqueue(self: *ClaudeSession, text: []const u8) !void {
         const dup = try self.allocator.dupe(u8, text);
         errdefer self.allocator.free(dup);
-        self.pending_mutex.lock();
-        defer self.pending_mutex.unlock();
+        self.pending_mutex.lockUncancelable(self.io);
+        defer self.pending_mutex.unlock(self.io);
         try self.pending.append(self.allocator, dup);
     }
 
     pub fn drainInbox(self: *ClaudeSession) ![]claude_sdk.OwnedMessage {
-        self.inbox_mutex.lock();
-        defer self.inbox_mutex.unlock();
+        self.inbox_mutex.lockUncancelable(self.io);
+        defer self.inbox_mutex.unlock(self.io);
         return self.inbox.toOwnedSlice(self.allocator);
     }
 
-    fn workerEntry(self: *ClaudeSession) void {
+    fn workerEntry(self: *ClaudeSession) std.Io.Cancelable!void {
         // claude_sdk.Session.init already spawns the CLI; no separate
         // initialize handshake. Start polling immediately.
         while (!self.stop.load(.seq_cst)) {
@@ -201,57 +196,55 @@ const ClaudeSession = struct {
             while (true) {
                 const maybe = self.inner.poll() catch break;
                 const owned = maybe orelse break;
-                self.inbox_mutex.lock();
+                self.inbox_mutex.lockUncancelable(self.io);
                 self.inbox.append(self.allocator, owned) catch {
                     var o = owned;
                     o.deinit();
                 };
-                self.inbox_mutex.unlock();
+                self.inbox_mutex.unlock(self.io);
                 any = true;
             }
-            self.pending_mutex.lock();
+            self.pending_mutex.lockUncancelable(self.io);
             const text_opt: ?[]u8 = if (self.pending.items.len > 0)
                 self.pending.orderedRemove(0)
             else
                 null;
-            self.pending_mutex.unlock();
+            self.pending_mutex.unlock(self.io);
             if (text_opt) |text| {
                 defer self.allocator.free(text);
                 self.inner.send(text) catch {};
                 any = true;
             }
-            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
+            if (!any) try std.Io.sleep(self.io, .fromMilliseconds(2), .awake);
         }
     }
 };
 
 const KimiSession = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     inner: kimi_wire_sdk.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: host_io.Mutex = .{},
+    pending_mutex: std.Io.Mutex = .init,
 
     inbox: std.ArrayList(kimi_wire_sdk.OwnedInbound) = .empty,
-    inbox_mutex: host_io.Mutex = .{},
+    inbox_mutex: std.Io.Mutex = .init,
 
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn destroy(self: *KimiSession) void {
         self.stop.store(true, .seq_cst);
-        if (self.worker) |t| {
-            t.join();
-            self.worker = null;
-        }
-        self.pending_mutex.lock();
+        self.tasks.cancel(self.io);
+        self.pending_mutex.lockUncancelable(self.io);
         for (self.pending.items) |p| self.allocator.free(p);
         self.pending.deinit(self.allocator);
-        self.pending_mutex.unlock();
-        self.inbox_mutex.lock();
+        self.pending_mutex.unlock(self.io);
+        self.inbox_mutex.lockUncancelable(self.io);
         for (self.inbox.items) |*m| m.deinit();
         self.inbox.deinit(self.allocator);
-        self.inbox_mutex.unlock();
+        self.inbox_mutex.unlock(self.io);
         self.inner.close() catch {};
         self.inner.deinit();
         const allocator = self.allocator;
@@ -261,18 +254,18 @@ const KimiSession = struct {
     pub fn enqueue(self: *KimiSession, text: []const u8) !void {
         const dup = try self.allocator.dupe(u8, text);
         errdefer self.allocator.free(dup);
-        self.pending_mutex.lock();
-        defer self.pending_mutex.unlock();
+        self.pending_mutex.lockUncancelable(self.io);
+        defer self.pending_mutex.unlock(self.io);
         try self.pending.append(self.allocator, dup);
     }
 
     pub fn drainInbox(self: *KimiSession) ![]kimi_wire_sdk.OwnedInbound {
-        self.inbox_mutex.lock();
-        defer self.inbox_mutex.unlock();
+        self.inbox_mutex.lockUncancelable(self.io);
+        defer self.inbox_mutex.unlock(self.io);
         return self.inbox.toOwnedSlice(self.allocator);
     }
 
-    fn workerEntry(self: *KimiSession) void {
+    fn workerEntry(self: *KimiSession) std.Io.Cancelable!void {
         // kimi --wire requires an initialize handshake before any prompt.
         // Run it here so the JS thread isn't stuck waiting.
         var init_result = self.inner.initialize(.{}) catch {
@@ -286,42 +279,43 @@ const KimiSession = struct {
             while (true) {
                 const maybe = self.inner.poll() catch break;
                 const owned = maybe orelse break;
-                self.inbox_mutex.lock();
+                self.inbox_mutex.lockUncancelable(self.io);
                 self.inbox.append(self.allocator, owned) catch {
                     var o = owned;
                     o.deinit();
                 };
-                self.inbox_mutex.unlock();
+                self.inbox_mutex.unlock(self.io);
                 any = true;
             }
-            self.pending_mutex.lock();
+            self.pending_mutex.lockUncancelable(self.io);
             const text_opt: ?[]u8 = if (self.pending.items.len > 0)
                 self.pending.orderedRemove(0)
             else
                 null;
-            self.pending_mutex.unlock();
+            self.pending_mutex.unlock(self.io);
             if (text_opt) |text| {
                 defer self.allocator.free(text);
                 var token = self.inner.prompt(.{ .text = text }) catch continue;
                 token.deinit();
                 any = true;
             }
-            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
+            if (!any) try std.Io.sleep(self.io, .fromMilliseconds(2), .awake);
         }
     }
 };
 
 const LocalAiSession = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     inner: *local_ai_runtime.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: host_io.Mutex = .{},
+    pending_mutex: std.Io.Mutex = .init,
 
     inbox: std.ArrayList(local_ai_runtime.OwnedEvent) = .empty,
-    inbox_mutex: host_io.Mutex = .{},
+    inbox_mutex: std.Io.Mutex = .init,
 
-    worker: ?std.Thread = null,
+    tasks: std.Io.Group = .init,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     // Per-submit token cap. Pulled from worker_start opts JSON
@@ -332,18 +326,15 @@ const LocalAiSession = struct {
 
     pub fn destroy(self: *LocalAiSession) void {
         self.stop.store(true, .seq_cst);
-        if (self.worker) |t| {
-            t.join();
-            self.worker = null;
-        }
-        self.pending_mutex.lock();
+        self.tasks.cancel(self.io);
+        self.pending_mutex.lockUncancelable(self.io);
         for (self.pending.items) |p| self.allocator.free(p);
         self.pending.deinit(self.allocator);
-        self.pending_mutex.unlock();
-        self.inbox_mutex.lock();
+        self.pending_mutex.unlock(self.io);
+        self.inbox_mutex.lockUncancelable(self.io);
         for (self.inbox.items) |*e| e.deinit();
         self.inbox.deinit(self.allocator);
-        self.inbox_mutex.unlock();
+        self.inbox_mutex.unlock(self.io);
         self.inner.close();
         self.inner.destroy();
         const allocator = self.allocator;
@@ -353,42 +344,42 @@ const LocalAiSession = struct {
     pub fn enqueue(self: *LocalAiSession, text: []const u8) !void {
         const dup = try self.allocator.dupe(u8, text);
         errdefer self.allocator.free(dup);
-        self.pending_mutex.lock();
-        defer self.pending_mutex.unlock();
+        self.pending_mutex.lockUncancelable(self.io);
+        defer self.pending_mutex.unlock(self.io);
         try self.pending.append(self.allocator, dup);
     }
 
     pub fn drainInbox(self: *LocalAiSession) ![]local_ai_runtime.OwnedEvent {
-        self.inbox_mutex.lock();
-        defer self.inbox_mutex.unlock();
+        self.inbox_mutex.lockUncancelable(self.io);
+        defer self.inbox_mutex.unlock(self.io);
         return self.inbox.toOwnedSlice(self.allocator);
     }
 
-    fn workerEntry(self: *LocalAiSession) void {
+    fn workerEntry(self: *LocalAiSession) std.Io.Cancelable!void {
         while (!self.stop.load(.seq_cst)) {
             var any = false;
             while (true) {
                 const owned = self.inner.poll() orelse break;
-                self.inbox_mutex.lock();
+                self.inbox_mutex.lockUncancelable(self.io);
                 self.inbox.append(self.allocator, owned) catch {
                     var o = owned;
                     o.deinit();
                 };
-                self.inbox_mutex.unlock();
+                self.inbox_mutex.unlock(self.io);
                 any = true;
             }
-            self.pending_mutex.lock();
+            self.pending_mutex.lockUncancelable(self.io);
             const text_opt: ?[]u8 = if (self.pending.items.len > 0)
                 self.pending.orderedRemove(0)
             else
                 null;
-            self.pending_mutex.unlock();
+            self.pending_mutex.unlock(self.io);
             if (text_opt) |text| {
                 defer self.allocator.free(text);
                 self.inner.submit(.{ .text = text, .max_tokens = self.max_tokens }) catch {};
                 any = true;
             }
-            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
+            if (!any) try std.Io.sleep(self.io, .fromMilliseconds(2), .awake);
         }
     }
 };
@@ -605,6 +596,7 @@ fn workerEventToJs(iso: v8.Isolate, ctx: v8.Context, ev: *const worker_contract.
 fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
+    const host = v8rt.hostContext(cx.iso);
     if (info.length() < 2) return setReturnString(info, cx.iso, "");
 
     const backend_name_arg = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnString(info, cx.iso, "");
@@ -658,17 +650,17 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                     const new_max_tokens_raw = jsonIntField(parsed.value, "max_tokens") orelse 4096;
                     ls.max_tokens = if (new_max_tokens_raw > 0) @intCast(new_max_tokens_raw) else 4096;
 
-                    ls.pending_mutex.lock();
+                    ls.pending_mutex.lockUncancelable(ls.io);
                     for (ls.pending.items) |p| ls.allocator.free(p);
                     ls.pending.clearRetainingCapacity();
-                    ls.pending_mutex.unlock();
+                    ls.pending_mutex.unlock(ls.io);
 
-                    ls.inbox_mutex.lock();
+                    ls.inbox_mutex.lockUncancelable(ls.io);
                     for (ls.inbox.items) |*ev| ev.deinit();
                     ls.inbox.clearRetainingCapacity();
-                    ls.inbox_mutex.unlock();
+                    ls.inbox_mutex.unlock(ls.io);
 
-                    // Drain any events the local_ai worker thread already
+                    // Drain any events the local_ai worker task already
                     // pulled into the inner ring but hasn't surfaced yet.
                     while (inner.poll()) |evt| {
                         var owned = evt;
@@ -706,7 +698,7 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 .permission_mode = .bypass_permissions,
                 .inherit_stderr = true,
             };
-            const inner = claude_sdk.Session.init(std.heap.c_allocator, opts) catch
+            const inner = claude_sdk.Session.init(host.io, host.environ, std.heap.c_allocator, opts) catch
                 return setReturnString(info, cx.iso, "");
             const cs = std.heap.c_allocator.create(ClaudeSession) catch {
                 var s = inner;
@@ -714,8 +706,8 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 s.deinit();
                 return setReturnString(info, cx.iso, "");
             };
-            cs.* = .{ .allocator = std.heap.c_allocator, .inner = inner };
-            cs.worker = std.Thread.spawn(.{}, ClaudeSession.workerEntry, .{cs}) catch {
+            cs.* = .{ .io = host.io, .allocator = std.heap.c_allocator, .inner = inner };
+            cs.tasks.concurrent(cs.io, ClaudeSession.workerEntry, .{cs}) catch {
                 cs.destroy();
                 return setReturnString(info, cx.iso, "");
             };
@@ -730,7 +722,7 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 .yolo = jsonBoolField(parsed.value, "yolo") orelse true,
                 .inherit_stderr = true,
             };
-            const inner = kimi_wire_sdk.Session.init(std.heap.c_allocator, k_opts) catch
+            const inner = kimi_wire_sdk.Session.init(host.io, std.heap.c_allocator, k_opts) catch
                 return setReturnString(info, cx.iso, "");
             const ks = std.heap.c_allocator.create(KimiSession) catch {
                 var s = inner;
@@ -738,8 +730,8 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 s.deinit();
                 return setReturnString(info, cx.iso, "");
             };
-            ks.* = .{ .allocator = std.heap.c_allocator, .inner = inner };
-            ks.worker = std.Thread.spawn(.{}, KimiSession.workerEntry, .{ks}) catch {
+            ks.* = .{ .io = host.io, .allocator = std.heap.c_allocator, .inner = inner };
+            ks.tasks.concurrent(ks.io, KimiSession.workerEntry, .{ks}) catch {
                 ks.destroy();
                 return setReturnString(info, cx.iso, "");
             };
@@ -749,8 +741,9 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             const cs = std.heap.c_allocator.create(CodexSession) catch
                 return setReturnString(info, cx.iso, "");
             cs.* = .{
+                .io = host.io,
                 .allocator = std.heap.c_allocator,
-                .codex = codex_sdk.Codex.init(std.heap.c_allocator, .{ .cwd = cwd_opt }) catch {
+                .codex = codex_sdk.Codex.init(host.io, std.heap.c_allocator, .{ .cwd = cwd_opt }) catch {
                     std.heap.c_allocator.destroy(cs);
                     return setReturnString(info, cx.iso, "");
                 },
@@ -764,7 +757,7 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 std.heap.c_allocator.destroy(cs);
                 return setReturnString(info, cx.iso, "");
             };
-            cs.worker = std.Thread.spawn(.{}, CodexSession.workerEntry, .{cs}) catch {
+            cs.tasks.concurrent(cs.io, CodexSession.workerEntry, .{cs}) catch {
                 cs.thread.deinit();
                 cs.codex.deinit();
                 std.heap.c_allocator.destroy(cs);
@@ -785,21 +778,21 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 .n_ctx = n_ctx,
                 .verbose = false,
             };
-            const inner = local_ai_runtime.Session.create(std.heap.c_allocator, opts) catch
+            const inner = local_ai_runtime.Session.create(host.io, host.environ, std.heap.c_allocator, opts) catch
                 return setReturnString(info, cx.iso, "");
             const ls = std.heap.c_allocator.create(LocalAiSession) catch {
                 inner.close();
                 inner.destroy();
                 return setReturnString(info, cx.iso, "");
             };
-            ls.* = .{ .allocator = std.heap.c_allocator, .inner = inner, .max_tokens = max_tokens };
+            ls.* = .{ .io = host.io, .allocator = std.heap.c_allocator, .inner = inner, .max_tokens = max_tokens };
             // local_ai_runtime takes tools via setTools (not init opts);
             // forward it here so the schema is in place before the
-            // worker thread sends its first CHAT.
+            // worker task sends its first CHAT.
             if (jsonStrField(parsed.value, "tools_json")) |tools_json| {
                 inner.setTools(tools_json) catch {};
             }
-            ls.worker = std.Thread.spawn(.{}, LocalAiSession.workerEntry, .{ls}) catch {
+            ls.tasks.concurrent(ls.io, LocalAiSession.workerEntry, .{ls}) catch {
                 ls.destroy();
                 return setReturnString(info, cx.iso, "");
             };
@@ -815,7 +808,7 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             // claudewrap bridge reads it as a thread's resume key (claude's
             // sid), so one chat thread keeps the same claude process.
             const user_field = jsonStrField(parsed.value, "session_id");
-            const inner = openai_compat_sdk.Session.init(std.heap.c_allocator, .{
+            const inner = openai_compat_sdk.Session.init(host.io, host.environ, std.heap.c_allocator, .{
                 .base_url = base_url,
                 .api_key = api_key,
                 .model = model_id,
@@ -839,7 +832,7 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         return setReturnString(info, cx.iso, "");
     };
 
-    var store = worker_contract.WorkerStore.init(allocator, .{ .worker_id = id }) catch {
+    var store = worker_contract.WorkerStore.init(host.io, allocator, .{ .worker_id = id }) catch {
         allocator.free(id);
         session.deinit();
         return setReturnString(info, cx.iso, "");
@@ -913,7 +906,7 @@ fn hostWorkerPoll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
     const entry = lookup(id) orelse return setReturnUndefined(info, cx.iso);
 
-    // Drain the worker thread's inbox into the WorkerStore. The worker
+    // Drain the worker task's inbox into the WorkerStore. The worker
     // thread populates the inbox from its SDK in the background; we
     // dispatch on the JS thread so each ingest fn can use the store
     // without locking it.

@@ -19,10 +19,6 @@ const std = @import("std");
 /// reader without mapfile.zig having to be its own wired module.
 pub const mapfile = @import("mapfile.zig");
 
-fn io() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
-}
-
 pub const HASH_BYTES: usize = 32;
 pub const MANIFEST_ENTRY_BYTES: usize = 44; // key(4) kind(2) rsv(2) length(4) hash(32)
 
@@ -96,20 +92,20 @@ pub const GameFile = struct {
     /// confirm every manifest asset is either embedded or already installed in
     /// the content store, and confirm every stream reference resolves. `dir` is
     /// the content store. Fails loudly on the first violation.
-    pub fn installAndValidate(self: GameFile, allocator: std.mem.Allocator, dir: std.Io.Dir) Error!void {
+    pub fn installAndValidate(self: GameFile, io: std.Io, allocator: std.mem.Allocator, dir: std.Io.Dir) Error!void {
         var installed: std.ArrayList([HASH_BYTES]u8) = .empty;
         defer installed.deinit(allocator);
 
         for (self.blobs) |blob| {
             const actual = sha256(blob.payload);
             if (!std.mem.eql(u8, &actual, &blob.claimed_hash)) return Error.BadAssetHash;
-            try atomicInstall(dir, actual, blob.payload);
+            try atomicInstall(io, dir, actual, blob.payload);
             try installed.append(allocator, actual);
         }
 
         for (self.manifest) |entry| {
             if (containsHash(installed.items, entry.hash)) continue;
-            if (!try installedAssetMatches(allocator, dir, entry)) return Error.MissingAsset;
+            if (!try installedAssetMatches(io, allocator, dir, entry)) return Error.MissingAsset;
         }
 
         try validateRefs(self.logic, self.manifest);
@@ -203,24 +199,24 @@ fn sha256(payload: []const u8) [HASH_BYTES]u8 {
 /// Atomic content-store install: write to a temp file, fsync, rename into place
 /// keyed by hex(hash). The hash IS the corruption check (already verified by
 /// the caller); the rename makes the install all-or-nothing.
-fn atomicInstall(dir: std.Io.Dir, hash: [HASH_BYTES]u8, bytes: []const u8) Error!void {
+fn atomicInstall(io: std.Io, dir: std.Io.Dir, hash: [HASH_BYTES]u8, bytes: []const u8) Error!void {
     const hex = std.fmt.bytesToHex(hash, .lower);
     var tmp_buf: [HASH_BYTES * 2 + 8]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, ".tmp.{s}", .{hex}) catch return Error.InstallFailed;
-    var file = dir.createFile(io(), tmp, .{ .truncate = true }) catch return Error.InstallFailed;
-    file.writeStreamingAll(io(), bytes) catch {
-        file.close(io());
-        dir.deleteFile(io(), tmp) catch {};
+    var file = dir.createFile(io, tmp, .{ .truncate = true }) catch return Error.InstallFailed;
+    file.writeStreamingAll(io, bytes) catch {
+        file.close(io);
+        dir.deleteFile(io, tmp) catch {};
         return Error.InstallFailed;
     };
-    file.sync(io()) catch {
-        file.close(io());
-        dir.deleteFile(io(), tmp) catch {};
+    file.sync(io) catch {
+        file.close(io);
+        dir.deleteFile(io, tmp) catch {};
         return Error.InstallFailed;
     };
-    file.close(io());
-    std.Io.Dir.rename(dir, tmp, dir, hex[0..], io()) catch {
-        dir.deleteFile(io(), tmp) catch {};
+    file.close(io);
+    std.Io.Dir.rename(dir, tmp, dir, hex[0..], io) catch {
+        dir.deleteFile(io, tmp) catch {};
         return Error.InstallFailed;
     };
 }
@@ -232,9 +228,9 @@ fn containsHash(haystack: []const [HASH_BYTES]u8, needle: [HASH_BYTES]u8) bool {
     return false;
 }
 
-fn installedAssetMatches(allocator: std.mem.Allocator, dir: std.Io.Dir, entry: ManifestEntry) Error!bool {
+fn installedAssetMatches(io: std.Io, allocator: std.mem.Allocator, dir: std.Io.Dir, entry: ManifestEntry) Error!bool {
     const hex = std.fmt.bytesToHex(entry.hash, .lower);
-    const bytes = dir.readFileAlloc(io(), hex[0..], allocator, .limited(@as(usize, entry.length) + 1)) catch return false;
+    const bytes = dir.readFileAlloc(io, hex[0..], allocator, .limited(@as(usize, entry.length) + 1)) catch return false;
     defer allocator.free(bytes);
     if (bytes.len != entry.length) return false;
     const actual = sha256(bytes);

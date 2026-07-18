@@ -19,10 +19,6 @@ const mapfile = gamefile.mapfile;
 // codec; decoding here, in the game host that links stb, is the path that works.
 const c = @import("../c.zig").imports;
 
-fn io() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
-}
-
 pub const Error = gamefile.Error || error{
     NoMapTiles,
     UnsupportedTileEncoding,
@@ -2084,10 +2080,10 @@ fn streamReferences(stream: gamefile.Stream, key: u32) bool {
     return false;
 }
 
-fn readInstalledAsset(allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.Io.Dir, key: u32) Error!?[]u8 {
+fn readInstalledAsset(io: std.Io, allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.Io.Dir, key: u32) Error!?[]u8 {
     const hash = file.assetHashForKey(key) orelse return null;
     const hex = std.fmt.bytesToHex(hash, .lower);
-    return store_dir.readFileAlloc(io(), hex[0..], allocator, .limited(64 << 20)) catch return Error.MissingAsset;
+    return store_dir.readFileAlloc(io, hex[0..], allocator, .limited(64 << 20)) catch return Error.MissingAsset;
 }
 
 /// A BLANK scene — the paint-first editor's empty canvas (BLANKBOOT req_2490).
@@ -2134,13 +2130,13 @@ pub fn blankScene() Scene {
 /// against `store_dir`, then decode the map stream's tile grid. The asset
 /// vocabulary is installed/verified as a side effect (the gate must pass before
 /// anything is composed).
-pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std.Io.Dir) Error!Scene {
+pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, store_dir: std.Io.Dir) Error!Scene {
     const file = try gamefile.readGameFile(allocator, bytes);
     defer file.deinit(allocator);
 
     // The gate: install + sha256-verify every asset, resolve every reference.
     // Nothing is constructed until the whole vocabulary checks out.
-    try file.installAndValidate(allocator, store_dir);
+    try file.installAndValidate(io, allocator, store_dir);
 
     // The game-map stream's data is a nested RJMP map container; pull its tiles.
     const map_lumps = try mapfile.readLumps(allocator, file.map.data, null);
@@ -2182,7 +2178,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     const player_model: []PlayerModelGroup = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_model)) |lump|
         try decodePlayerModel(allocator, lump.data)
     else if (streamReferences(file.map, PLAYER_MODEL_ASSET_KEY)) blk: {
-        player_model_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_MODEL_ASSET_KEY);
+        player_model_asset = try readInstalledAsset(io, allocator, file, store_dir, PLAYER_MODEL_ASSET_KEY);
         break :blk if (player_model_asset) |bytes_model| try decodePlayerModel(allocator, bytes_model) else try allocator.alloc(PlayerModelGroup, 0);
     } else try allocator.alloc(PlayerModelGroup, 0);
     var player_animation_asset: ?[]u8 = null;
@@ -2190,7 +2186,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     const player_animation = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_animation)) |lump|
         try decodePlayerAnimation(allocator, lump.data)
     else if (streamReferences(file.map, PLAYER_ANIMATION_ASSET_KEY)) blk: {
-        player_animation_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
+        player_animation_asset = try readInstalledAsset(io, allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
         break :blk if (player_animation_asset) |bytes_animation| try decodePlayerAnimation(allocator, bytes_animation) else emptyPlayerAnimationSet();
     } else emptyPlayerAnimationSet();
     // NPC population (req_0935): inline lumps in the map container (unlike the
@@ -2330,7 +2326,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     }
     for (file.manifest) |entry| {
         if (entry.kind != DECAL_IMAGE_ASSET_KIND) continue;
-        const payload = (readInstalledAsset(allocator, file, store_dir, entry.key) catch null) orelse continue;
+        const payload = (readInstalledAsset(io, allocator, file, store_dir, entry.key) catch null) orelse continue;
         try decal_asset_list.append(allocator, .{ .key = entry.key, .bytes = payload });
     }
     const decal_assets = try decal_asset_list.toOwnedSlice(allocator);

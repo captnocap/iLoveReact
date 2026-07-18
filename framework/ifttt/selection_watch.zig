@@ -25,6 +25,7 @@
 
 const std = @import("std");
 const c = @import("../c.zig").imports;
+const HostContext = @import("../host_context.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 
 const POLL_MS: u32 = 80;
@@ -64,14 +65,14 @@ pub fn getText() []const u8 {
     return text_buf[0..text_len];
 }
 
-pub fn tick(dt_ms: u32) void {
+pub fn tick(host: *HostContext, dt_ms: u32) void {
     accum_ms += dt_ms;
     if (accum_ms < POLL_MS) {
         // Still tick the debounce timer between polls so fast hardware
         // (high-Hz ticking) doesn't elongate the perceived debounce window.
         if (pending_fire) {
             ms_since_change += dt_ms;
-            if (ms_since_change >= DEBOUNCE_MS) firePending();
+            if (ms_since_change >= DEBOUNCE_MS) firePending(host);
         }
         return;
     }
@@ -99,9 +100,9 @@ pub fn tick(dt_ms: u32) void {
             pending_fire = false;
             ms_since_change = 0;
             text_len = 0;
-            v8_runtime.callGlobal("__beginJsEvent");
-            v8_runtime.evalExpr("__ifttt_onSystemSelectionCleared()");
-            v8_runtime.callGlobal("__endJsEvent");
+            v8_runtime.callGlobal(host, "__beginJsEvent");
+            v8_runtime.evalExpr(host, "__ifttt_onSystemSelectionCleared()");
+            v8_runtime.callGlobal(host, "__endJsEvent");
         }
         return;
     }
@@ -130,11 +131,11 @@ pub fn tick(dt_ms: u32) void {
         ms_since_change = 0;
     } else if (pending_fire) {
         ms_since_change += POLL_MS;
-        if (ms_since_change >= DEBOUNCE_MS) firePending();
+        if (ms_since_change >= DEBOUNCE_MS) firePending(host);
     }
 }
 
-fn firePending() void {
+fn firePending(host: *HostContext) void {
     pending_fire = false;
     ms_since_change = 0;
 
@@ -155,7 +156,7 @@ fn firePending() void {
         "__ifttt_onSystemSelection({d},{d:.0},{d:.0},{d:.0},{d:.0},{d:.0},{d:.0})",
         .{ text_len, drag_start_x, drag_start_y, drag_end_x, drag_end_y, screen_w, screen_h },
     ) catch return;
-    v8_runtime.callGlobal("__beginJsEvent");
-    v8_runtime.evalExpr(sentinel);
-    v8_runtime.callGlobal("__endJsEvent");
+    v8_runtime.callGlobal(host, "__beginJsEvent");
+    v8_runtime.evalExpr(host, sentinel);
+    v8_runtime.callGlobal(host, "__endJsEvent");
 }

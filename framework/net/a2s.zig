@@ -43,8 +43,8 @@ pub const A2sClient = struct {
     rules_challenge: ?[4]u8 = null,
     err_buf: [128]u8 = undefined,
 
-    pub fn open(host: []const u8, port: u16) !A2sClient {
-        return .{ .sock = try udp.UdpSocket.openConnected(host, port) };
+    pub fn open(allocator: std.mem.Allocator, io: std.Io, host: []const u8, port: u16) !A2sClient {
+        return .{ .sock = try udp.UdpSocket.openConnected(allocator, io, host, port) };
     }
 
     pub fn close(self: *A2sClient) void {
