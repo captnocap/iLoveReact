@@ -56,6 +56,35 @@ export type StickerPlacement = {
   rot: number;
 };
 
+/** Provenance carried by the ONE semantic floor piece that reserves a generated
+ * building site. The anchor is deliberately an ordinary build piece: its
+ * provenance gives a later, versioned core-building pass enough information to
+ * replace it without introducing a second parcel/building representation.
+ *
+ * Geometry is not stored here. `widthM`/`depthM` describe the intended module-
+ * aligned footprint; the placed floor remains one 3m semantic anchor. */
+export const GENERATED_SITE_GENERATOR = 'coastal-city' as const;
+export const GENERATED_SITE_VERSION = '1' as const;
+export const GENERATED_SITE_FLOOR_PIECE_ID = 'floor.concrete.common' as const;
+export const GENERATED_SITE_LIMITS = Object.freeze({
+  maxSeed: 0xffff_ffff,
+  maxTextChars: 128,
+  maxFootprintMeters: 3_000,
+  maxSuggestedFloors: 128,
+});
+
+export type GeneratedSiteProvenance = {
+  generator: typeof GENERATED_SITE_GENERATOR;
+  version: typeof GENERATED_SITE_VERSION;
+  seed: number;
+  siteId: string;
+  intendedUse: string;
+  widthM: number;
+  depthM: number;
+  suggestedMaxFloors: number;
+  frontagePathId: string;
+};
+
 export type PlacedPiece = {
   id: string;
   pieceId: string;
@@ -82,6 +111,9 @@ export type PlacedPiece = {
   // live loader draws them at yaw + rate×clock; colliders keep the authored yaw.
   // Absent or 0 ⇒ static.
   spinDegPerSec?: number;
+  // Procedural building-site provenance. Present only on the single real floor
+  // piece reserving that site; it is not a parallel parcel or fake building.
+  generatedSite?: GeneratedSiteProvenance;
 };
 
 /** The Spin quick-verb's one rate (SPINPROP req_3128) — a storefront-sign turn:

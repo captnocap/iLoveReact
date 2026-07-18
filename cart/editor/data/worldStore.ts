@@ -8,7 +8,15 @@
 // pairing one map's pieces with another map's ground.
 import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import { textBytes } from '../../../runtime/workspace/lumps';
-import type { PlacedPiece } from '../world/pieces';
+import {
+  GENERATED_SITE_GENERATOR,
+  GENERATED_SITE_FLOOR_PIECE_ID,
+  GENERATED_SITE_LIMITS,
+  GENERATED_SITE_VERSION,
+  PIECE_MODULE_METERS,
+  type GeneratedSiteProvenance,
+  type PlacedPiece,
+} from '../world/pieces';
 import { validFacade, type Facade } from '../world/facades';
 import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
@@ -55,6 +63,48 @@ function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+const GENERATED_SITE_KEYS = [
+  'generator',
+  'version',
+  'seed',
+  'siteId',
+  'intendedUse',
+  'widthM',
+  'depthM',
+  'suggestedMaxFloors',
+  'frontagePathId',
+] as const;
+const GENERATED_SITE_KEY_SET = new Set<string>(GENERATED_SITE_KEYS);
+const GENERATED_SITE_YAWS = new Set([0, 90, 180, 270]);
+
+function boundedNonemptyText(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= GENERATED_SITE_LIMITS.maxTextChars
+    && value.trim() === value;
+}
+
+function validGeneratedSite(value: unknown): value is GeneratedSiteProvenance {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== GENERATED_SITE_KEYS.length || keys.some((key) => !GENERATED_SITE_KEY_SET.has(key))) return false;
+  if (value.generator !== GENERATED_SITE_GENERATOR || value.version !== GENERATED_SITE_VERSION) return false;
+  if (!finite(value.seed) || !Number.isInteger(value.seed) || value.seed < 0 || value.seed > GENERATED_SITE_LIMITS.maxSeed) return false;
+  if (!boundedNonemptyText(value.siteId) || !boundedNonemptyText(value.intendedUse) || !boundedNonemptyText(value.frontagePathId)) return false;
+  if (!finite(value.widthM)
+    || value.widthM <= 0
+    || value.widthM > GENERATED_SITE_LIMITS.maxFootprintMeters
+    || !Number.isInteger(value.widthM / PIECE_MODULE_METERS)) return false;
+  if (!finite(value.depthM)
+    || value.depthM <= 0
+    || value.depthM > GENERATED_SITE_LIMITS.maxFootprintMeters
+    || !Number.isInteger(value.depthM / PIECE_MODULE_METERS)) return false;
+  return finite(value.suggestedMaxFloors)
+    && Number.isInteger(value.suggestedMaxFloors)
+    && value.suggestedMaxFloors > 0
+    && value.suggestedMaxFloors <= GENERATED_SITE_LIMITS.maxSuggestedFloors;
+}
+
 function validPiece(value: unknown): value is PlacedPiece {
   const piece = value as Partial<PlacedPiece> | null;
   if (!piece || typeof piece.id !== 'string' || typeof piece.pieceId !== 'string') return false;
@@ -86,6 +136,13 @@ function validPiece(value: unknown): value is PlacedPiece {
       if (!finite(s.scale) || (s.scale as number) <= 0) return false;
       if (!finite(s.rot) || !Number.isInteger(s.rot)) return false;
     }
+  }
+  if (piece.generatedSite !== undefined) {
+    if (!validGeneratedSite(piece.generatedSite)) return false;
+    if (piece.pieceId !== GENERATED_SITE_FLOOR_PIECE_ID || piece.floor !== 0) return false;
+    if (!GENERATED_SITE_YAWS.has(piece.yawDegrees)) return false;
+    if (!Number.isInteger((piece.x - PIECE_MODULE_METERS / 2) / PIECE_MODULE_METERS)) return false;
+    if (!Number.isInteger((piece.z - PIECE_MODULE_METERS / 2) / PIECE_MODULE_METERS)) return false;
   }
   return true;
 }
@@ -120,6 +177,16 @@ function validatedArray<T>(value: unknown, label: string, validate: (item: unkno
   return value as T[];
 }
 
+function validateUniqueGeneratedSiteIds(pieces: readonly PlacedPiece[]): void {
+  const siteIds = new Set<string>();
+  for (const piece of pieces) {
+    const siteId = piece.generatedSite?.siteId;
+    if (siteId === undefined) continue;
+    if (siteIds.has(siteId)) throw new Error(`generated site '${siteId}' is duplicated`);
+    siteIds.add(siteId);
+  }
+}
+
 /** Strict parser used by boot and Open. v1 had no document id and is accepted
  * only through the one-time fixed-file migration path. */
 export function parseWorldSaveText(text: string, expectedStem: string, options: ParseOptions = {}): WorldSave {
@@ -138,11 +205,13 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
   if (!legacy && raw.document !== expected) {
     throw new Error(`document id '${String(raw.document)}' does not match directory '${expected}'`);
   }
+  const pieces = validatedArray(raw.pieces, 'pieces', validPiece);
+  validateUniqueGeneratedSiteIds(pieces);
   return {
     version: 2,
     document: expected,
     seq: typeof raw.seq === 'number' && Number.isFinite(raw.seq) && raw.seq > 0 ? Math.trunc(raw.seq) : 1,
-    pieces: validatedArray(raw.pieces, 'pieces', validPiece),
+    pieces,
     objects: validatedArray(raw.objects, 'objects', validObject, true),
     zones: validatedArray(raw.zones, 'zones', validZone, true),
     facades: validatedArray(raw.facades ?? [], 'facades', validFacade, true),
