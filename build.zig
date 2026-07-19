@@ -1200,14 +1200,27 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const indexed_edit_mesh_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/indexed_edit_mesh.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
     mesh_edit_test_mod.addImport("mesh_edit", mesh_edit_impl_test_mod);
+    mesh_edit_test_mod.addImport("indexed_edit_mesh", indexed_edit_mesh_test_mod);
     const mesh_edit_test = b.addTest(.{
         .name = "mesh-edit-test",
         .root_module = mesh_edit_test_mod,
     });
     const run_mesh_edit_test = b.addRunArtifact(mesh_edit_test);
+    const indexed_edit_mesh_test = b.addTest(.{
+        .name = "indexed-edit-mesh-test",
+        .root_module = indexed_edit_mesh_test_mod,
+    });
+    const run_indexed_edit_mesh_test = b.addRunArtifact(indexed_edit_mesh_test);
     const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
+    mesh_edit_test_step.dependOn(&run_indexed_edit_mesh_test.step);
 
     // ── mesh journal log (history ownership diagnostics + JSON) unit tests ─
     const mesh_journal_log_impl_test_mod = b.createModule(.{

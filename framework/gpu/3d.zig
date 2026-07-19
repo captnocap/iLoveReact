@@ -24,6 +24,7 @@ const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
 const mesh_journal_log = @import("mesh_journal_log.zig");
 const path_array = @import("path_array.zig");
 const stage_scale = @import("stage_scale.zig");
@@ -513,16 +514,64 @@ var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
 var g_edit_count: u32 = 0;
 var g_edit_revision: u32 = 0;
+// Indexed-aware edit operations preserve this table across previews and commits.
+// Rendering still consumes g_edit_verts; legacy topology replacements clear the table
+// and the next indexed operation imports their result once at that boundary.
+var g_indexed_edit_mesh: ?indexed_edit_mesh.Mesh = null;
 var g_guard_before: ?[]f32 = null; // pre-gizmo face positions for safety prompt/revert
+var g_guard_indexed_before: ?indexed_edit_mesh.Mesh = null;
 var g_guard_pending: bool = false;
 var g_guard_bad_faces: u32 = 0;
 var g_guard_face_count: u32 = 0;
 var g_guard_bad_list: ?[]u32 = null; // indices of the offending tris — Split Quads targets these
 var g_guard_can_split: bool = false; // some offending tri sits in a multi-tri authored group
 
+fn clearIndexedEditMesh() void {
+    if (g_indexed_edit_mesh) |*mesh| mesh.deinit();
+    g_indexed_edit_mesh = null;
+}
+
+fn adoptIndexedEditMesh(mesh: *indexed_edit_mesh.Mesh, lowered: *const indexed_edit_mesh.Lowered) void {
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    mesh.clearCutOrigins();
+    mesh.adoptLoweredMetadata(lowered, groups, parts);
+    clearIndexedEditMesh();
+    g_indexed_edit_mesh = mesh.*;
+    mesh.* = .{ .allocator = std.heap.c_allocator };
+}
+
+fn cloneIndexedEditMeshOrImport(
+    verts: []const f32,
+    tri_count: u32,
+    groups: ?[]const u32,
+    parts: ?[]const u32,
+) ?indexed_edit_mesh.Mesh {
+    if (g_indexed_edit_mesh) |*mesh| return mesh.clone() catch null;
+    return indexed_edit_mesh.Mesh.fromSoup(std.heap.c_allocator, verts, tri_count, groups, parts) catch null;
+}
+
+fn ensureIndexedEditMesh() bool {
+    if (g_indexed_edit_mesh != null) return true;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
+    g_indexed_edit_mesh = indexed_edit_mesh.Mesh.fromSoup(std.heap.c_allocator, verts, tri_count, groups_arg, parts) catch return false;
+    return true;
+}
+
 fn clearMeshGuardSnapshot() void {
     if (g_guard_before) |p| std.heap.c_allocator.free(p);
     g_guard_before = null;
+    if (g_guard_indexed_before) |*mesh| mesh.deinit();
+    g_guard_indexed_before = null;
     if (g_guard_bad_list) |l| std.heap.c_allocator.free(l);
     g_guard_bad_list = null;
     g_guard_pending = false;
@@ -533,6 +582,7 @@ fn clearMeshGuardSnapshot() void {
 
 fn clearActiveEditMesh() void {
     clearMeshGuardSnapshot();
+    clearIndexedEditMesh();
     if (g_edit_verts) |v| std.heap.c_allocator.free(v);
     if (g_edit_key) |k| std.heap.c_allocator.free(k);
     g_edit_verts = null;
@@ -635,6 +685,10 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
 fn applyMeshMutation(m: mesh_edit.Mutation) bool {
     if (!m.changed) return false;
     if (!copyPaintPositionsToEditVerts(m.first_face, m.last_face)) return false;
+    if (g_indexed_edit_mesh) |*mesh| {
+        const verts = g_edit_verts orelse return false;
+        if (!mesh.updatePositionsFromInterleaved(verts, g_edit_count / 3)) clearIndexedEditMesh();
+    }
     if (model_paint.positions()) |pos| {
         _ = model_source.updateGeometryFromDisplayed(pos, m.first_face, m.last_face);
     }
@@ -1293,8 +1347,8 @@ pub fn meshTopoCreateFaceFromEdges() bool {
 }
 
 // ── Part-range truth (req_2644) ──────────────────────────────────────────────────
-// The outliner's parts are contiguous authored-group-id ranges. planeCutSoup mints
-// FRESH ids for every +side piece it touches, so after a loop cut a part's faces no
+// The outliner's parts are contiguous authored-group-id ranges. Topology cuts mint
+// FRESH ids for their new pieces, so after a cut a part's faces no
 // longer sit inside its [lo,hi) — the cart's stale ranges then select the wrong slab,
 // tear the mesh on part moves, and mis-scope appended parts. The host is the single
 // source of truth: ops that re-group carry per-face part parentage through the cut and
@@ -1419,55 +1473,24 @@ fn ensureDisjointPartRanges(context: []const u8) bool {
     return true;
 }
 
-/// Loop cut: slice the resident mesh by the axis-aligned plane across the ONE selected
-/// edge, through its midpoint. The plane's normal is the edge's DOMINANT world axis, not
-/// the raw edge direction (req_2837): on a tapered shape the side edges lean, and a plane
-/// perpendicular to a leaning edge cuts a slanted ring nothing can level afterwards —
-/// snapping to the dominant axis keeps the ring flat (Blender's topological loop lands
-/// level on a taper too; every other cut in this family is axis-aligned). Straddling faces
-/// split; authored face grouping (studio meshes) carries through so each crossed n-gon
-/// becomes two clean faces — the host-native twin of the Studio's loopCut(EditMesh). The
-/// heavy work is mesh_edit.planeCutSoup (pure, tested); this derives the plane, rebuilds
-/// the interleaved edit mesh, and re-applies the grouping.
+/// Run the js-bench-editor/Blockbench topological loop walk from the selected edge.
+/// Rendering remains triangle soup, but adjacency and traversal use stable vertex ids;
+/// a boundary, non-quad, or closed ring terminates the walk instead of changing the
+/// operation into an infinite plane slice.
 pub fn meshTopoLoopCut() bool {
     if (!model_paint.hasTarget()) return false;
     const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
     const ep = mesh_edit.edgeEndpointsPub(edge_idx);
     const a = mesh_edit.vertPosPub(ep[0]);
     const b = mesh_edit.vertPosPub(ep[1]);
-    const dir = vsub(b, a);
-    if (vdot(dir, dir) < 1e-12) return false;
-    var axis: usize = 0;
-    if (@abs(dir[1]) > @abs(dir[axis])) axis = 1;
-    if (@abs(dir[2]) > @abs(dir[axis])) axis = 2;
-    var nrm: [3]f32 = .{ 0, 0, 0 };
-    nrm[axis] = 1;
-    const mid = vmul(vadd(a, b), 0.5);
-    const d = mid[axis];
+    const selected_part = mesh_edit.selectedEdgePartPub();
+    if (vdot(vsub(b, a), vsub(b, a)) < 1e-12) return false;
 
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
     const base_colors = collectCurrentFaceColors() orelse return false;
     defer std.heap.c_allocator.free(base_colors);
-
-    // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
-    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
-    defer std.heap.c_allocator.free(pos);
-    {
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            var k: u32 = 0;
-            while (k < 3) : (k += 1) {
-                const src = (@as(usize, f) * 3 + k) * 8;
-                const dst = (@as(usize, f) * 3 + k) * 3;
-                if (src + 2 >= verts.len) return false;
-                pos[dst + 0] = verts[src + 0];
-                pos[dst + 1] = verts[src + 1];
-                pos[dst + 2] = verts[src + 2];
-            }
-        }
-    }
 
     // Per-tri authored group (null when this mesh has no grouping — plain imports).
     var groups_buf: ?[]u32 = null;
@@ -1485,75 +1508,27 @@ pub fn meshTopoLoopCut() bool {
     defer if (base_part) |bp| std.heap.c_allocator.free(bp);
     const part_count = hostPartCount();
 
-    // A plane is infinite, but an edit scope is not: faces belonging to another outliner
-    // part must pass through byte-for-byte even when the plane crosses them (req_2899).
-    const cut_scope = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
-    defer std.heap.c_allocator.free(cut_scope);
-    var scope_face: u32 = 0;
-    while (scope_face < tri_count) : (scope_face += 1) cut_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
-
     const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
-    // Topological ring cut FIRST (req_3037): split the quad ring at edge midpoints —
-    // level relative to the shape however it leans or flares. The axis-snapped plane
-    // below sliced VERTICALLY whenever the selected edge leaned past 45° (any flare),
-    // the recurring lopsided cut. Plane stays as the fallback for ungrouped soups,
-    // diagonal picks, and meshes whose groups don't chain into a walkable ring.
-    const cut = blk: {
-        if (groups_arg) |gs| {
-            if (mesh_edit.ringCutSoup(pos, tri_count, a, b, gs, cut_scope)) |rc| break :blk rc;
-        }
-        break :blk mesh_edit.planeCutSoupMasked(pos, tri_count, nrm, d, groups_arg, cut_scope) orelse return false;
-    };
-    defer std.heap.c_allocator.free(cut.positions);
-    defer std.heap.c_allocator.free(cut.src_face);
-    defer if (cut.groups) |g| std.heap.c_allocator.free(g);
-    if (cut.tri_count <= tri_count) return false; // the plane missed every face → not a cut
+    const parts_arg: ?[]const u32 = if (base_part) |p| p else null;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg) orelse return false;
+    defer indexed.deinit();
+    if (!(indexed.loopCutFromEdge(a, b, selected_part, 1, 0.5) catch return false)) return false;
+    var cut = indexed.lower() catch return false;
+    defer cut.deinit();
+    if (cut.tri_count <= tri_count) return false;
     const cut_colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch return false;
     defer std.heap.c_allocator.free(cut_colors);
-    if (!mesh_edit.inheritFaceRgba(base_colors, cut.src_face, cut_colors)) return false;
-
-    // Rebuild the interleaved edit mesh (appendTri recomputes normals; UVs are rewritten by
-    // setPaintTarget on install), then re-apply the fresh grouping AFTER the retain (which
-    // clears it).
-    var out: std.ArrayListUnmanaged(f32) = .empty;
-    var t: u32 = 0;
-    while (t < cut.tri_count) : (t += 1) {
-        const bse = @as(usize, t) * 9;
-        const p0: [3]f32 = .{ cut.positions[bse + 0], cut.positions[bse + 1], cut.positions[bse + 2] };
-        const p1: [3]f32 = .{ cut.positions[bse + 3], cut.positions[bse + 4], cut.positions[bse + 5] };
-        const p2: [3]f32 = .{ cut.positions[bse + 6], cut.positions[bse + 7], cut.positions[bse + 8] };
-        if (!appendTri(&out, p0, p1, p2)) {
-            out.deinit(std.heap.c_allocator);
-            return false;
-        }
-    }
-    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
-        out.deinit(std.heap.c_allocator);
-        return false;
-    };
-    defer std.heap.c_allocator.free(owned);
+    if (!mesh_edit.inheritFaceRgba(base_colors, cut.source_triangles, cut_colors)) return false;
 
     var snap = journalSnapshotCurrent("loop cut");
-    const ok = replaceActiveEditMesh(owned, cut.tri_count * 3);
+    const install_groups: ?[]const u32 = if (groups_arg != null) cut.groups else null;
+    const ok = lcInstallSoup(cut.positions, cut.tri_count, install_groups, cut_colors);
     if (ok) {
-        _ = applyExactFaceColors(cut_colors, cut.tri_count);
-        if (cut.groups) |g| {
-            model_source.setFaceGroups(g);
-            _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
-        }
-        // Fold the minted +side groups back into their parts' contiguous ranges: each
-        // output face inherits the part of the input face it came from (req_2644).
         if (base_part) |bp| {
-            if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |fp| {
-                defer std.heap.c_allocator.free(fp);
-                var i: u32 = 0;
-                while (i < cut.tri_count) : (i += 1) {
-                    const sf = cut.src_face[i];
-                    fp[i] = if (sf < bp.len) bp[sf] else model_source.NO_PART;
-                }
-                renormalizePartRanges(fp, part_count);
-            } else |_| {}
+            _ = bp;
+            renormalizePartRanges(cut.parts, part_count);
         }
+        adoptIndexedEditMesh(&indexed, &cut);
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -1647,144 +1622,50 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
     const frame = mesh_edit.mirrorFramePub() orelse return false;
-    const c = frame.center[axis];
-    const keep_sign: f32 = if (keep_positive) 1 else -1;
-    const eps: f32 = 1e-5;
-
-    // Positions-only soup from the interleaved edit mesh (the loop-cut prologue).
-    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
-    defer std.heap.c_allocator.free(pos);
-    {
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            var k: u32 = 0;
-            while (k < 3) : (k += 1) {
-                const src = (@as(usize, f) * 3 + k) * 8;
-                const dst = (@as(usize, f) * 3 + k) * 3;
-                if (src + 2 >= verts.len) return false;
-                pos[dst + 0] = verts[src + 0];
-                pos[dst + 1] = verts[src + 1];
-                pos[dst + 2] = verts[src + 2];
-            }
-        }
-    }
-    var groups_buf: ?[]u32 = null;
-    defer if (groups_buf) |g| std.heap.c_allocator.free(g);
-    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
-        const g = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
-        var i: u32 = 0;
-        while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
-        groups_buf = g;
-    }
-    const base_part = capturePartOfFaces();
-    defer if (base_part) |bp| std.heap.c_allocator.free(bp);
+    const base_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(base_colors);
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
     const part_count = hostPartCount();
+    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts) orelse return false;
+    defer indexed.deinit();
+    if (!(indexed.symmetrize(axis, frame.center[axis], keep_positive) catch return false)) return false;
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    if (lowered.tri_count == 0) return false;
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
 
-    // Cut at the mirror plane (axis-aligned normal) so no face straddles it.
-    var nrm = [3]f32{ 0, 0, 0 };
-    nrm[axis] = 1;
-    const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
-    const cut = mesh_edit.planeCutSoup(pos, tri_count, nrm, c, groups_arg) orelse return false;
-    defer std.heap.c_allocator.free(cut.positions);
-    defer std.heap.c_allocator.free(cut.src_face);
-    defer if (cut.groups) |g| std.heap.c_allocator.free(g);
-
-    // Keep + reflect: kept faces re-emit as-is; off-seam kept faces also emit their
-    // reflected twin with two corners swapped (reflection flips handedness).
-    var out: std.ArrayListUnmanaged(f32) = .empty;
-    defer out.deinit(std.heap.c_allocator);
-    var out_groups: std.ArrayListUnmanaged(u32) = .empty;
-    defer out_groups.deinit(std.heap.c_allocator);
-    var out_src: std.ArrayListUnmanaged(u32) = .empty;
-    defer out_src.deinit(std.heap.c_allocator);
-    var twin_group = std.AutoHashMapUnmanaged(u32, u32){};
-    defer twin_group.deinit(std.heap.c_allocator);
-    var next_group: u32 = 0;
-    if (cut.groups) |g| {
-        for (g) |gid| {
-            if (gid != model_source.NO_FACE_GROUP and gid >= next_group) next_group = gid + 1;
-        }
-    }
-    var kept: u32 = 0;
-    var t: u32 = 0;
-    while (t < cut.tri_count) : (t += 1) {
-        const b = @as(usize, t) * 9;
-        var corners: [3][3]f32 = undefined;
-        var cs: f32 = 0;
-        var k: usize = 0;
-        while (k < 3) : (k += 1) {
-            corners[k] = .{ cut.positions[b + k * 3], cut.positions[b + k * 3 + 1], cut.positions[b + k * 3 + 2] };
-            cs += corners[k][axis];
-        }
-        cs = cs / 3.0 - c;
-        if (cs * keep_sign < -eps) continue; // the far half is DROPPED (rebuilt below)
-        if (!appendTri(&out, corners[0], corners[1], corners[2])) return false;
-        const gid: u32 = if (cut.groups) |g| g[t] else model_source.NO_FACE_GROUP;
-        out_groups.append(std.heap.c_allocator, gid) catch return false;
-        out_src.append(std.heap.c_allocator, cut.src_face[t]) catch return false;
-        kept += 1;
-        if (@abs(cs) <= eps) continue; // seam-coplanar face — its own mirror
-        var m: [3][3]f32 = corners;
-        for (0..3) |j| m[j][axis] = 2.0 * c - m[j][axis];
-        // Winding: reflection flips handedness — swap two corners so the twin faces out.
-        if (!appendTri(&out, m[0], m[2], m[1])) return false;
-        var tg: u32 = model_source.NO_FACE_GROUP;
-        if (gid != model_source.NO_FACE_GROUP) {
-            const gop = twin_group.getOrPut(std.heap.c_allocator, gid) catch return false;
-            if (!gop.found_existing) {
-                gop.value_ptr.* = next_group;
-                next_group += 1;
-            }
-            tg = gop.value_ptr.*;
-        }
-        out_groups.append(std.heap.c_allocator, tg) catch return false;
-        out_src.append(std.heap.c_allocator, cut.src_face[t]) catch return false;
-    }
-    if (kept == 0 or out_groups.items.len == 0) return false;
-
-    const new_count: u32 = @intCast(out_groups.items.len);
     var snap = journalSnapshotCurrent("symmetrize");
-    const ok = replaceActiveEditMesh(out.items, new_count * 3);
+    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
+    const ok = lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors);
     if (ok) {
-        if (cut.groups != null) {
-            model_source.setFaceGroups(out_groups.items);
-            _ = refreshPaintLayout();
-        }
-        if (base_part) |bp| {
-            if (std.heap.c_allocator.alloc(u32, new_count)) |fp| {
-                defer std.heap.c_allocator.free(fp);
-                var i: u32 = 0;
-                while (i < new_count) : (i += 1) {
-                    const sf = out_src.items[i];
-                    fp[i] = if (sf < bp.len) bp[sf] else model_source.NO_PART;
-                }
-                renormalizePartRanges(fp, part_count);
-            } else |_| {}
-        }
+        if (parts != null) renormalizePartRanges(lowered.parts, part_count);
+        adoptIndexedEditMesh(&indexed, &lowered);
         journalCommit(&snap);
     } else journalDiscard(&snap);
     return ok;
 }
 
-// ── Loop cut on a FACE: the studio treatment as a host-owned popup session ─────────
-// The old studio's Blockbench loop cut (req_0984/0985/0990): the cut axis is one of the
-// clicked face's two IN-PLANE axes (never its normal — cutting ⟂ the normal would slab
-// toward the face and leave it whole), the plane comb spans the SELECTED face's extent on
-// that axis (req_1006: a cut on an already-cut half subdivides THAT half), and the popup
-// previews live before committing. The session mirrors the gizmo-drag pattern: snapshot
-// at begin, every preview re-cuts from a captured base, journal-commit only on
-// end(commit) — cancel restores the base exactly, leaving no undo entry.
+// ── Loop cut on a FACE: reference topological walk in a host-owned session ────
+// Direction selects an ordered edge of the clicked face. The cut follows opposite
+// edges by stable vertex identity, terminates at boundaries/non-quads, and previews
+// live from a captured indexed base. Journal commit happens only on end(commit);
+// cancel restores the base exactly and leaves no undo entry.
 const LcSession = struct {
     basic: bool,
+    base_mesh: indexed_edit_mesh.Mesh,
+    last_mesh: ?indexed_edit_mesh.Mesh,
     base_pos: []f32, // positions-only soup at begin (tri_count * 9)
     tri_count: u32,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
     base_colors: []u8, // true RGBA per base face; previews inherit through src_face
-    // One bool per BASE face: the active outliner scope captured at begin. Cut planes
-    // are infinite, so this explicit mutation mask keeps sibling parts intact (req_2899).
-    base_scope: []bool,
-    // Exact authored face selection at begin. Parametric cuts split only complete
-    // selected quad groups; selected triangles of a larger face are not enough.
+    // Exact authored face selection at begin. A face is selected only when all render
+    // triangles derived from it are selected.
     base_cut_mask: []bool,
     // Part parentage (req_2644): one part index per BASE face at begin, and the same
     // carried through the LAST installed preview — commit renormalizes the minted
@@ -1792,21 +1673,16 @@ const LcSession = struct {
     base_face_part: ?[]u32,
     last_face_part: ?[]u32, // per LAST-preview face; aliases nothing (owned)
     part_count: u32,
-    // The face's two in-plane cut directions as UNIT VECTORS (popup direction 0/1
-    // picks one): dirs[0] runs along the selection's longest boundary edge, dirs[1]
-    // is normal × dirs[0]. Derived from the face's ACTUAL edges — never world axes —
-    // so a cut on a leaned/sheared shape follows the shape (req_2794: world-axis
-    // planes pushed through a leaning column exited through the slanted corner
-    // edges partway up, splitting them at arbitrary heights). On an axis-aligned
-    // face these degenerate to the world axes exactly.
+    // The seed face's first two ordered edge directions. Popup direction 0/1 chooses
+    // the same edge index that the reference walk receives; these vectors only drive
+    // the overlay handle and never determine topological adjacency.
     dirs: [2][3]f32,
     lo: [2]f32, // selected-face extent along each cut direction (dot-space)
     hi: [2]f32,
     keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
     snap: ?JournalEntry,
-    // Overlay visibility (req_2625): the selection's world centroid at begin (anchors the
-    // cut-plane handle) + the LAST previewed comb, so the editor overlay can accent the
-    // freshly cut edges and draw a translate-style handle on the middle cut plane.
+    // Overlay visibility (req_2625): the selection's world centroid at begin anchors
+    // the handle; last_planes is a visual guide, not the cutting algorithm.
     sel_center: [3]f32 = .{ 0, 0, 0 },
     last_dir: u32 = 0,
     last_planes: [64]f32 = undefined,
@@ -1815,10 +1691,6 @@ const LcSession = struct {
     // session's own dir/cuts, and __mesh_lc_state echoes them back to the popup.
     last_cuts: u32 = 1,
     last_offset_frac: f32 = 0.5,
-    // Null while the topological/parametric path is active. A value means the
-    // preview had to change semantics and use the plane cutter; the existing
-    // preview/state doors expose its message so the popup cannot hide that fact.
-    last_fallback: ?LcFallback = null,
     // The handle drag's CONTINUOUS cursor offset (req_2644 QQ): previews install the
     // SNAPPED frac, so the raw position accumulates here or slow drags could never
     // cross a whole-unit detent. Every preview re-seeds it (steppers move both).
@@ -1826,35 +1698,17 @@ const LcSession = struct {
 };
 var g_lc: ?LcSession = null;
 
-const LcFallback = enum {
-    basic_incomplete_quad,
-    loop_incomplete_ring,
-    loop_incomplete_coverage,
-    missing_face_groups,
-
-    fn message(reason: LcFallback, basic: bool) []const u8 {
-        return switch (reason) {
-            .basic_incomplete_quad => "Selected geometry is not a complete authored quad; Cut used a selection-scoped plane fallback.",
-            .loop_incomplete_ring => "The quad ring could not continue cleanly; Loop Cut used a full-slice plane fallback.",
-            .loop_incomplete_coverage => "The quad ring skipped faces crossed by the full slice; Loop Cut used a plane fallback.",
-            .missing_face_groups => if (basic)
-                "This mesh has no authored face groups; Cut used a selection-scoped plane fallback."
-            else
-                "This mesh has no authored face groups; Loop Cut used a full-slice plane fallback.",
-        };
-    }
-};
-
 /// One size-unit in world space — the mesh basis (16 u = 1 tile), the loop-cut handle's
 /// default snap increment (req_2644 QQ) and the studio gizmo's own step law.
 const LC_SNAP_WORLD: f32 = 1.0 / 16.0;
 
 fn lcFree() void {
     var s = g_lc orelse return;
+    s.base_mesh.deinit();
+    if (s.last_mesh) |*mesh| mesh.deinit();
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
     std.heap.c_allocator.free(s.base_colors);
-    std.heap.c_allocator.free(s.base_scope);
     std.heap.c_allocator.free(s.base_cut_mask);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
@@ -1869,30 +1723,6 @@ fn domAxis(v: [3]f32) u8 {
     const y = @abs(v[1]);
     const z = @abs(v[2]);
     return if (x >= y and x >= z) 0 else if (y >= z) 1 else 2;
-}
-
-/// The loop-cut session's two CUT-PLANE NORMALS: the WORLD AXES flanking the
-/// selection normal's dominant axis — the old studio's loopCutRange contract,
-/// straight by construction. The plane comb only ever cuts NON-QUAD selections
-/// now (every complete authored quad takes the parametric ring, which is what
-/// follows leaned/sheared shapes), so req_2794's neighbor-normal heuristic is
-/// retired: averaged neighbors tilt the comb on irregular shapes — a pyramid
-/// side cut level on the picked face and lopsided across the rest — and can
-/// collapse both directions onto one plane, deadening the dir toggle. Null only
-/// with no usable normal.
-fn lcDeriveDirs(nrm: [3]f32) ?[2][3]f32 {
-    if (vdot(nrm, nrm) < 0.5) return null; // vnorm zeroed it — degenerate selection
-    const na = domAxis(nrm);
-    var out: [2][3]f32 = undefined;
-    var w: u8 = 0;
-    var a: u8 = 0;
-    while (a < 3) : (a += 1) {
-        if (a != na) {
-            out[w] = axisVec(a);
-            w += 1;
-        }
-    }
-    return out;
 }
 
 /// The plane comb for `cuts` planes at `offset` within [lo,hi] — the studio's
@@ -1950,10 +1780,9 @@ fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32, colors:
 
 pub const LcInfo = struct { size0: f32, size1: f32 };
 
-/// Open a loop-cut session on the CURRENT face selection: capture the base soup, derive
-/// the face's two in-plane axes (dominant axis of the average selected-face normal is
-/// the normal axis; the other two are the cut candidates) and the selection's extent on
-/// each. Returns the two span sizes for the popup, or null when not in face mode /
+/// Open a loop-cut session on the CURRENT face selection: capture the indexed base and
+/// expose the first face's first two ordered edge lengths as direction choices. Returns
+/// those two lengths for the popup, or null when not in face mode /
 /// nothing selected. A prior session (stale popup) is dropped, not committed.
 pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     lcFree();
@@ -1996,52 +1825,6 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         }
     }
 
-    // Average selected-face normal + the selection's actual edge directions → the two
-    // in-plane cut directions (req_2794: world axes are only right while the shape is
-    // axis-aligned; a leaned column needs planes that follow its edges).
-    var acc: [3]f32 = .{ 0, 0, 0 };
-    var keep_group: u32 = model_source.NO_FACE_GROUP;
-    {
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            if (!mask[f]) continue;
-            acc = vadd(acc, faceCrossFromPositions(pos, f));
-            if (keep_group == model_source.NO_FACE_GROUP) keep_group = model_source.faceGroupOf(f);
-        }
-    }
-    const dirs = lcDeriveDirs(vnorm(acc)) orelse {
-        std.heap.c_allocator.free(pos);
-        return null;
-    };
-
-    // The SELECTED faces' extent along each cut direction (not the whole mesh —
-    // req_1006), plus the selection's world centroid — the anchor for the overlay's
-    // cut-plane handle. Extents live in dot-space along the direction vectors.
-    var lo: [2]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32) };
-    var hi: [2]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32) };
-    var center: [3]f32 = .{ 0, 0, 0 };
-    var corner_n: f32 = 0;
-    {
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            if (!mask[f]) continue;
-            var k: u32 = 0;
-            while (k < 3) : (k += 1) {
-                const vb = (@as(usize, f) * 3 + k) * 3;
-                const vert: [3]f32 = .{ pos[vb + 0], pos[vb + 1], pos[vb + 2] };
-                center = vadd(center, vert);
-                corner_n += 1;
-                var d: u8 = 0;
-                while (d < 2) : (d += 1) {
-                    const v = vdot(vert, dirs[d]);
-                    if (v < lo[d]) lo[d] = v;
-                    if (v > hi[d]) hi[d] = v;
-                }
-            }
-        }
-    }
-    if (corner_n > 0) center = vmul(center, 1.0 / corner_n);
-
     var groups: ?[]u32 = null;
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
         const g = std.heap.c_allocator.alloc(u32, tri_count) catch {
@@ -2053,289 +1836,126 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         groups = g;
     }
 
-    const base_scope = std.heap.c_allocator.alloc(bool, tri_count) catch {
-        std.heap.c_allocator.free(pos);
-        if (groups) |g| std.heap.c_allocator.free(g);
-        return null;
-    };
-    var scope_face: u32 = 0;
-    while (scope_face < tri_count) : (scope_face += 1) base_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
     const base_cut_mask = std.heap.c_allocator.dupe(bool, mask[0..tri_count]) catch {
         std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
-        std.heap.c_allocator.free(base_scope);
         return null;
     };
     const base_colors = collectCurrentFaceColors() orelse {
         std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
-        std.heap.c_allocator.free(base_scope);
         std.heap.c_allocator.free(base_cut_mask);
         return null;
     };
     if (base_colors.len != @as(usize, tri_count) * 4) {
         std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
-        std.heap.c_allocator.free(base_scope);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
         return null;
     }
 
+    const base_face_part = capturePartOfFaces();
+    const groups_arg: ?[]const u32 = if (groups) |g| g else null;
+    const parts_arg: ?[]const u32 = if (base_face_part) |p| p else null;
+    var base_mesh = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg) orelse {
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(base_cut_mask);
+        std.heap.c_allocator.free(base_colors);
+        if (base_face_part) |p| std.heap.c_allocator.free(p);
+        return null;
+    };
+    const seed = base_mesh.seedInfo(base_cut_mask) orelse {
+        base_mesh.deinit();
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(base_cut_mask);
+        std.heap.c_allocator.free(base_colors);
+        if (base_face_part) |p| std.heap.c_allocator.free(p);
+        return null;
+    };
+
     g_lc = .{
         .basic = basic,
+        .base_mesh = base_mesh,
+        .last_mesh = null,
         .base_pos = pos,
         .tri_count = tri_count,
         .base_groups = groups,
         .base_colors = base_colors,
-        .base_scope = base_scope,
         .base_cut_mask = base_cut_mask,
-        .base_face_part = capturePartOfFaces(),
+        .base_face_part = base_face_part,
         .last_face_part = null, // no preview yet — commit falls back to the base parts
         .part_count = hostPartCount(),
-        .dirs = dirs,
-        .lo = lo,
-        .hi = hi,
-        .keep_group = keep_group,
+        .dirs = seed.directions,
+        .lo = seed.lo,
+        .hi = seed.hi,
+        .keep_group = seed.keep_group,
         .snap = journalSnapshotCurrent(if (basic) "cut" else "loop cut"),
-        .sel_center = center,
+        .sel_center = seed.center,
     };
-    return .{ .size0 = hi[0] - lo[0], .size1 = hi[1] - lo[1] };
+    return .{ .size0 = seed.sizes[0], .size1 = seed.sizes[1] };
 }
 
-/// Re-cut from the captured base at (direction, cuts, offset) and install the result as
-/// the live mesh — the popup's live preview. offset_frac is 0..1 of the span (0.5 = the
-/// even comb). Zero surviving planes (offset pushed them all out) restores the bare base,
-/// so scrubbing the offset never strands a stale cut on screen.
-/// Whether a parametric ring result covers every in-scope authored face the
-/// equivalent plane comb would cross. Subdivided groups are recovered from the
-/// result itself (a subdivided quad always emits at least one MINTED strip whose
-/// group differs from its source face's); any base group a plane strictly
-/// crosses that was never subdivided is a face the ring skipped.
-fn lcRingCoversPlanes(s: *const LcSession, d: usize, planes: []const f32, groups: []const u32, cut: mesh_edit.CutResult) bool {
-    var visited = std.AutoHashMapUnmanaged(u32, void){};
-    defer visited.deinit(std.heap.c_allocator);
-    if (cut.groups) |cut_groups| {
-        var t: u32 = 0;
-        while (t < cut.tri_count) : (t += 1) {
-            const src = cut.src_face[t];
-            if (src >= s.tri_count) continue;
-            if (cut_groups[t] != groups[src]) visited.put(std.heap.c_allocator, groups[src], {}) catch return false;
-        }
-    }
-    const n = s.dirs[d];
-    for (planes) |p| {
-        var side = std.AutoHashMapUnmanaged(u32, [2]bool){};
-        defer side.deinit(std.heap.c_allocator);
-        var f: u32 = 0;
-        while (f < s.tri_count) : (f += 1) {
-            const g = groups[f];
-            if (g == model_source.NO_FACE_GROUP) continue;
-            if (visited.contains(g)) continue;
-            if (!s.base_scope[f]) continue;
-            var k: u32 = 0;
-            while (k < 3) : (k += 1) {
-                const b = (@as(usize, f) * 3 + k) * 3;
-                const sd = n[0] * s.base_pos[b] + n[1] * s.base_pos[b + 1] + n[2] * s.base_pos[b + 2] - p;
-                const gop = side.getOrPut(std.heap.c_allocator, g) catch return false;
-                if (!gop.found_existing) gop.value_ptr.* = .{ false, false };
-                if (sd > 1e-4) gop.value_ptr.*[0] = true;
-                if (sd < -1e-4) gop.value_ptr.*[1] = true;
-            }
-        }
-        var it = side.iterator();
-        while (it.next()) |e| {
-            if (e.value_ptr.*[0] and e.value_ptr.*[1]) return false; // crossed, never cut
-        }
-    }
-    return true;
-}
-
+/// Re-run the reference topological edit from the captured indexed base and lower
+/// the result for rendering. No plane fallback exists: traversal termination is a
+/// successful partial ring, exactly as in js-bench-editor.
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *LcSession = if (g_lc) |*sp| sp else return false;
-    s.last_fallback = null;
     const d: usize = @min(dir, 1);
-    const lo = s.lo[d];
-    const hi = s.hi[d];
-    if (hi - lo < 1e-6) return false;
-    var planes: [64]f32 = undefined; // the studio popup's cut cap
-    const offset = std.math.clamp(offset_frac, 0.0, 1.0) * (hi - lo);
-    const n_planes = lcPlanes(lo, hi, @min(cuts, 64), offset, &planes);
-    // The ruled cuts+offset comb is now evaluated in the face's 0..1 parametric
-    // span. `planes` remains only overlay/read-back coordinates; it never reaches
-    // the cutting core for authored quads.
-    var fractions: [64]f32 = undefined;
-    const fraction_count = lcPlanes(0, 1, @min(cuts, 64), std.math.clamp(offset_frac, 0.0, 1.0), &fractions);
-    // Remember the previewed comb so the editor overlay can accent the cut edges and
-    // anchor the cut-plane handle while the popup is open (req_2625).
+    const cut_count = @min(@max(cuts, 1), 64);
+    const fraction = std.math.clamp(offset_frac, 0.0, 1.0);
+    const reuse_topology = s.last_mesh != null and s.last_dir == @as(u32, @intCast(d)) and s.last_cuts == cut_count;
+
+    // Keep the popup overlay/read-back contract. These planes are display guides only;
+    // topology is determined exclusively by the indexed edge walk below.
+    var planes: [64]f32 = undefined;
+    const span = s.hi[d] - s.lo[d];
+    if (span < 1e-6) return false;
+    const n_planes = lcPlanes(s.lo[d], s.hi[d], cut_count, fraction * span, &planes);
     s.last_dir = @intCast(d);
     s.last_planes = planes;
     s.last_plane_count = n_planes;
-    s.last_cuts = @min(@max(cuts, 1), 64);
-    s.last_offset_frac = std.math.clamp(offset_frac, 0.0, 1.0);
-    s.drag_raw_frac = s.last_offset_frac; // steppers/popup moves re-seed the drag accumulator
+    s.last_cuts = cut_count;
+    s.last_offset_frac = fraction;
+    s.drag_raw_frac = fraction;
 
-    if (s.base_groups) |groups| {
-        const cut_result = if (s.basic)
-            mesh_edit.parametricQuadCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, @intCast(d), fractions[0..fraction_count])
-        else
-            mesh_edit.ringParametricCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, s.base_scope, @intCast(d), fractions[0..fraction_count]);
-        if (cut_result) |cut| ring: {
-            // The ring result only stands when it covers every in-scope face the
-            // equivalent plane comb would cross. A ring can CLOSE cleanly and still
-            // skip faces in the cut's path — after horizontal band cuts, a pyramid's
-            // vertical belt closes around four frustum quads while the apex
-            // triangles and base sit squarely in the planes' way (req_3119) — and
-            // the studio contract is a FULL slice. Basic cuts are selection-scoped
-            // by design and skip the check.
-            if (!s.basic and !lcRingCoversPlanes(s, d, planes[0..n_planes], groups, cut)) {
-                std.heap.c_allocator.free(cut.positions);
-                std.heap.c_allocator.free(cut.src_face);
-                if (cut.groups) |g| std.heap.c_allocator.free(g);
-                s.last_fallback = .loop_incomplete_coverage;
-                log.print("[mesh] loop cut ring skips faces in the cut's path; using the plane comb for a full slice\n", .{});
-                break :ring;
-            }
-            defer std.heap.c_allocator.free(cut.positions);
-            defer std.heap.c_allocator.free(cut.src_face);
-            defer if (cut.groups) |g| std.heap.c_allocator.free(g);
-            // A basic multi-cut keeps the primitive byte-for-byte and separates its
-            // later two-triangle strips here so every authored interval is addressable.
-            if (s.basic and fraction_count > 1) {
-                if (cut.groups) |cut_groups| {
-                    var next_group: u32 = 0;
-                    for (cut_groups) |gid| {
-                        if (gid != model_source.NO_FACE_GROUP and gid >= next_group) next_group = gid + 1;
-                    }
-                    var run_start: usize = 0;
-                    while (run_start < cut.src_face.len) {
-                        var run_end = run_start + 1;
-                        while (run_end < cut.src_face.len and cut.src_face[run_end] == cut.src_face[run_start]) : (run_end += 1) {}
-                        if (run_end - run_start == @as(usize, fraction_count + 1) * 2) {
-                            var strip: usize = 2;
-                            while (strip <= fraction_count) : (strip += 1) {
-                                cut_groups[run_start + strip * 2] = next_group;
-                                cut_groups[run_start + strip * 2 + 1] = next_group;
-                                next_group += 1;
-                            }
-                        }
-                        run_start = run_end;
-                    }
-                }
-            }
-            const colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch return false;
-            defer std.heap.c_allocator.free(colors);
-            if (!mesh_edit.inheritFaceRgba(s.base_colors, cut.src_face, colors)) return false;
-            if (s.last_face_part) |p| std.heap.c_allocator.free(p);
-            s.last_face_part = null;
-            if (s.base_face_part) |parts| {
-                const next_parts = std.heap.c_allocator.alloc(u32, cut.tri_count) catch return false;
-                var t: u32 = 0;
-                while (t < cut.tri_count) : (t += 1) {
-                    const src = cut.src_face[t];
-                    next_parts[t] = if (src < parts.len) parts[src] else model_source.NO_PART;
-                }
-                s.last_face_part = next_parts;
-            }
-            return lcInstallSoup(cut.positions, cut.tri_count, cut.groups, colors);
-        } else {
-            s.last_fallback = if (s.basic) .basic_incomplete_quad else .loop_incomplete_ring;
-            log.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
-        }
-    } else {
-        s.last_fallback = .missing_face_groups;
-    }
+    var preview = if (reuse_topology)
+        s.last_mesh.?.clone() catch return false
+    else
+        s.base_mesh.clone() catch return false;
+    defer preview.deinit();
+    const changed = if (reuse_topology) blk: {
+        preview.repositionCutVertices(cut_count, fraction);
+        break :blk true;
+    } else if (s.basic)
+        preview.cutSelected(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false
+    else
+        preview.loopCut(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false;
+    if (!changed) return false;
 
-    // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
-    // plane; intermediates free as we go — only the final result installs). Part
-    // parentage rides along (src_face chains per plane) so commit can renormalize the
-    // minted group ids back into contiguous per-part ranges (req_2644).
-    var cur_pos: []const f32 = s.base_pos;
-    var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
-    var cur_colors: []const u8 = s.base_colors;
-    // Basic Cut is selection-scoped even when its preferred quad path degrades.
-    // Loop Cut retains the outliner-part scope for its explicit full-slice fallback.
-    var cur_scope: []const bool = if (s.basic) s.base_cut_mask else s.base_scope;
-    var cur_part: ?[]const u32 = if (s.base_face_part) |p| p else null;
-    var cur_count: u32 = s.tri_count;
-    var owned = false; // false while cur_* still aliases the session base
-    var pi: u32 = 0;
-    while (pi < n_planes) : (pi += 1) {
-        const cut = mesh_edit.planeCutSoupMasked(cur_pos, cur_count, s.dirs[d], planes[pi], cur_groups, cur_scope) orelse break;
-        const next_scope = std.heap.c_allocator.alloc(bool, cut.tri_count) catch {
-            std.heap.c_allocator.free(cut.positions);
-            std.heap.c_allocator.free(cut.src_face);
-            if (cut.groups) |g| std.heap.c_allocator.free(g);
-            break;
-        };
-        var scoped_tri: u32 = 0;
-        while (scoped_tri < cut.tri_count) : (scoped_tri += 1) {
-            const src = cut.src_face[scoped_tri];
-            next_scope[scoped_tri] = src < cur_scope.len and cur_scope[src];
-        }
-        const next_colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch {
-            std.heap.c_allocator.free(next_scope);
-            std.heap.c_allocator.free(cut.positions);
-            std.heap.c_allocator.free(cut.src_face);
-            if (cut.groups) |g| std.heap.c_allocator.free(g);
-            break;
-        };
-        if (!mesh_edit.inheritFaceRgba(cur_colors, cut.src_face, next_colors)) {
-            std.heap.c_allocator.free(next_colors);
-            std.heap.c_allocator.free(next_scope);
-            std.heap.c_allocator.free(cut.positions);
-            std.heap.c_allocator.free(cut.src_face);
-            if (cut.groups) |g| std.heap.c_allocator.free(g);
-            break;
-        }
-        var next_part: ?[]const u32 = null;
-        if (cur_part) |cp| {
-            if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |np| {
-                var t: u32 = 0;
-                while (t < cut.tri_count) : (t += 1) {
-                    const sf = cut.src_face[t];
-                    np[t] = if (sf < cp.len) cp[sf] else model_source.NO_PART;
-                }
-                next_part = np;
-            } else |_| {}
-        }
-        std.heap.c_allocator.free(cut.src_face);
-        if (owned) {
-            std.heap.c_allocator.free(@constCast(cur_pos));
-            if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
-            std.heap.c_allocator.free(@constCast(cur_colors));
-            std.heap.c_allocator.free(@constCast(cur_scope));
-            if (cur_part) |p| std.heap.c_allocator.free(@constCast(p));
-        }
-        cur_pos = cut.positions;
-        cur_groups = cut.groups;
-        cur_colors = next_colors;
-        cur_scope = next_scope;
-        cur_part = next_part;
-        cur_count = cut.tri_count;
-        owned = true;
-    }
-    defer if (owned) {
-        std.heap.c_allocator.free(@constCast(cur_pos));
-        if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
-        std.heap.c_allocator.free(@constCast(cur_colors));
-        std.heap.c_allocator.free(@constCast(cur_scope));
-    };
-    // Stash the FINAL preview's parentage on the session (commit renormalizes from it).
+    var lowered = preview.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(s.base_colors, lowered.source_triangles, colors)) return false;
+
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     s.last_face_part = null;
-    if (cur_part) |p| {
-        if (owned) {
-            s.last_face_part = @constCast(p); // ownership moves to the session
-        } else {
-            s.last_face_part = std.heap.c_allocator.dupe(u32, p) catch null; // still the base's
-        }
+    if (s.base_face_part != null) {
+        s.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
     }
-    return lcInstallSoup(cur_pos, cur_count, cur_groups, cur_colors);
+    const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
+    if (!lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors)) return false;
+    if (s.last_mesh) |*mesh| mesh.deinit();
+    s.last_mesh = preview;
+    preview = .{ .allocator = std.heap.c_allocator };
+    return true;
 }
 
 /// Close the session. commit keeps the previewed cut as ONE journal entry and re-selects
-/// the clicked face's −side piece (planeCutSoup keeps the original group id on the −side,
+/// the clicked face's retained piece (the indexed split keeps its original group id,
 /// so the selection rides the cut like the studio's, req_0989). cancel restores the
 /// captured base exactly and leaves no undo entry.
 pub fn meshLoopCutFaceEnd(commit: bool) bool {
@@ -2359,6 +1979,13 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         }
         const fp: ?[]const u32 = if (s.last_face_part) |p| p else if (s.base_face_part) |p| p else null;
         if (fp) |face_part| renormalizePartRanges(face_part, s.part_count);
+        if (s.last_mesh) |*mesh| {
+            if (mesh.lower()) |lowered_value| {
+                var lowered = lowered_value;
+                defer lowered.deinit();
+                adoptIndexedEditMesh(mesh, &lowered);
+            } else |_| {}
+        }
         if (keep_face) |f| {
             const g = model_source.faceGroupOf(f);
             if (g != model_source.NO_FACE_GROUP) _ = mesh_edit.selectFacesByGroupRange(g, g + 1, false);
@@ -2369,12 +1996,24 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     } else {
         const groups_arg: ?[]const u32 = if (s.base_groups) |g| g else null;
         ok = lcInstallSoup(s.base_pos, s.tri_count, groups_arg, s.base_colors);
+        if (ok) {
+            if (s.base_mesh.clone()) |restored_value| {
+                var restored = restored_value;
+                defer restored.deinit();
+                if (restored.lower()) |lowered_value| {
+                    var lowered = lowered_value;
+                    defer lowered.deinit();
+                    adoptIndexedEditMesh(&restored, &lowered);
+                } else |_| {}
+            } else |_| {}
+        }
         journalDiscard(&s.snap);
     }
+    s.base_mesh.deinit();
+    if (s.last_mesh) |*mesh| mesh.deinit();
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
     std.heap.c_allocator.free(s.base_colors);
-    std.heap.c_allocator.free(s.base_scope);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap); // no-op when committed
@@ -2400,14 +2039,12 @@ pub fn meshLcState() ?LcState {
         .dir = sp.last_dir,
         .cuts = sp.last_cuts,
         .offset_frac = sp.last_offset_frac,
-        .fallback_reason = if (sp.last_fallback) |reason| reason.message(sp.basic) else null,
+        .fallback_reason = null,
     };
 }
 
 pub fn meshLcFallbackReason() ?[]const u8 {
-    const sp: *const LcSession = if (g_lc) |*p| p else return null;
-    const reason = sp.last_fallback orelse return null;
-    return reason.message(sp.basic);
+    return null;
 }
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
@@ -3752,78 +3389,40 @@ pub fn meshFlipSelectionWinding() bool {
 /// the selected region as a boundary fan: shared seams and their collinear midpoint
 /// verts disappear, exactly like Studio's mergeFaces.
 pub fn meshMergeSelectedFaces() bool {
-    if (!model_paint.hasTarget()) return false;
-    if (mesh_edit.mode() != .face) return false;
-    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return false;
-    if (g_edit_count != model_source.count()) return false;
+    if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return false;
+    const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
     const mask = jalloc.alloc(bool, tri_count) catch return false;
     defer jalloc.free(mask);
-    const selected = mesh_edit.buildDeleteMask(mask);
-    if (selected == 0) return false;
+    if (mesh_edit.buildDeleteMask(mask) == 0) return false;
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const part_count = hostPartCount();
+    const base_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(base_colors);
+    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts) orelse return false;
+    defer indexed.deinit();
+    if (!(indexed.mergeSelected(mask) catch return false)) return false;
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
 
-    const groups = captureFaceGroups() orelse return false;
-    defer jalloc.free(groups);
-    var target: ?u32 = null;
-    var distinct: u32 = 0;
-    {
-        var seen = std.AutoHashMapUnmanaged(u32, void){};
-        defer seen.deinit(jalloc);
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            if (!mask[f]) continue;
-            if (target == null) target = groups[f];
-            const gop = seen.getOrPut(jalloc, groups[f]) catch return false;
-            if (!gop.found_existing) distinct += 1;
-        }
-    }
-    if (distinct < 2) return false;
-
-    const cur_verts = g_edit_verts orelse return false;
-    const pos = jalloc.alloc(f32, @as(usize, tri_count) * 9) catch return false;
-    defer jalloc.free(pos);
-    var f: u32 = 0;
-    while (f < tri_count) : (f += 1) {
-        var corner: u32 = 0;
-        while (corner < 3) : (corner += 1) {
-            const src = (@as(usize, f) * 3 + corner) * 8;
-            const dst = (@as(usize, f) * 3 + corner) * 3;
-            if (src + 2 >= cur_verts.len) return false;
-            @memcpy(pos[dst .. dst + 3], cur_verts[src .. src + 3]);
-        }
-    }
-    const dissolved = mesh_edit.dissolveSelectedGroups(pos, tri_count, groups, mask) orelse return false;
-    defer dissolved.deinit();
-    const new_tri_count: u32 = @intCast(dissolved.positions.len / 9);
-    const old_colors = collectCurrentFaceColors() orelse return false;
-    defer std.heap.c_allocator.free(old_colors);
-    const new_colors = jalloc.alloc(u8, @as(usize, new_tri_count) * 4) catch return false;
-    defer jalloc.free(new_colors);
-    if (!mesh_edit.inheritFaceRgba(old_colors, dissolved.src_face, new_colors)) return false;
-    var out: std.ArrayListUnmanaged(f32) = .empty;
-    defer out.deinit(jalloc);
-    var i: u32 = 0;
-    while (i < new_tri_count) : (i += 1) {
-        const base = @as(usize, i) * 9;
-        const a: [3]f32 = .{ dissolved.positions[base], dissolved.positions[base + 1], dissolved.positions[base + 2] };
-        const b: [3]f32 = .{ dissolved.positions[base + 3], dissolved.positions[base + 4], dissolved.positions[base + 5] };
-        const c: [3]f32 = .{ dissolved.positions[base + 6], dissolved.positions[base + 7], dissolved.positions[base + 8] };
-        if (!appendTri(&out, a, b, c)) return false;
-    }
     var snap = journalSnapshotCurrent("merge faces");
     mesh_edit.clearSelection();
-    if (!replaceActiveEditMesh(out.items, new_tri_count * 3)) {
-        journalDiscard(&snap);
-        return false;
-    }
-    model_source.setFaceGroups(dissolved.groups);
-    if (!applyExactFaceColors(new_colors, new_tri_count)) {
-        journalDiscard(&snap);
-        return false;
-    }
-    _ = refreshPaintLayout();
-    journalCommit(&snap);
-    return true;
+    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
+    const ok = lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors);
+    if (ok) {
+        if (parts != null) renormalizePartRanges(lowered.parts, part_count);
+        adoptIndexedEditMesh(&indexed, &lowered);
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
+    return ok;
 }
 
 /// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent
@@ -4154,9 +3753,9 @@ fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     return vcross(vsub(p1, a), vsub(p2, a));
 }
 
-// The unsafe-edit predicate is the studio's concave Auto-Fix, ported verbatim
-// (mesh_edit.newlyConcaveGroups ← editMesh.ts isFaceConcave/newConcaveFaces,
-// req_2823). The differential normal/area heuristics that lived here false-fired
+// The unsafe-edit predicate is the studio's concave Auto-Fix over ordered indexed
+// faces (editMesh.ts isFaceConcave/newConcaveFaces, req_2823). The differential
+// normal/area heuristics that lived here false-fired
 // on rotates (req_2754), pre-degenerate meshes (req_2755), loop-cut slivers, and
 // hinge edits (req_2816) — "changed a lot" is not "became invalid".
 
@@ -4260,6 +3859,9 @@ pub fn meshGizmoBegin() void {
     g_gizmo_snap = journalSnapshotCurrent("transform");
     const pos = model_paint.positions() orelse return;
     g_guard_before = std.heap.c_allocator.dupe(f32, pos) catch null;
+    if (ensureIndexedEditMesh()) {
+        if (g_indexed_edit_mesh) |*mesh| g_guard_indexed_before = mesh.clone() catch null;
+    }
     g_guard_face_count = model_paint.faceCount();
 }
 
@@ -4305,9 +3907,10 @@ pub fn meshGizmoFinish() bool {
     // FACES, matching the studio's "N face(s) buckled — not convex".
     var bad_list: std.ArrayListUnmanaged(u32) = .empty;
     var bad_faces: u32 = 0;
-    if (captureFaceGroups()) |groups| {
-        defer std.heap.c_allocator.free(groups);
-        bad_faces = mesh_edit.newlyConcaveGroups(before, after, fc, groups, &bad_list);
+    if (g_guard_indexed_before) |*before_mesh| {
+        if (g_indexed_edit_mesh) |*after_mesh| {
+            bad_faces = after_mesh.newlyConcaveComparedTo(before_mesh, &bad_list);
+        }
     }
     if (bad_faces == 0) {
         bad_list.deinit(std.heap.c_allocator);
@@ -4346,6 +3949,13 @@ pub fn meshEditGuardResolve(action: u8) bool {
                 _ = copyPaintPositionsToEditVerts(0, fc - 1);
                 _ = model_source.updateGeometryFromDisplayed(pos, 0, fc - 1);
                 _ = patchActiveEditMesh(0, fc - 1);
+                if (g_indexed_edit_mesh) |*mesh| {
+                    const verts = g_edit_verts orelse {
+                        clearIndexedEditMesh();
+                        return false;
+                    };
+                    if (!mesh.updatePositionsFromInterleaved(verts, fc)) clearIndexedEditMesh();
+                }
             }
             // The restore bypassed mesh_edit's mutation path, so its welded
             // vert positions (overlay dots/edges, gizmo pivot, picking) still
@@ -5894,6 +5504,7 @@ pub fn meshEditSetScopeRanges(pairs: []const u32) void {
 /// built before the groups arrived. The binding must not write model_source directly:
 /// same-triangle-count group changes are invisible to mesh_edit's normal cache key.
 pub fn meshEditSetFaceGroups(groups: []const u32) void {
+    clearIndexedEditMesh();
     model_source.setFaceGroups(groups);
     mesh_edit.faceGroupsChanged();
 }
@@ -5902,6 +5513,7 @@ pub fn meshEditSetFaceGroups(groups: []const u32) void {
 /// This is also where a PERSISTED doc's ranges arrive on load/resume — a doc saved
 /// while the req_3029 minting bug was live heals here instead of reopening corrupt.
 pub fn meshEditSetPartRanges(pairs: []const u32) void {
+    clearIndexedEditMesh();
     // Tripwire (req_3049): a session lost its host part ranges and the next save
     // persisted a doc that reopens with every part merged. An empty push over a mesh
     // that HAS ranges is the one legal way to clear them — name it when it happens.

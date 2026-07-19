@@ -2705,7 +2705,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         >
           {/* Studio concave Auto-Fix wording (req_0949 port, req_2823): counts authored
               FACES newly buckled — the host predicate is editMesh.ts isFaceConcave ported
-              to mesh_edit.newlyConcaveGroups, not the old per-triangle heuristics. */}
+              to the indexed ordered-face table, not the old per-triangle heuristics. */}
           <Text style={{ color: '#ffe1bf', fontSize: 13, fontWeight: 700 }}>⚠ Concave face</Text>
           <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
             {`${guard.bad} face${guard.bad === 1 ? '' : 's'} buckled — not convex`}

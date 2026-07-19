@@ -1381,12 +1381,10 @@ export function scaleVerts(m: EditMesh, indices: Iterable<number>, anchor: V3, f
   return { ...m, verts };
 }
 
-// ── Loop cut: slice the mesh with axis-aligned planes (req_0984/0985) ──────────
-// The Blockbench loop-cut tool: a face click + a direction (one of the face's two
-// in-plane axes) + a cut count + an offset → N parallel planes perpendicular to
-// that axis, looping around the whole box. Built on a general planar split so it
-// keeps working after earlier cuts (the mesh is no longer a bare cuboid). Pure +
-// headless so editMesh.test.ts proves the topology + the spacing math.
+// ── Generic planar split helpers (req_0984/0985) ───────────────────────────────────
+// These generic helpers remain useful to callers that explicitly ask for a plane
+// operation. The loop-cut tool below deliberately does not use them: it follows
+// ordered face adjacency exactly like js-bench-editor.
 
 const POS_KEY_DP = 5; // vertex-merge precision (decimal places) for the cut verts.
 
@@ -1473,11 +1471,216 @@ export function loopCutRange(m: EditMesh, axis: 0 | 1 | 2, lo: number, hi: numbe
   return out;
 }
 
-/** Apply a full loop cut across the WHOLE mesh extent (the bare-cuboid case). */
+type LoopCutOptions = { face: number; direction: number; cuts: number; offset: number; selectedFaces?: number[] };
+
+const cloneCutFace = (face: EditMeshFace): EditMeshFace => ({
+  ...face,
+  loop: face.loop.slice(),
+  uv: face.uv?.map((p) => [p[0], p[1]] as V2),
+});
+
+/** The js-bench-editor/Blockbench loop walk, expressed against EditMesh's real
+ * vertex ids and ordered face loops. `offset` is a distance along the selected
+ * side edge. A quad continues through its opposite edge; boundaries close the
+ * walk, and a terminal triangle is split without reinterpreting the request as
+ * an infinite plane cut. */
+export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh {
+  const start = m.faces[options.face];
+  if (!start || start.loop.length < 2) return m;
+  const verts = m.verts.map((v) => [v[0], v[1], v[2]] as V3);
+  const faces = m.faces.map(cloneCutFace);
+  const processed = new Set<number>();
+  const centers = new Map<string, number>();
+  const cutCount = Math.max(1, Math.round(options.cuts));
+  const startLoop = start.loop;
+  const startSide: [number, number] = [
+    startLoop[options.direction % startLoop.length],
+    startLoop[(options.direction + 1) % startLoop.length],
+  ];
+  const selectedFaces = new Set(options.selectedFaces ?? [options.face]);
+  aligned: for (let edge = 0; edge < startLoop.length; edge += 1) {
+    const candidate: [number, number] = [startLoop[edge], startLoop[(edge + 1) % startLoop.length]];
+    for (const faceIndex of selectedFaces) {
+      if (faceIndex === options.face) continue;
+      const other = faces[faceIndex];
+      if (other?.loop.includes(candidate[0]) && other.loop.includes(candidate[1])) {
+        startSide[0] = candidate[0]; startSide[1] = candidate[1];
+        break aligned;
+      }
+    }
+  }
+  const startLength = Math.hypot(
+    verts[startSide[1]][0] - verts[startSide[0]][0],
+    verts[startSide[1]][1] - verts[startSide[0]][1],
+    verts[startSide[1]][2] - verts[startSide[0]][2],
+  );
+  if (startLength < 1e-9) return m;
+  const offsetRatio = Math.max(0, Math.min(1, options.offset / startLength));
+
+  const uvAt = (face: EditMeshFace, vi: number): V2 => {
+    const i = face.loop.indexOf(vi);
+    const uv = i >= 0 ? face.uv?.[i] : undefined;
+    return uv ? [uv[0], uv[1]] : [0.5, 0.5];
+  };
+  const centerVertex = (edge: [number, number], ratio: number): number => {
+    const key = edge[0] < edge[1] ? `${edge[0]}.${edge[1]}` : `${edge[1]}.${edge[0]}`;
+    const existing = centers.get(key);
+    if (existing != null) return existing;
+    const a = verts[edge[0]], b = verts[edge[1]];
+    const id = verts.length;
+    verts.push([
+      a[0] + (b[0] - a[0]) * ratio,
+      a[1] + (b[1] - a[1]) * ratio,
+      a[2] + (b[2] - a[2]) * ratio,
+    ]);
+    centers.set(key, id);
+    return id;
+  };
+  const neighbor = (current: number, edge: [number, number]): number | undefined => {
+    for (let fi = 0; fi < faces.length; fi += 1) {
+      if (fi === current || processed.has(fi) || faces[fi].loop.length < 3) continue;
+      if (faces[fi].loop.includes(edge[0]) && faces[fi].loop.includes(edge[1])) return fi;
+    }
+    return undefined;
+  };
+  const ratioAt = (cutNo: number): number => cutCount > 1
+    ? 1 - (offsetRatio * 2) / (cutCount + 1 - cutNo)
+    : offsetRatio;
+  const lerpUV = (a: V2, b: V2, t: number): V2 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+  const splitFace = (faceIndex: number, sideInput: [number, number], doubleSide: boolean, cutNo: number): boolean => {
+    const source = faces[faceIndex];
+    if (!source || source.loop.length < 2) return false;
+    processed.add(faceIndex);
+    const side: [number, number] = [sideInput[0], sideInput[1]];
+    const sideDiff = source.loop.indexOf(side[0]) - source.loop.indexOf(side[1]);
+    if (sideDiff === -1 || sideDiff > 2) side.reverse();
+    const ratio = Math.max(0, Math.min(1, ratioAt(cutNo)));
+
+    if (source.loop.length === 4) {
+      const opposite = source.loop.filter((vi) => !side.includes(vi)) as [number, number];
+      if (opposite.length !== 2) return false;
+      const oppositeDiff = source.loop.indexOf(opposite[0]) - source.loop.indexOf(opposite[1]);
+      if (oppositeDiff === 1 || oppositeDiff < -2) opposite.reverse();
+      const centerSide = centerVertex(side, ratio);
+      const centerOpposite = centerVertex(opposite, ratio);
+      const sideUV = lerpUV(uvAt(source, side[0]), uvAt(source, side[1]), ratio);
+      const oppositeUV = lerpUV(uvAt(source, opposite[0]), uvAt(source, opposite[1]), ratio);
+      faces[faceIndex] = {
+        ...source,
+        loop: [opposite[0], centerSide, centerOpposite, side[0]],
+        uv: [uvAt(source, opposite[0]), sideUV, oppositeUV, uvAt(source, side[0])],
+      };
+      faces.push({
+        ...source,
+        loop: [side[1], centerSide, centerOpposite, opposite[1]],
+        uv: [uvAt(source, side[1]), sideUV, oppositeUV, uvAt(source, opposite[1])],
+      });
+
+      if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, side[0]], doubleSide, cutNo + 1);
+      if (cutNo !== 0) return true;
+      const next = neighbor(faceIndex, opposite);
+      if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0);
+      if (doubleSide) {
+        const previous = neighbor(faceIndex, side);
+        if (previous != null) {
+          const previousOpposite = faces[previous].loop.filter((vi) => !side.includes(vi));
+          if (previousOpposite.length === 2) {
+            splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0);
+          } else if (previousOpposite.length === 1) {
+            splitFace(previous, side, false, 0);
+          }
+        }
+      }
+      return true;
+    }
+
+    if (source.loop.length === 3) {
+      const opposed = source.loop.find((vi) => !side.includes(vi));
+      if (opposed == null) return false;
+
+      if (options.direction > 2) {
+        const opposite: [number, number] = [side[options.direction % side.length], opposed];
+        const oppositeDiff = source.loop.indexOf(opposite[0]) - source.loop.indexOf(opposite[1]);
+        if (oppositeDiff === 1 || oppositeDiff < -2) opposite.reverse();
+        const centerSide = centerVertex(side, ratio);
+        const centerOpposite = centerVertex(opposite, ratio);
+        const sideUV = lerpUV(uvAt(source, side[0]), uvAt(source, side[1]), ratio);
+        const oppositeUV = lerpUV(uvAt(source, opposite[0]), uvAt(source, opposite[1]), ratio);
+        const otherQuad = side.find((vi) => !opposite.includes(vi))!;
+        const otherTri = side.find((vi) => opposite.includes(vi))!;
+        const sourceNormal = faceNormal({ verts, faces: [] }, source);
+        faces[faceIndex] = {
+          ...source,
+          loop: [opposed, centerSide, centerOpposite, otherQuad],
+          uv: [uvAt(source, opposed), sideUV, oppositeUV, uvAt(source, otherQuad)],
+        };
+        const newFaceIndex = faces.length;
+        faces.push({
+          ...source,
+          loop: [otherTri, centerSide, centerOpposite],
+          uv: [uvAt(source, otherTri), sideUV, oppositeUV],
+        });
+        for (const fi of [faceIndex, newFaceIndex]) {
+          if (dot(faceNormal({ verts, faces: [] }, faces[fi]), sourceNormal) < 0) {
+            faces[fi].loop.reverse();
+            faces[fi].uv?.reverse();
+          }
+        }
+        if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, otherQuad], doubleSide, cutNo + 1);
+        if (cutNo !== 0) return true;
+        const next = neighbor(faceIndex, opposite);
+        if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0);
+        if (doubleSide) {
+          const previous = neighbor(faceIndex, side);
+          if (previous != null) {
+            const previousOpposite = faces[previous].loop.filter((vi) => !side.includes(vi));
+            if (previousOpposite.length === 2) splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0);
+          }
+        }
+        return true;
+      }
+
+      // Directions 0..2 are the normal edge-to-opposed-vertex terminal used by
+      // the editor popup and selected-edge action. It deliberately stops here.
+      const center = centerVertex(side, ratio);
+      const centerUV = lerpUV(uvAt(source, side[0]), uvAt(source, side[1]), ratio);
+      faces[faceIndex] = {
+        ...source,
+        loop: [opposed, center, side[0]],
+        uv: [uvAt(source, opposed), centerUV, uvAt(source, side[0])],
+      };
+      faces.push({
+        ...source,
+        loop: [side[1], center, opposed],
+        uv: [uvAt(source, side[1]), centerUV, uvAt(source, opposed)],
+      });
+      if (options.direction % 3 === 2) {
+        faces[faceIndex].loop.reverse(); faces[faceIndex].uv?.reverse();
+        faces[faces.length - 1].loop.reverse(); faces[faces.length - 1].uv?.reverse();
+      }
+      return true;
+    }
+    return false;
+  };
+
+  if (!splitFace(options.face, startSide, start.loop.length === 4 || options.direction > 2, 0)) return m;
+  return { ...m, verts, faces };
+}
+
+/** Compatibility entry point: choose the first authored face edge whose dominant
+ * direction matches `axis`, then run the same topological walk as the host. */
 export function loopCut(m: EditMesh, axis: 0 | 1 | 2, cuts: number, offset: number): EditMesh {
-  let lo = Infinity, hi = -Infinity;
-  for (const v of m.verts) { if (v[axis] < lo) lo = v[axis]; if (v[axis] > hi) hi = v[axis]; }
-  return loopCutRange(m, axis, lo, hi, cuts, offset);
+  for (let fi = 0; fi < m.faces.length; fi += 1) {
+    const face = m.faces[fi];
+    for (let direction = 0; direction < face.loop.length; direction += 1) {
+      const a = m.verts[face.loop[direction]], b = m.verts[face.loop[(direction + 1) % face.loop.length]];
+      const delta = [Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), Math.abs(b[2] - a[2])];
+      const dominant = delta[1] > delta[0] ? (delta[2] > delta[1] ? 2 : 1) : (delta[2] > delta[0] ? 2 : 0);
+      if (dominant === axis) return loopCutFromFace(m, { face: fi, direction, cuts, offset });
+    }
+  }
+  return m;
 }
 
 // ── Extrude: lift a face out (or in) and wall the gap (req_1015) ────────────────
