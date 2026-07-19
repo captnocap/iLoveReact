@@ -1815,12 +1815,35 @@ const LcSession = struct {
     // session's own dir/cuts, and __mesh_lc_state echoes them back to the popup.
     last_cuts: u32 = 1,
     last_offset_frac: f32 = 0.5,
+    // Null while the topological/parametric path is active. A value means the
+    // preview had to change semantics and use the plane cutter; the existing
+    // preview/state doors expose its message so the popup cannot hide that fact.
+    last_fallback: ?LcFallback = null,
     // The handle drag's CONTINUOUS cursor offset (req_2644 QQ): previews install the
     // SNAPPED frac, so the raw position accumulates here or slow drags could never
     // cross a whole-unit detent. Every preview re-seeds it (steppers move both).
     drag_raw_frac: f32 = 0.5,
 };
 var g_lc: ?LcSession = null;
+
+const LcFallback = enum {
+    basic_incomplete_quad,
+    loop_incomplete_ring,
+    loop_incomplete_coverage,
+    missing_face_groups,
+
+    fn message(reason: LcFallback, basic: bool) []const u8 {
+        return switch (reason) {
+            .basic_incomplete_quad => "Selected geometry is not a complete authored quad; Cut used a selection-scoped plane fallback.",
+            .loop_incomplete_ring => "The quad ring could not continue cleanly; Loop Cut used a full-slice plane fallback.",
+            .loop_incomplete_coverage => "The quad ring skipped faces crossed by the full slice; Loop Cut used a plane fallback.",
+            .missing_face_groups => if (basic)
+                "This mesh has no authored face groups; Cut used a selection-scoped plane fallback."
+            else
+                "This mesh has no authored face groups; Loop Cut used a full-slice plane fallback.",
+        };
+    }
+};
 
 /// One size-unit in world space — the mesh basis (16 u = 1 tile), the loop-cut handle's
 /// default snap increment (req_2644 QQ) and the studio gizmo's own step law.
@@ -2130,6 +2153,7 @@ fn lcRingCoversPlanes(s: *const LcSession, d: usize, planes: []const f32, groups
 
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *LcSession = if (g_lc) |*sp| sp else return false;
+    s.last_fallback = null;
     const d: usize = @min(dir, 1);
     const lo = s.lo[d];
     const hi = s.hi[d];
@@ -2168,6 +2192,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
                 std.heap.c_allocator.free(cut.positions);
                 std.heap.c_allocator.free(cut.src_face);
                 if (cut.groups) |g| std.heap.c_allocator.free(g);
+                s.last_fallback = .loop_incomplete_coverage;
                 log.print("[mesh] loop cut ring skips faces in the cut's path; using the plane comb for a full slice\n", .{});
                 break :ring;
             }
@@ -2214,8 +2239,11 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             }
             return lcInstallSoup(cut.positions, cut.tri_count, cut.groups, colors);
         } else {
+            s.last_fallback = if (s.basic) .basic_incomplete_quad else .loop_incomplete_ring;
             log.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
         }
+    } else {
+        s.last_fallback = .missing_face_groups;
     }
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
@@ -2225,7 +2253,9 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     var cur_pos: []const f32 = s.base_pos;
     var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
     var cur_colors: []const u8 = s.base_colors;
-    var cur_scope: []const bool = s.base_scope;
+    // Basic Cut is selection-scoped even when its preferred quad path degrades.
+    // Loop Cut retains the outliner-part scope for its explicit full-slice fallback.
+    var cur_scope: []const bool = if (s.basic) s.base_cut_mask else s.base_scope;
     var cur_part: ?[]const u32 = if (s.base_face_part) |p| p else null;
     var cur_count: u32 = s.tri_count;
     var owned = false; // false while cur_* still aliases the session base
@@ -2360,13 +2390,24 @@ pub fn meshLcActive() bool {
     return g_lc != null;
 }
 
-pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32 };
+pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32, fallback_reason: ?[]const u8 };
 /// The live session's last-previewed params — the __mesh_lc_state read-back. A host-side
 /// handle drag re-previews internally, so the popup polls this to keep its steppers and
 /// offset cell tracking the drag.
 pub fn meshLcState() ?LcState {
     const sp: *const LcSession = if (g_lc) |*p| p else return null;
-    return .{ .dir = sp.last_dir, .cuts = sp.last_cuts, .offset_frac = sp.last_offset_frac };
+    return .{
+        .dir = sp.last_dir,
+        .cuts = sp.last_cuts,
+        .offset_frac = sp.last_offset_frac,
+        .fallback_reason = if (sp.last_fallback) |reason| reason.message(sp.basic) else null,
+    };
+}
+
+pub fn meshLcFallbackReason() ?[]const u8 {
+    const sp: *const LcSession = if (g_lc) |*p| p else return null;
+    const reason = sp.last_fallback orelse return null;
+    return reason.message(sp.basic);
 }
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection

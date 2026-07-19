@@ -2499,6 +2499,7 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
             loop.deinit(alloc);
             continue;
         }
+        dropCollinearLoop(&loop);
         const m = loop.items.len;
         var i: usize = 0;
         while (i < m) : (i += 1) {
@@ -2779,7 +2780,9 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         if (!selected) continue;
         var loop = CutLoop.empty;
         defer loop.deinit(alloc);
-        if (!chainGroupLoop(pos, tris, &loop) or loop.items.len != 4) return null;
+        if (!chainGroupLoop(pos, tris, &loop)) return null;
+        dropCollinearLoop(&loop);
+        if (loop.items.len != 4) return null;
         const q = [4][3]f32{ loop.items[0], loop.items[1], loop.items[2], loop.items[3] };
         if (!emitParametricQuadCuts(&out_pos, &out_src, &out_grp, q, direction, fractions, tris[0], entry.key_ptr.*, &remap, &next_id)) return null;
         for (fractions) |t| {
@@ -2888,6 +2891,7 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
             loop.deinit(alloc);
             continue;
         }
+        dropCollinearLoop(&loop);
         var i: usize = 0;
         while (i < loop.items.len) : (i += 1) {
             const ka = cutPosKey(loop.items[i]);
@@ -3911,6 +3915,19 @@ test "parametric cut splits the uncut neighbor's edge at the cut point (req_3125
             try testing.expect(d2 > 1e-10); // interior hit = a surviving T-junction
         }
     }
+
+    // Regression: that absorbed point makes B's reconstructed boundary contain five
+    // vertices (one lies on a straight edge). A later Basic Cut on B must simplify the
+    // boundary back to its four authored corners instead of rejecting the whole op and
+    // sending the caller into its plane fallback.
+    const second_mask = try testing.allocator.alloc(bool, r.tri_count);
+    defer testing.allocator.free(second_mask);
+    for (r.groups.?, 0..) |gid, face| second_mask[face] = gid == 1;
+    const second = parametricQuadCutsSoup(r.positions, r.tri_count, r.groups.?, second_mask, 0, cuts[0..]) orelse return error.TestExpectedSecondCut;
+    defer alloc.free(second.positions);
+    defer alloc.free(second.src_face);
+    defer if (second.groups) |g| alloc.free(g);
+    try testing.expect(second.tri_count > r.tri_count);
 }
 
 test "ring parametric cuts subdivide four faces of a closed cube ring" {

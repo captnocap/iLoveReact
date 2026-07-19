@@ -303,7 +303,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number };
+type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
@@ -399,7 +399,7 @@ const meshLcPreview = (dir: number, cuts: number, offsetFrac: number) =>
 const meshLcEnd = (commit: boolean) => readTopoResult(host.__mesh_lc_end?.(commit ? 1 : 0));
 // Read back the LIVE session's last-previewed params: a host-side handle drag re-previews
 // internally (engine.zig → meshLcHandleDrag), so the popup polls this while open.
-type LcState = { ok: number; dir?: number; cuts?: number; offsetFrac?: number; key?: string; count?: number };
+type LcState = { ok: number; dir?: number; cuts?: number; offsetFrac?: number; key?: string; count?: number; fallbackReason?: string };
 const meshLcState = (): LcState | null => {
   try {
     const j = host.__mesh_lc_state?.();
@@ -820,22 +820,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // and routes the motion to meshLcHandleDrag, which re-previews HOST-side. The popup
   // polls `__mesh_lc_state` (~4 Hz, effect below) to adopt each drag's new mesh key and
   // mirror dir/cuts/offset back into this state WITHOUT re-previewing.
-  const [lc, setLc] = useState<null | { basic: boolean; dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
+  const [lc, setLc] = useState<null | { basic: boolean; dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number]; fallbackReason: string | null }>(null);
   const openLoopCut = (basic = false) => {
     const info = meshLcBegin(basic);
     if (!info?.ok) {
       setError('Select a face to loop-cut (face mode)');
       return;
     }
-    const next = { basic, dir: 0 as 0 | 1, cuts: 1, offset: 50, unit: 'units' as const, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
+    const preview = meshLcPreview(0, 1, 0.5);
+    const next = { basic, dir: 0 as 0 | 1, cuts: 1, offset: 50, unit: 'units' as const, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number], fallbackReason: preview?.fallbackReason ?? null };
     setLc(next);
-    adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
+    adoptMesh(preview);
   };
   const changeLoopCut = (patch: Partial<{ dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent' }>) => {
     if (!lc) return;
     const next = { ...lc, ...patch };
+    const preview = meshLcPreview(next.dir, next.cuts, next.offset / 100);
+    next.fallbackReason = preview?.fallbackReason ?? null;
     setLc(next);
-    adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
+    adoptMesh(preview);
   };
   const closeLoopCut = (commit: boolean) => {
     if (!lc) return;
@@ -860,7 +863,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const pct = Math.round(st.offsetFrac * 10000) / 100;
         const dir = (st.dir === 1 ? 1 : 0) as 0 | 1;
         const cuts = Math.max(1, st.cuts ?? 1);
-        setLc((prev) => (prev && (prev.offset !== pct || prev.dir !== dir || prev.cuts !== cuts) ? { ...prev, dir, cuts, offset: pct } : prev));
+        const fallbackReason = st.fallbackReason ?? null;
+        setLc((prev) => (prev && (prev.offset !== pct || prev.dir !== dir || prev.cuts !== cuts || prev.fallbackReason !== fallbackReason)
+          ? { ...prev, dir, cuts, offset: pct, fallbackReason }
+          : prev));
       }
       setTimeout(poll, 250);
     };
@@ -1964,8 +1970,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           const basic = num(a[0]) !== 0;
           const info = meshLcBegin(basic);
           if (info?.ok) {
-            setLc({ basic, dir: 0, cuts: 1, offset: 50, unit: 'units', sizes: [info.size0 ?? 0, info.size1 ?? 0] });
-            adoptMesh(meshLcPreview(0, 1, 0.5));
+            const preview = meshLcPreview(0, 1, 0.5);
+            setLc({ basic, dir: 0, cuts: 1, offset: 50, unit: 'units', sizes: [info.size0 ?? 0, info.size1 ?? 0], fallbackReason: preview?.fallbackReason ?? null });
+            adoptMesh(preview);
           }
           console.error(`[meshops] lcbegin → ${JSON.stringify(info)}`);
         }
@@ -1973,8 +1980,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           const dir = (num(a[0]) >= 1 ? 1 : 0) as 0 | 1;
           const cuts = Math.max(1, Math.min(64, num(a[1])));
           const off = Math.max(0, Math.min(1, num(a[2])));
-          adoptMesh(meshLcPreview(dir, cuts, off));
-          setLc((prev) => (prev ? { ...prev, dir, cuts, offset: Math.round(off * 10000) / 100 } : prev));
+          const preview = meshLcPreview(dir, cuts, off);
+          adoptMesh(preview);
+          setLc((prev) => (prev ? { ...prev, dir, cuts, offset: Math.round(off * 10000) / 100, fallbackReason: preview?.fallbackReason ?? null } : prev));
         }
         else if (name === 'lcend') { adoptMesh(meshLcEnd(num(a[0]) === 1)); setLc(null); }
         // lcstate: log the raw __mesh_lc_state JSON — the headless proof the read-back
@@ -2580,6 +2588,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
               </Pressable>
             </Row>
+            {lc.fallbackReason ? (
+              <Text style={{ color: '#e7b96b', fontSize: 11 }}>{lc.fallbackReason}</Text>
+            ) : null}
             {/* Direction — a TWO-STATE toggle labeled by the face's two in-plane axes
                 (U/V) with each axis's real span, not a 0/1 stepper in a wide container
                 (req_2643 MM). Same treatment as [Size | %]; both pairs span exactly the

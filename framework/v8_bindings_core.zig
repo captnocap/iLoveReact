@@ -745,6 +745,26 @@ fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     setReturnString(info, json);
 }
 
+fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
+    if (!ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [512]u8 = undefined;
+    const json = if (scene3d.meshLcFallbackReason()) |reason|
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"fallbackReason\":\"{s}\"}}", .{ key, scene3d.meshEditActiveCount(), reason })
+    else
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}", .{ key, scene3d.meshEditActiveCount() });
+    setReturnString(info, json catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    });
+}
+
 /// __mesh_topo_extrude_edge(distance) → JSON {"ok","key","count"}. Extrude exactly
 /// one selected welded edge, appending a bridged quad split into triangles.
 fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -815,9 +835,10 @@ fn hostMeshLcBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setReturnString(info, json);
 }
 
-/// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON {"ok","key","count"}. Install the cut
-/// at these popup params as the live mesh (the live preview — not journaled). offsetFrac
-/// is 0..1 of the face's span on the chosen axis; 0.5 is the even comb.
+/// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON {"ok","key","count","fallbackReason"?}.
+/// Install the cut at these popup params as the live mesh (the live preview — not
+/// journaled). offsetFrac is 0..1 of the face's span on the chosen axis; 0.5 is the
+/// even comb. fallbackReason is present whenever the host changed to plane semantics.
 fn hostMeshLcPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const dir = argToI32(info, 0) orelse 0;
@@ -825,7 +846,7 @@ fn hostMeshLcPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const off: f32 = @floatCast(argToF64(info, 2) orelse 0.5);
     const ok = scene3d.meshLoopCutFacePreview(@intCast(@max(0, dir)), @intCast(@max(1, cuts)), off);
     if (ok) state.markDirty();
-    setMeshTopoReturn(info, ok);
+    setMeshLcPreviewReturn(info, ok);
 }
 
 /// __mesh_lc_end(commit) → JSON {"ok","key","count"}. Apply (journal ONE 'loop cut' entry;
@@ -839,10 +860,11 @@ fn hostMeshLcEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_lc_state() → JSON {"ok","dir","cuts","offsetFrac","key","count"}. Read back the
-/// LIVE session's last-previewed params (req_2625 gap DD): a host-side handle drag
-/// re-previews internally, so the popup polls this to keep its value tracking the drag —
-/// key/count because every re-preview installs a NEW mesh key the cart must adopt.
+/// __mesh_lc_state() → JSON {"ok","dir","cuts","offsetFrac","key","count","fallbackReason"?}.
+/// Read back the LIVE session's last-previewed params (req_2625 gap DD): a host-side
+/// handle drag re-previews internally, so the popup polls this to keep its value tracking
+/// the drag — key/count because every re-preview installs a NEW mesh key the cart must
+/// adopt. fallbackReason mirrors the preview door for those host-owned re-previews.
 fn hostMeshLcState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const st = scene3d.meshLcState() orelse {
@@ -853,12 +875,15 @@ fn hostMeshLcState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    var buf: [320]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d}}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount() }) catch {
+    var buf: [512]u8 = undefined;
+    const json = if (st.fallback_reason) |reason|
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d},\"fallbackReason\":\"{s}\"}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount(), reason })
+    else
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d}}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount() });
+    setReturnString(info, json catch {
         setReturnString(info, "{\"ok\":0}");
         return;
-    };
-    setReturnString(info, json);
+    });
 }
 
 /// __mesh_delete_selection() → JSON {"ok","key","count"}. Delete exactly the selected mesh
