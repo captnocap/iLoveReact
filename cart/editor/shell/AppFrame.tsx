@@ -326,6 +326,23 @@ export default function AppFrame() {
   const persistenceSettings = useMemo(editorPersistenceSettings, [settingsRevision]);
   const [manualWorldDirty, setManualWorldDirty] = useState(false);
   const [modelMutationRevision, setModelMutationRevision] = useState(0);
+  // Destructive part-count changes require a one-shot capability tied to the exact
+  // resulting row count. Hydration and autosave cannot mint it, so a fallback one-row
+  // projection can never overwrite a multi-part document (req_3234).
+  const authorizedPartShrinkTargetRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    for (const [modelId, targetCount] of authorizedPartShrinkTargetRef.current) {
+      if ((state.modelParts[modelId]?.length ?? -1) !== targetCount) {
+        authorizedPartShrinkTargetRef.current.delete(modelId);
+      }
+    }
+  }, [state.modelParts]);
+  const partShrinkSaveOptions = (modelId: string, liveCount: number) => ({
+    allowPartShrink: authorizedPartShrinkTargetRef.current.get(modelId) === liveCount,
+  });
+  const consumePartShrinkAuthorization = (modelId: string) => {
+    authorizedPartShrinkTargetRef.current.delete(modelId);
+  };
   const worldDurableRefs = useRef<{
     pieces: EditorState['worldPieces'];
     objects: EditorState['objects'];
@@ -815,6 +832,9 @@ export default function AppFrame() {
             redo: [],
             status: plan.status,
           };
+          if (parts.length < currentParts.length) {
+            authorizedPartShrinkTargetRef.current.set(transaction.modelId, parts.length);
+          }
           stateRef.current = next;
           setState(next);
           return appliedAtMs;
@@ -1327,10 +1347,16 @@ export default function AppFrame() {
     const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
     const result = materializeModelPackage(pkgToSave);
     const liveRows = current.modelParts[pkg.id] ?? [];
-    const artifactsOk = result.ok && writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined);
+    const artifactsOk = result.ok && writeModelArtifacts(
+      pkg,
+      partsMetaFromRows(liveRows),
+      meshDocPartRangesFromRows(liveRows) ?? undefined,
+      partShrinkSaveOptions(pkg.id, liveRows.length),
+    );
     const ok = result.ok && artifactsOk;
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
     if (ok) {
+      consumePartShrinkAuthorization(pkg.id);
       registerSavedPackage(pkgToSave);
       const depths = undoDepths(current);
       savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
@@ -1999,11 +2025,17 @@ export default function AppFrame() {
           return;
         }
       }
-      const docWritten = writeModelArtifacts(pkg, partsMetaFromRows(liveParts ?? []), meshDocPartRangesFromRows(liveParts ?? []) ?? undefined);
+      const docWritten = writeModelArtifacts(
+        pkg,
+        partsMetaFromRows(liveParts ?? []),
+        meshDocPartRangesFromRows(liveParts ?? []) ?? undefined,
+        partShrinkSaveOptions(pkg.id, liveParts?.length ?? 0),
+      );
       if (!docWritten) {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the model document could not be saved without losing part ranges.' }));
         return;
       }
+      consumePartShrinkAuthorization(pkg.id);
       // Resolve the geometry through the ONE resolver the viewer uses — the package
       // meshdoc just written (host truth), else live seed parts, else the package
       // resolver. Cache it so the resident builder draws exactly what you see.
@@ -3149,10 +3181,16 @@ export default function AppFrame() {
       return;
     }
     const liveRows = state.modelParts[pkg.id] ?? [];
-    if (!writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined)) {
+    if (!writeModelArtifacts(
+      pkg,
+      partsMetaFromRows(liveRows),
+      meshDocPartRangesFromRows(liveRows) ?? undefined,
+      partShrinkSaveOptions(pkg.id, liveRows.length),
+    )) {
       setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Character export stopped: the model document could not be saved without losing part ranges.' }));
       return;
     }
+    consumePartShrinkAuthorization(pkg.id);
     // Measured part centers off the meshdoc just written (host truth). Ranges
     // pair with rows by RANK (both ascend by lo — the parts.json contract); a
     // failed write degrades to name-only rows (binding holds, transforms identity).
@@ -3490,6 +3528,9 @@ export default function AppFrame() {
       if (removed.includes(tid)) hiddenPartIdsRef.current.delete(tid);
     }
     const status = lines.join(' · ');
+    if (removed.length > 0) {
+      authorizedPartShrinkTargetRef.current.set(mid, allParts.length - removed.length);
+    }
     setState((prev) => {
       const parts = (prev.modelParts[mid] ?? []).filter((p) => !removed.includes(p.id));
       return { ...prev, status, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: removed.includes(prev.modelActivePartId ?? '') ? (parts[0]?.id ?? null) : prev.modelActivePartId };
@@ -3517,6 +3558,7 @@ export default function AppFrame() {
       if ((hostFns.__mesh_group_face_count?.(r.lo, r.hi) ?? -1) === 0) empty.add(p.id);
     }
     if (empty.size === 0) return;
+    authorizedPartShrinkTargetRef.current.set(mid, (state.modelParts[mid] ?? []).length - empty.size);
     setState((prev) => {
       const list = (prev.modelParts[mid] ?? []).filter((p) => !empty.has(p.id));
       return {
@@ -3846,6 +3888,7 @@ export default function AppFrame() {
       return;
     }
 
+    authorizedPartShrinkTargetRef.current.set(mid, workingParts.length);
     selectedPartIdsRef.current = [survivor.id];
     setSelectedPartIds([survivor.id]);
     // The structural host op clears its old face selection. Re-scope AND re-select the
@@ -4053,6 +4096,9 @@ export default function AppFrame() {
         restored = stampRowsByRank(restored, hostRanges);
       }
       api!.setPartRangesMirror((hostRanges ?? restored.filter((p) => p.lo != null && p.hi != null).map((p) => ({ lo: p.lo!, hi: p.hi! }))));
+      const currentPartCount = state.modelParts[mid]?.length ?? 0;
+      if (restored.length < currentPartCount) authorizedPartShrinkTargetRef.current.set(mid, restored.length);
+      else authorizedPartShrinkTargetRef.current.delete(mid);
       setState((prev) => {
         const keep = restored!;
         const nextActive = keep.some((p) => p.id === prev.modelActivePartId) ? prev.modelActivePartId : (keep[0]?.id ?? null);
@@ -4499,7 +4545,13 @@ export default function AppFrame() {
     // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
     // the NEXT mount seeds from the package, so this write is what edits survive by.
     const liveRows = s.modelParts[pkg.id] ?? [];
-    if (!writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined)) return null;
+    if (!writeModelArtifacts(
+      pkg,
+      partsMetaFromRows(liveRows),
+      meshDocPartRangesFromRows(liveRows) ?? undefined,
+      partShrinkSaveOptions(pkg.id, liveRows.length),
+    )) return null;
+    consumePartShrinkAuthorization(pkg.id);
     savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
   };

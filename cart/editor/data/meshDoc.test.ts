@@ -6,6 +6,7 @@
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
 import { inferMeshDocPartRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { writeModelArtifacts } from './modelPackageStore';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -63,10 +64,13 @@ test('a degraded host cannot overwrite a multi-part mesh document', () => {
   assert(!meshDocPartRangesComplete(15, 0), 'zero ranges were accepted for a 15-part model');
   assert(!meshDocPartRangesComplete(15, 1), 'one merged range was accepted for a 15-part model');
   assert(meshDocPartRangesComplete(15, 15), 'a complete range table was rejected');
-  assert(meshDocPartRangesComplete(1, 0), 'an unparted/single-part document should remain writable');
+  assert(!meshDocPartRangesComplete(1, 0), 'a single part without its one durable range was accepted');
+  assert(meshDocPartRangesComplete(1, 1), 'a complete single-part range table was rejected');
   assert(!meshDocPartMetadataCanShrink(0, 15, 1), 'a collapsed fallback row could overwrite 15 saved names');
-  assert(meshDocPartMetadataCanShrink(15, 15, 1), 'an intentional delete from a healthy document was blocked');
+  assert(!meshDocPartMetadataCanShrink(15, 15, 1), 'a healthy document shrank without a destructive-action capability');
+  assert(meshDocPartMetadataCanShrink(15, 15, 1, true), 'an explicitly authorized delete from a healthy document was blocked');
   assert(meshDocPartMetadataCanShrink(0, 15, 15), 'an exact recovered outliner could not repair its zero-range document');
+  assert(!meshDocPartMetadataCanShrink(15, 1, 1), 'the durable range table did not outvote already-collapsed metadata');
 });
 
 test('save recovery accepts only complete non-overlapping live ranges', () => {
@@ -106,6 +110,36 @@ test('package part extraction keeps only its range and normalizes face groups', 
   assert(part.vertices.length === 48, `expected two triangles, got ${part.vertices.length / 24}`);
   assert(part.vertices[0] === 24 && part.vertices[24] === 48, 'wrong source triangles copied');
   assert(part.faceGroups[0] === 0 && part.faceGroups[1] === 1, 'source group ids were not normalized');
+});
+
+test('paint-only artifact persistence cannot rewrite editable mesh files', () => {
+  const host = globalThis as any;
+  const names = [
+    '__fs_exists', '__fs_read', '__fs_mkdir', '__model_meshdoc_write',
+    '__model_mesh_write', '__model_atlas_read', '__model_paint_program_read',
+  ];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  let documentWrites = 0;
+  let sourceMeshWrites = 0;
+  try {
+    host.__fs_exists = (path: string) => path.endsWith('/mesh/doc.blob');
+    host.__fs_read = () => null;
+    host.__fs_mkdir = () => true;
+    host.__model_meshdoc_write = () => { documentWrites += 1; return 1; };
+    host.__model_mesh_write = () => { sourceMeshWrites += 1; return 1; };
+    host.__model_atlas_read = () => '{}';
+    host.__model_paint_program_read = () => '';
+    const ok = writeModelArtifacts({ kind: 'prop', id: 'test:paint-only', name: 'paint only' });
+    assert(ok, 'paint-only persistence did not recognize the existing document');
+    assert(documentWrites === 0, 'paint-only persistence rewrote doc.blob');
+    assert(sourceMeshWrites === 0, 'paint-only persistence rewrote base.blob');
+  } finally {
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
 });
 
 log(`\n${passed} passed, ${failed} failed`);

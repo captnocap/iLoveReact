@@ -6,6 +6,17 @@ const testing = std.testing;
 const mesh_edit = @import("mesh_edit");
 const indexed_edit_mesh = @import("indexed_edit_mesh");
 
+test "meshdoc range table must exactly match the declared Outliner count" {
+    const healthy = [_]u32{ 0, 4, 4, 9, 12, 15 };
+    try testing.expect(mesh_edit.partRangesValid(healthy[0..], 3));
+    try testing.expect(!mesh_edit.partRangesValid(healthy[0..], 1));
+    try testing.expect(!mesh_edit.partRangesValid(null, 3));
+    const overlap = [_]u32{ 0, 5, 4, 9 };
+    try testing.expect(!mesh_edit.partRangesValid(overlap[0..], 2));
+    const empty = [_]u32{ 0, 0 };
+    try testing.expect(!mesh_edit.partRangesValid(empty[0..], 1));
+}
+
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
     var verts = [_]f32{
         // Selected triangle: +Z winding, distinct UVs on every corner.

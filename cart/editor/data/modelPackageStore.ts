@@ -419,14 +419,20 @@ export function writeModelArtifacts(
   pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
   parts?: MeshDocPartMeta[],
   recoveryRanges?: { lo: number; hi: number }[],
+  options: { allowPartShrink?: boolean } = {},
 ): boolean {
   const dir = claimPackageDir(pkg);
   const meshDir = `${dir}/mesh`;
   const atlasDir = `${dir}/atlases`;
   mkdir(meshDir);
   mkdir(atlasDir);
-  host.__model_mesh_write?.(`${meshDir}/base.blob`);
-  const docWritten = writeMeshDoc(dir, parts, recoveryRanges);
+  // Paint/atlas callers do not own Outliner structure. They must never rewrite the
+  // editable source document from whatever transient range mirror happens to be
+  // resident (that was the req_3231 collapse). Only a full model save supplies parts.
+  const docWritten = parts
+    ? writeMeshDoc(dir, parts, recoveryRanges, options)
+    : exists(`${meshDir}/doc.blob`);
+  if (parts && docWritten) host.__model_mesh_write?.(`${meshDir}/base.blob`);
   let paintProgramWritten = true;
   try {
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');

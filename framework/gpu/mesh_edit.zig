@@ -23,6 +23,8 @@ const builtin = @import("builtin");
 const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 
+pub const partRangesValid = model_source.partRangesValid;
+
 const alloc = std.heap.c_allocator;
 
 pub const Mode = enum(u8) { none = 0, vertex = 1, edge = 2, face = 3 };

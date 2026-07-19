@@ -20,8 +20,8 @@
 // Every function here takes the package's resolved on-disk home (`dir`) — resolution
 // stays in modelPackageStore (this module must not import it: the store's
 // writeModelArtifacts calls down into this writer).
-import { exists, readFile, readFileBase64, writeFile } from '../../../runtime/hooks/fs';
-import { base64ToBytes } from '../../../runtime/workspace';
+import { exists, readFile, readFileBase64, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { base64ToBytes, textBytes } from '../../../runtime/workspace';
 
 const host = globalThis as any;
 
@@ -56,11 +56,20 @@ const docCache = new Map<string, PackageMeshDoc | null>();
 const metaCache = new Map<string, MeshDocPartMeta[] | null>();
 
 export function meshDocPartRangesComplete(partCount: number, hostRangeCount: number): boolean {
-  return partCount < 2 || hostRangeCount >= partCount;
+  return partCount > 0 && hostRangeCount === partCount;
 }
 
-export function meshDocPartMetadataCanShrink(storedRangeCount: number | undefined, savedPartCount: number, livePartCount: number): boolean {
-  return storedRangeCount !== 0 || savedPartCount < 2 || livePartCount >= savedPartCount;
+export function meshDocPartMetadataCanShrink(
+  storedRangeCount: number | undefined,
+  savedPartCount: number,
+  livePartCount: number,
+  explicitlyAuthorized = false,
+): boolean {
+  // Counts may grow freely. Shrinking is destructive and therefore requires the
+  // explicit capability minted by a real Delete/Merge/Undo action in AppFrame.
+  // Hydration, paint saves, and autosave never possess that capability.
+  const durablePartCount = Math.max(storedRangeCount ?? 0, savedPartCount);
+  return livePartCount >= durablePartCount || explicitlyAuthorized;
 }
 
 /** Return a complete, host-safe range mirror or null. This is deliberately strict:
@@ -83,51 +92,77 @@ export function invalidateMeshDoc(dir: string): void {
   metaCache.delete(dir);
 }
 
-/** Write the resident host model into the package as its meshdoc (host door). True only
- *  when doc.blob landed; parts metadata rides along best-effort. */
-export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[], recoveryRanges?: { lo: number; hi: number }[]): boolean {
-  // A zero-range document with many saved names can hydrate as one fallback row in
-  // older builds. Never let that collapsed row overwrite parts.json. Exact recovery
-  // must land once first; intentional deletes are safe after that repaired save.
+/** Transactionally write the resident host model and its exact Outliner/range table.
+ * The staged host blob is validated before either durable file is replaced. */
+export function writeMeshDoc(
+  dir: string,
+  parts: MeshDocPartMeta[],
+  recoveryRanges?: { lo: number; hi: number }[],
+  options: { allowPartShrink?: boolean } = {},
+): boolean {
+  // The editable document is a two-file transaction. No metadata-less caller is
+  // admitted here; paint-only persistence must leave doc.blob + parts.json alone.
+  if (parts.length === 0) {
+    console.error(`[meshdoc] REFUSING SAVE for ${dir}: an editable mesh document needs at least one named part`);
+    return false;
+  }
   const priorDoc = readMeshDoc(dir);
   const priorPartCount = readMeshDocParts(dir)?.length ?? 0;
-  if (!meshDocPartMetadataCanShrink(priorDoc?.storedRangeCount, priorPartCount, parts?.length ?? 0)) {
-    console.error(`[meshdoc] REFUSING SAVE for ${dir}: the existing zero-range document retains ${priorPartCount} named parts but the live outliner has only ${parts?.length ?? 0}; recover the outliner before saving`);
+  if (!meshDocPartMetadataCanShrink(priorDoc?.storedRangeCount, priorPartCount, parts.length, options.allowPartShrink === true)) {
+    console.error(`[meshdoc] REFUSING SAVE for ${dir}: durable document has ${Math.max(priorDoc?.storedRangeCount ?? 0, priorPartCount)} part(s), but the live outliner has ${parts.length} and no explicit Delete/Merge authorization`);
     return false;
   }
   // Save gate (req_3049/req_3226): writing fewer host ranges than outliner parts
   // destroys the only durable part-boundary table. Never replace a recoverable old
   // document with that degraded state. Geometry can still be saved once the host is
   // re-seeded; until then the caller gets a loud failure and the old blob stays intact.
-  if (parts && parts.length >= 2) {
-    const hostRangeCount = (): number => {
+  {
+    const hostPartRanges = (): { lo: number; hi: number }[] => {
       try {
         const o = JSON.parse(host.__mesh_part_ranges?.() ?? 'null');
-        return o?.ok && Array.isArray(o.ranges) ? o.ranges.length : 0;
-      } catch { return 0; }
+        if (!o?.ok || !Array.isArray(o.ranges)) return [];
+        const ranges = o.ranges.map((pair: unknown) => {
+          if (!Array.isArray(pair) || pair.length !== 2) return null;
+          const [lo, hi] = pair;
+          return typeof lo === 'number' && typeof hi === 'number' &&
+            Number.isInteger(lo) && Number.isInteger(hi) && lo >= 0 && hi > lo ? { lo, hi } : null;
+        });
+        if (ranges.some((range: unknown) => range === null)) return [];
+        const valid = ranges as { lo: number; hi: number }[];
+        for (let index = 1; index < valid.length; index += 1) {
+          if (valid[index]!.lo < valid[index - 1]!.hi) return [];
+        }
+        return valid;
+      } catch { return []; }
     };
-    let hostRanges = hostRangeCount();
+    let hostRanges = hostPartRanges();
     // A topology op used to clear the host mirror while the outliner retained its
     // complete host-stamped ranges. Restore only that validated live truth; otherwise
     // the refusal below preserves the previous document for explicit recovery.
-    if (!meshDocPartRangesComplete(parts.length, hostRanges) && recoveryRanges?.length === parts.length) {
+    if (hostRanges.length !== parts.length && recoveryRanges?.length === parts.length) {
       const pairs = new Uint32Array(recoveryRanges.length * 2);
       recoveryRanges.forEach((range, index) => {
         pairs[index * 2] = range.lo;
         pairs[index * 2 + 1] = range.hi;
       });
       host.__mesh_set_part_ranges?.(pairs);
-      hostRanges = hostRangeCount();
+      hostRanges = hostPartRanges();
     }
-    if (!meshDocPartRangesComplete(parts.length, hostRanges)) {
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: host has ${hostRanges} part range(s) while the outliner declares ${parts.length} (${parts.map((p) => p.name).join(', ')}) — preserving the previous document instead of persisting merged parts (req_3049/req_3226)`);
+    if (hostRanges.length !== parts.length) {
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: host has ${hostRanges.length} part range(s) while the outliner declares ${parts.length} (${parts.map((p) => p.name).join(', ')}) — preserving the previous document instead of persisting merged parts (req_3049/req_3226/req_3234)`);
       return false;
     }
+
+    // The expected count crosses as a scalar only. The host re-validates it at the
+    // write boundary and atomically renames a complete fsynced RJMD over doc.blob;
+    // resident geometry never crosses the JS bridge.
+    if (host.__model_meshdoc_write?.(`${dir}/${DOC_BLOB}`, parts.length) !== 1) return false;
   }
-  const ok = host.__model_meshdoc_write?.(`${dir}/${DOC_BLOB}`) === 1;
-  if (ok && parts && parts.length > 0) {
-    writeFile(`${dir}/${PARTS_META}`, JSON.stringify({ version: 1, parts }, null, 2));
-  }
+
+  // doc.blob commits first. If the second atomic write fails, the old metadata remains
+  // paired by rank as far as it goes; geometry can never collapse to a one-range file.
+  const metadata = textBytes(JSON.stringify({ version: 1, parts }, null, 2));
+  const ok = writeFileBytesAtomic(`${dir}/${PARTS_META}`, metadata);
   invalidateMeshDoc(dir);
   return ok;
 }

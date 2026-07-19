@@ -23,6 +23,7 @@ const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
 const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
+const meshdoc_format = @import("gpu/meshdoc_format.zig");
 const material_tex = @import("gpu/material_tex.zig");
 const paint_program = @import("gpu/paint_program.zig");
 const capture = @import("gpu/capture.zig");
@@ -1818,7 +1819,7 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
-/// __model_meshdoc_write(path) → 1 on success. The model DOCUMENT blob (RJMD v2) — the
+/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v2) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
 /// header u32×7 [magic 'RJMD', version=2, vertCount, faceCount, hasGroups, rangeCount,
@@ -1840,20 +1841,52 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const ranges = model_source.partRanges();
     const has_groups: u32 = if (groups != null and groups.?.len == face_count) 1 else 0;
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
-    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
-    defer alloc.free(pathz);
-    const file = std.Io.Dir.cwd().createFile(io, pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close(io);
+    if (!meshdoc_format.rangesValid(ranges, range_count)) return setReturnNumber(info, 0);
+    if (argToI32(info, 1)) |expected| {
+        if (expected < 0 or @as(u32, @intCast(expected)) != range_count) return setReturnNumber(info, 0);
+    }
+
+    // Never truncate the durable document in place. A complete, fsynced temp file is
+    // atomically renamed over it only after every section succeeds (req_3234).
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(io, tmp_path, .{ .truncate = true }) catch return setReturnNumber(info, 0);
     const glass_first_vertex = @min(scene3d.modelGlassFirstVertex(), vert_count);
     const header = [7]u32{ 0x444D4A52, 2, vert_count, face_count, has_groups, range_count, glass_first_vertex };
-    file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
-    file.writeStreamingAll(io, std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch {
+        file.close(io);
+        std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
+    file.writeStreamingAll(io, std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch {
+        file.close(io);
+        std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
     if (has_groups == 1) {
-        file.writeStreamingAll(io, std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(groups.?[0..face_count])) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
     }
     if (range_count > 0) {
-        file.writeStreamingAll(io, std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(ranges.?)) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
     }
+    file.sync(io) catch {
+        file.close(io);
+        std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
+    file.close(io);
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, io) catch {
+        std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
     setReturnNumber(info, 1);
 }
 

@@ -6,6 +6,9 @@
 
 const std = @import("std");
 const model_paint = @import("model_paint.zig");
+const meshdoc_format = @import("meshdoc_format.zig");
+
+pub const partRangesValid = meshdoc_format.rangesValid;
 
 const alloc = std.heap.c_allocator;
 
@@ -106,7 +109,11 @@ pub fn faceGroups() ?[]const u32 {
 /// load/append so the weld knows which authored groups form one independent part.
 pub fn setPartRanges(pairs: []const u32) void {
     if (g_part_ranges) |old| alloc.free(old);
-    g_part_ranges = if (pairs.len >= 2) alloc.dupe(u32, pairs) catch null else null;
+    const range_count: u32 = @intCast(pairs.len / 2);
+    g_part_ranges = if (meshdoc_format.rangesValid(pairs, range_count) and range_count > 0)
+        alloc.dupe(u32, pairs) catch null
+    else
+        null;
 }
 
 pub fn hasPartRanges() bool {
