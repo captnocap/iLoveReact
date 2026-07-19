@@ -1468,6 +1468,50 @@ fn ensureMirrorTwins() ?[]u32 {
     return twins;
 }
 
+/// Live symmetry report against the exact same identity domains and per-part
+/// bounds centers as mirrored transforms. Only vertices in the current outliner
+/// scope contribute; coincident vertices in different parts can never pair.
+pub fn symmetryReportPub(axis: u8) ?[3]f32 {
+    if (axis > 2 or !ensureTopology()) return null;
+    const parts = g_vert_part orelse return null;
+    if (parts.len < g_vert_count) return null;
+    const centers = buildMirrorCentersPerVert() orelse return null;
+    defer alloc.free(centers);
+    var by_position = std.AutoHashMapUnmanaged(MirrorKey, u32).empty;
+    defer by_position.deinit(alloc);
+    by_position.ensureTotalCapacity(alloc, g_vert_count) catch return null;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        const index: usize = @intCast(vertex);
+        by_position.put(alloc, mirrorKey(parts[index], vertPos(vertex)), vertex) catch return null;
+    }
+
+    const subset: u8 = @as(u8, 1) << @intCast(axis);
+    const epsilon: f32 = 1.5 / MIRROR_Q;
+    var unmatched: u32 = 0;
+    var total: u32 = 0;
+    vertex = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!vertInScopePub(vertex)) continue;
+        const index: usize = @intCast(vertex);
+        total += 1;
+        const reflected = reflectPointAround(vertPos(vertex), subset, mirrorCenterAt(centers, vertex));
+        const twin = by_position.get(mirrorKey(parts[index], reflected)) orelse {
+            unmatched += 1;
+            continue;
+        };
+        const actual = vertPos(twin);
+        if (@abs(actual[0] - reflected[0]) > epsilon or
+            @abs(actual[1] - reflected[1]) > epsilon or
+            @abs(actual[2] - reflected[2]) > epsilon)
+        {
+            unmatched += 1;
+        }
+    }
+    const frame = mirrorFramePub() orelse return null;
+    return .{ frame.center[axis], @floatFromInt(unmatched), @floatFromInt(total) };
+}
+
 fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [3]f32, scalar: f32) Mutation {
     const mask = fillAffectedVerts() orelse return .{};
     const axis = vecNorm(axis_raw);
@@ -2367,6 +2411,44 @@ test "mirror Y uses the outliner part center, not workspace zero" {
     try testing.expectApproxEqAbs(@as(f32, 2.25), vertPos(ti)[1], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[2], 0.0001);
+}
+
+test "symmetry report measures only scoped vertices against each part's own plane" {
+    var first: [12 * 3 * 8]f32 = undefined;
+    var second: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&first);
+    buildCubeSoup(&second);
+    var corner: usize = 0;
+    while (corner < 12 * 3) : (corner += 1) {
+        second[corner * 8 + 0] += 20;
+        second[corner * 8 + 1] += 3;
+    }
+    var soup: [24 * 3 * 8]f32 = undefined;
+    @memcpy(soup[0..first.len], first[0..]);
+    @memcpy(soup[first.len..], second[0..]);
+    var groups: [24]u32 = undefined;
+    for (0..12) |face| {
+        groups[face] = @intCast(face / 2);
+        groups[12 + face] = @intCast(6 + face / 2);
+    }
+    model_source.setFaceGroups(groups[0..]);
+    model_source.setPartRanges(&.{ 0, 6, 6, 12 });
+    model_paint.setTarget(796, soup[0..], 72);
+    defer {
+        resetForModelLoad();
+        model_paint.clear();
+        model_source.clear();
+    }
+
+    setEditScope(0, 6);
+    const focused = symmetryReportPub(0).?;
+    try testing.expectEqual(@as(f32, 0), focused[1]);
+    try testing.expectEqual(@as(f32, 8), focused[2]);
+
+    setEditScope(0, 0);
+    const whole = symmetryReportPub(0).?;
+    try testing.expectEqual(@as(f32, 0), whole[1]);
+    try testing.expectEqual(@as(f32, 16), whole[2]);
 }
 
 test "mirror X+Y: a moved corner carries its X, Y, and XY-diagonal twins" {

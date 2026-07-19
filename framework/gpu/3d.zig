@@ -1537,91 +1537,25 @@ pub fn meshTopoLoopCut() bool {
 
 // ── Symmetrize + symmetry check (the studio's req_1190/1191/1192, host-native — req_2831) ──
 // The trust layer the mirror planes shipped without: a live "is it symmetric?" count and
-// the keep+/keep− repair. Ports editMesh.ts symmetrize/symmetryReport verbatim onto the
-// resident soup; the plane is the MIRROR FRAME's center on that axis — the same plane the
-// armed mirror overlay draws, so what the badge measures is what the user sees.
+// the keep+/− repair. Both use the same per-outliner-part identity domains and bounds
+// centers as live mirrored transforms. Scope is authoritative: focused parts are repaired,
+// and every other part passes through untouched.
 
-/// Port of symmetryReport (editMesh.ts): unique verts (1e-3 grid), each must have a
-/// twin within eps of its reflection. Returns {center, unmatched, total}; total is the
-/// UNIQUE vert count. Null when no mesh is resident.
+/// Returns {display center, unmatched, total} for logical vertices in the current
+/// outliner scope. Pairing is part-local, exactly like live mirrored transforms.
 pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
     if (axis > 2 or !model_paint.hasTarget()) return null;
-    const pos = model_paint.positions() orelse return null;
-    const frame = mesh_edit.mirrorFramePub() orelse return null;
-    const c = frame.center[axis];
-    const eps: f32 = 1e-3;
-    // Unique verts via the JS's tolerance grid (bucket by eps-cell, probe neighbours).
-    const Cell = struct { x: i32, y: i32, z: i32 };
-    var cells: std.AutoHashMapUnmanaged(Cell, std.ArrayListUnmanaged([3]f32)) = .empty;
-    defer {
-        var it = cells.valueIterator();
-        while (it.next()) |l| l.deinit(std.heap.c_allocator);
-        cells.deinit(std.heap.c_allocator);
-    }
-    var uniq: std.ArrayListUnmanaged([3]f32) = .empty;
-    defer uniq.deinit(std.heap.c_allocator);
-    const gq = struct {
-        fn f(x: f32) i32 {
-            return @round(x / 1e-3);
-        }
-    }.f;
-    var i: usize = 0;
-    while (i + 2 < pos.len) : (i += 3) {
-        const p = [3]f32{ pos[i], pos[i + 1], pos[i + 2] };
-        const key = Cell{ .x = gq(p[0]), .y = gq(p[1]), .z = gq(p[2]) };
-        const gop = cells.getOrPut(std.heap.c_allocator, key) catch return null;
-        if (!gop.found_existing) gop.value_ptr.* = .empty;
-        var dup = false;
-        for (gop.value_ptr.items) |q| {
-            if (@abs(q[0] - p[0]) <= eps and @abs(q[1] - p[1]) <= eps and @abs(q[2] - p[2]) <= eps) {
-                dup = true;
-                break;
-            }
-        }
-        if (dup) continue;
-        gop.value_ptr.append(std.heap.c_allocator, p) catch return null;
-        uniq.append(std.heap.c_allocator, p) catch return null;
-    }
-    var unmatched: u32 = 0;
-    for (uniq.items) |v| {
-        var r = v;
-        r[axis] = 2.0 * c - r[axis];
-        const gx = gq(r[0]);
-        const gy = gq(r[1]);
-        const gz = gq(r[2]);
-        var found = false;
-        var dx: i32 = -1;
-        outer: while (dx <= 1) : (dx += 1) {
-            var dy: i32 = -1;
-            while (dy <= 1) : (dy += 1) {
-                var dz: i32 = -1;
-                while (dz <= 1) : (dz += 1) {
-                    const bucket = cells.get(.{ .x = gx + dx, .y = gy + dy, .z = gz + dz }) orelse continue;
-                    for (bucket.items) |q| {
-                        if (@abs(q[0] - r[0]) <= eps and @abs(q[1] - r[1]) <= eps and @abs(q[2] - r[2]) <= eps) {
-                            found = true;
-                            break :outer;
-                        }
-                    }
-                }
-            }
-        }
-        if (!found) unmatched += 1;
-    }
-    return .{ c, @floatFromInt(unmatched), @floatFromInt(uniq.items.len) };
+    return mesh_edit.symmetryReportPub(axis);
 }
 
-/// Port of symmetrize (editMesh.ts, req_1190): cut the soup at the mirror plane so no
-/// face straddles, DROP the far half, and emit each kept off-seam face plus its
-/// reflected reverse-wound twin — the model comes out exactly symmetric. Twins mint
-/// fresh group ids (one per source group) and inherit their source's part, riding the
-/// same adoption path as loop cut. keep_positive keeps the +axis half.
+/// Port of Studio symmetrize (req_1190): repair the active outliner part(s), not the
+/// composed model. Each part cuts at its own live-mirror center, drops the far half,
+/// and emits reflected reverse-wound twins. Selection clears, as in the original UI.
 pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (axis > 2 or !model_paint.hasTarget()) return false;
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
-    const frame = mesh_edit.mirrorFramePub() orelse return false;
     const base_colors = collectCurrentFaceColors() orelse return false;
     defer std.heap.c_allocator.free(base_colors);
     const groups = captureFaceGroups();
@@ -1632,7 +1566,23 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts) orelse return false;
     defer indexed.deinit();
-    if (!(indexed.symmetrize(axis, frame.center[axis], keep_positive) catch return false)) return false;
+    if (parts) |face_parts| {
+        if (part_count == 0) return false;
+        const target_parts = std.heap.c_allocator.alloc(bool, @intCast(part_count)) catch return false;
+        defer std.heap.c_allocator.free(target_parts);
+        @memset(target_parts, false);
+        var face: u32 = 0;
+        while (face < tri_count) : (face += 1) {
+            if (!mesh_edit.faceInScopePub(face)) continue;
+            const part = face_parts[@intCast(face)];
+            const part_index: usize = @intCast(part);
+            if (part_index < target_parts.len) target_parts[part_index] = true;
+        }
+        if (!(indexed.symmetrizeParts(axis, keep_positive, target_parts) catch return false)) return false;
+    } else {
+        const frame = mesh_edit.mirrorFramePub() orelse return false;
+        if (!(indexed.symmetrize(axis, frame.center[axis], keep_positive) catch return false)) return false;
+    }
     var lowered = indexed.lower() catch return false;
     defer lowered.deinit();
     if (lowered.tri_count == 0) return false;
@@ -1646,6 +1596,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
+        mesh_edit.clearSelection();
         journalCommit(&snap);
     } else journalDiscard(&snap);
     return ok;

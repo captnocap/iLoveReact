@@ -281,6 +281,47 @@ test "face RGBA inheritance follows indexed lowering provenance" {
     try testing.expectEqualSlices(u8, before[0..], inherited[0..]);
 }
 
+test "symmetrize is bounded by the focused outliner part" {
+    const focused = [4][3]f32{
+        .{ -1, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ -1, 1, 0 },
+    };
+    const control = [4][3]f32{
+        .{ 10, 3, 0 }, .{ 12, 3, 0 }, .{ 12, 5, 0 }, .{ 10, 5, 0 },
+    };
+    var soup = [_]f32{0} ** (4 * 3 * 8);
+    const Emit = struct {
+        fn triangle(out: []f32, triangle_index: usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+            }
+        }
+    };
+    Emit.triangle(soup[0..], 0, focused[0], focused[1], focused[2]);
+    Emit.triangle(soup[0..], 1, focused[0], focused[2], focused[3]);
+    Emit.triangle(soup[0..], 2, control[0], control[1], control[2]);
+    Emit.triangle(soup[0..], 3, control[0], control[2], control[3]);
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const parts = [_]u32{ 0, 0, 1, 1 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 4, groups[0..], parts[0..]);
+    defer indexed.deinit();
+    var before: [4][3]f32 = undefined;
+    for (indexed.faces.items[1].vertices.items, 0..) |vertex_id, corner| {
+        before[corner] = indexed.vertices.items[vertex_id].position;
+    }
+
+    try testing.expect(try indexed.symmetrizeParts(0, true, &.{ true, false }));
+    try testing.expect(indexed.faces.items[1].alive);
+    for (indexed.faces.items[1].vertices.items, 0..) |vertex_id, corner| {
+        try testing.expectEqual(before[corner], indexed.vertices.items[vertex_id].position);
+    }
+    var control_faces: u32 = 0;
+    for (indexed.faces.items) |face| if (face.alive and face.part == 1) {
+        control_faces += 1;
+    };
+    try testing.expectEqual(@as(u32, 1), control_faces);
+}
+
 test "solidify offsets a triangulated cube by authored planes, not diagonal incidence" {
     const corners = [8][3]f32{
         .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },

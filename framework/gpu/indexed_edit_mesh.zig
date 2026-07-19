@@ -452,7 +452,7 @@ pub const Mesh = struct {
     /// stable edge ids, so adjacent faces receive the same vertex without any
     /// position matching. The negative piece retains the source group; the positive
     /// piece receives a fresh authored group, matching the host's established rule.
-    pub fn cutByPlane(mesh: *Mesh, normal: Vec3, distance: f32) !bool {
+    fn cutByPlaneForPart(mesh: *Mesh, normal: Vec3, distance: f32, target_part: ?u32) !bool {
         const original_face_count = mesh.faces.items.len;
         var edge_vertices = std.AutoHashMapUnmanaged(u64, u32).empty;
         defer edge_vertices.deinit(mesh.allocator);
@@ -461,6 +461,7 @@ pub const Mesh = struct {
         while (face_id < original_face_count) : (face_id += 1) {
             const face = &mesh.faces.items[face_id];
             if (!face.alive or face.vertices.items.len < 3) continue;
+            if (target_part) |part| if (face.part != part) continue;
             var has_negative = false;
             var has_positive = false;
             for (face.vertices.items) |vertex_id| {
@@ -520,20 +521,28 @@ pub const Mesh = struct {
         return changed;
     }
 
-    /// Reference symmetrize: cut at the mirror plane, discard the requested far
-    /// half, and reflect a reverse-wound twin of every off-seam face.
-    pub fn symmetrize(mesh: *Mesh, axis: u8, center: f32, keep_positive: bool) !bool {
+    pub fn cutByPlane(mesh: *Mesh, normal: Vec3, distance: f32) !bool {
+        return mesh.cutByPlaneForPart(normal, distance, null);
+    }
+
+    /// Symmetrize one identity domain. A null part is the legacy single-mesh
+    /// contract; a concrete part leaves every other outliner part untouched.
+    fn symmetrizeForPart(mesh: *Mesh, axis: u8, center: f32, keep_positive: bool, target_part: ?u32) !bool {
         if (axis > 2) return false;
         var normal = Vec3{ 0, 0, 0 };
         normal[axis] = 1;
-        _ = try mesh.cutByPlane(normal, center);
+        var changed = try mesh.cutByPlaneForPart(normal, center, target_part);
         const keep_sign: f32 = if (keep_positive) 1 else -1;
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.vertices.items.len < 3) continue;
+            if (target_part) |part| if (face.part != part) continue;
             var centroid: f32 = 0;
             for (face.vertices.items) |vertex_id| centroid += mesh.vertices.items[vertex_id].position[axis];
             centroid = centroid / @as(f32, @floatFromInt(face.vertices.items.len)) - center;
-            if (centroid * keep_sign < -1e-5) face.alive = false;
+            if (centroid * keep_sign < -1e-5) {
+                face.alive = false;
+                changed = true;
+            }
         }
 
         var reflected_vertices = std.AutoHashMapUnmanaged(u32, u32).empty;
@@ -541,11 +550,11 @@ pub const Mesh = struct {
         var twin_groups = std.AutoHashMapUnmanaged(u32, u32).empty;
         defer twin_groups.deinit(mesh.allocator);
         const kept_face_count = mesh.faces.items.len;
-        var changed = false;
         var face_id: usize = 0;
         while (face_id < kept_face_count) : (face_id += 1) {
             const face = &mesh.faces.items[face_id];
             if (!face.alive) continue;
+            if (target_part) |part| if (face.part != part) continue;
             var on_seam = true;
             for (face.vertices.items) |vertex_id| {
                 if (@abs(mesh.vertices.items[vertex_id].position[axis] - center) > 1e-5) on_seam = false;
@@ -614,6 +623,39 @@ pub const Mesh = struct {
             }
             try mesh.faces.append(mesh.allocator, twin);
             changed = true;
+        }
+        return changed;
+    }
+
+    /// Reference single-mesh symmetrize: cut at the supplied plane, discard the
+    /// requested far half, and reflect a reverse-wound twin of every off-seam face.
+    pub fn symmetrize(mesh: *Mesh, axis: u8, center: f32, keep_positive: bool) !bool {
+        return mesh.symmetrizeForPart(axis, center, keep_positive, null);
+    }
+
+    /// Composite-model symmetrize. Each requested outliner part is repaired around
+    /// its own bounds center, matching live mirror editing. Parts absent from the
+    /// mask are strict pass-through geometry: they are neither cut nor reflected.
+    pub fn symmetrizeParts(mesh: *Mesh, axis: u8, keep_positive: bool, target_parts: []const bool) !bool {
+        if (axis > 2) return false;
+        var changed = false;
+        for (target_parts, 0..) |target, part_index| {
+            if (!target) continue;
+            const part: u32 = @intCast(part_index);
+            var lo = std.math.floatMax(f32);
+            var hi = -std.math.floatMax(f32);
+            var any = false;
+            for (mesh.faces.items) |*face| {
+                if (!face.alive or face.part != part) continue;
+                for (face.vertices.items) |vertex_id| {
+                    const coordinate = mesh.vertices.items[vertex_id].position[axis];
+                    lo = @min(lo, coordinate);
+                    hi = @max(hi, coordinate);
+                    any = true;
+                }
+            }
+            if (!any) continue;
+            changed = (try mesh.symmetrizeForPart(axis, (lo + hi) * 0.5, keep_positive, part)) or changed;
         }
         return changed;
     }
@@ -1707,6 +1749,49 @@ test "indexed symmetrize cuts authored faces without a fan-diagonal T vertex" {
         seam_vertices += 1;
     };
     try std.testing.expectEqual(@as(u32, 2), seam_vertices);
+}
+
+test "part symmetrize cannot cut or reflect an unfocused outliner part" {
+    const allocator = std.testing.allocator;
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    const focused = [4]Vec3{
+        .{ -1, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ -1, 1, 0 },
+    };
+    const untouched = [4]Vec3{
+        .{ 10, 3, 0 }, .{ 12, 3, 0 }, .{ 12, 5, 0 }, .{ 10, 5, 0 },
+    };
+    try appendSoupTri(&soup, allocator, focused[0], focused[1], focused[2]);
+    try appendSoupTri(&soup, allocator, focused[0], focused[2], focused[3]);
+    try appendSoupTri(&soup, allocator, untouched[0], untouched[1], untouched[2]);
+    try appendSoupTri(&soup, allocator, untouched[0], untouched[2], untouched[3]);
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const parts = [_]u32{ 0, 0, 1, 1 };
+    var mesh = try Mesh.fromSoup(allocator, soup.items, 4, groups[0..], parts[0..]);
+    defer mesh.deinit();
+
+    const untouched_face = try mesh.faces.items[1].clone(allocator);
+    defer {
+        var copy = untouched_face;
+        copy.deinit(allocator);
+    }
+    var untouched_positions: [4]Vec3 = undefined;
+    for (untouched_face.vertices.items, 0..) |vertex_id, corner| {
+        untouched_positions[corner] = mesh.vertices.items[vertex_id].position;
+    }
+
+    try std.testing.expect(try mesh.symmetrizeParts(0, true, &.{ true, false }));
+    try std.testing.expect(mesh.faces.items[1].alive);
+    try std.testing.expectEqualSlices(u32, untouched_face.vertices.items, mesh.faces.items[1].vertices.items);
+    try std.testing.expectEqual(untouched_face.diagonal, mesh.faces.items[1].diagonal);
+    for (mesh.faces.items[1].vertices.items, 0..) |vertex_id, corner| {
+        try std.testing.expectEqual(untouched_positions[corner], mesh.vertices.items[vertex_id].position);
+    }
+    var untouched_faces: u32 = 0;
+    for (mesh.faces.items) |face| {
+        if (face.alive and face.part == 1) untouched_faces += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 1), untouched_faces);
 }
 
 test "equal-length non-planar mirror quads carry the same physical diagonal" {
