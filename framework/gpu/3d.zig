@@ -1553,6 +1553,7 @@ pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
 /// and emits reflected reverse-wound twins. Selection clears, as in the original UI.
 pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (axis > 2 or !model_paint.hasTarget()) return false;
+    const original_mode = mesh_edit.mode();
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
@@ -1596,6 +1597,9 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
+        // lcInstallSoup is shared with loop cut and deliberately enters face mode.
+        // Studio symmetrize instead preserves the active tool and clears its selection.
+        mesh_edit.setMode(original_mode);
         mesh_edit.clearSelection();
         journalCommit(&snap);
     } else journalDiscard(&snap);
