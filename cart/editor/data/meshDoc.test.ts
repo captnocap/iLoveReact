@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { inferMeshDocPartRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -64,6 +64,9 @@ test('a degraded host cannot overwrite a multi-part mesh document', () => {
   assert(!meshDocPartRangesComplete(15, 1), 'one merged range was accepted for a 15-part model');
   assert(meshDocPartRangesComplete(15, 15), 'a complete range table was rejected');
   assert(meshDocPartRangesComplete(1, 0), 'an unparted/single-part document should remain writable');
+  assert(!meshDocPartMetadataCanShrink(0, 15, 1), 'a collapsed fallback row could overwrite 15 saved names');
+  assert(meshDocPartMetadataCanShrink(15, 15, 1), 'an intentional delete from a healthy document was blocked');
+  assert(meshDocPartMetadataCanShrink(0, 15, 15), 'an exact recovered outliner could not repair its zero-range document');
 });
 
 test('save recovery accepts only complete non-overlapping live ranges', () => {
@@ -71,6 +74,25 @@ test('save recovery accepts only complete non-overlapping live ranges', () => {
   assert(JSON.stringify(recovered) === JSON.stringify([{ lo: 0, hi: 8 }, { lo: 8, hi: 12 }]), 'valid ranges were not normalized by rank');
   assert(meshDocPartRangesFromRows([{ lo: 0, hi: 8 }, { lo: 7, hi: 12 }]) === null, 'overlapping ranges were accepted');
   assert(meshDocPartRangesFromRows([{ lo: 0, hi: 8 }, { lo: undefined, hi: undefined }]) === null, 'missing ranges were guessed');
+});
+
+test('missing ranges recover only from an exact parts-to-connectivity-run match', () => {
+  const vertices = new Float32Array(5 * 24);
+  const triangles = [
+    [[0, 0, 0], [1, 0, 0], [0, 1, 0]],       // group 0, component A
+    [[1, 0, 0], [1, 1, 0], [0, 1, 0]],       // group 1, component A
+    [[4, 0, 0], [5, 0, 0], [4, 1, 0]],       // group 2, component B
+    [[0, 0, 0], [0, 1, 0], [-1, 0, 0]],      // group 3, component A again
+    [[10, 0, 0], [11, 0, 0], [10, 1, 0]],    // group 10, gap forces a new run
+  ];
+  triangles.forEach((triangle, ti) => triangle.forEach((position, corner) => {
+    const at = (ti * 3 + corner) * 8;
+    vertices.set(position, at);
+  }));
+  const doc = { vertices, faceGroups: new Uint32Array([0, 1, 2, 3, 10]) };
+  const recovered = inferMeshDocPartRanges(doc, 4);
+  assert(JSON.stringify(recovered) === JSON.stringify([{ lo: 0, hi: 2 }, { lo: 2, hi: 3 }, { lo: 3, hi: 4 }, { lo: 10, hi: 11 }]), `exact runs were not recovered: ${JSON.stringify(recovered)}`);
+  assert(inferMeshDocPartRanges(doc, 3) === null, 'ambiguous run/metadata mismatch was guessed');
 });
 
 test('package part extraction keeps only its range and normalizes face groups', () => {

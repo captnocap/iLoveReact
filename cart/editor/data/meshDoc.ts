@@ -32,6 +32,12 @@ export type PackageMeshDoc = {
   faceGroups: Uint32Array | null;
   /** per-part [lo,hi) authored-group ranges, ascending lo; always ≥1 entry */
   ranges: { lo: number; hi: number }[];
+  /** Number physically stored in RJMD. Zero means `ranges` is only the decoder's
+   *  one-part fallback unless `recoveredPartRanges` is true. */
+  storedRangeCount?: number;
+  /** Missing durable ranges were recovered exactly from contiguous connectivity
+   *  runs and the parts.json row count. */
+  recoveredPartRanges?: boolean;
   /** First vertex in the stable trailing glass run; absent on legacy RJMD v1. */
   glassFirstVertex?: number | null;
 };
@@ -51,6 +57,10 @@ const metaCache = new Map<string, MeshDocPartMeta[] | null>();
 
 export function meshDocPartRangesComplete(partCount: number, hostRangeCount: number): boolean {
   return partCount < 2 || hostRangeCount >= partCount;
+}
+
+export function meshDocPartMetadataCanShrink(storedRangeCount: number | undefined, savedPartCount: number, livePartCount: number): boolean {
+  return storedRangeCount !== 0 || savedPartCount < 2 || livePartCount >= savedPartCount;
 }
 
 /** Return a complete, host-safe range mirror or null. This is deliberately strict:
@@ -76,6 +86,15 @@ export function invalidateMeshDoc(dir: string): void {
 /** Write the resident host model into the package as its meshdoc (host door). True only
  *  when doc.blob landed; parts metadata rides along best-effort. */
 export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[], recoveryRanges?: { lo: number; hi: number }[]): boolean {
+  // A zero-range document with many saved names can hydrate as one fallback row in
+  // older builds. Never let that collapsed row overwrite parts.json. Exact recovery
+  // must land once first; intentional deletes are safe after that repaired save.
+  const priorDoc = readMeshDoc(dir);
+  const priorPartCount = readMeshDocParts(dir)?.length ?? 0;
+  if (!meshDocPartMetadataCanShrink(priorDoc?.storedRangeCount, priorPartCount, parts?.length ?? 0)) {
+    console.error(`[meshdoc] REFUSING SAVE for ${dir}: the existing zero-range document retains ${priorPartCount} named parts but the live outliner has only ${parts?.length ?? 0}; recover the outliner before saving`);
+    return false;
+  }
   // Save gate (req_3049/req_3226): writing fewer host ranges than outliner parts
   // destroys the only durable part-boundary table. Never replace a recoverable old
   // document with that degraded state. Geometry can still be saved once the host is
@@ -118,6 +137,15 @@ export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[], recoveryRan
 export function readMeshDoc(dir: string): PackageMeshDoc | null {
   if (docCache.has(dir)) return docCache.get(dir)!;
   const doc = parseDocBlob(dir) ?? parseLegacyBlob(dir);
+  if (doc?.storedRangeCount === 0) {
+    const partCount = readMeshDocParts(dir)?.length ?? 0;
+    const recovered = inferMeshDocPartRanges(doc, partCount);
+    if (recovered) {
+      doc.ranges = recovered;
+      doc.recoveredPartRanges = true;
+      console.warn(`[meshdoc] recovered ${recovered.length} missing part ranges for ${dir} from exact contiguous connectivity runs; the next Save will persist them`);
+    }
+  }
   docCache.set(dir, doc);
   return doc;
 }
@@ -176,7 +204,7 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
     for (let i = 0; i < rangeCount; i += 1) ranges.push({ lo: pairs[i * 2]!, hi: pairs[i * 2 + 1]! });
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
-  return { vertices, faceGroups, ranges, glassFirstVertex };
+  return { vertices, faceGroups, ranges, glassFirstVertex, storedRangeCount: rangeCount };
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering
@@ -205,6 +233,70 @@ function groupSpanEnd(groups: Uint32Array | null, faceCount: number): number {
   let max = 0;
   for (let i = 0; i < groups.length; i += 1) { if (groups[i]! > max) max = groups[i]!; }
   return max + 1;
+}
+
+/** Recover a missing range table only when the saved authored-group sequence splits
+ * into exactly the number of contiguous edge-connectivity runs declared by parts.json.
+ * This recovers documents whose range header was cleared while refusing ambiguous
+ * multi-shell parts (run count mismatch). No spatial tolerance or primitive guessing. */
+export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups'>, partCount: number): { lo: number; hi: number }[] | null {
+  const groups = doc.faceGroups;
+  const triangleCount = Math.floor(doc.vertices.length / 24);
+  if (!groups || groups.length !== triangleCount || triangleCount === 0 || partCount < 2) return null;
+
+  const parent = new Int32Array(triangleCount);
+  for (let i = 0; i < triangleCount; i += 1) parent[i] = i;
+  const root = (input: number): number => {
+    let current = input;
+    while (parent[current] !== current) {
+      parent[current] = parent[parent[current]!]!;
+      current = parent[current]!;
+    }
+    return current;
+  };
+  const union = (a: number, b: number) => {
+    const ar = root(a), br = root(b);
+    if (ar !== br) parent[br] = ar;
+  };
+  const vertexKey = (triangle: number, corner: number): string => {
+    const at = (triangle * 3 + corner) * 8;
+    const x = doc.vertices[at] || 0, y = doc.vertices[at + 1] || 0, z = doc.vertices[at + 2] || 0;
+    return `${x},${y},${z}`;
+  };
+  const groupFirst = new Map<number, number>();
+  const edgeFirst = new Map<string, number>();
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const group = groups[triangle]!;
+    const sameGroup = groupFirst.get(group);
+    if (sameGroup == null) groupFirst.set(group, triangle);
+    else union(triangle, sameGroup);
+    const vertices = [vertexKey(triangle, 0), vertexKey(triangle, 1), vertexKey(triangle, 2)];
+    for (let corner = 0; corner < 3; corner += 1) {
+      const a = vertices[corner]!, b = vertices[(corner + 1) % 3]!;
+      const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const adjacent = edgeFirst.get(edge);
+      if (adjacent == null) edgeFirst.set(edge, triangle);
+      else union(triangle, adjacent);
+    }
+  }
+
+  const usedGroups = [...groupFirst.keys()].sort((a, b) => a - b);
+  if (usedGroups.length === 0) return null;
+  const runs: { lo: number; hi: number }[] = [];
+  let lo = usedGroups[0]!;
+  let previous = lo;
+  let previousRoot = root(groupFirst.get(lo)!);
+  for (const group of usedGroups.slice(1)) {
+    const currentRoot = root(groupFirst.get(group)!);
+    if (group !== previous + 1 || currentRoot !== previousRoot) {
+      runs.push({ lo, hi: previous + 1 });
+      lo = group;
+    }
+    previous = group;
+    previousRoot = currentRoot;
+  }
+  runs.push({ lo, hi: previous + 1 });
+  return runs.length === partCount ? runs : null;
 }
 
 /** Rank-order live outliner rows into meshdoc part metadata (ascending lo — the same

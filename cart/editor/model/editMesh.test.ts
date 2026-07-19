@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { loopCutFromFace, type EditMesh, type V3 } from './editMesh';
+import { cylinder, loopCutFromFace, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -44,6 +44,21 @@ test('loop cut follows the closed tapered quad ring by vertex identity', () => {
   assert(cut.verts.length === 12, `the four shared ring edges should mint four vertices, got ${cut.verts.length}`);
   for (const v of cut.verts.slice(source.verts.length)) assert(v[1] === 1, `tapered cut drifted off the edge ratio: y=${v[1]}`);
   for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `cut emitted a crossed/degenerate face: ${face.loop.join(',')}`);
+});
+
+test('the cylinder primitive has reference fan caps that loop cut can enter', () => {
+  const segments = 16;
+  const source = cylinder(1, 2, segments);
+  assert(source.verts.length === segments * 2 + 2, `cylinder is missing its cap centers: ${source.verts.length}`);
+  assert(source.faces.length === segments * 3, `cylinder does not have side quads plus two cap fans: ${source.faces.length}`);
+  assert(source.faces.slice(segments).every((face) => face.loop.length === 3), 'a cylinder cap remained an n-gon');
+
+  // direction 1 enters the top and bottom rim edges. The reference walk splits
+  // those terminal fan triangles and stops at their existing center vertices.
+  const cut = loopCutFromFace(source, { face: 0, direction: 1, cuts: 1, offset: Math.sin(Math.PI / segments) });
+  assert(cut.faces.length === source.faces.length + 3, `side + two cap triangles should each split once, got ${cut.faces.length}`);
+  assert(cut.verts.length === source.verts.length + 2, `shared top/bottom rim cuts should mint two vertices, got ${cut.verts.length}`);
+  for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `cap traversal emitted a degenerate face: ${face.loop.join(',')}`);
 });
 
 test('a terminal triangle is split and traversal stops there', () => {

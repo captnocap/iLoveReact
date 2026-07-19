@@ -170,11 +170,11 @@ test "dissolving an irregular four-quad grid drops seam verts and rebuilds a cle
 
 test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_2954)" {
     // Exact topology emitted by editMeshToGeometry(cylinder(..., 12)):
-    // 12 side quads (two triangles/group), then two 12-gon cap fans
-    // (ten triangles/group). The render soup has 66 welded triangle edges, but
-    // the editor topology has only the cylinder's 36 authored edges.
+    // 12 side quads (two triangles/group), then 24 real cap triangles around
+    // explicit center vertices, matching js-bench-editor's primitive (req_3230).
+    // Quad render diagonals are still derived; cap spokes are authored edges.
     const segments: usize = 12;
-    const triangle_count: usize = segments * 2 + (segments - 2) * 2;
+    const triangle_count: usize = segments * 4;
     var soup = [_]f32{0} ** (triangle_count * 3 * 8);
     var groups: [triangle_count]u32 = undefined;
     var bottom: [segments][3]f32 = undefined;
@@ -208,21 +208,19 @@ test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_
         Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(i), bottom[i], top[i], top[next]);
         Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(i), bottom[i], top[next], bottom[next]);
     }
-    // Top face.loop is reversed; bottom is the forward ring, matching cylinder().
-    for (0..segments - 2) |i| {
-        Emit.triangle(soup[0..], groups[0..], &triangle_index, segments, top[segments - 1], top[segments - 2 - i], top[segments - 3 - i]);
-    }
-    for (0..segments - 2) |i| {
-        Emit.triangle(soup[0..], groups[0..], &triangle_index, segments + 1, bottom[0], bottom[i + 1], bottom[i + 2]);
+    for (0..segments) |i| {
+        const next = (i + 1) % segments;
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(segments + i * 2), top[i], .{ 0, 1, 0 }, top[next]);
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(segments + i * 2 + 1), bottom[i], bottom[next], .{ 0, 0, 0 });
     }
     try testing.expectEqual(triangle_count, triangle_index);
 
     mesh_edit.test_support.loadGroupedSoup(2953, soup[0..], @intCast(triangle_count * 3), groups[0..]);
     defer mesh_edit.test_support.clear();
     try testing.expect(mesh_edit.ensureTopologyPub());
-    try testing.expectEqual(@as(u32, 24), mesh_edit.vertCount());
-    try testing.expectEqual(@as(u32, 66), mesh_edit.edgeCount());
-    try testing.expectEqual(@as(u32, 36), mesh_edit.boundaryEdgeCount());
+    try testing.expectEqual(@as(u32, 26), mesh_edit.vertCount());
+    try testing.expectEqual(@as(u32, 72), mesh_edit.edgeCount());
+    try testing.expectEqual(@as(u32, 60), mesh_edit.boundaryEdgeCount());
 
     // The user's seven-line screenshot is precisely a stale [0,2) part scope:
     // two adjacent quads contribute two top + two bottom + three vertical edges.
@@ -242,7 +240,7 @@ test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_
         const index: u32 = @intCast(edge);
         if (mesh_edit.edgeIsBoundaryPub(index) and mesh_edit.edgeInScopePub(index)) fresh_edges += 1;
     }
-    try testing.expectEqual(@as(u32, 36), fresh_edges);
+    try testing.expectEqual(@as(u32, 60), fresh_edges);
 
     var internal_edge: ?u32 = null;
     for (0..mesh_edit.edgeCount()) |edge| {

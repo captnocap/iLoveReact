@@ -683,8 +683,11 @@ export function clampSides(n: number): number {
   return Math.max(SHAPE_SIDES_MIN, Math.min(SHAPE_SIDES_MAX, Math.round(n)));
 }
 
-/** A cylinder: top + bottom rings, side quads, n-gon caps, centered at origin.
- *  `segments` = Blockbench's "sides" (clamped 3..48, req_1056). */
+/** A cylinder with the exact js-bench-editor primitive topology: top + bottom
+ *  rings, side quads, and cap triangle fans around explicit center vertices.
+ *  The fan is semantic edit topology, not render soup — it is what lets the
+ *  reference Loop Cut enter a cap triangle instead of stopping at an n-gon.
+ *  `segments` = Blockbench's "sides" (clamped 3..48, req_1056/req_3230). */
 export function cylinder(radius: number, height: number, segments = 16): EditMesh {
   const seg = clampSides(segments);
   const y = height / 2;
@@ -703,15 +706,15 @@ export function cylinder(radius: number, height: number, segments = 16): EditMes
     // +Y, so bottom→top→top+1→bottom+1 gives radial-out).
     faces.push({ loop: [bottom(i), top(i), top(i + 1), bottom(i + 1)] });
   }
-  // caps: top loop reversed → +Y normal; bottom loop straight → -Y normal.
-  const topLoop: number[] = [];
-  const bottomLoop: number[] = [];
+  const bottomCenter = verts.length;
+  verts.push([0, -y, 0]);
+  const topCenter = verts.length;
+  verts.push([0, y, 0]);
   for (let i = 0; i < seg; i += 1) {
-    topLoop.push(top(seg - 1 - i));
-    bottomLoop.push(bottom(i));
+    // Opposite rim winding to the side quad; normals point out of each cap.
+    faces.push({ loop: [top(i), topCenter, top(i + 1)] });
+    faces.push({ loop: [bottom(i), bottom(i + 1), bottomCenter] });
   }
-  faces.push({ loop: topLoop });
-  faces.push({ loop: bottomLoop });
   return fullFaceUV({ verts, faces });
 }
 

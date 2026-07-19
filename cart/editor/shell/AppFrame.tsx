@@ -4386,7 +4386,16 @@ export default function AppFrame() {
     const existing = state.modelParts[mid];
     const pkg = modelPackageById(mid);
     const meshDoc = pkg ? packageMeshDoc(pkg) : null;
-    let parts = existing;
+    const savedMeta = pkg ? (packageMeshDocParts(pkg) ?? []) : [];
+    // A zero-range RJMD used to hydrate one fallback row and hot-state could then
+    // preserve that collapsed row forever. When meshDoc recovered an exact range/run
+    // match, replace only that count-mismatched fallback with all saved metadata rows.
+    const recoverCollapsedParts = Boolean(
+      meshDoc?.recoveredPartRanges &&
+      savedMeta.length === meshDoc.ranges.length &&
+      existing && existing.length !== meshDoc.ranges.length,
+    );
+    let parts = recoverCollapsedParts ? undefined : existing;
     if (!parts) {
       if (meshDoc && meshDoc.ranges.length > 0) {
         // A materialized package hydrates from its OWN meshdoc (req_2753): rows are
@@ -4394,7 +4403,7 @@ export default function AppFrame() {
         // the outliner and the mesh agree by construction — this is what brings the
         // outliner (and the edits) back after a cold restart. parts.json rows pair with
         // ranges by rank; a legacy package (base.blob only) recovers as one part.
-        const meta = pkg ? (packageMeshDocParts(pkg) ?? []) : [];
+        const meta = savedMeta;
         parts = meshDoc.ranges.map((r, i) => ({
           id: `part:doc:${mid}:${i}`,
           name: meta[i]?.name ?? (meshDoc.ranges.length === 1 ? (pkg?.name ?? 'part 1') : `part ${i + 1}`),
@@ -4447,10 +4456,17 @@ export default function AppFrame() {
       const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
       withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
     }
+    if (recoverCollapsedParts && meshDoc) {
+      // A hot reload may resume the already-resident one-range host session instead
+      // of remounting the recovered seed. Repair its mirror at the same boundary as
+      // the outliner so face scope and the next Save immediately agree.
+      modelToolApiRef.current?.setPartRangesMirror(meshDoc.ranges);
+    }
     setState((prev) => ({
       ...prev,
       modelParts: { ...prev.modelParts, [mid]: withRanges },
-      modelActivePartId: existing ? prev.modelActivePartId : (withRanges[0]?.id ?? prev.modelActivePartId),
+      modelActivePartId: existing && !recoverCollapsedParts ? prev.modelActivePartId : (withRanges[0]?.id ?? prev.modelActivePartId),
+      status: recoverCollapsedParts ? `recovered ${withRanges.length} saved parts from the mesh document's exact connectivity ranges` : prev.status,
     }));
   }, [state.activeWorkspaceDocumentId]);
 

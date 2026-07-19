@@ -869,6 +869,10 @@ pub const Mesh = struct {
                         _ = try splitFace(context, previous_face, previous_opposite, previous.vertices.items.len == 4, 0);
                     } else if (count == 1) {
                         _ = try splitFace(context, previous_face, side, false, 0);
+                    } else if (previous.vertices.items.len > 4) {
+                        // Legacy ReactJIT cylinder cap. The reference primitive would
+                        // present a terminal triangle on this side of the seed too.
+                        _ = try splitFace(context, previous_face, side, false, 0);
                     }
                 }
             }
@@ -940,7 +944,84 @@ pub const Mesh = struct {
             }
             return true; // reference terminates after splitting a triangle
         }
+
+        // ReactJIT cylinders authored before req_3230 stored each cap as one convex
+        // n-gon. js-bench-editor cylinders have a real center vertex and one triangle
+        // per cap side, which is why its loop walk can enter the top/bottom. Promote
+        // only a planar convex n-gon whose EVERY rim edge is bounded by a side quad;
+        // arbitrary imported n-gons keep the reference's normal stop behavior.
+        if (face_len > 4) {
+            if (try context.mesh.promoteLegacyFanCap(face_id, side)) |cap_triangle| {
+                return splitFace(context, cap_triangle, side, false, cut_no);
+            }
+        }
         return false;
+    }
+
+    fn promoteLegacyFanCap(mesh: *Mesh, face_id: u32, entering_edge: [2]u32) !?u32 {
+        if (face_id >= mesh.faces.items.len) return null;
+        const face = &mesh.faces.items[face_id];
+        if (!face.alive or face.vertices.items.len <= 4 or faceIsConcave(mesh, face)) return null;
+
+        var entering_corner: ?usize = null;
+        var center = Vec3{ 0, 0, 0 };
+        var center_uv = Vec2{ 0, 0 };
+        const origin = mesh.vertices.items[face.vertices.items[0]].position;
+        const normal = faceNormal(mesh, face);
+        if (length3(normal) < 0.5) return null;
+        var extent: f32 = 0;
+        for (face.vertices.items, 0..) |vertex_id, corner| {
+            const next = (corner + 1) % face.vertices.items.len;
+            const next_id = face.vertices.items[next];
+            const is_entering_edge = (vertex_id == entering_edge[0] and next_id == entering_edge[1]) or
+                (vertex_id == entering_edge[1] and next_id == entering_edge[0]);
+            if (is_entering_edge) entering_corner = corner;
+            const position = mesh.vertices.items[vertex_id].position;
+            center = add3(center, position);
+            center_uv[0] += face.uvs.items[corner][0];
+            center_uv[1] += face.uvs.items[corner][1];
+            extent = @max(extent, length3(sub3(position, origin)));
+
+            var quad_neighbor = false;
+            for (mesh.faces.items) |*other| {
+                if (!other.alive or other.id == face_id or other.part != face.part or other.vertices.items.len != 4) continue;
+                if (containsVertex(other, vertex_id) and containsVertex(other, next_id)) {
+                    quad_neighbor = true;
+                    break;
+                }
+            }
+            // The entering side quad was already split before traversal reached this
+            // cap, so its original rim edge is now represented by two half-edge quads.
+            if (!quad_neighbor and !is_entering_edge) return null;
+        }
+        const start = entering_corner orelse return null;
+        const count = face.vertices.items.len;
+        const inverse_count = 1.0 / @as(f32, @floatFromInt(count));
+        center = mul3(center, inverse_count);
+        center_uv = .{ center_uv[0] * inverse_count, center_uv[1] * inverse_count };
+        const planar_epsilon = @max(@as(f32, 1e-5), extent * 1e-4);
+        for (face.vertices.items) |vertex_id| {
+            if (@abs(dot3(sub3(mesh.vertices.items[vertex_id].position, origin), normal)) > planar_epsilon) return null;
+        }
+
+        var source = try face.clone(mesh.allocator);
+        defer source.deinit(mesh.allocator);
+        const center_id: u32 = @intCast(mesh.vertices.items.len);
+        try mesh.vertices.append(mesh.allocator, .{ .position = center });
+        var fan_side: usize = 0;
+        while (fan_side < count) : (fan_side += 1) {
+            const corner = (start + fan_side) % count;
+            const next = (corner + 1) % count;
+            const vertices = [3]u32{ source.vertices.items[corner], source.vertices.items[next], center_id };
+            const uvs = [3]Vec2{ source.uvs.items[corner], source.uvs.items[next], center_uv };
+            if (fan_side == 0) {
+                try mesh.replaceFaceLoop(face_id, vertices[0..], uvs[0..]);
+            } else {
+                const triangle = try mesh.makeSplitFace(&source, vertices[0..], uvs[0..]);
+                try mesh.faces.append(mesh.allocator, triangle);
+            }
+        }
+        return face_id;
     }
 
     fn makeSplitFace(mesh: *Mesh, source: *const Face, vertices: []const u32, uvs: []const Vec2) !Face {
@@ -1280,6 +1361,60 @@ test "loop cut keeps every panel of a closed cylinder belt ordered" {
     var lowered = try mesh.lower();
     defer lowered.deinit();
     try std.testing.expectEqual(@as(u32, segments * 4), lowered.tri_count);
+}
+
+test "loop cut promotes legacy cylinder n-gon caps to the reference triangle fan" {
+    const allocator = std.testing.allocator;
+    const segments = 16;
+    var bottom: [segments]Vec3 = undefined;
+    var top: [segments]Vec3 = undefined;
+    for (0..segments) |index| {
+        const angle = @as(f32, @floatFromInt(index)) / segments * std.math.tau;
+        bottom[index] = .{ @cos(angle), 0, @sin(angle) };
+        top[index] = .{ @cos(angle), 2, @sin(angle) };
+    }
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    var groups = std.ArrayListUnmanaged(u32).empty;
+    defer groups.deinit(allocator);
+    for (0..segments) |index| {
+        const next = (index + 1) % segments;
+        try appendSoupTri(&soup, allocator, bottom[index], top[index], top[next]);
+        try appendSoupTri(&soup, allocator, bottom[index], top[next], bottom[next]);
+        try groups.append(allocator, @intCast(index));
+        try groups.append(allocator, @intCast(index));
+    }
+    // Exact old ReactJIT cap lowering: each cap was one authored n-gon group,
+    // render-fanned from a rim vertex with no stable center vertex.
+    for (0..segments - 2) |index| {
+        try appendSoupTri(&soup, allocator, top[segments - 1], top[segments - 2 - index], top[segments - 3 - index]);
+        try groups.append(allocator, segments);
+    }
+    for (0..segments - 2) |index| {
+        try appendSoupTri(&soup, allocator, bottom[0], bottom[index + 1], bottom[index + 2]);
+        try groups.append(allocator, segments + 1);
+    }
+    const triangle_count: u32 = @intCast(groups.items.len);
+    var mesh = try Mesh.fromSoup(allocator, soup.items, triangle_count, groups.items, null);
+    defer mesh.deinit();
+    try std.testing.expectEqual(@as(usize, segments + 2), mesh.faces.items.len);
+
+    const selected = try allocator.alloc(bool, triangle_count);
+    defer allocator.free(selected);
+    @memset(selected, false);
+    selected[0] = true;
+    selected[1] = true;
+    try std.testing.expect(try mesh.loopCut(selected, 1, 1, 0.5));
+    try std.testing.expectEqual(@as(usize, segments * 3 + 3), mesh.faces.items.len);
+    try std.testing.expectEqual(@as(usize, segments * 2 + 4), mesh.vertices.items.len);
+    for (mesh.faces.items) |*face| {
+        if (!face.alive) continue;
+        try std.testing.expect(face.vertices.items.len == 3 or face.vertices.items.len == 4);
+        try std.testing.expect(length3(Mesh.faceNormal(&mesh, face)) > 0.99);
+    }
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expectEqual(@as(u32, segments * 4 + 4), lowered.tri_count);
 }
 
 test "indexed loop cut splits a terminal triangle then stops like the reference" {
