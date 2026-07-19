@@ -123,7 +123,7 @@ import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
-import { partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
+import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { nextDuplicateGroupName, nextDuplicatePartName } from '../data/modelOutliner';
 import {
@@ -1326,7 +1326,8 @@ export default function AppFrame() {
       : pkg;
     const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
     const result = materializeModelPackage(pkgToSave);
-    const artifactsOk = result.ok && writeModelArtifacts(pkg, partsMetaFromRows(current.modelParts[pkg.id] ?? []));
+    const liveRows = current.modelParts[pkg.id] ?? [];
+    const artifactsOk = result.ok && writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined);
     const ok = result.ok && artifactsOk;
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
     if (ok) {
@@ -1998,7 +1999,11 @@ export default function AppFrame() {
           return;
         }
       }
-      const docWritten = writeModelArtifacts(pkg, partsMetaFromRows(liveParts ?? []));
+      const docWritten = writeModelArtifacts(pkg, partsMetaFromRows(liveParts ?? []), meshDocPartRangesFromRows(liveParts ?? []) ?? undefined);
+      if (!docWritten) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the model document could not be saved without losing part ranges.' }));
+        return;
+      }
       // Resolve the geometry through the ONE resolver the viewer uses — the package
       // meshdoc just written (host truth), else live seed parts, else the package
       // resolver. Cache it so the resident builder draws exactly what you see.
@@ -3144,7 +3149,10 @@ export default function AppFrame() {
       return;
     }
     const liveRows = state.modelParts[pkg.id] ?? [];
-    writeModelArtifacts(pkg, partsMetaFromRows(liveRows));
+    if (!writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined)) {
+      setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Character export stopped: the model document could not be saved without losing part ranges.' }));
+      return;
+    }
     // Measured part centers off the meshdoc just written (host truth). Ranges
     // pair with rows by RANK (both ascend by lo — the parts.json contract); a
     // failed write degrades to name-only rows (binding holds, transforms identity).
@@ -4474,7 +4482,8 @@ export default function AppFrame() {
     if (!materializeModelPackage(pkg).ok) return null;
     // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
     // the NEXT mount seeds from the package, so this write is what edits survive by.
-    if (!writeModelArtifacts(pkg, partsMetaFromRows(s.modelParts[pkg.id] ?? []))) return null;
+    const liveRows = s.modelParts[pkg.id] ?? [];
+    if (!writeModelArtifacts(pkg, partsMetaFromRows(liveRows), meshDocPartRangesFromRows(liveRows) ?? undefined)) return null;
     savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
   };

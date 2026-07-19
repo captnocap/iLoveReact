@@ -70,6 +70,7 @@ pub const SeedInfo = struct {
 pub const Lowered = struct {
     allocator: std.mem.Allocator,
     positions: []f32,
+    triangle_vertices: [][3]u32,
     groups: []u32,
     source_triangles: []u32,
     face_ids: []u32,
@@ -78,6 +79,7 @@ pub const Lowered = struct {
 
     pub fn deinit(lowered: *Lowered) void {
         lowered.allocator.free(lowered.positions);
+        lowered.allocator.free(lowered.triangle_vertices);
         lowered.allocator.free(lowered.groups);
         lowered.allocator.free(lowered.source_triangles);
         lowered.allocator.free(lowered.face_ids);
@@ -90,12 +92,18 @@ pub const Mesh = struct {
     allocator: std.mem.Allocator,
     vertices: std.ArrayListUnmanaged(Vertex) = .empty,
     faces: std.ArrayListUnmanaged(Face) = .empty,
+    /// Stable vertex ids for each triangle/corner in the CURRENT resident soup order.
+    /// Imports preserve the source diagonal/order; lowering replaces this map with the
+    /// deterministic derived order. Position-only gizmo mutations must use this map,
+    /// never guess that an old model was already lowered by today's diagonal policy.
+    render_triangles: std.ArrayListUnmanaged([3]u32) = .empty,
     next_group: u32 = 0,
 
     pub fn deinit(mesh: *Mesh) void {
         for (mesh.faces.items) |*face| face.deinit(mesh.allocator);
         mesh.faces.deinit(mesh.allocator);
         mesh.vertices.deinit(mesh.allocator);
+        mesh.render_triangles.deinit(mesh.allocator);
         mesh.* = undefined;
     }
 
@@ -103,6 +111,7 @@ pub const Mesh = struct {
         var out = Mesh{ .allocator = mesh.allocator, .next_group = mesh.next_group };
         errdefer out.deinit();
         try out.vertices.appendSlice(mesh.allocator, mesh.vertices.items);
+        try out.render_triangles.appendSlice(mesh.allocator, mesh.render_triangles.items);
         for (mesh.faces.items) |*face| try out.faces.append(mesh.allocator, try face.clone(mesh.allocator));
         return out;
     }
@@ -200,6 +209,11 @@ pub const Mesh = struct {
                 }
                 corner_vertex[triangle * 3 + corner] = vertex_id.?;
             }
+            try mesh.render_triangles.append(allocator, .{
+                corner_vertex[triangle * 3],
+                corner_vertex[triangle * 3 + 1],
+                corner_vertex[triangle * 3 + 2],
+            });
         }
 
         var buckets = std.ArrayListUnmanaged(Bucket).empty;
@@ -826,7 +840,11 @@ pub const Mesh = struct {
             const side_uv = lerp2(uvFor(old, side[0]), uvFor(old, side[1]), ratio);
             const opposite_uv = lerp2(uvFor(old, opposite[0]), uvFor(old, opposite[1]), ratio);
             const new_face = try context.mesh.makeSplitFace(old, &.{ side[1], center_side, center_opposite, opposite[1] }, &.{ uvFor(old, side[1]), side_uv, opposite_uv, uvFor(old, opposite[1]) });
-            try context.mesh.replaceFaceLoop(face_id, &.{ opposite[0], center_side, center_opposite, side[0] }, &.{ uvFor(old, opposite[0]), side_uv, opposite_uv, uvFor(old, side[0]) });
+            // Blockbench stores this array as an unordered vertex set and its
+            // MeshFace.getSortedVertices() restores polygon order. Our face loops are
+            // ordered data, so emit that sorted order directly; the literal reference
+            // array crosses center_side/center_opposite into a bow-tie quad.
+            try context.mesh.replaceFaceLoop(face_id, &.{ opposite[0], center_opposite, center_side, side[0] }, &.{ uvFor(old, opposite[0]), opposite_uv, side_uv, uvFor(old, side[0]) });
             try context.mesh.faces.append(context.mesh.allocator, new_face);
 
             if (cut_no + 1 < context.cuts) {
@@ -880,7 +898,7 @@ pub const Mesh = struct {
                 const other_quad = if (side[0] != opposite[0] and side[0] != opposite[1]) side[0] else side[1];
                 const other_tri = if (side[0] == opposite[0] or side[0] == opposite[1]) side[0] else side[1];
                 const new_face = try context.mesh.makeSplitFace(old, &.{ other_tri, center_side, center_opposite }, &.{ uvFor(old, other_tri), side_uv, opposite_uv });
-                try context.mesh.replaceFaceLoop(face_id, &.{ opposed_vertex, center_side, center_opposite, other_quad }, &.{ uvFor(old, opposed_vertex), side_uv, opposite_uv, uvFor(old, other_quad) });
+                try context.mesh.replaceFaceLoop(face_id, &.{ opposed_vertex, center_opposite, center_side, other_quad }, &.{ uvFor(old, opposed_vertex), opposite_uv, side_uv, uvFor(old, other_quad) });
                 const new_face_id = new_face.id;
                 try context.mesh.faces.append(context.mesh.allocator, new_face);
                 if (dot3(faceNormal(context.mesh, &context.mesh.faces.items[new_face_id]), old_normal) < 0) context.mesh.reverseFace(new_face_id);
@@ -978,6 +996,8 @@ pub const Mesh = struct {
     pub fn lower(mesh: *const Mesh) !Lowered {
         var positions = std.ArrayListUnmanaged(f32).empty;
         defer positions.deinit(mesh.allocator);
+        var triangle_vertices = std.ArrayListUnmanaged([3]u32).empty;
+        defer triangle_vertices.deinit(mesh.allocator);
         var groups = std.ArrayListUnmanaged(u32).empty;
         defer groups.deinit(mesh.allocator);
         var sources = std.ArrayListUnmanaged(u32).empty;
@@ -991,17 +1011,19 @@ pub const Mesh = struct {
             if (!face.alive or face.vertices.items.len < 3) continue;
             if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
-                try emitLoweredTri(mesh, face, tris[0], &positions, &groups, &sources, &face_ids, &parts);
-                try emitLoweredTri(mesh, face, tris[1], &positions, &groups, &sources, &face_ids, &parts);
+                try emitLoweredTri(mesh, face, tris[0], &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                try emitLoweredTri(mesh, face, tris[1], &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
             } else {
                 var corner: usize = 1;
                 while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &groups, &sources, &face_ids, &parts);
+                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
                 }
             }
         }
         const pos_owned = try positions.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(pos_owned);
+        const triangle_vertices_owned = try triangle_vertices.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(triangle_vertices_owned);
         const group_owned = try groups.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(group_owned);
         const source_owned = try sources.toOwnedSlice(mesh.allocator);
@@ -1012,6 +1034,7 @@ pub const Mesh = struct {
         return .{
             .allocator = mesh.allocator,
             .positions = pos_owned,
+            .triangle_vertices = triangle_vertices_owned,
             .groups = group_owned,
             .source_triangles = source_owned,
             .face_ids = face_id_owned,
@@ -1025,6 +1048,7 @@ pub const Mesh = struct {
         face: *const Face,
         triangle: [3]usize,
         positions: *std.ArrayListUnmanaged(f32),
+        triangle_vertices: *std.ArrayListUnmanaged([3]u32),
         groups: *std.ArrayListUnmanaged(u32),
         sources: *std.ArrayListUnmanaged(u32),
         face_ids: *std.ArrayListUnmanaged(u32),
@@ -1034,6 +1058,11 @@ pub const Mesh = struct {
             const p = mesh.vertices.items[face.vertices.items[corner]].position;
             try positions.appendSlice(mesh.allocator, p[0..]);
         }
+        try triangle_vertices.append(mesh.allocator, .{
+            face.vertices.items[triangle[0]],
+            face.vertices.items[triangle[1]],
+            face.vertices.items[triangle[2]],
+        });
         try groups.append(mesh.allocator, face.group);
         try sources.append(mesh.allocator, if (face.source_triangles.items.len > 0) face.source_triangles.items[0] else 0);
         try face_ids.append(mesh.allocator, face.id);
@@ -1044,6 +1073,12 @@ pub const Mesh = struct {
     /// triangle ids the provenance basis for the next edit session. Vertex and face ids
     /// remain untouched.
     pub fn adoptLoweredMetadata(mesh: *Mesh, lowered: *const Lowered, groups: ?[]const u32, parts: ?[]const u32) void {
+        // Reserve before clearing so allocation failure leaves the still-valid resident
+        // mapping intact. A missing map would make the next position-only gizmo update
+        // fail (or tempt this layer to reconstruct identity from soup order again).
+        mesh.render_triangles.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
+        mesh.render_triangles.clearRetainingCapacity();
+        mesh.render_triangles.appendSliceAssumeCapacity(lowered.triangle_vertices);
         var touched = std.AutoHashMapUnmanaged(u32, void).empty;
         defer touched.deinit(mesh.allocator);
         for (lowered.face_ids, 0..) |face_id, triangle| {
@@ -1064,38 +1099,18 @@ pub const Mesh = struct {
         }
     }
 
-    /// Pull a legacy position-only mutation back through the last deterministic
-    /// lowering without rebuilding identity. The triangle order is derived from the
-    /// pre-mutation table, which is exactly the order resident in `interleaved`.
+    /// Pull a position-only mutation through the explicit resident triangle map.
+    /// Import soup may use either quad diagonal and arbitrary triangle order; guessing
+    /// today's deterministic lowering here corrupts stable ids on the first gizmo move.
     pub fn updatePositionsFromInterleaved(mesh: *Mesh, interleaved: []const f32, tri_count: u32) bool {
         if (interleaved.len < @as(usize, tri_count) * 24) return false;
-        var rendered: u32 = 0;
-        for (mesh.faces.items) |*face| {
-            if (!face.alive or face.vertices.items.len < 3) continue;
-            if (face.vertices.items.len == 4) {
-                const tris = quadTriangles(mesh, face);
-                for (tris) |triangle| {
-                    if (!mesh.pullTrianglePositions(face, triangle, interleaved, rendered, tri_count)) return false;
-                    rendered += 1;
-                }
-            } else {
-                var corner: usize = 1;
-                while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    if (!mesh.pullTrianglePositions(face, .{ 0, corner, corner + 1 }, interleaved, rendered, tri_count)) return false;
-                    rendered += 1;
-                }
+        if (mesh.render_triangles.items.len != tri_count) return false;
+        for (mesh.render_triangles.items, 0..) |triangle, rendered| {
+            for (triangle, 0..) |vertex_id, output_corner| {
+                if (vertex_id >= mesh.vertices.items.len) return false;
+                const base = (@as(usize, rendered) * 3 + output_corner) * 8;
+                mesh.vertices.items[vertex_id].position = .{ interleaved[base], interleaved[base + 1], interleaved[base + 2] };
             }
-        }
-        return rendered == tri_count;
-    }
-
-    fn pullTrianglePositions(mesh: *Mesh, face: *const Face, triangle: [3]usize, interleaved: []const f32, rendered: u32, tri_count: u32) bool {
-        if (rendered >= tri_count) return false;
-        for (triangle, 0..) |corner, output_corner| {
-            const vertex_id = face.vertices.items[corner];
-            if (vertex_id >= mesh.vertices.items.len) return false;
-            const base = (@as(usize, rendered) * 3 + output_corner) * 8;
-            mesh.vertices.items[vertex_id].position = .{ interleaved[base], interleaved[base + 1], interleaved[base + 2] };
         }
         return true;
     }
@@ -1208,6 +1223,9 @@ test "indexed loop cut follows a closed flared quad ring at edge ratios" {
     defer mesh.deinit();
     const selected = [_]bool{ true, true, false, false, false, false, false, false };
     try std.testing.expect(try mesh.loopCut(selected[0..], 1, 1, 0.5));
+    for (mesh.faces.items) |*face| {
+        if (face.alive) try std.testing.expect(length3(Mesh.faceNormal(&mesh, face)) > 0.99);
+    }
     var lowered = try mesh.lower();
     defer lowered.deinit();
     try std.testing.expectEqual(@as(u32, 16), lowered.tri_count);
@@ -1216,6 +1234,52 @@ test "indexed loop cut follows a closed flared quad ring at edge ratios" {
         const y = lowered.positions[index + 1];
         if (y != 0 and y != 2) try std.testing.expectEqual(@as(f32, 1), y);
     }
+}
+
+test "loop cut keeps every panel of a closed cylinder belt ordered" {
+    const allocator = std.testing.allocator;
+    const segments = 16;
+    var quads: [segments][4]Vec3 = undefined;
+    for (0..segments) |index| {
+        const a0 = @as(f32, @floatFromInt(index)) / segments * std.math.tau;
+        const a1 = @as(f32, @floatFromInt((index + 1) % segments)) / segments * std.math.tau;
+        const bottom0 = Vec3{ @cos(a0), 0, @sin(a0) };
+        const top0 = Vec3{ @cos(a0), 2, @sin(a0) };
+        const bottom1 = Vec3{ @cos(a1), 0, @sin(a1) };
+        const top1 = Vec3{ @cos(a1), 2, @sin(a1) };
+        // Same ordered side loop emitted by cart/editor/model/editMesh.ts cylinder().
+        quads[index] = .{ bottom0, top0, top1, bottom1 };
+    }
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, segments * 2, fixture.groups, null);
+    defer mesh.deinit();
+    var selected: [segments * 2]bool = @splat(false);
+    selected[0] = true;
+    selected[1] = true;
+
+    // The perpendicular direction has no opposite quad beyond the open belt edge,
+    // so the reference splits only the seed panel and stops. It must still leave two
+    // ordered faces rather than the crossed panel/hole seen in req_3227.
+    var perpendicular = try mesh.clone();
+    defer perpendicular.deinit();
+    try std.testing.expect(try perpendicular.loopCut(selected[0..], 1, 1, 0.5));
+    try std.testing.expectEqual(@as(usize, segments + 1), perpendicular.faces.items.len);
+    for (perpendicular.faces.items) |*face| {
+        if (face.alive) try std.testing.expect(length3(Mesh.faceNormal(&perpendicular, face)) > 0.99);
+    }
+
+    try std.testing.expect(try mesh.loopCut(selected[0..], 0, 1, 0.5));
+    try std.testing.expectEqual(@as(usize, segments * 2), mesh.faces.items.len);
+    for (mesh.faces.items) |*face| {
+        if (!face.alive) continue;
+        try std.testing.expectEqual(@as(usize, 4), face.vertices.items.len);
+        try std.testing.expect(length3(Mesh.faceNormal(&mesh, face)) > 0.99);
+    }
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expectEqual(@as(u32, segments * 4), lowered.tri_count);
 }
 
 test "indexed loop cut splits a terminal triangle then stops like the reference" {
@@ -1315,7 +1379,7 @@ test "reference multi-cut recursively spaces cuts from the amended offset" {
     var saw_far = false;
     for (mesh.vertices.items) |vertex| {
         if (@abs(vertex.position[0] - 0.16666667) < 1e-5) saw_near = true;
-        if (@abs(vertex.position[0] - 0.79166667) < 1e-5) saw_far = true;
+        if (@abs(vertex.position[0] - 0.375) < 1e-5) saw_far = true;
     }
     try std.testing.expect(saw_near);
     try std.testing.expect(saw_far);
@@ -1381,6 +1445,42 @@ test "position mutations update stable ids through the deterministic lowering" {
     try std.testing.expect(mesh.updatePositionsFromInterleaved(moved, 2));
     try std.testing.expectEqualSlices(u32, original_face_ids[0..], &.{mesh.faces.items[0].id});
     for (mesh.vertices.items) |stable_vertex| try std.testing.expect(stable_vertex.position[0] >= 3);
+}
+
+test "first rigid gizmo move preserves an imported quad's original diagonal map" {
+    const allocator = std.testing.allocator;
+    const v = [4]Vec3{ .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ 0, 1, 0 } };
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    // Imported resident soup uses diagonal 1–3. Deterministic lowering of this
+    // rectangle chooses 0–2, so deriving the resident corner map from lower() would
+    // assign the transformed corners to the wrong stable ids.
+    try appendSoupTri(&soup, allocator, v[0], v[1], v[3]);
+    try appendSoupTri(&soup, allocator, v[1], v[2], v[3]);
+    const groups = [_]u32{ 0, 0 };
+    var mesh = try Mesh.fromSoup(allocator, soup.items, 2, groups[0..], null);
+    defer mesh.deinit();
+    var before = try mesh.clone();
+    defer before.deinit();
+    var rotated = try allocator.dupe(f32, soup.items);
+    defer allocator.free(rotated);
+    var corner: usize = 0;
+    while (corner < 6) : (corner += 1) {
+        const base = corner * 8;
+        const x = rotated[base];
+        const y = rotated[base + 1];
+        rotated[base] = 4 - y;
+        rotated[base + 1] = -3 + x;
+        rotated[base + 2] += 2;
+    }
+    try std.testing.expect(mesh.updatePositionsFromInterleaved(rotated, 2));
+    for (before.vertices.items, mesh.vertices.items) |old, current| {
+        const expected = Vec3{ 4 - old.position[1], -3 + old.position[0], old.position[2] + 2 };
+        for (0..3) |axis| try std.testing.expectApproxEqAbs(expected[axis], current.position[axis], 1e-6);
+    }
+    var bad = std.ArrayListUnmanaged(u32).empty;
+    defer bad.deinit(allocator);
+    try std.testing.expectEqual(@as(u32, 0), mesh.newlyConcaveComparedTo(&before, &bad));
 }
 
 test "indexed symmetrize cuts authored faces without a fan-diagonal T vertex" {

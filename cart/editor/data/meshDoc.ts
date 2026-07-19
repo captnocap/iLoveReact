@@ -49,6 +49,25 @@ const PARTS_META = 'mesh/parts.json';
 const docCache = new Map<string, PackageMeshDoc | null>();
 const metaCache = new Map<string, MeshDocPartMeta[] | null>();
 
+export function meshDocPartRangesComplete(partCount: number, hostRangeCount: number): boolean {
+  return partCount < 2 || hostRangeCount >= partCount;
+}
+
+/** Return a complete, host-safe range mirror or null. This is deliberately strict:
+ * save recovery may restore known live ranges, but it must never invent boundaries. */
+export function meshDocPartRangesFromRows(rows: readonly { lo?: number; hi?: number }[]): { lo: number; hi: number }[] | null {
+  const ranges: { lo: number; hi: number }[] = [];
+  for (const row of rows) {
+    if (!Number.isInteger(row.lo) || !Number.isInteger(row.hi) || row.lo! < 0 || row.hi! <= row.lo!) return null;
+    ranges.push({ lo: row.lo!, hi: row.hi! });
+  }
+  ranges.sort((a, b) => a.lo - b.lo);
+  for (let i = 1; i < ranges.length; i += 1) {
+    if (ranges[i]!.lo < ranges[i - 1]!.hi) return null;
+  }
+  return ranges;
+}
+
 export function invalidateMeshDoc(dir: string): void {
   docCache.delete(dir);
   metaCache.delete(dir);
@@ -56,21 +75,34 @@ export function invalidateMeshDoc(dir: string): void {
 
 /** Write the resident host model into the package as its meshdoc (host door). True only
  *  when doc.blob landed; parts metadata rides along best-effort. */
-export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[]): boolean {
-  // Tripwire (req_3049): a save wrote Door_Wall_1's doc with ZERO ranges while its
-  // outliner showed two parts — the host's range truth had been silently cleared
-  // somewhere in the session, and the save faithfully persisted the damage (the
-  // reopened doc merges every part into one). The doc still writes (disk mirrors the
-  // host honestly), but a parts/ranges mismatch screams so the culprit names itself
-  // the moment this recurs.
+export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[], recoveryRanges?: { lo: number; hi: number }[]): boolean {
+  // Save gate (req_3049/req_3226): writing fewer host ranges than outliner parts
+  // destroys the only durable part-boundary table. Never replace a recoverable old
+  // document with that degraded state. Geometry can still be saved once the host is
+  // re-seeded; until then the caller gets a loud failure and the old blob stays intact.
   if (parts && parts.length >= 2) {
-    let hostRanges = 0;
-    try {
-      const o = JSON.parse(host.__mesh_part_ranges?.() ?? 'null');
-      if (o?.ok && Array.isArray(o.ranges)) hostRanges = o.ranges.length;
-    } catch { /* unreadable host answer counts as zero — the scream below reports it */ }
-    if (hostRanges < parts.length) {
-      console.error(`[meshdoc] SAVING ${dir} WITH ${hostRanges} HOST PART RANGES while parts.json declares ${parts.length} parts (${parts.map((p) => p.name).join(', ')}) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)`);
+    const hostRangeCount = (): number => {
+      try {
+        const o = JSON.parse(host.__mesh_part_ranges?.() ?? 'null');
+        return o?.ok && Array.isArray(o.ranges) ? o.ranges.length : 0;
+      } catch { return 0; }
+    };
+    let hostRanges = hostRangeCount();
+    // A topology op used to clear the host mirror while the outliner retained its
+    // complete host-stamped ranges. Restore only that validated live truth; otherwise
+    // the refusal below preserves the previous document for explicit recovery.
+    if (!meshDocPartRangesComplete(parts.length, hostRanges) && recoveryRanges?.length === parts.length) {
+      const pairs = new Uint32Array(recoveryRanges.length * 2);
+      recoveryRanges.forEach((range, index) => {
+        pairs[index * 2] = range.lo;
+        pairs[index * 2 + 1] = range.hi;
+      });
+      host.__mesh_set_part_ranges?.(pairs);
+      hostRanges = hostRangeCount();
+    }
+    if (!meshDocPartRangesComplete(parts.length, hostRanges)) {
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: host has ${hostRanges} part range(s) while the outliner declares ${parts.length} (${parts.map((p) => p.name).join(', ')}) — preserving the previous document instead of persisting merged parts (req_3049/req_3226)`);
+      return false;
     }
   }
   const ok = host.__model_meshdoc_write?.(`${dir}/${DOC_BLOB}`) === 1;

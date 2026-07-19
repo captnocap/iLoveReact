@@ -17,6 +17,16 @@ function test(name: string, fn: () => void) {
   catch (error) { failed += 1; log(`FAIL  ${name}: ${(error as Error).message}`); }
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
+function faceNormalMagnitude(mesh: EditMesh, loop: number[]): number {
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < loop.length; i += 1) {
+    const a = mesh.verts[loop[i]], b = mesh.verts[loop[(i + 1) % loop.length]];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return Math.hypot(nx, ny, nz);
+}
 
 function taperedRing(): EditMesh {
   const bottom: V3[] = [[-4, 0, -4], [4, 0, -4], [4, 0, 4], [-4, 0, 4]];
@@ -33,6 +43,7 @@ test('loop cut follows the closed tapered quad ring by vertex identity', () => {
   assert(cut.faces.length === 8, `four quads should become eight, got ${cut.faces.length}`);
   assert(cut.verts.length === 12, `the four shared ring edges should mint four vertices, got ${cut.verts.length}`);
   for (const v of cut.verts.slice(source.verts.length)) assert(v[1] === 1, `tapered cut drifted off the edge ratio: y=${v[1]}`);
+  for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `cut emitted a crossed/degenerate face: ${face.loop.join(',')}`);
 });
 
 test('a terminal triangle is split and traversal stops there', () => {
@@ -71,7 +82,7 @@ test('multiple cuts use the reference recursive amended-offset spacing', () => {
   const cut = loopCutFromFace(mesh, { face: 0, direction: 0, cuts: 2, offset: 0.25 });
   const xs = cut.verts.slice(mesh.verts.length).map((vertex) => vertex[0]);
   assert(xs.some((x) => Math.abs(x - 0.16666667) < 1e-6), `missing recursive near cut: ${xs.join(', ')}`);
-  assert(xs.some((x) => Math.abs(x - 0.79166667) < 1e-6), `missing recursive far cut: ${xs.join(', ')}`);
+  assert(xs.some((x) => Math.abs(x - 0.375) < 1e-6), `missing recursive far cut: ${xs.join(', ')}`);
 });
 
 test('a shared selected edge overrides the direction slider like the reference', () => {

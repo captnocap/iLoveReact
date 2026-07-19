@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -57,6 +57,20 @@ test('parts metadata preserves organizational groups while ranking by host range
   ]);
   assert(rows[0]?.name === 'deck' && rows[1]?.name === 'divider', 'host-range ranking changed');
   assert(rows.every((row) => row.groupId === 'bridge' && row.groupName === 'Bridge deck'), 'group metadata was stripped from parts.json rows');
+});
+
+test('a degraded host cannot overwrite a multi-part mesh document', () => {
+  assert(!meshDocPartRangesComplete(15, 0), 'zero ranges were accepted for a 15-part model');
+  assert(!meshDocPartRangesComplete(15, 1), 'one merged range was accepted for a 15-part model');
+  assert(meshDocPartRangesComplete(15, 15), 'a complete range table was rejected');
+  assert(meshDocPartRangesComplete(1, 0), 'an unparted/single-part document should remain writable');
+});
+
+test('save recovery accepts only complete non-overlapping live ranges', () => {
+  const recovered = meshDocPartRangesFromRows([{ lo: 8, hi: 12 }, { lo: 0, hi: 8 }]);
+  assert(JSON.stringify(recovered) === JSON.stringify([{ lo: 0, hi: 8 }, { lo: 8, hi: 12 }]), 'valid ranges were not normalized by rank');
+  assert(meshDocPartRangesFromRows([{ lo: 0, hi: 8 }, { lo: 7, hi: 12 }]) === null, 'overlapping ranges were accepted');
+  assert(meshDocPartRangesFromRows([{ lo: 0, hi: 8 }, { lo: undefined, hi: undefined }]) === null, 'missing ranges were guessed');
 });
 
 test('package part extraction keeps only its range and normalizes face groups', () => {

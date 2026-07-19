@@ -415,14 +415,18 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
 // atlas readback. Best-effort — each piece is skipped when its host door or data is
 // absent. Call on any save of the active model. Returns true when the meshdoc landed
 // (callers strip their seed geometry only then — disk truth must exist first).
-export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>, parts?: MeshDocPartMeta[]): boolean {
+export function writeModelArtifacts(
+  pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
+  parts?: MeshDocPartMeta[],
+  recoveryRanges?: { lo: number; hi: number }[],
+): boolean {
   const dir = claimPackageDir(pkg);
   const meshDir = `${dir}/mesh`;
   const atlasDir = `${dir}/atlases`;
   mkdir(meshDir);
   mkdir(atlasDir);
   host.__model_mesh_write?.(`${meshDir}/base.blob`);
-  const docWritten = writeMeshDoc(dir, parts);
+  const docWritten = writeMeshDoc(dir, parts, recoveryRanges);
   let paintProgramWritten = true;
   try {
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');

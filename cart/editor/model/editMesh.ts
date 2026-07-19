@@ -1568,8 +1568,11 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
       const oppositeUV = lerpUV(uvAt(source, opposite[0]), uvAt(source, opposite[1]), ratio);
       faces[faceIndex] = {
         ...source,
-        loop: [opposite[0], centerSide, centerOpposite, side[0]],
-        uv: [uvAt(source, opposite[0]), sideUV, oppositeUV, uvAt(source, side[0])],
+        // Blockbench's MeshFace stores the literal reference array as a vertex set
+        // and getSortedVertices() restores polygon order. EditMesh loops are already
+        // ordered, so write the sorted order directly and avoid a bow-tie quad.
+        loop: [opposite[0], centerOpposite, centerSide, side[0]],
+        uv: [uvAt(source, opposite[0]), oppositeUV, sideUV, uvAt(source, side[0])],
       };
       faces.push({
         ...source,
@@ -1612,8 +1615,8 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
         const sourceNormal = faceNormal({ verts, faces: [] }, source);
         faces[faceIndex] = {
           ...source,
-          loop: [opposed, centerSide, centerOpposite, otherQuad],
-          uv: [uvAt(source, opposed), sideUV, oppositeUV, uvAt(source, otherQuad)],
+          loop: [opposed, centerOpposite, centerSide, otherQuad],
+          uv: [uvAt(source, opposed), oppositeUV, sideUV, uvAt(source, otherQuad)],
         };
         const newFaceIndex = faces.length;
         faces.push({
