@@ -20,6 +20,11 @@ export type V2 = [number, number];
  *  fields are the convergence layers (Part 1.5 of the playbook). */
 export type EditMeshFace = {
   loop: number[];
+  /** The authored render diagonal for a quad, stored as its two stable vertex ids.
+   *  Four positions do not define one surface when they are non-planar: the diagonal
+   *  is topology, not a lowering preference. Mirroring carries this edge to the twin
+   *  so equal-length diagonals cannot make the two sides fold opposite ways. */
+  diagonal?: [number, number];
   /** per-corner UV into the atlas, NORMALIZED [0,1] in a fixed square texture
    *  space, in the SAME order as `loop`. STORED DATA assigned once by `unwrap()`
    *  (Part 5 of the playbook) — geometry edits (gizmo move/resize, any vert move)
@@ -171,6 +176,7 @@ export function cloneMesh(m: EditMesh): EditMesh {
     verts: m.verts.map((v) => [v[0], v[1], v[2]] as V3),
     faces: m.faces.map((f) => {
       const nf: EditMeshFace = { loop: f.loop.slice() };
+      if (f.diagonal) nf.diagonal = [f.diagonal[0], f.diagonal[1]];
       if (f.uv) nf.uv = f.uv.map((u) => [u[0], u[1]] as V2);
       if (f.material != null) nf.material = f.material;
       if (f.glass != null) nf.glass = f.glass;
@@ -201,9 +207,13 @@ export function cloneMesh(m: EditMesh): EditMesh {
 export function mirrorMesh(m: EditMesh, axis: 0 | 1 | 2): EditMesh {
   const out = cloneMesh(m);
   for (const v of out.verts) v[axis] = -v[axis];
-  for (const f of out.faces) {
-    f.loop.reverse();
-    if (f.uv) f.uv.reverse();
+  for (let fi = 0; fi < out.faces.length; fi += 1) {
+    const f = out.faces[fi];
+    const source = m.faces[fi];
+    // Pin the source's actual physical diagonal before changing winding. Vertex ids
+    // are unchanged by this in-place reflection, so the same pair is its mirror edge.
+    if (source.loop.length === 4) f.diagonal = quadDiagonalVertices(m, source);
+    reverseFaceLoopKeepingAnchor(f);
   }
   if (out.mounts) for (const mt of out.mounts) {
     mt.position[axis] = -mt.position[axis];
@@ -447,9 +457,33 @@ export function symmetrize(m: EditMesh, axis: 0 | 1 | 2, keepPositive: boolean, 
     if (f.loop.length < 3) continue;
     let cs = 0; for (const vi of f.loop) cs += cut.verts[vi][axis]; cs = cs / f.loop.length - c;
     if (cs * keepSign < -eps) continue; // drop the far half
-    faces.push({ ...f, loop: f.loop.map((vi) => intern(cut.verts[vi])), uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined });
+    const sourceDiagonal = f.loop.length === 4 ? quadDiagonalVertices(cut, f) : undefined;
+    const keptBySource = new Map<number, number>();
+    const keptLoop = f.loop.map((vi) => {
+      const id = intern(cut.verts[vi]);
+      keptBySource.set(vi, id);
+      return id;
+    });
+    faces.push({
+      ...f,
+      loop: keptLoop,
+      uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined,
+      diagonal: sourceDiagonal ? [keptBySource.get(sourceDiagonal[0])!, keptBySource.get(sourceDiagonal[1])!] : undefined,
+    });
     if (Math.abs(cs) > eps) { // not a seam-coplanar face → also emit the reflected twin (winding reversed so it faces out)
-      faces.push({ ...f, loop: f.loop.map((vi) => intern(reflect(cut.verts[vi]))).reverse(), uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2).reverse() : undefined });
+      const twinBySource = new Map<number, number>();
+      const twin: EditMeshFace = {
+        ...f,
+        loop: f.loop.map((vi) => {
+          const id = intern(reflect(cut.verts[vi]));
+          twinBySource.set(vi, id);
+          return id;
+        }),
+        uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined,
+        diagonal: sourceDiagonal ? [twinBySource.get(sourceDiagonal[0])!, twinBySource.get(sourceDiagonal[1])!] : undefined,
+      };
+      reverseFaceLoopKeepingAnchor(twin);
+      faces.push(twin);
     }
   }
   // joints: keep the kept-side (+ seam) ones, mirror the off-seam ones (unique names).
@@ -564,21 +598,28 @@ export function faceCentroid(m: EditMesh, face: EditMeshFace): V3 {
  *  creases, while a box's 90° corners stay crisp. req_1326. */
 export const SMOOTH_CREASE_DEG = 40;
 
-/** Pick a quad's triangulation diagonal in a way that does NOT depend on how the
- *  loop happens to be rotated or wound — so a face and its mirror twin (whose loop
- *  is reflected AND reversed) fold along *corresponding* diagonals and therefore
- *  render identically. A naive fan from loop[0] always cuts loop[0]→loop[2]; under
- *  a mirror that vertex pair swaps to the OTHER diagonal, so a non-planar quad buckles
- *  one way on the left and the opposite way on the right (req_2057: one side reads
- *  convex, the other concave, with mismatched shading).
+/** Resolve a quad's authored diagonal to render triangles. Once `diagonal` exists,
+ *  loop rotation/winding cannot change the physical edge — a face and its mirror
+ *  twin therefore fold identically. A naive fan from loop[0] always cuts
+ *  loop[0]→loop[2]; under a mirror that pair can become the OTHER physical diagonal,
+ *  so a non-planar quad buckles one way on the left and the opposite way on the right
+ *  (req_2057/req_3236).
  *
- *  Criterion (both branches are purely positional / outward-normal based, hence
- *  reflection-invariant): prefer the diagonal whose two tris are BOTH wound with the
- *  face normal — that removes a reflex/concave fold, the same rule Split Quads uses;
+ *  Fallback for an unpinned face (both branches are positional/outward-normal
+ *  based): prefer the diagonal whose two tris are BOTH wound with the face normal —
+ *  that removes a reflex/concave fold, the same rule Split Quads uses;
  *  when both or neither diagonal stays convex, take the shorter diagonal as a stable
  *  tiebreak. Returns the two tris as LOOP-position triples (index into face.loop). */
 function quadTriPositions(m: EditMesh, face: EditMeshFace): [[number, number, number], [number, number, number]] {
   const L = face.loop;
+  if (face.diagonal) {
+    const [a, b] = face.diagonal;
+    const ai = L.indexOf(a), bi = L.indexOf(b);
+    if (ai >= 0 && bi >= 0 && ((ai + 2) % 4 === bi || (bi + 2) % 4 === ai)) {
+      const useAC = (ai % 2) === 0;
+      return useAC ? [[0, 1, 2], [0, 2, 3]] : [[1, 2, 3], [1, 3, 0]];
+    }
+  }
   const v = (li: number): V3 => m.verts[L[li]];
   const normal = faceNormal(m, face);
   const triOk = (i: number, j: number, k: number): boolean => dot(cross(sub(v(j), v(i)), sub(v(k), v(i))), normal) > 0;
@@ -591,6 +632,30 @@ function quadTriPositions(m: EditMesh, face: EditMeshFace): [[number, number, nu
     useAC = d2(0, 2) <= d2(1, 3); // both/neither convex → shorter diagonal (mirror-invariant)
   }
   return useAC ? [[0, 1, 2], [0, 2, 3]] : [[1, 2, 3], [1, 3, 0]];
+}
+
+/** The physical edge chosen by quadTriPositions, expressed in stable vertex ids. */
+function quadDiagonalVertices(m: EditMesh, face: EditMeshFace): [number, number] {
+  const first = quadTriPositions(m, face)[0];
+  return [face.loop[first[0]], face.loop[first[2]]];
+}
+
+/** Reverse face winding without rotating its topological anchor. For a quad this
+ *  maps source diagonal 0-2 to twin diagonal 0-2 even when both lengths tie. */
+function reverseFaceLoopKeepingAnchor(face: EditMeshFace): void {
+  if (face.loop.length > 1) face.loop = [face.loop[0], ...face.loop.slice(1).reverse()];
+  if (face.uv && face.uv.length > 1) face.uv = [face.uv[0], ...face.uv.slice(1).reverse()];
+}
+
+function remapFaceVertices(face: EditMeshFace, remap: Map<number, number>): EditMeshFace {
+  const diagonal = face.diagonal;
+  return {
+    ...face,
+    loop: face.loop.map((vertex) => remap.get(vertex)!),
+    diagonal: diagonal && remap.has(diagonal[0]) && remap.has(diagonal[1])
+      ? [remap.get(diagonal[0])!, remap.get(diagonal[1])!]
+      : undefined,
+  };
 }
 
 /** Lower to the framework's non-indexed triangle soup: fan-triangulate each face,
@@ -2164,7 +2229,7 @@ function pruneOrphanVerts(m: EditMesh): EditMesh {
   const remap = new Map<number, number>();
   const verts: V3[] = [];
   m.verts.forEach((v, i) => { if (used.has(i)) { remap.set(i, verts.length); verts.push([v[0], v[1], v[2]]); } });
-  return { ...m, verts, faces: m.faces.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) })) };
+  return { ...m, verts, faces: m.faces.map((face) => remapFaceVertices(face, remap)) };
 }
 
 export function bevelEdge(m: EditMesh, edge: Edge, width: number): EditMesh {
@@ -2414,9 +2479,11 @@ export function facesGeometry(m: EditMesh, faceIndices: Iterable<number>, push =
     if (!face || face.loop.length < 3) continue;
     const n = faceNormal(m, face) as Vec3;
     const off = (idx: number): Vec3 => { const p = m.verts[idx]; return [p[0] + n[0] * push, p[1] + n[1] * push, p[2] + n[2] * push]; };
-    const a = off(face.loop[0]);
-    for (let i = 1; i + 1 < face.loop.length; i += 1) {
-      g.tri(a, n, [0.5, 0.5], off(face.loop[i]), n, [0.5, 0.5], off(face.loop[i + 1]), n, [0.5, 0.5]);
+    const tris: [number, number, number][] = face.loop.length === 4
+      ? quadTriPositions(m, face)
+      : Array.from({ length: face.loop.length - 2 }, (_, i) => [0, i + 1, i + 2] as [number, number, number]);
+    for (const [a, b, c] of tris) {
+      g.tri(off(face.loop[a]), n, [0.5, 0.5], off(face.loop[b]), n, [0.5, 0.5], off(face.loop[c]), n, [0.5, 0.5]);
     }
   }
   return g.build();
@@ -2584,7 +2651,7 @@ export function deleteFaces(m: EditMesh, faceIndices: Iterable<number>): EditMes
   const remap = new Map<number, number>();
   const verts: V3[] = [];
   m.verts.forEach((v, i) => { if (used.has(i)) { remap.set(i, verts.length); verts.push([v[0], v[1], v[2]]); } });
-  const faces = kept.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) }));
+  const faces = kept.map((face) => remapFaceVertices(face, remap));
   return { ...m, verts, faces };
 }
 
@@ -2688,7 +2755,7 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
   const remap = new Map<number, number>();
   const verts: V3[] = [];
   m.verts.forEach((v, i) => { if (used.has(i)) { remap.set(i, verts.length); verts.push([v[0], v[1], v[2]]); } });
-  const faces = kept.map((f) => ({ ...f, loop: f.loop.map((vi) => remap.get(vi)!) }));
+  const faces = kept.map((face) => remapFaceVertices(face, remap));
   return { ...m, verts, faces };
 }
 

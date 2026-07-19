@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { cylinder, loopCutFromFace, type EditMesh, type V3 } from './editMesh';
+import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorMesh, symmetrize, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -27,6 +27,51 @@ function faceNormalMagnitude(mesh: EditMesh, loop: number[]): number {
   }
   return Math.hypot(nx, ny, nz);
 }
+
+function renderedQuadDiagonal(mesh: EditMesh, faceIndex: number): V3[] {
+  const face = mesh.faces[faceIndex];
+  const geometry = editMeshToGeometry(mesh, (candidate) => candidate === face);
+  const counts = new Map<string, { position: V3; count: number }>();
+  for (let corner = 0; corner < 6; corner += 1) {
+    const at = corner * 8;
+    const position: V3 = [geometry.positions[at], geometry.positions[at + 1], geometry.positions[at + 2]];
+    const key = position.map((value) => value.toFixed(6)).join(',');
+    const entry = counts.get(key);
+    if (entry) entry.count += 1;
+    else counts.set(key, { position, count: 1 });
+  }
+  return [...counts.values()].filter((entry) => entry.count === 2).map((entry) => entry.position);
+}
+
+const positionSetKey = (positions: V3[]) => positions
+  .map((position) => position.map((value) => value.toFixed(6)).join(','))
+  .sort()
+  .join('|');
+
+test('equal-length non-planar mirror quads carry the same physical diagonal', () => {
+  // A square in YZ with alternating X is the exact tie that defeats "shortest
+  // diagonal": both diagonals are length sqrt(8), but they produce opposite folds.
+  const source: EditMesh = {
+    verts: [[1, -1, -1], [2, -1, 1], [1, 1, 1], [2, 1, -1]],
+    faces: [{ loop: [0, 1, 2, 3] }],
+  };
+  const sourceDiagonal = renderedQuadDiagonal(source, 0);
+  assert(sourceDiagonal.length === 2, `source did not lower to one diagonal: ${sourceDiagonal.length}`);
+
+  const mirrored = mirrorMesh(source, 0);
+  const mirroredDiagonal = renderedQuadDiagonal(mirrored, 0);
+  const reflectedSource = sourceDiagonal.map(([x, y, z]) => [-x, y, z] as V3);
+  assert(positionSetKey(mirroredDiagonal) === positionSetKey(reflectedSource),
+    `mirror chose the other physical diagonal: ${positionSetKey(mirroredDiagonal)} != ${positionSetKey(reflectedSource)}`);
+
+  const paired = symmetrize(source, 0, true);
+  assert(paired.faces.length === 2, `symmetrize should emit a kept face and twin, got ${paired.faces.length}`);
+  const keptDiagonal = renderedQuadDiagonal(paired, 0);
+  const twinDiagonal = renderedQuadDiagonal(paired, 1);
+  const reflectedKept = keptDiagonal.map(([x, y, z]) => [-x, y, z] as V3);
+  assert(positionSetKey(twinDiagonal) === positionSetKey(reflectedKept),
+    `symmetrize twin chose the other physical diagonal: ${positionSetKey(twinDiagonal)} != ${positionSetKey(reflectedKept)}`);
+});
 
 function taperedRing(): EditMesh {
   const bottom: V3[] = [[-4, 0, -4], [4, 0, -4], [4, 0, 4], [-4, 0, 4]];

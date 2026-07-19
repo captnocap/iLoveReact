@@ -31,6 +31,10 @@ pub const Face = struct {
     vertices: std.ArrayListUnmanaged(u32) = .empty,
     uvs: std.ArrayListUnmanaged(Vec2) = .empty,
     source_triangles: std.ArrayListUnmanaged(u32) = .empty,
+    /// The physical render diagonal of a quad, as stable vertex ids. Four
+    /// non-planar positions do not define one surface without this edge; it is
+    /// authored topology and mirrored twins copy it explicitly.
+    diagonal: ?[2]u32 = null,
     group: u32,
     part: u32,
     alive: bool = true,
@@ -48,6 +52,7 @@ pub const Face = struct {
             .group = face.group,
             .part = face.part,
             .alive = face.alive,
+            .diagonal = face.diagonal,
         };
         errdefer out.deinit(allocator);
         try out.vertices.appendSlice(allocator, face.vertices.items);
@@ -332,6 +337,21 @@ pub const Mesh = struct {
             if (current == first) break;
         }
         if (current != first or face.vertices.items.len != boundary_count) return error.MalformedFaceBoundary;
+        // Recover the exact diagonal that triangulated an imported authored quad.
+        // Once inside the indexed model this edge is topology, never re-guessed from
+        // positions after a non-planar edit.
+        if (face.vertices.items.len == 4) {
+            var use_it = uses.iterator();
+            while (use_it.next()) |entry| {
+                if (entry.value_ptr.* < 2) continue;
+                const key = entry.key_ptr.*;
+                const candidate = [2]u32{ @intCast(key >> 32), @intCast(key & 0xffffffff) };
+                if (quadDiagonalKind(&face, candidate) != null) {
+                    face.diagonal = candidate;
+                    break;
+                }
+            }
+        }
         return face;
     }
 
@@ -531,12 +551,23 @@ pub const Mesh = struct {
                 if (@abs(mesh.vertices.items[vertex_id].position[axis] - center) > 1e-5) on_seam = false;
             }
             if (on_seam) continue;
+            // Clone before appending reflected vertices: an append may reallocate the
+            // mesh vertex table, but the face clone and its pinned diagonal stay valid.
+            var twin = try face.clone(mesh.allocator);
+            errdefer twin.deinit(mesh.allocator);
+            const source_diagonal = if (face.vertices.items.len == 4)
+                (face.diagonal orelse chosenQuadDiagonal(mesh, face))
+            else
+                null;
             var twin_vertices = std.ArrayListUnmanaged(u32).empty;
             defer twin_vertices.deinit(mesh.allocator);
-            var corner = face.vertices.items.len;
-            while (corner > 0) {
-                corner -= 1;
-                const source_id = face.vertices.items[corner];
+            // Reverse winding while keeping corner zero as the anchor. In the exact
+            // equal-diagonal case this maps 0-2 to the twin's corresponding 0-2,
+            // instead of silently rotating the loop and swapping physical diagonals.
+            var output_corner: usize = 0;
+            while (output_corner < face.vertices.items.len) : (output_corner += 1) {
+                const source_corner = if (output_corner == 0) 0 else face.vertices.items.len - output_corner;
+                const source_id = face.vertices.items[source_corner];
                 const source_position = mesh.vertices.items[source_id].position;
                 var twin_id = source_id;
                 if (@abs(source_position[axis] - center) > 1e-5) {
@@ -556,16 +587,30 @@ pub const Mesh = struct {
                 group_entry.value_ptr.* = mesh.next_group;
                 mesh.next_group += 1;
             }
-            var twin = try face.clone(mesh.allocator);
             twin.id = @intCast(mesh.faces.items.len);
             twin.group = group_entry.value_ptr.*;
             twin.vertices.clearRetainingCapacity();
             twin.uvs.clearRetainingCapacity();
             try twin.vertices.appendSlice(mesh.allocator, twin_vertices.items);
-            corner = face.uvs.items.len;
-            while (corner > 0) {
-                corner -= 1;
-                try twin.uvs.append(mesh.allocator, face.uvs.items[corner]);
+            output_corner = 0;
+            while (output_corner < face.uvs.items.len) : (output_corner += 1) {
+                const source_corner = if (output_corner == 0) 0 else face.uvs.items.len - output_corner;
+                try twin.uvs.append(mesh.allocator, face.uvs.items[source_corner]);
+            }
+            if (source_diagonal) |diagonal| {
+                const a_position = mesh.vertices.items[diagonal[0]].position;
+                const b_position = mesh.vertices.items[diagonal[1]].position;
+                const twin_a = if (@abs(a_position[axis] - center) <= 1e-5)
+                    diagonal[0]
+                else
+                    reflected_vertices.get(diagonal[0]) orelse return error.InvalidMirrorDiagonal;
+                const twin_b = if (@abs(b_position[axis] - center) <= 1e-5)
+                    diagonal[1]
+                else
+                    reflected_vertices.get(diagonal[1]) orelse return error.InvalidMirrorDiagonal;
+                twin.diagonal = .{ twin_a, twin_b };
+            } else {
+                twin.diagonal = null;
             }
             try mesh.faces.append(mesh.allocator, twin);
             changed = true;
@@ -1035,6 +1080,7 @@ pub const Mesh = struct {
         try out.vertices.appendSlice(mesh.allocator, vertices);
         try out.uvs.appendSlice(mesh.allocator, uvs);
         try out.source_triangles.appendSlice(mesh.allocator, source.source_triangles.items);
+        if (out.vertices.items.len == 4) out.diagonal = chosenQuadDiagonal(mesh, &out);
         return out;
     }
 
@@ -1044,6 +1090,7 @@ pub const Mesh = struct {
         face.uvs.clearRetainingCapacity();
         try face.vertices.appendSlice(mesh.allocator, vertices);
         try face.uvs.appendSlice(mesh.allocator, uvs);
+        face.diagonal = if (face.vertices.items.len == 4) chosenQuadDiagonal(mesh, face) else null;
     }
 
     fn reverseFace(mesh: *Mesh, face_id: u32) void {
@@ -1196,7 +1243,21 @@ pub const Mesh = struct {
         return true;
     }
 
-    fn quadTriangles(mesh: *const Mesh, face: *const Face) [2][3]usize {
+    /// null when `candidate` is not one of this quad's two physical diagonals;
+    /// true for loop positions 0-2, false for 1-3.
+    fn quadDiagonalKind(face: *const Face, candidate: [2]u32) ?bool {
+        if (face.vertices.items.len != 4) return null;
+        const matches = struct {
+            fn edge(a: u32, b: u32, edge_pair: [2]u32) bool {
+                return (a == edge_pair[0] and b == edge_pair[1]) or (a == edge_pair[1] and b == edge_pair[0]);
+            }
+        }.edge;
+        if (matches(face.vertices.items[0], face.vertices.items[2], candidate)) return true;
+        if (matches(face.vertices.items[1], face.vertices.items[3], candidate)) return false;
+        return null;
+    }
+
+    fn chosenQuadDiagonal(mesh: *const Mesh, face: *const Face) [2]u32 {
         const p0 = mesh.vertices.items[face.vertices.items[0]].position;
         const p1 = mesh.vertices.items[face.vertices.items[1]].position;
         const p2 = mesh.vertices.items[face.vertices.items[2]].position;
@@ -1208,6 +1269,17 @@ pub const Mesh = struct {
             ac_convex
         else
             distanceSquared(p0, p2) <= distanceSquared(p1, p3);
+        return if (use_ac)
+            .{ face.vertices.items[0], face.vertices.items[2] }
+        else
+            .{ face.vertices.items[1], face.vertices.items[3] };
+    }
+
+    fn quadTriangles(mesh: *const Mesh, face: *const Face) [2][3]usize {
+        const use_ac = if (face.diagonal) |diagonal|
+            (quadDiagonalKind(face, diagonal) orelse quadDiagonalKind(face, chosenQuadDiagonal(mesh, face)).?)
+        else
+            quadDiagonalKind(face, chosenQuadDiagonal(mesh, face)).?;
         return if (use_ac) .{ .{ 0, 1, 2 }, .{ 0, 2, 3 } } else .{ .{ 1, 2, 3 }, .{ 1, 3, 0 } };
     }
 
@@ -1635,6 +1707,46 @@ test "indexed symmetrize cuts authored faces without a fan-diagonal T vertex" {
         seam_vertices += 1;
     };
     try std.testing.expectEqual(@as(u32, 2), seam_vertices);
+}
+
+test "equal-length non-planar mirror quads carry the same physical diagonal" {
+    const allocator = std.testing.allocator;
+    const v = [4]Vec3{
+        .{ 1, -1, -1 },
+        .{ 2, -1, 1 },
+        .{ 1, 1, 1 },
+        .{ 2, 1, -1 },
+    };
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    try appendSoupTri(&soup, allocator, v[0], v[1], v[2]);
+    try appendSoupTri(&soup, allocator, v[0], v[2], v[3]);
+    const groups = [_]u32{ 0, 0 };
+    var mesh = try Mesh.fromSoup(allocator, soup.items, 2, groups[0..], null);
+    defer mesh.deinit();
+    try std.testing.expect(mesh.faces.items[0].diagonal != null);
+    try std.testing.expect(try mesh.symmetrize(0, 0, true));
+    try std.testing.expectEqual(@as(usize, 2), mesh.faces.items.len);
+
+    const kept_diagonal = mesh.faces.items[0].diagonal.?;
+    const twin_diagonal = mesh.faces.items[1].diagonal.?;
+    var reflected = [2]Vec3{
+        mesh.vertices.items[kept_diagonal[0]].position,
+        mesh.vertices.items[kept_diagonal[1]].position,
+    };
+    reflected[0][0] = -reflected[0][0];
+    reflected[1][0] = -reflected[1][0];
+    const twin = [2]Vec3{
+        mesh.vertices.items[twin_diagonal[0]].position,
+        mesh.vertices.items[twin_diagonal[1]].position,
+    };
+    const direct = distanceSquared(reflected[0], twin[0]) < 1e-10 and distanceSquared(reflected[1], twin[1]) < 1e-10;
+    const swapped = distanceSquared(reflected[0], twin[1]) < 1e-10 and distanceSquared(reflected[1], twin[0]) < 1e-10;
+    try std.testing.expect(direct or swapped);
+
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expectEqual(@as(u32, 4), lowered.tri_count);
 }
 
 test "edge loop cut cannot cross a coincident outliner part" {
