@@ -1,6 +1,6 @@
 # Editor UI sections — the prompting vocabulary (A–H)
 
-Active surface: `cart/editor/`. Last verified: 2026-07-16.
+Active surface: `cart/editor/`. Last verified: 2026-07-19.
 USER ASK req_2970 ("i am sick and tired of trying to point out a specific area
 of the ui that i want something to land in ... we are going to recategorize
 everything by a section number so prompting can turn into 'add that to
@@ -19,21 +19,21 @@ geometry.
 ```
 ┌──────────────────── A window chrome (37) ──────────────────────┐
 │  B   │        C        │  D  [action bar 36]       │           │
-│ rail │ content browser │  E     viewport (flexes)  │  G focus  │
-│ (48) │   (350 ⇄ 680)   │                           │  panel    │
-│      │                 │  F  [stage tabs]          │  (326)    │
+│ rail │ content browser │  E     viewport (flexes)  │ body│rail │
+│ (48) │  (0/350/680)    │                           │0/285│40  │
+│      │                 │  F  [stage tabs]          │           │
 └──────────────────── H status bar (31) ─────────────────────────┘
 ```
 
 | §  | Name            | Owner file                  | What lives there |
 |----|-----------------|-----------------------------|------------------|
 | A  | Window Chrome   | `shell/Chrome.tsx`          | "Shitty Games" brand · File/Edit/View/Build menu bar · Compile · Editor/Play toggle · window controls |
-| B  | Left Rail       | `shell/LeftRail.tsx`        | the vertical domain icon stack (Eye, Grid, Box, Actor, Data, Pipeline) |
-| C  | Content Browser | `library/LibraryPanel.tsx`  | the asset dock (req_3135): search · Favorites/Recent · content tree · count footer · selected-asset detail card; expand toggle attaches the thumbnail-grid column (tucked 350 ⇄ expanded 680, both fixed constants) |
+| B  | Left Rail       | `shell/LeftRail.tsx`        | contextual source-library buttons; pressing the active button again collapses/reopens C |
+| C  | Content Browser | `library/LibraryPanel.tsx`  | the contextual asset dock (req_3135/req_3266): search · Favorites/Recent · content tree · count footer · selected-asset detail card; collapsed 0 / tucked 350 / expanded grid 680 |
 | D  | Action Bar      | `stage/ToolOptions.tsx`     | THE toolbar (req_2552): mesh tools, snap, floor ▼/▲, view modes, the paint segment (`shell/PaintToolbar.tsx`), the map-paint bar (`stage/MapPaintBar.tsx`) |
 | E  | Stage           | `stage/Stage.tsx`           | the flexing center viewport — world / model / playtest / animation / material-focus surfaces + in-viewport docks (`BuildBar`, `MapPaintDock`) |
 | F  | Stage Tabs      | `stage/StageTabs.tsx`       | the open-document tab strip at the bottom edge of the stage |
-| G  | Focus Panel     | `inspector/Inspector.tsx`   | the right panel (inspector / layers / grid / mission / routes panes) + its 40px pane-switch rail |
+| G  | Focus Panel     | `inspector/Inspector.tsx`   | contextual focus body + persistent 40px rail; model view exposes Model / Paint / Rig, and pressing the active button again collapses/reopens the body |
 | H  | Status Bar      | `shell/BuildDock.tsx`       | build dock: undo/redo · build journal · eventbus · perf · memory · status line · coords |
 
 ## The rules
@@ -50,7 +50,8 @@ geometry.
   model context menu is E's).
 - **Sections wrap the fixed-region contract, they don't replace it** — each
   SECTIONS entry points at its `REGIONS` key (req_2627), which still owns the
-  pixel constants content lays out against.
+  pixel constants content lays out against. C and G can omit their body while
+  their rail remains; each open width is still a declared constant.
 - `grep -rn "SECTION D" cart/editor/` lands on the owning component.
 
 ## Mechanism (where the letters live)

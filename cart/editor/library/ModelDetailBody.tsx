@@ -1,6 +1,6 @@
 // editor/library/ModelDetailBody.tsx — the focused-model detail content
-// (header, folder contract, atlas sets, paint variants). Pure real-data display
-// from the model package; renders in the right inspector when a model is in focus.
+// (header, folder contract, atlas sets). Pure real-data display from the model
+// package; paint variants live in the model's dedicated Paint pane (req_3266).
 //
 // The card describes the model with facts NOTHING else on screen already shows. The
 // OUTLINER (right below) owns the parts and their count — so the card never restates
@@ -12,7 +12,6 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelThumbnail from './ModelThumbnail';
-import ModelPaintVariants from './ModelPaintVariants';
 
 // A folder-contract value counts as real only if it's present and not the "-" placeholder.
 const hasValue = (value?: string): value is string => !!value && value !== '-';
@@ -103,11 +102,6 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
           </ScrollView>
         </C.HW_ModelSection>
       ) : null}
-
-      {/* Real paint variants — whole saved paintings of the model, read live from the editor
-          store (honest-empty until one is saved). Replaces the old palette-slot swatches that
-          were fabricated here and mislabeled as variants. */}
-      <ModelPaintVariants key={model.id} model={model} />
 
     </>
   );

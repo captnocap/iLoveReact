@@ -1,18 +1,30 @@
-// SECTION B — Left Rail (see shell/regions.ts SECTIONS): the vertical domain
-// icon stack on the window's left edge (Eye, Grid, Box, Actor, Data, Pipeline).
+// SECTION B — Left Rail (see shell/regions.ts SECTIONS): the contextual source-
+// library buttons. Selecting the active button again folds Section C away.
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { DOMAINS } from '../data/content';
-import type { EditorState } from '../data/types';
+import { leftPanelsFor, resolvedPanelId, type LeftPanelId } from '../data/panelSystem';
+import type { WorkspaceDocumentKind } from '../data/types';
 
-export default function LeftRail({ state, onDomain }: { state: EditorState; onDomain: (domain: string) => void }) {
+export default function LeftRail(props: {
+  documentKind: WorkspaceDocumentKind;
+  activePane: string;
+  collapsed: boolean;
+  onPane: (pane: LeftPanelId) => void;
+}) {
+  const panes = leftPanelsFor(props.documentKind);
+  const activePane = resolvedPanelId(panes, props.activePane);
   return (
     <C.HW_LeftRail>
-      {DOMAINS.map(([domain, icon]) => {
-        const Btn = state.activeDomain === domain ? C.HW_RailButtonOn : C.HW_RailButton;
+      {panes.map((pane) => {
+        const active = activePane === pane.id;
+        const Btn = active ? C.HW_RailButtonOn : C.HW_RailButton;
         return (
-          <Btn key={domain} onPress={() => onDomain(domain)}>
-            <Icon name={icon} size={15} color={accentFor(state.activeDomain === domain ? 'primary' : 'textDim')} />
+          <Btn
+            key={pane.id}
+            tooltip={active ? `${pane.label} — ${props.collapsed ? 'open panel' : 'collapse panel'}` : `Open ${pane.label}`}
+            onPress={() => props.onPane(pane.id)}
+          >
+            <Icon name={pane.icon} size={15} color={accentFor(active ? 'primary' : 'textDim')} />
           </Btn>
         );
       })}

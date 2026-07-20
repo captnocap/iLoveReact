@@ -101,8 +101,8 @@ classifier({
   HW_LeftRail: { type: 'Box', style: { width: REGIONS.leftRail.width, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, paddingBottom: 8, backgroundColor: 'theme:surface', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_RailButton: { type: 'Pressable', style: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_RailButtonOn: { type: 'Pressable', style: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
-  // CONTENT BROWSER region (req_2627): fixed left panel. Two fixed states
-  // (req_3135): tucked micro dock and the expanded dock with the grid attached.
+  // CONTENT BROWSER region (req_2627): when open, two fixed states (req_3135):
+  // tucked micro dock and expanded dock. Collapse omits this body; rail remains.
   HW_SidePanel: { type: 'Box', style: { width: REGIONS.contentBrowser.width, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_SidePanelWide: { type: 'Box', style: { width: REGIONS.contentBrowser.expandedWidth, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   // ── The asset dock chrome (req_3135, concept 4): Assets header with the
@@ -110,7 +110,7 @@ classifier({
   // selected-asset detail card. Expanded attaches the concept-1 grid column.
   HW_LibHead: { type: 'Box', style: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 8, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_LibTitle: { type: 'Text', fontSize: 13, color: 'theme:text', style: { fontWeight: 800 } },
-  HW_LibHeadButton: { type: 'Pressable', style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
+  HW_PanelHeadButton: { type: 'Pressable', style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_LibSearchRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 10, marginRight: 10, marginTop: 8, marginBottom: 6 } },
   HW_LibSearchBox: { type: 'Box', style: { flexGrow: 1, minWidth: 0, height: 26, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 6, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' } },
   HW_LibSearchInput: { type: 'TextInput', style: { flexGrow: 1, minWidth: 0, height: 22, borderWidth: 0, backgroundColor: 'transparent', color: 'theme:textSecondary', fontSize: 11 } },
@@ -484,7 +484,8 @@ classifier({
   HW_StatusBar: { type: 'Box', style: { height: 28, flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
   HW_StatusText: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700 } },
 
-  // FOCUS PANEL region (req_2627): fixed right panel = inspector column + pane rail.
+  // FOCUS PANEL region (req_2627/req_3266): open body + persistent pane rail.
+  // Collapsed Inspector renders HW_RightRail alone, returning body width to Stage.
   HW_RightPanel: { type: 'Box', style: { width: REGIONS.focusPanel.width, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_Inspector: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column' } },
   HW_InspectorBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'scroll' } },

@@ -1,19 +1,18 @@
 // cart/editor/shell/regions.ts — the FIXED-REGION LAYOUT CONTRACT (req_2627).
 //
-// The editor window breaks into primitively-named FIXED regions. Each region's
-// dimensions are CONSTANTS — they never shift with app state; only the content
-// inside a region swaps. Everything rendered inside a region therefore knows
-// its available space as a constant imported from HERE, never deduced from app
-// state. This module codifies the editor's CURRENT real geometry (it does not
-// redesign it) so workspace.cls.ts and panel content share one source of truth.
+// The editor window breaks into primitively-named regions. Every OPEN region's
+// dimensions are CONSTANTS; the center viewport is the sole flexing region.
+// Sections C and G may remove their panel BODY while their adjacent fixed rail
+// remains, giving that width back to the viewport (req_3266). Content still lays
+// out against constants imported from HERE, never window measurements.
 //
 // Region map (the user's vocabulary), top to bottom / left to right:
 //
 //   ┌──────────────────── A window chrome (37) ──────────────────────┐
 //   │  B   │        C        │  D  [action bar 36]       │           │
-//   │ rail │ content browser │  E     viewport (flexes)  │  G focus  │
-//   │ (48) │      (350)      │                           │  panel    │
-//   │      │                 │  F  [stage tabs]          │  (326)    │
+//   │ rail │ content browser │  E     viewport (flexes)  │ body│rail │
+//   │ (48) │   (0/350/680)   │                           │0/285│40  │
+//   │      │                 │  F  [stage tabs]          │           │
 //   └──────────────────── H status bar (31) ─────────────────────────┘
 //
 // Content rules that hang off this contract: no whole-panel scrolling (nested
@@ -31,12 +30,12 @@
 // that to land in the right file.
 export const SECTIONS = {
   A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · menu bar · active map · Editor/Play toggle · window controls' },
-  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'the vertical domain icon stack (Eye, Grid, Box, Actor, Data)' },
-  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'the asset dock (req_3135): search · Favorites/Recent · content tree · count footer · detail card; expand toggle attaches the thumbnail-grid column (350 ⇄ 680)' },
+  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'contextual source-library buttons; active-button repeat collapses/reopens C' },
+  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'the contextual asset dock (req_3135/req_3266): collapsed (0), tucked tree (350), or tree + thumbnail grid (680)' },
   D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
   E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },
   F: { region: 'viewport', name: 'Stage Tabs', file: 'stage/StageTabs.tsx', contains: 'the open-document tab strip at the bottom edge of the stage' },
-  G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'the right panel (inspector / layers / grid) + its 40px pane-switch rail' },
+  G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'contextual focus body + persistent 40px rail; model view exposes Model / Paint / Rig, active-button repeat collapses/reopens the body' },
   H: { region: 'statusBar', name: 'Status Bar', file: 'shell/BuildDock.tsx', contains: 'build dock: undo/redo · build journal · eventbus · perf · memory · status line · coords' },
 } as const;
 
@@ -53,13 +52,12 @@ const CHROME_HEIGHT = 37; // window chrome: brand + menu bar + active map + rout
 const ACTION_BAR_HEIGHT = 36; // action bar: THE toolbar row above the stage (HW_ToolOptions)
 const LEFT_RAIL_WIDTH = 48; // domain rail on the far left edge (HW_LeftRail)
 const CONTENT_BROWSER_WIDTH = 350; // content browser, left panel (HW_SidePanel)
-// The content browser is the ONE region with TWO fixed states (req_3135): the
-// tucked micro dock (350) and the expanded dock with the thumbnail grid
-// attached to the tree's right. Both are constants — content still lays out
-// against fixed numbers per state; nothing is deduced from window size.
+// When present, the content browser has TWO fixed states (req_3135): the tucked
+// micro dock (350) and expanded tree + thumbnail grid (680). Its collapsed state
+// omits the body entirely; the separate 48px rail remains.
 const CONTENT_BROWSER_WIDTH_EXPANDED = 680; // content browser, expanded (HW_SidePanelWide)
 const CONTENT_BROWSER_TREE_WIDTH = 218; // expanded mode: the fixed tree column (HW_LibTreeCol)
-const FOCUS_PANEL_WIDTH = 326; // focus panel, right panel (HW_RightPanel)
+const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
 const STATUS_BAR_HEIGHT = 31; // status bar: the bottom build dock (HW_BuildDock)
 
@@ -70,7 +68,7 @@ export const REGIONS = {
   /** ACTION BAR — the tool row (ToolOptions) pinned under the chrome, above the stage. */
   actionBar: { height: ACTION_BAR_HEIGHT },
 
-  /** LEFT RAIL — the domain icon strip on the window's left edge. */
+  /** LEFT RAIL — contextual source-library buttons on the window's left edge. */
   leftRail: { width: LEFT_RAIL_WIDTH },
 
   /**
@@ -93,7 +91,7 @@ export const REGIONS = {
   viewport: { flexes: true },
 
   /**
-   * FOCUS PANEL — the right panel (inspector / piece focus / model focus).
+   * FOCUS PANEL — the open right body plus its persistent contextual rail.
    * bodyWidth = outer minus its left border and the pane-switch rail;
    * innerWidth = bodyWidth minus the inspector body's 10px gutters — the
    * constant every focus-panel card/section lays out against.

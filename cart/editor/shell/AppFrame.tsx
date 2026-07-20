@@ -159,6 +159,15 @@ import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
+import {
+  leftPanelForFolder,
+  leftPanelsFor,
+  pressPanelButton,
+  resolvedPanelId,
+  rightPanelsFor,
+  type LeftPanelId,
+  type RightPanelId,
+} from '../data/panelSystem';
 import { playerStarterParts } from '../model/playerStarter';
 import { buildPieceStarterParts } from '../model/buildPieceStarter';
 import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
@@ -1439,15 +1448,26 @@ export default function AppFrame() {
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
+  const activeWorkspaceDocument = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)
+    ?? state.workspaceDocuments[0]!;
+  const activeDocumentKind = activeWorkspaceDocument.kind;
+  const contextualLeftPanels = leftPanelsFor(activeDocumentKind);
+  const activeLeftPanel = resolvedPanelId(contextualLeftPanels, state.activeDomain);
+  // A document switch may make the prior source pane unavailable (World/Build →
+  // Model, for example). Project the new context's default immediately without
+  // overwriting the prior selection; choosing a rail button commits the change.
+  const effectiveContentFolder = state.activeDomain === activeLeftPanel
+    ? state.contentFolder
+    : contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!.folder;
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
   const activeAsset = assetById(state.activeAssetId, state.assetOverrides);
   const contextPanelMode = panelModeFor(state, activeObject);
-  const panelMode = tabForContentFolder(state.contentFolder) ?? contextPanelMode;
+  const panelMode = tabForContentFolder(effectiveContentFolder) ?? contextPanelMode;
 
   const filteredAssets = useMemo(() => {
     const needle = state.search.trim().toLowerCase();
     return catalogAssets
-      .filter((asset) => assetMatchesContentFolder(asset, state.contentFolder))
+      .filter((asset) => assetMatchesContentFolder(asset, effectiveContentFolder))
       .filter((asset) => {
         if (!needle) return true;
         const haystack = [
@@ -1461,7 +1481,7 @@ export default function AppFrame() {
         return haystack.includes(needle);
       })
       .sort(rankAssets);
-  }, [catalogAssets, panelMode, state.contentFolder, state.search]);
+  }, [catalogAssets, effectiveContentFolder, state.search]);
 
   // editMs is the REAL measured apply time of this edit (Date.now around the
   // reducer). emptyMs/richMs mirror it — we don't yet measure the empty-vs-rich
@@ -2645,11 +2665,52 @@ export default function AppFrame() {
     });
   };
 
-  const selectContentFolder = (contentFolder: ContentFolderId) => {
+  const pressLeftPanel = (pressed: LeftPanelId) => {
     setState((prev) => {
+      const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
+      const panes = leftPanelsFor(documentKind);
+      const active = resolvedPanelId(panes, prev.activeDomain);
+      const result = pressPanelButton(active, pressed, prev.leftPanelCollapsed);
+      const changedPane = prev.activeDomain !== pressed;
+      const rootFolder = panes.find((pane) => pane.id === pressed)?.folder ?? prev.contentFolder;
+      const contentFolder = changedPane ? rootFolder : prev.contentFolder;
       const tab = tabForContentFolder(contentFolder);
       return {
         ...prev,
+        activeDomain: result.active,
+        leftPanelCollapsed: result.collapsed,
+        contentFolder,
+        activeTab: tab ?? prev.activeTab,
+        assetPage: changedPane ? 0 : prev.assetPage,
+        expandedFolders: { ...prev.expandedFolders, [contentFolder]: true },
+        status: result.collapsed ? `${pressed} library collapsed` : `${pressed} library open`,
+      };
+    });
+  };
+
+  const pressRightPanel = (pressed: RightPanelId) => {
+    setState((prev) => {
+      const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
+      const active = resolvedPanelId(rightPanelsFor(documentKind), prev.rightPane);
+      const result = pressPanelButton(active, pressed, prev.rightPanelCollapsed);
+      return {
+        ...prev,
+        rightPane: result.active,
+        rightPanelCollapsed: result.collapsed,
+        status: result.collapsed ? `${pressed} focus collapsed` : `${pressed} focus open`,
+      };
+    });
+  };
+
+  const selectContentFolder = (contentFolder: ContentFolderId) => {
+    setState((prev) => {
+      const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
+      const fallback = resolvedPanelId(leftPanelsFor(documentKind), prev.activeDomain);
+      const tab = tabForContentFolder(contentFolder);
+      return {
+        ...prev,
+        activeDomain: leftPanelForFolder(documentKind, contentFolder, fallback),
+        leftPanelCollapsed: false,
         contentFolder,
         activeTab: tab ?? prev.activeTab,
         assetPage: 0,
@@ -5118,9 +5179,14 @@ export default function AppFrame() {
       <>
       <C.HW_Body>
         <RenderProbe id="Left Rail">
-          <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
+          <LeftRail
+            documentKind={activeDocumentKind}
+            activePane={activeLeftPanel}
+            collapsed={state.leftPanelCollapsed}
+            onPane={pressLeftPanel}
+          />
         </RenderProbe>
-        <RenderProbe id="Content Browser">
+        {!state.leftPanelCollapsed ? <RenderProbe id="Content Browser">
           <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
@@ -5128,7 +5194,7 @@ export default function AppFrame() {
             mode={panelMode}
             activeAsset={activeAsset}
             activeObject={activeObject}
-            contentFolder={state.contentFolder}
+            contentFolder={effectiveContentFolder}
             expandedFolders={state.expandedFolders}
             onSearch={(search) => setState((prev) => ({ ...prev, search, assetPage: 0 }))}
             onAsset={selectAsset}
@@ -5160,7 +5226,7 @@ export default function AppFrame() {
             onModelDuplicate={duplicateModel}
             onModelDelete={deleteModel}
           />
-        </RenderProbe>
+        </RenderProbe> : null}
         <RenderProbe id="Workspace">
           <Workspace
             state={workspaceState}
@@ -5221,7 +5287,8 @@ export default function AppFrame() {
             state={state}
             activeObject={activeObject}
             activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
-            onPane={(rightPane) => setState((prev) => ({ ...prev, rightPane, status: `inspector pane: ${rightPane}` }))}
+            onPane={pressRightPanel}
+            onCollapse={() => setState((prev) => ({ ...prev, rightPanelCollapsed: true, status: 'focus panel collapsed' }))}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}

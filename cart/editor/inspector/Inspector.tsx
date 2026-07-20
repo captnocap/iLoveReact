@@ -1,7 +1,7 @@
-// SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the right panel
-// (inspector / layers / grid) + its pane-switch rail.
+// SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the contextual focus
+// body + its persistent pane rail. The active rail button folds the body away.
 import { useEffect, useState } from 'react';
-import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { Pressable, Row } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 // Fixed-region contract (req_2627): the UV preview sizes itself from the focus
@@ -9,9 +9,10 @@ import { C, accentFor } from '../workspace.cls';
 import { REGIONS } from '../shell/regions';
 import type { ModelFocusBridge, ModelFocusShape } from '../stage/ModelView';
 import { commandById } from '../data/commands';
-import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, effectiveModelPackage } from '../data/content';
+import { FLOORS, PRESETS, SNAP_MODES, effectiveModelPackage } from '../data/content';
+import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
 import { objectMetricRows } from '../data/readouts';
-import type { Asset, EditorState, WorldObject } from '../data/types';
+import type { Asset, EditorState, WorkspaceDocumentKind, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
 import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
@@ -22,7 +23,8 @@ import GlobalsSection from './GlobalsSection';
 import GcStressSection from './GcStressSection';
 import PresetSection from './PresetSection';
 import ModelDetailBody from '../library/ModelDetailBody';
-import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
+import ModelPaintVariants from '../library/ModelPaintVariants';
+import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
@@ -254,14 +256,26 @@ function PaintLayersSection({ bridge, onDocumentMutated }: { bridge: ModelFocusB
 // The FOCUS PANEL's pane-switch rail — the fixed 40px icon column on the
 // panel's right edge (REGIONS.focusPanel.railWidth). One component, every
 // branch: the rail is part of the region, not of any one panel mode.
-function FocusRail(props: { activePane: string; onPane: (pane: string) => void }) {
+function FocusRail(props: {
+  documentKind: WorkspaceDocumentKind;
+  activePane: string;
+  collapsed: boolean;
+  onPane: (pane: RightPanelId) => void;
+}) {
+  const panes = rightPanelsFor(props.documentKind);
+  const activePane = resolvedPanelId(panes, props.activePane);
   return (
     <C.HW_RightRail>
-      {RIGHT_PANES.map(([pane, icon]) => {
-        const Btn = props.activePane === pane ? C.HW_RailButtonOn : C.HW_RailButton;
+      {panes.map((pane) => {
+        const active = activePane === pane.id;
+        const Btn = active ? C.HW_RailButtonOn : C.HW_RailButton;
         return (
-          <Btn key={pane} onPress={() => props.onPane(pane)}>
-            <Icon name={icon} size={14} color={accentFor(props.activePane === pane ? 'primary' : 'textDim')} />
+          <Btn
+            key={pane.id}
+            tooltip={active ? `${pane.label} — ${props.collapsed ? 'open panel' : 'collapse panel'}` : `Open ${pane.label}`}
+            onPress={() => props.onPane(pane.id)}
+          >
+            <Icon name={pane.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />
           </Btn>
         );
       })}
@@ -273,7 +287,8 @@ export default function Inspector(props: {
   state: EditorState;
   activeObject: WorldObject;
   activeAsset: Asset;
-  onPane: (pane: string) => void;
+  onPane: (pane: RightPanelId) => void;
+  onCollapse: () => void;
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
   onModelBrush: (brush: Brush) => void;
@@ -308,6 +323,13 @@ export default function Inspector(props: {
     ? effectiveModelPackage(activeDocument.sourceId, props.state.modelOverrides, props.state.modelDupes)
     : null;
   const activeCommand = commandById(props.state.activeCommandId);
+  const documentKind = activeDocument?.kind ?? 'world';
+  const activePane = resolvedPanelId(rightPanelsFor(documentKind), props.state.rightPane);
+  // Collapse removes only the body. The rail remains at the stage edge so the
+  // same active button can restore it without a separate hidden affordance.
+  if (props.state.rightPanelCollapsed) {
+    return <FocusRail documentKind={documentKind} activePane={activePane} collapsed onPane={props.onPane} />;
+  }
   const pathRows = props.activeObject.kind === 'TILE'
     ? [
       ['walkable', '—'],
@@ -345,7 +367,9 @@ export default function Inspector(props: {
           <C.HW_PanelHead>
             <C.HW_Kicker>GLOBALS · PHYSICS</C.HW_Kicker>
             <C.HW_Spacer />
-            <Icon name="Gauge" size={12} color={accentFor('textFaint')} />
+            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
+              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            </C.HW_PanelHeadButton>
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
             <GlobalsSection
@@ -356,7 +380,7 @@ export default function Inspector(props: {
             <GcStressSection />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
-        <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -372,7 +396,9 @@ export default function Inspector(props: {
           <C.HW_PanelHead>
             <C.HW_Kicker>{selectedPiece ? 'PIECE FOCUS' : 'BUILD'}</C.HW_Kicker>
             <C.HW_Spacer />
-            <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
+              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            </C.HW_PanelHeadButton>
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
             <PieceBody
@@ -385,7 +411,7 @@ export default function Inspector(props: {
             />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
-        <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -406,21 +432,23 @@ export default function Inspector(props: {
     // (REGIONS.grid.labelWidth label + REGIONS.grid.verbColWidth verb).
     const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
+    const paneTitle = activePane === 'paint' ? 'MODEL · PAINT' : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
     return (
       <C.HW_RightPanel>
         <C.HW_Inspector>
           <C.HW_PanelHead>
-            <C.HW_Kicker>MODEL FOCUS</C.HW_Kicker>
+            <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
             <C.HW_Spacer />
-            <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
+              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            </C.HW_PanelHeadButton>
           </C.HW_PanelHead>
-          {/* NO whole-panel scrolling (req_2627): the model focus body is a fixed
-              column of budgeted slices — the outliner and paint-variant lists carry
-              their OWN bounded nested scrolls. */}
+          {/* Each model pane remains a fixed column of budgeted slices (req_2627).
+              Lists carry their own bounded scrolling; switching panes replaces the
+              body instead of stacking every authoring concern into one column. */}
           <C.HW_InspectorBodyFixed>
-            {/* The model's NAME, editable in place (req_2620 S — the old studio's
-                name field). Typing renames through the ONE write-through path:
-                manifest for on-disk models, pending-until-first-save otherwise. */}
+            {/* Identity + save state stay present across Model/Paint/Rig so an edit
+                never loses its durable commit verb when the focus body switches. */}
             <C.HW_RenameBar>
               <C.HW_FormLabel>name</C.HW_FormLabel>
               <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
@@ -435,63 +463,54 @@ export default function Inspector(props: {
                 <C.HW_VerbText>Save</C.HW_VerbText>
               </C.HW_VerbFixed>
             </C.HW_RenameBar>
-            <ModelDetailBody model={activeModel} />
-            {/* SHAPE — the studio count strip + bounds line (req_2618 G), fed by the
-                model-focus bridge; honest-empty until the viewer publishes. */}
-            <ShapeSection shape={focusBridge?.shape ?? null} />
-            {/* RIG (req_2712/2713) — what this model's bones MEAN when exported:
-                searchable pockets, placement surfaces, seats, cover, dynamics.
-                The draft edits live; Export → Prop / Save compile it into the
-                package manifest's skeleton (disk truth, req_2718). */}
-            <RigSection
-              rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
-              onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
-            />
-            {/* The OUTLINER — parts of this multi-part model (add / select / hide / delete).
-                Only primitive-authored models carry parts state. */}
-            {modelParts ? (
-              <ModelOutliner
-                parts={modelParts}
-                activeId={props.state.modelActivePartId}
-                selectedIds={selectedSet}
-                onSelect={props.outlinerHandlers.onSelectPart}
-                onRename={props.outlinerHandlers.onRenamePart}
-                onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
-                onDuplicate={props.outlinerHandlers.onDuplicatePart}
-                onDelete={props.outlinerHandlers.onDeletePart}
-                onSelectGroup={props.outlinerHandlers.onSelectPartGroup}
-                onRenameGroup={props.outlinerHandlers.onRenamePartGroup}
-                onToggleVisibleGroup={props.outlinerHandlers.onToggleVisiblePartGroup}
-                onDuplicateGroup={props.outlinerHandlers.onDuplicatePartGroup}
-                onDissolveGroup={props.outlinerHandlers.onDissolvePartGroup}
-                onGroupSelected={props.outlinerHandlers.onGroupSelectedParts}
-                onUngroupSelected={props.outlinerHandlers.onUngroupSelectedParts}
-                onMoveItem={props.outlinerHandlers.onMoveOutlinerItem}
-                onAdd={props.outlinerHandlers.onAddPart}
-                onImportModel={props.outlinerHandlers.onImportModel}
-                roleNamer={props.outlinerHandlers.roleNamer}
-                onStartRoleNamer={props.outlinerHandlers.onStartRoleNamer}
-                onSkipRole={props.outlinerHandlers.onSkipRole}
-                onCancelRoleNamer={props.outlinerHandlers.onCancelRoleNamer}
+            {activePane === 'inspector' ? (
+              <>
+                <ModelDetailBody model={activeModel} />
+                <ShapeSection shape={focusBridge?.shape ?? null} />
+                {/* The OUTLINER is geometry/selection focus, not rig or paint state. */}
+                {modelParts ? (
+                  <ModelOutliner
+                    parts={modelParts}
+                    activeId={props.state.modelActivePartId}
+                    selectedIds={selectedSet}
+                    onSelect={props.outlinerHandlers.onSelectPart}
+                    onRename={props.outlinerHandlers.onRenamePart}
+                    onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
+                    onDuplicate={props.outlinerHandlers.onDuplicatePart}
+                    onDelete={props.outlinerHandlers.onDeletePart}
+                    onSelectGroup={props.outlinerHandlers.onSelectPartGroup}
+                    onRenameGroup={props.outlinerHandlers.onRenamePartGroup}
+                    onToggleVisibleGroup={props.outlinerHandlers.onToggleVisiblePartGroup}
+                    onDuplicateGroup={props.outlinerHandlers.onDuplicatePartGroup}
+                    onDissolveGroup={props.outlinerHandlers.onDissolvePartGroup}
+                    onGroupSelected={props.outlinerHandlers.onGroupSelectedParts}
+                    onUngroupSelected={props.outlinerHandlers.onUngroupSelectedParts}
+                    onMoveItem={props.outlinerHandlers.onMoveOutlinerItem}
+                    onAdd={props.outlinerHandlers.onAddPart}
+                    onImportModel={props.outlinerHandlers.onImportModel}
+                    roleNamer={props.outlinerHandlers.roleNamer}
+                    onStartRoleNamer={props.outlinerHandlers.onStartRoleNamer}
+                    onSkipRole={props.outlinerHandlers.onSkipRole}
+                    onCancelRoleNamer={props.outlinerHandlers.onCancelRoleNamer}
+                  />
+                ) : null}
+                <ViewBookmarksSection bridge={focusBridge} />
+              </>
+            ) : activePane === 'paint' ? (
+              <>
+                <ModelPaintVariants key={activeModel.id} model={activeModel} />
+                <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
+                <PaintLayersSection bridge={focusBridge} onDocumentMutated={props.onModelDocumentMutated} />
+              </>
+            ) : (
+              <RigSection
+                rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
+                onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
               />
-            ) : null}
-            {/* UV — the atlas panel relocated from the floating viewport card into this
-                fixed panel (req_2643 OO), scoped-by-name to the active outliner part
-                (req_2619 P). Sits below the outliner so a tall preview can never crowd
-                the part list out of the non-scrolling body. */}
-            <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
-            {/* VIEW BOOKMARKS (req_3074) — pinned camera poses, below the atlas/scope
-                card: row click recalls, trash removes, + pins the current view. */}
-            <ViewBookmarksSection bridge={focusBridge} />
-            {/* PAINT LAYERS (req_2672) — the stroke program's layer table, live whenever
-                the doc has paint (host truth; hidden honest-empty before any painting). */}
-              <PaintLayersSection bridge={focusBridge} onDocumentMutated={props.onModelDocumentMutated} />
-            {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):
-                paint controls belong at the top as icons, not a bottom-right text-pill panel.
-                The Inspector now stays focused on selection/material inspection. */}
+            )}
           </C.HW_InspectorBodyFixed>
         </C.HW_Inspector>
-        <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -499,9 +518,11 @@ export default function Inspector(props: {
     <C.HW_RightPanel>
       <C.HW_Inspector>
         <C.HW_PanelHead>
-          <C.HW_Kicker>{props.state.rightPane.toUpperCase()}</C.HW_Kicker>
+          <C.HW_Kicker>{`${documentKind.toUpperCase()} FOCUS`}</C.HW_Kicker>
           <C.HW_Spacer />
-          <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+          <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
+            <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+          </C.HW_PanelHeadButton>
         </C.HW_PanelHead>
         <C.HW_ObjectHead>
           <C.HW_Tag><C.HW_TagText>{props.activeObject.kind}</C.HW_TagText></C.HW_Tag>
@@ -540,7 +561,7 @@ export default function Inspector(props: {
         <ReadOnlySection title="PLACEMENT" color="primary" rows={pathRows} />
         <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
       </C.HW_Inspector>
-      <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
+      <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
     </C.HW_RightPanel>
   );
 }

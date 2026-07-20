@@ -465,6 +465,7 @@ export type EditorState = {
   exportCharacterPrompt?: boolean | null;
   presetMenuOpen: boolean;
   actionMenu: Menu;
+  /** Contextual source-library selection; resolved against the center document. */
   activeDomain: string;
   activeTab: LibraryTab;
   activeCommandId: string;
@@ -525,6 +526,8 @@ export type EditorState = {
   // Content browser dock state (req_3135): tucked micro dock (false) or the
   // expanded tree + thumbnail-grid dock (true). Both widths are region constants.
   libraryExpanded: boolean;
+  /** The source-library body is absent while its left rail remains available. */
+  leftPanelCollapsed: boolean;
   search: string;
   surfacePreset: string;
   snapIndex: number;
@@ -534,7 +537,10 @@ export type EditorState = {
   wallsDown: boolean;
   workspaceDocuments: WorkspaceDocument[];
   activeWorkspaceDocumentId: string;
+  /** Contextual focus selection; model documents currently expose Model/Paint/Rig. */
   rightPane: string;
+  /** The focus body is absent while its right rail remains available. */
+  rightPanelCollapsed: boolean;
   contextOpen: boolean;
   modelTool: ModelToolSnapshot;
   status: string;

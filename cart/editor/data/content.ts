@@ -12,18 +12,6 @@ import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, Mode
 import type { BuildKind } from '../world/buildCatalog';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
 
-export const DOMAINS = [
-  ['world', 'Eye'],
-  ['grid', 'Grid3X3'],
-  ['pieces', 'Box'],
-  ['actors', 'UserRound'],
-  ['data', 'Table2'],
-];
-export const RIGHT_PANES = [
-  ['inspector', 'SlidersHorizontal'],
-  ['layers', 'Layers'],
-  ['grid', 'LayoutGrid'],
-];
 export const CONTENT_TREE: ContentNode[] = EDITOR_ASSET_CATALOG.contentTree;
 export const SNAP_MODES = ['surface + edge', 'grid', 'free', 'vertex'];
 export const FLOORS = ['Floor 2', 'Floor 1', 'Basement'];

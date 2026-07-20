@@ -20,6 +20,7 @@ import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './
 import { loadGlobalsSave } from './globalsStore';
 import { loadColorLibrary } from './colorLibraryStore';
 import { commandExists, MENUS } from './commands';
+import { normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
 import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v2';
@@ -150,8 +151,8 @@ export function loadPersistedState(): EditorState {
   // selected at the instant a dev reload lands. Re-enter through real defaults.
   if (!commandExists(merged.activeCommandId)) merged.activeCommandId = 'select-tool';
   if (!MENUS.includes(merged.actionMenu)) merged.actionMenu = 'Build';
-  if (merged.activeDomain === 'pipeline') merged.activeDomain = 'world';
-  if (merged.rightPane === 'mission' || merged.rightPane === 'routes') merged.rightPane = 'inspector';
+  merged.activeDomain = normalizeLeftPanelId(merged.activeDomain);
+  merged.rightPane = normalizeRightPanelId(merged.rightPane);
   // The id seq only ever grows: a stale hotstate seq must not re-mint ids the
   // disk save already handed out.
   merged.seq = Math.max(merged.seq, base.seq);

@@ -261,9 +261,9 @@ export default function LibraryPanel(props: {
         <Icon name="FolderOpen" size={14} color={accentFor('primary')} />
         <C.HW_LibTitle>Assets</C.HW_LibTitle>
         <C.HW_Spacer />
-        <C.HW_LibHeadButton onPress={props.onToggleExpanded}>
-          <Icon name={expanded ? 'PanelLeftClose' : 'PanelLeftOpen'} size={14} color={accentFor(expanded ? 'primary' : 'textDim')} />
-        </C.HW_LibHeadButton>
+        <C.HW_PanelHeadButton tooltip={expanded ? 'Tuck thumbnail grid' : 'Attach thumbnail grid'} onPress={props.onToggleExpanded}>
+          <Icon name={expanded ? 'Minimize2' : 'Maximize2'} size={14} color={accentFor(expanded ? 'primary' : 'textDim')} />
+        </C.HW_PanelHeadButton>
       </C.HW_LibHead>
       <C.HW_LibSearchRow>
         <C.HW_LibSearchBox>
