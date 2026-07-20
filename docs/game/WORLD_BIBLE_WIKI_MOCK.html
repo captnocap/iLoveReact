@@ -1,0 +1,2207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Bible — Wiki Layout Mock</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b10;
+      --bg-alt: #0b1016;
+      --surface: #0e141c;
+      --surface-raised: #111a24;
+      --surface-hover: #14202b;
+      --border: #202b36;
+      --border-soft: #16212b;
+      --text: #edf5f7;
+      --text-secondary: #b8c6d0;
+      --text-dim: #788692;
+      --text-faint: #4e5d68;
+      --cyan: #42d9e8;
+      --cyan-soft: #12333a;
+      --green: #77dc9b;
+      --green-soft: #153326;
+      --yellow: #f1bd58;
+      --yellow-soft: #332815;
+      --red: #ef8074;
+      --red-soft: #361d1d;
+      --violet: #a99bff;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      color: inherit;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 1px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: 32px 38px minmax(0, 1fr) 24px;
+      width: 100%;
+      height: 100%;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--border);
+      background: #080d13;
+      user-select: none;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 132px;
+      color: var(--text-secondary);
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .15em;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 13px;
+      height: 13px;
+      border: 1px solid var(--cyan);
+      transform: rotate(30deg) skew(-4deg);
+    }
+
+    .brand-mark::after {
+      position: absolute;
+      inset: 3px;
+      border: 1px solid var(--cyan);
+      content: "";
+    }
+
+    .menu {
+      display: flex;
+      align-self: stretch;
+    }
+
+    .menu button {
+      padding: 0 10px;
+      border: 0;
+      background: transparent;
+      color: var(--text-dim);
+      font: 500 11px/1 var(--sans);
+    }
+
+    .menu button:hover {
+      background: var(--surface-hover);
+      color: var(--text-secondary);
+    }
+
+    .topbar-spacer {
+      flex: 1;
+    }
+
+    .top-chip,
+    .play-button {
+      height: 22px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface);
+      color: var(--text-secondary);
+      font: 600 10px/1 var(--mono);
+      letter-spacing: .04em;
+    }
+
+    .top-chip {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+    }
+
+    .play-button {
+      padding: 0 11px;
+      border-color: #286a70;
+      background: #10272b;
+      color: #bff7fb;
+    }
+
+    .document-tabs {
+      display: flex;
+      align-items: end;
+      gap: 2px;
+      padding: 5px 8px 0 48px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-alt);
+    }
+
+    .document-tab {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      max-width: 260px;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .document-tab.active {
+      border-color: var(--border);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .document-tab .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-faint);
+    }
+
+    .document-tab.active .dot {
+      background: var(--cyan);
+      box-shadow: 0 0 8px #42d9e866;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 44px 282px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 0;
+      border-right: 1px solid var(--border);
+      background: #080d13;
+    }
+
+    .rail-button {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      background: transparent;
+      color: var(--text-faint);
+      font: 700 11px/1 var(--mono);
+    }
+
+    .rail-button:hover {
+      background: var(--surface-hover);
+      color: var(--text-secondary);
+    }
+
+    .rail-button.active {
+      border-color: #1e5057;
+      background: var(--cyan-soft);
+      color: var(--cyan);
+    }
+
+    .rail-divider {
+      width: 20px;
+      margin: 4px 0;
+      border-top: 1px solid var(--border-soft);
+    }
+
+    .rail-spacer {
+      flex: 1;
+    }
+
+    .wiki-sidebar {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      border-right: 1px solid var(--border);
+      background: var(--bg-alt);
+    }
+
+    .sidebar-head {
+      padding: 15px 14px 12px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .eyebrow {
+      color: var(--cyan);
+      font: 700 9px/1.2 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 5px;
+    }
+
+    .sidebar-title {
+      font-size: 17px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    .page-count {
+      color: var(--text-dim);
+      font: 10px/1 var(--mono);
+    }
+
+    .search-wrap {
+      position: relative;
+      margin-top: 12px;
+    }
+
+    .search-wrap::before {
+      position: absolute;
+      top: 8px;
+      left: 9px;
+      color: var(--text-faint);
+      font: 12px/1 var(--mono);
+      content: "/";
+    }
+
+    .search {
+      width: 100%;
+      height: 31px;
+      padding: 0 9px 0 25px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: #080d13;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .search::placeholder {
+      color: var(--text-faint);
+    }
+
+    .new-page {
+      width: 100%;
+      height: 31px;
+      margin-top: 8px;
+      border: 1px solid #27646c;
+      border-radius: 3px;
+      background: #10272b;
+      color: #c9f9ff;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .sidebar-scroll {
+      min-height: 0;
+      padding: 12px 8px 20px;
+      overflow: auto;
+    }
+
+    .nav-label {
+      margin: 13px 8px 6px;
+      color: var(--text-faint);
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .nav-label:first-child {
+      margin-top: 2px;
+    }
+
+    .nav-item,
+    .page-link {
+      display: grid;
+      width: 100%;
+      min-height: 30px;
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      background: transparent;
+      text-align: left;
+    }
+
+    .nav-item {
+      grid-template-columns: 18px 1fr auto;
+      padding: 0 8px;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .nav-item:hover,
+    .page-link:hover {
+      background: var(--surface-hover);
+    }
+
+    .nav-item .nav-icon {
+      color: var(--text-faint);
+      font: 10px/1 var(--mono);
+    }
+
+    .nav-count {
+      color: var(--text-faint);
+      font: 10px/1 var(--mono);
+    }
+
+    .page-link {
+      grid-template-columns: 8px minmax(0, 1fr);
+      gap: 8px;
+      padding: 5px 8px;
+      color: var(--text-secondary);
+    }
+
+    .page-link.active {
+      border-color: #204b51;
+      background: var(--cyan-soft);
+      color: var(--text);
+    }
+
+    .page-kind-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--violet);
+    }
+
+    .page-link[data-kind="business"] .page-kind-dot {
+      background: var(--green);
+    }
+
+    .page-link[data-kind="person"] .page-kind-dot {
+      background: var(--violet);
+    }
+
+    .page-link[data-kind="place"] .page-kind-dot {
+      background: var(--yellow);
+    }
+
+    .page-link[data-kind="mechanic"] .page-kind-dot {
+      background: var(--cyan);
+    }
+
+    .page-link-title {
+      overflow: hidden;
+      font-size: 11px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .page-link-meta {
+      margin-top: 2px;
+      overflow: hidden;
+      color: var(--text-faint);
+      font: 9px/1.2 var(--mono);
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .sidebar-source {
+      padding: 10px 13px;
+      border-top: 1px solid var(--border-soft);
+      color: var(--text-faint);
+      font: 9px/1.45 var(--mono);
+    }
+
+    .sidebar-source strong {
+      display: block;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background:
+        linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), #ffffff03 calc(100% - 1px)),
+        var(--surface);
+    }
+
+    .page-toolbar {
+      position: sticky;
+      z-index: 5;
+      top: 0;
+      display: flex;
+      align-items: center;
+      min-height: 47px;
+      padding: 0 26px;
+      border-bottom: 1px solid var(--border);
+      background: #0e141cf5;
+      backdrop-filter: blur(10px);
+    }
+
+    .breadcrumbs {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text-dim);
+      font: 10px/1 var(--mono);
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .breadcrumbs span {
+      color: var(--text-faint);
+    }
+
+    .toolbar-spacer {
+      flex: 1;
+    }
+
+    .mode-tabs {
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #090f15;
+    }
+
+    .mode-tab {
+      height: 25px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 2px;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .mode-tab.active {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+
+    .page-wrap {
+      width: min(1120px, calc(100% - 56px));
+      margin: 0 auto;
+      padding: 32px 0 80px;
+    }
+
+    .draft-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 22px;
+      padding: 10px 12px;
+      border: 1px solid #665026;
+      border-radius: 4px;
+      background: #241d10;
+      color: #e8cf9b;
+    }
+
+    .draft-banner.disk {
+      border-color: #285b3c;
+      background: #102319;
+      color: #a8e6ba;
+    }
+
+    .banner-mark {
+      display: grid;
+      flex: 0 0 auto;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font: 700 11px/1 var(--mono);
+    }
+
+    .banner-copy {
+      min-width: 0;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .banner-copy strong {
+      display: block;
+      color: #f5dfad;
+      font-size: 12px;
+    }
+
+    .draft-banner.disk .banner-copy strong {
+      color: #c0f0cc;
+    }
+
+    .banner-copy code {
+      color: inherit;
+      font-family: var(--mono);
+    }
+
+    .banner-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 7px;
+      margin-left: auto;
+    }
+
+    .button {
+      min-height: 29px;
+      padding: 0 11px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface-raised);
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .button:hover:not(:disabled) {
+      border-color: #344553;
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+
+    .button.primary {
+      border-color: #27717a;
+      background: #12333a;
+      color: #c9f9ff;
+    }
+
+    .button.primary:hover:not(:disabled) {
+      border-color: var(--cyan);
+      background: #17424a;
+    }
+
+    .button.confirm {
+      border-color: #3c7751;
+      background: #153326;
+      color: #c5f3d2;
+    }
+
+    .button.danger {
+      border-color: #603530;
+      background: #2a1717;
+      color: #f0aaa2;
+    }
+
+    .button:disabled {
+      cursor: default;
+      opacity: .42;
+    }
+
+    .page-heading {
+      display: flex;
+      align-items: start;
+      gap: 20px;
+      margin-bottom: 23px;
+      padding-bottom: 19px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .heading-copy {
+      min-width: 0;
+    }
+
+    .page-kicker {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .kind-badge,
+    .state-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      font: 700 8px/1 var(--mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .kind-badge {
+      border-color: #31533d;
+      background: #14261b;
+      color: var(--green);
+    }
+
+    .kind-badge.person {
+      border-color: #443c6a;
+      background: #1f1b32;
+      color: var(--violet);
+    }
+
+    .kind-badge.place {
+      border-color: #665126;
+      background: #271f11;
+      color: var(--yellow);
+    }
+
+    .kind-badge.mechanic {
+      border-color: #245c64;
+      background: #11282d;
+      color: var(--cyan);
+    }
+
+    .state-badge {
+      border-color: #705926;
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .state-badge.disk {
+      border-color: #315c3e;
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(29px, 3vw, 40px);
+      font-weight: 680;
+      letter-spacing: -.035em;
+      line-height: 1.05;
+    }
+
+    .page-ref {
+      margin-top: 8px;
+      color: var(--text-dim);
+      font: 10px/1.4 var(--mono);
+    }
+
+    .heading-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 7px;
+      margin-left: auto;
+    }
+
+    .wiki-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 286px;
+      gap: 44px;
+      align-items: start;
+    }
+
+    .article {
+      min-width: 0;
+      color: var(--text-secondary);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .article .lead {
+      margin: 0 0 24px;
+      color: #dce7ea;
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    .article h2 {
+      margin: 32px 0 12px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid var(--border-soft);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: -.015em;
+    }
+
+    .article h2:first-of-type {
+      margin-top: 0;
+    }
+
+    .article p {
+      margin: 0 0 13px;
+    }
+
+    .entity-link {
+      border-bottom: 1px solid #42d9e866;
+      color: #7ce7f1;
+      text-decoration: none;
+    }
+
+    button.entity-link {
+      display: inline;
+      padding: 0;
+      border-top: 0;
+      border-right: 0;
+      border-left: 0;
+      background: transparent;
+      font-family: inherit;
+      font-size: inherit;
+    }
+
+    .entity-link:hover {
+      border-bottom-color: var(--cyan);
+      color: #c7f9fd;
+    }
+
+    .position-table {
+      width: 100%;
+      margin: 14px 0 20px;
+      border-collapse: collapse;
+      font-family: var(--sans);
+      font-size: 11px;
+    }
+
+    .position-table th,
+    .position-table td {
+      padding: 8px 9px;
+      border: 1px solid var(--border-soft);
+      text-align: left;
+    }
+
+    .position-table th {
+      background: #0a1016;
+      color: var(--text-dim);
+      font: 700 8px/1.2 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .position-table td {
+      color: var(--text-secondary);
+    }
+
+    .muted {
+      color: var(--text-faint);
+    }
+
+    .world-link-card,
+    .platform-empty,
+    .backlinks {
+      border: 1px solid var(--border-soft);
+      border-radius: 4px;
+      background: #0a1016;
+    }
+
+    .world-link-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      font-family: var(--sans);
+    }
+
+    .map-thumb {
+      position: relative;
+      flex: 0 0 auto;
+      width: 66px;
+      height: 52px;
+      overflow: hidden;
+      border: 1px solid #34424d;
+      border-radius: 2px;
+      background:
+        linear-gradient(90deg, transparent 47%, #26323b 48% 52%, transparent 53%),
+        linear-gradient(0deg, transparent 47%, #26323b 48% 52%, transparent 53%),
+        #111a22;
+    }
+
+    .map-thumb::before {
+      position: absolute;
+      top: 9px;
+      left: 12px;
+      width: 24px;
+      height: 17px;
+      border: 1px solid var(--yellow);
+      background: #5d4a2344;
+      content: "";
+      transform: rotate(-5deg);
+    }
+
+    .map-thumb::after {
+      position: absolute;
+      right: 9px;
+      bottom: 8px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 0 3px #42d9e82e;
+      content: "";
+    }
+
+    .world-link-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .world-link-copy strong {
+      display: block;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .world-link-copy span {
+      color: var(--text-faint);
+      font: 9px/1.4 var(--mono);
+    }
+
+    .platform-empty {
+      padding: 13px 14px;
+      font-family: var(--sans);
+    }
+
+    .platform-empty strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .platform-empty p {
+      margin: 0;
+      color: var(--text-faint);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .backlinks {
+      margin-top: 31px;
+      padding: 13px 14px;
+      font-family: var(--sans);
+    }
+
+    .backlinks-title {
+      margin-bottom: 9px;
+      color: var(--text-faint);
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .backlink-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 28px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .backlink-row + .backlink-row {
+      border-top: 1px solid var(--border-soft);
+    }
+
+    .backlink-arrow {
+      color: var(--text-faint);
+      font: 10px/1 var(--mono);
+    }
+
+    .backlink-reason {
+      margin-left: auto;
+      color: var(--text-faint);
+      font: 9px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .infobox {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #0a1016;
+    }
+
+    .infobox-visual {
+      display: grid;
+      min-height: 138px;
+      place-items: center;
+      border-bottom: 1px solid var(--border);
+      background:
+        radial-gradient(circle at 50% 35%, #18343a 0, #0d1d23 44%, #091016 75%),
+        #0a1016;
+    }
+
+    .entity-logo {
+      display: grid;
+      width: 82px;
+      height: 82px;
+      place-items: center;
+      border: 1px solid #5a763f;
+      border-radius: 50%;
+      background: #182b17;
+      box-shadow: inset 0 0 0 5px #0d1610, 0 12px 30px #0008;
+      color: #b4df6f;
+      font: 800 23px/1 var(--mono);
+      letter-spacing: -.12em;
+    }
+
+    .entity-logo.person {
+      border-color: #625795;
+      background: #211e39;
+      color: #c7beff;
+    }
+
+    .entity-logo.place {
+      border-color: #806633;
+      border-radius: 6px;
+      background: #312816;
+      color: #f4cc79;
+    }
+
+    .entity-logo.mechanic {
+      border-color: #28717a;
+      border-radius: 6px;
+      background: #102b31;
+      color: #9cf1f8;
+    }
+
+    .infobox-caption {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-soft);
+      text-align: center;
+    }
+
+    .infobox-caption strong {
+      display: block;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .infobox-caption span {
+      color: var(--text-faint);
+      font: 8px/1.4 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .fact-row {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 8px;
+      padding: 8px 11px;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .fact-row:last-child {
+      border-bottom: 0;
+    }
+
+    .fact-label {
+      color: var(--text-faint);
+      font: 8px/1.45 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .fact-value {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      color: var(--text-secondary);
+    }
+
+    .fact-value a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+
+    .source-card {
+      margin-top: 12px;
+      padding: 10px 11px;
+      border: 1px solid var(--border-soft);
+      border-radius: 4px;
+      background: #090f15;
+    }
+
+    .source-card-label {
+      color: var(--text-faint);
+      font: 700 8px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .source-path {
+      margin-top: 6px;
+      overflow-wrap: anywhere;
+      color: var(--text-dim);
+      font: 9px/1.45 var(--mono);
+    }
+
+    .source-note {
+      margin-top: 7px;
+      color: var(--text-faint);
+      font-size: 9px;
+      line-height: 1.45;
+    }
+
+    .edit-panel[hidden],
+    .read-panel[hidden] {
+      display: none;
+    }
+
+    .edit-panel {
+      max-width: 900px;
+    }
+
+    .edit-heading {
+      margin-bottom: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .edit-heading h1 {
+      font-size: 29px;
+    }
+
+    .edit-heading p {
+      margin: 8px 0 0;
+      color: var(--text-dim);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .edit-section {
+      margin-bottom: 24px;
+    }
+
+    .edit-section-title {
+      margin-bottom: 10px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .edit-section-note {
+      margin: -5px 0 10px;
+      color: var(--text-faint);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    .field label {
+      color: var(--text-dim);
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: #080d13;
+      color: var(--text);
+    }
+
+    .field input,
+    .field select {
+      height: 34px;
+      padding: 0 10px;
+    }
+
+    .field textarea {
+      min-height: 90px;
+      padding: 10px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+
+    .field textarea.prose {
+      min-height: 220px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 14px;
+    }
+
+    .field-hint {
+      color: var(--text-faint);
+      font-size: 9px;
+      line-height: 1.35;
+    }
+
+    .readonly-input {
+      color: var(--text-dim) !important;
+      font-family: var(--mono) !important;
+    }
+
+    .facts-editor {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+
+    .fact-edit-row {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr);
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .fact-edit-row:last-child {
+      border-bottom: 0;
+    }
+
+    .fact-edit-key {
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      background: #0a1016;
+      color: var(--text-dim);
+      font: 9px/1.4 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .fact-edit-row input {
+      height: 35px;
+      padding: 0 10px;
+      border: 0;
+      border-left: 1px solid var(--border-soft);
+      background: #080d13;
+    }
+
+    .edit-footer {
+      position: sticky;
+      bottom: -1px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 30px;
+      padding: 12px 0;
+      border-top: 1px solid var(--border);
+      background: #0e141cf5;
+      backdrop-filter: blur(10px);
+    }
+
+    .edit-footer-note {
+      margin-right: auto;
+      color: var(--text-faint);
+      font: 9px/1.4 var(--mono);
+    }
+
+    .statusbar {
+      display: flex;
+      align-items: center;
+      gap: 17px;
+      padding: 0 9px;
+      border-top: 1px solid var(--border);
+      background: #080d13;
+      color: var(--text-faint);
+      font: 8px/1 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      user-select: none;
+    }
+
+    .statusbar .live {
+      color: var(--green);
+    }
+
+    .statusbar-spacer {
+      flex: 1;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      z-index: 50;
+      inset: 0;
+      display: grid;
+      padding: 24px;
+      place-items: center;
+      background: #020507cc;
+      backdrop-filter: blur(3px);
+    }
+
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+
+    .modal {
+      width: min(690px, 100%);
+      max-height: min(780px, calc(100vh - 48px));
+      overflow: auto;
+      border: 1px solid #35444f;
+      border-radius: 6px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px #000c;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: start;
+      gap: 16px;
+      padding: 18px 20px 15px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      font-size: 17px;
+    }
+
+    .modal-head p {
+      margin: 5px 0 0;
+      color: var(--text-dim);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .modal-close {
+      display: grid;
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      margin-left: auto;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: transparent;
+      color: var(--text-dim);
+    }
+
+    .modal-body {
+      padding: 18px 20px;
+    }
+
+    .review-label {
+      margin: 17px 0 8px;
+      color: var(--text-faint);
+      font: 700 8px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .review-label:first-child {
+      margin-top: 0;
+    }
+
+    .target-path {
+      padding: 9px 10px;
+      border: 1px solid var(--border-soft);
+      border-radius: 3px;
+      background: #080d13;
+      color: var(--text-secondary);
+      font: 10px/1.5 var(--mono);
+      overflow-wrap: anywhere;
+    }
+
+    .change-list {
+      border: 1px solid var(--border-soft);
+      border-radius: 3px;
+      background: #0a1016;
+    }
+
+    .change-row {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 12px;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .change-row:last-child {
+      border-bottom: 0;
+    }
+
+    .change-field {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      text-transform: uppercase;
+    }
+
+    .change-value {
+      color: var(--text-secondary);
+    }
+
+    .diff {
+      overflow: auto;
+      padding: 10px 0;
+      border: 1px solid var(--border-soft);
+      border-radius: 3px;
+      background: #070b10;
+      font: 10px/1.55 var(--mono);
+    }
+
+    .diff-line {
+      display: block;
+      min-width: max-content;
+      padding: 0 11px;
+      white-space: pre;
+    }
+
+    .diff-line.context {
+      color: var(--text-dim);
+    }
+
+    .diff-line.remove {
+      background: #361d1d99;
+      color: #f0aaa2;
+    }
+
+    .diff-line.add {
+      background: #15332699;
+      color: #a8e6ba;
+    }
+
+    .write-warning {
+      display: flex;
+      gap: 10px;
+      margin-top: 17px;
+      padding: 10px 11px;
+      border: 1px solid #665026;
+      border-radius: 3px;
+      background: #211a0e;
+      color: #d9c28f;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .write-warning strong {
+      color: #f3dca5;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: end;
+      gap: 8px;
+      padding: 13px 20px;
+      border-top: 1px solid var(--border);
+      background: #0a1016;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 80;
+      right: 18px;
+      bottom: 39px;
+      max-width: 360px;
+      padding: 10px 12px;
+      border: 1px solid #315c3e;
+      border-radius: 4px;
+      background: #102319;
+      box-shadow: 0 12px 38px #000a;
+      color: #c0f0cc;
+      font-size: 10px;
+      line-height: 1.5;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity .15s ease, transform .15s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 980px) {
+      .workspace {
+        grid-template-columns: 40px 238px minmax(0, 1fr);
+      }
+
+      .wiki-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .infobox-wrap {
+        grid-row: 1;
+        max-width: 420px;
+      }
+
+      .menu button:nth-last-child(-n + 3) {
+        display: none;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .app {
+        grid-template-rows: 32px 38px minmax(0, 1fr) 24px;
+      }
+
+      .brand {
+        min-width: auto;
+      }
+
+      .brand span,
+      .menu,
+      .top-chip {
+        display: none;
+      }
+
+      .document-tabs {
+        padding-left: 8px;
+      }
+
+      .workspace {
+        grid-template-columns: 0 210px minmax(0, 1fr);
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .page-toolbar {
+        padding: 0 14px;
+      }
+
+      .breadcrumbs {
+        display: none;
+      }
+
+      .page-wrap {
+        width: calc(100% - 28px);
+        padding-top: 20px;
+      }
+
+      .draft-banner {
+        align-items: start;
+        flex-wrap: wrap;
+      }
+
+      .banner-actions {
+        width: 100%;
+        margin-left: 34px;
+      }
+
+      .page-heading {
+        flex-direction: column;
+      }
+
+      .heading-actions {
+        margin-left: 0;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .field.full {
+        grid-column: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><i class="brand-mark"></i><span>SHITTY GAMES</span></div>
+      <nav class="menu" aria-label="Application menu">
+        <button type="button">File</button>
+        <button type="button">Edit</button>
+        <button type="button">View</button>
+        <button type="button">Map</button>
+        <button type="button">Build</button>
+        <button type="button">Globals</button>
+        <button type="button">Window</button>
+      </nav>
+      <div class="topbar-spacer"></div>
+      <div class="top-chip">Editor</div>
+      <button class="play-button" type="button" data-toast="The wiki stays an authoring surface; Play consumes confirmed disk content.">Play</button>
+    </header>
+
+    <div class="document-tabs" aria-label="Open documents">
+      <button class="document-tab" type="button"><i class="dot"></i> Coastal City</button>
+      <button class="document-tab active" type="button"><i class="dot"></i> World Bible / <span id="tab-page-title">CropDuster Labs</span></button>
+    </div>
+
+    <div class="workspace">
+      <nav class="rail" aria-label="Editor surfaces">
+        <button class="rail-button" type="button" title="World">W</button>
+        <button class="rail-button" type="button" title="Models">M</button>
+        <button class="rail-button" type="button" title="Materials">T</button>
+        <div class="rail-divider"></div>
+        <button class="rail-button active" type="button" title="World Bible">B</button>
+        <button class="rail-button" type="button" title="Missions">G</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-button" type="button" title="Settings">S</button>
+      </nav>
+
+      <aside class="wiki-sidebar">
+        <div class="sidebar-head">
+          <div class="eyebrow">Project knowledge</div>
+          <div class="sidebar-title-row">
+            <div class="sidebar-title">World Bible</div>
+            <div class="page-count">6 pages</div>
+          </div>
+          <div class="search-wrap">
+            <input id="wiki-search" class="search" type="search" placeholder="Search pages or refs" aria-label="Search World Bible">
+          </div>
+          <button class="new-page" type="button" data-toast="New Page would start with only a kind, stable ref, name, and optional prose.">+ New page</button>
+        </div>
+
+        <div class="sidebar-scroll">
+          <div class="nav-label">Browse</div>
+          <button class="nav-item" type="button"><span class="nav-icon">#</span><span>All pages</span><span class="nav-count">6</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">@</span><span>People</span><span class="nav-count">1</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">□</span><span>Businesses</span><span class="nav-count">1</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">◇</span><span>Places</span><span class="nav-count">2</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">:</span><span>Mechanics</span><span class="nav-count">1</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">!</span><span>Missions</span><span class="nav-count">0</span></button>
+
+          <div class="nav-label">Pages</div>
+          <div id="page-list">
+            <button class="page-link active" type="button" data-ref="biz.cropduster_labs" data-kind="business" data-search="cropduster labs business biz.cropduster_labs">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">CropDuster Labs</span><span class="page-link-meta">Business</span></span>
+            </button>
+            <button class="page-link" type="button" data-ref="npc.rowena_pike" data-kind="person" data-search="rowena pike person npc.rowena_pike">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">Rowena Pike</span><span class="page-link-meta">Person</span></span>
+            </button>
+            <button class="page-link" type="button" data-ref="place.east_mercer_depot" data-kind="place" data-search="east mercer depot place place.east_mercer_depot">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">East Mercer Depot</span><span class="page-link-meta">Place</span></span>
+            </button>
+            <button class="page-link" type="button" data-ref="place.whetstone_arms" data-kind="place" data-search="whetstone arms home place place.whetstone_arms">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">Whetstone Arms</span><span class="page-link-meta">Place</span></span>
+            </button>
+            <button class="page-link" type="button" data-ref="position.site_manager" data-kind="business" data-search="site manager position position.site_manager">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">Site Manager</span><span class="page-link-meta">Position</span></span>
+            </button>
+            <button class="page-link" type="button" data-ref="mechanic.shift_occupancy" data-kind="mechanic" data-search="shift occupancy mechanic mechanic.shift_occupancy">
+              <i class="page-kind-dot"></i><span><span class="page-link-title">Shift Occupancy</span><span class="page-link-meta">Mechanic</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidebar-source">
+          <strong>CANONICAL SOURCE</strong>
+          world/knowledge/*.md<br>
+          Parsed from on-disk &lt;blocks&gt;
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="page-toolbar">
+          <div class="breadcrumbs">WORLD BIBLE <span>/</span> <span id="breadcrumb-kind">BUSINESSES</span> <span>/</span> <b id="breadcrumb-title">CROPDUSTER LABS</b></div>
+          <div class="toolbar-spacer"></div>
+          <div class="mode-tabs" aria-label="Page mode">
+            <button id="read-tab" class="mode-tab active" type="button">Read</button>
+            <button id="edit-tab" class="mode-tab" type="button">Edit</button>
+          </div>
+        </div>
+
+        <div class="page-wrap">
+          <section id="read-panel" class="read-panel">
+            <div id="draft-banner" class="draft-banner">
+              <div class="banner-mark">!</div>
+              <div class="banner-copy">
+                <strong id="banner-title">Draft differs from disk</strong>
+                <span id="banner-description">The canonical Markdown file has not changed. Review the proposed patch before writing.</span>
+              </div>
+              <div class="banner-actions">
+                <button id="revert-button" class="button" type="button">Revert draft</button>
+                <button class="button primary review-button" type="button">Review changes</button>
+              </div>
+            </div>
+
+            <header class="page-heading">
+              <div class="heading-copy">
+                <div class="page-kicker">
+                  <span id="kind-badge" class="kind-badge">Business</span>
+                  <span id="state-badge" class="state-badge">Draft changed</span>
+                </div>
+                <h1 id="page-title">CropDuster Labs</h1>
+                <div id="page-ref" class="page-ref">ref: biz.cropduster_labs</div>
+              </div>
+              <div class="heading-actions">
+                <button id="edit-page-button" class="button" type="button">Edit page</button>
+                <button class="button primary review-button" type="button">Review changes</button>
+              </div>
+            </header>
+
+            <div class="wiki-grid">
+              <article class="article">
+                <p id="page-lead" class="lead"></p>
+                <div id="page-sections"></div>
+
+                <section id="backlinks" class="backlinks">
+                  <div class="backlinks-title">Pages linking here</div>
+                  <div id="backlink-list"></div>
+                </section>
+              </article>
+
+              <aside class="infobox-wrap" aria-label="Entity facts">
+                <div class="infobox">
+                  <div class="infobox-visual"><div id="entity-logo" class="entity-logo">CD</div></div>
+                  <div class="infobox-caption"><strong id="infobox-title">CropDuster Labs</strong><span id="infobox-kind">Business entity</span></div>
+                  <div id="fact-list"></div>
+                </div>
+                <div class="source-card">
+                  <div class="source-card-label">On-disk source</div>
+                  <div id="source-path" class="source-path">world/knowledge/businesses/cropduster-labs.md</div>
+                  <div class="source-note">This page is a view over the block file. Editing creates a draft; only confirmed review updates disk.</div>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section id="edit-panel" class="edit-panel" hidden>
+            <div class="edit-heading">
+              <div class="page-kicker"><span class="kind-badge">Wiki edit</span><span id="edit-state-badge" class="state-badge">Draft changed</span></div>
+              <h1>Editing <span id="edit-heading-title">CropDuster Labs</span></h1>
+              <p>Fields and prose edit one page draft. Nothing below writes the canonical file until the reviewed patch is formally confirmed.</p>
+            </div>
+
+            <div class="edit-section">
+              <div class="edit-section-title">Identity</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="edit-title">Display name</label>
+                  <input id="edit-title" autocomplete="off">
+                </div>
+                <div class="field">
+                  <label for="edit-kind">Entity kind</label>
+                  <select id="edit-kind">
+                    <option value="business">Business</option>
+                    <option value="person">Person</option>
+                    <option value="place">Place</option>
+                    <option value="position">Position</option>
+                    <option value="mechanic">Mechanic</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="edit-ref">Stable ref</label>
+                  <input id="edit-ref" class="readonly-input" readonly>
+                  <span class="field-hint">Labels can change; links keep this identity.</span>
+                </div>
+                <div class="field">
+                  <label for="edit-logo">Image / logo asset</label>
+                  <input id="edit-logo" autocomplete="off" placeholder="asset.logo.cropduster_labs">
+                  <span class="field-hint">Optional. Partial pages are valid while authoring.</span>
+                </div>
+                <div class="field full">
+                  <label for="edit-summary">Page introduction</label>
+                  <textarea id="edit-summary"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="edit-section">
+              <div class="edit-section-title">Facts and relations</div>
+              <div class="edit-section-note">The GUI displays labels, while relations store stable <code>@[ref]</code> links.</div>
+              <div id="facts-editor" class="facts-editor"></div>
+            </div>
+
+            <div class="edit-section">
+              <div class="edit-section-title">Page prose</div>
+              <div class="edit-section-note">Literal lore and design notes stay readable around the entity blocks.</div>
+              <div class="field">
+                <textarea id="edit-prose" class="prose"></textarea>
+              </div>
+            </div>
+
+            <div class="edit-footer">
+              <div class="edit-footer-note">DRAFT ONLY · canonical source remains unchanged</div>
+              <button id="cancel-edit-button" class="button" type="button">Return to read</button>
+              <button class="button primary review-button" type="button">Review changes</button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <span class="live">● WORLD BIBLE READY</span>
+      <span>CANONICAL: ON-DISK BLOCKS</span>
+      <span>DRAFT RECOVERY: ON</span>
+      <span class="statusbar-spacer"></span>
+      <span>HTML LAYOUT MOCK · NO FILES ARE WRITTEN</span>
+    </footer>
+  </div>
+
+  <div id="review-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="review-title">
+      <header class="modal-head">
+        <div>
+          <h2 id="review-title">Review changes before writing</h2>
+          <p>This is the sole publish door. The real implementation rechecks the disk hash immediately before an atomic write.</p>
+        </div>
+        <button id="modal-close" class="modal-close" type="button" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="review-label">Target file</div>
+        <div id="review-path" class="target-path"></div>
+
+        <div class="review-label">Semantic changes</div>
+        <div id="change-list" class="change-list"></div>
+
+        <div class="review-label">Exact text patch</div>
+        <div id="diff" class="diff"></div>
+
+        <div class="write-warning">
+          <span>!</span>
+          <div><strong>On-disk content is the source of truth.</strong><br>This confirmation would update only the reviewed spans. In this HTML mock it changes memory only; no real file is touched.</div>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button id="modal-cancel" class="button" type="button">Keep editing</button>
+        <button id="confirm-write" class="button confirm" type="button">Confirm Write to Disk</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const pages = {
+        'biz.cropduster_labs': {
+          ref: 'biz.cropduster_labs',
+          kind: 'business',
+          title: 'CropDuster Labs',
+          initials: 'CD',
+          asset: 'asset.logo.cropduster_labs',
+          path: 'world/knowledge/businesses/cropduster-labs.md',
+          summary: 'CropDuster Labs is a pest-control contractor operating from an aging depot in East Mercer. Its municipal work keeps the lights on; its disposal practices are less carefully documented.',
+          prose: '## Overview\n\nCropDuster began as a two-truck extermination outfit and grew by underbidding municipal contracts. The company is locally known for fast response times, exhausted crews, and invoices that rarely match the first estimate.\n\n## Designer notes\n\nKeep the business useful before it becomes suspicious. Its staff, building, and shifts should exist even if no website or social platform is ever authored.',
+          facts: [
+            ['Legal name', 'CropDuster Laboratories LLC'],
+            ['Location', '@[place.east_mercer_depot]'],
+            ['Manager', '@[npc.rowena_pike]'],
+            ['Positions', '3 authored · 2 occupied'],
+            ['World space', 'east_mercer/depot_04'],
+          ],
+          sections: `
+            <h2>Overview</h2>
+            <p>CropDuster began as a two-truck extermination outfit and grew by underbidding municipal contracts. The company now works from <button class="entity-link" data-ref="place.east_mercer_depot">East Mercer Depot</button>, managed by <button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button>.</p>
+            <p>The business can exist as world knowledge without automatically owning a website, social account, marketplace listing, or mission.</p>
+
+            <h2>People and positions</h2>
+            <table class="position-table">
+              <thead><tr><th>Position</th><th>Occupant</th><th>Usual shift</th></tr></thead>
+              <tbody>
+                <tr><td><button class="entity-link" data-ref="position.site_manager">Site Manager</button></td><td><button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button></td><td>Mon–Fri · 08:00–17:00</td></tr>
+                <tr><td>Field Technician</td><td class="muted">Seeded occupant</td><td>Mon–Sat · 07:00–15:00</td></tr>
+                <tr><td>Night Sanitation</td><td class="muted">Vacant</td><td>Tue/Thu · 22:00–03:00</td></tr>
+              </tbody>
+            </table>
+
+            <h2>World binding</h2>
+            <div class="world-link-card">
+              <div class="map-thumb"></div>
+              <div class="world-link-copy"><strong>East Mercer Depot</strong><span>world space · east_mercer/depot_04</span></div>
+              <button class="button" type="button" data-toast="This linked field would open the existing map surface at the depot.">Open in map</button>
+            </div>
+
+            <h2>Platform presences</h2>
+            <div class="platform-empty"><strong>None authored</strong><p>This is intentional. A site or account will become its own linked page only after its gameplay purpose is understood.</p></div>
+
+            <h2>Designer notes</h2>
+            <p>Keep the business useful before it becomes suspicious. Its staff, building, and shifts should exist even if no fake-internet platform is ever authored.</p>`,
+          backlinks: [
+            ['npc.rowena_pike', 'Rowena Pike', 'job'],
+            ['place.east_mercer_depot', 'East Mercer Depot', 'tenant'],
+            ['position.site_manager', 'Site Manager', 'organization'],
+          ],
+        },
+        'npc.rowena_pike': {
+          ref: 'npc.rowena_pike',
+          kind: 'person',
+          title: 'Rowena Pike',
+          initials: 'RP',
+          asset: '',
+          path: 'world/knowledge/people/rowena-pike.md',
+          summary: 'Rowena Pike is the site manager at CropDuster Labs. She is competent, underslept, and more loyal to her crew than to the company that signs her checks.',
+          prose: '## Biography\n\nRowena became site manager after the previous manager disappeared during a regulatory audit. She sleeps lightly and keeps duplicate keys to every locked room in the depot.\n\n## Designer notes\n\nHer job and home are links to other established entities, not prose-only aliases.',
+          facts: [
+            ['Born', '1988-11-03'],
+            ['Job', '@[position.site_manager]'],
+            ['Employer', '@[biz.cropduster_labs]'],
+            ['Home', '@[place.whetstone_arms]'],
+            ['Platform presences', 'None authored'],
+          ],
+          sections: `
+            <h2>Biography</h2>
+            <p>Rowena became site manager after the previous manager disappeared during a regulatory audit. She works for <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button> and returns most nights to <button class="entity-link" data-ref="place.whetstone_arms">Whetstone Arms</button>.</p>
+            <h2>Known relations</h2>
+            <p>Her position is stable world data. Her biography can remain incomplete until a story or mission needs more specificity.</p>
+            <h2>Platform presences</h2>
+            <div class="platform-empty"><strong>None authored</strong><p>Being a named NPC does not automatically create social accounts or public pages.</p></div>
+            <h2>Designer notes</h2>
+            <p>Her job and home are links to other established entities, not prose-only aliases.</p>`,
+          backlinks: [
+            ['biz.cropduster_labs', 'CropDuster Labs', 'manager'],
+            ['position.site_manager', 'Site Manager', 'occupant'],
+          ],
+        },
+        'place.east_mercer_depot': {
+          ref: 'place.east_mercer_depot',
+          kind: 'place',
+          title: 'East Mercer Depot',
+          initials: 'EM',
+          asset: 'asset.photo.east_mercer_depot',
+          path: 'world/knowledge/places/east-mercer-depot.md',
+          summary: 'A corrugated industrial depot boxed between a drainage channel and the East Mercer freight spur.',
+          prose: '## Description\n\nThe depot contains a reception cage, chemical storage, vehicle bay, break room, and an office overlooking the floor.\n\n## Designer notes\n\nThe wiki keeps the semantic place link. Detailed geometry remains in the map surface.',
+          facts: [
+            ['District', 'East Mercer'],
+            ['World space', 'east_mercer/depot_04'],
+            ['Occupant', '@[biz.cropduster_labs]'],
+            ['Interior map', 'interiors/depot_small_02'],
+          ],
+          sections: `
+            <h2>Description</h2>
+            <p>The depot contains a reception cage, chemical storage, vehicle bay, break room, and an office overlooking the floor. Its current tenant is <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button>.</p>
+            <h2>World binding</h2>
+            <div class="world-link-card"><div class="map-thumb"></div><div class="world-link-copy"><strong>east_mercer/depot_04</strong><span>city map · semantic place binding</span></div><button class="button" type="button" data-toast="This would open the existing map surface rather than embedding another map editor here.">Open in map</button></div>
+            <h2>Designer notes</h2>
+            <p>The wiki keeps the semantic place link. Detailed geometry remains in the map surface.</p>`,
+          backlinks: [
+            ['biz.cropduster_labs', 'CropDuster Labs', 'location'],
+          ],
+        },
+        'place.whetstone_arms': {
+          ref: 'place.whetstone_arms',
+          kind: 'place',
+          title: 'Whetstone Arms',
+          initials: 'WA',
+          asset: '',
+          path: 'world/knowledge/places/whetstone-arms.md',
+          summary: 'A narrow apartment building above a pawn shop on Whetstone Avenue.',
+          prose: '## Description\n\nThe building is established only as far as current lore requires. Individual apartments can be added when a resident or mission needs one.',
+          facts: [['District', 'Whetstone'], ['World space', 'whetstone/block_12'], ['Residents', '1 authored']],
+          sections: `<h2>Description</h2><p>A narrow apartment building above a pawn shop on Whetstone Avenue. <button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> rents one of its rear units.</p><h2>Designer notes</h2><p>The building is established only as far as current lore requires. Individual apartments can be added when a resident or mission needs one.</p>`,
+          backlinks: [['npc.rowena_pike', 'Rowena Pike', 'home']],
+        },
+        'position.site_manager': {
+          ref: 'position.site_manager',
+          kind: 'position',
+          title: 'Site Manager',
+          initials: 'SM',
+          asset: '',
+          path: 'world/knowledge/positions/site-manager.md',
+          summary: 'The stable management position for CropDuster Labs at East Mercer Depot. The position survives changes in occupant.',
+          prose: '## Responsibilities\n\nOpens the depot, assigns field crews, receives complaints, and controls keys to restricted storage.',
+          facts: [['Organization', '@[biz.cropduster_labs]'], ['Workplace', '@[place.east_mercer_depot]'], ['Occupant', '@[npc.rowena_pike]'], ['Shift', 'Mon–Fri · 08:00–17:00']],
+          sections: `<h2>Responsibilities</h2><p>Opens the depot, assigns field crews, receives complaints, and controls keys to restricted storage.</p><h2>Current occupancy</h2><p><button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> currently occupies this position at <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button>.</p>`,
+          backlinks: [['biz.cropduster_labs', 'CropDuster Labs', 'position'], ['npc.rowena_pike', 'Rowena Pike', 'job']],
+        },
+        'mechanic.shift_occupancy': {
+          ref: 'mechanic.shift_occupancy',
+          kind: 'mechanic',
+          title: 'Shift Occupancy',
+          initials: 'SO',
+          asset: '',
+          path: 'world/knowledge/mechanics/shift-occupancy.md',
+          summary: 'Positions own ordinary shift patterns; occupants fill those positions over time. Jobs are not duplicated strings on NPC and business pages.',
+          prose: '## Rule\n\nA position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.\n\n## Why\n\nThis lets a recurring racket bind to a job while a personal grievance binds to the current person.',
+          facts: [['Status', 'Draft mechanic'], ['Consumes', 'Position · Occupancy · Shift'], ['Produces', 'At-time occupant query']],
+          sections: `<h2>Rule</h2><p>A position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.</p><h2>Why</h2><p>This lets a recurring racket bind to a job while a personal grievance binds to the current person. This page is intentionally prose-first; the mechanic can be compiled later without forcing its design into a bespoke GUI now.</p>`,
+          backlinks: [['position.site_manager', 'Site Manager', 'uses mechanic']],
+        },
+      };
+
+      const diskPages = JSON.parse(JSON.stringify(pages));
+      diskPages['biz.cropduster_labs'].summary = 'CropDuster Labs is a pest-control contractor operating from East Mercer Depot.';
+
+      let currentRef = 'biz.cropduster_labs';
+      let mode = 'read';
+      let toastTimer = 0;
+
+      const $ = (selector) => document.querySelector(selector);
+      const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function isChanged(page) {
+        return JSON.stringify(page) !== JSON.stringify(diskPages[page.ref]);
+      }
+
+      function kindLabel(kind) {
+        return ({ business: 'Business', person: 'Person', place: 'Place', position: 'Position', mechanic: 'Mechanic' })[kind] || kind;
+      }
+
+      function kindPlural(kind) {
+        return ({ business: 'Businesses', person: 'People', place: 'Places', position: 'Positions', mechanic: 'Mechanics' })[kind] || `${kind}s`;
+      }
+
+      function showToast(message) {
+        const toast = $('#toast');
+        toast.textContent = message;
+        toast.classList.add('show');
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2600);
+      }
+
+      function linkedValue(value) {
+        const match = /^@\[([^\]]+)\]$/.exec(value);
+        if (!match) return escapeHtml(value);
+        const target = pages[match[1]];
+        if (!target) return `<span class="muted">${escapeHtml(value)}</span>`;
+        return `<a href="#${escapeHtml(target.ref)}" data-ref="${escapeHtml(target.ref)}">${escapeHtml(target.title)}</a>`;
+      }
+
+      function renderState(page) {
+        const changed = isChanged(page);
+        const stateText = changed ? 'Draft changed' : 'Disk';
+        const badge = $('#state-badge');
+        const editBadge = $('#edit-state-badge');
+        const banner = $('#draft-banner');
+        const reviewButtons = $$('.review-button');
+
+        badge.textContent = stateText;
+        editBadge.textContent = stateText;
+        badge.classList.toggle('disk', !changed);
+        editBadge.classList.toggle('disk', !changed);
+        banner.classList.toggle('disk', !changed);
+        $('#banner-title').textContent = changed ? 'Draft differs from disk' : 'Page matches disk';
+        $('#banner-description').textContent = changed
+          ? 'The canonical Markdown file has not changed. Review the proposed patch before writing.'
+          : 'This page reflects the confirmed on-disk block file.';
+        banner.querySelector('.banner-mark').textContent = changed ? '!' : '✓';
+        $('#revert-button').disabled = !changed;
+        reviewButtons.forEach((button) => { button.disabled = !changed; });
+      }
+
+      function renderRead() {
+        const page = pages[currentRef];
+        $('#tab-page-title').textContent = page.title;
+        $('#breadcrumb-kind').textContent = kindPlural(page.kind).toUpperCase();
+        $('#breadcrumb-title').textContent = page.title.toUpperCase();
+        $('#page-title').textContent = page.title;
+        $('#page-ref').textContent = `ref: ${page.ref}`;
+        $('#page-lead').textContent = page.summary;
+        $('#page-sections').innerHTML = page.sections;
+        $('#infobox-title').textContent = page.title;
+        $('#infobox-kind').textContent = `${kindLabel(page.kind)} entity`;
+        $('#source-path').textContent = page.path;
+
+        const kindBadge = $('#kind-badge');
+        kindBadge.textContent = kindLabel(page.kind);
+        kindBadge.className = `kind-badge ${page.kind}`;
+
+        const logo = $('#entity-logo');
+        logo.textContent = page.initials;
+        logo.className = `entity-logo ${page.kind}`;
+
+        $('#fact-list').innerHTML = page.facts.map(([label, value]) => `
+          <div class="fact-row">
+            <div class="fact-label">${escapeHtml(label)}</div>
+            <div class="fact-value">${linkedValue(value)}</div>
+          </div>`).join('');
+
+        $('#backlink-list').innerHTML = page.backlinks.length
+          ? page.backlinks.map(([ref, title, reason]) => `
+            <div class="backlink-row">
+              <span class="backlink-arrow">←</span>
+              <button class="entity-link" type="button" data-ref="${escapeHtml(ref)}">${escapeHtml(title)}</button>
+              <span class="backlink-reason">${escapeHtml(reason)}</span>
+            </div>`).join('')
+          : '<div class="backlink-row muted">No pages link here yet.</div>';
+
+        $$('.page-link').forEach((button) => button.classList.toggle('active', button.dataset.ref === currentRef));
+        renderState(page);
+        bindDynamicActions();
+      }
+
+      function renderEdit() {
+        const page = pages[currentRef];
+        $('#edit-heading-title').textContent = page.title;
+        $('#edit-title').value = page.title;
+        $('#edit-kind').value = page.kind;
+        $('#edit-ref').value = page.ref;
+        $('#edit-logo').value = page.asset;
+        $('#edit-summary').value = page.summary;
+        $('#edit-prose').value = page.prose;
+        $('#facts-editor').innerHTML = page.facts.map(([label, value], index) => `
+          <div class="fact-edit-row">
+            <div class="fact-edit-key">${escapeHtml(label)}</div>
+            <input data-fact-index="${index}" aria-label="${escapeHtml(label)}" value="${escapeHtml(value)}">
+          </div>`).join('');
+        renderState(page);
+      }
+
+      function commitEditFields() {
+        const page = pages[currentRef];
+        page.title = $('#edit-title').value.trim() || page.title;
+        page.kind = $('#edit-kind').value;
+        page.asset = $('#edit-logo').value.trim();
+        page.summary = $('#edit-summary').value;
+        page.prose = $('#edit-prose').value;
+        $$('#facts-editor input[data-fact-index]').forEach((input) => {
+          page.facts[Number(input.dataset.factIndex)][1] = input.value;
+        });
+      }
+
+      function setMode(nextMode) {
+        if (mode === 'edit') commitEditFields();
+        mode = nextMode;
+        $('#read-panel').hidden = mode !== 'read';
+        $('#edit-panel').hidden = mode !== 'edit';
+        $('#read-tab').classList.toggle('active', mode === 'read');
+        $('#edit-tab').classList.toggle('active', mode === 'edit');
+        if (mode === 'read') renderRead();
+        else renderEdit();
+        $('.main').scrollTop = 0;
+      }
+
+      function selectPage(ref) {
+        if (!pages[ref]) return;
+        if (mode === 'edit') commitEditFields();
+        currentRef = ref;
+        setMode('read');
+      }
+
+      function semanticChanges(page) {
+        const disk = diskPages[page.ref];
+        if (!disk) return [['Page', 'New page']];
+        const changes = [];
+        if (page.title !== disk.title) changes.push(['Display name', `${disk.title} → ${page.title}`]);
+        if (page.kind !== disk.kind) changes.push(['Entity kind', `${disk.kind} → ${page.kind}`]);
+        if (page.asset !== disk.asset) changes.push(['Image / logo', `${disk.asset || 'None'} → ${page.asset || 'None'}`]);
+        if (page.summary !== disk.summary) changes.push(['Introduction', 'Prose changed']);
+        if (page.prose !== disk.prose) changes.push(['Page prose', 'Prose changed']);
+        page.facts.forEach(([label, value], index) => {
+          if (!disk.facts[index] || disk.facts[index][1] !== value) changes.push([label, `${disk.facts[index]?.[1] || 'None'} → ${value}`]);
+        });
+        return changes;
+      }
+
+      function firstChangedText(page) {
+        const disk = diskPages[page.ref];
+        if (!disk) return ['(new file)', page.summary];
+        if (disk.summary !== page.summary) return [disk.summary, page.summary];
+        if (disk.prose !== page.prose) return [disk.prose, page.prose];
+        if (disk.title !== page.title) return [`title: ${disk.title}`, `title: ${page.title}`];
+        const factIndex = page.facts.findIndex((fact, index) => fact[1] !== disk.facts[index]?.[1]);
+        if (factIndex >= 0) return [disk.facts[factIndex]?.join(': ') || '', page.facts[factIndex].join(': ')];
+        return ['(no text change)', '(no text change)'];
+      }
+
+      function openReview() {
+        if (mode === 'edit') commitEditFields();
+        const page = pages[currentRef];
+        if (!isChanged(page)) {
+          showToast('This page already matches the confirmed disk file.');
+          return;
+        }
+
+        $('#review-path').textContent = page.path;
+        $('#change-list').innerHTML = semanticChanges(page).map(([field, value]) => `
+          <div class="change-row"><div class="change-field">${escapeHtml(field)}</div><div class="change-value">${escapeHtml(value)}</div></div>`).join('');
+        const [before, after] = firstChangedText(page);
+        $('#diff').innerHTML = `
+          <span class="diff-line context">@@ ${escapeHtml(page.ref)} @@</span>
+          <span class="diff-line remove">- ${escapeHtml(before)}</span>
+          <span class="diff-line add">+ ${escapeHtml(after)}</span>`;
+        $('#review-modal').hidden = false;
+        $('#modal-close').focus();
+      }
+
+      function closeReview() {
+        $('#review-modal').hidden = true;
+      }
+
+      function confirmWrite() {
+        const page = pages[currentRef];
+        diskPages[currentRef] = JSON.parse(JSON.stringify(page));
+        closeReview();
+        setMode('read');
+        showToast(`Mock confirmation complete: ${page.path} now represents the confirmed disk state.`);
+      }
+
+      function revertDraft() {
+        if (!diskPages[currentRef]) return;
+        pages[currentRef] = JSON.parse(JSON.stringify(diskPages[currentRef]));
+        renderRead();
+        showToast('Draft reverted to the confirmed disk version.');
+      }
+
+      function bindDynamicActions() {
+        $$('[data-ref]').forEach((element) => {
+          if (element.classList.contains('page-link')) return;
+          element.onclick = (event) => {
+            event.preventDefault();
+            selectPage(element.dataset.ref);
+          };
+        });
+        $$('[data-toast]').forEach((element) => {
+          element.onclick = () => showToast(element.dataset.toast);
+        });
+      }
+
+      $$('.page-link').forEach((button) => {
+        button.addEventListener('click', () => selectPage(button.dataset.ref));
+      });
+
+      $('#wiki-search').addEventListener('input', (event) => {
+        const query = event.target.value.trim().toLowerCase();
+        $$('.page-link').forEach((button) => {
+          button.hidden = query !== '' && !button.dataset.search.includes(query);
+        });
+      });
+
+      $('#read-tab').addEventListener('click', () => setMode('read'));
+      $('#edit-tab').addEventListener('click', () => setMode('edit'));
+      $('#edit-page-button').addEventListener('click', () => setMode('edit'));
+      $('#cancel-edit-button').addEventListener('click', () => setMode('read'));
+      $$('.review-button').forEach((button) => button.addEventListener('click', openReview));
+      $('#revert-button').addEventListener('click', revertDraft);
+      $('#modal-close').addEventListener('click', closeReview);
+      $('#modal-cancel').addEventListener('click', closeReview);
+      $('#confirm-write').addEventListener('click', confirmWrite);
+      $('#review-modal').addEventListener('click', (event) => {
+        if (event.target === $('#review-modal')) closeReview();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !$('#review-modal').hidden) closeReview();
+        if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+          event.preventDefault();
+          $('#wiki-search').focus();
+        }
+      });
+
+      bindDynamicActions();
+      renderRead();
+    })();
+  </script>
+</body>
+</html>
