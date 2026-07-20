@@ -28,6 +28,10 @@ and "what evidence caused this headline?" quickly and deterministically. The
 typed graph is a derived view of block identities and `@[ref]` links, not a
 separate authoring database.
 
+The first in-app GUI should nevertheless feel like an ordinary wiki, not like a
+graph database, fake-internet CMS, or collection of bespoke entity editors. The
+typed machinery belongs beneath familiar pages, links, search, and editing.
+
 ---
 
 ## 0. Source ownership: disk wins
@@ -556,8 +560,8 @@ schedule(position, worldInstant) -> current activity/location token
 No per-frame pathfinding and no timer per employee are required. A state change
 invalidates the relevant deterministic plan, matching V5, V21, V30, and R6.
 
-The editor must include a weekly grid and an **At Time** preview. Selecting
-Tuesday 22:30 should answer:
+The query layer must be able to answer an **At Time** request such as Tuesday
+22:30:
 
 - which businesses are open;
 - which positions are on duty;
@@ -566,7 +570,9 @@ Tuesday 22:30 should answer:
 - which gigs are eligible;
 - which map markers those answers bind to.
 
-That preview is also the mission validator's queryable future.
+That answer is also the mission validator's queryable future. A weekly grid or
+interactive At Time preview can be added later as a normal wiki page tool; it is
+not a prerequisite for the first World Bible GUI.
 
 ---
 
@@ -707,28 +713,44 @@ system should not make a task retry part of the protagonist's history.
 
 ## 10. The World Bible editor surface
 
-The surface belongs inside the active editor. It should reuse the existing
-workspace-document tabs, content tree, command authority, inspector, and world
-selection rather than create a second editor shell.
+Clarified by USER ASK `req_3269`: this begins as a conventional wiki inside the
+active editor. It should reuse the existing workspace-document tabs, navigation,
+search, and command authority rather than create a second editor shell or a
+specialized UI for every entity kind.
 
 ### Default layout
 
 ```text
-Content tree / queries       Wiki-shaped record             Inspector
-----------------------       ------------------             ---------
-People                       title + typed fields           validation
-Organizations                prose + inline refs            relationships
-Positions                    backlinks                      map bindings
-Places                       site previews                  at-time state
-Sites                        gig templates                  where-used
-Documents                                                   compile output
-Gigs
+Wiki index / search          Ordinary entity page
+-------------------          ----------------------------------------
+All pages                    title · kind · ref · source state
+People                       image/logo + small facts table
+Businesses                   readable prose with entity links
+Places                       related pages
+Mechanics                    backlinks
+Missions                     Read | Edit | Review Changes | Write to Disk
 ```
 
-Recommended behavior:
+The first surface needs only familiar wiki behavior:
 
-- `Characters`, `Locations`, and `Missions` in the existing content tree become
-  views over the parsed on-disk block files rather than parallel registries.
+- list, search, create, open, rename, and link pages;
+- render prose, images/logos, and a small facts table from the page's blocks;
+- switch between a readable page and one straightforward editing view;
+- autocomplete `@[ref]` links by entity title while storing the stable ref;
+- show related pages and backlinks;
+- represent a world/building space as an ordinary linked field that can open the
+  existing map surface, rather than embedding a map editor in every page;
+- allow partial pages. An entity can begin as only a stable ref, kind, name, and
+  a paragraph, then gain facts and relations as the world becomes clearer;
+- keep validation local and plain: missing required identity, unresolved link,
+  duplicate ref, or invalid field. Advanced simulation diagnostics do not need
+  to occupy the first editing surface.
+
+The disk boundary remains visible without turning the page into source-control
+software:
+
+- `Characters`, `Locations`, and `Missions` in the existing navigation become
+  filtered wiki indexes over parsed on-disk block files, not parallel registries.
 - Every open document visibly reports `DISK`, `DRAFT CHANGED`, `DISK CHANGED`,
   or `CONFLICT`; a dirty dot alone is too ambiguous for a two-authority surface.
 - Editing a field, prose, relation, asset, or world binding changes the draft
@@ -737,24 +759,33 @@ Recommended behavior:
   **Write to Disk** names every target path and requires formal confirmation.
 - **Reload from Disk** is explicit when it would discard draft changes. External
   file changes are detected and surfaced, not automatically merged.
-- Opening a person, business, site, document, position, or place creates a normal
-  workspace document keyed by its stable source ID.
-- `[[` opens typed entity autocomplete. Selecting an entity writes its ID token,
-  while the editor displays its current label.
-- Backlinks and **Where Used** are first-class. A renamed business shows every
-  document, account, position, place, and gig that references it.
-- The right inspector exposes strict fields and relation editors. The central
-  page carries readable prose; users should not have to edit raw JSON.
-- A business page displays workers and shifts as projections and offers
-  **New Position**, **Assign Occupant**, **Create Account**, **Create Location**,
-  **Create Site**, and **Create Gig Template** commands.
-- A Place page can select or create V24 semantic markers on the same world map.
-- A Site/Document page has **Preview as Site**, using the exact site template
-  and compiled document blocks the `/play` browser will consume.
-- An **At Time** control globally previews derived age, shifts, occupancy,
-  openings, routes, and mission availability.
-- Compile diagnostics are navigable: an unresolved route opens the bad block;
-  an impossible shift opens the pattern; a missing station opens the position.
+
+There is no required graph canvas, three-column inspector, schedule dashboard,
+site preview, social feed composer, or gig wizard in this first GUI. Those may
+become useful later, but the wiki page remains the common floor beneath them.
+
+### 10.1 Establish the entity, then design its platforms
+
+The World Bible authors the world entity before authoring how a fictional
+platform presents it. A minimally established entity has:
+
+1. a stable `<ref>`;
+2. a kind and display name;
+3. a readable page, even if it is only a short paragraph;
+4. any already-known asset, place, job, home, or relationship links.
+
+That is enough to establish a business, NPC, place, organization, or mechanic.
+It does **not** imply that the entity owns a website, social account, storefront,
+market listing, news entry, or mission. The wiki must not manufacture those
+presences merely because the corresponding buttons are easy to add.
+
+When play actually needs a platform presence, design that platform according to
+its gameplay purpose and create a separate linked entity such as `<site>`,
+`<account>`, `<listing>`, or `<document>` whose owner/subject points back to the
+established entity. The platform can then have its own later preview or editor.
+This keeps the base business/NPC schema small and lets different in-game
+platforms consume the same identity without forcing them through one premature
+universal CMS.
 
 The World Bible is a non-diegetic authoring tool. A WikiKnow-style site inside
 the game is a separate InternetSite projection over selected public data. This
@@ -1035,43 +1066,37 @@ representative-play spikewatch gate with no new rhythmic spike class.
 
 ---
 
-## 16. First vertical slice
+## 16. First vertical slice: establish entities in the wiki
 
-Do not start by importing all 300 Engaige records or building sixty site skins.
-Prove the complete chain with one small but deep neighborhood.
+Do not start by importing all 300 Engaige records, building sixty site skins, or
+proving the whole internet. First prove that an ordinary wiki can establish and
+relate the few entities from which those later systems will grow.
 
 Recommended fixture:
 
-- one organization/business with a parent shell company;
-- two physical locations and their world markers;
-- four stable positions covering a day and overnight shift;
-- one authored manager, one authored target/client, one seeded worker, and one
-  vacancy;
-- a website plus FlockBook accounts for the business and people;
-- one public fact, one secret fact, and three contradictory claims;
-- one WikiKnow-style reference page, one FlockBook thread, one local-news story,
-  and one anonymous countervoice post;
-- real comments/reactions and a metric-derived notification count;
-- one person-bound grievance gig and one position-bound recurring racket;
-- one runtime incident producing a witness record, post, headline, and mission
-  consequence through explicit cause IDs;
-- site preview on the phone and an in-world screen using the same compiled rows.
+- one business with a name, short description, and logo;
+- one physical location linked to an existing world/building space;
+- one authored NPC with a short biography, home, and job relation;
+- one position and simple shift linking the NPC to the business;
+- one mechanic page written primarily as literal design prose;
+- backlinks among those pages, with no website or social platform required.
 
 The slice is complete only when:
 
-1. changing the business in the World Bible leaves its source file untouched;
-2. Review Changes shows the exact proposed block/text patch;
-3. explicit Write to Disk updates the named file and re-parses it cleanly;
-4. an external text edit creates `DISK CHANGED` or `CONFLICT`, never data loss;
-5. every referenced entity and route opens;
-6. Tuesday-at-time preview resolves workers, openings, and markers;
-7. both gig bindings validate and the headless verifier can complete them;
-8. renaming the business changes labels without changing any IDs or links;
-9. the false public claim never becomes mission/world truth;
-10. the incident's media chain can be rebuilt from its source events;
-11. AI-off still produces a coherent internet;
-12. the phone and in-world screen consume the same content channel;
-13. the runtime performance gate remains silent.
+1. every fixture entity can be found, opened, read, and edited like a wiki page;
+2. changing the business leaves its source file untouched while in draft;
+3. Review Changes shows the exact proposed block/text patch;
+4. explicit Write to Disk updates the named file and re-parses it cleanly;
+5. an external text edit creates `DISK CHANGED` or `CONFLICT`, never data loss;
+6. entity links and backlinks survive a display-name change because refs remain
+   stable;
+7. the logo and world-space relation are visible without bespoke business or map
+   editors inside the page;
+8. literal mechanic prose round-trips byte-for-byte outside confirmed edits;
+9. no platform presence is generated simply because the business or NPC exists.
+
+Only after this slice works should one established entity be used to choose and
+prove the first in-game platform projection end to end.
 
 ---
 
@@ -1106,19 +1131,22 @@ draft; only confirmed proposals can change disk.
 
 ### Phase 2 — World Bible workspace
 
-- content-tree views, record documents, inspector relations, typed reference
-  autocomplete, backlinks, diagnostics, schedule grid, and At Time preview;
+- ordinary wiki index/search, readable entity pages, one editing view, simple
+  facts/assets/relations, typed reference autocomplete, and backlinks;
 - persistent `DISK`/`DRAFT CHANGED`/`DISK CHANGED`/`CONFLICT` indicators,
   Review Changes, Write to Disk confirmation, Reload, and Revert Draft;
-- world-marker binding through the existing map surface;
-- business roster as a position/occupancy projection.
+- a plain world-space reference that can open the existing map surface;
+- navigable basic identity/reference diagnostics.
 
-Exit: the entire fixture can be authored without raw JSON while the user always
-knows whether they are looking at disk or a divergent editor draft.
+Exit: the small entity fixture can be authored like a normal wiki, without raw
+JSON or platform-specific editors, while the user always knows whether they are
+looking at disk or a divergent draft.
 
 ### Phase 3 — fake-internet floor
 
-- site/domain/route/document/account model;
+- choose one gameplay-needed platform for an already established entity;
+- add only the site/domain/route/document/account model that platform proves it
+  needs, keeping each presence linked back to its owner/subject entity;
 - compiled site templates, document blocks, route/search indexes;
 - shared preview for editor, phone, and in-world screen;
 - metric tokens, link completeness, comments, and seeded feeds;
@@ -1182,24 +1210,31 @@ them:
 2. **World Bible is a projection and deliberate writer, not an authority.** Its
    parsed model, backlinks, and structured forms come from `<ref>`/`@[ref]`
    blocks, and its writer preserves untouched human prose byte-for-byte.
-3. **Authored named people are tenured.** Common workers remain seeded occupants
+3. **The first GUI is an ordinary wiki.** Pages, search, links, backlinks, small
+   facts/assets, and read/edit/review are the floor; specialized inspectors,
+   dashboards, graph canvases, and platform CMS tools must prove a later need.
+4. **Entity first, platform later.** Establish a business, NPC, place, or mechanic
+   independently; add a website, account, listing, document, or mission only when
+   its gameplay purpose is known, as a separate linked entity.
+5. **Authored named people are tenured.** Common workers remain seeded occupants
    until promotion.
-4. **Job means Position plus Occupancy.** It is not a string on an NPC or an
+6. **Job means Position plus Occupancy.** It is not a string on an NPC or an
    embedded worker tuple on a business.
-5. **DOB is stored; age is derived.** Week/day/hour are views of one world
+7. **DOB is stored; age is derived.** Week/day/hour are views of one world
    instant.
-6. **Accounts are entities.** Handles are not loose strings, and controller
+8. **Accounts are entities.** Handles are not loose strings, and controller
    truth is separate from public ownership.
-7. **Facts and Claims never share authority.** The internet is allowed to lie;
+9. **Facts and Claims never share authority.** The internet is allowed to lie;
    mission/world predicates are not allowed to believe it by accident.
-8. **No dead links and no fake counts.** Both become compiler contracts.
-9. **Static authored floor first.** Event templates second; bounded AI prose
+10. **No dead links and no fake counts.** Both become compiler contracts.
+11. **Static authored floor first.** Event templates second; bounded AI prose
    last.
-10. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
+12. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
    and validation only.
-11. **Compile repeated presentation.** Site/layout/text templates are small
+13. **Compile repeated presentation.** Site/layout/text templates are small
     dictionaries over dense instances; only dirty visible records update.
 
-If these hold, the wiki is much more than a lore notebook. It becomes the place
-where a business, its staff, building, hours, accounts, rumors, websites, and
-gigs are authored once and then compiled into every system that needs them.
+If these hold, the wiki begins as a good lore notebook and identity registry. It
+establishes a business, NPC, place, or mechanic once; later game platforms and
+missions can then reference that entity and add only the behavior they actually
+need.

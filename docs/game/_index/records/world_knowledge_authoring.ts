@@ -5,7 +5,7 @@ export const world_knowledge_authoring: DocIndex = {
   file: 'WORLD_KNOWLEDGE_AUTHORING.md',
   purpose: ['npc', 'world_gen', 'scripting', 'persistence', 'ui', 'agent_llm'],
   summary:
-    'Candidate format-first architecture: project-owned Markdown files with declarative <block> records, stable <ref> identities, @[ref] links, and surrounding human prose are canonical; the wiki-shaped World Bible holds a visibly divergent draft and requires review plus formal Write to Disk confirmation. Confirmed disk content derives typed people/organization/position/place/account/site/document/fact/claim/gig records and compiles into dense schedule, route, search, text, and mission-affordance indexes. Engaige contributes content-density and recursion disciplines, while its free-text identities, random schedules, event firehose, and fact-inventing AI are retired.',
+    'Candidate format-first architecture: project-owned Markdown files with declarative <block> records, stable <ref> identities, @[ref] links, and surrounding human prose are canonical. The first in-app World Bible is deliberately an ordinary wiki—pages, search, links, backlinks, simple facts/assets, and read/edit/review—with a visibly divergent draft and formal Write to Disk confirmation. It establishes entities before any gameplay-needed website, account, listing, document, or mission is designed as a separate linked projection.',
   interfaces: [
     {
       name: 'WORLD_KNOWLEDGE',
@@ -45,7 +45,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'component',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Proposed active-editor workspace view over canonical block files: existing content tree and document tabs browse wiki-shaped pages while the inspector edits a separate draft. Every document shows DISK, DRAFT CHANGED, DISK CHANGED, or CONFLICT; Review Changes exposes semantic and exact-text diffs; Write to Disk names target paths and requires formal confirmation. Backlinks/where-used, typed ref autocomplete, map bindings, At Time projections, site preview, and diagnostics reuse the active shell.',
+        'Proposed deliberately simple active-editor wiki over canonical block files: index/search, ordinary readable entity pages, one editing view, small facts/assets/relations, typed-ref links, backlinks, and basic diagnostics. Every page shows DISK, DRAFT CHANGED, DISK CHANGED, or CONFLICT; Review Changes exposes semantic and exact-text diffs; Write to Disk names target paths and requires confirmation. Platform previews, graph canvases, schedule dashboards, bespoke inspectors, and gig wizards are deferred until proven necessary.',
       dependsOn: ['WORLD_KNOWLEDGE', 'WorldMarker'],
       consumers: ['cart/editor'],
       status: 'candidate',
@@ -90,6 +90,15 @@ export const world_knowledge_authoring: DocIndex = {
       status: 'promote',
     },
     {
+      name: 'Entity first, platform projection later',
+      purpose: ['ui', 'scripting', 'world_gen', 'maintenance'],
+      description:
+        'The ordinary wiki first establishes a stable business, NPC, place, organization, or mechanic with a ref, name, prose, and known links. Existence does not automatically create a website, social account, listing, document, or mission. When gameplay proves a platform need, its presence is authored as a separate linked entity with purpose-specific behavior and UI.',
+      examples: ['world_knowledge_authoring'],
+      promoteTo: 'WorldBibleSurface',
+      status: 'promote',
+    },
+    {
       name: 'Authored floor plus causally bounded media ceiling',
       purpose: ['scripting', 'agent_llm', 'npc'],
       description:
@@ -116,6 +125,15 @@ export const world_knowledge_authoring: DocIndex = {
     },
   ],
   hazards: [
+    {
+      name: 'premature platform CMS obscures entity authoring',
+      purpose: ['ui', 'scripting', 'maintenance'],
+      description:
+        'Starting the World Bible with site previews, feed composers, schedule dashboards, graph canvases, and type-specific inspectors makes basic lore entry depend on platform decisions that have not been made. It also pressures every entity to acquire fake-internet presences whether gameplay needs them or not.',
+      evidence: ['USER ASK req_3269', 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md §10/§16'],
+      fix: 'Ship familiar wiki primitives first; establish partial entities independently; add each platform as a later linked projection only after its gameplay purpose and required data are known.',
+      severity: 'high',
+    },
     {
       name: 'automatic editor writes erase the source-of-truth distinction',
       purpose: ['persistence', 'ui', 'maintenance'],
