@@ -15,7 +15,7 @@ import {
   type ShaderSpec, type ShaderParam,
 } from '../textures/shaders';
 import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
-import { ShaderThumb } from '../shell/PaintToolbar';
+import ShaderThumb from '../shell/ShaderThumb';
 import type { Rgb } from '../data/types';
 
 // The live editing state for the active bucket: which spec, which variant (take), and every

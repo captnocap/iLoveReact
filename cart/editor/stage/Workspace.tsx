@@ -23,8 +23,6 @@ export default function Workspace(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  /** The paint controls segment for the action bar (ToolOptions renders it while painting). */
-  paintBar?: any;
   selectedPartCount: number;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
@@ -39,7 +37,6 @@ export default function Workspace(props: {
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
-  onFacadeLayers: (facadeId: string, layers: import('../world/facades').FacadeLayer[], activeLayerId: string) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
   onFacadeClear: (facadeId: string) => void;

@@ -15,6 +15,7 @@ import { type PaintTheme, DARK_THEME } from './theme';
 import { sizeTrackToPx, sizePxToTrack } from './stroke';
 import { brushIconLayers, toolIconLayers, type IconLayer } from './icons';
 import type { BrushShape, BrushTool } from './model';
+import { parseClampedNumericDraft, replacementDraftAfterEdit } from './numericInput';
 
 function fmt(v: number, precision: number): string {
   return precision <= 0 ? String(Math.round(v)) : v.toFixed(precision);
@@ -47,18 +48,21 @@ export function BrushScalar(props: BrushScalarProps) {
   const precision = props.precision ?? 0;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(fmt(props.value, precision));
+  const replaceBaselineRef = useRef<string | null>(null);
   useEffect(() => { if (!editing) setDraft(fmt(props.value, precision)); }, [props.value, precision, editing]);
 
   const toTrack = (v: number) => (props.log ? sizePxToTrack(v) : (v - props.min) / Math.max(1e-6, props.max - props.min));
   const fromTrack = (t: number) => (props.log ? sizeTrackToPx(t) : props.min + t * (props.max - props.min));
 
-  const commitDraft = () => {
-    const n = Number(draft);
+  const commitDraft = (submitted?: unknown) => {
+    const raw = typeof submitted === 'string' ? submitted : draft;
+    const value = parseClampedNumericDraft(raw, props.min, props.max);
+    replaceBaselineRef.current = null;
     setEditing(false);
-    if (Number.isFinite(n)) {
-      const v = Math.max(props.min, Math.min(props.max, n));
-      props.onChange(v);
-      props.onCommit?.(v);
+    if (value !== null) {
+      setDraft(fmt(value, precision));
+      props.onChange(value);
+      props.onCommit?.(value);
     } else setDraft(fmt(props.value, precision));
   };
   // End of a drag: settle the value once (props.value is the last live onChange result).
@@ -109,8 +113,17 @@ export function BrushScalar(props: BrushScalarProps) {
       <Box style={{ width: 52 }}>
         <TextInput
           value={editing ? draft : `${fmt(props.value, precision)}${props.unit ?? ''}`}
-          onMouseDown={() => { setEditing(true); setDraft(fmt(props.value, precision)); }}
-          onChangeText={(v: string) => { setEditing(true); setDraft(v); }}
+          onMouseDown={() => {
+            replaceBaselineRef.current = editing ? draft : `${fmt(props.value, precision)}${props.unit ?? ''}`;
+            setEditing(true);
+            setDraft(fmt(props.value, precision));
+          }}
+          onChangeText={(value: string) => {
+            const baseline = replaceBaselineRef.current;
+            replaceBaselineRef.current = null;
+            setEditing(true);
+            setDraft(baseline === null ? value : replacementDraftAfterEdit(baseline, value));
+          }}
           onSubmit={commitDraft}
           onSubmitEditing={commitDraft}
           onBlur={commitDraft}

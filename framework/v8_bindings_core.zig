@@ -1967,7 +1967,7 @@ fn hostModelPaintStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 }
 
 /// __model_paint_stamp(x, y, r, g, b, radius, flow[, kind, hardness, angleDeg, aspect,
-/// scatter]) → 1 if a face was dabbed, 0 on a miss. One free-form sub-face brush dab (see
+/// scatter, blend]) → 1 if a face was dabbed, 0 on a miss. One free-form sub-face brush dab (see
 /// scene3d.paintStampAt); fired per pointer-move during a stroke. radius is in patch-texel
 /// units, flow 0..1. The optional tail is the brush FOOTPRINT (req_2831) — kind is the
 /// BRUSH_SHAPE_ID contract (runtime/paint/model.ts, 0 round … 10 knife); absent = the old
@@ -1982,12 +1982,14 @@ fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const radius: f32 = @floatCast(argToF64(info, 5) orelse 2.0);
     const flow: f32 = @floatCast(argToF64(info, 6) orelse 1.0);
+    const blend_raw = argToI32(info, 12) orelse 0;
     const spec = scene3d.BrushShape{
         .kind = @intCast(std.math.clamp(argToI32(info, 7) orelse 0, 0, 10)),
         .hardness = @floatCast(argToF64(info, 8) orelse 1.0),
         .angle_rad = @as(f32, @floatCast(argToF64(info, 9) orelse 0.0)) * std.math.pi / 180.0,
         .aspect = @floatCast(argToF64(info, 10) orelse 1.0),
         .scatter = @floatCast(argToF64(info, 11) orelse 0.0),
+        .blend = @intCast(if (blend_raw >= 0 and blend_raw <= 7) blend_raw else 0),
     };
     const face = scene3d.paintStampAt(x, y, r, g, b, radius, flow, spec);
     if (face >= 0) state.markDirty();

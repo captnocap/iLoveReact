@@ -57,8 +57,11 @@ const OP_FILL = paint_ops.OP_FILL; // v2: group u32, ord u32
 // hardness f32, angle_rad f32, aspect f32, scatter f32. Older blobs never contain it,
 // so v1/v2 replay is untouched; newer blobs are version-gated at the header.
 const OP_DAB_SHAPED = paint_ops.OP_DAB_SHAPED;
+// v4: OP_DAB_SHAPED + blend-mode u32. A new tag keeps every v3 stream readable
+// without making the op walker guess which operand layout it encountered.
+const OP_DAB_BLENDED = paint_ops.OP_DAB_BLENDED;
 const MAGIC = [4]u8{ 'R', 'J', 'P', 'P' };
-const VERSION: u16 = 3; // v1 = flat face-indexed stream, v2 = hide-stable keys — both readable
+const VERSION: u16 = 4; // v1 flat faces · v2 stable keys · v3 shapes · v4 blend modes
 const MAT_BAKE_SIZE: u32 = 256;
 
 /// Ungrouped faces carry this group key; the ordinal is then the raw face index.
@@ -644,7 +647,7 @@ pub fn recordDabShaped(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: b
     emitInk(mat, rgb);
     g_open_fill_seen.clearRetainingCapacity();
     const key = faceKeyOf(face);
-    g_open.append(alloc, OP_DAB_SHAPED) catch {};
+    g_open.append(alloc, OP_DAB_BLENDED) catch {};
     appendOpenU32(key.group);
     appendOpenU32(key.ord);
     appendOpenF32(u);
@@ -656,6 +659,7 @@ pub fn recordDabShaped(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: b
     appendOpenF32(spec.angle_rad);
     appendOpenF32(spec.aspect);
     appendOpenF32(spec.scatter);
+    appendOpenU32(spec.blend);
 }
 
 /// Record one whole-face fill (same hide-stable key).
@@ -992,6 +996,31 @@ fn runStrokeOps(io: std.Io, environ: *const std.process.Environ.Map, ops: []cons
                 const scatter = c.f32v() orelse return;
                 const face = resolveFace(res, group, ord) orelse continue;
                 const spec = model_paint.BrushShape{ .kind = @intCast(@min(kind, 255)), .hardness = hardness, .angle_rad = angle, .aspect = aspect, .scatter = scatter };
+                flushInk(io, environ, ink);
+                if (ink.mat_active) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow, spec);
+            },
+            OP_DAB_BLENDED => {
+                const group = c.u32v() orelse return;
+                const ord = c.u32v() orelse return;
+                const u = c.f32v() orelse return;
+                const v = c.f32v() orelse return;
+                const radius = c.f32v() orelse return;
+                const flow = c.f32v() orelse return;
+                const kind = c.u32v() orelse return;
+                const hardness = c.f32v() orelse return;
+                const angle = c.f32v() orelse return;
+                const aspect = c.f32v() orelse return;
+                const scatter = c.f32v() orelse return;
+                const blend = c.u32v() orelse return;
+                const face = resolveFace(res, group, ord) orelse continue;
+                const spec = model_paint.BrushShape{
+                    .kind = @intCast(@min(kind, 255)),
+                    .hardness = hardness,
+                    .angle_rad = angle,
+                    .aspect = aspect,
+                    .scatter = scatter,
+                    .blend = @intCast(if (blend <= 7) blend else 0),
+                };
                 flushInk(io, environ, ink);
                 if (ink.mat_active) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow, spec);
             },

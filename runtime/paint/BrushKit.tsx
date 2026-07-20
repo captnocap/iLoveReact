@@ -5,14 +5,15 @@
 // texture/shader swatches). Drop it next to a <Paintable> + useBrushStroke and
 // every tool in the repo gets the SAME paint UI (USER ASK req_1447).
 
+import { useState } from 'react';
 import { Box, Col, Row, Text, Pressable } from '../primitives';
-import { BrushScalar, ChipRow, BrushIcon, ToolIcon, type ChipOption } from './controls';
+import { BrushScalar, BrushIcon, ToolIcon } from './controls';
 import { ColorField } from './ColorField';
 import { type PaintTheme, DARK_THEME } from './theme';
 import {
-  type Brush, type BrushTool, type BrushShape, type Palette, type PaintInk,
+  type BlendMode, type Brush, type BrushTool, type BrushShape, type Palette, type PaintInk,
   BLEND_MODES, BRUSH_PRESETS, TOOL_HOTKEY,
-  normalizeBrush, pushRecent, inkKey,
+  applyBrushPreset, pushRecent, inkKey,
 } from './model';
 
 function presetShape(p: typeof BRUSH_PRESETS[number]): BrushShape {
@@ -41,6 +42,8 @@ export interface BrushKitProps {
   onPaletteChange?: (p: Palette) => void;
   /** which tools to surface (default: the host-supported set). */
   tools?: BrushTool[];
+  /** Blend vocabulary this target can actually execute. Omit for the full set. */
+  blendModes?: readonly BlendMode[];
   theme?: PaintTheme;
   width?: number;
   sections?: Partial<Record<'tools' | 'shapes' | 'dials' | 'blend' | 'color' | 'palette', boolean>>;
@@ -51,6 +54,84 @@ function Section(props: { title: string; theme: PaintTheme; children: any }) {
     <Col style={{ gap: 6 }}>
       <Text style={{ color: props.theme.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{props.title.toUpperCase()}</Text>
       {props.children}
+    </Col>
+  );
+}
+
+/** The canonical icon picker, exported so a dock can pin the tools above its
+ * scrolling brush controls without reimplementing their labels or hit targets. */
+export function BrushToolPicker(props: {
+  tool: BrushTool;
+  onToolChange: (tool: BrushTool) => void;
+  tools?: readonly BrushTool[];
+  theme?: PaintTheme;
+}) {
+  const T = props.theme ?? DARK_THEME;
+  const tools = props.tools ?? DEFAULT_TOOLS;
+  return (
+    <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+      {tools.map((tool) => {
+        const selected = props.tool === tool;
+        return (
+          <Pressable
+            key={tool}
+            tooltip={`${TOOL_LABEL[tool]} (${TOOL_HOTKEY[tool]})`}
+            onMouseDown={() => props.onToolChange(tool)}
+            style={{
+              width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: selected ? T.accent : T.control,
+              borderWidth: 1, borderColor: selected ? T.accent : T.frame,
+            }}
+          >
+            <ToolIcon tool={tool} size={22} color={selected ? T.page : T.ink} />
+          </Pressable>
+        );
+      })}
+    </Row>
+  );
+}
+
+function blendLabel(mode: BlendMode): string {
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+/** GIMP-shaped blend control: one stable readout, with its choices expanding
+ * vertically in the panel flow instead of nine chips competing for one row. */
+function BlendModePicker(props: {
+  value: BlendMode;
+  modes: readonly BlendMode[];
+  onChange: (mode: BlendMode) => void;
+  theme: PaintTheme;
+}) {
+  const [open, setOpen] = useState(false);
+  const T = props.theme;
+  return (
+    <Col style={{ gap: 4 }}>
+      <Pressable
+        tooltip="Choose how this brush combines with existing paint"
+        onPress={() => setOpen((value) => !value)}
+        style={{ height: 27, paddingLeft: 9, paddingRight: 9, borderRadius: 5, borderWidth: 1, borderColor: T.frame, backgroundColor: T.control, flexDirection: 'row', alignItems: 'center' }}
+      >
+        <Text style={{ color: T.ink, fontSize: 10, fontWeight: '800' }}>{blendLabel(props.value)}</Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: T.dim, fontSize: 10 }}>{open ? '▲' : '▼'}</Text>
+      </Pressable>
+      {open ? (
+        <Col style={{ borderWidth: 1, borderColor: T.frame, borderRadius: 5, overflow: 'hidden' }}>
+          {props.modes.map((mode) => {
+            const selected = mode === props.value;
+            return (
+              <Pressable
+                key={mode}
+                onPress={() => { props.onChange(mode); setOpen(false); }}
+                style={{ height: 25, paddingLeft: 9, paddingRight: 9, flexDirection: 'row', alignItems: 'center', backgroundColor: selected ? T.accent : T.control, borderBottomWidth: mode === props.modes[props.modes.length - 1] ? 0 : 1, borderBottomColor: T.frame }}
+              >
+                <Text style={{ color: selected ? T.page : T.ink, fontSize: 10, fontWeight: selected ? '800' : '600' }}>{blendLabel(mode)}</Text>
+              </Pressable>
+            );
+          })}
+        </Col>
+      ) : null}
     </Col>
   );
 }
@@ -86,7 +167,7 @@ export function BrushKit(props: BrushKitProps) {
   const commit = (delta: Partial<Brush>) => { const nb = { ...b, ...delta }; props.onBrushChange(nb); props.onBrushCommit?.(nb); };
 
   const tools = props.tools ?? DEFAULT_TOOLS;
-  const blendOpts: ChipOption<string>[] = BLEND_MODES.map((m) => ({ value: m, label: m }));
+  const blendModes = props.blendModes ?? BLEND_MODES;
 
   // Record an ink in the recents ring (a DELIBERATE choice — a swatch click or a
   // settled colour), kept separate from setting the live brush ink. The colour
@@ -107,25 +188,7 @@ export function BrushKit(props: BrushKitProps) {
     <Col style={{ width: props.width ?? 248, gap: 12, padding: 12, backgroundColor: T.panel, borderWidth: 1, borderColor: T.frame, borderRadius: 8 }}>
       {show('tools') ? (
         <Section title="Tool" theme={T}>
-          {/* tools ship with a standard icon too — picker is glyphs, not names */}
-          <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-            {tools.map((t) => {
-              const sel = props.tool === t;
-              return (
-                <Pressable
-                  key={t}
-                  tooltip={`${TOOL_LABEL[t]} (${TOOL_HOTKEY[t]})`}
-                  onMouseDown={() => props.onToolChange(t)}
-                  style={{
-                    width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
-                    backgroundColor: sel ? T.accent : T.control, borderWidth: 1, borderColor: sel ? T.accent : T.frame,
-                  }}
-                >
-                  <ToolIcon tool={t} size={22} color={sel ? T.page : T.ink} />
-                </Pressable>
-              );
-            })}
-          </Row>
+          <BrushToolPicker tool={props.tool} tools={tools} onToolChange={props.onToolChange} theme={T} />
         </Section>
       ) : null}
 
@@ -140,7 +203,12 @@ export function BrushKit(props: BrushKitProps) {
                 <Pressable
                   key={p.id}
                   tooltip={p.label}
-                  onMouseDown={() => commit(normalizeBrush({ ...b, ...p.brush, ink: b.ink, size: b.size }))}
+                  // Presets start from the canonical baseline. Inheriting Spray's
+                  // scatter/flow into Knife (or Soft's hardness into Rake) made the
+                  // footprint lie about the icon after the first selection.
+                  onMouseDown={() => {
+                    commit(applyBrushPreset(b, p));
+                  }}
                   style={{
                     width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
                     backgroundColor: sel ? T.accent : T.control, borderWidth: 1, borderColor: sel ? T.accent : T.frame,
@@ -168,7 +236,7 @@ export function BrushKit(props: BrushKitProps) {
 
       {show('blend') ? (
         <Section title="Blend" theme={T}>
-          <ChipRow options={blendOpts} value={b.blend} onChange={(m) => commit({ blend: m as Brush['blend'] })} theme={T} wrap />
+          <BlendModePicker value={b.blend} modes={blendModes} onChange={(blend) => commit({ blend })} theme={T} />
         </Section>
       ) : null}
 

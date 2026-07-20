@@ -14,7 +14,8 @@ import { mapDocumentPaths } from '../data/mapDocuments';
 import { stickerById } from '../data/stickerStore';
 import { shaderSpec } from '../textures/shaders';
 import { facadeCanvasSize, facadeQuadMesh, FACADE_TEXELS_PER_METER, type Facade, type FacadeStamp, type FacadeStrokeSelection } from './facades';
-import type { PaintInk } from '../../../runtime/paint/model';
+import type { BlendMode, PaintInk } from '../../../runtime/paint/model';
+import { compositeBlendChannel } from '../../../runtime/paint/blend';
 import { hexToRgb01 } from '../../../runtime/paint/colors';
 import type { MeshRef, ResidentMesh } from './meshProps';
 
@@ -124,6 +125,7 @@ export function compositeFacadeStrokeMask(
   erase: boolean,
   selection?: FacadeStrokeSelection,
   shader?: FacadeInkPixels | null,
+  blend: BlendMode = 'normal',
 ): Uint8Array {
   if (base.length !== width * height * 4 || mask.length !== base.length) return base;
   const color = ink.kind === 'color' ? hexToRgb01(ink.hex) : ([1, 1, 1] as [number, number, number]);
@@ -133,7 +135,7 @@ export function compositeFacadeStrokeMask(
     const i = (y * width + x) * 4;
     const coverage = mask[i + 3]! / 255;
     if (coverage <= 0) continue;
-    if (erase) {
+    if (erase || blend === 'erase') {
       const keep = 1 - coverage;
       base[i] = Math.round(base[i]! * keep);
       base[i + 1] = Math.round(base[i + 1]! * keep);
@@ -150,11 +152,10 @@ export function compositeFacadeStrokeMask(
       sa *= shader.rgba[si + 3]! / 255;
     }
     const da = base[i + 3]! / 255;
-    const keep = 1 - sa;
-    base[i] = Math.round(Math.max(0, Math.min(1, sr * sa + (base[i]! / 255) * keep)) * 255);
-    base[i + 1] = Math.round(Math.max(0, Math.min(1, sg * sa + (base[i + 1]! / 255) * keep)) * 255);
-    base[i + 2] = Math.round(Math.max(0, Math.min(1, sb * sa + (base[i + 2]! / 255) * keep)) * 255);
-    base[i + 3] = Math.round((sa + da * keep) * 255);
+    base[i] = Math.round(compositeBlendChannel(base[i]! / 255, da, sr, sa, blend) * 255);
+    base[i + 1] = Math.round(compositeBlendChannel(base[i + 1]! / 255, da, sg, sa, blend) * 255);
+    base[i + 2] = Math.round(compositeBlendChannel(base[i + 2]! / 255, da, sb, sa, blend) * 255);
+    base[i + 3] = Math.round((sa + da * (1 - sa)) * 255);
   }
   return base;
 }

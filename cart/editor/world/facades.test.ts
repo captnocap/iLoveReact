@@ -117,6 +117,18 @@ test('host brush mask composites shader pixels through an exact lasso', () => {
   assert(resized.length === 16, 'preview density resizes to ambient bake dimensions');
 });
 
+test('facade replay honors blend and erase recipes', () => {
+  const mask = new Uint8Array([0, 0, 0, 255]);
+  const multiply = new Uint8Array([128, 128, 128, 255]);
+  compositeFacadeStrokeMask(multiply, mask, 1, 1, { kind: 'color', hex: '#808080' }, false, undefined, null, 'multiply');
+  assert(multiply[0] >= 63 && multiply[0] <= 65, `multiply produced ${multiply[0]}`);
+  const screen = new Uint8Array([128, 128, 128, 255]);
+  compositeFacadeStrokeMask(screen, mask, 1, 1, { kind: 'color', hex: '#808080' }, false, undefined, null, 'screen');
+  assert(screen[0] >= 191 && screen[0] <= 193, `screen produced ${screen[0]}`);
+  compositeFacadeStrokeMask(screen, mask, 1, 1, { kind: 'color', hex: '#ffffff' }, false, undefined, null, 'erase');
+  assert(screen[3] === 0, 'erase blend did not reveal the layer below');
+});
+
 // ── stamp blitting ────────────────────────────────────────────────────────────
 
 registerStickers([{ version: 1, id: 'stk-t', name: 't', textureId: 'img-t', widthMeters: 1, heightMeters: 1 }]);

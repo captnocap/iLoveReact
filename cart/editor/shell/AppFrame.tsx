@@ -17,8 +17,7 @@ import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
 import ScaleByDialog from './ScaleByDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
-import PaintToolbar from './PaintToolbar';
-import { PaintInkPanel, PaintToolOptionsPanel } from './PaintSidePanel';
+import { PaintPanel } from './PaintSidePanel';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
 import PreferencesDialog from './PreferencesDialog';
@@ -27,6 +26,7 @@ import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
+import { FacadePaintLayersSection, ModelPaintLayersSection } from '../inspector/PaintLayerSections';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import AddChunkDialog from '../dialogs/AddChunkDialog';
 import MapDocumentsDialog from '../dialogs/MapDocumentsDialog';
@@ -206,6 +206,7 @@ import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 
 const FACADE_PREVIEW_DETAILS = [128, FACADE_TEXELS_PER_METER, 512] as const;
+const MODEL_PAINT_TOOLS = ['fill', 'brush', 'eyedropper'] as const;
 const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'eyedropper', 'marquee', 'lasso'] as const;
 const COLOR_STUDIO_UNDO_CAP = 32;
 
@@ -2555,6 +2556,8 @@ export default function AppFrame() {
         worldFacades: existing ? prev.worldFacades.map((item) => item.id === facade.id ? facade : item) : [...prev.worldFacades, facade],
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
+        activeDomain: 'paint',
+        leftPanelCollapsed: false,
         contextOpen: false,
         status: `Facade painter — ${facade.pieceIds.length} piece(s), ${facade.widthMeters.toFixed(1)}×${facade.heightMeters.toFixed(1)}m at 256 px/m`,
       };
@@ -5092,17 +5095,6 @@ export default function AppFrame() {
     const detail = FACADE_PREVIEW_DETAILS[(at + 1 + FACADE_PREVIEW_DETAILS.length) % FACADE_PREVIEW_DETAILS.length]!;
     return { ...prev, facadePaint: { ...prev.facadePaint, detail }, status: `facade paint preview: ${detail} px/m · bake remains ${FACADE_TEXELS_PER_METER} px/m` };
   });
-  const activePaintBar = paintUiActive ? (
-    <PaintToolbar
-      brushTool={activePaintTool}
-      detail={activePaintDetail}
-      tools={facadePaintActive ? [...FACADE_PAINT_TOOLS] : undefined}
-      onBrushTool={(tool) => facadePaintActive
-        ? setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, tool } }))
-        : modelToolApiRef.current?.brushTool(tool)}
-      onCycleDetail={facadePaintActive ? cycleFacadeDetail : () => modelToolApiRef.current?.cycleDetail()}
-    />
-  ) : null;
   const paintSpine = {
     onSetCurrent: (color: typeof state.colorSpineCurrent) => setColorSpineCurrent(color, 'paint dock'),
     onAddToTray: () => addColorSpineToTray('paint dock'),
@@ -5110,19 +5102,33 @@ export default function AppFrame() {
     onScenePick: (color: typeof state.colorSpineCurrent, css: string) => pickColorSpineScene(color, css, 'paint dock'),
     onLoadLibrarySet: (colors: typeof state.colorSpinePalette) => loadColorSpineLibrarySet(colors, 'paint dock'),
   };
+  const activeFacade = facadePaintActive
+    ? state.worldFacades.find((facade) => facade.id === activeWorkspaceDocument.sourceId) ?? null
+    : null;
+  const activePaintLayers = facadePaintActive
+    ? (activeFacade ? <FacadePaintLayersSection facade={activeFacade} onLayers={updateFacadeLayers} /> : null)
+    : <ModelPaintLayersSection refreshKey={modelMutationRevision} onDocumentMutated={markActiveModelDirty} />;
   const activePaintSidePanel = !paintUiActive ? null
-    : activeLeftPanelDefinition.renderer === 'paint-tools' ? (
-      <PaintToolOptionsPanel
+    : activeLeftPanelDefinition.renderer === 'paint' ? (
+      <PaintPanel
         brush={activePaintBrush}
         brushTool={activePaintTool}
-        detail={activePaintDetail}
+        tools={facadePaintActive ? FACADE_PAINT_TOOLS : MODEL_PAINT_TOOLS}
         onBrush={setActivePaintBrush}
-        onInk={() => pressLeftPanel('ink')}
-      />
-    ) : activeLeftPanelDefinition.renderer === 'paint-ink' ? (
-      <PaintInkPanel
-        brush={activePaintBrush}
-        onBrush={setActivePaintBrush}
+        onBrushTool={(tool) => facadePaintActive
+          ? setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, tool } }))
+          : modelToolApiRef.current?.brushTool(tool)}
+        resolution={{
+          label: facadePaintActive ? 'Preview' : 'Atlas',
+          value: activePaintDetail <= 1 ? 'fill only' : `${activePaintDetail} px/m`,
+          onCycle: facadePaintActive ? cycleFacadeDetail : () => modelToolApiRef.current?.cycleDetail(),
+        }}
+        safety={facadePaintActive ? undefined : {
+          value: state.modelTool.safety === 0 ? 'Clip' : 'Lock',
+          onCycle: () => modelToolApiRef.current?.cycleSafety(),
+        }}
+        supportsEraseBlend={facadePaintActive}
+        layers={activePaintLayers}
         current={state.colorSpineCurrent}
         palette={state.colorSpinePalette}
         recents={state.colorSpineRecents}
@@ -5251,7 +5257,19 @@ export default function AppFrame() {
             selectedPartCount={selectedPartCount}
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
-            onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
+            onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => {
+              const enteringPaint = modelTool.paint && !prev.modelTool.paint;
+              return {
+                ...prev,
+                modelTool,
+                ...(enteringPaint ? {
+                  activeDomain: 'paint',
+                  leftPanelCollapsed: false,
+                  rightPane: 'inspector',
+                  rightPanelCollapsed: false,
+                } : null),
+              };
+            })}
             modelContextTrigger={modelMenu.triggerProps}
             outlinerHandlers={outlinerHandlers}
             modelOnDisk={activeModelOnDisk}
@@ -5261,7 +5279,6 @@ export default function AppFrame() {
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
             onMapPaint={patchMapPaint}
-            paintBar={activePaintBar}
             // Doc switching mid-blocking-session would unmount the surface that owns the
             // session (loop cut's captured base mesh dies with it) — guarded (req_2626 HH).
             onWorkspaceDocument={guarded(selectWorkspaceDocument)}
@@ -5277,7 +5294,6 @@ export default function AppFrame() {
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}
-            onFacadeLayers={updateFacadeLayers}
             onFacadePaint={(patch) => setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, ...patch } }))}
             onFacadeStamp={recordFacadeStamp}
             onFacadeClear={clearFacadePaint}
@@ -5314,7 +5330,6 @@ export default function AppFrame() {
             // Save verb runs the SAME 'save-snapshot' command as File → Save.
             onRenameModel={renameModel}
             onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
-            onModelDocumentMutated={markActiveModelDirty}
             modelOnDisk={activeModelOnDisk}
             onSetModelRig={setModelRig}
             onAssignSlot={assignPieceSlot}

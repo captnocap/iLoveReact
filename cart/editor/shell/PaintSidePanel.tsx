@@ -1,19 +1,22 @@
-// SECTION C — persistent paint controls (req_3270).
+// SECTION C — the persistent Paint workspace (req_3270/3271).
 //
-// Paint is a center-stage context, so the left rail swaps the asset library for
-// two stable pages while a model/facade painter is active:
-//   • Tool Options — the canonical BrushKit controls, including every Brush dial.
-//   • Ink          — the existing Color Library / live shader catalog.
-//
-// These are projections of the SAME Brush + color-spine state the painter uses.
-// Nothing here owns a second brush, palette, or paint engine. Slider drag state
-// remains isolated inside BrushDials so a scrub does not repaint AppFrame.
+// Paint is a PEER of the source libraries in the left rail, not a mode that
+// destroys them. One panel keeps its tools, layers, brush, blend, Color Library,
+// and shader catalog together while the right side remains free for the model
+// outliner. Everything projects the painter's existing state; this file owns no
+// second brush, layer program, palette, or paint engine.
 import { useState, type ReactNode } from 'react';
 import { Box, Row, Col, Text, TextInput, Pressable, ScrollView } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
-import { type Brush, type BrushTool } from '@reactjit/runtime/paint';
+import {
+  BLEND_MODES,
+  BrushToolPicker,
+  DARK_THEME,
+  type BlendMode,
+  type Brush,
+  type BrushTool,
+} from '@reactjit/runtime/paint';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
-import { ToolIcon } from '../../../runtime/paint/controls';
 import { C, accentFor } from '../workspace.cls';
 import { REGIONS } from './regions';
 import ColorLibraryPanel from '../stage/ColorLibraryPanel';
@@ -21,7 +24,7 @@ import { BrushDials, type ColorSpineHandlers } from '../inspector/ModelBrushDock
 import { shaderGroups, shaderSpec, type ShaderSpec } from '../textures/shaders';
 import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
 import type { Rgb } from '../data/types';
-import { ShaderThumb } from './PaintToolbar';
+import ShaderThumb from './ShaderThumb';
 
 const LINE = '#242a33';
 const TEXT = '#e8edf6';
@@ -46,20 +49,20 @@ export type PaintInkControls = {
   onEditMaterial?: (specId: string) => void;
 };
 
-const TOOL_LABEL: Record<BrushTool, string> = {
-  brush: 'Brush',
-  eraser: 'Eraser',
-  line: 'Line',
-  rect: 'Rectangle',
-  ellipse: 'Ellipse',
-  fill: 'Fill',
-  eyedropper: 'Eyedropper',
-  smudge: 'Smudge',
-  blur: 'Blur',
-  text: 'Text',
-  marquee: 'Marquee',
-  lasso: 'Lasso',
+export type PaintPanelProps = PaintInkControls & {
+  brushTool: BrushTool;
+  tools: readonly BrushTool[];
+  onBrushTool: (tool: BrushTool) => void;
+  resolution: { label: string; value: string; onCycle: () => void };
+  safety?: { value: string; onCycle: () => void };
+  /** Model paint keeps face alpha meaningful, so erase-blend is facade-only. */
+  supportsEraseBlend: boolean;
+  /** The target adapter's shared PaintLayersPanel. Pinned above scrolling controls. */
+  layers?: ReactNode;
 };
+
+const COLOR_BLEND_MODES = BLEND_MODES.filter((mode): mode is Exclude<BlendMode, 'erase'> => mode !== 'erase');
+const BLEND_TOOLS = new Set<BrushTool>(['brush', 'eraser', 'line', 'rect', 'ellipse']);
 
 function PaintPanelShell(props: {
   icon: string;
@@ -80,69 +83,14 @@ function PaintPanelShell(props: {
   );
 }
 
-export function PaintToolOptionsPanel(props: {
-  brush: Brush;
-  brushTool: BrushTool;
-  detail: number;
-  onBrush: (brush: Brush) => void;
-  onInk: () => void;
-}) {
-  const shaderInk = props.brush.ink.kind === 'shader' ? props.brush.ink : null;
-  const inkSpec = shaderInk ? shaderSpec(shaderInk.surface) : null;
-  const inkPreview = inkSpec && shaderInk
-    ? <ShaderThumb shader={inkSpec.shader} data={shaderInk.data ?? []} size={26} />
-    : <Box style={{ width: 26, height: 26, borderRadius: 6, backgroundColor: props.brush.ink.kind === 'color' ? props.brush.ink.hex : '#ffffff', borderWidth: 1, borderColor: LINE }} />;
-  return (
-    <PaintPanelShell
-      icon="SlidersHorizontal"
-      title="Tool Options"
-      detail={<Text style={{ color: DIM, fontSize: 9, fontFamily: 'ui-monospace' }}>{props.detail <= 1 ? 'fill' : `${props.detail}px`}</Text>}
-    >
-      <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
-        <Col style={{ gap: 10, padding: REGIONS.contentBrowser.gutter }}>
-          <Row style={{ minHeight: 46, alignItems: 'center', gap: 10, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: LINE, backgroundColor: '#131519' }}>
-            <Box style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: ACCENT }}>
-              <ToolIcon tool={props.brushTool} size={20} color="#0d0e10" />
-            </Box>
-            <Col style={{ gap: 2 }}>
-              <Text style={{ color: TEXT, fontSize: 12, fontWeight: '800' }}>{TOOL_LABEL[props.brushTool]}</Text>
-              <Text style={{ color: DIM, fontSize: 9 }}>settings stay open while you paint</Text>
-            </Col>
-          </Row>
-          <Pressable
-            tooltip="Open the persistent Color / Shader ink page"
-            onPress={props.onInk}
-            style={{ height: 40, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 8, paddingRight: 8, borderRadius: 8, borderWidth: 1, borderColor: LINE, backgroundColor: '#131519' }}
-          >
-            {inkPreview}
-            <Col style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
-              <Text style={{ color: TEXT, fontSize: 10, fontWeight: '800' }}>Ink</Text>
-              <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontFamily: 'ui-monospace' }}>
-                {shaderInk ? inkSpec?.label ?? shaderInk.surface : props.brush.ink.kind === 'color' ? props.brush.ink.hex.toUpperCase() : props.brush.ink.kind}
-              </Text>
-            </Col>
-            <Icon name="ChevronRight" size={12} color={DIM} />
-          </Pressable>
-          <BrushDials
-            seed={props.brush}
-            tool={props.brushTool}
-            width={REGIONS.contentBrowser.innerWidth}
-            onSync={props.onBrush}
-          />
-        </Col>
-      </ScrollView>
-    </PaintPanelShell>
-  );
-}
-
-// View memory, not document state: switching rail pages never throws away the
-// user's Color/Shader tab, search, or catalog page.
+// View memory, not document state: reopening Paint never throws away the user's
+// Color/Shader choice, search, or catalog page.
 let inkTabMemo: 'color' | 'shader' | null = null;
 let shaderPageMemo = 0;
 let shaderPageTouched = false;
 let shaderQueryMemo = '';
 
-export function PaintInkPanel(props: PaintInkControls) {
+export function PaintPanel(props: PaintPanelProps) {
   const shaderInk = props.brush.ink.kind === 'shader' ? props.brush.ink : null;
   const [tab, setTabState] = useState<'color' | 'shader'>(inkTabMemo ?? (shaderInk ? 'shader' : 'color'));
   const [query, setQueryState] = useState(shaderQueryMemo);
@@ -190,25 +138,74 @@ export function PaintInkPanel(props: PaintInkControls) {
   ) : (
     <Box style={{ width: 22, height: 22, borderRadius: 5, backgroundColor: oklchToHex(props.current), borderWidth: 1, borderColor: LINE }} />
   );
+  const blendModes = props.supportsEraseBlend ? BLEND_MODES : COLOR_BLEND_MODES;
 
   return (
-    <PaintPanelShell icon="Palette" title="Ink" detail={inkPreview}>
-      <Row style={{ gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: LINE }}>
-        {(['color', 'shader'] as const).map((choice) => {
-          const active = tab === choice;
-          return (
+    <PaintPanelShell icon="Paintbrush" title="Paint" detail={inkPreview}>
+      {/* Tool choice and layers stay pinned. The source browser remains one rail
+          click away, and the right Model pane can keep its outliner visible. */}
+      <Col style={{ gap: 8, padding: REGIONS.contentBrowser.gutter, borderBottomWidth: 1, borderBottomColor: LINE }}>
+        <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>TOOLS</Text>
+        <BrushToolPicker
+          tool={props.brushTool}
+          tools={props.tools}
+          onToolChange={props.onBrushTool}
+          theme={DARK_THEME}
+        />
+        <Row style={{ gap: 6 }}>
+          <Pressable
+            tooltip={`${props.resolution.label} — click to cycle`}
+            onPress={props.resolution.onCycle}
+            style={{ flexGrow: 1, minWidth: 0, height: 29, paddingLeft: 8, paddingRight: 8, borderRadius: 6, borderWidth: 1, borderColor: LINE, backgroundColor: '#131519', flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <Icon name="Grid3x3" size={12} color={DIM} />
+            <Text style={{ color: DIM, fontSize: 9, fontWeight: '800' }}>{props.resolution.label.toUpperCase()}</Text>
+            <Box style={{ flexGrow: 1 }} />
+            <Text style={{ color: TEXT, fontSize: 10, fontFamily: 'ui-monospace' }}>{props.resolution.value}</Text>
+          </Pressable>
+          {props.safety ? (
             <Pressable
-              key={choice}
-              onPress={() => setTab(choice)}
-              style={{ flexGrow: 1, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: active ? '#e8e8ea' : '#141518', borderWidth: 1, borderColor: active ? '#e8e8ea' : LINE }}
+              tooltip="Face safety — Clip follows the face under each dab; Lock masks the stroke to its pressed face"
+              onPress={props.safety.onCycle}
+              style={{ width: 88, height: 29, paddingLeft: 8, paddingRight: 8, borderRadius: 6, borderWidth: 1, borderColor: LINE, backgroundColor: '#131519', flexDirection: 'row', alignItems: 'center', gap: 5 }}
             >
-              <Text style={{ color: active ? '#0d0e10' : TEXT, fontSize: 11, fontWeight: '700' }}>{choice === 'color' ? 'Color' : 'Shader'}</Text>
+              <Icon name="ShieldCheck" size={12} color={DIM} />
+              <Text style={{ color: TEXT, fontSize: 10, fontWeight: '800' }}>{props.safety.value}</Text>
             </Pressable>
-          );
-        })}
-      </Row>
+          ) : null}
+        </Row>
+        {props.layers}
+      </Col>
       <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
-        <Col style={{ gap: 8, padding: 12 }}>
+        <Col style={{ gap: 12, padding: REGIONS.contentBrowser.gutter }}>
+          <BrushDials
+            seed={props.brush}
+            tool={props.brushTool}
+            width={REGIONS.contentBrowser.innerWidth}
+            showBlend={BLEND_TOOLS.has(props.brushTool)}
+            blendModes={blendModes}
+            onSync={props.onBrush}
+          />
+          <Col style={{ gap: 8, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: LINE, backgroundColor: '#131519' }}>
+            <Row style={{ alignItems: 'center', gap: 7 }}>
+              <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>INK</Text>
+              <Box style={{ flexGrow: 1 }} />
+              {inkPreview}
+            </Row>
+            <Row style={{ gap: 5 }}>
+              {(['color', 'shader'] as const).map((choice) => {
+                const active = tab === choice;
+                return (
+                  <Pressable
+                    key={choice}
+                    onPress={() => setTab(choice)}
+                    style={{ flexGrow: 1, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: active ? '#e8e8ea' : '#141518', borderWidth: 1, borderColor: active ? '#e8e8ea' : LINE }}
+                  >
+                    <Text style={{ color: active ? '#0d0e10' : TEXT, fontSize: 11, fontWeight: '700' }}>{choice === 'color' ? 'Color' : 'Shader'}</Text>
+                  </Pressable>
+                );
+              })}
+            </Row>
           {tab === 'color' ? (
             <ColorLibraryPanel
               current={props.current}
@@ -233,6 +230,7 @@ export function PaintInkPanel(props: PaintInkControls) {
               onEditMaterial={props.onEditMaterial}
             />
           )}
+          </Col>
         </Col>
       </ScrollView>
     </PaintPanelShell>

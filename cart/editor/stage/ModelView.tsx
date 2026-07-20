@@ -35,7 +35,7 @@ import {
 // stamping is a Zig host capability (model_paint.zig via the __model_paint_* doors), so this
 // is the brush MODEL driving a host backend, not a second brush implementation.
 import {
-  BrushKit, BRUSH_SHAPE_ID, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
+  blendModeIndex, BrushKit, BRUSH_SHAPE_ID, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
   type Brush, type BrushTool, type Palette,
 } from '@reactjit/runtime/paint';
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
@@ -549,7 +549,7 @@ const stampAt = (x: number, y: number, rgb: RGB, radius: number, b: Brush) =>
   host.__model_paint_stamp?.(
     x, y, rgb[0], rgb[1], rgb[2], radius, b.flow,
     b.stamp.kind === 'analytic' ? BRUSH_SHAPE_ID[b.stamp.shape] : 0,
-    b.hardness, b.angleDeg, b.aspect, b.scatter,
+    b.hardness, b.angleDeg, b.aspect, b.scatter, blendModeIndex(b.blend),
   ) === 1;
 const strokeBeginAt = (x: number, y: number) => host.__model_paint_stroke_begin?.(x, y) ?? -1;
 // Eyedropper read (req_3097): the painted atlas colour under the viewport pixel as
@@ -596,6 +596,15 @@ const DEFAULT_FIT = 1024; // the proven painter shipped at 1024²
 // floors the radius at ~0.6 (one texel). Higher density = more texels to the meter, so the
 // SAME size brush paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
+const MODEL_STROKE_TUNING = {
+  defaultScreenSpacingPx: 3,
+  minScreenSpacingPx: 1,
+  maxDabsPerPointerMove: 24,
+} as const;
+const modelScreenSpacing = (spacing: number) => Math.max(
+  MODEL_STROKE_TUNING.minScreenSpacingPx,
+  MODEL_STROKE_TUNING.defaultScreenSpacingPx * (spacing / DEFAULT_BRUSH.spacing),
+);
 
 // Loop-cut popup control grid (req_2626 II / req_2643 MM): the SHARED editor grid —
 // one FIXED label column + fixed − / value / + stepper columns straight from
@@ -2284,11 +2293,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             const x = p?.x ?? 0, y = p?.y ?? 0;
             const rgb = brushRgb(brush);
             if (brushTool === 'fill') { fillFaceAt(x, y, rgb); lastPtRef.current = { x, y }; return; }
-            // Free-form: walk the screen segment from the last dab in ~3px steps (bounded) so a
-            // fast drag stays gap-free — each step is one host stamp (raycast + clipped disc).
+            // Free-form: walk the screen segment at the brush's authored spacing (bounded)
+            // so the Spacing dial is real here too, not only on flat Paintables.
             const last = lastPtRef.current ?? { x, y };
             const dx = x - last.x, dy = y - last.y;
-            const steps = Math.min(24, Math.max(1, Math.floor(Math.hypot(dx, dy) / 3)));
+            const steps = Math.min(
+              MODEL_STROKE_TUNING.maxDabsPerPointerMove,
+              Math.max(1, Math.floor(Math.hypot(dx, dy) / modelScreenSpacing(brush.spacing))),
+            );
             const radius = brushRadius(brush.size);
             for (let i = 1; i <= steps; i += 1) {
               const t = i / steps;

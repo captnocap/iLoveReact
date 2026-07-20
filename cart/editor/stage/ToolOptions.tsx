@@ -31,9 +31,6 @@ export default function ToolOptions(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  /** Compact paint tool + resolution segment. Persistent brush/ink controls are
-   *  projected into the left dock while this center-stage context is active. */
-  paintBar?: any;
   /** Explicit outliner selection size. A 2+ part selection owns Merge, so the generic
    *  face-dissolve verb must not be offered for the same host face selection. */
   selectedPartCount: number;
@@ -79,28 +76,12 @@ export default function ToolOptions(props: {
             </C.HW_IconButton>
           </Fragment>
         ) : null}
-        {/* Paint keeps its compact tool/resolution strip here; the full GIMP-style
-            brush and ink surfaces remain open in Section C (req_3270). */}
-        {props.state.modelTool.paint && props.paintBar ? (
-          <Fragment>
-            <C.HW_OptionDivider />
-            {props.paintBar}
-            <C.HW_Pill tooltip="Face safety — Clip paints the face under the dab; Lock masks the stroke to the pressed face" onPress={() => props.onCommand('mesh-paint-safety', 'action bar')}>
-              <C.HW_OptionLabel>SAFE</C.HW_OptionLabel>
-              <C.HW_PillText>{props.state.modelTool.safety === 0 ? 'Clip' : 'Lock'}</C.HW_PillText>
-            </C.HW_Pill>
-          </Fragment>
-        ) : null}
       </C.HW_ToolOptions>
     );
   }
 
   if (activeDoc.kind === 'facade') {
-    return (
-      <C.HW_ToolOptions>
-        {props.paintBar}
-      </C.HW_ToolOptions>
-    );
+    return <C.HW_ToolOptions />;
   }
 
   // Map Paint is a tool toggle segment, not a replacement toolbar. Keep the

@@ -43,6 +43,13 @@ const Stream = struct {
         std.mem.writeInt(u32, operands[4..8], ord, .little);
         try stream.op(paint_ops.OP_DAB_SHAPED, &operands);
     }
+
+    fn blendedDab(stream: *Stream, group: u32, ord: u32) !void {
+        var operands = [_]u8{0} ** 48;
+        std.mem.writeInt(u32, operands[0..4], group, .little);
+        std.mem.writeInt(u32, operands[4..8], ord, .little);
+        try stream.op(paint_ops.OP_DAB_BLENDED, &operands);
+    }
 };
 
 test "empty stream has no redundant fills" {
@@ -114,6 +121,15 @@ test "dabs interleaved with fills are walked without affecting dedupe" {
     const shaped_offsets = try paint_ops.redundantFillOffsets(std.testing.allocator, shaped.bytes.items);
     defer std.testing.allocator.free(shaped_offsets);
     try std.testing.expectEqualSlices(usize, &.{45}, shaped_offsets);
+
+    var blended = Stream{};
+    defer blended.deinit();
+    try blended.blendedDab(1, 0);
+    try blended.fill(1, 0);
+    try blended.fill(1, 0);
+    const blended_offsets = try paint_ops.redundantFillOffsets(std.testing.allocator, blended.bytes.items);
+    defer std.testing.allocator.free(blended_offsets);
+    try std.testing.expectEqualSlices(usize, &.{49}, blended_offsets);
 }
 
 test "truncated stream stops after the valid prefix" {
@@ -146,5 +162,6 @@ test "operand sizes match the frozen wire format" {
     try std.testing.expectEqual(@as(?usize, 24), paint_ops.operandSize(2));
     try std.testing.expectEqual(@as(?usize, 8), paint_ops.operandSize(3));
     try std.testing.expectEqual(@as(?usize, 44), paint_ops.operandSize(4));
+    try std.testing.expectEqual(@as(?usize, 48), paint_ops.operandSize(5));
     try std.testing.expectEqual(@as(?usize, null), paint_ops.operandSize(9));
 }

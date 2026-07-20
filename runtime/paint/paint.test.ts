@@ -13,7 +13,7 @@ import {
   stepSizeLadder, constrainLine, constrainSquare, dabsAlongSegment, dabsForStrokePath, STROKE_TUNING,
 } from './stroke';
 import {
-  normalizeBrush, blendModeIndex, brushFromPreset, BRUSH_PRESETS,
+  normalizeBrush, blendModeIndex, brushFromPreset, applyBrushPreset, BRUSH_PRESETS,
   BRUSH_SHAPE_ID, pushRecent, defaultPalette, inkKey, DEFAULT_BRUSH,
 } from './model';
 import {
@@ -21,6 +21,9 @@ import {
   hexToRgb01, normalizeHexColor, oklchToHex, rgb01ToHex,
 } from './colors';
 import { layoutText, hasGlyph, GLYPH_W, GLYPH_H } from './glyphs';
+import { blendChannel, compositeBlendChannel } from './blend';
+import { parseClampedNumericDraft, replacementDraftAfterEdit } from './numericInput';
+import { scatteredDabPoint } from './stamp';
 
 // ── micro harness (self-contained; the repo has no test framework) ───────────
 let passed = 0, failed = 0;
@@ -85,6 +88,15 @@ test('[ and ] step the detent ladder', () => {
   assert(stepSizeLadder(1, -1) === 1, 'clamps at the bottom');
 });
 
+test('a clicked brush readout replaces its value on the first typed character', () => {
+  assert(replacementDraftAfterEdit('32', '342') === '4', 'middle-cursor insertion did not replace 32');
+  assert(replacementDraftAfterEdit('32px', '324') === '4', 'controlled unit removal confused replacement');
+  assert(replacementDraftAfterEdit('0.50', '-0.50') === '-', 'negative-sign entry was not isolated');
+  assert(parseClampedNumericDraft('900', 1, 512) === 512, 'Enter did not clamp high');
+  assert(parseClampedNumericDraft('-20', 0, 1) === 0, 'Enter did not clamp low');
+  assert(parseClampedNumericDraft('nope', 0, 1) === null, 'invalid draft became a value');
+});
+
 // ── shift constraints ────────────────────────────────────────────────────────
 test('constrainLine snaps to 45° increments when axis-locked', () => {
   const p = constrainLine(0, 0, 100, 8, true); // ~4.5° → snaps to 0°
@@ -121,12 +133,38 @@ test('blend mode indices are stable and contiguous from 0', () => {
   assert(blendModeIndex('multiply') === 1 && blendModeIndex('screen') === 2, 'order held');
 });
 
+test('blend modes produce distinct destination-aware colours', () => {
+  close(blendChannel(0.5, 0.4, 'multiply'), 0.2, 1e-9, 'multiply');
+  close(blendChannel(0.5, 0.4, 'screen'), 0.7, 1e-9, 'screen');
+  close(blendChannel(0.25, 0.8, 'overlay'), 0.4, 1e-9, 'overlay');
+  close(compositeBlendChannel(0.5, 1, 0.4, 0.5, 'multiply'), 0.35, 1e-9, 'half-flow multiply');
+});
+
+test('scatter visibly moves every dab but remains deterministic', () => {
+  const centered = scatteredDabPoint(20, 30, 8, 0);
+  const scattered = scatteredDabPoint(20, 30, 8, 2);
+  const replayed = scatteredDabPoint(20, 30, 8, 2);
+  assert(centered.x === 20 && centered.y === 30, 'zero scatter moved the dab');
+  assert(scattered.x !== 20 || scattered.y !== 30, 'non-zero scatter left an ordinary dab centered');
+  assert(scattered.x === replayed.x && scattered.y === replayed.y, 'scatter crawled between replays');
+  assert(Math.hypot(scattered.x - 20, scattered.y - 30) <= 16, 'scatter exceeded radius-multiple bound');
+});
+
 test('every preset normalizes to a valid analytic brush with a known shape id', () => {
   for (const p of BRUSH_PRESETS) {
     const b = brushFromPreset(p);
     assert(b.stamp.kind === 'analytic', `${p.id} is analytic`);
     assert(BRUSH_SHAPE_ID[(b.stamp as any).shape] !== undefined, `${p.id} maps to a host kind`);
   }
+});
+
+test('choosing a preset cannot inherit another preset\'s footprint dials', () => {
+  const spray = applyBrushPreset(DEFAULT_BRUSH, BRUSH_PRESETS.find((preset) => preset.id === 'spray')!);
+  const knife = applyBrushPreset(spray, BRUSH_PRESETS.find((preset) => preset.id === 'knife')!);
+  assert(knife.stamp.kind === 'analytic' && knife.stamp.shape === 'knife', 'knife shape did not land');
+  assert(knife.scatter === DEFAULT_BRUSH.scatter, 'spray scatter leaked into knife');
+  assert(knife.flow === DEFAULT_BRUSH.flow, 'spray flow leaked into knife');
+  assert(knife.size === spray.size && inkKey(knife.ink) === inkKey(spray.ink), 'live size/ink were discarded');
 });
 
 test('palette recents dedupe by ink and cap', () => {

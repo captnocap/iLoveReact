@@ -45,7 +45,6 @@ export default function Stage(props: {
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
-  onFacadeLayers: (facadeId: string, layers: import('../world/facades').FacadeLayer[], activeLayerId: string) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
   onFacadeClear: (facadeId: string) => void;
@@ -105,7 +104,6 @@ export default function Stage(props: {
                 facade={facade}
                 stickerArm={props.state.stickerArm}
                 onStroke={props.onFacadeStroke}
-                onLayers={props.onFacadeLayers}
                 paintState={props.state.facadePaint}
                 onPaintState={props.onFacadePaint}
                 onStamp={props.onFacadeStamp}

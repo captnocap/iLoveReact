@@ -5,6 +5,7 @@ pub const OP_INK_MATERIAL: u8 = 1;
 pub const OP_DAB: u8 = 2;
 pub const OP_FILL: u8 = 3;
 pub const OP_DAB_SHAPED: u8 = 4;
+pub const OP_DAB_BLENDED: u8 = 5;
 
 /// A live dab is necessarily the newest write into the shared atlas.  Once a
 /// stroke commits, replay is required when that direct write does not already
@@ -22,6 +23,7 @@ pub fn operandSize(tag: u8) ?usize {
         OP_DAB => 24,
         OP_FILL => 8,
         OP_DAB_SHAPED => 44,
+        OP_DAB_BLENDED => 48,
         else => null,
     };
 }

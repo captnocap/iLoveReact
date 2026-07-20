@@ -1,6 +1,7 @@
 // SECTION B — Left Rail (see shell/regions.ts SECTIONS): contextual input panes.
-// Source libraries yield to Tool Options + Ink while the stage is painting.
-// Selecting the active button again folds Section C away.
+// Paint joins the relevant source libraries while the stage is painting, so
+// either surface can reopen in the same slot. Selecting the active button again
+// folds Section C away.
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { leftPanelsFor, resolvedPanelId, type LeftPanelId } from '../data/panelSystem';

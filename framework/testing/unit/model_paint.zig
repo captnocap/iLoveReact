@@ -15,6 +15,12 @@ const QUAD_VERTS = [_]f32{
     0, 1, 0, 0, 0, 1, 0, 0,
 };
 
+fn atlasHash(bytes: []const u8) u64 {
+    var hash: u64 = 1469598103934665603;
+    for (bytes) |byte| hash = (hash ^ byte) *% 1099511628211;
+    return hash;
+}
+
 test "appending an authored group carries exact paint texels and the atlas base" {
     var initial = QUAD_VERTS;
     model_paint.setTarget(77, &initial, 6);
@@ -178,4 +184,75 @@ test "an empty delete midpoint does not consume the pending atlas carry" {
     try testing.expectEqualSlices(u8, expected, model_paint.atlas().?.rgba);
     model_paint.clearAtlas();
     try testing.expectEqual(@as([4]u8, .{ 7, 13, 23, 255 }), model_paint.faceColor(0).?);
+}
+
+test "model brush blend modes alter the destination colour" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(901, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    model_paint.setBase(.solid, .{ 100, 150, 200, 255 });
+    model_paint.clearAtlas();
+    model_paint.paintStampShaped(0, 0.33, 0.33, 20, .{ 200, 100, 50, 255 }, 1, .{ .blend = 1 });
+    try testing.expectEqual(@as([4]u8, .{ 78, 58, 39, 255 }), model_paint.faceColor(0).?);
+
+    model_paint.clearAtlas();
+    model_paint.paintStampShaped(0, 0.33, 0.33, 20, .{ 200, 100, 50, 255 }, 1, .{ .blend = 2 });
+    const screen = model_paint.faceColor(0).?;
+    try testing.expect(screen[0] > 200 and screen[1] > 150 and screen[2] > 200);
+}
+
+test "scatter moves an ordinary round dab and replays deterministically" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(902, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(48, &quad, 6);
+    model_paint.setBase(.solid, .{ 0, 0, 0, 255 });
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    model_paint.clearAtlas();
+    model_paint.paintStampShaped(0, 0.27, 0.41, 3, .{ 255, 255, 255, 255 }, 1, .{ .scatter = 0 });
+    const centered = atlasHash(model_paint.atlas().?.rgba);
+    model_paint.clearAtlas();
+    model_paint.paintStampShaped(0, 0.27, 0.41, 3, .{ 255, 255, 255, 255 }, 1, .{ .scatter = 2 });
+    const scattered = atlasHash(model_paint.atlas().?.rgba);
+    try testing.expect(centered != scattered);
+    model_paint.clearAtlas();
+    model_paint.paintStampShaped(0, 0.27, 0.41, 3, .{ 255, 255, 255, 255 }, 1, .{ .scatter = 2 });
+    try testing.expectEqual(scattered, atlasHash(model_paint.atlas().?.rgba));
+}
+
+test "all advertised analytic brush kinds rasterize distinct footprints" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(903, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(64, &quad, 6);
+    model_paint.setBase(.solid, .{ 0, 0, 0, 255 });
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    var hashes: [11]u64 = undefined;
+    for (0..11) |kind| {
+        model_paint.clearAtlas();
+        model_paint.paintStampShaped(0, 0.33, 0.33, 8, .{ 255, 255, 255, 255 }, 1, .{
+            .kind = @intCast(kind),
+            .hardness = 0.8,
+            .aspect = 1.9,
+            .scatter = if (kind == 8 or kind == 9) 0.65 else 0,
+        });
+        hashes[kind] = atlasHash(model_paint.atlas().?.rgba);
+    }
+    for (hashes, 0..) |hash, at| for (hashes[at + 1 ..]) |other| {
+        try testing.expect(hash != other);
+    };
 }

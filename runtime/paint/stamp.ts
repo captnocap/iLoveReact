@@ -20,6 +20,17 @@ export function jitterSeed(x: number, y: number): number {
   return ((h >>> 0) % 1000) / 1000;
 }
 
+/** Scatter moves the whole dab by up to `scatter × radius`. Two stable hashes
+ * produce a uniform disc, so every shape responds visibly and replay does not
+ * crawl between frames. Shape-specific grain still receives `scatter` below. */
+export function scatteredDabPoint(x: number, y: number, radius: number, scatter: number): { x: number; y: number } {
+  const amount = Math.max(0, scatter) * Math.max(0, radius);
+  if (amount === 0) return { x, y };
+  const angle = jitterSeed(x, y) * Math.PI * 2;
+  const distance = Math.sqrt(jitterSeed(x + 73.19, y - 29.71)) * amount;
+  return { x: x + Math.cos(angle) * distance, y: y + Math.sin(angle) * distance };
+}
+
 /** The 0..1 RGB a brush lays down: the eraser writes the texture's base coat, a
  *  colour ink its hex, texture/shader inks resolve to white until the host
  *  dest-sampling pass (Phase B). */
@@ -41,15 +52,16 @@ export function stampBrushDab(
   const kindId = BRUSH_SHAPE_ID[shape] ?? 0;
   const angle = (brush.angleDeg * Math.PI) / 180;
   const seed = jitterSeed(x, y);
+  const point = scatteredDabPoint(x, y, radius, brush.scatter);
   const cx = clip?.x ?? 0, cy = clip?.y ?? 0, cw = clip?.w ?? 0, ch = clip?.h ?? 0;
   // The eraser carves transparency (DEST-OUT) so it reveals the layer below, instead
   // of painting a colour (req_1729). brushErase has no colour args.
   if (erase) {
-    paint.brushErase(x, y, radius, kindId, angle, brush.aspect, brush.hardness, brush.flow, brush.scatter, seed, cx, cy, cw, ch);
+    paint.brushErase(point.x, point.y, radius, kindId, angle, brush.aspect, brush.hardness, brush.flow, brush.scatter, seed, cx, cy, cw, ch);
     return;
   }
   paint.brushColor(
-    x, y, radius, rgb[0], rgb[1], rgb[2],
+    point.x, point.y, radius, rgb[0], rgb[1], rgb[2],
     kindId, angle, brush.aspect, brush.hardness, brush.flow, brush.scatter, seed,
     cx, cy, cw, ch,
   );

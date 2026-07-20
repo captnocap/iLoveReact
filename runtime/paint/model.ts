@@ -192,6 +192,13 @@ export function brushFromPreset(p: BrushPreset): Brush {
   return normalizeBrush({ ...DEFAULT_BRUSH, ...p.brush });
 }
 
+/** Apply a footprint preset without leaking settings from the previously
+ * selected preset. Size and ink are the user's live instruments; every other
+ * dial returns to the named preset's canonical recipe. */
+export function applyBrushPreset(current: Brush, preset: BrushPreset): Brush {
+  return { ...brushFromPreset(preset), size: current.size, ink: current.ink };
+}
+
 // ── Palette ──────────────────────────────────────────────────────────────────
 // One palette model that holds BOTH colors and texture/shader inks, plus a
 // recents ring — so "the palette accounts for textures" everywhere, not just

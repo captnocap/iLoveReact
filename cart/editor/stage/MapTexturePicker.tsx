@@ -11,7 +11,7 @@
 import { useState } from 'react';
 import { Box, Row, Col, Text, Pressable } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
-import { ShaderThumb } from '../shell/PaintToolbar';
+import ShaderThumb from '../shell/ShaderThumb';
 import { FILL_SHADER } from '../render3d/shaders/index';
 import { GROUND_MATERIALS, tileBindingFor, type TileMaterialBinding } from '../render3d/groundFormula';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';

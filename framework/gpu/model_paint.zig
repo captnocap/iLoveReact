@@ -1407,6 +1407,7 @@ pub const BrushShape = struct {
     angle_rad: f32 = 0.0,
     aspect: f32 = 1.0,
     scatter: f32 = 0.0,
+    blend: u8 = 0, // runtime/paint BlendMode: 0 normal … 7 lighten (8 erase is facade-only)
 };
 
 fn satf(v: f32) f32 {
@@ -1506,14 +1507,30 @@ fn brushCoverage(spec: BrushShape, dx: f32, dy: f32, r_raw: f32, flow: f32, wx: 
     return satf(coverage) * satf(flow);
 }
 
+fn blendChannel(base: f32, ink: f32, mode: u8) f32 {
+    const d = std.math.clamp(base / 255.0, 0.0, 1.0);
+    const s = std.math.clamp(ink / 255.0, 0.0, 1.0);
+    const target = switch (mode) {
+        1 => d * s, // multiply
+        2 => 1.0 - (1.0 - d) * (1.0 - s), // screen
+        3 => if (d <= 0.5) 2.0 * d * s else 1.0 - 2.0 * (1.0 - d) * (1.0 - s), // overlay
+        4 => @min(1.0, d + s), // add
+        5 => @max(0.0, d - s), // subtract
+        6 => @min(d, s), // darken
+        7 => @max(d, s), // lighten
+        else => s,
+    };
+    return target * 255.0;
+}
+
 /// Blend one texel toward `ink` by `amt` — COLOUR only. The alpha channel is the
 /// per-face glass state, so a brush stroke never touches it: painting a glass face
 /// gives stained glass, not un-glassed (req_2928).
-fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
+fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8) void {
     inline for (0..3) |c| {
         const base: f32 = buf[d + c];
-        const tc: f32 = ink[c];
-        buf[d + c] = @trunc(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
+        const target = blendChannel(base, ink[c], mode);
+        buf[d + c] = @intFromFloat(std.math.clamp(base + (target - base) * amt, 0.0, 255.0));
     }
 }
 
@@ -1547,12 +1564,12 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
                 const fy: f32 = @floatFromInt(ty);
                 if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
                 const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt);
+                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend);
             }
         }
         const ct = faceCentroidTexel(lay, face);
         const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, @floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
-        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt);
+        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend);
         markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
         return;
     }
@@ -1561,8 +1578,6 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     // island-space corners. Affine, so a LOCK-mode hit outside [0,1] extrapolates
     // correctly onto the sibling half of the face.
     const c = triTexelCorners(lay, face);
-    const cx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
-    const cy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
     // HARD-EDGED pixel dab — the proven painter stamps cells, it does not airbrush
     // (req_2538: the AA coverage ramp made every dab mostly soft ring, and a dragged
     // stroke stacked those partial texels into a blurry fan; a texel is either painted
@@ -1573,6 +1588,15 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     const r = @max(radius, 0.75);
     // Grain seed derived from the dab's OWN (u,v) so program replay reproduces it.
     const seed = cu * 7.13 + cv * 3.71;
+    const base_cx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
+    const base_cy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
+    // Scatter is positional jitter for EVERY footprint, not a Spray-only density
+    // knob. Two stable hashes yield a uniform disc and replay the same offset.
+    const scatter_amount = @max(spec.scatter, 0.0) * r;
+    const scatter_angle = hash12f(@floor(cu * 4096.0), @floor(cv * 4096.0)) * 2.0 * std.math.pi;
+    const scatter_distance = @sqrt(hash12f(@floor(cu * 8192.0 + 17.0), @floor(cv * 8192.0 - 31.0))) * scatter_amount;
+    const cx = base_cx + @cos(scatter_angle) * scatter_distance;
+    const cy = base_cy + @sin(scatter_angle) * scatter_distance;
 
     // Footprint bounds ∩ island rect (the paintable.zig vertex-shader bbox: elongated
     // shapes reach aspect× the radius, spray reaches scatter× further). A dab can bleed
@@ -1603,7 +1627,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend);
         }
     }
     markRows(y0, y1);

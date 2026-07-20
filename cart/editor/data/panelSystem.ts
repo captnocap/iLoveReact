@@ -1,13 +1,13 @@
 // editor/data/panelSystem.ts — the contextual side-panel contract (req_3266).
 //
 // The center document + active tool decide which panes exist. The left rail is
-// the contextual INPUT dock: source libraries while browsing, persistent tool
-// options while painting. The right rail owns document/selection FOCUS. A rail
+// the contextual INPUT dock: source libraries and a peer Paint workspace while
+// painting. The right rail owns document/selection FOCUS. A rail
 // never advertises a pane without a renderer. Pressing the selected rail button
 // again collapses its adjacent panel; another button selects and opens it.
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
-export type LeftPanelId = 'assets' | 'build' | 'models' | 'materials' | 'characters' | 'missions' | 'tool-options' | 'ink';
+export type LeftPanelId = 'assets' | 'build' | 'models' | 'materials' | 'characters' | 'missions' | 'paint';
 export type RightPanelId = 'inspector' | 'paint' | 'rig';
 
 export type PanelButton<Id extends string> = {
@@ -22,7 +22,7 @@ export type LeftPanelButton =
       /** Root selected when changing to this source library. */
       folder: ContentFolderId;
     })
-  | (PanelButton<LeftPanelId> & { renderer: 'paint-tools' | 'paint-ink' });
+  | (PanelButton<LeftPanelId> & { renderer: 'paint' });
 
 export type RightPanelButton = PanelButton<RightPanelId>;
 
@@ -32,26 +32,27 @@ const MODELS = { id: 'models', label: 'Models', icon: 'Box', renderer: 'library'
 const MATERIALS = { id: 'materials', label: 'Materials', icon: 'Palette', renderer: 'library', folder: 'materials' } as const;
 const CHARACTERS = { id: 'characters', label: 'Characters', icon: 'UserRound', renderer: 'library', folder: 'characters' } as const;
 const MISSIONS = { id: 'missions', label: 'Mission assets', icon: 'Map', renderer: 'library', folder: 'missions' } as const;
-const PAINT_TOOLS = { id: 'tool-options', label: 'Tool Options', icon: 'SlidersHorizontal', renderer: 'paint-tools' } as const;
-const PAINT_INK = { id: 'ink', label: 'Ink', icon: 'Palette', renderer: 'paint-ink' } as const;
+const PAINT = { id: 'paint', label: 'Paint', icon: 'Paintbrush', renderer: 'paint' } as const;
 
 const WORLD_LEFT = [ASSETS, BUILD, MODELS, MATERIALS, CHARACTERS, MISSIONS] as const;
 const MODEL_LEFT = [MODELS, MATERIALS] as const;
 const MATERIAL_LEFT = [MATERIALS, MODELS] as const;
 const ANIMATION_LEFT = [CHARACTERS, MODELS] as const;
 const FACADE_LEFT = [MATERIALS, MODELS] as const;
-const PAINT_LEFT = [PAINT_TOOLS, PAINT_INK] as const;
+const MODEL_PAINT_LEFT = [PAINT, MODELS, MATERIALS] as const;
+const FACADE_PAINT_LEFT = [PAINT, MATERIALS, MODELS] as const;
 
 const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' } as const;
 const MODEL_RIGHT = [
   { id: 'inspector', label: 'Model', icon: 'SlidersHorizontal' },
-  { id: 'paint', label: 'Paint', icon: 'Layers' },
+  { id: 'paint', label: 'Atlas', icon: 'Image' },
   { id: 'rig', label: 'Rig', icon: 'Bone' },
 ] as const;
 const FOCUS_RIGHT = [INSPECTOR] as const;
 
 export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false): readonly LeftPanelButton[] {
-  if (paintActive && (kind === 'model' || kind === 'facade')) return PAINT_LEFT;
+  if (paintActive && kind === 'model') return MODEL_PAINT_LEFT;
+  if (paintActive && kind === 'facade') return FACADE_PAINT_LEFT;
   if (kind === 'model') return MODEL_LEFT;
   if (kind === 'material') return MATERIAL_LEFT;
   if (kind === 'animation') return ANIMATION_LEFT;
@@ -104,7 +105,8 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'actors') return 'characters';
   if (value === 'data') return 'missions';
   if (value === 'world' || value === 'pipeline') return 'assets';
-  return (['assets', 'build', 'models', 'materials', 'characters', 'missions', 'tool-options', 'ink'] as const).includes(value as LeftPanelId)
+  if (value === 'tool-options' || value === 'ink') return 'paint';
+  return (['assets', 'build', 'models', 'materials', 'characters', 'missions', 'paint'] as const).includes(value as LeftPanelId)
     ? value as LeftPanelId
     : 'assets';
 }

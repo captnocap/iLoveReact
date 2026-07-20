@@ -13,7 +13,7 @@
 // (shape/blend chips) commit immediately since they don't drag.
 import { useEffect, useRef, useState } from 'react';
 import { Col, Text } from '../../../runtime/primitives';
-import { BrushKit, DARK_THEME, type Brush, type BrushTool } from '@reactjit/runtime/paint';
+import { BrushKit, DARK_THEME, type BlendMode, type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import ModelShaderBucket from './ModelShaderBucket';
@@ -28,7 +28,15 @@ export type ColorSpineHandlers = {
 
 // The dials, isolated. Owns a synchronous local draft so sliders are responsive, and its
 // re-renders never touch the Color Studio sibling. Syncs to the viewer only on commit.
-export function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex?: string; width?: number; onSync: (b: Brush) => void }) {
+export function BrushDials(props: {
+  seed: Brush;
+  tool: BrushTool;
+  inkHex?: string;
+  width?: number;
+  showBlend?: boolean;
+  blendModes?: readonly BlendMode[];
+  onSync: (b: Brush) => void;
+}) {
   const [draft, setDraft] = useState<Brush>(props.seed);
   const lastSync = useRef<string>('');
 
@@ -59,7 +67,8 @@ export function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex?: strin
       palette={{ swatches: [], recents: [] }}
       theme={DARK_THEME}
       width={props.width ?? 244}
-      sections={{ tools: false, color: false, palette: false }}
+      blendModes={props.blendModes}
+      sections={{ tools: false, blend: props.showBlend !== false, color: false, palette: false }}
     />
   );
 }

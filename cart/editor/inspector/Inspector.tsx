@@ -28,7 +28,6 @@ import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
-import PaintLayersPanel from './PaintLayersPanel';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -187,72 +186,6 @@ function ViewBookmarksSection({ bridge }: { bridge: ModelFocusBridge | null }) {
   );
 }
 
-// ── PAINT LAYERS (req_2672) ─────────────────────────────────────────────────────────
-// The stroke program's LAYER table (host truth: __mesh_paint_layers). A layer is an
-// ordered stroke GROUP — visibility/reorder/delete/merge are program edits + one host
-// replay, never a pixel compositor. Shown whenever the doc HAS paint (the host reports
-// layers once anything recorded), not only during paint mode. Rows sit on the regions
-// grid: fixed height, eye column, flexing name (the ACTIVE row's name is the rename
-// input — the existing rename-input pattern), fixed verb columns at the right edge.
-type PaintLayerRow = { id: number; name: string; visible: number; strokes: number };
-type PaintLayersSnap = { active: number; layers: PaintLayerRow[] };
-
-function readPaintLayers(): PaintLayersSnap | null {
-  try {
-    const j = (globalThis as any).__mesh_paint_layers?.();
-    if (typeof j !== 'string' || !j) return null;
-    const o = JSON.parse(j);
-    if (o?.ok !== 1 || !Array.isArray(o.layers)) return null;
-    return { active: (o.active ?? 0) | 0, layers: o.layers as PaintLayerRow[] };
-  } catch { return null; }
-}
-
-function PaintLayersSection({ bridge, onDocumentMutated }: { bridge: ModelFocusBridge | null; onDocumentMutated: () => void }) {
-  const [snap, setSnap] = useState<PaintLayersSnap | null>(() => readPaintLayers());
-  // Host-driven state (strokes/undo land without a React render) — poll at 1Hz like the
-  // dock's journal badge, plus a re-read on every focus-bridge ping (stroke end).
-  useEffect(() => {
-    const read = () => {
-      const next = readPaintLayers();
-      setSnap((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
-    };
-    read();
-    const t = setInterval(read, 1000);
-    return () => clearInterval(t);
-  }, [bridge]);
-  // One door for every verb; the op returns the refreshed table so the panel updates in
-  // the same call. A refused op re-reads (honest state, never a stale optimistic row).
-  const runOp = (op: string, id: number, arg?: string | number): boolean => {
-    try {
-      const j = (globalThis as any).__mesh_paint_layer_op?.(op, id, arg ?? 0);
-      if (typeof j === 'string' && j) {
-        const o = JSON.parse(j);
-        if (o?.ok === 1 && Array.isArray(o.layers)) {
-          setSnap({ active: (o.active ?? 0) | 0, layers: o.layers as PaintLayerRow[] });
-          if (op !== 'active' && op !== 'visible') onDocumentMutated();
-          return true;
-        }
-      }
-    } catch { /* fall through to the honest re-read */ }
-    setSnap(readPaintLayers());
-    return false;
-  };
-  if (!snap || snap.layers.length === 0) return null; // no paint yet — honest-empty, no section
-  return (
-    <PaintLayersPanel
-      rows={snap.layers.map((layer) => ({ ...layer, visible: !!layer.visible }))}
-      activeId={snap.active}
-      onAdd={() => runOp('add', 0)}
-      onActive={(id) => runOp('active', id)}
-      onVisible={(id, visible) => runOp('visible', id, visible ? 1 : 0)}
-      onRename={(id, name) => runOp('rename', id, name)}
-      onMove={(id, direction) => runOp(direction, id)}
-      onMergeDown={(id) => runOp('mergedown', id)}
-      onDelete={(id) => runOp('delete', id)}
-    />
-  );
-}
-
 // The FOCUS PANEL's pane-switch rail — the fixed 40px icon column on the
 // panel's right edge (REGIONS.focusPanel.railWidth). One component, every
 // branch: the rail is part of the region, not of any one panel mode.
@@ -297,7 +230,6 @@ export default function Inspector(props: {
   // 'save-snapshot' command as File → Save; onDisk feeds the save-state chip.
   onRenameModel: (id: string, name: string) => void;
   onSaveModel: () => void;
-  onModelDocumentMutated: () => void;
   modelOnDisk: boolean;
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
@@ -500,7 +432,6 @@ export default function Inspector(props: {
               <>
                 <ModelPaintVariants key={activeModel.id} model={activeModel} />
                 <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
-                <PaintLayersSection bridge={focusBridge} onDocumentMutated={props.onModelDocumentMutated} />
               </>
             ) : (
               <RigSection

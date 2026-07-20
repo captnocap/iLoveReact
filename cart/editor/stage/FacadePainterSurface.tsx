@@ -1,6 +1,6 @@
 // Facade Painter (req_3062): the Studio paint system aimed at one meter-true
-// multi-piece wall canvas. The action bar owns the shared PaintToolbar; this
-// surface owns only the target, its durable layer program, and selection masks.
+// multi-piece wall canvas. The left Paint panel owns tools and layers; this
+// surface owns only the target raster, durable stroke program, and selection masks.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Row, Col, Text, Pressable, Effect, Graph, Paintable, StaticSurface } from '../../../runtime/primitives';
 import { useBrushStroke, type CommittedBrushStroke } from '../../../runtime/hooks/useBrushStroke';
@@ -14,7 +14,6 @@ import { stampBrushDab } from '../../../runtime/paint/stamp';
 import {
   facadeLayers,
   type Facade,
-  type FacadeLayer,
   type FacadePaintTool,
   type FacadeStamp,
   type FacadeStroke,
@@ -25,7 +24,6 @@ import { rotatePackedTexture } from '../textures/pixelTexture';
 import { stickerById } from '../data/stickerStore';
 import { defaultShaderData, shaderSpec } from '../textures/shaders';
 import type { EditorState } from '../data/types';
-import PaintLayersPanel from '../inspector/PaintLayersPanel';
 
 const CHECKER = `
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
@@ -48,7 +46,6 @@ const FACADE_PAINTER_TUNING = {
   paneMaxWidthPx: 760,
   paneMaxHeightPx: 560,
   viewMinPx: 64,
-  layerPanelWidthPx: 264,
   selectionStrokeWidthPx: 1.4,
 } as const;
 
@@ -110,7 +107,6 @@ export default function FacadePainterSurface(props: {
   paintState: EditorState['facadePaint'];
   onPaintState: (patch: Partial<EditorState['facadePaint']>) => void;
   onStroke: (facadeId: string, stroke: FacadeStroke) => void;
-  onLayers: (facadeId: string, layers: FacadeLayer[], activeLayerId: string) => void;
   onStamp: (facadeId: string, stamp: FacadeStamp) => void;
   onClear: (facadeId: string) => void;
   onSave: (facadeId: string, strokesRgba: Uint8Array, width: number, height: number) => void;
@@ -202,7 +198,7 @@ export default function FacadePainterSurface(props: {
         for (const stroke of layer.strokes) {
           const mask = queueStrokeMask(stroke);
           if (!mask) return false;
-          compositeFacadeStrokeMask(base, mask, size.w, size.h, stroke.ink, stroke.tool === 'eraser', selectionPixelsFor(stroke.selection), shaderFor(stroke.ink));
+          compositeFacadeStrokeMask(base, mask, size.w, size.h, stroke.ink, stroke.tool === 'eraser', selectionPixelsFor(stroke.selection), shaderFor(stroke.ink), stroke.brush.blend);
           paint.upload(base);
           base = paint.readback() ?? base;
         }
@@ -226,9 +222,12 @@ export default function FacadePainterSurface(props: {
     const bx = selection.points[selection.points.length - 2]!, by = selection.points[selection.points.length - 1]!;
     return { x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) };
   })() : undefined;
-  const needsScratch = brush.ink.kind === 'shader' || selection?.kind === 'lasso';
-  const controllerTool: BrushTool = needsScratch && tool === 'eraser' ? 'brush' : tool;
-  const controllerBrush: Brush = needsScratch && tool === 'eraser' ? { ...brush, ink: { kind: 'color', hex: '#ffffff' } } : brush;
+  const needsScratch = brush.ink.kind === 'shader' || selection?.kind === 'lasso' || brush.blend !== 'normal';
+  const maskingErase = needsScratch && (tool === 'eraser' || brush.blend === 'erase');
+  const controllerTool: BrushTool = maskingErase ? 'brush' : tool;
+  const controllerBrush: Brush = maskingErase
+    ? { ...brush, blend: 'normal', ink: { kind: 'color', hex: '#ffffff' } }
+    : brush;
 
   const commitStroke = (record?: CommittedBrushStroke) => {
     if (!record || !['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(tool)) return;
@@ -236,7 +235,7 @@ export default function FacadePainterSurface(props: {
       const mask = scratch.paint.readback();
       const base = baselineRef.current;
       if (mask && base) {
-        compositeFacadeStrokeMask(base, mask, size.w, size.h, brush.ink, tool === 'eraser', selection ?? undefined, shaderFor(brush.ink));
+        compositeFacadeStrokeMask(base, mask, size.w, size.h, brush.ink, tool === 'eraser', selection ?? undefined, shaderFor(brush.ink), brush.blend);
         activePaint.upload(base);
       }
       baselineRef.current = null;
@@ -318,34 +317,6 @@ export default function FacadePainterSurface(props: {
     stroke.handlers.onMouseUp(event);
   };
 
-  const updateLayers = (next: FacadeLayer[], active = activeLayerId): boolean => {
-    if (!next.length || !next.some((layer) => layer.id === active)) return false;
-    props.onLayers(facade.id, next, active);
-    return true;
-  };
-  const addLayer = () => {
-    let n = 1;
-    while (layers.some((layer) => layer.id === `layer-${n}`)) n += 1;
-    const id = `layer-${n}`;
-    return updateLayers([...layers, { id, name: `Layer ${n}`, visible: true, opacity: 1, strokes: [] }], id);
-  };
-  const moveLayer = (id: string, direction: 'up' | 'down') => {
-    const at = layers.findIndex((layer) => layer.id === id);
-    const to = direction === 'up' ? at + 1 : at - 1;
-    if (at < 0 || to < 0 || to >= layers.length) return false;
-    const next = layers.slice();
-    [next[at], next[to]] = [next[to]!, next[at]!];
-    return updateLayers(next);
-  };
-  const mergeLayer = (id: string) => {
-    const at = layers.findIndex((layer) => layer.id === id);
-    if (at <= 0) return false;
-    const next = layers.slice();
-    next[at - 1] = { ...next[at - 1]!, strokes: [...next[at - 1]!.strokes, ...next[at]!.strokes] };
-    next.splice(at, 1);
-    return updateLayers(next, next[at - 1]!.id);
-  };
-
   const scale = Math.min(FACADE_PAINTER_TUNING.paneMaxWidthPx / size.w, FACADE_PAINTER_TUNING.paneMaxHeightPx / size.h);
   const viewW = Math.max(FACADE_PAINTER_TUNING.viewMinPx, Math.floor(size.w * scale));
   const viewH = Math.max(FACADE_PAINTER_TUNING.viewMinPx, Math.floor(size.h * scale));
@@ -405,21 +376,8 @@ export default function FacadePainterSurface(props: {
             {selectionOutline.length >= 4 ? <Graph style={{ position: 'absolute', left: 0, top: 0, width: viewW, height: viewH }} viewX={0} viewY={0} viewZoom={1} originTopLeft><Graph.Polyline points={selectionOutline} stroke="#f4d35e" strokeWidth={FACADE_PAINTER_TUNING.selectionStrokeWidthPx} /></Graph> : null}
           </Pressable>
         </Box>
-        <Col style={{ width: FACADE_PAINTER_TUNING.layerPanelWidthPx }}>
-          <PaintLayersPanel
-            rows={layers.map((layer) => ({ id: layer.id, name: layer.name, visible: layer.visible, strokes: layer.strokes.length }))}
-            activeId={activeLayerId}
-            onAdd={addLayer}
-            onActive={(id) => updateLayers(layers, id)}
-            onVisible={(id, visible) => updateLayers(layers.map((layer) => layer.id === id ? { ...layer, visible } : layer))}
-            onRename={(id, name) => updateLayers(layers.map((layer) => layer.id === id ? { ...layer, name } : layer))}
-            onMove={moveLayer}
-            onMergeDown={mergeLayer}
-            onDelete={(id) => layers.length > 1 ? updateLayers(layers.filter((layer) => layer.id !== id), id === activeLayerId ? layers.find((layer) => layer.id !== id)!.id : activeLayerId) : false}
-          />
-          <Text style={{ color: accentFor('textDim'), fontSize: 9, marginTop: 8 }}>{tool === 'lasso' ? 'Lasso clips the next strokes to its exact polygon.' : tool === 'marquee' ? 'Marquee clips the next strokes to its rectangle.' : brush.ink.kind === 'shader' && !shaderFor(brush.ink) ? 'Shader ink is warming up…' : ''}</Text>
-        </Col>
       </Row>
+      <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>{tool === 'lasso' ? 'Lasso clips the next strokes to its exact polygon.' : tool === 'marquee' ? 'Marquee clips the next strokes to its rectangle.' : brush.ink.kind === 'shader' && !shaderFor(brush.ink) ? 'Shader ink is warming up…' : ''}</Text>
     </Col>
   );
 }

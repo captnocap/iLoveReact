@@ -28,12 +28,12 @@ test('model browse context exposes source libraries and focus tools', () => {
   assert(rightPanelsFor('model').map((button) => button.id).join(',') === 'inspector,paint,rig', 'model right rail drifted');
 });
 
-test('paint context replaces source shortcuts with persistent paint panes', () => {
+test('paint is one peer pane and source libraries remain reachable', () => {
   const modelPaint = leftPanelsFor('model', true);
   const facadePaint = leftPanelsFor('facade', true);
-  assert(modelPaint.map((button) => button.id).join(',') === 'tool-options,ink', 'model paint panes drifted');
-  assert(facadePaint.map((button) => button.id).join(',') === 'tool-options,ink', 'facade paint panes drifted');
-  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint-tools,paint-ink', 'paint pane renderers are not explicit');
+  assert(modelPaint.map((button) => button.id).join(',') === 'paint,models,materials', 'model paint panes drifted');
+  assert(facadePaint.map((button) => button.id).join(',') === 'paint,materials,models', 'facade paint panes drifted');
+  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint,library,library', 'paint pane renderers are not explicit');
   assert(leftPanelsFor('world', true)[0]!.id === 'assets', 'unsupported world paint context replaced its library');
 });
 
@@ -70,8 +70,9 @@ test('tree navigation updates the matching contextual rail family', () => {
 test('mock-era hot state migrates into the live pane vocabulary', () => {
   assert(normalizeLeftPanelId('grid') === 'materials', 'legacy grid did not migrate');
   assert(normalizeLeftPanelId('actors') === 'characters', 'legacy actors did not migrate');
-  assert(normalizeLeftPanelId('tool-options') === 'tool-options', 'tool options did not survive hot reload');
-  assert(normalizeLeftPanelId('ink') === 'ink', 'ink did not survive hot reload');
+  assert(normalizeLeftPanelId('tool-options') === 'paint', 'split tool-options state did not migrate to Paint');
+  assert(normalizeLeftPanelId('ink') === 'paint', 'split Ink state did not migrate to Paint');
+  assert(normalizeLeftPanelId('paint') === 'paint', 'live Paint pane did not survive hot reload');
   assert(normalizeRightPanelId('layers') === 'inspector', 'inert legacy right pane became live content unexpectedly');
   assert(normalizeRightPanelId('rig') === 'rig', 'live rig pane did not survive hot reload');
 });
