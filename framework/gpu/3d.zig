@@ -6248,24 +6248,41 @@ pub fn paintIslands() ?[]const paint_islands_mod.Island {
     return model_paint.layoutIslands();
 }
 
-/// Apply one complete UV-island rectangle table to the live model. The atlas
-/// pixels and paint-program baseline move with the rectangles, then the same
-/// resident vertex buffer the viewport renders receives the rewritten UVs.
+/// True when the active 3D authored-face selection contains this UV island.
+/// An authored n-gon may contain several render triangles; any selected member
+/// identifies the shared island because normal face picking selects the group.
+pub fn paintIslandSelected(island_index: u32) bool {
+    const face_count = model_paint.faceCount();
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (!mesh_edit.faceSelectedPub(face)) continue;
+        if (model_paint.islandIndexForFace(face) == island_index) return true;
+    }
+    return false;
+}
+
+/// Select one UV island through the native authored-face selection. This is the
+/// inverse of paintIslandSelected and keeps the viewport overlay, HUD count, and
+/// UV transform handles on one authoritative selection.
+pub fn meshEditSelectPaintIsland(island_index: u32, additive: bool) bool {
+    const face = model_paint.firstFaceForIsland(island_index) orelse return false;
+    return meshEditSelectFace(face, additive);
+}
+
+/// Apply one complete UV-island rectangle table to the live model. The atlas is
+/// fixed artwork: only the resident mesh's sampling coordinates move. Since the
+/// stroke program records face-relative coordinates, bake the unchanged current
+/// raster as its new baseline at this boundary so a later replay cannot move old
+/// pixels behind the user's back.
 pub fn applyUvIslandRects(rects: []const u32) bool {
     const verts = g_edit_verts orelse return false;
-    const atlas = model_paint.atlas() orelse return false;
     const islands = model_paint.layoutIslands() orelse return false;
     if (rects.len != islands.len * 4) return false;
-    const old_rects = std.heap.c_allocator.alloc(u32, rects.len) catch return false;
-    defer std.heap.c_allocator.free(old_rects);
-    if (!model_paint.copyLayoutRects(old_rects)) return false;
 
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     if (!model_paint.applyIslandRects(rects, verts, g_edit_count)) return false;
-    // A missing baseline is valid; an allocation failure here degrades future
-    // paint undo to the normal clear+base fallback without invalidating the UV edit.
-    _ = paint_program.remapBaseline(old_rects, rects, atlas.w, atlas.h);
+    paint_program.adoptCurrentAtlasAsBaseline();
     const face_count = g_edit_count / 3;
     // No retained GPU row is a valid pre-first-draw state. The CPU edit mesh is
     // already authoritative and will seed that row when it appears; a missing

@@ -2203,8 +2203,8 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 }
 
 /// __model_uv_layout_apply(Uint32Array[x,y,w,h,...]) → 1 on atomic success.
-/// The table must describe every current island; validation and pixel/UV remap
-/// happen together behind scene3d's single deep boundary.
+/// The table must describe every current island; validation and the UV-only mesh
+/// rewrite happen together behind scene3d's single deep boundary.
 fn hostModelUvLayoutApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const bytes = argBytes(info, 0) orelse {
@@ -2217,6 +2217,44 @@ fn hostModelUvLayoutApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     }
     const rects: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
     const ok = scene3d.applyUvIslandRects(rects);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_uv_selection_read() → JSON [islandIndex,...]. The UV panel polls this
+/// only when the native model selection commits, avoiding an expensive atlas-byte
+/// read merely to synchronize selection chrome.
+fn hostModelUvSelectionRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const islands = scene3d.paintIslands() orelse {
+        setReturnString(info, "[]");
+        return;
+    };
+    var out: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.writeAll("[") catch return setReturnString(info, "[]");
+    var emitted: usize = 0;
+    for (islands, 0..) |_, island_index| {
+        if (!scene3d.paintIslandSelected(@intCast(island_index))) continue;
+        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", island_index }) catch return setReturnString(info, "[]");
+        emitted += 1;
+    }
+    writer.writeAll("]") catch return setReturnString(info, "[]");
+    setReturnString(info, out.written());
+}
+
+/// __model_uv_island_select(index, additive) → 1. UV clicks enter the same native
+/// authored-face selection consumed by the 3D viewport; there is no panel-only set.
+fn hostModelUvIslandSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const index_raw = argToI32(info, 0) orelse -1;
+    if (index_raw < 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const additive = (argToI32(info, 1) orelse 0) != 0;
+    const ok = scene3d.meshEditSelectPaintIsland(@intCast(index_raw), additive);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -3302,6 +3340,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
+    v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
+    v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
     v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
     v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);

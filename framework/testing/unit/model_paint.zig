@@ -257,7 +257,7 @@ test "all advertised analytic brush kinds rasterize distinct footprints" {
     };
 }
 
-test "authored UV rectangle edits carry pixels and rewrite displayed UVs atomically" {
+test "authored UV rectangle edits keep texture pixels fixed and rewrite displayed UVs" {
     var joined: [12 * 8]f32 = undefined;
     @memcpy(joined[0 .. 6 * 8], &QUAD_VERTS);
     @memcpy(joined[6 * 8 ..], &QUAD_VERTS);
@@ -271,8 +271,9 @@ test "authored UV rectangle edits carry pixels and rewrite displayed UVs atomica
         model_paint.setDetail(1, &joined, 12);
         model_paint.test_support.clearTargetAndSource();
     }
-    model_paint.paintStamp(0, 0.33, 0.33, 8, .{ 251, 31, 47, 255 }, 1);
+    model_paint.paintFaceRgb(0, .{ 251, 31, 47 });
     const before_color = model_paint.faceColor(0).?;
+    const before_atlas_hash = atlasHash(model_paint.atlas().?.rgba);
     const before_u = joined[6];
     const before_v = joined[7];
     const islands = model_paint.layoutIslands().?;
@@ -280,16 +281,20 @@ test "authored UV rectangle edits carry pixels and rewrite displayed UVs atomica
 
     var old_rects: [8]u32 = undefined;
     try testing.expect(model_paint.copyLayoutRects(&old_rects));
-    const swapped = [8]u32{
-        old_rects[4], old_rects[5], old_rects[2], old_rects[3],
-        old_rects[0], old_rects[1], old_rects[6], old_rects[7],
+    const moved_and_resized = [8]u32{
+        old_rects[4], old_rects[5], @max(1, old_rects[2] / 2), @max(1, old_rects[3] / 2),
+        old_rects[0], old_rects[1], old_rects[6],              old_rects[7],
     };
-    try testing.expect(model_paint.applyIslandRects(&swapped, &joined, 12));
-    try testing.expectEqual(before_color, model_paint.faceColor(0).?);
+    try testing.expect(model_paint.applyIslandRects(&moved_and_resized, &joined, 12));
+    try testing.expectEqual(before_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
+    const after_color = model_paint.faceColor(0).?;
+    try testing.expect(!std.mem.eql(u8, before_color[0..], after_color[0..]));
     try testing.expect(before_u != joined[6] or before_v != joined[7]);
+    try testing.expectEqual(@as(u32, 0), model_paint.firstFaceForIsland(0).?);
+    try testing.expectEqual(@as(u32, 2), model_paint.firstFaceForIsland(1).?);
     var adopted: [8]u32 = undefined;
     try testing.expect(model_paint.copyLayoutRects(&adopted));
-    try testing.expectEqualSlices(u32, &swapped, &adopted);
+    try testing.expectEqualSlices(u32, &moved_and_resized, &adopted);
 }
 
 test "closed pen polygon fills one logical island across its triangle diagonal" {

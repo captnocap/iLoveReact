@@ -187,6 +187,14 @@ pub fn edgeSelectedPub(e: u32) bool {
     const s = g_sel_edge orelse return false;
     return e < s.len and s[e];
 }
+/// Whether a displayed triangle belongs to the active authored-face selection.
+/// UV authoring reads this same set so the 3D and 2D views never invent parallel
+/// face-selection state.
+pub fn faceSelectedPub(face: u32) bool {
+    if (g_mode != .face) return false;
+    const selected = g_sel_face orelse return false;
+    return face < selected.len and selected[face];
+}
 /// A selected (tinted) face's TRUE base colour, read from its saved pre-tint patch —
 /// null when the face carries no tint (read the live atlas instead). Colour snapshots
 /// (the mesh-edit journal, quality carry) use this so the selection orange never bakes.

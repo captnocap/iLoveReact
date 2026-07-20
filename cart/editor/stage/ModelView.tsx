@@ -103,6 +103,7 @@ export type ModelFocusUv = {
   revision: number;
   rgba: Uint8Array | null;
   islands: UvIslandRect[];
+  selectedIslands: number[];
   w: number;
   h: number;
   detail: number;
@@ -127,6 +128,7 @@ export type ModelFocusBridge = {
   paintLive: boolean;
   refreshUv: () => void;
   applyUvLayout: (rects: Uint32Array) => boolean;
+  selectUvIsland: (index: number, additive: boolean) => boolean;
   reloadUvAtlas: () => string;
   shape: ModelFocusShape | null;
   camMarks: { name: string; active: boolean }[];
@@ -1095,12 +1097,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     return out;
   };
+  const readUvSelection = (): number[] => {
+    try {
+      const json = host.__model_uv_selection_read?.();
+      if (typeof json !== 'string' || !json) return [];
+      const parsed = JSON.parse(json);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((index): index is number => Number.isInteger(index) && index >= 0);
+    } catch {
+      return [];
+    }
+  };
   const buildUvPanel = () => {
     const fail = (w: number, h: number, d: number, note: string) => setUvPanel({
       key: `${model?.key ?? 'none'}-${w}x${h}`,
       revision: ++uvRevisionRef.current,
       rgba: null,
       islands: [],
+      selectedIslands: [],
       w,
       h,
       detail: d,
@@ -1135,6 +1149,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       revision: ++uvRevisionRef.current,
       rgba,
       islands,
+      selectedIslands: readUvSelection(),
       w: o.w,
       h: o.h,
       detail: o.detail,
@@ -1143,11 +1158,37 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       ...(packageDir ? { diskPath: `${packageDir}/atlases/base.png` } : {}),
     });
   };
+  const syncUvSelection = () => {
+    const selectedIslands = readUvSelection();
+    setUvPanel((current) => {
+      if (!current) return current;
+      const same = current.selectedIslands.length === selectedIslands.length
+        && current.selectedIslands.every((index, at) => index === selectedIslands[at]);
+      return same ? current : { ...current, selectedIslands };
+    });
+  };
   const applyUvLayout = (rects: Uint32Array): boolean => {
     const ok = host.__model_uv_layout_apply?.(rects) === 1;
     if (!ok) return false;
     onDocumentMutated?.();
     buildUvPanel();
+    return true;
+  };
+  const selectUvIsland = (index: number, additive: boolean): boolean => {
+    if (!Number.isInteger(index) || index < 0) return false;
+    // A UV face click is an authored-face selection action. Leave the mutually
+    // exclusive paint/path/focus tools immediately so the host door cannot be
+    // rejected by a paint session that React has not torn down yet.
+    host.__mesh_paint_session?.(0);
+    setPaintMode(false);
+    setPathPlaneMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    const ok = host.__model_uv_island_select?.(index, additive ? 1 : 0) === 1;
+    if (!ok) return false;
+    setSelMode(3);
+    adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: 1 });
+    syncUvSelection();
     return true;
   };
   const reloadUvAtlas = (): string => {
@@ -1645,6 +1686,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       paintLive: paintMode,
       refreshUv: buildUvPanel,
       applyUvLayout,
+      selectUvIsland,
       reloadUvAtlas,
       shape: model
         ? {
@@ -1826,7 +1868,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     meshCapture(true);
     // The host calls this once per committed selection change (a click or a marquee release,
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
-    (globalThis as any).__meshEditSelChanged = () => adoptHostSelection();
+    (globalThis as any).__meshEditSelChanged = () => {
+      adoptHostSelection();
+      syncUvSelection();
+    };
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
     // Hot-reload resume (req_2898): if the host is STILL holding this document's live
     // mesh from before the reload (doc twig matches AND the host session key matches),

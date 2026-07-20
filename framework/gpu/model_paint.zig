@@ -666,12 +666,30 @@ fn hsvPastel(h: f32) [4]u8 {
     var g: f32 = v;
     var b: f32 = v;
     switch (i) {
-        0 => { g = t; b = p; },
-        1 => { r = q; b = p; },
-        2 => { r = p; b = t; },
-        3 => { r = p; g = q; },
-        4 => { r = t; g = p; },
-        else => { g = p; b = q; },
+        0 => {
+            g = t;
+            b = p;
+        },
+        1 => {
+            r = q;
+            b = p;
+        },
+        2 => {
+            r = p;
+            b = t;
+        },
+        3 => {
+            r = p;
+            g = q;
+        },
+        4 => {
+            r = t;
+            g = p;
+        },
+        else => {
+            g = p;
+            b = q;
+        },
     }
     return .{ @as(u8, @trunc(r * 255.0)), @as(u8, @trunc(g * 255.0)), @as(u8, @trunc(b * 255.0)), 255 };
 }
@@ -1273,6 +1291,18 @@ pub fn islandIndexForFace(face: u32) ?u32 {
     const lay = &(g_layout orelse return null);
     if (face >= g_facecount) return null;
     return lay.tri_island[face];
+}
+
+/// A stable displayed-triangle representative for an authored UV island. The
+/// model and UV views use this to share one face selection instead of keeping a
+/// second panel-only selection state.
+pub fn firstFaceForIsland(island_index: u32) ?u32 {
+    const lay = &(g_layout orelse return null);
+    if (island_index >= lay.islands.len) return null;
+    for (lay.tri_island, 0..) |candidate, face| {
+        if (candidate == island_index) return @intCast(face);
+    }
+    return null;
 }
 
 /// Map a face barycentric hit to normalized coordinates inside its authored
@@ -1934,74 +1964,17 @@ fn validIslandRectTable(rects: []const u32, atlas_w: u32, atlas_h: u32) bool {
     return true;
 }
 
-/// Resample every old island rectangle into its new rectangle inside an atlas of
-/// unchanged dimensions. This public pure boundary also remaps paint_program's
-/// runtime baseline, so paint undo keeps using the authored UV arrangement.
-pub fn remapRgbaRects(
-    destination: []u8,
-    source: []const u8,
-    atlas_w: u32,
-    atlas_h: u32,
-    old_rects: []const u32,
-    new_rects: []const u32,
-) bool {
-    const byte_len = @as(usize, atlas_w) * @as(usize, atlas_h) * 4;
-    if (destination.len != byte_len or source.len != byte_len or old_rects.len != new_rects.len) return false;
-    if (!validIslandRectTable(old_rects, atlas_w, atlas_h) or !validIslandRectTable(new_rects, atlas_w, atlas_h)) return false;
-
-    var byte: usize = 0;
-    while (byte < destination.len) : (byte += 4) {
-        destination[byte + 0] = DEFAULT_FACE[0];
-        destination[byte + 1] = DEFAULT_FACE[1];
-        destination[byte + 2] = DEFAULT_FACE[2];
-        destination[byte + 3] = DEFAULT_FACE[3];
-    }
-    var index: usize = 0;
-    while (index < old_rects.len) : (index += 4) {
-        const ox = old_rects[index + 0];
-        const oy = old_rects[index + 1];
-        const ow = old_rects[index + 2];
-        const oh = old_rects[index + 3];
-        const nx = new_rects[index + 0];
-        const ny = new_rects[index + 1];
-        const nw = new_rects[index + 2];
-        const nh = new_rects[index + 3];
-        var py: u32 = 0;
-        while (py < nh) : (py += 1) {
-            const sy = oy + @min(oh - 1, py * oh / nh);
-            var px: u32 = 0;
-            while (px < nw) : (px += 1) {
-                const sx = ox + @min(ow - 1, px * ow / nw);
-                const src = (@as(usize, sy) * atlas_w + sx) * 4;
-                const dst = (@as(usize, ny + py) * atlas_w + (nx + px)) * 4;
-                @memcpy(destination[dst .. dst + 4], source[src .. src + 4]);
-            }
-        }
-    }
-    return true;
-}
-
 /// Atomically adopt a complete UV island rectangle table. Painted pixels move
-/// with their islands, corner UVs receive the same affine transform, and the
-/// caller's displayed vertex buffer is rewritten only after every validation and
-/// allocation has succeeded. Overlap is permitted deliberately (stacked UVs are
-/// a normal authoring operation); table order determines the visible top copy.
+/// nowhere: UV editing moves and scales the mesh's sampling coordinates over a
+/// fixed texture, matching external texture editors and Blockbench. The caller's
+/// displayed vertex buffer is rewritten only after the complete table validates.
+/// Overlap is permitted deliberately because stacked UVs are a normal authoring
+/// operation.
 pub fn applyIslandRects(new_rects: []const u32, verts: []f32, vert_count: u32) bool {
     const lay = &(g_layout orelse return false);
-    const live = g_rgba orelse return false;
+    if (g_rgba == null) return false;
     if (new_rects.len != lay.islands.len * 4 or vert_count != g_facecount * 3) return false;
     if (verts.len < @as(usize, vert_count) * 8 or !validIslandRectTable(new_rects, g_atlas_w, g_atlas_h)) return false;
-
-    const old_rects = alloc.alloc(u32, new_rects.len) catch return false;
-    defer alloc.free(old_rects);
-    if (!copyLayoutRects(old_rects)) return false;
-    const source = alloc.dupe(u8, live) catch return false;
-    defer alloc.free(source);
-    const remapped = alloc.alloc(u8, live.len) catch return false;
-    if (!remapRgbaRects(remapped, source, g_atlas_w, g_atlas_h, old_rects, new_rects)) {
-        alloc.free(remapped);
-        return false;
-    }
 
     for (lay.islands, 0..) |*island, island_index| {
         const table = island_index * 4;
@@ -2038,10 +2011,6 @@ pub fn applyIslandRects(new_rects: []const u32, verts: []f32, vert_count: u32) b
         verts[vertex * 8 + 6] = lay.corner_uv[@as(usize, vertex) * 2 + 0] / atlas_w_f;
         verts[vertex * 8 + 7] = lay.corner_uv[@as(usize, vertex) * 2 + 1] / atlas_h_f;
     }
-    alloc.free(live);
-    g_rgba = remapped;
-    g_has_dirty = false;
-    markRows(0, g_atlas_h - 1);
     return true;
 }
 

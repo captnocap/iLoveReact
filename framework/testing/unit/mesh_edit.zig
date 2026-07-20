@@ -104,6 +104,9 @@ test "created grouped face becomes the one active face ready to flip" {
     try testing.expectEqual(@as(u32, 1), mesh_edit.focusCreatedFace(1, 2));
     try testing.expectEqual(mesh_edit.Mode.face, mesh_edit.mode());
     try testing.expectEqual(@as(u32, 1), mesh_edit.selCount()); // authored face, not two triangles
+    try testing.expect(!mesh_edit.faceSelectedPub(0));
+    try testing.expect(mesh_edit.faceSelectedPub(1));
+    try testing.expect(mesh_edit.faceSelectedPub(2));
     var mask = [_]bool{ false, false, false };
     try testing.expectEqual(@as(u32, 2), mesh_edit.buildDeleteMask(mask[0..]));
     try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);

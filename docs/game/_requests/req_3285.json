@@ -1,0 +1,18 @@
+{
+  "id": "req_3285",
+  "at": "2026-07-20T09:51:25.995Z",
+  "origin": "codex:019f7e48",
+  "text": "ok so wait a second now they are technically there but they are not in sync with the face in the sense i click on the face and it doesnt give me that outline in the uv in sync \nalso, when i go to resize it, it is not behaving as it should this is taking the entire color that is covering and bringing it with it look [Image #1][Image #2]",
+  "status": "doing",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:51:53.060Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

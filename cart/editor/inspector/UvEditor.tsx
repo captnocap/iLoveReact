@@ -10,9 +10,11 @@ import {
   hitUvIsland,
   moveUvIsland,
   resizeUvIslandFromCorner,
+  shouldPanUvCanvas,
   uniformUvPack,
   uvRectPath,
   UV_LAYOUT_TUNING,
+  type UvCanvasTool,
   type UvIslandRect,
   type UvResizeCorner,
 } from '../model/uvLayout';
@@ -121,7 +123,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   rectsRef.current = rects;
   const [selected, setSelected] = useState(-1);
   const [note, setNote] = useState<string | null>(null);
-  const [tool, setTool] = useState<'select' | 'pan'>('select');
+  const [tool, setTool] = useState<UvCanvasTool>('select');
   const [aspectLocked, setAspectLocked] = useState(false);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const surfaceRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
@@ -155,6 +157,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setSelected((index) => Math.min(index, uv.islands.length - 1));
     if (uv.rgba) texture.paint.upload(uv.rgba);
   }, [uv.key, uv.revision]);
+
+  const synchronizedSelectionKey = uv.selectedIslands.join(',');
+  useEffect(() => {
+    setSelected(uv.selectedIslands[0] ?? -1);
+  }, [synchronizedSelectionKey]);
 
   useEffect(() => {
     if (surfaceSize.width <= 1 || surfaceSize.height <= 1) return;
@@ -273,7 +280,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         }}
         onMouseDown={(event: any) => {
           const screen = localScreenPoint(event);
-          if (tool === 'pan' || Number(event?.button) === 1) {
+          const mouseButtonsMask = Number(host.getMouseButtons?.() ?? event?.buttons ?? 0);
+          if (shouldPanUvCanvas(tool, mouseButtonsMask)) {
             gestureRef.current = { kind: 'pan', start: screen, seed: viewRef.current };
             return;
           }
@@ -285,7 +293,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const point = atlasPoint(screen);
           const index = hitUvIsland(rectsRef.current, point.x, point.y);
           setSelected(index);
-          if (index >= 0) gestureRef.current = { kind: 'move', index, start: point, seed: rectsRef.current[index]! };
+          if (index >= 0) {
+            bridge.selectUvIsland(index, Boolean(event?.shiftKey));
+            gestureRef.current = { kind: 'move', index, start: point, seed: rectsRef.current[index]! };
+          }
         }}
         onMouseMove={(event: any) => {
           const gesture = gestureRef.current;
@@ -310,14 +321,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         onMouseUp={() => {
           const gesture = gestureRef.current;
           gestureRef.current = null;
-          if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV island');
-          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV island');
+          if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV face over the fixed texture');
+          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV face over the fixed texture');
         }}
         onMouseLeave={() => {
           const gesture = gestureRef.current;
           gestureRef.current = null;
-          if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV island');
-          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV island');
+          if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV face over the fixed texture');
+          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV face over the fixed texture');
         }}
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#0d1016' }}
       >
@@ -327,9 +338,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Effect shader={ATLAS_SHADER} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, borderWidth: 1, borderColor: '#354052', pointerEvents: 'none' }} />
         <Graph style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          <Graph.Path d={rectScreenPath(rects)} fill="none" stroke="#8993a4" strokeWidth={0.8} />
-          {active.length ? <Graph.Path d={rectScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.4} /> : null}
-          {selectedRect ? <Graph.Path d={rectScreenPath([selectedRect])} fill="#f4d35e22" stroke="#f4f7ff" strokeWidth={1.7} /> : null}
+          <Graph.Path d={rectScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={3.2} />
+          <Graph.Path d={rectScreenPath(rects)} fill="none" stroke="#c7d0df" strokeWidth={1.15} />
+          {active.length ? <Graph.Path d={rectScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.65} /> : null}
+          {selectedRect ? <Graph.Path d={rectScreenPath([selectedRect])} fill="#f4d35e2b" stroke="#ffffff" strokeWidth={2.2} /> : null}
         </Graph>
         {handlePoints.map((handle) => (
           <Box key={handle.corner} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />

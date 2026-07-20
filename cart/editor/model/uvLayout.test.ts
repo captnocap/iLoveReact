@@ -5,6 +5,7 @@ import {
   parseUvIslandRects,
   resizeUvIsland,
   resizeUvIslandFromCorner,
+  shouldPanUvCanvas,
   uniformUvPack,
 } from './uvLayout';
 
@@ -38,6 +39,12 @@ test('four-corner resize keeps the opposite corner fixed', () => {
 test('hit testing chooses the smallest overlapping island', () => {
   const rects = parseUvIslandRects([0, 0, 20, 20, 5, 5, 3, 3], [1, 2]);
   assert(hitUvIsland(rects, 6, 6) === 1, 'nested island was unreachable');
+});
+
+test('primary drag selects one face while hand tool or middle drag pans', () => {
+  assert(!shouldPanUvCanvas('select', 1), 'primary button was mistaken for middle-button pan');
+  assert(shouldPanUvCanvas('select', 2), 'middle button did not pan from the select tool');
+  assert(shouldPanUvCanvas('pan', 1), 'hand tool did not pan with the primary button');
 });
 
 test('uniform pack gives every island an equal, bounded cell', () => {

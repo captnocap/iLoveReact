@@ -5,12 +5,15 @@ export const UV_LAYOUT_TUNING = {
   gutterTexels: 2,
   minimumIslandTexels: 1,
   resizeHandlePx: 8,
+  middleMouseButtonsMask: 2,
   checkerPx: 20,
   canvasPaddingPx: 16,
   defaultNativeScale: 4,
   minimumZoom: 0.05,
   maximumZoom: 32,
 } as const;
+
+export type UvCanvasTool = 'select' | 'pan';
 
 export type UvIslandRect = {
   x: number;
@@ -22,6 +25,15 @@ export type UvIslandRect = {
 
 const integer = (value: number): number => Math.round(Number.isFinite(value) ? value : 0);
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
+
+/**
+ * ReactJIT pointer events use a one-based `button` value for the primary button,
+ * so DOM's `button === 1` middle-button convention is not valid here. The live
+ * SDL button mask is unambiguous: bit 1 is the middle button.
+ */
+export function shouldPanUvCanvas(tool: UvCanvasTool, mouseButtonsMask: number): boolean {
+  return tool === 'pan' || (integer(mouseButtonsMask) & UV_LAYOUT_TUNING.middleMouseButtonsMask) !== 0;
+}
 
 export function parseUvIslandRects(rects: readonly number[] | undefined, groups: readonly number[] | undefined): UvIslandRect[] {
   if (!rects || rects.length % 4 !== 0) return [];

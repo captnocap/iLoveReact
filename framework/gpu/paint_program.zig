@@ -133,28 +133,6 @@ fn forceBaselineCapture() void {
     captureBaselineIfNeeded();
 }
 
-/// Carry the runtime-only undo baseline through an authored UV rectangle edit.
-/// Stroke ops are face/barycentric recipes and therefore need no rewrite; only
-/// this cached raster anchor still contains the old island placement.
-pub fn remapBaseline(old_rects: []const u32, new_rects: []const u32, atlas_w: u32, atlas_h: u32) bool {
-    const source = g_baseline orelse return true;
-    const destination = alloc.alloc(u8, source.len) catch {
-        // The baseline is only an undo acceleration cache. If it cannot move
-        // with the authored UVs, discard it so replay takes the established
-        // clear+base path instead of restoring pixels at stale coordinates.
-        dropBaseline();
-        return false;
-    };
-    if (!model_paint.remapRgbaRects(destination, source, atlas_w, atlas_h, old_rects, new_rects)) {
-        alloc.free(destination);
-        dropBaseline();
-        return false;
-    }
-    alloc.free(source);
-    g_baseline = destination;
-    return true;
-}
-
 /// An externally edited atlas PNG is a deliberate raster bake. Keep the layer
 /// names, retire the old stroke recipe/history, and make the imported pixels the
 /// baseline beneath every stroke authored from this point onward.
