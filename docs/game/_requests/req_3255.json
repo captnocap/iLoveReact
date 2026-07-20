@@ -1,0 +1,30 @@
+{
+  "id": "req_3255",
+  "at": "2026-07-20T05:53:55.572Z",
+  "origin": "codex:019f7a9c",
+  "text": "when painting, if i have say 3 layers and i paint on the top most layer, and then go and paint on a layer below it, and i paint under where it would be from the layer on top. it shows as painting on top of that layer, until the next undo command which then shifts it under",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T05:54:06.096Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:20:34.491Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed paint-layer ordering at the stroke boundary. Live dabs still write directly into the shared atlas for responsiveness, but pointer-up now detects when the active layer is hidden or has any visible layer above it and immediately replays the canonical bottom-to-top program. A lower-layer stroke therefore settles beneath upper layers as soon as the stroke commits instead of waiting for a later Undo to incidentally recomposite it. Added a focused Zig truth-table test for all visible/covered cases and verified the full model-paint suite plus the editor ReleaseFast build.",
+  "shas": [
+    "31550a3b6"
+  ],
+  "resolvedAt": "2026-07-20T06:20:34.491Z"
+}

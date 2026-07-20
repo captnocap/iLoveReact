@@ -1,0 +1,30 @@
+{
+  "id": "req_3256",
+  "at": "2026-07-20T05:56:56.601Z",
+  "origin": "codex:019f7a9c",
+  "text": "and the undo button still breaks the entire paint topology. again, this time i didnt have a broken piece i just didnt like the edit i made to the plane i had, and hitting undo made the eyes break again [Image #1] which they likely are not brokenn but they do this which is problematic",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T05:57:06.674Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:20:34.491Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed mesh undo flattening/scrambling detailed atlas paint after position-only edits. Transform, nudge, numeric scale, face winding, and the identity-mapped symmetrize return path now carry the exact atlas and durable paint program through journal installation instead of rebuilding from per-face centroid colours. The journal also snapshots/restores the UV-stale state, so undoing a structural edit returns to the previous valid paint contract while redo returns to the locked state. Verified with the mesh-journal unit suite, model-paint suite, binding codegen check, and full editor ReleaseFast build.",
+  "shas": [
+    "31550a3b6"
+  ],
+  "resolvedAt": "2026-07-20T06:20:34.491Z"
+}

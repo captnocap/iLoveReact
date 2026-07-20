@@ -1,0 +1,30 @@
+{
+  "id": "req_3257",
+  "at": "2026-07-20T06:01:21.731Z",
+  "origin": "codex:019f7a9c",
+  "text": "yes well you might be overlooking the fact there is zero safety to this flow of any sort: outliner -> get uv -> add outliner -> paint is just automatically appending the 2nd outliner to the uv where any sane program would not allow that to happen without adding a brand new uv entirely, blockbench specically does not let you paint on these outliners till you remake a uv because kinda yeah no shit it would break.",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:01:36.503Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:20:34.491Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the missing topology-to-UV safety contract. Every structural mesh action (add/delete/duplicate/mirror parts, cuts, extrudes, face creation/merge, detach/merge, solidify, split quads, symmetrize, and path arrays) marks the authored paint layout stale. The host now rejects paint entry, brush/fill, program/raster restore, paint undo/redo, layer mutations, and direct paint doors while stale; the UI presents an explicit Remake Paint Atlas gate, and only that atlas-base operation unlocks painting. Autosave still saves the new mesh but refuses to overwrite or endorse the old atlas, leaves the previous paint files recoverable, removes the runtime painted-form approval stamp, and writes a durable layout.stale.json marker that restores the lock after a cold restart. Added host binding contracts and classifier regression coverage; all focused tests and the editor ReleaseFast build pass.",
+  "shas": [
+    "31550a3b6"
+  ],
+  "resolvedAt": "2026-07-20T06:20:34.491Z"
+}
