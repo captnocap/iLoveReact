@@ -51,6 +51,13 @@ test "empty stream has no redundant fills" {
     try std.testing.expectEqualSlices(usize, &.{}, offsets);
 }
 
+test "stroke commit replays whenever direct atlas order differs from layer order" {
+    try std.testing.expect(!paint_ops.strokeCommitNeedsReplay(true, false));
+    try std.testing.expect(paint_ops.strokeCommitNeedsReplay(true, true));
+    try std.testing.expect(paint_ops.strokeCommitNeedsReplay(false, false));
+    try std.testing.expect(paint_ops.strokeCommitNeedsReplay(false, true));
+}
+
 test "repeated fill reports the first tag offset" {
     var stream = Stream{};
     defer stream.deinit();

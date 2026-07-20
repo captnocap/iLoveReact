@@ -729,6 +729,7 @@ pub fn meshEditActiveCount() u32 {
 /// quality remesh, this drops the previous document's focused outliner range so it
 /// cannot filter the incoming mesh (req_2953).
 pub fn meshEditBeginModel() void {
+    g_paint_layout_stale = false;
     mesh_edit.resetForModelLoad();
 }
 
@@ -2090,7 +2091,16 @@ fn paintStableJournalLabel(label: []const u8) bool {
         std.mem.eql(u8, label, "mirror part") or
         std.mem.eql(u8, label, "delete part") or
         std.mem.eql(u8, label, "hide part") or
-        std.mem.eql(u8, label, "show part");
+        std.mem.eql(u8, label, "show part") or
+        // Identity-mapped replacements must carry the exact atlas/program on
+        // undo instead of flattening every painted island to its centroid
+        // colour. Symmetrize still marks the live layout stale because it
+        // rewrites topology; carrying here only protects the return trip.
+        std.mem.eql(u8, label, "transform") or
+        std.mem.eql(u8, label, "nudge") or
+        std.mem.eql(u8, label, "scale by value") or
+        std.mem.eql(u8, label, "symmetrize") or
+        std.mem.eql(u8, label, "flip faces");
 }
 
 fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
@@ -2453,6 +2463,7 @@ const JournalEntry = struct {
     part_ranges: ?[]u32,
     colors: ?[]u8,
     hidden: []JournalHidden,
+    paint_layout_stale: bool,
     note: ?[]u8,
     label: []const u8, // static string — the op that FOLLOWED this snapshot
     action_id: u32 = 0,
@@ -2573,6 +2584,7 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         .part_ranges = null,
         .colors = null,
         .hidden = &.{},
+        .paint_layout_stale = g_paint_layout_stale,
         .note = null,
         .label = label,
         .action_id = 0,
@@ -2606,6 +2618,7 @@ fn journalCommit(snap: *?JournalEntry) void {
     var e = snap.* orelse return;
     snap.* = null;
     if (mesh_journal_log.actionKindForLabel(e.label)) |kind| {
+        if (mesh_journal_log.actionInvalidatesPaintLayout(kind)) g_paint_layout_stale = true;
         g_mesh_action_seq +%= 1;
         if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
         e.action_id = g_mesh_action_seq;
@@ -2818,8 +2831,8 @@ pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
         else => out.append(alloc, ch) catch return null,
     };
     var print_buf: [192]u8 = undefined;
-    const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{}}}", .{
-        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.atlas() != null,
+    const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{},\"paintStale\":{}}}", .{
+        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.atlas() != null, g_paint_layout_stale,
     }) catch return null;
     out.appendSlice(alloc, rendered) catch return null;
     return out.toOwnedSlice(alloc) catch null;
@@ -2886,6 +2899,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     // — undoing into one must heal it, not resurrect the corruption.
     _ = ensureDisjointPartRanges("undo/redo restore");
     if (e.count > 0) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
+    g_paint_layout_stale = e.paint_layout_stale;
     return true;
 }
 
@@ -4074,7 +4088,27 @@ pub fn meshEditMirrorRaw() u8 {
 // mode dressing / gizmo. Entering the session RESETS the selection (documented choice:
 // paint entry clears; leaving paint starts clean in Object mode — nothing to restore).
 var g_paint_session: bool = false;
-pub fn setPaintSession(on: bool) void {
+// Structural mesh edits invalidate the authored UV/island contract.  The
+// carried atlas may remain visible as a preview, but all paint entry points
+// fail closed until Create/Remake Paint Atlas explicitly lays a new base.
+var g_paint_layout_stale: bool = false;
+
+pub fn paintLayoutStale() bool {
+    return g_paint_layout_stale;
+}
+
+/// Restore the persisted topology/atlas mismatch on a cold editor load. Only
+/// explicit setPaintBase may clear this state; loading an old raster/program is
+/// deliberately not an unlock path.
+pub fn invalidatePaintLayout() void {
+    g_paint_layout_stale = true;
+    g_paint_session = false;
+}
+
+pub fn setPaintSession(io: std.Io, environ: *const std.process.Environ.Map, on: bool) void {
+    // Host enforcement: a cart bug, script, or stale UI state cannot enter paint
+    // against a topology revision whose atlas has not been explicitly rebuilt.
+    if (on and g_paint_layout_stale) return;
     if (on == g_paint_session) return;
     g_paint_session = on;
     if (on) {
@@ -4083,7 +4117,7 @@ pub fn setPaintSession(on: bool) void {
     } else {
         // Leaving paint commits any half-open stroke as its own undo unit — the journal
         // must never carry a dangling gesture across sessions (req_2672).
-        _ = paint_program.endStrokeUnit();
+        _ = paintStrokeEnd(io, environ);
     }
 }
 pub fn paintSessionActive() bool {
@@ -5594,6 +5628,7 @@ pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {
 /// each PART its own colour on load so a bare studio mesh reads as coloured parts, matching
 /// the outliner swatches. Returns the number of faces painted.
 pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
+    if (g_paint_layout_stale) return 0;
     const fc = model_paint.faceCount();
     // Painting a selection-tinted face must land UNDER the tint (the outliner can recolor
     // a part while its faces are selected): lift the tint, paint, re-apply — the re-saved
@@ -5630,7 +5665,7 @@ pub fn meshEditCounts() [4]u32 {
 /// camera. Returns the DISPLAYED face index painted, or -1 on a miss. The caller maps
 /// that face back to the source paint (so it survives quality changes) and marks dirty.
 pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
-    if (!model_paint.hasTarget()) return -1;
+    if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const face = mesh_edit.scopedFaceHit(model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)));
     if (face < 0) return -1;
@@ -5681,7 +5716,10 @@ pub fn paintProgramRead() ?[]u8 {
 /// the paint module can't do) so face+bary dabs land at the resolution they were made.
 /// False if there's no resident mesh or the blob is malformed.
 pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
-    if (g_edit_verts == null or g_edit_count == 0) return false;
+    // A program stores face/barycentric addresses from one UV/topology revision.
+    // It may restore a cold, unchanged model, but it must never silently bless a
+    // structurally changed one. setPaintBase is the sole explicit unlock.
+    if (g_paint_layout_stale or g_edit_verts == null or g_edit_count == 0) return false;
     // The replay overwrites atlas texels wholesale — lift any selection tint first so
     // the replayed paint is TRUE paint, then re-tint over it (depth-counted, so the
     // nested setPaintDetail's own guard folds into this one).
@@ -5699,18 +5737,28 @@ pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, bl
 // paint, never mix with the orange; same law as paintProgramApply).
 
 /// Commit the open stroke unit (pointer-up). Returns true when a stroke was recorded.
-pub fn paintStrokeEnd() bool {
-    return paint_program.endStrokeUnit();
+pub fn paintStrokeEnd(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (g_paint_layout_stale) return false;
+    const committed = paint_program.endStrokeUnit();
+    if (!committed) return false;
+    if (paint_program.activeLayerNeedsCompositeReplay()) {
+        mesh_edit.suspendFaceTint();
+        defer mesh_edit.resumeFaceTint();
+        paint_program.replayAll(io, environ);
+    }
+    return true;
 }
 
 /// Undo/redo ONE stroke-journal unit (a stroke or a structural layer op) by program
 /// replay. False when the journal side is empty.
 pub fn paintStrokeUndo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.undoStroke(io, environ);
 }
 pub fn paintStrokeRedo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.redoStroke(io, environ);
@@ -5738,30 +5786,37 @@ pub fn paintActiveLayer() u32 {
     return paint_program.activeLayerId();
 }
 pub fn paintLayerAdd() u32 {
+    if (g_paint_layout_stale) return 0;
     return paint_program.layerAdd();
 }
 pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.layerDelete(io, environ, id);
 }
 pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.layerMove(io, environ, id, up);
 }
 pub fn paintLayerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.layerSetVisible(io, environ, id, on);
 }
 pub fn paintLayerSetActive(id: u32) bool {
+    if (g_paint_layout_stale) return false;
     return paint_program.layerSetActive(id);
 }
 pub fn paintLayerRename(id: u32, name: []const u8) bool {
+    if (g_paint_layout_stale) return false;
     return paint_program.layerRename(id, name);
 }
 pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+    if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.layerMergeDown(io, environ, id);
@@ -5782,7 +5837,7 @@ pub const DEFAULT_FACE = model_paint.DEFAULT_FACE;
 /// Paint a face by its index (no raycast) — programmatic fill / the headless paint
 /// proof. Returns false if there's no target or the index is out of range.
 pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
-    if (face >= model_paint.faceCount()) return false;
+    if (g_paint_layout_stale or face >= model_paint.faceCount()) return false;
     mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
     defer mesh_edit.resumeFaceTint();
     model_paint.paintFaceRgb(face, .{ r, g, b });
@@ -5805,6 +5860,7 @@ pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
     defer mesh_edit.resumeFaceTint();
     model_paint.setBase(m, .{ r, g, b, 255 });
     model_paint.clearAtlas();
+    g_paint_layout_stale = false;
     return true;
 }
 
@@ -5833,7 +5889,7 @@ pub fn paintModeSet(mode: i32) void {
 /// LOCK-mode stroke begin: pick the face under the cursor and remember it, so every dab in
 /// this stroke masks to that one face. Returns the face index, or -1 on a miss / no target.
 pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
-    if (!model_paint.hasTarget()) return -1;
+    if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return -1;
     if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) return -1;
@@ -5898,7 +5954,7 @@ fn stampGroupMirrored(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: 
 /// (patch-texel units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport
 /// offset is honoured (req_2248) exactly like paintAt. Returns the painted face, or -1.
 pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32, spec: model_paint.BrushShape) i32 {
-    if (!model_paint.hasTarget()) return -1;
+    if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const lx = vpLocalX(mx);
     const ly = vpLocalY(my);
@@ -6028,6 +6084,9 @@ pub fn paintedMeshVerts() ?[]const f32 {
 /// Load a saved painting: restore its detail (rewrites UVs + re-uploads the mesh) then blit the
 /// saved atlas over the texture. Returns false if the bytes don't match the restored dimensions.
 pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
+    // Saved atlas pixels describe the previous island layout. They cannot be the
+    // implicit way out of a stale topology; the user must remake the atlas first.
+    if (g_paint_layout_stale) return false;
     // The blit overwrites every texel — lift the tint so the saved painting lands as
     // TRUE paint, then re-tint over it (folds with setPaintDetail's nested guard).
     mesh_edit.suspendFaceTint();

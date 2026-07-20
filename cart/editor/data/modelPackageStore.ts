@@ -221,6 +221,15 @@ export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
 
 export type ModelBasePaint = { version: 1; detail: number; program: string };
 
+const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
+
+/** A structural mesh save leaves the previous paint assets recoverable on disk,
+ *  but this marker prevents them from being silently rebound to the new topology. */
+export function modelPaintLayoutIsStale(pkg: Pick<ModelPackage, 'kind' | 'id'>): boolean {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  return !!dir && exists(`${dir}/${PAINT_LAYOUT_STALE_FILE}`);
+}
+
 export function parseModelBasePaintText(text: string): ModelBasePaint | null {
   try {
     const value = JSON.parse(text) as Partial<ModelBasePaint>;
@@ -232,6 +241,7 @@ export function parseModelBasePaintText(text: string): ModelBasePaint | null {
 export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): ModelBasePaint | null {
   const dir = resolvePackageDir(pkg.kind, pkg.id);
   if (!dir) return null;
+  if (exists(`${dir}/${PAINT_LAYOUT_STALE_FILE}`)) return null;
   const text = readFile(`${dir}/atlases/base.paint.json`);
   if (!text) return null;
   return parseModelBasePaintText(text);
@@ -456,6 +466,26 @@ export function writeModelArtifacts(
     ? writeMeshDoc(dir, parts, recoveryRanges, options)
     : exists(`${meshDir}/doc.blob`);
   if (parts && docWritten) host.__model_mesh_write?.(`${meshDir}/base.blob`);
+  const stalePath = `${dir}/${PAINT_LAYOUT_STALE_FILE}`;
+  const paintLayoutStale = host.__model_paint_layout_stale?.() === 1;
+  if (paintLayoutStale) {
+    // Save the geometry, but never endorse the automatically derived preview UVs
+    // as authored paint. Keep old paint files recoverable and mark the mismatch;
+    // removing only the approval stamp also prevents runtime placement from using
+    // the old painted mesh against the just-written document.
+    const doc = stat(`${meshDir}/doc.blob`);
+    const markerWritten = !!doc && writeFileBytesAtomic(stalePath, textBytes(JSON.stringify({
+      version: 1,
+      docStamp: `${doc.size}:${doc.mtimeMs}`,
+      reason: 'topology-changed',
+    })));
+    const paintedMetaPath = `${meshDir}/painted.json`;
+    if (exists(paintedMetaPath)) remove(paintedMetaPath);
+    return docWritten && markerWritten;
+  }
+  // An explicit Create/Remake Paint Atlas cleared the host gate. This save now
+  // establishes the current atlas as belonging to the current mesh document.
+  if (exists(stalePath)) remove(stalePath);
   let paintProgramWritten = true;
   try {
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');

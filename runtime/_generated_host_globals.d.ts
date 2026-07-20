@@ -77,6 +77,8 @@ declare global {
   function __mesh_edit_scope(...args: unknown[]): unknown;
   function __mesh_edit_scope_ranges(...args: unknown[]): unknown;
   function __mesh_paint_session(...args: unknown[]): unknown;
+  function __model_paint_layout_stale(...args: unknown[]): unknown;
+  function __model_paint_layout_invalidate(...args: unknown[]): unknown;
   function __mesh_paint_stroke_end(...args: unknown[]): unknown;
   function __mesh_paint_undo(...args: unknown[]): unknown;
   function __mesh_paint_redo(...args: unknown[]): unknown;

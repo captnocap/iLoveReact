@@ -1440,8 +1440,24 @@ fn hostMeshEditScopeRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
 fn hostMeshPaintSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const on = (argToI32(info, 0) orelse 0) != 0;
-    scene3d.setPaintSession(on);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    scene3d.setPaintSession(host.io, host.environ, on);
     state.markDirty();
+}
+
+/// __model_paint_layout_stale() → 1 when structural geometry changed after the
+/// last explicit atlas build. Brush/fill doors are host-blocked in this state.
+fn hostModelPaintLayoutStale(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, if (scene3d.paintLayoutStale()) 1 else 0);
+}
+
+/// __model_paint_layout_invalidate() → restore a persisted stale-layout marker
+/// after the mesh document is adopted on a cold load.
+fn hostModelPaintLayoutInvalidate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.invalidatePaintLayout();
+    setReturnNumber(info, 1);
 }
 
 // ── Stroke journal + paint layers (req_2672) ─────────────────────────────────────────
@@ -1450,7 +1466,8 @@ fn hostMeshPaintSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
 /// The cart calls this on pointer-up/leave; a unit auto-opens on the first recorded dab.
 fn hostMeshPaintStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, if (scene3d.paintStrokeEnd()) 1 else 0);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    setReturnNumber(info, if (scene3d.paintStrokeEnd(host.io, host.environ)) 1 else 0);
 }
 
 /// __mesh_paint_undo() / __mesh_paint_redo() → JSON {"ok","label","undo","redo"} (the
@@ -3162,6 +3179,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
     v8_runtime.registerHostFn("__mesh_edit_scope_ranges", hostMeshEditScopeRanges);
     v8_runtime.registerHostFn("__mesh_paint_session", hostMeshPaintSession);
+    v8_runtime.registerHostFn("__model_paint_layout_stale", hostModelPaintLayoutStale);
+    v8_runtime.registerHostFn("__model_paint_layout_invalidate", hostModelPaintLayoutInvalidate);
     v8_runtime.registerHostFn("__mesh_paint_stroke_end", hostMeshPaintStrokeEnd);
     v8_runtime.registerHostFn("__mesh_paint_undo", hostMeshPaintUndo);
     v8_runtime.registerHostFn("__mesh_paint_redo", hostMeshPaintRedo);

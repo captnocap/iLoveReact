@@ -128,6 +128,40 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
     };
 }
 
+/// Structural edits change the set/grouping of UV islands.  A previously
+/// authored atlas is then stale and painting must remain locked until the user
+/// explicitly rebuilds it. Position-only, visibility, material, and metadata
+/// edits preserve the UV contract.
+pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
+    return switch (kind) {
+        .extrude_face,
+        .extrude_edge,
+        .create_face,
+        .loop_cut,
+        .delete_selection,
+        .delete_part,
+        .add_part,
+        .duplicate_part,
+        .mirror_part,
+        .path_array,
+        .detach_faces,
+        .merge_parts,
+        .merge_faces,
+        .solidify_faces,
+        .split_quads,
+        .symmetrize,
+        => true,
+        .hide_part,
+        .show_part,
+        .flip_faces,
+        .glass_faces,
+        .transform,
+        .nudge,
+        .scale_by_value,
+        => false,
+    };
+}
+
 /// Metadata-only model actions share the resident mesh journal so Ctrl-Z keeps
 /// one chronological document history. Reject inert or unbounded checkpoints
 /// before the journal allocates a full mesh snapshot.

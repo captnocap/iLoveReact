@@ -312,6 +312,14 @@
           "zig": "hostMeshPaintSession"
         },
         {
+          "js": "__model_paint_layout_stale",
+          "zig": "hostModelPaintLayoutStale"
+        },
+        {
+          "js": "__model_paint_layout_invalidate",
+          "zig": "hostModelPaintLayoutInvalidate"
+        },
+        {
           "js": "__mesh_paint_stroke_end",
           "zig": "hostMeshPaintStrokeEnd"
         },

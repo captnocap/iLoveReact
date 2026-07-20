@@ -6,6 +6,14 @@ pub const OP_DAB: u8 = 2;
 pub const OP_FILL: u8 = 3;
 pub const OP_DAB_SHAPED: u8 = 4;
 
+/// A live dab is necessarily the newest write into the shared atlas.  Once a
+/// stroke commits, replay is required when that direct write does not already
+/// match the layer composite: the active layer is hidden, or a visible layer
+/// sits above it.
+pub fn strokeCommitNeedsReplay(active_visible: bool, has_visible_layer_above: bool) bool {
+    return !active_visible or has_visible_layer_above;
+}
+
 /// Operand byte count for a tag (bytes AFTER the tag byte), or null for unknown tags.
 pub fn operandSize(tag: u8) ?usize {
     return switch (tag) {

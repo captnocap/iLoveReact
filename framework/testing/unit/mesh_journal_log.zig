@@ -66,6 +66,18 @@ test "every journaled mesh label has one stable semantic command identity" {
     try testing.expect(journal_log.actionKindForLabel("unknown mutation") == null);
 }
 
+test "only UV-structural mesh actions invalidate an authored paint layout" {
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.add_part));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.loop_cut));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.delete_part));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.split_quads));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.symmetrize));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.transform));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.nudge));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.hide_part));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.glass_faces));
+}
+
 test "part boundary accepts a complete live range and rejects a stale subrange" {
     const ranges = [_]u32{ 0, 16, 16, 32 };
     try testing.expect(journal_log.hasExactPartRange(&ranges, 0, 16));

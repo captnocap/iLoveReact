@@ -42,7 +42,7 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { readModelBasePaint, writeModelArtifacts } from '../data/modelPackageStore';
+import { modelPaintLayoutIsStale, readModelBasePaint, writeModelArtifacts } from '../data/modelPackageStore';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
@@ -354,12 +354,13 @@ type ToolTwig = {
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
-type HostSession = { key: string; count: number; radius: number; undo: number; redo: number; atlas: boolean };
+type HostSession = { key: string; count: number; radius: number; undo: number; redo: number; atlas: boolean; paintStale?: boolean };
 const readModelSession = (): HostSession | null => {
   const j = host.__model_session_json?.();
   if (typeof j !== 'string' || !j) return null;
   try { return JSON.parse(j) as HostSession; } catch { return null; }
 };
+const paintLayoutIsStale = () => host.__model_paint_layout_stale?.() === 1;
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -789,6 +790,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
       adoptHostSelection(selInfo);
       resyncPartRanges();
+      const paintStale = paintLayoutIsStale();
+      if (paintStale) {
+        atlasReadyRef.current = false;
+        atlasInvalidatedRef.current = true;
+        setPaintMode(false);
+      } else if (atlasInvalidatedRef.current) {
+        // Undo restored the pre-structural mesh and its still-valid atlas.
+        atlasInvalidatedRef.current = false;
+        atlasReadyRef.current = true;
+      }
       refreshUvIfLive();
       return true;
     }
@@ -998,6 +1009,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // silently painting on whatever detail carried over — the step every paint tool makes
   // explicit. atlasReadyRef survives edit-op key changes and resets on a fresh load.
   const atlasReadyRef = useRef(false);
+  // Unlike a never-painted model, a structurally edited model must not auto-load
+  // an older saved painting. Its UV contract is stale and requires an explicit
+  // Remake Paint Atlas decision first.
+  const atlasInvalidatedRef = useRef(false);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
   // The atlas base TYPE (Blockbench's Create Texture "Type"), picked in the SAME gate as the
   // size since both gate painting (req_2546): Texture Template = per-island colours, Solid =
@@ -1150,24 +1165,33 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return;
     }
     if (!model) return;
+    // A cold load restores the durable mismatch marker before consulting any old
+    // base/variant. The host gate makes this true even for script/direct-door use.
+    if (paintTarget && modelPaintLayoutIsStale(paintTarget)) {
+      host.__model_paint_layout_invalidate?.();
+      atlasReadyRef.current = false;
+      atlasInvalidatedRef.current = true;
+    }
     if (!atlasReadyRef.current) {
-      const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
-      if (basePaint) {
-        changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
-        if (host.__model_paint_program_apply?.(basePaint.program) === 1) {
+      if (!atlasInvalidatedRef.current) {
+        const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
+        if (basePaint) {
+          changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
+          if (host.__model_paint_program_apply?.(basePaint.program) === 1) {
+            atlasReadyRef.current = true;
+            enterPaint();
+            return;
+          }
+        }
+        // Already-painted model? Its atlas is a solved question — restore the latest
+        // painting (which rebuilds the atlas) rather than re-prompting (req_2526).
+        const saved = paintTarget ? listPaintVariants(paintTarget) : [];
+        if (saved.length > 0) {
+          restoreSavedPaint(saved[saved.length - 1]);
           atlasReadyRef.current = true;
           enterPaint();
           return;
         }
-      }
-      // Already-painted model? Its atlas is a solved question — restore the latest
-      // painting (which rebuilds the atlas) rather than re-prompting (req_2526).
-      const saved = paintTarget ? listPaintVariants(paintTarget) : [];
-      if (saved.length > 0) {
-        restoreSavedPaint(saved[saved.length - 1]);
-        atlasReadyRef.current = true;
-        enterPaint();
-        return;
       }
       setAtlasPrompt(true);
       return;
@@ -1185,6 +1209,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const [sr, sg, sb] = baseType === 'solid' ? brushRgb(brush) : [220, 220, 225];
     host.__model_atlas_base?.(mode, sr, sg, sb);
     atlasReadyRef.current = true;
+    atlasInvalidatedRef.current = false;
     // The moment the atlas is made + coloured, persist it as the model's base atlas + mesh
     // (req_2551) — the freshly laid base is exactly what atlases/base.png should hold.
     if (paintTarget) writeModelArtifacts(paintTarget);
@@ -1624,6 +1649,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintMode(false);
     setAtlasPrompt(false);
     atlasReadyRef.current = false;
+    atlasInvalidatedRef.current = false;
     setLc(null); // the host drops a live loop-cut session with the old mesh's journal
   };
 
@@ -1758,7 +1784,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (!session || session.key !== twig.key) return false;
       setModel({ key: session.key, count: session.count, radius: session.radius, name: initialTitle ?? initialMesh?.name ?? 'model' });
       setError(null);
-      atlasReadyRef.current = session.atlas;
+      atlasInvalidatedRef.current = session.paintStale === true;
+      atlasReadyRef.current = session.atlas && !atlasInvalidatedRef.current;
       // Part ranges + selection are host truth — mirror them instead of re-seeding.
       resyncPartRanges();
       // Resume HEAL (req_3058): the host process outlives window "restarts", so a
@@ -1795,6 +1822,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     } else {
       const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
       if (path && !resumeHostSession()) applyPath(path);
+    }
+    // Persist the topology/atlas contract across a full process restart. The old
+    // paint assets stay recoverable, but neither UI nor host may apply them until
+    // Remake Paint Atlas establishes a new layout for this document revision.
+    if (paintTarget && modelPaintLayoutIsStale(paintTarget)) {
+      host.__model_paint_layout_invalidate?.();
+      atlasReadyRef.current = false;
+      atlasInvalidatedRef.current = true;
+      setPaintMode(false);
     }
     // Re-push the twig-seeded gizmo tool so the host matches the restored UI even
     // when the host session did NOT survive (cold start with a warm twig).
@@ -2785,9 +2821,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               backgroundColor: 'rgba(17,20,29,0.97)', borderWidth: 1, borderColor: '#3c5a80', borderRadius: 8,
             }}
           >
-            <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>Create Paint Atlas</Text>
+            <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>
+              {atlasInvalidatedRef.current ? 'Remake Paint Atlas' : 'Create Paint Atlas'}
+            </Text>
             <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
-              {`${authoredFaces && authoredFaces !== Math.floor(model.count / 3)
+              {atlasInvalidatedRef.current
+                ? 'Geometry changed after the previous UV layout. Painting is locked until you explicitly build a new atlas for the current outliners.'
+                : `${authoredFaces && authoredFaces !== Math.floor(model.count / 3)
                 ? `${authoredFaces} faces (${Math.floor(model.count / 3)} triangles)`
                 : `${Math.floor(model.count / 3)} triangles`} — the whole model shares ONE paint atlas; its faces split it by real-world size. Bigger atlas = finer strokes on this model.`}
             </Text>

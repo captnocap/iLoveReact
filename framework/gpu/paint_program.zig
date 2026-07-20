@@ -692,6 +692,21 @@ pub fn endStrokeUnit() bool {
     return true;
 }
 
+/// Whether the just-committed live atlas writes need the canonical bottom→top
+/// replay before they are presented.  Top-layer visible strokes are already in
+/// composite order; every other case must re-lay once at pointer-up.
+pub fn activeLayerNeedsCompositeReplay() bool {
+    const active_index = layerIndexOf(g_active_layer) orelse return true;
+    var visible_above = false;
+    for (g_layers.items[active_index + 1 ..]) |layer| {
+        if (layer.visible) {
+            visible_above = true;
+            break;
+        }
+    }
+    return paint_ops.strokeCommitNeedsReplay(g_layers.items[active_index].visible, visible_above);
+}
+
 pub fn isEmpty() bool {
     return g_strokes.items.len == 0 and (!g_open_live or g_open.items.len == 0);
 }
