@@ -1,0 +1,30 @@
+{
+  "id": "req_3254",
+  "at": "2026-07-20T05:01:28.385Z",
+  "origin": "codex:019f7a9c",
+  "text": "no it was a head face deleted. the plane created a face or it did a cut it did something clearly very wrong idk what it is but it seems to have made a random ass cut in one other outliner, and then removing it, removed half of the cut it introduced while retaining the other half  right like if u look this is what it did [Image #1] the red lines are all the things it introduced while the green line is what it was previously",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T05:02:18.955Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T05:14:07.175Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The marked extra red topology was traced to invalid cross-outliner edit ownership rather than a harmless overlay. Structural append and delete now fail closed before mutation whenever host ownership and outliner metadata diverge, preventing the add-transform-delete sequence from splitting and partially removing a head face.",
+  "shas": [
+    "a7c910368"
+  ],
+  "resolvedAt": "2026-07-20T05:14:07.175Z"
+}

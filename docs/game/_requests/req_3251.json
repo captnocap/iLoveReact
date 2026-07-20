@@ -1,0 +1,30 @@
+{
+  "id": "req_3251",
+  "at": "2026-07-20T04:53:42.010Z",
+  "origin": "codex:019f7a9c",
+  "text": "lame lol the fucker cut out of my model when i deleted the plane [Image #1] from the earlier running app",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:54:01.878Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T05:14:07.149Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Prevented outliner deletion from touching stale group fragments: the cart resolves the live range and the host now accepts only one exact resident part range. Add Part also proves the full visible/hidden ownership partition before any geometry mutation, so an invalid shared identity fails without changing the model.",
+  "shas": [
+    "a7c910368"
+  ],
+  "resolvedAt": "2026-07-20T05:14:07.149Z"
+}

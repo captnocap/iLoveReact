@@ -1,0 +1,30 @@
+{
+  "id": "req_3252",
+  "at": "2026-07-20T04:55:21.701Z",
+  "origin": "codex:019f7a9c",
+  "text": "i cant even close it the two edges to create face refuses it",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:58:13.156Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T05:14:07.158Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Create Face now accepts two adjacent selected boundary edges as the three vertices of a missing triangle, matching the practical Blockbench hole-repair gesture instead of silently refusing it. The pure edge-order helper is covered by the mesh-edit Zig suite.",
+  "shas": [
+    "a7c910368"
+  ],
+  "resolvedAt": "2026-07-20T05:14:07.158Z"
+}

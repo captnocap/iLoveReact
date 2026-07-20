@@ -1,0 +1,30 @@
+{
+  "id": "req_3253",
+  "at": "2026-07-20T04:57:34.344Z",
+  "origin": "codex:019f7a9c",
+  "text": "no so heres what happened this other triangle shouldnt exist in here but it does [Image #1] these two points came from that previous plane add [Image #2] you can tgell because they dont exist on the other side [Image #3] so what exactly happened then because it doesnt make much sense to me. how does adding an outliner break that hard",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:58:13.474Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T05:14:07.168Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Hardened Add Part at the actual failure boundary: the cart sends its expected pre-append part count and the host proves ordered disjoint ranges, complete face ownership, nonempty visible or hidden members, and exact count agreement before installing any new geometry.",
+  "shas": [
+    "a7c910368"
+  ],
+  "resolvedAt": "2026-07-20T05:14:07.167Z"
+}
