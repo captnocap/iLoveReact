@@ -47,11 +47,13 @@ export default function BuildDock({
   // React render, so a state mirror would lie); on the world the real worldUndo/worldRedo
   // stacks. The buttons render faint at zero and the count is always the live journal —
   // never the old history-FEED length, which reverted nothing.
-  const isModelDoc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId)?.kind === 'model';
+  const activeDocumentKind = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId)?.kind ?? 'world';
+  const isModelDoc = activeDocumentKind === 'model';
+  const isKnowledgeDoc = activeDocumentKind === 'knowledge';
   // While the paint session is live the STROKE journal is the badge's truth (req_2672)
   // — same 2Hz poll, different door: strokes land host-side per gesture with no render.
   const painting = isModelDoc && state.modelTool.paint;
-  const mapPainting = !isModelDoc && state.mapPaint.active;
+  const mapPainting = activeDocumentKind === 'world' && state.mapPaint.active;
   const [meshDepths, setMeshDepths] = useState({ undo: 0, redo: 0 });
   const [mapDepths, setMapDepths] = useState({ undo: 0, redo: 0 });
   useEffect(() => {
@@ -81,11 +83,11 @@ export default function BuildDock({
     const t = setInterval(read, 500);
     return () => clearInterval(t);
   }, [mapPainting]);
-  const undoCount = isModelDoc ? meshDepths.undo : mapPainting ? mapDepths.undo : state.worldUndo.length;
-  const redoCount = isModelDoc ? meshDepths.redo : mapPainting ? mapDepths.redo : state.worldRedo.length;
+  const undoCount = isKnowledgeDoc ? 0 : isModelDoc ? meshDepths.undo : mapPainting ? mapDepths.undo : state.worldUndo.length;
+  const redoCount = isKnowledgeDoc ? 0 : isModelDoc ? meshDepths.redo : mapPainting ? mapDepths.redo : state.worldRedo.length;
   // Cursor hover wins while the mouse is over the world; selection is the fallback.
   const hover = useWorldHoverReadout();
-  const piece = hover ?? selectedPieceReadout(state);
+  const piece = isKnowledgeDoc ? null : hover ?? selectedPieceReadout(state);
   // Real host telemetry — polled at 2Hz (cheap; never per-frame). Empty sources
   // render as 0/— instead of seeded historical data.
   const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
@@ -96,6 +98,36 @@ export default function BuildDock({
   const gpuMs = frame?.gpu_us ? frame.gpu_us / 1000 : 0;
   const triCount = gpu?.scene3d_triangles ?? 0;
   const drawCalls = gpu?.scene3d_draw_calls ?? 0;
+  if (isKnowledgeDoc) {
+    return (
+      <C.HW_BuildDock>
+        <C.HW_DockGroup>
+          <Icon name="BookOpen" size={13} color={accentFor('primary')} />
+          <C.HW_DockLabel>WORLD BIBLE</C.HW_DockLabel>
+          <C.HW_DockValue>world/knowledge</C.HW_DockValue>
+        </C.HW_DockGroup>
+        <C.HW_DockDivider />
+        <C.HW_DockGroup>
+          <C.HW_DockLabel>DISK</C.HW_DockLabel>
+          <C.HW_DockValue>CANONICAL</C.HW_DockValue>
+          <C.HW_DockLabel>CTRL+S</C.HW_DockLabel>
+          <C.HW_DockValue>REVIEW SELECTED</C.HW_DockValue>
+        </C.HW_DockGroup>
+        <C.HW_Spacer />
+        <C.HW_DockPerfButton onPress={onPerf}>
+          <C.HW_DockLabel>FPS:</C.HW_DockLabel>
+          <C.HW_DockCoord>{fps > 0 ? Math.round(fps) : '-'}</C.HW_DockCoord>
+          <C.HW_DockLabel>FRAME</C.HW_DockLabel>
+          <C.HW_DockValue>{frameMs > 0 ? formatMs(frameMs) : '-'}</C.HW_DockValue>
+        </C.HW_DockPerfButton>
+        <C.HW_DockPerfButton onPress={onMemory}>
+          <Icon name="Activity" size={13} color={accentFor(state.memoryPopoverOpen ? 'primary' : 'textFaint')} />
+          <C.HW_DockLabel>MEM</C.HW_DockLabel>
+          <C.HW_DockLabel>{formatBytes(system?.process_rss_bytes)}/{formatBytes(system?.mem_total_bytes)}</C.HW_DockLabel>
+        </C.HW_DockPerfButton>
+      </C.HW_BuildDock>
+    );
+  }
   return (
     <C.HW_BuildDock>
       <C.HW_DockBuild onPress={onBuild}>

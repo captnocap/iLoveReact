@@ -262,6 +262,9 @@ declare global {
   function __fs_config_dir(...args: unknown[]): unknown;
   function __fs_write_bytes(...args: unknown[]): unknown;
   function __fs_write_bytes_atomic(...args: unknown[]): unknown;
+  function __fs_write_bytes_atomic_if_unchanged(...args: unknown[]): unknown;
+  function __fs_remove_file_durable(...args: unknown[]): unknown;
+  function __fs_finalize_pending_recovery(...args: unknown[]): unknown;
   function __fs_write_base64_atomic(...args: unknown[]): unknown;
   function __fs_scandir(...args: unknown[]): unknown;
   function __fs_deletefile(...args: unknown[]): unknown;

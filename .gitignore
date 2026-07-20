@@ -318,6 +318,14 @@ images/
 # while editing; never commit it, and keep file-trail watchers from churning on it.
 cart/*/sessions/
 
+# World Bible conditional-write artifacts. Confirmed pages are the direct
+# `*.md` children; prepared temps, stable transaction locks, and versioned
+# prior inodes stay local for crash/racing-editor recovery and must never enter
+# the shipped corpus.
+world/knowledge/*.md.tmp.*
+world/knowledge/*.md.write-lock
+world/knowledge/*.md.write-pending
+
 # hmsc-int persistence content — runtime authoring state, never git's (the
 # layer code in cart/hmsc-int/data/*.ts and the umbrella manifest are tracked).
 # The live backing is cart/hmsc-int/data/domains/<domain>/store.db (sqlite,

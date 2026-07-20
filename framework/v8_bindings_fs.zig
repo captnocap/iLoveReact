@@ -5,6 +5,7 @@ const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const mapfile = @import("world/mapfile.zig");
 const app_config = @import("fs/app_config.zig");
+const fs_core = @import("fs/fs.zig");
 
 fn currentContext(info: v8.FunctionCallbackInfo) v8.Context {
     return info.getIsolate().getCurrentContext();
@@ -586,6 +587,10 @@ fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setBool(info, false);
         return;
     };
+    fs_core.syncContainingDir(v8_runtime.hostContext(info.getIsolate()).io, std.Io.Dir.cwd(), path_buf) catch {
+        setBool(info, false);
+        return;
+    };
     setBool(info, true);
 }
 
@@ -638,7 +643,132 @@ fn fsWriteBytesAtomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setBool(info, false);
         return;
     };
+    fs_core.syncContainingDir(v8_runtime.hostContext(info.getIsolate()).io, std.Io.Dir.cwd(), path_buf) catch {
+        setBool(info, false);
+        return;
+    };
     setBool(info, true);
+}
+
+/// __fs_write_bytes_atomic_if_unchanged(path, expected|null, bytes,
+/// retain_previous=1, allow_pending_recovery=0, recovery_owner_path?) -> number.
+/// Returns 1 when written, 0 when the reviewed bytes no longer match, and -1
+/// on an I/O failure. The prepared file is installed through the fs core's
+/// no-overwrite claim/validate/install protocol; two writers cannot both win
+/// from the same reviewed snapshot. Canonical authoring retains its named
+/// predecessor; high-frequency app-owned recovery may durably retire it.
+fn fsWriteBytesAtomicIfUnchanged(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    defer alloc.free(path_buf);
+    if (info.length() <= 1) {
+        setNumber(info, -1);
+        return;
+    }
+    const expected_value = info.getArg(1);
+    const expected: ?[]const u8 = if (expected_value.isNull() or expected_value.isUndefined()) null else argView(info, 1) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    const bytes = argView(info, 2) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    const retain_previous = argBoolDefault(info, 3, true);
+    const allow_pending_recovery = argBoolDefault(info, 4, false);
+    const recovery_owner_path: ?[]u8 = if (allow_pending_recovery)
+        argStringAlloc(alloc, info, 5) orelse {
+            setNumber(info, -1);
+            return;
+        }
+    else
+        null;
+    defer if (recovery_owner_path) |owner| alloc.free(owner);
+    const host = v8_runtime.hostContext(info.getIsolate());
+
+    if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
+        const parent_path = path_buf[0..idx];
+        if (fs_core.isConfined(parent_path)) {
+            fs_core.makePathDurable(host.io, std.Io.Dir.cwd(), parent_path) catch {
+                setNumber(info, -1);
+                return;
+            };
+        } else {
+            std.Io.Dir.cwd().createDirPath(host.io, parent_path) catch {
+                setNumber(info, -1);
+                return;
+            };
+        }
+    }
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, std.Io.Clock.now(.real, host.io).toNanoseconds() }) catch {
+        setNumber(info, -1);
+        return;
+    };
+    var file = std.Io.Dir.cwd().createFile(host.io, tmp_path, .{ .truncate = true, .exclusive = true }) catch {
+        setNumber(info, -1);
+        return;
+    };
+    file.writeStreamingAll(host.io, bytes) catch {
+        file.close(host.io);
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        setNumber(info, -1);
+        return;
+    };
+    file.sync(host.io) catch {
+        file.close(host.io);
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        setNumber(info, -1);
+        return;
+    };
+    file.close(host.io);
+
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const backup_path = std.fmt.bufPrint(&backup_buf, "{s}.previous", .{tmp_path}) catch {
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        setNumber(info, -1);
+        return;
+    };
+    const result = fs_core.replacePreparedFileIfUnchangedWithPolicy(
+        host.io,
+        std.Io.Dir.cwd(),
+        path_buf,
+        tmp_path,
+        backup_path,
+        alloc,
+        expected,
+        allow_pending_recovery,
+        recovery_owner_path,
+    ) catch {
+        // If the claim already moved canonical bytes to backup_path, retain
+        // both the prepared temp and backup as the crash-recovery marker pair.
+        if (!fs_core.pathExists(host.io, std.Io.Dir.cwd(), backup_path)) {
+            std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        }
+        setNumber(info, -1);
+        return;
+    };
+    if (result == .changed) {
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        setNumber(info, 0);
+        return;
+    }
+    if (result != .written) {
+        setNumber(info, -1);
+        return;
+    }
+    if (!retain_previous and fs_core.pathExists(host.io, std.Io.Dir.cwd(), backup_path)) {
+        // The installed file is already fsynced. Retire the app-owned
+        // predecessor and fsync its parent so normal autosave cannot grow an
+        // unbounded history. A crash before this point leaves a recoverable
+        // marker that the World Bible controller validates on startup.
+        fs_core.deleteFileDurable(host.io, std.Io.Dir.cwd(), backup_path) catch {};
+    }
+    setNumber(info, 1);
 }
 
 fn fsReadRjmpEntities(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -729,11 +859,73 @@ fn fsMkdir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path_buf);
-    std.Io.Dir.cwd().createDirPath(v8_runtime.hostContext(info.getIsolate()).io, path_buf) catch {
+    const host = v8_runtime.hostContext(info.getIsolate());
+    if (fs_core.isConfined(path_buf)) {
+        fs_core.makePathDurable(host.io, std.Io.Dir.cwd(), path_buf) catch {
+            setBool(info, false);
+            return;
+        };
+    } else {
+        std.Io.Dir.cwd().createDirPath(host.io, path_buf) catch {
+            setBool(info, false);
+            return;
+        };
+    }
+    setBool(info, true);
+}
+
+fn fsRemoveFileDurable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(path_buf);
+    fs_core.deleteFileDurable(v8_runtime.hostContext(info.getIsolate()).io, std.Io.Dir.cwd(), path_buf) catch {
         setBool(info, false);
         return;
     };
     setBool(info, true);
+}
+
+/// __fs_finalize_pending_recovery(path, expectedBytes, preparedPath,
+/// retirePrevious) -> number. Returns 1 when finalized, 0 on an ownership or
+/// content change, and -1 on I/O failure. Validation and all cleanup share the
+/// target writer lock.
+fn fsFinalizePendingRecovery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    defer alloc.free(path_buf);
+    const expected = argView(info, 1) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    const prepared_path = argStringAlloc(alloc, info, 2) orelse {
+        setNumber(info, -1);
+        return;
+    };
+    defer alloc.free(prepared_path);
+    const retire_previous = argBoolDefault(info, 3, false);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const result = fs_core.finalizePendingRecovery(
+        host.io,
+        std.Io.Dir.cwd(),
+        path_buf,
+        prepared_path,
+        alloc,
+        expected,
+        retire_previous,
+    ) catch {
+        setNumber(info, -1);
+        return;
+    };
+    const status: f64 = if (result == .finalized) 1 else 0;
+    setNumber(info, status);
 }
 
 fn fsRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -894,6 +1086,7 @@ pub fn registerFs(vm: anytype) void {
     v8_runtime.registerHostFn("__fs_config_dir", fsConfigDir);
     v8_runtime.registerHostFn("__fs_write_bytes", fsWriteBytes);
     v8_runtime.registerHostFn("__fs_write_bytes_atomic", fsWriteBytesAtomic);
+    v8_runtime.registerHostFn("__fs_write_bytes_atomic_if_unchanged", fsWriteBytesAtomicIfUnchanged);
     v8_runtime.registerHostFn("__fs_write_base64_atomic", fsWriteBase64Atomic);
     v8_runtime.registerHostFn("__fs_scandir", fsScandir);
     v8_runtime.registerHostFn("__fs_deletefile", fsDeletefile);
@@ -903,6 +1096,8 @@ pub fn registerFs(vm: anytype) void {
     v8_runtime.registerHostFn("__fs_list_json", fsListJson);
     v8_runtime.registerHostFn("__fs_stat_json", fsStatJson);
     v8_runtime.registerHostFn("__fs_mkdir", fsMkdir);
+    v8_runtime.registerHostFn("__fs_remove_file_durable", fsRemoveFileDurable);
+    v8_runtime.registerHostFn("__fs_finalize_pending_recovery", fsFinalizePendingRecovery);
     v8_runtime.registerHostFn("__fs_remove", fsRemove);
     v8_runtime.registerHostFn("__fs_media_scan_json", fsMediaScanJson);
     v8_runtime.registerHostFn("__fs_media_stats_json", fsMediaStatsJson);

@@ -11,7 +11,7 @@ import type { EditorState, WorkspaceDocument } from './types';
 // world/model/material command grays with its surface reason and only global
 // chords fire (the loader owns WASD/Space/Shift).
 // 'animation' (req_2786): the webcam capture tab — same non-scope treatment.
-export type Surface = 'world' | 'model' | 'material' | 'playtest' | 'animation';
+export type Surface = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'knowledge';
 
 function activeDoc(state: EditorState): WorkspaceDocument | undefined {
   return state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
@@ -26,6 +26,7 @@ export function activeSurface(state: EditorState): Surface {
   if (doc?.kind === 'material' || state.materialFocused) return 'material';
   if (doc?.kind === 'playtest') return 'playtest';
   if (doc?.kind === 'animation') return 'animation';
+  if (doc?.kind === 'knowledge') return 'knowledge';
   return 'world';
 }
 

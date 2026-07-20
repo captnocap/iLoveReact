@@ -12,6 +12,7 @@ import {
   normalizeRightPanelId,
   pressPanelButton,
   resolvedPanelId,
+  resolvedPanelIdOrNull,
   rightPanelsFor,
 } from './panelSystem';
 
@@ -43,6 +44,12 @@ test('non-model documents never advertise unimplemented right panes', () => {
   }
 });
 
+test('World Bible owns one explicit index pane and no generic world inspector', () => {
+  const left = leftPanelsFor('knowledge');
+  assert(left.length === 1 && left[0]!.id === 'world-bible' && left[0]!.renderer === 'world-bible', 'knowledge fell into the world asset browser');
+  assert(rightPanelsFor('knowledge').length === 0, 'knowledge advertised the world-object inspector');
+});
+
 test('pressing the active rail button toggles collapse', () => {
   const closed = pressPanelButton('models', 'models', false);
   assert(closed.active === 'models' && closed.collapsed, 'active press did not collapse');
@@ -58,6 +65,7 @@ test('pressing a different button selects it and opens its panel', () => {
 test('invalid pane state resolves to the context default without inventing a renderer', () => {
   assert(resolvedPanelId(leftPanelsFor('model'), 'missions') === 'models', 'model left default was not contextual');
   assert(resolvedPanelId(rightPanelsFor('world'), 'rig') === 'inspector', 'world right default was not contextual');
+  assert(resolvedPanelIdOrNull(rightPanelsFor('knowledge'), 'inspector') === null, 'empty World Bible focus rail did not resolve safely');
 });
 
 test('tree navigation updates the matching contextual rail family', () => {

@@ -71,7 +71,7 @@ export type LibraryTab = 'Build' | 'Props' | 'Skins';
 // where global tunables (Globals → Physics) are tested live.
 // 'animation' (req_2786): the CAPTURE tab — webcam feed beside the exported
 // player model with live pose sync; the animation workbench arc's surface.
-export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade';
+export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade' | 'knowledge';
 export type WorkspaceDocument = {
   id: string;
   kind: WorkspaceDocumentKind;

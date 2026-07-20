@@ -9,6 +9,17 @@ export const WORLD_DOCUMENT: WorkspaceDocument = {
   subtitle: 'main.gamefile',
 };
 
+// One project-wide World Bible tab. Individual entities navigate inside this
+// ordinary wiki document; they are not hundreds of workspace tabs.
+export const WORLD_BIBLE_DOCUMENT_ID = 'knowledge:world-bible';
+
+export const WORLD_BIBLE_DOCUMENT: WorkspaceDocument = {
+  id: WORLD_BIBLE_DOCUMENT_ID,
+  kind: 'knowledge',
+  title: 'World Bible',
+  subtitle: 'world/knowledge',
+};
+
 // The playtest drop-in tab (GLOBALS req_2770): ONE document, upserted by the
 // Globals menu — the same editor world with the embodied player, where global
 // tunables are tested live. Closeable like any non-world tab.

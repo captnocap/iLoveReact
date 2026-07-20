@@ -24,6 +24,8 @@ import PreferencesDialog from './PreferencesDialog';
 import HotUpdateDialog from './HotUpdateDialog';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
+import WorldBibleIndexPanel from '../worldBible/WorldBibleIndexPanel';
+import { requestWorldBibleReview, worldBibleController, worldBibleHasDrafts } from '../worldBible/controller';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import { FacadePaintLayersSection, ModelPaintLayersSection } from '../inspector/PaintLayerSections';
@@ -34,7 +36,7 @@ import ModelContextMenu from '../stage/ModelContextMenu';
 import WorldContextMenu from '../stage/WorldContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
-import { useRoute } from '../../../runtime/router';
+import { useNavigate, useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
@@ -165,6 +167,7 @@ import {
   leftPanelsFor,
   pressPanelButton,
   resolvedPanelId,
+  resolvedPanelIdOrNull,
   rightPanelsFor,
   type LeftPanelId,
   type RightPanelId,
@@ -193,7 +196,7 @@ import { hexToOklch, oklchToHex, type OklchColor } from '../../../runtime/paint/
 import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
-import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
 import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
 import { discardModelWorkingCopyState } from '../data/persistenceLifecycle';
@@ -309,6 +312,7 @@ export default function AppFrame() {
   // authoring state survives a round trip. The body is what swaps: editor panels
   // on /editor, the host-native WorldLoader on /play.
   const { path } = useRoute();
+  const navigate = useNavigate();
   const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
   // Migrated application commands read and atomically replace this live
@@ -341,9 +345,17 @@ export default function AppFrame() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
   const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
+  const [unsavedActionLabels, setUnsavedActionLabels] = useState<{ save?: string; discard?: string; cancel?: string }>({});
   const unsavedDecisionRef = useRef<{ save: () => void; discard: () => void; cancel?: () => void } | null>(null);
-  const requestUnsavedDecision = (documentName: string, save: () => void, discard: () => void, cancel?: () => void) => {
+  const requestUnsavedDecision = (
+    documentName: string,
+    save: () => void,
+    discard: () => void,
+    cancel?: () => void,
+    labels: { save?: string; discard?: string; cancel?: string } = {},
+  ) => {
     unsavedDecisionRef.current = { save, discard, cancel };
+    setUnsavedActionLabels(labels);
     setUnsavedDocumentName(documentName);
   };
   const [settingsRevision, setSettingsRevision] = useState(0);
@@ -1809,6 +1821,20 @@ export default function AppFrame() {
       const block = blockingNow(state);
       if (block && commandId !== block.closerCommandId) { refuseBlocked(block); return; }
     }
+    // Knowledge is intentionally outside the editor's generic save/undo
+    // machinery. Ctrl+S opens its exact patch review; it can never inherit the
+    // world snapshot writer just because Save is a global command.
+    if (activeSurface(stateRef.current) === 'knowledge') {
+      if (commandId === 'save-snapshot') {
+        const reviewing = worldBibleController.reviewSelected();
+        setState((prev) => ({ ...prev, openMenu: null, status: reviewing ? 'Selected World Bible page is ready for write review' : 'Selected World Bible page has no reviewable changes' }));
+        return;
+      }
+      if (commandId === 'undo-local' || commandId === 'redo-local') {
+        setState((prev) => ({ ...prev, openMenu: null, status: 'World Bible: use Revert Draft or edit the keyed fields; canonical disk is unchanged' }));
+        return;
+      }
+    }
     if (commandId === 'new-map') {
       createNewMap('untitled');
       return;
@@ -2701,7 +2727,12 @@ export default function AppFrame() {
   const pressRightPanel = (pressed: RightPanelId) => {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
-      const active = resolvedPanelId(rightPanelsFor(documentKind), prev.rightPane);
+      const active = resolvedPanelIdOrNull(rightPanelsFor(documentKind), prev.rightPane);
+      if (active === null) return {
+        ...prev,
+        rightPanelCollapsed: true,
+        status: 'This document has no focus panel',
+      };
       const result = pressPanelButton(active, pressed, prev.rightPanelCollapsed);
       return {
         ...prev,
@@ -4805,6 +4836,49 @@ export default function AppFrame() {
     setState(next);
   };
 
+  const refreshWorldBibleForOpen = () => {
+    const alreadyLoaded = worldBibleController.snapshot().loaded;
+    worldBibleController.ensureLoaded();
+    // A watcher only exists while the wiki surface is mounted. Re-opening an
+    // already-loaded Bible must therefore reconcile edits made while another
+    // document (or /play) had the surface unmounted.
+    if (alreadyLoaded) worldBibleController.refreshDisk();
+  };
+
+  const activateWorldBible = () => {
+    refreshWorldBibleForOpen();
+    if (playing) navigate.push('/editor');
+    const autosaved = autosaveActiveModelDoc(stateRef.current);
+    setState((prev) => ({
+      ...prev,
+      workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
+      activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
+      activeDomain: 'world-bible',
+      leftPanelCollapsed: false,
+      materialFocused: false,
+      contextOpen: false,
+      modelDirty: autosaved ? { ...prev.modelDirty, [autosaved.id]: false } : prev.modelDirty,
+      status: autosaved
+        ? `Autosaved "${autosaved.name}"; World Bible opened — canonical source is world/knowledge`
+        : 'World Bible opened — canonical source is world/knowledge',
+    }));
+  };
+
+  const openWorldBible = () => {
+    const current = stateRef.current;
+    const currentDoc = current.workspaceDocuments.find((doc) => doc.id === current.activeWorkspaceDocumentId);
+    const currentModelId = currentDoc?.kind === 'model' ? currentDoc.sourceId : null;
+    if (!persistenceSettings.autosave && currentModelId && current.modelDirty[currentModelId]) {
+      requestUnsavedDecision(
+        currentDoc?.title ?? 'Model',
+        () => { if (saveActiveModelNow()) activateWorldBible(); },
+        () => { discardModelWorkingCopy(currentModelId); activateWorldBible(); },
+      );
+      return;
+    }
+    activateWorldBible();
+  };
+
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string, bypassUnsavedPrompt = false) => {
     if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) {
       const currentDoc = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
@@ -4821,6 +4895,7 @@ export default function AppFrame() {
         return;
       }
     }
+    if (activeWorkspaceDocumentId === WORLD_BIBLE_DOCUMENT_ID) refreshWorldBibleForOpen();
     const autosaved = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
@@ -4867,6 +4942,32 @@ export default function AppFrame() {
 
   const closeWorkspaceDocument = (documentId: string, bypassUnsavedPrompt = false) => {
     if (documentId === WORLD_DOCUMENT_ID) return;
+    if (!bypassUnsavedPrompt && documentId === WORLD_BIBLE_DOCUMENT_ID && worldBibleHasDrafts()) {
+      requestWorldBibleReview();
+      setState((prev) => ({
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
+        activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
+        activeDomain: 'world-bible',
+        leftPanelCollapsed: false,
+        status: 'World Bible draft is not on disk — review it, or keep the recovery draft and close',
+      }));
+      requestUnsavedDecision(
+        'World Bible — canonical disk is unchanged; recovery draft is noncanonical',
+        () => setState((prev) => ({ ...prev, status: 'World Bible write review remains open — canonical disk is unchanged' })),
+        () => {
+          if (!worldBibleController.flushRecovery()) {
+            setState((prev) => ({ ...prev, status: 'World Bible recovery write failed — tab remains open' }));
+            return;
+          }
+          closeWorkspaceDocument(documentId, true);
+          setState((prev) => ({ ...prev, status: 'World Bible tab closed — noncanonical recovery draft kept' }));
+        },
+        () => setState((prev) => ({ ...prev, status: 'World Bible close cancelled — recovery draft remains open' })),
+        { save: 'Return to review', discard: 'Keep draft & close' },
+      );
+      return;
+    }
     if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId === documentId) {
       const currentDoc = state.workspaceDocuments.find((doc) => doc.id === documentId);
       const currentModelId = currentDoc?.kind === 'model' ? currentDoc.sourceId : null;
@@ -5174,6 +5275,9 @@ export default function AppFrame() {
         spine={paintSpine}
       />
     ) : null;
+  const activeWorldBibleSidePanel = activeLeftPanelDefinition.renderer === 'world-bible'
+    ? <WorldBibleIndexPanel />
+    : null;
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
   // track edits while the menu stays open — Rotate keeps it open) + the RANKED
@@ -5195,7 +5299,7 @@ export default function AppFrame() {
     if (manualWorldDirty && !saveWorldNowAll('Saved before exit')) return false;
     return true;
   };
-  const closeEditor = () => {
+  const closeEditorNormally = () => {
     const current = stateRef.current;
     const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
     const modelId = doc?.kind === 'model' ? doc.sourceId : null;
@@ -5217,6 +5321,38 @@ export default function AppFrame() {
     }
     closeHostWindow();
   };
+  const closeEditor = () => {
+    if (worldBibleHasDrafts()) {
+      requestWorldBibleReview();
+      if (playing) navigate.push('/editor');
+      requestUnsavedDecision(
+        'World Bible — canonical disk is unchanged; recovery draft is noncanonical',
+        () => setState((prev) => ({
+          ...prev,
+          workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
+          activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
+          activeDomain: 'world-bible',
+          leftPanelCollapsed: false,
+          materialFocused: false,
+          status: 'World Bible write review remains open — canonical disk is unchanged',
+        })),
+        () => {
+          if (!worldBibleController.flushRecovery()) {
+            setState((prev) => ({ ...prev, status: 'World Bible recovery write failed — exit cancelled' }));
+            return;
+          }
+          // Keep the previously active document in place until this choice so
+          // the ordinary close path can still see and prompt for a dirty model
+          // or world after the World Bible recovery copy is durable.
+          closeEditorNormally();
+        },
+        () => setState((prev) => ({ ...prev, status: 'Exit cancelled — World Bible recovery draft remains open' })),
+        { save: 'Return to review', discard: 'Keep draft & exit' },
+      );
+      return;
+    }
+    closeEditorNormally();
+  };
 
   return (
     <C.HW_App>
@@ -5226,6 +5362,7 @@ export default function AppFrame() {
           activeCommand={activeCommand}
           onMenu={guarded((menu: Menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu })))}
           onCommand={runCommand}
+          onWorldBible={guarded(openWorldBible)}
           onClose={closeEditor}
         />
       </RenderProbe>
@@ -5245,8 +5382,8 @@ export default function AppFrame() {
             onPane={pressLeftPanel}
           />
         </RenderProbe>
-        {!state.leftPanelCollapsed ? <RenderProbe id={activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
-          {activePaintSidePanel ?? <LibraryPanel
+        {!state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
+          {activeWorldBibleSidePanel ?? activePaintSidePanel ?? <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
             assets={filteredAssets}
@@ -5351,7 +5488,7 @@ export default function AppFrame() {
             onColorSpineLoadLibrarySet={loadColorSpineLibrarySet}
           />
         </RenderProbe>
-        <RenderProbe id="Inspector">
+        {activeDocumentKind !== 'knowledge' ? <RenderProbe id="Inspector">
           <Inspector
             state={state}
             activeObject={activeObject}
@@ -5384,7 +5521,7 @@ export default function AppFrame() {
               onLoadLibrarySet: loadColorSpineLibrarySet,
             }}
           />
-        </RenderProbe>
+        </RenderProbe> : null}
       </C.HW_Body>
       <RenderProbe id="Bottom Dock">
         <BuildDock
@@ -5445,6 +5582,9 @@ export default function AppFrame() {
         <RenderProbe id="Unsaved Changes Dialog">
           <UnsavedChangesDialog
             documentName={unsavedDocumentName}
+            saveLabel={unsavedActionLabels.save}
+            discardLabel={unsavedActionLabels.discard}
+            cancelLabel={unsavedActionLabels.cancel}
             onCancel={() => {
               const decision = unsavedDecisionRef.current;
               unsavedDecisionRef.current = null;

@@ -171,12 +171,342 @@ pub fn writeAtomic(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []con
         dir.deleteFile(io, tmp_path) catch {};
         return err;
     };
+    try syncContainingDir(io, dir, path);
+}
+
+/// Compare current bytes with an expected snapshot. `null` means the caller
+/// reviewed file absence. Conditional replacement uses this only after it has
+/// atomically moved the live directory entry to a unique claimed path.
+pub fn contentMatches(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.mem.Allocator, expected: ?[]const u8) !bool {
+    try checkPath(path);
+    const wanted = expected orelse return !pathExists(io, dir, path);
+    const current = dir.readFileAlloc(io, path, allocator, .limited(wanted.len + 1)) catch return false;
+    defer allocator.free(current);
+    return std.mem.eql(u8, current, wanted);
+}
+
+pub const ReplacePreparedResult = enum { written, changed };
+pub const FinalizePendingRecoveryResult = enum { finalized, changed };
+
+pub const TargetWriteLock = struct {
+    file: std.Io.File,
+    io: std.Io,
+
+    pub fn release(lock: *TargetWriteLock) void {
+        lock.file.close(lock.io);
+    }
+};
+
+/// Acquire the stable advisory lock shared by every conditional writer for one
+/// target pathname. The lock file deliberately remains named between writes:
+/// unlinking it while another process waits on the old inode would allow a
+/// third process to create and lock a different inode under the same name.
+pub fn acquireTargetWriteLock(io: std.Io, dir: std.Io.Dir, path: []const u8) !TargetWriteLock {
+    try checkPath(path);
+    var lock_buf: [MAX_PATH]u8 = undefined;
+    const lock_path = std.fmt.bufPrint(&lock_buf, "{s}.write-lock", .{path}) catch return error.NameTooLong;
+    const file = try dir.createFile(io, lock_path, .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+    });
+    return .{ .file = file, .io = io };
+}
+
+fn targetWritePendingPath(buffer: []u8, path: []const u8) ![]const u8 {
+    return std.fmt.bufPrint(buffer, "{s}.write-pending", .{path}) catch error.NameTooLong;
+}
+
+/// Unlike the convenience `pathExists`, this distinguishes definite absence
+/// from permission, media, and other I/O failures. Transaction ownership must
+/// fail closed on every result except `FileNotFound`.
+fn fileExistsChecked(io: std.Io, dir: std.Io.Dir, path: []const u8) !bool {
+    try checkPath(path);
+    var file = dir.openFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    file.close(io);
+    return true;
+}
+
+fn createTargetWritePending(io: std.Io, dir: std.Io.Dir, pending_path: []const u8, prepared_path: []const u8) !void {
+    var file = try dir.createFile(io, pending_path, .{ .truncate = false, .exclusive = true });
+    // The marker's complete payload is the unique prepared path. Recovery may
+    // proceed only when this identity matches, so an old process cannot adopt
+    // a newer transaction's fixed per-target marker.
+    file.writeStreamingAll(io, prepared_path) catch |err| {
+        file.close(io);
+        dir.deleteFile(io, pending_path) catch {};
+        return err;
+    };
+    file.sync(io) catch |err| {
+        file.close(io);
+        dir.deleteFile(io, pending_path) catch {};
+        return err;
+    };
+    file.close(io);
+    try syncContainingDir(io, dir, pending_path);
+}
+
+fn clearTargetWritePending(io: std.Io, dir: std.Io.Dir, pending_path: []const u8) !void {
+    try deleteFileDurable(io, dir, pending_path);
+}
+
+fn isPreparedPathForTarget(path: []const u8, prepared_path: []const u8) bool {
+    if (prepared_path.len <= path.len + ".tmp.".len) return false;
+    if (!std.mem.eql(u8, prepared_path[0..path.len], path)) return false;
+    if (!std.mem.eql(u8, prepared_path[path.len .. path.len + ".tmp.".len], ".tmp.")) return false;
+    for (prepared_path[path.len + ".tmp.".len ..]) |byte| {
+        if (byte < '0' or byte > '9') return false;
+    }
+    return true;
+}
+
+/// Finish a validated recovery under the same stable lock used by writers.
+/// Exact target bytes and marker ownership are rechecked before any artifact
+/// is touched. The replay temp is retired first, its predecessor optionally,
+/// and durable pending ownership last; a competing recovery therefore cannot
+/// be left with an unmarked target vacancy.
+pub fn finalizePendingRecovery(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    prepared_path: []const u8,
+    allocator: std.mem.Allocator,
+    expected_current: []const u8,
+    retire_previous: bool,
+) !FinalizePendingRecoveryResult {
+    try checkPath(path);
+    try checkPath(prepared_path);
+    if (!isPreparedPathForTarget(path, prepared_path)) return .changed;
+    var transaction_lock = try acquireTargetWriteLock(io, dir, path);
+    defer transaction_lock.release();
+
+    var pending_buf: [MAX_PATH]u8 = undefined;
+    const pending_path = try targetWritePendingPath(&pending_buf, path);
+    if (!(try fileExistsChecked(io, dir, pending_path))) {
+        // Fully finalized is idempotent, but a missing marker must never
+        // authorize deletion of surviving recovery artifacts.
+        if (!(try contentMatches(io, dir, path, allocator, expected_current))) return .changed;
+        if (try fileExistsChecked(io, dir, prepared_path)) return .changed;
+        if (retire_previous) {
+            var prior_buf: [MAX_PATH]u8 = undefined;
+            const prior_path = std.fmt.bufPrint(&prior_buf, "{s}.previous", .{prepared_path}) catch return error.NameTooLong;
+            if (try fileExistsChecked(io, dir, prior_path)) return .changed;
+        }
+        return .finalized;
+    }
+
+    if (!(try contentMatches(io, dir, pending_path, allocator, prepared_path))) return .changed;
+    if (!(try contentMatches(io, dir, path, allocator, expected_current))) return .changed;
+
+    deleteFileDurable(io, dir, prepared_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+    if (retire_previous) {
+        var prior_buf: [MAX_PATH]u8 = undefined;
+        const prior_path = std.fmt.bufPrint(&prior_buf, "{s}.previous", .{prepared_path}) catch return error.NameTooLong;
+        deleteFileDurable(io, dir, prior_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    }
+    try clearTargetWritePending(io, dir, pending_path);
+    return .finalized;
+}
+
+fn restoreClaimedBackup(
+    io: std.Io,
+    dir: std.Io.Dir,
+    backup_path: []const u8,
+    path: []const u8,
+    pending_path: []const u8,
+) bool {
+    std.Io.Dir.renamePreserve(dir, backup_path, dir, path, io) catch return false;
+    syncContainingDir(io, dir, path) catch return false;
+    clearTargetWritePending(io, dir, pending_path) catch return false;
+    return true;
+}
+
+/// Conditionally install an already-written and synchronized temp file.
+///
+/// This does not compare and then overwrite. For an existing target it first
+/// atomically claims the current directory entry by moving it to `backup_path`
+/// with no-replace semantics, validates those claimed bytes, and installs the
+/// temp with another no-replace rename. Competing writers therefore cannot
+/// both validate the same snapshot and then silently overwrite one another.
+/// The caller still owns `temp_path` when `.changed` is returned.
+pub fn replacePreparedFileIfUnchanged(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    temp_path: []const u8,
+    backup_path: []const u8,
+    allocator: std.mem.Allocator,
+    expected: ?[]const u8,
+) !ReplacePreparedResult {
+    return replacePreparedFileIfUnchangedWithPolicy(
+        io,
+        dir,
+        path,
+        temp_path,
+        backup_path,
+        allocator,
+        expected,
+        false,
+        null,
+    );
+}
+
+/// Recovery uses the same serialized compare/install protocol but may enter
+/// while a durable pending marker from the crashed owner is present. In that
+/// mode the marker remains armed until the caller validates and retires the
+/// original claim artifacts.
+pub fn replacePreparedFileIfUnchangedWithPolicy(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    temp_path: []const u8,
+    backup_path: []const u8,
+    allocator: std.mem.Allocator,
+    expected: ?[]const u8,
+    allow_pending_recovery: bool,
+    recovery_owner_path: ?[]const u8,
+) !ReplacePreparedResult {
+    try checkPath(path);
+    try checkPath(temp_path);
+    try checkPath(backup_path);
+    var transaction_lock = try acquireTargetWriteLock(io, dir, path);
+    defer transaction_lock.release();
+    var pending_buf: [MAX_PATH]u8 = undefined;
+    const pending_path = try targetWritePendingPath(&pending_buf, path);
+    const pending_exists = try fileExistsChecked(io, dir, pending_path);
+    if (pending_exists and !allow_pending_recovery) return .changed;
+    // Recovery authority comes from durable ownership left by the interrupted
+    // writer. A stale recovery process must never mint a fresh marker after a
+    // different process has already finalized and retired that transaction.
+    if (allow_pending_recovery) {
+        if (!pending_exists) return .changed;
+        const owner_path = recovery_owner_path orelse return .changed;
+        try checkPath(owner_path);
+        if (!isPreparedPathForTarget(path, owner_path)) return .changed;
+        if (!(try contentMatches(io, dir, pending_path, allocator, owner_path))) return .changed;
+    } else if (recovery_owner_path != null) {
+        return .changed;
+    }
+
+    if (expected == null) {
+        // A crashed existing-file writer may have released its OS lock while
+        // the target remains durably claimed at a unique backup pathname. The
+        // fixed pending marker distinguishes that internal vacancy from true
+        // reviewed absence until startup recovery restores or retires it.
+        std.Io.Dir.renamePreserve(dir, temp_path, dir, path, io) catch |err| switch (err) {
+            error.PathAlreadyExists => return .changed,
+            else => return err,
+        };
+        try syncContainingDir(io, dir, path);
+        return .written;
+    }
+
+    if (!allow_pending_recovery) try createTargetWritePending(io, dir, pending_path, temp_path);
+
+    std.Io.Dir.renamePreserve(dir, path, dir, backup_path, io) catch |err| switch (err) {
+        error.FileNotFound, error.PathAlreadyExists => {
+            if (!allow_pending_recovery) try clearTargetWritePending(io, dir, pending_path);
+            return .changed;
+        },
+        else => {
+            if (!allow_pending_recovery) clearTargetWritePending(io, dir, pending_path) catch {};
+            return err;
+        },
+    };
+    syncContainingDir(io, dir, backup_path) catch |err| {
+        if (allow_pending_recovery) {
+            std.Io.Dir.renamePreserve(dir, backup_path, dir, path, io) catch {};
+            syncContainingDir(io, dir, path) catch {};
+        } else {
+            _ = restoreClaimedBackup(io, dir, backup_path, path, pending_path);
+        }
+        return err;
+    };
+
+    if (!(try contentMatches(io, dir, backup_path, allocator, expected))) {
+        std.Io.Dir.renamePreserve(dir, backup_path, dir, path, io) catch |err| switch (err) {
+            // A competing writer installed a new canonical file while the
+            // reviewed bytes were claimed. Keep both: its file at `path` and
+            // the displaced bytes at the unique backup path.
+            error.PathAlreadyExists => {
+                try syncContainingDir(io, dir, backup_path);
+                return .changed;
+            },
+            else => return err,
+        };
+        try syncContainingDir(io, dir, path);
+        if (!allow_pending_recovery) try clearTargetWritePending(io, dir, pending_path);
+        return .changed;
+    }
+
+    std.Io.Dir.renamePreserve(dir, temp_path, dir, path, io) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            // Do not overwrite the winner. The reviewed prior version remains
+            // at backup_path for recovery because path is no longer vacant.
+            try syncContainingDir(io, dir, backup_path);
+            return .changed;
+        },
+        else => {
+            // Best-effort restore after an I/O failure. If another writer has
+            // occupied path, leaving the unique backup is safer than replacing
+            // either set of bytes.
+            if (allow_pending_recovery) {
+                std.Io.Dir.renamePreserve(dir, backup_path, dir, path, io) catch {};
+                syncContainingDir(io, dir, path) catch {};
+            } else {
+                _ = restoreClaimedBackup(io, dir, backup_path, path, pending_path);
+            }
+            return err;
+        },
+    };
+
+    // Persist both the installed proposal and its recoverable predecessor.
+    // The predecessor deliberately stays named: an external editor may have
+    // opened that inode before our claim and can still write through its fd.
+    // Keeping the versioned backup means those racing bytes are recoverable
+    // instead of being silently unlinked.
+    try syncContainingDir(io, dir, path);
+    if (!allow_pending_recovery) try clearTargetWritePending(io, dir, pending_path);
+    return .written;
+}
+
+/// Make a completed rename durable by synchronizing the directory entry that
+/// owns `path`. A file fsync alone does not guarantee that the rename survives
+/// a sudden power loss.
+pub fn syncContainingDir(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    try checkPath(path);
+    const parent_path = std.fs.path.dirname(path) orelse ".";
+    // Zig opens non-iterable directories with O_PATH on Linux; fsync rejects
+    // that descriptor. Iteration capability gives us a real directory fd.
+    var parent = try dir.openDir(io, parent_path, .{ .iterate = true });
+    defer parent.close(io);
+    const parent_file: std.Io.File = .{
+        .handle = parent.handle,
+        .flags = .{ .nonblocking = false },
+    };
+    try parent_file.sync(io);
 }
 
 /// Delete a file.
 pub fn deleteFile(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
     try dir.deleteFile(io, path);
+}
+
+/// Delete one file and persist removal of its directory entry. Recovery code
+/// uses this to disarm replay markers only after the restored source is durable.
+pub fn deleteFileDurable(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    try deleteFile(io, dir, path);
+    try syncContainingDir(io, dir, path);
 }
 
 /// Check if a path exists (file or directory).
@@ -198,6 +528,39 @@ pub fn makeDir(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
 pub fn makePath(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
     try dir.createDirPath(io, path);
+}
+
+/// Create every missing directory component and fsync the parent immediately
+/// after each new edge. A final-parent fsync alone is insufficient when several
+/// ancestors were born in the same first-run write.
+pub fn makePathDurable(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    try checkPath(path);
+    var current: [MAX_PATH]u8 = undefined;
+    var current_len: usize = 0;
+    var segments = std.mem.splitScalar(u8, path, '/');
+    while (segments.next()) |segment| {
+        if (segment.len == 0 or std.mem.eql(u8, segment, ".")) continue;
+        if (current_len != 0) {
+            if (current_len == current.len) return error.NameTooLong;
+            current[current_len] = '/';
+            current_len += 1;
+        }
+        if (segment.len > current.len - current_len) return error.NameTooLong;
+        @memcpy(current[current_len..][0..segment.len], segment);
+        current_len += segment.len;
+        const current_path = current[0..current_len];
+        var created = true;
+        dir.createDir(io, current_path, .default_dir) catch |err| switch (err) {
+            error.PathAlreadyExists => created = false,
+            else => return err,
+        };
+        if (!created) {
+            var existing = try dir.openDir(io, current_path, .{});
+            existing.close(io);
+            continue;
+        }
+        try syncContainingDir(io, dir, current_path);
+    }
 }
 
 /// List the contents of a directory. Returns the number of entries written to `out`.
@@ -323,6 +686,17 @@ test "atomic write" {
 
     // Temp file should not remain
     try std.testing.expect(!pathExists(std.testing.io, tmp.dir, "data.txt.tmp"));
+}
+
+test "contentMatches distinguishes reviewed bytes and reviewed absence" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try std.testing.expect(try contentMatches(std.testing.io, tmp.dir, "page.md", std.testing.allocator, null));
+    try writeText(std.testing.io, tmp.dir, "page.md", "reviewed");
+    try std.testing.expect(!(try contentMatches(std.testing.io, tmp.dir, "page.md", std.testing.allocator, null)));
+    try std.testing.expect(try contentMatches(std.testing.io, tmp.dir, "page.md", std.testing.allocator, "reviewed"));
+    try std.testing.expect(!(try contentMatches(std.testing.io, tmp.dir, "page.md", std.testing.allocator, "changed")));
 }
 
 test "directory operations" {

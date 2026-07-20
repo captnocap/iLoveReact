@@ -281,9 +281,10 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
 // (__mesh_history — the door cart code never called before this), on the world the real
 // worldUndo/worldRedo stacks. Menus, the dock buttons, and the hotkey gate all read this — a
 // button that would do nothing renders disabled with the reason instead.
-export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' | 'material' };
+export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' | 'material' | 'knowledge' };
 let g_colorStudioUndoDepths: UndoDepths = { undo: 0, redo: 0, source: 'material' };
 export function undoDepths(state: EditorState): UndoDepths {
+  if (activeSurface(state) === 'knowledge') return { undo: 0, redo: 0, source: 'knowledge' };
   if (activeSurface(state) === 'material') return g_colorStudioUndoDepths;
   if (activeSurface(state) === 'model') {
     // While the paint session is live the STROKE journal is the undo truth (req_2672):

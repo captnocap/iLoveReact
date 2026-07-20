@@ -7,7 +7,7 @@
 // again collapses its adjacent panel; another button selects and opens it.
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
-export type LeftPanelId = 'assets' | 'build' | 'models' | 'materials' | 'characters' | 'missions' | 'paint';
+export type LeftPanelId = 'assets' | 'build' | 'models' | 'materials' | 'characters' | 'missions' | 'paint' | 'world-bible';
 export type RightPanelId = 'inspector' | 'paint' | 'rig';
 
 export type PanelButton<Id extends string> = {
@@ -22,7 +22,7 @@ export type LeftPanelButton =
       /** Root selected when changing to this source library. */
       folder: ContentFolderId;
     })
-  | (PanelButton<LeftPanelId> & { renderer: 'paint' });
+  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'world-bible' });
 
 export type RightPanelButton = PanelButton<RightPanelId>;
 
@@ -33,6 +33,7 @@ const MATERIALS = { id: 'materials', label: 'Materials', icon: 'Palette', render
 const CHARACTERS = { id: 'characters', label: 'Characters', icon: 'UserRound', renderer: 'library', folder: 'characters' } as const;
 const MISSIONS = { id: 'missions', label: 'Mission assets', icon: 'Map', renderer: 'library', folder: 'missions' } as const;
 const PAINT = { id: 'paint', label: 'Paint', icon: 'Paintbrush', renderer: 'paint' } as const;
+const WORLD_BIBLE = { id: 'world-bible', label: 'World Bible index', icon: 'BookOpen', renderer: 'world-bible' } as const;
 
 const WORLD_LEFT = [ASSETS, BUILD, MODELS, MATERIALS, CHARACTERS, MISSIONS] as const;
 const MODEL_LEFT = [MODELS, MATERIALS] as const;
@@ -41,6 +42,7 @@ const ANIMATION_LEFT = [CHARACTERS, MODELS] as const;
 const FACADE_LEFT = [MATERIALS, MODELS] as const;
 const MODEL_PAINT_LEFT = [PAINT, MODELS, MATERIALS] as const;
 const FACADE_PAINT_LEFT = [PAINT, MATERIALS, MODELS] as const;
+const KNOWLEDGE_LEFT = [WORLD_BIBLE] as const;
 
 const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' } as const;
 const MODEL_RIGHT = [
@@ -51,6 +53,7 @@ const MODEL_RIGHT = [
 const FOCUS_RIGHT = [INSPECTOR] as const;
 
 export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false): readonly LeftPanelButton[] {
+  if (kind === 'knowledge') return KNOWLEDGE_LEFT;
   if (paintActive && kind === 'model') return MODEL_PAINT_LEFT;
   if (paintActive && kind === 'facade') return FACADE_PAINT_LEFT;
   if (kind === 'model') return MODEL_LEFT;
@@ -61,11 +64,17 @@ export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false):
 }
 
 export function rightPanelsFor(kind: WorkspaceDocumentKind): readonly RightPanelButton[] {
+  if (kind === 'knowledge') return [];
   return kind === 'model' ? MODEL_RIGHT : FOCUS_RIGHT;
 }
 
 export function resolvedPanelId<Id extends string>(buttons: readonly PanelButton<Id>[], requested: string): Id {
   return buttons.find((button) => button.id === requested)?.id ?? buttons[0]!.id;
+}
+
+/** Empty panel families are intentional for documents without that rail. */
+export function resolvedPanelIdOrNull<Id extends string>(buttons: readonly PanelButton<Id>[], requested: string): Id | null {
+  return buttons.find((button) => button.id === requested)?.id ?? buttons[0]?.id ?? null;
 }
 
 export type PanelPressResult<Id extends string> = {
@@ -106,7 +115,7 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'data') return 'missions';
   if (value === 'world' || value === 'pipeline') return 'assets';
   if (value === 'tool-options' || value === 'ink') return 'paint';
-  return (['assets', 'build', 'models', 'materials', 'characters', 'missions', 'paint'] as const).includes(value as LeftPanelId)
+  return (['assets', 'build', 'models', 'materials', 'characters', 'missions', 'paint', 'world-bible'] as const).includes(value as LeftPanelId)
     ? value as LeftPanelId
     : 'assets';
 }

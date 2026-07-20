@@ -1813,6 +1813,28 @@ pub fn build(b: *std.Build) void {
     const key_pack_test_step = b.step("test-key-pack", "Run the key packing behavior tests");
     key_pack_test_step.dependOn(&run_key_pack_test.step);
 
+    // Expected-content comparison at the final atomic source-write boundary.
+    // Keep the filesystem contract in a focused headless test target so bridge
+    // coverage cannot hide a wrong absent/empty/exact-bytes distinction.
+    const fs_core_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/fs/fs.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const fs_expected_content_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/fs_expected_content.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fs_expected_content_test_mod.addImport("fs_core", fs_core_mod_for_tests);
+    const fs_expected_content_test = b.addTest(.{
+        .name = "fs-expected-content-test",
+        .root_module = fs_expected_content_test_mod,
+    });
+    const run_fs_expected_content_test = b.addRunArtifact(fs_expected_content_test);
+    const fs_expected_content_test_step = b.step("test-fs-expected-content", "Run filesystem expected-content comparison tests");
+    fs_expected_content_test_step.dependOn(&run_fs_expected_content_test.step);
+
     // Platform-native application configuration paths. The resolver is pure;
     // the V8 fs binding only creates the directory returned here.
     const app_config_mod_for_tests = b.createModule(.{

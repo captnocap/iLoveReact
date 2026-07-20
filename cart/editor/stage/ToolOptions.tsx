@@ -39,6 +39,17 @@ export default function ToolOptions(props: {
     ?? props.state.workspaceDocuments[0]!;
   const mergePartsCommand = props.selectedPartCount >= 2 ? commandById('mesh-merge-down') : null;
 
+  if (activeDoc.kind === 'knowledge') {
+    return (
+      <C.HW_ToolOptions>
+        <Icon name="BookOpen" size={13} color={accentFor('primary')} />
+        <C.HW_OptionLabel>WORLD BIBLE</C.HW_OptionLabel>
+        <C.HW_OptionDivider />
+        <C.HW_PillText>PROJECT MARKDOWN · DISK SOURCE · REVIEW BEFORE WRITE</C.HW_PillText>
+      </C.HW_ToolOptions>
+    );
+  }
+
   if (activeDoc.kind === 'model') {
     return (
       <C.HW_ToolOptions>

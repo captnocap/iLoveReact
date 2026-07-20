@@ -70,6 +70,83 @@ export function writeFileBytesAtomic(path: string, bytes: Uint8Array): boolean {
   return callHost<boolean>('__fs_write_bytes_atomic', false, path, bytes);
 }
 
+export type AtomicCompareWriteResult = 'written' | 'changed' | 'failed';
+
+/**
+ * Install bytes only while the live file still equals the reviewed snapshot.
+ * `expected === null` means the review observed that the file did not exist.
+ */
+export function writeFileBytesAtomicIfUnchanged(
+  path: string,
+  expected: Uint8Array | null,
+  bytes: Uint8Array,
+  retainPrevious = true,
+): AtomicCompareWriteResult {
+  const status = callHost<number>(
+    '__fs_write_bytes_atomic_if_unchanged',
+    -1,
+    path,
+    expected,
+    bytes,
+    retainPrevious ? 1 : 0,
+    0,
+  );
+  return status === 1 ? 'written' : status === 0 ? 'changed' : 'failed';
+}
+
+/** Reinstall validated bytes under ownership left by one exact interrupted
+ * prepared path. Missing or differently-owned pending state fails closed. */
+export function restoreFileBytesAtomicIfUnchanged(
+  path: string,
+  expected: Uint8Array | null,
+  bytes: Uint8Array,
+  pendingOwnerPath: string,
+  retainPrevious: boolean,
+): AtomicCompareWriteResult {
+  const status = callHost<number>(
+    '__fs_write_bytes_atomic_if_unchanged',
+    -1,
+    path,
+    expected,
+    bytes,
+    retainPrevious ? 1 : 0,
+    1,
+    pendingOwnerPath,
+  );
+  return status === 1 ? 'written' : status === 0 ? 'changed' : 'failed';
+}
+
+/** Remove one file and fsync its parent directory so a retired recovery
+ * marker cannot reappear after a crash. Directories are intentionally
+ * rejected; use `remove` for ordinary recursive cleanup. */
+export function removeFileDurable(path: string): boolean {
+  return callHost<boolean>('__fs_remove_file_durable', false, path);
+}
+
+export type PendingRecoveryFinalizeResult = 'finalized' | 'changed' | 'failed';
+
+/**
+ * Finish an interrupted transaction under its target lock: recheck exact
+ * target bytes and marker ownership, retire the replay temp and optional
+ * predecessor, then durably remove pending ownership last.
+ */
+export function finalizePendingRecovery(
+  path: string,
+  expected: Uint8Array,
+  preparedPath: string,
+  retirePrevious: boolean,
+): PendingRecoveryFinalizeResult {
+  const status = callHost<number>(
+    '__fs_finalize_pending_recovery',
+    -1,
+    path,
+    expected,
+    preparedPath,
+    retirePrevious ? 1 : 0,
+  );
+  return status === 1 ? 'finalized' : status === 0 ? 'changed' : 'failed';
+}
+
 /** True if a file or directory exists at `path`. */
 export function exists(path: string): boolean {
   return callHost<boolean>('__fs_exists', false, path);

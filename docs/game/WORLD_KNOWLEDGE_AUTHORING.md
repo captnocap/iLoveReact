@@ -1,6 +1,7 @@
 # World Knowledge Authoring
 
-Status: **architecture proposal** for USER ASK `req_3258`, not a ruling.
+Status: **architecture plus implemented first authoring slice** through USER ASK
+`req_3288`, not a game-design ruling.
 Going-forward implementation belongs in `cart/editor/` and its `/play` route.
 `cart/hmsc-int/` is referenced only where it already proves a useful contract.
 
@@ -81,6 +82,40 @@ before replacement. If the file changed after the diff was prepared, the write
 stops in `CONFLICT`. The writer preserves all untouched prose, comments,
 formatting, block ordering, and incomplete ideas byte-for-byte; it patches only
 the spans the user confirmed.
+
+The native write door serializes every expected-existing and expected-absent
+writer through one stable per-target advisory-lock inode, claims an existing
+pathname with no-overwrite renames, keeps the displaced inode as a versioned
+`.previous` file, and synchronizes each directory transition. This prevents two
+writers from winning the same reviewed snapshot, prevents the claim interval
+from masquerading as genuine file absence, and preserves writes made through a
+pre-open external file descriptor.
+Before an existing pathname is vacated, the writer also fsyncs a fixed-name
+`.write-pending` marker whose payload identifies that transaction's exact
+versioned prepared path. The OS lock disappears if its owner crashes; the
+marker does not. A waiting writer that reviewed absence must therefore stop
+until the validated startup recovery path proves that same owner, reinstalls
+durable bytes, and retires the marker.
+If the process dies during the brief claim/install interval, startup restores a
+missing canonical pathname only when the matching prepared-temp and prior-version
+pair both exist. The restored prior bytes are made durable before the prepared
+temp is durably retired, so the claim cannot replay after a later intentional
+deletion. Replay-temp cleanup, optional predecessor cleanup, and pending-marker
+retirement happen through one native finalizer: it holds the target advisory
+lock, rechecks exact target bytes and prepared-path ownership, then removes the
+pending marker last. A lone or differently-owned history backup never
+resurrects a page; the World Bible instead surfaces its path as excluded
+prior-version history so writes made through a pre-open external descriptor
+remain discoverable.
+
+Draft recovery uses the same expected-content claim but a different retention
+policy because it is app-owned and written frequently. A normal recovery write
+durably retires its displaced envelope instead of accumulating an unbounded full
+copy every edit burst. After an interrupted write, startup validates both sides,
+prefers the newer fsynced temp envelope, falls back to the prior valid envelope,
+and durably retires the replay pair. Malformed or conflicting artifacts are
+preserved byte-for-byte and block automatic recovery rewrites. Creating the
+first recovery directory also synchronizes every newly created ancestor.
 
 ---
 
@@ -259,18 +294,31 @@ The disposal-practice fact is a reveal. Do not hint at it in public copy.
 ```
 
 - `<public>` prose is eligible for a player-facing wiki/site projection.
+- when an entity is deliberately included in a public projection, its `<ref>`,
+  entity kind, and `<name>` are explicit public routing identity metadata;
 - facts require stable keys and explicit knowledge visibility; only `public`
   facts are eligible for a public projection;
 - `secret` facts remain authoritative world/mission truth but are excluded from
   the public projection;
 - `<notes>` and ordinary Markdown outside an explicitly public block are
   author-only by default and never enter a shipped player-facing knowledge view.
+- block-looking text inside HTML comments or Markdown fenced code is inert;
+  these remain byte-preserved author prose and cannot mint public semantics;
+- `<fact>` attributes are an allowlist of fully quoted `key`, `label`, and
+  `visibility` pairs. Unknown, duplicate, unquoted, or partially parsed syntax
+  is a hard error rather than a best-effort interpretation.
 
 This is deliberately fail-closed. The public compiler selects explicit public
 blocks and facts; it does not compile the whole page and attempt to subtract
 private material afterward. A later runtime revelation creates an appropriate
 event-derived Claim/Document projection—it does not silently change the source
 fact's visibility.
+
+Parsing alone does not grant publishing authority. The implemented public
+projection accepts only immutable pages minted by the canonical
+`world/knowledge/*.md` disk loader, and checks that provenance again at runtime.
+Serialized proposals, recovery drafts, arbitrary parsed strings, and forced
+TypeScript assertions therefore cannot label themselves `CANONICAL DISK`.
 
 ---
 
@@ -1320,9 +1368,10 @@ them:
    writer spans; labels and order are presentation only.
 5. **The `kind` field is authoritative.** Ref prefixes are helpful conventions,
    never a parallel type system.
-6. **Player-facing knowledge is an explicit allowlist.** Only `<public>` prose
-   and public facts compile into public wiki/site views; notes, unwrapped prose,
-   and secret facts are excluded by construction.
+6. **Player-facing knowledge is an explicit allowlist.** An included entity's
+   ref, kind, and name are explicitly public routing identity; only `<public>`
+   prose and public facts compile as page body. Notes, unwrapped prose, and
+   secret facts are excluded by construction.
 7. **Entity first, platform later.** Establish a business, NPC, place, or mechanic
    independently; add a website, account, listing, document, or mission only when
    its gameplay purpose is known, as a separate linked entity.

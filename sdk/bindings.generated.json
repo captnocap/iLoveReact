@@ -1060,6 +1060,18 @@
           "zig": "fsWriteBytesAtomic"
         },
         {
+          "js": "__fs_write_bytes_atomic_if_unchanged",
+          "zig": "fsWriteBytesAtomicIfUnchanged"
+        },
+        {
+          "js": "__fs_remove_file_durable",
+          "zig": "fsRemoveFileDurable"
+        },
+        {
+          "js": "__fs_finalize_pending_recovery",
+          "zig": "fsFinalizePendingRecovery"
+        },
+        {
           "js": "__fs_write_base64_atomic",
           "zig": "fsWriteBase64Atomic"
         },

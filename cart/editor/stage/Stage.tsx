@@ -20,6 +20,7 @@ import FacadePainterSurface from './FacadePainterSurface';
 import BuildBar from './BuildBar';
 import MapPaintDock from './MapPaintDock';
 import { worldToolFor } from '../world/worldTool';
+import WorldBibleSurface from '../worldBible/WorldBibleSurface';
 
 export default function Stage(props: {
   state: EditorState;
@@ -87,8 +88,10 @@ export default function Stage(props: {
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
-        {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' ? null : <C.HW_CanvasGrid />}
-        {activeDocument.kind === 'animation' ? (
+        {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' || activeDocument.kind === 'knowledge' ? null : <C.HW_CanvasGrid />}
+        {activeDocument.kind === 'knowledge' ? (
+          <WorldBibleSurface />
+        ) : activeDocument.kind === 'animation' ? (
           <AnimationCaptureSurface />
         ) : activeDocument.kind === 'playtest' ? (
           <PlaytestSurface

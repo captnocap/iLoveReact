@@ -15,8 +15,19 @@ function Button({ label, primary = false, onPress }: { label: string; primary?: 
   );
 }
 
-export default function UnsavedChangesDialog({ documentName, onSave, onDiscard, onCancel }: {
+export default function UnsavedChangesDialog({
+  documentName,
+  saveLabel = 'Save',
+  discardLabel = 'Discard',
+  cancelLabel = 'Cancel',
+  onSave,
+  onDiscard,
+  onCancel,
+}: {
   documentName: string;
+  saveLabel?: string;
+  discardLabel?: string;
+  cancelLabel?: string;
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
@@ -30,9 +41,9 @@ export default function UnsavedChangesDialog({ documentName, onSave, onDiscard, 
         </Row>
         <Text fontSize={11} color={TEXT} numberOfLines={1} noWrap>{documentName}</Text>
         <Row style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <Button label="Cancel" onPress={onCancel} />
-          <Button label="Discard" onPress={onDiscard} />
-          <Button label="Save" primary onPress={onSave} />
+          <Button label={cancelLabel} onPress={onCancel} />
+          <Button label={discardLabel} onPress={onDiscard} />
+          <Button label={saveLabel} primary onPress={onSave} />
         </Row>
       </Col>
     </Box>

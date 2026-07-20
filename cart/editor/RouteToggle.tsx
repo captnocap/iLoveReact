@@ -5,6 +5,7 @@
 // later; this is the explicit nav affordance so the two routes are reachable now.)
 import { useNavigate, useRoute } from '../../runtime/router';
 import { C } from './editor.cls';
+import { worldBibleController } from './worldBible/controller';
 
 export default function RouteToggle() {
   const nav = useNavigate();
@@ -14,10 +15,13 @@ export default function RouteToggle() {
   const EditorTxt = onPlay ? C.ED_TabText : C.ED_TabTextOn;
   const PlayBtn = onPlay ? C.ED_TabOn : C.ED_Tab;
   const PlayTxt = onPlay ? C.ED_TabTextOn : C.ED_TabText;
+  const enterPlay = () => {
+    if (worldBibleController.settleBeforePlay()) nav.push('/play');
+  };
   return (
     <C.ED_RouteToggle>
       <EditorBtn onPress={() => nav.push('/editor')}><EditorTxt>Editor</EditorTxt></EditorBtn>
-      <PlayBtn onPress={() => nav.push('/play')}><PlayTxt>Play</PlayTxt></PlayBtn>
+      <PlayBtn onPress={enterPlay}><PlayTxt>Play</PlayTxt></PlayBtn>
     </C.ED_RouteToggle>
   );
 }
