@@ -2633,6 +2633,10 @@ pub fn meshJournalMetadataCheckpoint(label: []const u8, before_note: []const u8,
     return true;
 }
 
+pub fn meshJournalMetadataCheckpointLabel(kind: []const u8) ?[]const u8 {
+    return mesh_journal_log.metadataCheckpointLabel(kind);
+}
+
 fn journalLogEntryView(entry: *const JournalEntry) mesh_journal_log.EntryView {
     return .{
         .label = entry.label,

@@ -17,6 +17,19 @@ test "metadata checkpoints require a real bounded state transition" {
     try testing.expect(!journal_log.metadataCheckpointValid("before", too_large));
 }
 
+test "every outliner action admitted by the command layer has a host checkpoint label" {
+    const cases = [_]struct { []const u8, []const u8 }{
+        .{ "part.rename", "rename part" },
+        .{ "parts.group", "group parts" },
+        .{ "parts.ungroup", "ungroup parts" },
+        .{ "group.rename", "rename group" },
+        .{ "group.dissolve", "dissolve group" },
+        .{ "outliner.move", "move outliner item" },
+    };
+    for (cases) |case| try testing.expectEqualStrings(case[1], journal_log.metadataCheckpointLabel(case[0]).?);
+    try testing.expect(journal_log.metadataCheckpointLabel("unknown") == null);
+}
+
 test "every journaled mesh label has one stable semantic command identity" {
     const cases = [_]struct { []const u8, journal_log.ActionKind, []const u8 }{
         .{ "extrude face", .extrude_face, "model.mesh.extrude-face" },

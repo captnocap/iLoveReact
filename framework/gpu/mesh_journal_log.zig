@@ -137,6 +137,23 @@ pub fn metadataCheckpointValid(before: []const u8, after: []const u8) bool {
         !std.mem.eql(u8, before, after);
 }
 
+/// Strict vocabulary for metadata-only journal actions. The V8 door and the
+/// cart command registry must meet here; keeping it in this testable module
+/// prevents a new outliner command from looking accepted in JS while the host
+/// silently refuses its checkpoint.
+pub fn metadataCheckpointLabel(kind: []const u8) ?[]const u8 {
+    const actions = [_]struct { []const u8, []const u8 }{
+        .{ "part.rename", "rename part" },
+        .{ "parts.group", "group parts" },
+        .{ "parts.ungroup", "ungroup parts" },
+        .{ "group.rename", "rename group" },
+        .{ "group.dissolve", "dissolve group" },
+        .{ "outliner.move", "move outliner item" },
+    };
+    for (actions) |action| if (std.mem.eql(u8, kind, action[0])) return action[1];
+    return null;
+}
+
 pub const StateView = struct {
     vertex_count: u32,
     groups: ?[]const u32 = null,

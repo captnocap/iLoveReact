@@ -1140,17 +1140,7 @@ fn hostMeshJournalCheckpoint(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     };
     defer std.heap.c_allocator.free(after);
 
-    const label: []const u8 = if (std.mem.eql(u8, kind, "part.rename"))
-        "rename part"
-    else if (std.mem.eql(u8, kind, "parts.group"))
-        "group parts"
-    else if (std.mem.eql(u8, kind, "parts.ungroup"))
-        "ungroup parts"
-    else if (std.mem.eql(u8, kind, "group.rename"))
-        "rename group"
-    else if (std.mem.eql(u8, kind, "group.dissolve"))
-        "dissolve group"
-    else {
+    const label = scene3d.meshJournalMetadataCheckpointLabel(kind) orelse {
         setReturnNumber(info, 0);
         return;
     };
