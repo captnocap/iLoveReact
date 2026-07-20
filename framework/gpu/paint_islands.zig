@@ -134,6 +134,113 @@ pub fn buildFit(
     return buildImpl(alloc, positions, groups, 1, fit_texels, max_dim, budget_bytes);
 }
 
+/// Reconstruct only the face-to-atlas metadata for an already-authored UV layout.
+/// Structural indexed edits (loop cut, merge, symmetrize) interpolate the existing
+/// per-corner UVs; adopting those UVs must not repack or clear the live paint atlas.
+/// `normalized_uvs` is two floats per rendered corner (six per triangle).
+pub fn buildFromNormalizedUv(
+    alloc: std.mem.Allocator,
+    normalized_uvs: []const f32,
+    groups: ?[]const u32,
+    atlas_w: u32,
+    atlas_h: u32,
+    density: f32,
+) ?Layout {
+    if (atlas_w == 0 or atlas_h == 0 or normalized_uvs.len == 0 or normalized_uvs.len % 6 != 0) return null;
+    const fc: u32 = @intCast(normalized_uvs.len / 6);
+    if (groups) |rows| if (rows.len < @as(usize, fc)) return null;
+
+    var island_of_group = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer island_of_group.deinit(alloc);
+    var islands = std.ArrayListUnmanaged(Island).empty;
+    defer islands.deinit(alloc);
+    const tri_island = alloc.alloc(u32, fc) catch return null;
+    var keep_tri_island = false;
+    defer if (!keep_tri_island) alloc.free(tri_island);
+    const corner_uv = alloc.alloc(f32, normalized_uvs.len) catch return null;
+    var keep_corner_uv = false;
+    defer if (!keep_corner_uv) alloc.free(corner_uv);
+
+    var face: u32 = 0;
+    while (face < fc) : (face += 1) {
+        const group = if (groups) |rows| rows[face] else NO_GROUP;
+        var island_index: u32 = undefined;
+        if (group == NO_GROUP) {
+            island_index = @intCast(islands.items.len);
+            islands.append(alloc, .{
+                .group = NO_GROUP,
+                .x = atlas_w - 1,
+                .y = atlas_h - 1,
+                .w = 0,
+                .h = 0,
+                .axis = 0,
+                .sign = 1,
+                .min_u = 0,
+                .min_v = 0,
+            }) catch return null;
+        } else {
+            const entry = island_of_group.getOrPut(alloc, group) catch return null;
+            if (!entry.found_existing) {
+                entry.value_ptr.* = @intCast(islands.items.len);
+                islands.append(alloc, .{
+                    .group = group,
+                    .x = atlas_w - 1,
+                    .y = atlas_h - 1,
+                    .w = 0,
+                    .h = 0,
+                    .axis = 0,
+                    .sign = 1,
+                    .min_u = 0,
+                    .min_v = 0,
+                }) catch return null;
+            }
+            island_index = entry.value_ptr.*;
+        }
+        tri_island[face] = island_index;
+
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const source = (@as(usize, face) * 3 + corner) * 2;
+            const u = normalized_uvs[source + 0];
+            const v = normalized_uvs[source + 1];
+            if (!std.math.isFinite(u) or !std.math.isFinite(v) or u < -0.0001 or u > 1.0001 or v < -0.0001 or v > 1.0001) return null;
+            const px = std.math.clamp(u, 0.0, 1.0) * @as(f32, @floatFromInt(atlas_w));
+            const py = std.math.clamp(v, 0.0, 1.0) * @as(f32, @floatFromInt(atlas_h));
+            corner_uv[source + 0] = px;
+            corner_uv[source + 1] = py;
+
+            const tx: u32 = @intFromFloat(std.math.clamp(@floor(px), 0, @as(f32, @floatFromInt(atlas_w - 1))));
+            const ty: u32 = @intFromFloat(std.math.clamp(@floor(py), 0, @as(f32, @floatFromInt(atlas_h - 1))));
+            const island = &islands.items[island_index];
+            if (island.w == 0) {
+                island.x = tx;
+                island.y = ty;
+                island.w = 1;
+                island.h = 1;
+            } else {
+                const max_x = @max(island.x + island.w - 1, tx);
+                const max_y = @max(island.y + island.h - 1, ty);
+                island.x = @min(island.x, tx);
+                island.y = @min(island.y, ty);
+                island.w = max_x - island.x + 1;
+                island.h = max_y - island.y + 1;
+            }
+        }
+    }
+
+    const island_owned = islands.toOwnedSlice(alloc) catch return null;
+    keep_tri_island = true;
+    keep_corner_uv = true;
+    return .{
+        .atlas_w = atlas_w,
+        .atlas_h = atlas_h,
+        .density = density,
+        .islands = island_owned,
+        .tri_island = tri_island,
+        .corner_uv = corner_uv,
+    };
+}
+
 fn buildImpl(
     alloc: std.mem.Allocator,
     positions: []const f32,
@@ -442,6 +549,29 @@ test "ungrouped triangles each get their own area-proportional island" {
     defer l.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 12), l.islands.len);
     for (l.islands) |isl| try testing.expectEqual(NO_GROUP, isl.group);
+}
+
+test "existing normalized UVs rebuild metadata without repacking" {
+    const allocator = std.testing.allocator;
+    const uvs = [_]f32{
+        0.125, 0.25, 0.5, 0.25, 0.5,   0.75,
+        0.125, 0.25, 0.5, 0.75, 0.125, 0.75,
+    };
+    const groups = [_]u32{ 7, 7 };
+    var layout = buildFromNormalizedUv(allocator, &uvs, &groups, 128, 64, 16) orelse return error.OutOfMemory;
+    defer layout.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), layout.islands.len);
+    try std.testing.expectEqual(@as(u32, 0), layout.tri_island[0]);
+    try std.testing.expectEqual(@as(u32, 0), layout.tri_island[1]);
+    for (uvs, 0..) |normalized, index| {
+        const dimension: f32 = if (index % 2 == 0) 128 else 64;
+        try std.testing.expectApproxEqAbs(normalized * dimension, layout.corner_uv[index], 0.0001);
+    }
+    try std.testing.expectEqual(@as(u32, 16), layout.islands[0].x);
+    try std.testing.expectEqual(@as(u32, 16), layout.islands[0].y);
+    try std.testing.expectEqual(@as(u32, 49), layout.islands[0].w);
+    try std.testing.expectEqual(@as(u32, 33), layout.islands[0].h);
 }
 
 test "buildFit: a lone cube spreads the whole atlas budget — writing-grade texels per face" {

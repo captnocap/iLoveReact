@@ -75,6 +75,10 @@ pub const SeedInfo = struct {
 pub const Lowered = struct {
     allocator: std.mem.Allocator,
     positions: []f32,
+    /// Normalized per-render-corner UVs (six floats per triangle). These are
+    /// edit topology, not disposable render metadata: loop cut interpolates them
+    /// so the derived soup can keep the current painted atlas exactly.
+    uvs: []f32,
     triangle_vertices: [][3]u32,
     groups: []u32,
     source_triangles: []u32,
@@ -84,6 +88,7 @@ pub const Lowered = struct {
 
     pub fn deinit(lowered: *Lowered) void {
         lowered.allocator.free(lowered.positions);
+        lowered.allocator.free(lowered.uvs);
         lowered.allocator.free(lowered.triangle_vertices);
         lowered.allocator.free(lowered.groups);
         lowered.allocator.free(lowered.source_triangles);
@@ -436,12 +441,48 @@ pub const Mesh = struct {
     pub fn repositionCutVertices(mesh: *Mesh, cuts_raw: u32, offset_fraction_raw: f32) void {
         const cuts = @max(1, cuts_raw);
         const offset_fraction = std.math.clamp(offset_fraction_raw, 0.0, 1.0);
-        for (mesh.vertices.items) |*vertex| {
-            const origin = vertex.cut_origin orelse continue;
-            const a = mesh.vertices.items[origin.edge[0]].position;
-            const b = mesh.vertices.items[origin.edge[1]].position;
-            vertex.position = lerp3(a, b, cutRatio(cuts, offset_fraction, origin.cut_no));
+        var cut_no: u32 = 0;
+        while (cut_no < cuts) : (cut_no += 1) {
+            for (mesh.vertices.items) |*vertex| {
+                const origin = vertex.cut_origin orelse continue;
+                if (origin.cut_no != cut_no) continue;
+                const a = mesh.vertices.items[origin.edge[0]].position;
+                const b = mesh.vertices.items[origin.edge[1]].position;
+                vertex.position = lerp3(a, b, cutRatio(cuts, offset_fraction, origin.cut_no));
+            }
+            // UVs are per FACE corner, so updating the shared vertex position is only
+            // half the preview. Each split piece retains the source-triangle provenance
+            // of its authored parent; resolve the two endpoint UVs inside that domain so
+            // seams on an adjacent face never leak across, then interpolate identically.
+            for (mesh.faces.items) |*face| {
+                if (!face.alive) continue;
+                for (face.vertices.items, 0..) |vertex_id, corner| {
+                    const origin = mesh.vertices.items[vertex_id].cut_origin orelse continue;
+                    if (origin.cut_no != cut_no) continue;
+                    const a_uv = mesh.uvInSourceDomain(face, origin.edge[0]) orelse continue;
+                    const b_uv = mesh.uvInSourceDomain(face, origin.edge[1]) orelse continue;
+                    face.uvs.items[corner] = lerp2(a_uv, b_uv, cutRatio(cuts, offset_fraction, origin.cut_no));
+                }
+            }
         }
+    }
+
+    fn uvInSourceDomain(mesh: *const Mesh, domain: *const Face, vertex_id: u32) ?Vec2 {
+        if (indexOf(domain.vertices.items, vertex_id)) |corner| return domain.uvs.items[corner];
+        for (mesh.faces.items) |*candidate| {
+            if (!candidate.alive or !sourceDomainsOverlap(domain, candidate)) continue;
+            if (indexOf(candidate.vertices.items, vertex_id)) |corner| return candidate.uvs.items[corner];
+        }
+        return null;
+    }
+
+    fn sourceDomainsOverlap(a: *const Face, b: *const Face) bool {
+        for (a.source_triangles.items) |source_a| {
+            for (b.source_triangles.items) |source_b| {
+                if (source_a == source_b) return true;
+            }
+        }
+        return false;
     }
 
     pub fn clearCutOrigins(mesh: *Mesh) void {
@@ -1166,6 +1207,8 @@ pub const Mesh = struct {
     pub fn lower(mesh: *const Mesh) !Lowered {
         var positions = std.ArrayListUnmanaged(f32).empty;
         defer positions.deinit(mesh.allocator);
+        var uvs = std.ArrayListUnmanaged(f32).empty;
+        defer uvs.deinit(mesh.allocator);
         var triangle_vertices = std.ArrayListUnmanaged([3]u32).empty;
         defer triangle_vertices.deinit(mesh.allocator);
         var groups = std.ArrayListUnmanaged(u32).empty;
@@ -1181,17 +1224,19 @@ pub const Mesh = struct {
             if (!face.alive or face.vertices.items.len < 3) continue;
             if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
-                try emitLoweredTri(mesh, face, tris[0], &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
-                try emitLoweredTri(mesh, face, tris[1], &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
             } else {
                 var corner: usize = 1;
                 while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
                 }
             }
         }
         const pos_owned = try positions.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(pos_owned);
+        const uv_owned = try uvs.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(uv_owned);
         const triangle_vertices_owned = try triangle_vertices.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(triangle_vertices_owned);
         const group_owned = try groups.toOwnedSlice(mesh.allocator);
@@ -1204,6 +1249,7 @@ pub const Mesh = struct {
         return .{
             .allocator = mesh.allocator,
             .positions = pos_owned,
+            .uvs = uv_owned,
             .triangle_vertices = triangle_vertices_owned,
             .groups = group_owned,
             .source_triangles = source_owned,
@@ -1218,6 +1264,7 @@ pub const Mesh = struct {
         face: *const Face,
         triangle: [3]usize,
         positions: *std.ArrayListUnmanaged(f32),
+        uvs: *std.ArrayListUnmanaged(f32),
         triangle_vertices: *std.ArrayListUnmanaged([3]u32),
         groups: *std.ArrayListUnmanaged(u32),
         sources: *std.ArrayListUnmanaged(u32),
@@ -1227,6 +1274,8 @@ pub const Mesh = struct {
         for (triangle) |corner| {
             const p = mesh.vertices.items[face.vertices.items[corner]].position;
             try positions.appendSlice(mesh.allocator, p[0..]);
+            const uv = if (corner < face.uvs.items.len) face.uvs.items[corner] else Vec2{ 0.5, 0.5 };
+            try uvs.appendSlice(mesh.allocator, uv[0..]);
         }
         try triangle_vertices.append(mesh.allocator, .{
             face.vertices.items[triangle[0]],
@@ -1429,6 +1478,37 @@ test "indexed loop cut follows a closed flared quad ring at edge ratios" {
         const y = lowered.positions[index + 1];
         if (y != 0 and y != 2) try std.testing.expectEqual(@as(f32, 1), y);
     }
+}
+
+test "lowered loop cut preserves and interpolates per-corner UVs" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var corner: usize = 0;
+    while (corner < fixture.verts.len / 8) : (corner += 1) {
+        fixture.verts[corner * 8 + 6] = fixture.verts[corner * 8 + 0];
+        fixture.verts[corner * 8 + 7] = fixture.verts[corner * 8 + 1];
+    }
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer mesh.deinit();
+    const selected = [_]bool{ true, true };
+    try std.testing.expect(try mesh.loopCut(selected[0..], 0, 1, 0.25));
+
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expectEqual(@as(usize, lowered.tri_count * 6), lowered.uvs.len);
+    var rendered_corner: usize = 0;
+    var saw_interpolated = false;
+    while (rendered_corner < lowered.tri_count * 3) : (rendered_corner += 1) {
+        const x = lowered.positions[rendered_corner * 3 + 0];
+        const y = lowered.positions[rendered_corner * 3 + 1];
+        try std.testing.expectApproxEqAbs(x, lowered.uvs[rendered_corner * 2 + 0], 0.0001);
+        try std.testing.expectApproxEqAbs(y, lowered.uvs[rendered_corner * 2 + 1], 0.0001);
+        if ((x > 0 and x < 1) or (y > 0 and y < 1)) saw_interpolated = true;
+    }
+    try std.testing.expect(saw_interpolated);
 }
 
 test "loop cut keeps every panel of a closed cylinder belt ordered" {
@@ -1640,6 +1720,11 @@ test "offset preview reuses topology and only recomputes cut vertices" {
     const fixture = try makeQuadStripSoup(allocator, quads[0..]);
     defer allocator.free(fixture.verts);
     defer allocator.free(fixture.groups);
+    var source_corner: usize = 0;
+    while (source_corner < fixture.verts.len / 8) : (source_corner += 1) {
+        fixture.verts[source_corner * 8 + 6] = fixture.verts[source_corner * 8 + 0];
+        fixture.verts[source_corner * 8 + 7] = fixture.verts[source_corner * 8 + 1];
+    }
     const selected = [_]bool{ true, true };
 
     var reused = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
@@ -1654,6 +1739,11 @@ test "offset preview reuses topology and only recomputes cut vertices" {
     try std.testing.expectEqual(fresh.vertices.items.len, reused.vertices.items.len);
     for (fresh.faces.items, reused.faces.items) |fresh_face, reused_face| {
         try std.testing.expectEqualSlices(u32, fresh_face.vertices.items, reused_face.vertices.items);
+        try std.testing.expectEqual(fresh_face.uvs.items.len, reused_face.uvs.items.len);
+        for (fresh_face.uvs.items, reused_face.uvs.items) |fresh_uv, reused_uv| {
+            try std.testing.expectApproxEqAbs(fresh_uv[0], reused_uv[0], 1e-6);
+            try std.testing.expectApproxEqAbs(fresh_uv[1], reused_uv[1], 1e-6);
+        }
     }
     for (fresh.vertices.items, reused.vertices.items) |fresh_vertex, reused_vertex| {
         for (0..3) |axis| try std.testing.expectApproxEqAbs(fresh_vertex.position[axis], reused_vertex.position[axis], 1e-6);

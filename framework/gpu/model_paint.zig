@@ -249,6 +249,91 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     rebuildLayoutInner(verts, vert_count, false);
 }
 
+/// Adopt structurally edited geometry whose indexed face table already carries the
+/// CURRENT atlas UVs. Rebuilds raycast/island metadata around those UVs while keeping
+/// the live raster byte-for-byte unchanged. This is the only safe preview/install
+/// path for topology edits: repacking here would destroy detailed paint before the
+/// stale-layout gate can ask the user to explicitly remake the atlas.
+pub fn setTargetPreservingAtlas(key_hash: u64, verts: []const f32, vert_count: u32, groups: ?[]const u32) bool {
+    setTargetPreservingAtlasInner(key_hash, verts, vert_count, groups) catch return false;
+    return true;
+}
+
+fn setTargetPreservingAtlasInner(key_hash: u64, verts: []const f32, vert_count: u32, groups: ?[]const u32) !void {
+    const live_rgba = g_rgba orelse return error.NoLiveAtlas;
+    if (g_layout == null or g_atlas_w == 0 or g_atlas_h == 0 or vert_count < 3 or vert_count % 3 != 0) return error.InvalidGeometry;
+    const need = @as(usize, vert_count) * 8;
+    if (verts.len < need) return error.InvalidGeometry;
+    const fc = vert_count / 3;
+    if (groups) |rows| if (rows.len < @as(usize, fc)) return error.InvalidGroups;
+
+    const positions_new = try alloc.alloc(f32, @as(usize, fc) * 9);
+    errdefer alloc.free(positions_new);
+    const normalized_uvs = try alloc.alloc(f32, @as(usize, fc) * 6);
+    defer alloc.free(normalized_uvs);
+    var face: u32 = 0;
+    while (face < fc) : (face += 1) {
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const source = (@as(usize, face) * 3 + corner) * 8;
+            const pos_target = (@as(usize, face) * 3 + corner) * 3;
+            const uv_target = (@as(usize, face) * 3 + corner) * 2;
+            positions_new[pos_target + 0] = verts[source + 0];
+            positions_new[pos_target + 1] = verts[source + 1];
+            positions_new[pos_target + 2] = verts[source + 2];
+            normalized_uvs[uv_target + 0] = verts[source + 6];
+            normalized_uvs[uv_target + 1] = verts[source + 7];
+        }
+    }
+
+    const carried_density = g_layout.?.density;
+    var layout_new = paint_islands.buildFromNormalizedUv(
+        alloc,
+        normalized_uvs,
+        groups,
+        g_atlas_w,
+        g_atlas_h,
+        carried_density,
+    ) orelse return error.InvalidUvs;
+    errdefer layout_new.deinit(alloc);
+
+    const island_count = layout_new.islands.len;
+    const starts_new = try alloc.alloc(u32, island_count + 1);
+    errdefer alloc.free(starts_new);
+    @memset(starts_new, 0);
+    face = 0;
+    while (face < fc) : (face += 1) starts_new[layout_new.tri_island[face] + 1] += 1;
+    var index: usize = 1;
+    while (index <= island_count) : (index += 1) starts_new[index] += starts_new[index - 1];
+    const triangles_new = try alloc.alloc(u32, fc);
+    errdefer alloc.free(triangles_new);
+    const cursor = try alloc.dupe(u32, starts_new[0..island_count]);
+    defer alloc.free(cursor);
+    face = 0;
+    while (face < fc) : (face += 1) {
+        const island = layout_new.tri_island[face];
+        triangles_new[cursor[island]] = face;
+        cursor[island] += 1;
+    }
+
+    // All allocations succeeded. Retire only topology-dependent state; the atlas
+    // allocation and every painted texel remain owned by this target.
+    dropAtlasCarry();
+    if (g_layout) |*layout| layout.deinit(alloc);
+    if (g_isl_start) |starts| alloc.free(starts);
+    if (g_isl_tris) |triangles| alloc.free(triangles);
+    if (g_positions) |positions_old| alloc.free(positions_old);
+    g_layout = layout_new;
+    g_isl_start = starts_new;
+    g_isl_tris = triangles_new;
+    g_positions = positions_new;
+    g_key_hash = key_hash;
+    g_facecount = fc;
+    g_rgba = live_rgba;
+    g_has_dirty = false;
+    markRows(0, g_atlas_h - 1);
+}
+
 /// Rebuild the island layout for the CURRENT target at the current density — the entry
 /// 3d.zig calls when the authored face groups land (they arrive after setTarget) or the
 /// density changes. Carries each face's base colour as a flat fill (sub-face strokes
@@ -1810,6 +1895,47 @@ test "island UVs: a grouped quad is ONE island and every vertex UV lands inside 
         try std.testing.expect(x >= @as(f32, @floatFromInt(isls[0].x)) and x <= @as(f32, @floatFromInt(isls[0].x + isls[0].w)));
         try std.testing.expect(y >= @as(f32, @floatFromInt(isls[0].y)) and y <= @as(f32, @floatFromInt(isls[0].y + isls[0].h)));
     }
+}
+
+test "topology adoption preserves the live atlas bytes and supplied UVs" {
+    var verts: [6 * 8]f32 = std.mem.zeroes([6 * 8]f32);
+    const points = [4][3]f32{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } };
+    const corners = [6]u32{ 0, 1, 2, 0, 2, 3 };
+    for (corners, 0..) |point, index| {
+        verts[index * 8 + 0] = points[point][0];
+        verts[index * 8 + 1] = points[point][1];
+        verts[index * 8 + 2] = points[point][2];
+    }
+    const initial_groups = [_]u32{ 4, 4 };
+    model_source.setFaceGroups(&initial_groups);
+    setTarget(7001, &verts, 6);
+    defer test_support.clearTargetAndSource();
+
+    const before_atlas = atlas() orelse return error.TestUnexpectedResult;
+    const before = try std.testing.allocator.dupe(u8, before_atlas.rgba);
+    defer std.testing.allocator.free(before);
+    if (g_rgba) |rgba| {
+        rgba[0] = 17;
+        rgba[1] = 33;
+        rgba[2] = 91;
+        @memcpy(before, rgba);
+    }
+
+    var edited: [12 * 8]f32 = undefined;
+    @memcpy(edited[0 .. 6 * 8], &verts);
+    @memcpy(edited[6 * 8 ..], &verts);
+    const supplied_uvs = edited;
+    const edited_groups = [_]u32{ 4, 4, 9, 9 };
+    try std.testing.expect(setTargetPreservingAtlas(7002, &edited, 12, &edited_groups));
+
+    const after = atlas() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(before_atlas.w, after.w);
+    try std.testing.expectEqual(before_atlas.h, after.h);
+    try std.testing.expectEqualSlices(u8, before, after.rgba);
+    try std.testing.expectEqualSlices(f32, &supplied_uvs, &edited);
+    try std.testing.expectEqual(@as(u32, 4), faceCount());
+    try std.testing.expect(isTarget(7002));
+    try std.testing.expectEqual(@as(usize, 2), g_layout.?.islands.len);
 }
 
 test "a dab straddling the quad diagonal paints CONTIGUOUS texels (anti-shredding)" {

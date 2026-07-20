@@ -748,6 +748,26 @@ fn appendTri(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32
     return appendVertex(list, a, n) and appendVertex(list, b, n) and appendVertex(list, c, n);
 }
 
+fn appendTriWithUvs(
+    list: *std.ArrayListUnmanaged(f32),
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    uvs: [3][2]f32,
+) bool {
+    const n = normalOf(a, b, c);
+    const positions = [3][3]f32{ a, b, c };
+    for (positions, 0..) |position, corner| {
+        const row = [_]f32{
+            position[0],    position[1],    position[2],
+            n[0],           n[1],           n[2],
+            uvs[corner][0], uvs[corner][1],
+        };
+        if (!appendFloats(list, &row)) return false;
+    }
+    return true;
+}
+
 fn triArea2(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
     const cr = vcross(vsub(b, a), vsub(c, a));
     return vdot(cr, cr);
@@ -819,6 +839,18 @@ fn applyExactFaceColors(colors: []const u8, face_count: u32) bool {
     return true;
 }
 
+/// Update the source-side representative colour table without flooding the paint
+/// atlas. Indexed topology installs keep the raster and UVs exactly; applyColors
+/// would flatten every detailed face back to this one centroid colour.
+fn applyExactSourceFaceColors(colors: []const u8, face_count: u32) bool {
+    const need = @as(usize, face_count) * 4;
+    if (colors.len != need) return false;
+    const destination = model_source.colors() orelse return false;
+    if (destination.len < need) return false;
+    @memcpy(destination[0..need], colors);
+    return true;
+}
+
 fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     const need = @as(usize, count) * 8;
     // count == 0 is a LEGITIMATE state (req_2806: deleting the last part empties the
@@ -852,6 +884,60 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     if (old_ranges) |r| model_source.setPartRanges(r);
     applyCarriedFaceColors(old_colors, count / 3);
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
+    return true;
+}
+
+/// Swap to indexed-lowered geometry without rebuilding or recolouring the live paint
+/// atlas. `new_verts` already carries the old atlas's interpolated UVs. The paint
+/// program and raster remain recoverable while painting is locked; an explicit atlas
+/// remake is the point that resets the now-stale strokes and derives a fresh layout.
+fn replaceActiveEditMeshPreservingAtlas(
+    new_verts: []const f32,
+    count: u32,
+    groups: ?[]const u32,
+    colors: []const u8,
+) bool {
+    const need = @as(usize, count) * 8;
+    if (count < 3 or count % 3 != 0 or new_verts.len < need) return false;
+    if (colors.len != @as(usize, count / 3) * 4 or model_paint.atlas() == null) return false;
+    if (groups) |rows| if (rows.len < @as(usize, count / 3)) return false;
+
+    const old_ranges: ?[]u32 = if (model_source.partRanges()) |ranges|
+        (std.heap.c_allocator.dupe(u32, ranges) catch null)
+    else
+        null;
+    defer if (old_ranges) |ranges| std.heap.c_allocator.free(ranges);
+    const old_hash = g_edit_key_hash;
+    g_edit_revision +%= 1;
+    const key = std.fmt.allocPrint(std.heap.c_allocator, "modelview-edit-{x}-{d}", .{ old_hash, g_edit_revision }) catch return false;
+    defer std.heap.c_allocator.free(key);
+    const edit_copy = std.heap.c_allocator.dupe(f32, new_verts[0..need]) catch return false;
+    var edit_copy_adopted = false;
+    defer if (!edit_copy_adopted) std.heap.c_allocator.free(edit_copy);
+    const key_copy = std.heap.c_allocator.dupe(u8, key) catch return false;
+    var key_copy_adopted = false;
+    defer if (!key_copy_adopted) std.heap.c_allocator.free(key_copy);
+    if (!stashHostMesh(key, new_verts[0..need], count)) return false;
+
+    // Restore any orange face tint into true paint while the OLD face indices and
+    // layout still own its saved patches. The preserved atlas must never capture UI.
+    mesh_edit.clearSelection();
+    if (!model_paint.setTargetPreservingAtlas(hashKey(key), new_verts, count, groups)) return false;
+    g_paint_layout_stale = true;
+
+    mesh_edit.reset();
+    clearActiveEditMesh();
+    g_edit_verts = edit_copy;
+    g_edit_key = key_copy;
+    g_edit_key_hash = hashKey(key);
+    g_edit_count = count;
+    edit_copy_adopted = true;
+    key_copy_adopted = true;
+
+    model_source.retain(key, new_verts[0..need], count);
+    if (groups) |rows| model_source.setFaceGroups(rows);
+    if (old_ranges) |ranges| model_source.setPartRanges(ranges);
+    if (!applyExactSourceFaceColors(colors, count / 3)) return false;
     return true;
 }
 
@@ -1535,7 +1621,7 @@ pub fn meshTopoLoopCut() bool {
 
     var snap = journalSnapshotCurrent("loop cut");
     const install_groups: ?[]const u32 = if (groups_arg != null) cut.groups else null;
-    const ok = lcInstallSoup(cut.positions, cut.tri_count, install_groups, cut_colors);
+    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut_colors);
     if (ok) {
         if (base_part) |bp| {
             _ = bp;
@@ -1606,11 +1692,11 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 
     var snap = journalSnapshotCurrent("symmetrize");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors);
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
-        // lcInstallSoup is shared with loop cut and deliberately enters face mode.
+        // The shared indexed-lowering install deliberately enters face mode.
         // Studio symmetrize instead preserves the active tool and clears its selection.
         mesh_edit.setMode(original_mode);
         mesh_edit.clearSelection();
@@ -1628,8 +1714,7 @@ const LcSession = struct {
     basic: bool,
     base_mesh: indexed_edit_mesh.Mesh,
     last_mesh: ?indexed_edit_mesh.Mesh,
-    base_pos: []f32, // positions-only soup at begin (tri_count * 9)
-    tri_count: u32,
+    base_paint_layout_stale: bool,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
     base_colors: []u8, // true RGBA per base face; previews inherit through src_face
     // Exact authored face selection at begin. A face is selected only when all render
@@ -1674,7 +1759,6 @@ fn lcFree() void {
     var s = g_lc orelse return;
     s.base_mesh.deinit();
     if (s.last_mesh) |*mesh| mesh.deinit();
-    std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
     std.heap.c_allocator.free(s.base_colors);
     std.heap.c_allocator.free(s.base_cut_mask);
@@ -1714,19 +1798,33 @@ fn lcPlanes(lo: f32, hi: f32, cuts: u32, offset: f32, out: []f32) u32 {
     return m;
 }
 
-/// Rebuild the interleaved edit mesh from a positions-only soup and install it —
-/// the shared tail of every session step (preview, cancel-restore). appendTri
-/// recomputes normals; UVs are rewritten on adopt. Stays in face mode.
-fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32, colors: []const u8) bool {
-    if (colors.len != @as(usize, tri_count) * 4) return false;
+/// Derive the render soup from indexed positions + per-corner UVs and install it
+/// without repacking the live paint atlas. Normals are derived here; topology and UV
+/// identity remain owned by indexed_edit_mesh. Stays in face mode.
+fn lcInstallLowered(
+    pos: []const f32,
+    uvs: []const f32,
+    tri_count: u32,
+    groups: ?[]const u32,
+    colors: []const u8,
+) bool {
+    if (pos.len != @as(usize, tri_count) * 9 or
+        uvs.len != @as(usize, tri_count) * 6 or
+        colors.len != @as(usize, tri_count) * 4) return false;
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
         const b = @as(usize, t) * 9;
+        const uv = @as(usize, t) * 6;
         const p0: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
         const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
         const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
-        if (!appendTri(&out, p0, p1, p2)) {
+        const tri_uvs = [3][2]f32{
+            .{ uvs[uv + 0], uvs[uv + 1] },
+            .{ uvs[uv + 2], uvs[uv + 3] },
+            .{ uvs[uv + 4], uvs[uv + 5] },
+        };
+        if (!appendTriWithUvs(&out, p0, p1, p2, tri_uvs)) {
             out.deinit(std.heap.c_allocator);
             return false;
         }
@@ -1736,12 +1834,7 @@ fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32, colors:
         return false;
     };
     defer std.heap.c_allocator.free(owned);
-    if (!replaceActiveEditMesh(owned, tri_count * 3)) return false;
-    if (!applyExactFaceColors(colors, tri_count)) return false;
-    if (groups) |g| {
-        model_source.setFaceGroups(g);
-        _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
-    }
+    if (!replaceActiveEditMeshPreservingAtlas(owned, tri_count * 3, groups, colors)) return false;
     mesh_edit.setMode(.face);
     return true;
 }
@@ -1773,50 +1866,24 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     }
     if (selected_in_scope == 0) return null;
 
-    // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
-    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return null;
-    {
-        var f: u32 = 0;
-        while (f < tri_count) : (f += 1) {
-            var k: u32 = 0;
-            while (k < 3) : (k += 1) {
-                const src = (@as(usize, f) * 3 + k) * 8;
-                const dst = (@as(usize, f) * 3 + k) * 3;
-                if (src + 2 >= verts.len) {
-                    std.heap.c_allocator.free(pos);
-                    return null;
-                }
-                pos[dst + 0] = verts[src + 0];
-                pos[dst + 1] = verts[src + 1];
-                pos[dst + 2] = verts[src + 2];
-            }
-        }
-    }
-
     var groups: ?[]u32 = null;
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
-        const g = std.heap.c_allocator.alloc(u32, tri_count) catch {
-            std.heap.c_allocator.free(pos);
-            return null;
-        };
+        const g = std.heap.c_allocator.alloc(u32, tri_count) catch return null;
         var i: u32 = 0;
         while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
         groups = g;
     }
 
     const base_cut_mask = std.heap.c_allocator.dupe(bool, mask[0..tri_count]) catch {
-        std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         return null;
     };
     const base_colors = collectCurrentFaceColors() orelse {
-        std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         return null;
     };
     if (base_colors.len != @as(usize, tri_count) * 4) {
-        std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
@@ -1827,7 +1894,6 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     const groups_arg: ?[]const u32 = if (groups) |g| g else null;
     const parts_arg: ?[]const u32 = if (base_face_part) |p| p else null;
     var base_mesh = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg) orelse {
-        std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
@@ -1836,7 +1902,6 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     };
     const seed = base_mesh.seedInfo(base_cut_mask) orelse {
         base_mesh.deinit();
-        std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
@@ -1848,8 +1913,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         .basic = basic,
         .base_mesh = base_mesh,
         .last_mesh = null,
-        .base_pos = pos,
-        .tri_count = tri_count,
+        .base_paint_layout_stale = g_paint_layout_stale,
         .base_groups = groups,
         .base_colors = base_colors,
         .base_cut_mask = base_cut_mask,
@@ -1915,7 +1979,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
     }
     const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
-    if (!lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors)) return false;
+    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors)) return false;
     if (s.last_mesh) |*mesh| mesh.deinit();
     s.last_mesh = preview;
     preview = .{ .allocator = std.heap.c_allocator };
@@ -1963,7 +2027,13 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         mesh_edit.setMode(.face);
     } else {
         const groups_arg: ?[]const u32 = if (s.base_groups) |g| g else null;
-        ok = lcInstallSoup(s.base_pos, s.tri_count, groups_arg, s.base_colors);
+        if (s.base_mesh.lower()) |lowered_value| {
+            var lowered = lowered_value;
+            defer lowered.deinit();
+            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, s.base_colors);
+        } else |_| {
+            ok = false;
+        }
         if (ok) {
             if (s.base_mesh.clone()) |restored_value| {
                 var restored = restored_value;
@@ -1974,12 +2044,12 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
                     adoptIndexedEditMesh(&restored, &lowered);
                 } else |_| {}
             } else |_| {}
+            g_paint_layout_stale = s.base_paint_layout_stale;
         }
         journalDiscard(&s.snap);
     }
     s.base_mesh.deinit();
     if (s.last_mesh) |*mesh| mesh.deinit();
-    std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
     std.heap.c_allocator.free(s.base_colors);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
@@ -2852,12 +2922,27 @@ pub fn meshRedoLabel() []const u8 {
 fn journalInstall(e: *const JournalEntry) bool {
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
+    const invalidates_layout = if (mesh_journal_log.actionKindForLabel(e.label)) |kind|
+        mesh_journal_log.actionInvalidatesPaintLayout(kind)
+    else
+        false;
+    // Indexed structural installs keep the atlas raster alive and journal snapshots
+    // retain their exact interleaved UVs. Undo/redo must use those UVs too; running the
+    // generic replace here would repack before the snapshot's stale flag is restored.
+    const preserve_indexed_atlas = invalidates_layout and
+        e.count >= 3 and
+        model_paint.atlas() != null and
+        e.colors != null;
     // Part-only journals add/remove whole stable groups; survivor paint identity is
     // unchanged, so undo/redo must preserve exact pixels AND the durable program.
     // Other topology journals may rewrite identity and keep the conservative reset.
-    const paint_stable = paintStableJournalLabel(e.label);
+    const paint_stable = !preserve_indexed_atlas and paintStableJournalLabel(e.label);
     if (paint_stable) beginPaintStableReplace();
-    if (!replaceActiveEditMesh(vcopy, e.count)) {
+    const installed = if (preserve_indexed_atlas)
+        replaceActiveEditMeshPreservingAtlas(vcopy, e.count, e.groups, e.colors.?)
+    else
+        replaceActiveEditMesh(vcopy, e.count);
+    if (!installed) {
         if (paint_stable) cancelPaintStableReplace();
         return false;
     }
@@ -2887,7 +2972,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     }
     model_source.setPartRanges(e.part_ranges orelse &.{});
     if (e.colors) |c| {
-        model_paint.applyColors(c);
+        if (!preserve_indexed_atlas) model_paint.applyColors(c);
         if (model_source.colors()) |src| {
             const n = @min(src.len, c.len);
             if (n > 0) @memcpy(src[0..n], c[0..n]);
@@ -2898,7 +2983,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     // Snapshots taken while the minting bug was live carry overlapped spans (req_3029)
     // — undoing into one must heal it, not resurrect the corruption.
     _ = ensureDisjointPartRanges("undo/redo restore");
-    if (e.count > 0) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
+    if (e.count > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     g_paint_layout_stale = e.paint_layout_stale;
     return true;
 }
@@ -3472,7 +3557,7 @@ pub fn meshMergeSelectedFaces() bool {
     var snap = journalSnapshotCurrent("merge faces");
     mesh_edit.clearSelection();
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallSoup(lowered.positions, lowered.tri_count, install_groups, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors);
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
@@ -5858,6 +5943,17 @@ pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
     // Atlas prompt, which can open while faces are still selected).
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
+    if (g_paint_layout_stale) {
+        // This is the user's explicit Remake Atlas decision. Until this exact door,
+        // structural edits retain their old UVs/raster for recovery; now derive a
+        // fresh packed layout for the current authored faces before laying the base.
+        const verts = g_edit_verts orelse return false;
+        paint_program.snapshotLayersForCarry();
+        paint_program.reset();
+        model_paint.rebuildLayout(verts, g_edit_count);
+        const face_count = g_edit_count / 3;
+        if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    }
     model_paint.setBase(m, .{ r, g, b, 255 });
     model_paint.clearAtlas();
     g_paint_layout_stale = false;
@@ -5998,6 +6094,10 @@ pub fn setPaintDetail(px: i32) i32 {
 pub fn refreshPaintLayout() bool {
     const verts = g_edit_verts orelse return false;
     if (g_edit_count == 0 or !model_paint.hasTarget()) return false;
+    // Structural topology installs already carry valid old-atlas UVs for display and
+    // recovery. Group/range bookkeeping must not silently repack them; only the
+    // explicit Remake Atlas door above is authorized to destroy that raster.
+    if (g_paint_layout_stale) return false;
     // The authored grouping just (re)landed — the stroke program's hide-stable face
     // keys (group + intra-group ordinal) must recompute against it (req_2672).
     paint_program.invalidateFaceKeys();
