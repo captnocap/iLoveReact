@@ -685,6 +685,16 @@ pub fn faceInScopePub(f: u32) bool {
     return faceInScope(f);
 }
 
+/// Apply the active outliner scope to a DISPLAYED-face raycast result.  Paint and
+/// edit picking share the same part boundary: a hit on another part is a miss,
+/// never permission to mutate that part (or to paint through it onto geometry
+/// behind it).  Keeping this policy here prevents the fill/brush/sample entry
+/// points from quietly drifting apart again.
+pub fn scopedFaceHit(face: i32) i32 {
+    if (face < 0) return -1;
+    return if (faceInScope(@intCast(face))) face else -1;
+}
+
 /// Build the per-vert / per-edge scope masks for the active scope (lazy; keyed on
 /// facecount+ranges). A vert is in scope if any in-scope face touches it; an edge if both
 /// endpoints are. No-op when the scope is inactive or the topology isn't welded yet.

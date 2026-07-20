@@ -3,6 +3,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView, { type PartRange } from './ModelView';
 import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/assetCatalog';
+import type { ModelOutlinerDragItem, ModelOutlinerDropTarget } from '../data/modelOutliner';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -20,6 +21,7 @@ export type OutlinerHandlers = {
   onDissolvePartGroup: (groupId: string) => void;
   onGroupSelectedParts: () => void;
   onUngroupSelectedParts: () => void;
+  onMoveOutlinerItem: (item: ModelOutlinerDragItem, target: ModelOutlinerDropTarget) => void;
   onAddPart: (kind: PrimitiveKind) => void;
   // Duplicate a part in place (host copies geometry + paint; the row gains a twin).
   onDuplicatePart: (id: string) => void;

@@ -73,10 +73,12 @@ import {
 import {
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
   MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_OUTLINER_MOVE_COMMAND_ID,
   MODEL_OUTLINER_ACTION_COMMAND_IDS,
   MODEL_PART_RENAME_COMMAND_ID,
   MODEL_PARTS_GROUP_COMMAND_ID,
   MODEL_PARTS_UNGROUP_COMMAND_ID,
+  planOutlinerMove,
   ModelOutlinerRejected,
   planGroupDissolve,
   planGroupRename,
@@ -150,6 +152,7 @@ export {
 export {
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
   MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_OUTLINER_MOVE_COMMAND_ID,
   MODEL_PART_RENAME_COMMAND_ID,
   MODEL_PARTS_GROUP_COMMAND_ID,
   MODEL_PARTS_UNGROUP_COMMAND_ID,
@@ -859,6 +862,14 @@ export function createEditorApplicationCommands(
     return planGroupDissolve(adapter.modelOutliner.read(), {
       modelId: value.modelId as string,
       groupId: value.groupId as string,
+    });
+  }));
+  outlinerRegistration(MODEL_OUTLINER_MOVE_COMMAND_ID, 'Move Model Outliner Item', 'GripVertical', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planOutlinerMove(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      item: value.item as any,
+      target: value.target as any,
     });
   }));
 

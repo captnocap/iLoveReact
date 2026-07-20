@@ -53,11 +53,12 @@ test('RJMD v2 rejects a non-triangle-aligned glass boundary', () => {
 
 test('parts metadata preserves organizational groups while ranking by host range', () => {
   const rows = partsMetaFromRows([
-    { name: 'divider', color: '#bbb', visible: true, lo: 8, groupId: 'bridge', groupName: 'Bridge deck' },
-    { name: 'deck', color: '#aaa', visible: true, lo: 2, groupId: 'bridge', groupName: 'Bridge deck' },
+    { name: 'divider', color: '#bbb', visible: true, lo: 8, groupId: 'rails', groupName: 'Rails', groupPath: [{ id: 'bridge', name: 'Bridge' }, { id: 'rails', name: 'Rails' }], outlinerOrder: 0 },
+    { name: 'deck', color: '#aaa', visible: true, lo: 2, groupId: 'bridge', groupName: 'Bridge', groupPath: [{ id: 'bridge', name: 'Bridge' }], outlinerOrder: 1 },
   ]);
   assert(rows[0]?.name === 'deck' && rows[1]?.name === 'divider', 'host-range ranking changed');
-  assert(rows.every((row) => row.groupId === 'bridge' && row.groupName === 'Bridge deck'), 'group metadata was stripped from parts.json rows');
+  assert(rows[1]?.groupPath?.map((group) => group.id).join('/') === 'bridge/rails', 'nested group metadata was stripped from parts.json rows');
+  assert(rows[0]?.outlinerOrder === 1 && rows[1]?.outlinerOrder === 0, 'display order was rewritten to host range rank');
 });
 
 test('a degraded host cannot overwrite a multi-part mesh document', () => {

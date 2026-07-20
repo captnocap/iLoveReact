@@ -5,6 +5,7 @@ import {
   modelOutlinerNote,
   planGroupDissolve,
   planGroupRename,
+  planOutlinerMove,
   planPartRename,
   planPartsGroup,
   planPartsUngroup,
@@ -50,6 +51,21 @@ test('adding loose parts to one selected group reuses that group identity', () =
   const result = planPartsGroup(base, { modelId: 'model-a', partIds: ['a', 'b'] });
   assert(result.transaction.groupId === 'g' && result.next.nextSequence === 20, 'existing group was replaced instead of extended');
   assert(result.next.parts[1]?.groupName === 'Bridge', 'loose row did not join the group');
+});
+
+test('outliner move is one exact journal transaction and nested dissolve keeps children', () => {
+  const base = snapshot([
+    part('a', 'Loose'),
+    { ...part('b', 'Door', 'body', 'Body'), groupPath: [{ id: 'body', name: 'Body' }] },
+    { ...part('c', 'Lamp', 'lights', 'Lights'), groupPath: [{ id: 'lights', name: 'Lights' }] },
+  ]);
+  const moved = planOutlinerMove(base, {
+    modelId: 'model-a', item: { kind: 'group', id: 'lights' }, target: { kind: 'group', id: 'body', position: 'inside' },
+  });
+  assert(moved.transaction.action === 'outliner.move' && moved.transaction.before[2]?.groupId === 'lights', 'move did not retain an exact inverse');
+  assert(moved.next.parts.find((row) => row.id === 'c')?.groupPath?.map((g) => g.id).join('/') === 'body/lights', 'move plan flattened nested folder');
+  const dissolved = planGroupDissolve(moved.next, { modelId: 'model-a', groupId: 'body' });
+  assert(dissolved.next.parts.find((row) => row.id === 'c')?.groupPath?.map((g) => g.id).join('/') === 'lights', 'dissolving parent destroyed child folder');
 });
 
 test('invalid and inert requests reject before a mutation plan exists', () => {

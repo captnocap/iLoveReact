@@ -43,7 +43,16 @@ export type PackageMeshDoc = {
 };
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
-export type MeshDocPartMeta = { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string };
+export type MeshDocPartMeta = {
+  name: string;
+  color: string;
+  visible: boolean;
+  kind?: string;
+  groupId?: string;
+  groupName?: string;
+  groupPath?: { id: string; name: string }[];
+  outlinerOrder?: number;
+};
 
 const RJMD_MAGIC = 0x444d4a52; // 'RJMD' little-endian
 const DOC_BLOB = 'mesh/doc.blob';
@@ -336,11 +345,20 @@ export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'f
 
 /** Rank-order live outliner rows into meshdoc part metadata (ascending lo — the same
  *  order the host reports ranges in). */
-export function partsMetaFromRows(rows: readonly { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string; lo?: number }[]): MeshDocPartMeta[] {
+export function partsMetaFromRows(rows: readonly { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string; groupPath?: { id: string; name: string }[]; outlinerOrder?: number; lo?: number }[]): MeshDocPartMeta[] {
   return rows
     .slice()
     .sort((a, b) => (a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER))
-    .map((p) => ({ name: p.name, color: p.color, visible: p.visible, kind: p.kind, groupId: p.groupId, groupName: p.groupName }));
+    .map((p, rangeRank) => ({
+      name: p.name,
+      color: p.color,
+      visible: p.visible,
+      kind: p.kind,
+      groupId: p.groupId,
+      groupName: p.groupName,
+      groupPath: p.groupPath,
+      outlinerOrder: p.outlinerOrder ?? rangeRank,
+    }));
 }
 
 /** Per-range bounds centers, rank-ordered to match `doc.ranges` — the MEASURED

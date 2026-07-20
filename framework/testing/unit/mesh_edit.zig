@@ -17,6 +17,20 @@ test "meshdoc range table must exactly match the declared Outliner count" {
     try testing.expect(!mesh_edit.partRangesValid(empty[0..], 1));
 }
 
+test "paint face hits cannot cross the active outliner scope" {
+    var soup = [_]f32{0} ** (6 * 8);
+    mesh_edit.test_support.loadGroupedSoup(3238, soup[0..], 6, &.{ 4, 9 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setEditScope(4, 5);
+    try testing.expectEqual(@as(i32, 0), mesh_edit.scopedFaceHit(0));
+    try testing.expectEqual(@as(i32, -1), mesh_edit.scopedFaceHit(1));
+    try testing.expectEqual(@as(i32, -1), mesh_edit.scopedFaceHit(-1));
+
+    mesh_edit.setEditScope(0, 0);
+    try testing.expectEqual(@as(i32, 1), mesh_edit.scopedFaceHit(1));
+}
+
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
     var verts = [_]f32{
         // Selected triangle: +Z winding, distinct UVs on every corner.

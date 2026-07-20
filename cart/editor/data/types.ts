@@ -24,6 +24,7 @@ export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Win
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
+export type ModelPartGroupRef = { id: string; name: string };
 // One sub-mesh of a multi-part model — the outliner concept ported from the Studio
 // (StudioPart). A model is a list of parts, each its own EditMesh; they compose into ONE
 // host mesh (composeModelParts) where each part owns a contiguous face-group range so the
@@ -36,6 +37,12 @@ export type ModelPart = {
   // The label is repeated so parts.json + the host journal need no parallel group table.
   groupId?: string;
   groupName?: string;
+  // Canonical root→leaf folder ancestry.  Legacy one-level rows only have
+  // groupId/groupName; readers lift those fields into a one-entry path.
+  groupPath?: ModelPartGroupRef[];
+  // Display order is independent from range rank. parts.json stays range-ranked
+  // so metadata cannot detach from geometry, then cold-open sorts by this field.
+  outlinerOrder?: number;
   // The primitive it was spawned from (naming/icons); absent for a Studio-authored part,
   // which is an arbitrary mesh, not a primitive.
   kind?: PrimitiveKind;

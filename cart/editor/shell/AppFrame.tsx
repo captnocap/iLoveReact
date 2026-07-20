@@ -125,10 +125,19 @@ import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
-import { nextDuplicateGroupName, nextDuplicatePartName } from '../data/modelOutliner';
+import {
+  groupPathById,
+  nextDuplicateGroupName,
+  nextDuplicatePartName,
+  partGroupPath,
+  partsInGroup,
+  type ModelOutlinerDragItem,
+  type ModelOutlinerDropTarget,
+} from '../data/modelOutliner';
 import {
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
   MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_OUTLINER_MOVE_COMMAND_ID,
   MODEL_PART_RENAME_COMMAND_ID,
   MODEL_PARTS_GROUP_COMMAND_ID,
   MODEL_PARTS_UNGROUP_COMMAND_ID,
@@ -3317,11 +3326,16 @@ export default function AppFrame() {
    *  mode row is exclusive; an outliner click mid-paint scopes without selecting). */
   const pushPartSetToHost = (s: EditorState, parts: ModelPart[], ids: string[], primaryId: string) => {
     const host = globalThis as any;
-    const ranges = ids
+    const selectedRanges = ids
       .map((sid) => { const p = parts.find((pp) => pp.id === sid); return p ? partRange(p) : null; })
       .filter((r): r is { lo: number; hi: number } => r !== null);
     const prim = parts.find((p) => p.id === primaryId);
     host.__modelActivePartRange = prim ? partRange(prim) : null; // the UV filter's truth (req_2619 P)
+    // Paint is intentionally single-outliner even when a modeling multi-set is
+    // highlighted. A union scope would make one stroke legally cross part
+    // boundaries; the focused primary is the complete paint target contract.
+    const primaryRange = prim ? partRange(prim) : null;
+    const ranges = s.modelTool.paint && primaryRange ? [primaryRange] : selectedRanges;
     if (ranges.length === 0) return;
     if (ranges.length === 1) {
       host.__mesh_edit_scope?.(ranges[0]!.lo, ranges[0]!.hi);
@@ -3330,7 +3344,7 @@ export default function AppFrame() {
       ranges.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
       host.__mesh_edit_scope_ranges?.(pairs);
     }
-    if (s.modelTool.paint) return; // paint owns the surface — scope only (req_2662)
+    if (s.modelTool.paint) return; // paint owns the surface — primary scope only
     // Selecting the parts' faces is a FACE-mode gesture — the host door flips its pick
     // mode to face. In vertex/edge mode focus only scopes (dots/edges restrict to the
     // set), so the toolbar's mode and the host's pick mode never diverge (req_2645 SS).
@@ -3371,6 +3385,21 @@ export default function AppFrame() {
     const bridge = (globalThis as any).__modelFocusBridge;
     if (bridge?.paintLive) bridge.refreshUv?.();
   };
+  const selectPartRef = useRef(selectPart);
+  selectPartRef.current = selectPart;
+  useEffect(() => {
+    // Host part indices are RANGE rank, not current outliner display order.  A
+    // drag-reordered list therefore maps through lo before handing focus to the
+    // ordinary row-selection path (which synchronously installs the new scope).
+    (globalThis as any).__meshEditFocusPart = (partIndex: number) => {
+      const current = stateRef.current;
+      const modelId = activePartsModelId(current);
+      const ranked = modelId ? (current.modelParts[modelId] ?? []).slice().sort((a, b) => (a.lo ?? Infinity) - (b.lo ?? Infinity)) : [];
+      const part = ranked[partIndex | 0];
+      if (part?.visible) selectPartRef.current(part.id);
+    };
+    return () => { delete (globalThis as any).__meshEditFocusPart; };
+  }, []);
   // A structural flow (add/dup/delete/import/undo) re-points the active part OUTSIDE
   // selectPart — collapse the multi-set to the new active so a stale set can't keep
   // group verbs firing on rows the user no longer sees selected.
@@ -3386,6 +3415,13 @@ export default function AppFrame() {
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === state.modelActivePartId) : null;
     (globalThis as any).__modelActivePartRange = part ? partRange(part) : null;
   }, [state.modelActivePartId, state.modelParts, state.activeWorkspaceDocumentId]);
+  useEffect(() => {
+    if (!state.modelTool.paint) return;
+    const mid = activePartsModelId(state);
+    const part = mid ? (state.modelParts[mid] ?? []).find((row) => row.id === state.modelActivePartId) : null;
+    const range = part ? partRange(part) : null;
+    if (range) (globalThis as any).__mesh_edit_scope?.(range.lo, range.hi);
+  }, [state.modelTool.paint, state.modelActivePartId, state.activeWorkspaceDocumentId]);
   const renamePart = (id: string, rawName: string) => {
     const mid = activePartsModelId(state);
     invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId: mid ?? '', partId: id, name: rawName }, 'focus-panel');
@@ -3398,14 +3434,15 @@ export default function AppFrame() {
   const selectPartGroup = (groupId: string) => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const members = parts.filter((part) => part.groupId === groupId);
+    const members = partsInGroup(parts, groupId);
+    const groupName = groupPathById(parts, groupId)?.at(-1)?.name ?? 'group';
     const visibleIds = members.filter((part) => part.visible).map((part) => part.id);
     if (!mid || members.length === 0) {
       setState((prev) => ({ ...prev, status: 'part group not found' }));
       return;
     }
     if (visibleIds.length === 0) {
-      setState((prev) => ({ ...prev, status: `${members[0]!.groupName ?? 'group'} is hidden — show it before editing` }));
+      setState((prev) => ({ ...prev, status: `${groupName} is hidden — show it before editing` }));
       return;
     }
     const primary = visibleIds.includes(state.modelActivePartId ?? '') ? state.modelActivePartId! : visibleIds[visibleIds.length - 1]!;
@@ -3414,7 +3451,7 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       modelActivePartId: primary,
-      status: `selected ${visibleIds.length} part${visibleIds.length === 1 ? '' : 's'} in ${members[0]!.groupName ?? 'group'}${visibleIds.length < members.length ? ' — hidden members excluded' : ''}`,
+      status: `selected ${visibleIds.length} part${visibleIds.length === 1 ? '' : 's'} in ${groupName}${visibleIds.length < members.length ? ' — hidden members excluded' : ''}`,
     }));
   };
 
@@ -3440,6 +3477,11 @@ export default function AppFrame() {
   const dissolvePartGroup = (groupId: string) => {
     const mid = activePartsModelId(state);
     invokeApplicationCommand(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId: mid ?? '', groupId }, 'focus-panel');
+  };
+
+  const moveOutlinerItem = (item: ModelOutlinerDragItem, target: ModelOutlinerDropTarget) => {
+    const mid = activePartsModelId(state);
+    invokeApplicationCommand(MODEL_OUTLINER_MOVE_COMMAND_ID, { modelId: mid ?? '', item, target }, 'focus-panel');
   };
 
   const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string, source = 'dock') => {
@@ -3487,13 +3529,13 @@ export default function AppFrame() {
   const toggleVisiblePartGroup = (groupId: string) => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const members = parts.filter((part) => part.groupId === groupId);
+    const members = partsInGroup(parts, groupId);
     if (!mid || members.length === 0) {
       setState((prev) => ({ ...prev, status: 'part group not found' }));
       return;
     }
     const hide = members.some((part) => part.visible);
-    applyPartVisibility(mid, parts, members.map((part) => part.id), hide, members[0]!.groupName ?? 'group');
+    applyPartVisibility(mid, parts, members.map((part) => part.id), hide, groupPathById(parts, groupId)?.at(-1)?.name ?? 'group');
   };
   const deletePart = (id: string, source = 'dock') => {
     const mid = activePartsModelId(state);
@@ -3588,7 +3630,7 @@ export default function AppFrame() {
   const duplicatePartRows = (
     rows: ModelPart[],
     mirrorAxis: number,
-    groupCopy?: { id: string; name: string; sourceName: string },
+    groupCopy?: { id: string; name: string; sourceName: string; pathByPartId: Map<string, { id: string; name: string }[]> },
     source = 'dock',
   ) => {
     const mid = activePartsModelId(state);
@@ -3621,6 +3663,8 @@ export default function AppFrame() {
       const duplicateName = nextDuplicatePartName(part.name, usedNames, qualifier);
       usedNames.push(duplicateName);
       const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
+      const copiedPath = groupCopy?.pathByPartId.get(part.id) ?? partGroupPath(part);
+      const copiedLeaf = copiedPath[copiedPath.length - 1];
       placedRows.push({
         id: `part:dup:${seq++}`,
         name: duplicateName,
@@ -3629,8 +3673,10 @@ export default function AppFrame() {
         visible: true,
         color: part.color,
         lift: part.lift,
-        groupId: groupCopy?.id ?? part.groupId,
-        groupName: groupCopy?.name ?? part.groupName,
+        groupId: copiedLeaf?.id,
+        groupName: copiedLeaf?.name,
+        groupPath: copiedPath.length ? copiedPath : undefined,
+        outlinerOrder: parts.length + placedRows.length,
         lo: r.lo,
         hi: r.hi,
       });
@@ -3686,26 +3732,51 @@ export default function AppFrame() {
   const duplicatePartGroup = (groupId: string) => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const members = parts.filter((part) => part.groupId === groupId);
+    const members = partsInGroup(parts, groupId);
     if (!mid || members.length === 0) {
       setState((prev) => ({ ...prev, status: 'part group not found' }));
       return;
     }
     const blocked = members.find((part) => !part.visible || !partRange(part));
+    const groupLabel = groupPathById(parts, groupId)?.at(-1)?.name ?? 'group';
     if (blocked) {
       setState((prev) => ({
         ...prev,
         status: !blocked.visible
-          ? `cannot duplicate ${members[0]!.groupName ?? 'group'} while ${blocked.name} is hidden — show the whole group first`
-          : `cannot duplicate ${members[0]!.groupName ?? 'group'} — ${blocked.name} has no stamped range`,
+          ? `cannot duplicate ${groupLabel} while ${blocked.name} is hidden — show the whole group first`
+          : `cannot duplicate ${groupLabel} — ${blocked.name} has no stamped range`,
       }));
       return;
     }
-    const sourceName = members[0]!.groupName ?? 'Group';
+    const sourceName = groupPathById(parts, groupId)?.at(-1)?.name ?? 'Group';
+    const copiedGroupId = `part-group:${state.seq}`;
+    const copiedGroupName = nextDuplicateGroupName(sourceName, parts);
+    const descendantIds = new Map<string, string>();
+    const pathByPartId = new Map<string, { id: string; name: string }[]>();
+    let descendantSequence = 0;
+    for (const member of members) {
+      const path = partGroupPath(member);
+      const at = path.findIndex((group) => group.id === groupId);
+      if (at < 0) continue;
+      const copied = [
+        ...path.slice(0, at),
+        { id: copiedGroupId, name: copiedGroupName },
+        ...path.slice(at + 1).map((group) => {
+          let id = descendantIds.get(group.id);
+          if (!id) {
+            id = `part-group:dup:${state.seq}:${descendantSequence++}`;
+            descendantIds.set(group.id, id);
+          }
+          return { id, name: group.name };
+        }),
+      ];
+      pathByPartId.set(member.id, copied);
+    }
     duplicatePartRows(members, -1, {
-      id: `part-group:${state.seq}`,
-      name: nextDuplicateGroupName(sourceName, parts),
+      id: copiedGroupId,
+      name: copiedGroupName,
       sourceName,
+      pathByPartId,
     });
   };
 
@@ -4045,7 +4116,7 @@ export default function AppFrame() {
         if (active && active.lo != null && active.hi != null) {
           (globalThis as any).__modelActivePartRange = { lo: active.lo, hi: active.hi };
           const sel = selectedPartIdsRef.current.filter((sid) => stamped.some((p) => p.id === sid));
-          if (sel.length > 1) {
+          if (!prev.modelTool.paint && sel.length > 1) {
             const pairs: number[] = [];
             for (const sid of sel) {
               const p = stamped.find((pp) => pp.id === sid);
@@ -4281,6 +4352,9 @@ export default function AppFrame() {
     setTimeout(runNext, 1200); // after RJIT_MODELDOC's document mount + first frames
     return undefined;
   }, []);
+  const outlinerClipboardRef = useRef<{ modelId: string; partIds: string[] } | null>(null);
+  const duplicateOutlinerRowsRef = useRef((rows: ModelPart[]) => duplicatePartRows(rows, -1, undefined, 'hotkey'));
+  duplicateOutlinerRowsRef.current = (rows) => duplicatePartRows(rows, -1, undefined, 'hotkey');
   // Subscribed DIRECTLY to the __keydown bus and normalized through modifiersFromKeyEvent:
   // the winning key bridge (useIFTTT's) emits ctrlKey/shiftKey flags with no `mods` object,
   // so useModifiers.onKeyDown handed every chord all-false modifiers — Ctrl+Z arrived as
@@ -4313,6 +4387,30 @@ export default function AppFrame() {
       if (key.length === 1 || ['enter', 'delete', 'backspace', 'tab', 'space'].includes(key)) {
         setState((prev) => ({ ...prev, status: `resolve ${block.label} first — finish or cancel it before doing anything else` }));
       }
+      return;
+    }
+    // Outliner-native clipboard. Geometry remains host-resident: copy records
+    // stable part ids and paste invokes the same paint-carrying host duplicate
+    // operation as the row button. Ctrl+D is the direct, one-keystroke twin.
+    if (activeSurface(s) === 'model' && mods.ctrl && !mods.alt && (key === 'c' || key === 'v' || key === 'd')) {
+      const modelId = activePartsModelId(s);
+      const parts = modelId ? (s.modelParts[modelId] ?? []) : [];
+      if (!modelId || parts.length === 0) return;
+      if (key === 'c') {
+        const partIds = effectiveSelectedIds(s, parts, selectedPartIdsRef.current);
+        outlinerClipboardRef.current = { modelId, partIds };
+        setState((prev) => ({ ...prev, status: `copied ${partIds.length} outliner part${partIds.length === 1 ? '' : 's'} — Ctrl+V to paste` }));
+        return;
+      }
+      const clip = key === 'd'
+        ? { modelId, partIds: effectiveSelectedIds(s, parts, selectedPartIdsRef.current) }
+        : outlinerClipboardRef.current;
+      if (!clip || clip.modelId !== modelId) {
+        setState((prev) => ({ ...prev, status: 'paste needs copied outliner parts from this model' }));
+        return;
+      }
+      const rows = clip.partIds.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
+      if (rows.length) duplicateOutlinerRowsRef.current(rows);
       return;
     }
     const id = commandForKeyEvent(s, key, mods);
@@ -4458,9 +4556,11 @@ export default function AppFrame() {
           color: meta[i]?.color ?? PART_TINTS[i % PART_TINTS.length],
           groupId: meta[i]?.groupId,
           groupName: meta[i]?.groupName,
+          groupPath: meta[i]?.groupPath,
+          outlinerOrder: meta[i]?.outlinerOrder ?? i,
           lo: r.lo,
           hi: r.hi,
-        }));
+        })).sort((a, b) => a.outlinerOrder - b.outlinerOrder);
       } else {
         // Any package whose viewer source is a raw .glb/.obj file (import: packages,
         // file: opens, content-browser loose files, imported props) is a model OF ONE
@@ -4765,6 +4865,7 @@ export default function AppFrame() {
     onDissolvePartGroup: guarded(dissolvePartGroup),
     onGroupSelectedParts: guarded(groupSelectedParts),
     onUngroupSelectedParts: guarded(ungroupSelectedParts),
+    onMoveOutlinerItem: guarded(moveOutlinerItem),
     onAddPart: guarded(addPart),
     onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
     onImportModel: guarded(() => setImportPartOpen(true)),

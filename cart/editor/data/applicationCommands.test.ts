@@ -16,6 +16,7 @@ import {
   COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
   MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_OUTLINER_MOVE_COMMAND_ID,
   MODEL_PART_RENAME_COMMAND_ID,
   MODEL_PARTS_GROUP_COMMAND_ID,
   MODEL_PARTS_UNGROUP_COMMAND_ID,
@@ -601,6 +602,28 @@ test('Outliner organization is one native-journal action path for dock and remot
     assert(h.modelOutliner().parts[0]?.groupId === 'part-group:40' && h.modelOutliner().parts[1]?.groupId === 'part-group:40', `${source} did not commit the exact group`);
     assert(h.modelOutliner().parts[2]?.groupId === undefined && h.commits() === 1 && h.outcomes.length === 1, `${source} mutated unrelated rows or published twice`);
   }
+});
+
+test('Outliner drag/reparent uses the same native-journal command boundary', () => {
+  const h = harness(0, 'model');
+  h.commands.invoke({
+    commandId: MODEL_PARTS_GROUP_COMMAND_ID,
+    args: { modelId: 'model-a', partIds: ['part-a', 'part-b'] },
+    source: 'dock',
+  });
+  const groupId = h.modelOutliner().parts[0]?.groupId!;
+  const moved = h.commands.invoke<ModelOutlinerActionResult>({
+    commandId: MODEL_OUTLINER_MOVE_COMMAND_ID,
+    args: {
+      modelId: 'model-a',
+      item: { kind: 'part', id: 'part-c' },
+      target: { kind: 'group', id: groupId, position: 'inside' },
+    },
+    source: 'dock',
+  });
+  assert(moved.status === 'applied' && moved.result.plan.transaction.action === 'outliner.move', 'drag bypassed the outliner action boundary');
+  assert(h.modelOutliner().parts.every((part) => part.groupId === groupId), 'drag did not reparent the part');
+  assert(h.commits() === 2, 'drag did not commit exactly once');
 });
 
 test('rename, ungroup, group rename, and dissolve share exact outliner transactions', () => {

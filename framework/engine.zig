@@ -412,6 +412,9 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshEditPick(_: f32, _: f32, _: bool) i32 {
         return -1;
     }
+    pub fn meshEditOutOfScopePartAt(_: f32, _: f32) i32 {
+        return -1;
+    }
     pub fn meshEditBox(_: f32, _: f32, _: f32, _: f32, _: bool) i32 {
         return -1;
     }
@@ -4505,6 +4508,18 @@ pub fn run(config_in: AppConfig) !void {
                             }
                             const m = r3d.meshEditModeRaw();
                             if (m >= 1 and m <= 3) {
+                                // A geometry click is also an outliner focus gesture.
+                                // Switch scope synchronously, then let this SAME press
+                                // perform the requested element pick in the new part.
+                                const part = r3d.meshEditOutOfScopePartAt(mx, my);
+                                if (part >= 0) {
+                                    var focus_buf: [96]u8 = undefined;
+                                    if (std.fmt.bufPrintZ(&focus_buf, "__meshEditFocusPart({d})", .{part})) |expr| {
+                                        js_vm.callGlobal(config.host, "__beginJsEvent");
+                                        js_vm.evalExpr(config.host, expr);
+                                        js_vm.callGlobal(config.host, "__endJsEvent");
+                                    } else |_| {}
+                                }
                                 me_selecting = true;
                                 me_shift = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) != 0;
                                 r3d.meshEditSnapshot();

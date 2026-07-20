@@ -1,5 +1,15 @@
 import type { ModelPart } from '../data/types';
-import { assignPartsToGroup, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
+import {
+  assignPartsToGroup,
+  moveOutlinerItem,
+  nextModelGroupName,
+  partGroupPath,
+  partsInGroup,
+  ungroupParts,
+  withPartGroupPath,
+  type ModelOutlinerDragItem,
+  type ModelOutlinerDropTarget,
+} from '../data/modelOutliner';
 
 export const MODEL_PART_NAME_MAX_CHARS = 80;
 
@@ -8,12 +18,14 @@ export const MODEL_PARTS_GROUP_COMMAND_ID = 'model.parts.group';
 export const MODEL_PARTS_UNGROUP_COMMAND_ID = 'model.parts.ungroup';
 export const MODEL_GROUP_RENAME_COMMAND_ID = 'model.group.rename';
 export const MODEL_GROUP_DISSOLVE_COMMAND_ID = 'model.group.dissolve';
+export const MODEL_OUTLINER_MOVE_COMMAND_ID = 'model.outliner.move';
 export const MODEL_OUTLINER_ACTION_COMMAND_IDS = [
   MODEL_PART_RENAME_COMMAND_ID,
   MODEL_PARTS_GROUP_COMMAND_ID,
   MODEL_PARTS_UNGROUP_COMMAND_ID,
   MODEL_GROUP_RENAME_COMMAND_ID,
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
+  MODEL_OUTLINER_MOVE_COMMAND_ID,
 ] as const;
 export type ModelOutlinerCommandId = typeof MODEL_OUTLINER_ACTION_COMMAND_IDS[number];
 
@@ -33,7 +45,8 @@ export type ModelOutlinerAction =
   | 'parts.group'
   | 'parts.ungroup'
   | 'group.rename'
-  | 'group.dissolve';
+  | 'group.dissolve'
+  | 'outliner.move';
 
 export type ModelOutlinerTransaction = {
   action: ModelOutlinerAction;
@@ -208,15 +221,17 @@ export function planGroupRename(
   args: { modelId: string; groupId: string; name: string },
 ): ModelOutlinerPlan {
   const parts = assertSnapshot(snapshot, args.modelId);
-  const members = parts.filter((part) => part.groupId === args.groupId);
+  const members = partsInGroup(parts as ModelPart[], args.groupId);
   if (!args.groupId || members.length === 0) throw new ModelOutlinerRejected('GROUP_NOT_FOUND', 'part group not found');
   const name = trimmedName(args.name, 'group');
-  const previousName = members[0]!.groupName ?? 'Group';
+  const previousName = partGroupPath(members[0]!).find((group) => group.id === args.groupId)?.name ?? 'Group';
   if (previousName === name) throw new ModelOutlinerRejected('NO_CHANGE', 'group already has that name');
-  if (parts.some((part) => part.groupId !== args.groupId && part.groupName?.toLowerCase() === name.toLowerCase())) {
+  if (parts.some((part) => partGroupPath(part as ModelPart).some((group) => group.id !== args.groupId && group.name.toLowerCase() === name.toLowerCase()))) {
     throw new ModelOutlinerRejected('DUPLICATE_NAME', `group name already in use: ${name}`);
   }
-  const after = parts.map((part) => part.groupId === args.groupId ? { ...part, groupName: name } : part);
+  const after = parts.map((part) => withPartGroupPath(part as ModelPart, partGroupPath(part as ModelPart).map((group) => (
+    group.id === args.groupId ? { ...group, name } : group
+  ))));
   return plan(
     snapshot,
     MODEL_GROUP_RENAME_COMMAND_ID,
@@ -235,11 +250,11 @@ export function planGroupDissolve(
   args: { modelId: string; groupId: string },
 ): ModelOutlinerPlan {
   const parts = assertSnapshot(snapshot, args.modelId);
-  const members = parts.filter((part) => part.groupId === args.groupId);
+  const members = partsInGroup(parts as ModelPart[], args.groupId);
   if (!args.groupId || members.length === 0) throw new ModelOutlinerRejected('GROUP_NOT_FOUND', 'part group not found');
-  const name = members[0]!.groupName ?? 'Group';
+  const name = partGroupPath(members[0]!).find((group) => group.id === args.groupId)?.name ?? 'Group';
   const ids = members.map((part) => part.id);
-  const after = ungroupParts(parts as ModelPart[], ids);
+  const after = parts.map((part) => withPartGroupPath(part as ModelPart, partGroupPath(part as ModelPart).filter((group) => group.id !== args.groupId)));
   return plan(
     snapshot,
     MODEL_GROUP_DISSOLVE_COMMAND_ID,
@@ -250,5 +265,46 @@ export function planGroupDissolve(
     after,
     snapshot.nextSequence,
     args.groupId,
+  );
+}
+
+export function planOutlinerMove(
+  snapshot: ModelOutlinerSnapshot,
+  args: { modelId: string; item: ModelOutlinerDragItem; target: ModelOutlinerDropTarget },
+): ModelOutlinerPlan {
+  const parts = assertSnapshot(snapshot, args.modelId);
+  if (!args.item || (args.item.kind !== 'part' && args.item.kind !== 'group') || typeof args.item.id !== 'string') {
+    throw new ModelOutlinerRejected('INVALID_DRAG', 'outliner drag source is invalid');
+  }
+  if (!args.target || !['root', 'part', 'group'].includes(args.target.kind)) {
+    throw new ModelOutlinerRejected('INVALID_DROP', 'outliner drop target is invalid');
+  }
+  const drop = args.target;
+  if (drop.kind !== 'root' && (
+    typeof drop.id !== 'string' ||
+    !['before', 'after', 'inside'].includes(drop.position) ||
+    (drop.kind === 'part' && drop.position === 'inside') ||
+    !parts.some((part) => drop.kind === 'part'
+      ? part.id === drop.id
+      : partGroupPath(part as ModelPart).some((group) => group.id === drop.id))
+  )) {
+    throw new ModelOutlinerRejected('INVALID_DROP', 'outliner drop destination does not exist');
+  }
+  const after = moveOutlinerItem(parts as ModelPart[], args.item, args.target);
+  if (after.map((part) => `${part.id}:${JSON.stringify(partGroupPath(part))}`).join('|') ===
+      parts.map((part) => `${part.id}:${JSON.stringify(partGroupPath(part as ModelPart))}`).join('|')) {
+    throw new ModelOutlinerRejected('NO_CHANGE', 'outliner item is already there');
+  }
+  const moved = args.item.kind === 'part'
+    ? after.filter((part) => part.id === args.item.id)
+    : partsInGroup(after, args.item.id);
+  return plan(
+    snapshot,
+    MODEL_OUTLINER_MOVE_COMMAND_ID,
+    'outliner.move',
+    `move ${args.item.kind} ${args.item.id}`,
+    `moved ${args.item.kind} in Outliner`,
+    moved.map((part) => part.id),
+    after,
   );
 }

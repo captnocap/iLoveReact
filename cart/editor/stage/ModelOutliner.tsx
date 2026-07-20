@@ -1,8 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Box, Col, Row, Text, TextInput, Pressable, ScrollView } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { PRIMITIVE_MESHES } from '../data/commands';
-import { modelOutlinerRoots, type ModelPartGroup } from '../data/modelOutliner';
+import {
+  modelOutlinerRoots,
+  type ModelOutlinerDragItem,
+  type ModelOutlinerDropTarget,
+  type ModelOutlinerRoot,
+  type ModelPartGroup,
+} from '../data/modelOutliner';
 import { REGIONS } from '../shell/regions';
 import type { ModelPart, PrimitiveKind } from '../data/types';
 
@@ -33,7 +39,7 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onAdd, onImportModel }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
@@ -51,15 +57,67 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
   onDissolveGroup: (groupId: string) => void;
   onGroupSelected: () => void;
   onUngroupSelected: () => void;
+  onMoveItem: (item: ModelOutlinerDragItem, target: ModelOutlinerDropTarget) => void;
   onAdd: (kind: PrimitiveKind) => void;
   onImportModel: () => void;
 }) {
   const [renaming, setRenaming] = useState<{ kind: 'part' | 'group'; id: string } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
+  const [dragging, setDragging] = useState<ModelOutlinerDragItem | null>(null);
+  const [dropTarget, setDropTarget] = useState<ModelOutlinerDropTarget | null>(null);
+  const dragRef = useRef<ModelOutlinerDragItem | null>(null);
+  const listRectRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
+  const scrollYRef = useRef(0);
   const roots = modelOutlinerRoots(parts);
   const collapsed = new Set(collapsedGroupIds);
-  const visibleRows = roots.reduce((count, root) => count + (root.kind === 'group' && !collapsed.has(root.group.id) ? 1 + root.group.parts.length : 1), 0);
+  const flatRows: { item: ModelOutlinerDragItem; depth: number }[] = [];
+  const flatten = (nodes: readonly ModelOutlinerRoot[], depth: number) => {
+    for (const node of nodes) {
+      if (node.kind === 'part') flatRows.push({ item: { kind: 'part', id: node.part.id }, depth });
+      else {
+        flatRows.push({ item: { kind: 'group', id: node.group.id }, depth });
+        if (!collapsed.has(node.group.id)) flatten(node.group.children, depth + 1);
+      }
+    }
+  };
+  flatten(roots, 0);
+  const visibleRows = flatRows.length + (dragging ? 1 : 0);
+
+  const targetAt = (event: any): ModelOutlinerDropTarget => {
+    const rect = listRectRef.current;
+    const contentY = Number(event?.y ?? rect.y) - rect.y + scrollYRef.current;
+    const index = Math.floor(contentY / PART_ROW_HEIGHT);
+    const row = flatRows[index];
+    if (!row) return { kind: 'root' };
+    const rowY = index * PART_ROW_HEIGHT;
+    const lowerHalf = contentY - rowY >= PART_ROW_HEIGHT / 2;
+    if (row.item.kind === 'group') {
+      // The folder/name side is the natural "put inside" target; its narrow
+      // left gutter remains a before/after reorder lane.
+      const inside = Number(event?.x ?? rect.x) >= rect.x + 48 + row.depth * 14;
+      return { ...row.item, position: inside ? 'inside' : (lowerHalf ? 'after' : 'before') };
+    }
+    return { ...row.item, position: lowerHalf ? 'after' : 'before' };
+  };
+  const beginDrag = (item: ModelOutlinerDragItem) => {
+    dragRef.current = item;
+    setDragging(item);
+    setDropTarget(null);
+  };
+  const updateDrag = (event: any) => {
+    if (!dragRef.current) return;
+    setDropTarget(targetAt(event));
+  };
+  const finishDrag = (event: any) => {
+    const item = dragRef.current;
+    const target = targetAt(event);
+    dragRef.current = null;
+    setDragging(null);
+    setDropTarget(null);
+    if (item) onMoveItem(item, target);
+  };
+  const isDrop = (kind: 'part' | 'group', id: string) => dropTarget?.kind === kind && dropTarget.id === id;
 
   const startRename = (part: ModelPart) => {
     setRenaming({ kind: 'part', id: part.id });
@@ -86,7 +144,7 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
     current.includes(groupId) ? current.filter((id) => id !== groupId) : [...current, groupId]
   ));
 
-  const renderPart = (part: ModelPart, nested: boolean) => {
+  const renderPart = (part: ModelPart, depth: number) => {
     const active = part.id === activeId;
     // Set member but not primary: a dimmer tint of the active blue (req_2659).
     const inSet = !active && Boolean(selectedIds?.includes(part.id));
@@ -95,11 +153,20 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
       <Row
         key={part.id}
         style={{
-          alignItems: 'center', gap: 4, paddingLeft: nested ? 17 : 5, paddingRight: 5, height: PART_ROW_HEIGHT,
-          backgroundColor: active ? '#2a466e' : inSet ? '#20344f' : 'transparent',
+          alignItems: 'center', gap: 4, paddingLeft: 5 + depth * 14, paddingRight: 5, height: PART_ROW_HEIGHT,
+          backgroundColor: isDrop('part', part.id) ? '#315a49' : active ? '#2a466e' : inSet ? '#20344f' : 'transparent',
           borderBottomWidth: 1, borderColor: '#161b26',
         }}
       >
+        <Pressable
+          style={{ width: 12, height: PART_ROW_HEIGHT, alignItems: 'center', justifyContent: 'center' }}
+          onMouseDown={() => beginDrag({ kind: 'part', id: part.id })}
+          onMouseMove={updateDrag}
+          onMouseUp={finishDrag}
+          tooltip="Drag to reorder, into a folder, or to ROOT"
+        >
+          <Icon name="GripVertical" size={10} color={dragging?.id === part.id ? '#bde6cf' : '#536174'} />
+        </Pressable>
         <Pressable style={ROW_CONTROL} onPress={() => onToggleVisible(part.id)} tooltip={part.visible ? 'Hide part' : 'Show part'}>
           <Icon name={part.visible ? 'Eye' : 'EyeOff'} size={13} color={part.visible ? '#9db4d0' : '#4a5464'} />
         </Pressable>
@@ -140,7 +207,7 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
     );
   };
 
-  const renderGroup = (group: ModelPartGroup) => {
+  const renderGroup = (group: ModelPartGroup, depth: number) => {
     const isCollapsed = collapsed.has(group.id);
     const anyVisible = group.parts.some((part) => part.visible);
     const active = group.parts.some((part) => part.id === activeId);
@@ -148,7 +215,16 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
     const isRenaming = renaming?.kind === 'group' && renaming.id === group.id;
     return (
       <Col key={group.id} style={{ width: '100%' }}>
-        <Row style={{ alignItems: 'center', gap: 3, paddingLeft: 4, paddingRight: 5, height: PART_ROW_HEIGHT, backgroundColor: active ? '#253e61' : inSet ? '#1c3049' : '#121a26', borderBottomWidth: 1, borderColor: '#1c2a3b' }}>
+        <Row style={{ alignItems: 'center', gap: 3, paddingLeft: 4 + depth * 14, paddingRight: 5, height: PART_ROW_HEIGHT, backgroundColor: isDrop('group', group.id) ? '#315a49' : active ? '#253e61' : inSet ? '#1c3049' : '#121a26', borderBottomWidth: 1, borderColor: '#1c2a3b' }}>
+          <Pressable
+            style={{ width: 12, height: PART_ROW_HEIGHT, alignItems: 'center', justifyContent: 'center' }}
+            onMouseDown={() => beginDrag({ kind: 'group', id: group.id })}
+            onMouseMove={updateDrag}
+            onMouseUp={finishDrag}
+            tooltip="Drag folder to reorder or nest it"
+          >
+            <Icon name="GripVertical" size={10} color={dragging?.id === group.id ? '#bde6cf' : '#536174'} />
+          </Pressable>
           <Pressable style={ROW_CONTROL} onPress={() => toggleCollapsed(group.id)} tooltip={isCollapsed ? 'Expand group' : 'Collapse group'}>
             <Icon name={isCollapsed ? 'ChevronRight' : 'ChevronDown'} size={12} color="#7890aa" />
           </Pressable>
@@ -183,7 +259,9 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
             <Icon name="FolderMinus" size={12} color="#8c735f" />
           </Pressable>
         </Row>
-        {!isCollapsed ? group.parts.map((part) => renderPart(part, true)) : null}
+        {!isCollapsed ? group.children.map((child) => (
+          child.kind === 'group' ? renderGroup(child.group, depth + 1) : renderPart(child.part, depth + 1)
+        )) : null}
       </Col>
     );
   };
@@ -200,6 +278,7 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
         <Icon name="ListTree" size={13} color="#8fb6c9" />
         <Text noWrap numberOfLines={1} style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>OUTLINER</Text>
         <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: '#536174', fontSize: 9, fontFamily: 'monospace' }}>Ctrl C/V/D</Text>
         <Text style={{ color: '#5d6878', fontSize: 11, fontFamily: 'monospace' }}>{`${parts.length}`}</Text>
         <Pressable style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }} onPress={onGroupSelected} tooltip="Group selected parts — Shift-click rows to build the set">
           <Icon name="FolderPlus" size={13} color="#90b7a0" />
@@ -209,10 +288,21 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
         </Pressable>
       </Row>
 
-      <ScrollView style={{ height: partListHeight(visibleRows) }} contentContainerStyle={{ flexDirection: 'column' }}>
+      <ScrollView
+        style={{ height: partListHeight(visibleRows) }}
+        contentContainerStyle={{ flexDirection: 'column' }}
+        onLayout={(rect: any) => { listRectRef.current = rect; }}
+        onScroll={(event: any) => { if (Number.isFinite(event?.scrollY)) scrollYRef.current = event.scrollY; }}
+      >
         {parts.length === 0 ? (
           <Text style={{ color: '#5d6878', fontSize: 11, padding: 12 }}>No parts yet — add one below.</Text>
-        ) : roots.map((root) => (root.kind === 'group' ? renderGroup(root.group) : renderPart(root.part, false)))}
+        ) : roots.map((root) => (root.kind === 'group' ? renderGroup(root.group, 0) : renderPart(root.part, 0)))}
+        {dragging ? (
+          <Row style={{ height: PART_ROW_HEIGHT, alignItems: 'center', paddingLeft: 10, gap: 6, backgroundColor: dropTarget?.kind === 'root' ? '#315a49' : '#111722', borderTopWidth: 1, borderColor: '#294637' }}>
+            <Icon name="CornerDownLeft" size={11} color="#88b99b" />
+            <Text style={{ color: '#88b99b', fontSize: 10, fontWeight: 700 }}>ROOT</Text>
+          </Row>
+        ) : null}
       </ScrollView>
 
       <Row style={{ alignItems: 'center', gap: 4, padding: 6, backgroundColor: 'rgba(18,22,31,0.9)', borderTopWidth: 1, borderColor: '#1d2330' }}>

@@ -1,4 +1,4 @@
-import { assignPartsToGroup, duplicateNameStem, modelOutlinerRoots, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts, withoutPartGroup } from './modelOutliner';
+import { assignPartsToGroup, duplicateNameStem, modelOutlinerRoots, moveOutlinerItem, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, partGroupPath, ungroupParts, withoutPartGroup } from './modelOutliner';
 import type { ModelPart } from './types';
 
 let passed = 0, failed = 0;
@@ -22,6 +22,32 @@ test('outliner folders gather non-contiguous parts without changing source rows'
   assert(roots[0]?.kind === 'group' && roots[0].group.parts.map((p) => p.id).join(',') === 'a,c', 'folder membership follows ids');
   assert(roots[1]?.kind === 'part' && roots[1].part.id === 'b', 'loose part remains a root');
   assert(parts.map((p) => p.id).join(',') === 'a,b,c', 'source order is never rewritten');
+});
+
+test('nested paths derive recursive groups without changing geometry identity', () => {
+  const parts = [
+    { ...part('a', 'hood'), groupPath: [{ id: 'body', name: 'Body' }, { id: 'front', name: 'Front' }], lo: 2, hi: 8 },
+    { ...part('b', 'door'), groupPath: [{ id: 'body', name: 'Body' }], lo: 8, hi: 12 },
+  ];
+  const roots = modelOutlinerRoots(parts);
+  assert(roots[0]?.kind === 'group' && roots[0].group.children[0]?.kind === 'group', 'nested folder was flattened');
+  assert(roots[0]?.kind === 'group' && roots[0].group.parts.length === 2, 'parent group did not include descendants');
+  assert(parts[0]?.lo === 2 && parts[0]?.hi === 8, 'tree derivation touched geometry range');
+});
+
+test('dragging parts and folders reparents paths and persists display order', () => {
+  const base = [
+    part('a', 'loose'),
+    { ...part('b', 'door', 'body', 'Body'), groupPath: [{ id: 'body', name: 'Body' }] },
+    { ...part('c', 'lamp', 'lights', 'Lights'), groupPath: [{ id: 'lights', name: 'Lights' }] },
+  ];
+  const nestedPart = moveOutlinerItem(base, { kind: 'part', id: 'a' }, { kind: 'group', id: 'body', position: 'inside' });
+  assert(partGroupPath(nestedPart.find((row) => row.id === 'a')!).map((g) => g.id).join('/') === 'body', 'part did not enter target group');
+  const nestedGroup = moveOutlinerItem(nestedPart, { kind: 'group', id: 'lights' }, { kind: 'group', id: 'body', position: 'inside' });
+  assert(partGroupPath(nestedGroup.find((row) => row.id === 'c')!).map((g) => g.id).join('/') === 'body/lights', 'folder did not nest under target');
+  assert(nestedGroup.every((row, index) => row.outlinerOrder === index), 'display order was not stamped');
+  const refusedCycle = moveOutlinerItem(nestedGroup, { kind: 'group', id: 'body' }, { kind: 'group', id: 'lights', position: 'inside' });
+  assert(refusedCycle.map((row) => row.id).join(',') === nestedGroup.map((row) => row.id).join(','), 'group cycle was allowed');
 });
 
 test('duplicate names replace legacy copy chains with one numbered family', () => {

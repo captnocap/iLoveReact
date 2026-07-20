@@ -466,6 +466,7 @@ export default function Inspector(props: {
                 onDissolveGroup={props.outlinerHandlers.onDissolvePartGroup}
                 onGroupSelected={props.outlinerHandlers.onGroupSelectedParts}
                 onUngroupSelected={props.outlinerHandlers.onUngroupSelectedParts}
+                onMoveItem={props.outlinerHandlers.onMoveOutlinerItem}
                 onAdd={props.outlinerHandlers.onAddPart}
                 onImportModel={props.outlinerHandlers.onImportModel}
               />

@@ -4010,6 +4010,18 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
 }
+
+/// The visible outliner part under the pointer when it is outside the current
+/// edit scope.  The engine asks before an element pick so one click can focus a
+/// different part and then perform the requested vertex/edge/face selection.
+pub fn meshEditOutOfScopePartAt(mx: f32, my: f32) i32 {
+    if (!model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
+    if (face < 0 or mesh_edit.faceInScopePub(@intCast(face))) return -1;
+    const part = model_source.partIndexOf(model_source.faceGroupOf(@intCast(face)));
+    return if (part == model_source.NO_PART) -1 else @intCast(part);
+}
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
 }
@@ -5533,7 +5545,7 @@ pub fn meshEditCounts() [4]u32 {
 pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
+    const face = mesh_edit.scopedFaceHit(model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)));
     if (face < 0) return -1;
     // The fill unit is the LOGICAL face — the whole authored group (a quad's two
     // triangles, a cap fan), not the one picked triangle (req_2506). With a material
@@ -5737,6 +5749,7 @@ pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return -1;
+    if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) return -1;
     g_locked_face = hit.face;
     return @intCast(hit.face);
 }
@@ -5785,6 +5798,7 @@ fn stampGroupMirrored(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: 
             if (sub & (@as(u8, 1) << ax) != 0) q[ax] = 2.0 * frame.center[ax] - q[ax];
         }
         const hit = model_paint.worldToFaceBary(q, eps) orelse continue;
+        if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) continue;
         if (hit.face == face) continue; // a dab ON the plane is its own mirror — skip
         stampGroup(hit.face, hit.u, hit.v, radius, rgba, mat, flow, rgb, spec);
     }
@@ -5804,11 +5818,13 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     const rgba = [4]u8{ r, g, b, 255 };
     const mat = model_paint.hasMaterialInk(); // dip into a shader bucket → sample it per dab
     if (g_paint_mode == 1) {
+        if (mesh_edit.scopedFaceHit(@intCast(g_locked_face)) < 0) return -1;
         const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
         stampGroupMirrored(g_locked_face, uv[0], uv[1], radius, rgba, mat, flow, .{ r, g, b }, spec);
         return @intCast(g_locked_face);
     }
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
+    if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) return -1;
     stampGroupMirrored(hit.face, hit.u, hit.v, radius, rgba, mat, flow, .{ r, g, b }, spec);
     return @intCast(hit.face);
 }
@@ -5902,6 +5918,7 @@ pub fn samplePaintAt(mx: f32, my: f32) ?[3]u8 {
     if (!model_paint.hasTarget()) return null;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return null;
+    if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) return null;
     const px = model_paint.sampleTexel(hit.face, hit.u, hit.v) orelse return null;
     return .{ px[0], px[1], px[2] };
 }
