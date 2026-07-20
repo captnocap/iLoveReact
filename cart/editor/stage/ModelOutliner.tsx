@@ -39,12 +39,18 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel, roleNamer, onStartRoleNamer, onSkipRole, onCancelRoleNamer }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
   // (activeId) keeps the strong row. Optional — absent reads as single-select.
   selectedIds?: string[];
+  // Guided role naming (req_3263): while a session is live, row clicks assign the
+  // shown role (AppFrame owns that swap); this panel renders the ask strip.
+  roleNamer?: { role: string; done: number; total: number; contract: string } | null;
+  onStartRoleNamer?: (contract: 'head' | 'body' | 'car') => void;
+  onSkipRole?: () => void;
+  onCancelRoleNamer?: () => void;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onToggleVisible: (id: string) => void;
@@ -63,6 +69,7 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
 }) {
   const [renaming, setRenaming] = useState<{ kind: 'part' | 'group'; id: string } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState<ModelOutlinerDragItem | null>(null);
   const [dropTarget, setDropTarget] = useState<ModelOutlinerDropTarget | null>(null);
@@ -286,7 +293,51 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
         <Pressable style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }} onPress={onUngroupSelected} tooltip="Remove selected parts from their groups — geometry is kept">
           <Icon name="Ungroup" size={13} color="#8b96a7" />
         </Pressable>
+        {onStartRoleNamer ? (
+          <Pressable
+            style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }}
+            onPress={() => (roleNamer ? onCancelRoleNamer?.() : setRolePickerOpen((open) => !open))}
+            tooltip="Name parts by role — pick a contract, then click each part it asks for"
+          >
+            <Icon name="Wand2" size={13} color={roleNamer || rolePickerOpen ? '#d9c26b' : '#8b96a7'} />
+          </Pressable>
+        ) : null}
       </Row>
+
+      {roleNamer ? (
+        // The live ask: click the part row that IS this role. Skip = model
+        // doesn't have one. The wand (or ✕ here) ends the session early.
+        <Row style={{ alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 6, height: 26, backgroundColor: '#2b2413', borderBottomWidth: 1, borderColor: '#4a3f1c' }}>
+          <Icon name="Wand2" size={12} color="#d9c26b" />
+          <Text noWrap style={{ color: '#b3a26b', fontSize: 10 }}>click the part that is</Text>
+          <Text noWrap style={{ color: '#f2df9c', fontSize: 11, fontWeight: 800, fontFamily: 'monospace' }}>{roleNamer.role}</Text>
+          <Box style={{ flexGrow: 1 }} />
+          <Text style={{ color: '#8d7f52', fontSize: 9, fontFamily: 'monospace' }}>{`${roleNamer.done + 1}/${roleNamer.total} · ${roleNamer.contract}`}</Text>
+          <Pressable style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }} onPress={() => onSkipRole?.()} tooltip="Skip — this model has no such part">
+            <Icon name="SkipForward" size={12} color="#b3a26b" />
+          </Pressable>
+          <Pressable style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }} onPress={() => onCancelRoleNamer?.()} tooltip="Stop role naming">
+            <Icon name="X" size={12} color="#b3a26b" />
+          </Pressable>
+        </Row>
+      ) : rolePickerOpen ? (
+        <Row style={{ alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 6, height: 26, backgroundColor: '#16202f', borderBottomWidth: 1, borderColor: '#243550' }}>
+          <Text noWrap style={{ color: '#7f93ad', fontSize: 10 }}>name roles for</Text>
+          {(['head', 'body', 'car'] as const).map((contract) => (
+            <Pressable
+              key={contract}
+              onPress={() => { setRolePickerOpen(false); onStartRoleNamer?.(contract); }}
+              style={{ height: 18, paddingLeft: 8, paddingRight: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: '#1d2c42', borderWidth: 1, borderColor: '#31486b' }}
+            >
+              <Text style={{ color: '#cfe0f5', fontSize: 10, fontWeight: 700 }}>{contract}</Text>
+            </Pressable>
+          ))}
+          <Box style={{ flexGrow: 1 }} />
+          <Pressable style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }} onPress={() => setRolePickerOpen(false)}>
+            <Icon name="X" size={12} color="#7f93ad" />
+          </Pressable>
+        </Row>
+      ) : null}
 
       <ScrollView
         style={{ height: partListHeight(visibleRows) }}

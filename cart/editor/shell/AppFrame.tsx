@@ -166,6 +166,7 @@ import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
 import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir } from '../data/modelPackageStore';
+import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -321,6 +322,13 @@ export default function AppFrame() {
   // Path Array's source is frozen when the dialog opens. Params remain dialog-local;
   // Apply revalidates these ids/ranges against the live outliner before touching mesh.
   const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
+  // Guided role naming (req_3263): the ask queue over one rig contract, pinned to
+  // the model it started on. Session-only — the renames it makes are the record.
+  // The ref mirrors the session for handlers: Pressable registrations only refresh
+  // when clean props diff, so callbacks must read .current, never the closure.
+  const [roleNamerSession, setRoleNamerSession] = useState<{ contractId: RoleContractId; modelId: string; queue: string[]; at: number } | null>(null);
+  const roleNamerRef = useRef(roleNamerSession);
+  roleNamerRef.current = roleNamerSession;
   const [scaleByOpen, setScaleByOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
@@ -4889,12 +4897,68 @@ export default function AppFrame() {
       };
     });
 
+  // ── Guided role naming (req_3263) ───────────────────────────────────────────
+  // The formal-lazy pass over the rig naming contract: part name → bone id is the
+  // rigging contract (req_2777), so instead of remembering the roster, a session
+  // asks for each missing role and the user clicks the part that takes it. Roles
+  // already claimed by a part name are satisfied before the first ask.
+  const startRoleNamer = (contractId: RoleContractId) => {
+    const live = stateRef.current;
+    const mid = activePartsModelId(live);
+    const rows = mid ? (live.modelParts[mid] ?? []) : [];
+    if (!mid || rows.length === 0) {
+      setState((prev) => ({ ...prev, status: 'role naming needs an open multi-part model' }));
+      return;
+    }
+    const plan = roleNamerPlan(contractId, rows.map((row) => row.name));
+    if (plan.open.length === 0) {
+      setRoleNamerSession(null);
+      setState((prev) => ({ ...prev, status: `every ${contractId} role is already named (${plan.claimed.size}/${plan.contract.roles.length})` }));
+      return;
+    }
+    setRoleNamerSession({ contractId, modelId: mid, queue: plan.open, at: 0 });
+    setState((prev) => ({ ...prev, status: `role naming: ${plan.claimed.size} of ${plan.contract.roles.length} already named — click the part that is "${plan.open[0]}"` }));
+  };
+  const advanceRoleNamer = (assignedRole: string | null) => {
+    const session = roleNamerRef.current;
+    if (!session) return;
+    const nextAt = session.at + 1;
+    if (nextAt >= session.queue.length) {
+      setRoleNamerSession(null);
+      setState((prev) => ({ ...prev, status: assignedRole ? `named "${assignedRole}" — role naming complete` : 'role naming complete' }));
+      return;
+    }
+    setRoleNamerSession({ ...session, at: nextAt });
+    const ask = `click the part that is "${session.queue[nextAt]}"`;
+    setState((prev) => ({ ...prev, status: assignedRole ? `named "${assignedRole}" — ${ask}` : `skipped — ${ask}` }));
+  };
+  const assignRoleToPart = (partId: string) => {
+    const session = roleNamerRef.current!;
+    // The session is pinned to the model it started on — a doc switch mid-pass
+    // must never rename parts of a different model.
+    if (activePartsModelId(stateRef.current) !== session.modelId) {
+      setRoleNamerSession(null);
+      setState((prev) => ({ ...prev, status: 'role naming cancelled — the active model changed' }));
+      return;
+    }
+    const role = session.queue[session.at]!;
+    selectPart(partId);
+    renamePart(partId, role);
+    advanceRoleNamer(role);
+  };
+  const cancelRoleNamer = () => {
+    setRoleNamerSession(null);
+    setState((prev) => ({ ...prev, status: 'role naming stopped' }));
+  };
+
   // The ONE outliner handler set (Workspace + Inspector mount the same object). Part
   // mutations are guarded: they must not fire over an unresolved blocking session
   // (req_2626 HH — e.g. adding/deleting parts mid loop-cut stacks state on a captured
   // base mesh). onStampRanges stays unguarded — it's the viewer REPORTING ranges, not input.
   const outlinerHandlers = {
-    onSelectPart: guarded(selectPart),
+    // A live role-naming session turns the row click into the assignment.
+    // Read through the ref: the row's registered handler may predate the session.
+    onSelectPart: guarded((id: string) => (roleNamerRef.current ? assignRoleToPart(id) : selectPart(id))),
     onRenamePart: guarded(renamePart),
     onToggleVisiblePart: guarded(toggleVisiblePart),
     onDeletePart: guarded(deletePart),
@@ -4910,6 +4974,17 @@ export default function AppFrame() {
     onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
     onImportModel: guarded(() => setImportPartOpen(true)),
     onStampRanges: stampModelPartRanges,
+    roleNamer: roleNamerSession
+      ? {
+          role: roleNamerSession.queue[roleNamerSession.at]!,
+          done: roleNamerSession.at,
+          total: roleNamerSession.queue.length,
+          contract: roleNamerSession.contractId,
+        }
+      : null,
+    onStartRoleNamer: guarded(startRoleNamer),
+    onSkipRole: () => advanceRoleNamer(null),
+    onCancelRoleNamer: cancelRoleNamer,
   };
 
   // ── Overlays vs the host pointer claim (req_2666 gap ZZ, req_2707) ───────────

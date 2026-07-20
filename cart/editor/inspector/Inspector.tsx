@@ -469,6 +469,10 @@ export default function Inspector(props: {
                 onMoveItem={props.outlinerHandlers.onMoveOutlinerItem}
                 onAdd={props.outlinerHandlers.onAddPart}
                 onImportModel={props.outlinerHandlers.onImportModel}
+                roleNamer={props.outlinerHandlers.roleNamer}
+                onStartRoleNamer={props.outlinerHandlers.onStartRoleNamer}
+                onSkipRole={props.outlinerHandlers.onSkipRole}
+                onCancelRoleNamer={props.outlinerHandlers.onCancelRoleNamer}
               />
             ) : null}
             {/* UV — the atlas panel relocated from the floating viewport card into this
