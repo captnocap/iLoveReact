@@ -1,0 +1,30 @@
+{
+  "id": "req_3297",
+  "at": "2026-07-20T17:08:44.665Z",
+  "origin": "codex:019f768a",
+  "text": "for what it is, its a good start, there is clearly a necessary amount of deshitify that needs to occur like i am here looking at the interface and i see this text appear\n\n DISK SOURCE\nSHOWN DISK IS CANONICAL\nDISK CANONICAL\nREVIEW BEFORE REWRITE\nREIVEW SELECTED\nWORLD BIBLE (x4)\noh shit and there is another \nCANONICAL SOURCE \n\nnone of this is adding anything at all and so therefore its just slop ok pick one location. state it one time. never again\n\ndeshitify at the others i missed as you find them you dont need to be selling anything to me and thats what all the flavor filler garbage reads as",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:08:58.722Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:19:49.437Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed repeated source, canonical, review, and product-title narration across the World Bible chrome, index, surface, and shell statuses. The interface now states the on-disk source-of-truth invariant once, while retaining only actionable state, field, error, and write controls.",
+  "shas": [
+    "57e798595"
+  ],
+  "resolvedAt": "2026-07-20T17:19:49.437Z"
+}
