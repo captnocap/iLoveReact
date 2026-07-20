@@ -38,7 +38,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -165,7 +165,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
+import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir } from '../data/modelPackageStore';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -1645,7 +1645,7 @@ export default function AppFrame() {
       currentTriangles,
       false,
       false,
-      () => installGeneratedMapDocumentPainting(stem, target.zones, painting.chunks, painting.paths),
+      () => installGeneratedMapDocumentPainting(stem, target.zones, painting),
     );
   };
 
@@ -4776,7 +4776,16 @@ export default function AppFrame() {
     () => visibleModelPackages(state.modelOverrides, state.modelDupes),
     [state.modelOverrides, state.modelDupes],
   );
-  const contentTreeNodes = useMemo(() => liveContentTree(visibleModels), [visibleModels]);
+  // The tree HOLDS ITS SHAPE while a rename is typing (req_3246): its Models rows
+  // are name-sorted, so every keystroke would re-rank the renamed row through the
+  // keyed sibling list — a reorder this reconciler answers with ghost/dropped rows
+  // (the array-sibling hazard). One rebuild when the rename settles.
+  const settledTreeRef = useRef<ContentNode[] | null>(null);
+  const contentTreeNodes = useMemo(() => {
+    if (state.modelRenamingId && settledTreeRef.current) return settledTreeRef.current;
+    settledTreeRef.current = liveContentTree(visibleModels);
+    return settledTreeRef.current;
+  }, [visibleModels, state.modelRenamingId]);
 
   // MANIFEST IS DISK TRUTH (req_2620 S/U): favorite/delete/rename write through to
   // the model's on-disk manifest when the package is materialized, so they survive
@@ -4811,10 +4820,12 @@ export default function AppFrame() {
   // (tiny JSON, human keystroke rate) so the name on disk is never behind the name
   // on screen; an unmaterialized doc keeps the name pending (dirty chip) until its
   // first save applies it. The open doc tab retitles in the same update.
+  // The FOLDER move does not ride the keystrokes (req_3246): moving a package home
+  // copies every blob in it, so the rename-follow is deferred to finishRenameModel.
   const renameModel = (id: string, name: string) =>
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
-      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { name }) : false;
+      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { name }, { deferRenameFollow: true }) : false;
       return {
         ...prev,
         modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], name } },
@@ -4822,7 +4833,13 @@ export default function AppFrame() {
         modelDirty: durable ? prev.modelDirty : { ...prev.modelDirty, [id]: true },
       };
     });
-  const finishRenameModel = () => setState((prev) => ({ ...prev, modelRenamingId: null, status: 'renamed model' }));
+  const finishRenameModel = () =>
+    setState((prev) => {
+      const id = prev.modelRenamingId;
+      const pkg = id ? effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes) : null;
+      if (id && pkg) settleRenamedPackageDir(pkg.kind, id);
+      return { ...prev, modelRenamingId: null, status: 'renamed model' };
+    });
 
   // Duplicate = copy the whole package DIRECTORY when the source is materialized
   // (req_2620 U: dupes are real on disk, own manifest, own name — the req_2168

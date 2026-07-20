@@ -246,8 +246,31 @@ export function updateManifestIdentity(
   kind: ModelPackageKind,
   id: string,
   patch: Partial<Pick<ModelManifest, 'name' | 'favorite' | 'hidden'>>,
+  options: { deferRenameFollow?: boolean } = {},
 ): boolean {
-  return patchManifest(kind, id, patch);
+  return patchManifest(kind, id, patch, options);
+}
+
+// Rename-follow, settled ONCE when a rename ends (req_3246). Live typing writes
+// the manifest name through per keystroke but must not move the package home
+// each time — a move copies every blob in the package. This reads the settled
+// manifest name and moves the directory to its slug home if it drifted.
+export function settleRenamedPackageDir(kind: ModelPackageKind, id: string): boolean {
+  const dir = resolvePackageDir(kind, id);
+  const text = dir ? readFile(`${dir}/manifest.json`) : null;
+  if (!dir || !text) return false;
+  try {
+    const manifest = parseManifest(text);
+    const want = nameDirFor(kind, id, manifest.name);
+    if (want === dir) return true;
+    if (!movePackageDir(manifest, dir, want)) {
+      console.error(`[model-packages] rename settled but moving ${dir} -> ${want} failed; package intact under the old folder name`);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Write the EXPORT declaration into an existing on-disk manifest: what the model
@@ -266,7 +289,7 @@ export function updateManifestPlaceable(
 // refuses to clobber an unreadable manifest, false when not materialized yet.
 // A name patch finishes with a folder move (rename-follow); a failed move is
 // LOUD but non-fatal — the package stays valid under its stale-named dir.
-function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelManifest>): boolean {
+function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelManifest>, options: { deferRenameFollow?: boolean } = {}): boolean {
   const dir = resolvePackageDir(kind, id);
   if (!dir) return false;
   const text = readFile(`${dir}/manifest.json`);
@@ -274,7 +297,7 @@ function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelM
   try {
     const manifest = { ...parseManifest(text), ...patch };
     if (!writeFile(`${dir}/manifest.json`, serializeManifest(manifest))) return false;
-    if (typeof patch.name === 'string') {
+    if (typeof patch.name === 'string' && !options.deferRenameFollow) {
       const want = nameDirFor(kind, id, manifest.name);
       if (want !== dir && !movePackageDir(manifest, dir, want)) {
         console.error(`[model-packages] rename wrote through but moving ${dir} -> ${want} failed; package intact under the old folder name`);

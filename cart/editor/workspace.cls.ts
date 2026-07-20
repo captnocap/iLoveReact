@@ -150,6 +150,10 @@ classifier({
   // Selected tree row is a solid accent fill (concept 4) — dark label/count on it.
   HW_TreeRowOn: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 3, paddingRight: 6, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' } },
   HW_TreeIndent: { type: 'Box', style: { width: 10, height: 1, backgroundColor: 'transparent' } },
+  // An expanded node's child rows live in their OWN column (req_3246): a bare
+  // variable-length row array beside fixed siblings shifts sibling indices when
+  // it grows/reorders, and the reconciler ghosts rows (array-sibling hazard).
+  HW_TreeChildren: { type: 'Box', style: { flexDirection: 'column' } },
   HW_TreeToggle: { type: 'Pressable', style: { width: 12, height: 14, alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:controlBg' } },
   HW_TreeLabel: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800 } },
   HW_TreeLabelOn: { type: 'Text', fontSize: 10, color: 'theme:stageBadgeText', style: { fontFamily: MONO, fontWeight: 900 } },

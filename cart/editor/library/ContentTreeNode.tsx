@@ -37,19 +37,26 @@ export default function ContentTreeNode(props: {
         <C.HW_Spacer />
         {count > 0 ? <Count>{count}</Count> : null}
       </Row>
-      {hasChildren && isExpanded ? props.node.children!.map((child) => (
-        <ContentTreeNode
-          key={child.id}
-          node={child}
-          depth={props.depth + 1}
-          assets={props.assets}
-          selected={props.selected}
-          expanded={props.expanded}
-          onFolder={props.onFolder}
-          onToggle={props.onToggle}
-          onNodeContext={props.onNodeContext}
-        />
-      )) : null}
+      {hasChildren && isExpanded ? (
+        // The child list gets its own container (req_3246): rendered bare beside
+        // the Row, a grow/reorder of this keyed array shifts every later sibling's
+        // index and the reconciler ghosts rows (the array-sibling hazard).
+        <C.HW_TreeChildren>
+          {props.node.children!.map((child) => (
+            <ContentTreeNode
+              key={child.id}
+              node={child}
+              depth={props.depth + 1}
+              assets={props.assets}
+              selected={props.selected}
+              expanded={props.expanded}
+              onFolder={props.onFolder}
+              onToggle={props.onToggle}
+              onNodeContext={props.onNodeContext}
+            />
+          ))}
+        </C.HW_TreeChildren>
+      ) : null}
     </>
   );
 }
