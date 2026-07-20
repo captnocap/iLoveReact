@@ -70,6 +70,40 @@ test "appending an authored group carries exact paint texels and the atlas base"
     try testing.expectEqual(@as([4]u8, .{ 31, 47, 63, 255 }), model_paint.faceColor(2).?);
 }
 
+test "append after stale topology preserves the raster and isolates the fresh part" {
+    var initial = QUAD_VERTS;
+    model_paint.setTarget(177, &initial, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &initial, 6);
+    model_paint.setDetail(16, &initial, 6);
+    model_paint.paintStamp(0, 0.15, 0.35, 3.0, .{ 255, 7, 11, 255 }, 1.0);
+
+    const before_atlas = model_paint.atlas().?;
+    const before = try testing.allocator.dupe(u8, before_atlas.rgba);
+    defer testing.allocator.free(before);
+    const placeholder = model_paint.reserveNeutralPlaceholderUv() orelse return error.TestUnexpectedResult;
+
+    var grown: [12 * 8]f32 = undefined;
+    @memcpy(grown[0 .. 6 * 8], &initial);
+    @memcpy(grown[6 * 8 ..], &initial);
+    var vertex: usize = 6;
+    while (vertex < 12) : (vertex += 1) {
+        grown[vertex * 8 + 0] += 2.0;
+        grown[vertex * 8 + 6] = placeholder[0];
+        grown[vertex * 8 + 7] = placeholder[1];
+    }
+    defer {
+        model_paint.setDetail(1, &grown, 12);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    try testing.expect(model_paint.setTargetPreservingAtlas(178, &grown, 12, &.{ 0, 0, 1, 1 }));
+    const after = model_paint.atlas().?;
+    try testing.expectEqual(before_atlas.w, after.w);
+    try testing.expectEqual(before_atlas.h, after.h);
+    try testing.expectEqualSlices(u8, before, after.rgba);
+    try testing.expectEqual(model_paint.DEFAULT_FACE, model_paint.faceColor(2).?);
+}
+
 test "deleting a fresh part preserves the surviving authored group's exact paint" {
     var joined: [12 * 8]f32 = undefined;
     @memcpy(joined[0 .. 6 * 8], &QUAD_VERTS);

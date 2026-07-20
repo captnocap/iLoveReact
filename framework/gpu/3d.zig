@@ -2329,10 +2329,11 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
     {
+        groups.ensureTotalCapacity(std.heap.c_allocator, @as(usize, cur_faces + new_faces)) catch return fail;
         var f: u32 = 0;
-        while (f < cur_faces) : (f += 1) groups.append(std.heap.c_allocator, cur_groups[f]) catch {};
+        while (f < cur_faces) : (f += 1) groups.appendAssumeCapacity(cur_groups[f]);
         var i: u32 = 0;
-        while (i < new_faces) : (i += 1) groups.append(std.heap.c_allocator, (if (i < new_groups.len) new_groups[i] else 0) + offset) catch {};
+        while (i < new_faces) : (i += 1) groups.appendAssumeCapacity((if (i < new_groups.len) new_groups[i] else 0) + offset);
     }
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
         out.deinit(std.heap.c_allocator);
@@ -2340,12 +2341,42 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     };
     defer std.heap.c_allocator.free(owned);
 
-    // Appending groups preserves every existing paint-program face key. Appending
-    // onto an emptied document is a fresh paint domain, however: group ids may be
-    // reused, so discard any delete-last carry instead of resurrecting old paint.
-    if (cur_count > 0) beginPaintStableReplace() else cancelPaintStableReplace();
-    const ok = replaceActiveEditMesh(owned, cur_count + new_count);
-    if (!ok) cancelPaintStableReplace();
+    // Once an atlas exists, append is an indexed topology install too.  The legacy
+    // path below rebuilt a blank target first and expected refreshPaintLayout() to
+    // recover the old raster afterward.  That recovery is deliberately forbidden
+    // while the UV contract is stale, which is how Add Cube could turn a painted
+    // model grey.  Existing corners now keep their exact UVs/raster; fresh corners
+    // point at one neutral gutter texel until the explicit Remake Atlas decision.
+    var exact_colors: ?[]u8 = null;
+    defer if (exact_colors) |colors| std.heap.c_allocator.free(colors);
+    if (cur_count > 0) {
+        const old_colors = collectCurrentFaceColors() orelse return fail;
+        defer std.heap.c_allocator.free(old_colors);
+        if (old_colors.len != @as(usize, cur_faces) * 4) return fail;
+        const colors = std.heap.c_allocator.alloc(u8, @as(usize, cur_faces + new_faces) * 4) catch return fail;
+        exact_colors = colors;
+        @memcpy(colors[0..old_colors.len], old_colors);
+        var f: u32 = cur_faces;
+        while (f < cur_faces + new_faces) : (f += 1) {
+            colors[f * 4 + 0] = model_paint.DEFAULT_FACE[0];
+            colors[f * 4 + 1] = model_paint.DEFAULT_FACE[1];
+            colors[f * 4 + 2] = model_paint.DEFAULT_FACE[2];
+            colors[f * 4 + 3] = model_paint.DEFAULT_FACE[3];
+        }
+        const placeholder_uv = model_paint.reserveNeutralPlaceholderUv() orelse return fail;
+        var vertex: u32 = cur_count;
+        while (vertex < cur_count + new_count) : (vertex += 1) {
+            owned[vertex * 8 + 6] = placeholder_uv[0];
+            owned[vertex * 8 + 7] = placeholder_uv[1];
+        }
+    }
+
+    // Appending onto an emptied document is the one fresh paint domain: there is no
+    // atlas to preserve, so install normally and derive its first layout.
+    const ok = if (cur_count > 0)
+        replaceActiveEditMeshPreservingAtlas(owned, cur_count + new_count, groups.items, exact_colors.?)
+    else
+        replaceActiveEditMesh(owned, new_count);
     if (ok) {
         model_source.setFaceGroups(groups.items);
         // The appended part joins the host's part-range truth (req_2644): grow the
@@ -2370,7 +2401,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
             model_source.setPartRanges(pair[0..]);
         }
         _ = ensureDisjointPartRanges("add part");
-        _ = refreshPaintLayout();
+        if (cur_count == 0) _ = refreshPaintLayout();
     }
     return .{ .ok = ok, .lo = offset, .hi = offset + new_group_span, .count = cur_count + new_count };
 }

@@ -905,6 +905,46 @@ pub fn atlas() ?Atlas {
     return .{ .rgba = buf, .w = g_atlas_w, .h = g_atlas_h };
 }
 
+/// Reserve one texel outside every authored island for geometry that has just been
+/// appended to an already-painted mesh.  The new part must remain visible without
+/// sampling an arbitrary piece of the old painting, but it is not allowed to join
+/// that painting's UV contract until the user explicitly remakes the atlas.
+///
+/// Packed layouts always leave a gutter at the right edge.  Reconstructed legacy
+/// layouts are checked rather than trusted: if no unowned edge texel exists, fail
+/// closed so a structural append cannot overwrite authored paint.
+pub fn reserveNeutralPlaceholderUv() ?[2]f32 {
+    const rgba = g_rgba orelse return null;
+    const lay = &(g_layout orelse return null);
+    if (g_atlas_w == 0 or g_atlas_h == 0) return null;
+
+    const x = g_atlas_w - 1;
+    var y: u32 = 0;
+    while (y < g_atlas_h) : (y += 1) {
+        var owned = false;
+        for (lay.islands) |island| {
+            if (island.w == 0 or island.h == 0) continue;
+            if (x >= island.x and x < island.x + island.w and y >= island.y and y < island.y + island.h) {
+                owned = true;
+                break;
+            }
+        }
+        if (owned) continue;
+
+        const pixel = (@as(usize, y) * g_atlas_w + x) * 4;
+        rgba[pixel + 0] = DEFAULT_FACE[0];
+        rgba[pixel + 1] = DEFAULT_FACE[1];
+        rgba[pixel + 2] = DEFAULT_FACE[2];
+        rgba[pixel + 3] = DEFAULT_FACE[3];
+        markRows(y, y);
+        return .{
+            (@as(f32, @floatFromInt(x)) + 0.5) / @as(f32, @floatFromInt(g_atlas_w)),
+            (@as(f32, @floatFromInt(y)) + 0.5) / @as(f32, @floatFromInt(g_atlas_h)),
+        };
+    }
+    return null;
+}
+
 /// Eyedropper read: the atlas texel colour at a bary point on a face — the affine
 /// inverse of stampInner's dab-centre mapping. Null when nothing is paintable.
 pub fn sampleTexel(face: u32, cu: f32, cv: f32) ?[4]u8 {
