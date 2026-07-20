@@ -289,7 +289,7 @@ export default function ColorLibraryPanel(props: {
   const ramp = rampForge(current, RAMP_STEPS);
   const pigments = mixPigments();
   // The host histograms the live paint atlas — real work, so once per mount
-  // (each popover open re-reads), never per color-pick render.
+  // (each panel mount re-reads), never per color-pick render.
   const sceneBase = useMemo(() => sceneSwatches(null), []);
   const scene = sceneBase.map((s) => ({ ...s, picked: s.css === props.scenePick }));
   const sets = libraryRows(current);

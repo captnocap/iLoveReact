@@ -30,9 +30,9 @@
 // that to land in the right file.
 export const SECTIONS = {
   A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · menu bar · active map · Editor/Play toggle · window controls' },
-  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'contextual source-library buttons; active-button repeat collapses/reopens C' },
-  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'the contextual asset dock (req_3135/req_3266): collapsed (0), tucked tree (350), or tree + thumbnail grid (680)' },
-  D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
+  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'contextual input buttons: source libraries while browsing, Tool Options + Ink while painting; active-button repeat collapses/reopens C' },
+  C: { region: 'contentBrowser', name: 'Left Panel', file: 'library/LibraryPanel.tsx + shell/PaintSidePanel.tsx', contains: 'the contextual input dock: asset browser (0/350/680) or persistent paint Tool Options / Ink (0/350)' },
+  D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE compact toolbar: mesh/world tools plus paint tool + resolution selection; detailed paint controls live persistently in C' },
   E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },
   F: { region: 'viewport', name: 'Stage Tabs', file: 'stage/StageTabs.tsx', contains: 'the open-document tab strip at the bottom edge of the stage' },
   G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'contextual focus body + persistent 40px rail; model view exposes Model / Paint / Rig, active-button repeat collapses/reopens the body' },
@@ -68,7 +68,7 @@ export const REGIONS = {
   /** ACTION BAR — the tool row (ToolOptions) pinned under the chrome, above the stage. */
   actionBar: { height: ACTION_BAR_HEIGHT },
 
-  /** LEFT RAIL — contextual source-library buttons on the window's left edge. */
+  /** LEFT RAIL — contextual input-pane buttons on the window's left edge. */
   leftRail: { width: LEFT_RAIL_WIDTH },
 
   /**

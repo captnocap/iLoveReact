@@ -17,7 +17,8 @@ import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
 import ScaleByDialog from './ScaleByDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
-import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
+import PaintToolbar from './PaintToolbar';
+import { PaintInkPanel, PaintToolOptionsPanel } from './PaintSidePanel';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
 import PreferencesDialog from './PreferencesDialog';
@@ -321,9 +322,6 @@ export default function AppFrame() {
   const pointerDeviceRef = useRef<'mouse' | 'pen'>(getPointerDevice());
   const lastToolByScopeRef = useRef<{ world: string | null; model: string | null }>({ world: null, model: null });
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
-  // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
-  // LATE (below) so they sit over the body; the bar (early) only toggles this.
-  const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
   // A pending image import awaiting the pixel-vs-exact decision. Transient.
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
   // The Add From Library picker (append a saved model into the OPEN model as parts).
@@ -1451,14 +1449,17 @@ export default function AppFrame() {
   const activeWorkspaceDocument = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)
     ?? state.workspaceDocuments[0]!;
   const activeDocumentKind = activeWorkspaceDocument.kind;
-  const contextualLeftPanels = leftPanelsFor(activeDocumentKind);
+  const paintUiActive = activeDocumentKind === 'facade'
+    || (activeDocumentKind === 'model' && state.modelTool.paint);
+  const contextualLeftPanels = leftPanelsFor(activeDocumentKind, paintUiActive);
   const activeLeftPanel = resolvedPanelId(contextualLeftPanels, state.activeDomain);
-  // A document switch may make the prior source pane unavailable (World/Build →
-  // Model, for example). Project the new context's default immediately without
-  // overwriting the prior selection; choosing a rail button commits the change.
-  const effectiveContentFolder = state.activeDomain === activeLeftPanel
-    ? state.contentFolder
-    : contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!.folder;
+  const activeLeftPanelDefinition = contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!;
+  // A context switch can make the prior pane unavailable. Library renderers
+  // project their own root without overwriting remembered state; paint renderers
+  // do not touch asset navigation at all.
+  const effectiveContentFolder = activeLeftPanelDefinition.renderer === 'library'
+    ? (state.activeDomain === activeLeftPanel ? state.contentFolder : activeLeftPanelDefinition.folder)
+    : state.contentFolder;
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
   const activeAsset = assetById(state.activeAssetId, state.assetOverrides);
   const contextPanelMode = panelModeFor(state, activeObject);
@@ -2668,12 +2669,14 @@ export default function AppFrame() {
   const pressLeftPanel = (pressed: LeftPanelId) => {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
-      const panes = leftPanelsFor(documentKind);
+      const paintActive = documentKind === 'facade' || (documentKind === 'model' && prev.modelTool.paint);
+      const panes = leftPanelsFor(documentKind, paintActive);
       const active = resolvedPanelId(panes, prev.activeDomain);
       const result = pressPanelButton(active, pressed, prev.leftPanelCollapsed);
       const changedPane = prev.activeDomain !== pressed;
-      const rootFolder = panes.find((pane) => pane.id === pressed)?.folder ?? prev.contentFolder;
-      const contentFolder = changedPane ? rootFolder : prev.contentFolder;
+      const selectedPane = panes.find((pane) => pane.id === pressed);
+      const rootFolder = selectedPane?.renderer === 'library' ? selectedPane.folder : prev.contentFolder;
+      const contentFolder = changedPane && selectedPane?.renderer === 'library' ? rootFolder : prev.contentFolder;
       const tab = tabForContentFolder(contentFolder);
       return {
         ...prev,
@@ -2681,9 +2684,11 @@ export default function AppFrame() {
         leftPanelCollapsed: result.collapsed,
         contentFolder,
         activeTab: tab ?? prev.activeTab,
-        assetPage: changedPane ? 0 : prev.assetPage,
-        expandedFolders: { ...prev.expandedFolders, [contentFolder]: true },
-        status: result.collapsed ? `${pressed} library collapsed` : `${pressed} library open`,
+        assetPage: changedPane && selectedPane?.renderer === 'library' ? 0 : prev.assetPage,
+        expandedFolders: selectedPane?.renderer === 'library'
+          ? { ...prev.expandedFolders, [contentFolder]: true }
+          : prev.expandedFolders,
+        status: result.collapsed ? `${selectedPane?.label ?? pressed} collapsed` : `${selectedPane?.label ?? pressed} open`,
       };
     });
   };
@@ -3036,7 +3041,7 @@ export default function AppFrame() {
     }
   };
 
-  // The ink popover's "open in Color Studio" — jump from a dipped shader ink to
+  // The Ink dock's "open in Color Studio" — jump from a dipped shader ink to
   // its editing page (selecting the matching library asset when there is one).
   const openColorStudioForSpec = (specId: string) => {
     const spec = shaderSpec(specId);
@@ -3056,8 +3061,7 @@ export default function AppFrame() {
     };
     stateRef.current = next;
     setState(next);
-    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: 0 }, 'toolbar');
-    setPaintPopover(null);
+    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: 0 }, 'paint dock');
   };
 
   // ── Model outliner (multi-part authoring) ───────────────────────────────────
@@ -5064,17 +5068,16 @@ export default function AppFrame() {
   const workspaceState = state.mapPaint.active && (state.mapPaint.texturePickerOpen || blockingOverlay(state) !== null)
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
-  const activePaintDocument = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
-  const facadePaintActive = activePaintDocument?.kind === 'facade';
-  const modelPaintActive = activePaintDocument?.kind === 'model' && state.modelTool.paint;
-  const paintUiActive = facadePaintActive || modelPaintActive;
+  const facadePaintActive = activeDocumentKind === 'facade';
   const activePaintBrush = facadePaintActive ? state.facadePaint.brush : state.modelTool.brush;
+  const activePaintTool = facadePaintActive ? state.facadePaint.tool : state.modelTool.brushTool;
+  const activePaintDetail = facadePaintActive ? state.facadePaint.detail : state.modelTool.detail;
   const setActivePaintBrush = (brush: typeof activePaintBrush) => {
     if (facadePaintActive) setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, brush } }));
     else modelToolApiRef.current?.setBrush(brush);
   };
-  // deej mapping: fader 1 = brush size (same 1..128 range as the toolbar
-  // slider), fader 2 = flow. Only fires on physical movement, and only while
+  // deej mapping: fader 1 = brush size (the board's 1..128 working range),
+  // fader 2 = flow. Only fires on physical movement, and only while
   // a paint surface is up — everywhere else the board is inert.
   deejApplyRef.current = (move: DeejMove) => {
     if (!paintUiActive) return;
@@ -5091,31 +5094,44 @@ export default function AppFrame() {
   });
   const activePaintBar = paintUiActive ? (
     <PaintToolbar
-      brush={activePaintBrush}
-      brushTool={facadePaintActive ? state.facadePaint.tool : state.modelTool.brushTool}
-      detail={facadePaintActive ? state.facadePaint.detail : state.modelTool.detail}
+      brushTool={activePaintTool}
+      detail={activePaintDetail}
       tools={facadePaintActive ? [...FACADE_PAINT_TOOLS] : undefined}
-      onBrush={setActivePaintBrush}
       onBrushTool={(tool) => facadePaintActive
         ? setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, tool } }))
         : modelToolApiRef.current?.brushTool(tool)}
       onCycleDetail={facadePaintActive ? cycleFacadeDetail : () => modelToolApiRef.current?.cycleDetail()}
-      popover={paintPopover}
-      onToggle={guarded((which: PaintPopover) => setPaintPopover((open) => (open === which ? null : which)))}
-      current={state.colorSpineCurrent}
-      palette={state.colorSpinePalette}
-      recents={state.colorSpineRecents}
-      scenePick={state.colorSpineScenePick}
-      paletteFor={paintPaletteFor}
-      spine={{
-        onSetCurrent: (color) => setColorSpineCurrent(color, 'toolbar'),
-        onAddToTray: () => addColorSpineToTray('toolbar'),
-        onPickTray: (color) => pickColorSpineTray(color, 'toolbar'),
-        onScenePick: (color, css) => pickColorSpineScene(color, css, 'toolbar'),
-        onLoadLibrarySet: (colors) => loadColorSpineLibrarySet(colors, 'toolbar'),
-      }}
     />
   ) : null;
+  const paintSpine = {
+    onSetCurrent: (color: typeof state.colorSpineCurrent) => setColorSpineCurrent(color, 'paint dock'),
+    onAddToTray: () => addColorSpineToTray('paint dock'),
+    onPickTray: (color: typeof state.colorSpineCurrent) => pickColorSpineTray(color, 'paint dock'),
+    onScenePick: (color: typeof state.colorSpineCurrent, css: string) => pickColorSpineScene(color, css, 'paint dock'),
+    onLoadLibrarySet: (colors: typeof state.colorSpinePalette) => loadColorSpineLibrarySet(colors, 'paint dock'),
+  };
+  const activePaintSidePanel = !paintUiActive ? null
+    : activeLeftPanelDefinition.renderer === 'paint-tools' ? (
+      <PaintToolOptionsPanel
+        brush={activePaintBrush}
+        brushTool={activePaintTool}
+        detail={activePaintDetail}
+        onBrush={setActivePaintBrush}
+        onInk={() => pressLeftPanel('ink')}
+      />
+    ) : activeLeftPanelDefinition.renderer === 'paint-ink' ? (
+      <PaintInkPanel
+        brush={activePaintBrush}
+        onBrush={setActivePaintBrush}
+        current={state.colorSpineCurrent}
+        palette={state.colorSpinePalette}
+        recents={state.colorSpineRecents}
+        scenePick={state.colorSpineScenePick}
+        paletteFor={paintPaletteFor}
+        onEditMaterial={openColorStudioForSpec}
+        spine={paintSpine}
+      />
+    ) : null;
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
   // track edits while the menu stays open — Rotate keeps it open) + the RANKED
@@ -5181,13 +5197,14 @@ export default function AppFrame() {
         <RenderProbe id="Left Rail">
           <LeftRail
             documentKind={activeDocumentKind}
+            paintActive={paintUiActive}
             activePane={activeLeftPanel}
             collapsed={state.leftPanelCollapsed}
             onPane={pressLeftPanel}
           />
         </RenderProbe>
-        {!state.leftPanelCollapsed ? <RenderProbe id="Content Browser">
-          <LibraryPanel
+        {!state.leftPanelCollapsed ? <RenderProbe id={activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
+          {activePaintSidePanel ?? <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
             assets={filteredAssets}
@@ -5225,7 +5242,7 @@ export default function AppFrame() {
             onModelFavorite={favoriteModel}
             onModelDuplicate={duplicateModel}
             onModelDelete={deleteModel}
-          />
+          />}
         </RenderProbe> : null}
         <RenderProbe id="Workspace">
           <Workspace
@@ -5483,29 +5500,6 @@ export default function AppFrame() {
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
-        </RenderProbe>
-      ) : null}
-      {!playing && paintUiActive && paintPopover ? (
-        <RenderProbe id="Paint Popovers">
-          <PaintPopovers
-            popover={paintPopover}
-            onClose={() => setPaintPopover(null)}
-            brush={activePaintBrush}
-            onBrush={setActivePaintBrush}
-            current={state.colorSpineCurrent}
-            palette={state.colorSpinePalette}
-            recents={state.colorSpineRecents}
-            scenePick={state.colorSpineScenePick}
-            paletteFor={paintPaletteFor}
-            onEditMaterial={openColorStudioForSpec}
-            spine={{
-              onSetCurrent: (color) => setColorSpineCurrent(color, 'toolbar'),
-              onAddToTray: () => addColorSpineToTray('toolbar'),
-              onPickTray: (color) => pickColorSpineTray(color, 'toolbar'),
-              onScenePick: (color, css) => pickColorSpineScene(color, css, 'toolbar'),
-              onLoadLibrarySet: (colors) => loadColorSpineLibrarySet(colors, 'toolbar'),
-            }}
-          />
         </RenderProbe>
       ) : null}
       {importPlan ? (

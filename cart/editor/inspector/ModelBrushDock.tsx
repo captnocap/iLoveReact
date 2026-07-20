@@ -28,7 +28,7 @@ export type ColorSpineHandlers = {
 
 // The dials, isolated. Owns a synchronous local draft so sliders are responsive, and its
 // re-renders never touch the Color Studio sibling. Syncs to the viewer only on commit.
-function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex: string; onSync: (b: Brush) => void }) {
+export function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex?: string; width?: number; onSync: (b: Brush) => void }) {
   const [draft, setDraft] = useState<Brush>(props.seed);
   const lastSync = useRef<string>('');
 
@@ -42,6 +42,7 @@ function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex: string; onSyn
 
   // Studio colour (low frequency — a click) flows into the brush ink and syncs immediately.
   useEffect(() => {
+    if (!props.inkHex) return;
     if (draft.ink.kind === 'color' && draft.ink.hex.toLowerCase() === props.inkHex.toLowerCase()) return;
     const nb: Brush = { ...draft, ink: { kind: 'color', hex: props.inkHex } };
     setDraft(nb);
@@ -57,7 +58,7 @@ function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex: string; onSyn
       onToolChange={() => { /* tool lives in the toolbar; the dock owns shape/size/flow */ }}
       palette={{ swatches: [], recents: [] }}
       theme={DARK_THEME}
-      width={244}
+      width={props.width ?? 244}
       sections={{ tools: false, color: false, palette: false }}
     />
   );

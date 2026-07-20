@@ -1,5 +1,5 @@
 // runtime/paint/controls.tsx — the ONE canonical control vocabulary. Every
-// brush number is the SAME control everywhere: a labelled slider with an
+// brush number (size/hardness/flow/scatter/angle/aspect/spacing) is the SAME control everywhere: a labelled slider with an
 // inline editable readout. No more "size is a slider here, a button there, an
 // incrementer somewhere else" — that inconsistency is the whole reason this
 // kit exists (USER ASK req_1447).

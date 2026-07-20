@@ -1,6 +1,6 @@
 // runtime/paint/BrushKit.tsx — the drop-in brush surface. A controlled panel
 // that renders the WHOLE brush experience from one place: tools, brush shapes
-// + presets, the size/hardness/flow/scatter/angle dials (all the canonical
+// + presets, the size/hardness/flow/scatter/angle/aspect/spacing dials (all the canonical
 // BrushScalar), blend modes, the color wheel, and the palette (color AND
 // texture/shader swatches). Drop it next to a <Paintable> + useBrushStroke and
 // every tool in the repo gets the SAME paint UI (USER ASK req_1447).
@@ -162,6 +162,7 @@ export function BrushKit(props: BrushKitProps) {
           <BrushScalar label="Scatter" value={b.scatter} min={0} max={3} precision={2} onChange={(v) => patch({ scatter: v })} onCommit={(v) => commit({ scatter: v })} theme={T} />
           <BrushScalar label="Angle" value={b.angleDeg} min={-180} max={180} precision={0} unit="°" onChange={(v) => patch({ angleDeg: Math.round(v) })} onCommit={(v) => commit({ angleDeg: Math.round(v) })} theme={T} />
           <BrushScalar label="Aspect" value={b.aspect} min={0.2} max={8} precision={2} onChange={(v) => patch({ aspect: v })} onCommit={(v) => commit({ aspect: v })} theme={T} />
+          <BrushScalar label="Spacing" value={b.spacing} min={0.05} max={1} precision={2} onChange={(v) => patch({ spacing: v })} onCommit={(v) => commit({ spacing: v })} theme={T} />
         </Section>
       ) : null}
 

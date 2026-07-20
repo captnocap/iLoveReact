@@ -18,7 +18,7 @@ import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import type { MapPaintState } from './mapPaint';
 
 const POP = '#17181b', LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', ACCENT = '#6ea8fe';
-const PAGE_SIZE = 15; // live-Effect budget, same as the ink popover
+const PAGE_SIZE = 15; // live-Effect budget, same as the persistent Ink panel
 const PICKER_LEFT = 410;
 const PICKER_BOTTOM = 126; // above the viewport bottom paint/build dock
 

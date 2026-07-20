@@ -465,7 +465,7 @@ export type EditorState = {
   exportCharacterPrompt?: boolean | null;
   presetMenuOpen: boolean;
   actionMenu: Menu;
-  /** Contextual source-library selection; resolved against the center document. */
+  /** Contextual left input-pane selection; resolved against document + active tool. */
   activeDomain: string;
   activeTab: LibraryTab;
   activeCommandId: string;

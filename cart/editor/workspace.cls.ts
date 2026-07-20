@@ -101,8 +101,9 @@ classifier({
   HW_LeftRail: { type: 'Box', style: { width: REGIONS.leftRail.width, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, paddingBottom: 8, backgroundColor: 'theme:surface', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_RailButton: { type: 'Pressable', style: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_RailButtonOn: { type: 'Pressable', style: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
-  // CONTENT BROWSER region (req_2627): when open, two fixed states (req_3135):
-  // tucked micro dock and expanded dock. Collapse omits this body; rail remains.
+  // LEFT PANEL region (req_2627/req_3270): asset browsing has tucked/expanded
+  // states; contextual tool panes use the fixed tucked width. Collapse omits
+  // this body in either context; the rail remains.
   HW_SidePanel: { type: 'Box', style: { width: REGIONS.contentBrowser.width, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_SidePanelWide: { type: 'Box', style: { width: REGIONS.contentBrowser.expandedWidth, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   // ── The asset dock chrome (req_3135, concept 4): Assets header with the

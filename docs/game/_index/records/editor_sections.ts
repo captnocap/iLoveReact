@@ -6,7 +6,7 @@ export const editor_sections: DocIndex = {
   cart: 'cart/editor/shell/regions.ts',
   purpose: ['ui'],
   summary:
-    'The prompting vocabulary (req_2970): every persistent block of the editor UI carries a section LETTER A–H — A chrome, B left rail, C content browser, D action bar, E stage, F stage tabs, G focus panel, H status bar — declared in shell/regions.ts SECTIONS and stamped `SECTION <X>` at the top of each owning component, so an ask says "add that to section C" instead of describing geometry. Exactly eight; floating layers (dialogs, popovers, context menus, in-viewport docks) are not sections — they belong to the section that spawns them.',
+    'The prompting vocabulary (req_2970/req_3270): every persistent block of the editor UI carries a section LETTER A–H — A chrome, B contextual left rail, C left input panel (asset browser or persistent paint Tool Options / Ink), D compact action bar, E stage, F stage tabs, G focus panel, H status bar — declared in shell/regions.ts SECTIONS and stamped `SECTION <X>` at the top of each owning component. Exactly eight; floating layers (dialogs, dropdowns, context menus, in-viewport docks) are not sections.',
   interfaces: [
     {
       name: 'SECTIONS (shell/regions.ts)',
@@ -15,7 +15,7 @@ export const editor_sections: DocIndex = {
       sourceFile: 'cart/editor/shell/regions.ts',
       description:
         'The letter → {region, name, file, contains} map, one entry per section, plus the lettered ASCII layout diagram. Wraps the req_2627 fixed-region contract (each entry points at its REGIONS key, which still owns the pixel constants). The ONE source of truth for section letters; the per-file `SECTION <X>` header comments are stamps pointing here.',
-      consumers: ['cart/editor/shell/Chrome.tsx', 'cart/editor/shell/LeftRail.tsx', 'cart/editor/library/LibraryPanel.tsx', 'cart/editor/stage/ToolOptions.tsx', 'cart/editor/stage/Stage.tsx', 'cart/editor/stage/StageTabs.tsx', 'cart/editor/inspector/Inspector.tsx', 'cart/editor/shell/BuildDock.tsx'],
+      consumers: ['cart/editor/shell/Chrome.tsx', 'cart/editor/shell/LeftRail.tsx', 'cart/editor/library/LibraryPanel.tsx', 'cart/editor/shell/PaintSidePanel.tsx', 'cart/editor/stage/ToolOptions.tsx', 'cart/editor/stage/Stage.tsx', 'cart/editor/stage/StageTabs.tsx', 'cart/editor/inspector/Inspector.tsx', 'cart/editor/shell/BuildDock.tsx'],
       status: 'live',
     },
   ],

@@ -1,6 +1,6 @@
 # Editor UI sections — the prompting vocabulary (A–H)
 
-Active surface: `cart/editor/`. Last verified: 2026-07-19.
+Active surface: `cart/editor/`. Last verified: 2026-07-20.
 USER ASK req_2970 ("i am sick and tired of trying to point out a specific area
 of the ui that i want something to land in ... we are going to recategorize
 everything by a section number so prompting can turn into 'add that to
@@ -19,7 +19,7 @@ geometry.
 ```
 ┌──────────────────── A window chrome (37) ──────────────────────┐
 │  B   │        C        │  D  [action bar 36]       │           │
-│ rail │ content browser │  E     viewport (flexes)  │ body│rail │
+│ rail │   left panel    │  E     viewport (flexes)  │ body│rail │
 │ (48) │  (0/350/680)    │                           │0/285│40  │
 │      │                 │  F  [stage tabs]          │           │
 └──────────────────── H status bar (31) ─────────────────────────┘
@@ -28,9 +28,9 @@ geometry.
 | §  | Name            | Owner file                  | What lives there |
 |----|-----------------|-----------------------------|------------------|
 | A  | Window Chrome   | `shell/Chrome.tsx`          | "Shitty Games" brand · File/Edit/View/Build menu bar · Compile · Editor/Play toggle · window controls |
-| B  | Left Rail       | `shell/LeftRail.tsx`        | contextual source-library buttons; pressing the active button again collapses/reopens C |
-| C  | Content Browser | `library/LibraryPanel.tsx`  | the contextual asset dock (req_3135/req_3266): search · Favorites/Recent · content tree · count footer · selected-asset detail card; collapsed 0 / tucked 350 / expanded grid 680 |
-| D  | Action Bar      | `stage/ToolOptions.tsx`     | THE toolbar (req_2552): mesh tools, snap, floor ▼/▲, view modes, the paint segment (`shell/PaintToolbar.tsx`), the map-paint bar (`stage/MapPaintBar.tsx`) |
+| B  | Left Rail       | `shell/LeftRail.tsx`        | contextual input buttons: source libraries while browsing, Tool Options + Ink while painting; pressing the active button again collapses/reopens C |
+| C  | Left Panel      | `library/LibraryPanel.tsx` + `shell/PaintSidePanel.tsx` | the contextual input dock: asset browser (collapsed 0 / tucked 350 / expanded 680), or persistent paint Tool Options / Ink (collapsed 0 / open 350) |
+| D  | Action Bar      | `stage/ToolOptions.tsx`     | compact mesh/world/paint tool selection and resolution; detailed brush and ink controls live persistently in C |
 | E  | Stage           | `stage/Stage.tsx`           | the flexing center viewport — world / model / playtest / animation / material-focus surfaces + in-viewport docks (`BuildBar`, `MapPaintDock`) |
 | F  | Stage Tabs      | `stage/StageTabs.tsx`       | the open-document tab strip at the bottom edge of the stage |
 | G  | Focus Panel     | `inspector/Inspector.tsx`   | contextual focus body + persistent 40px rail; model view exposes Model / Paint / Rig, and pressing the active button again collapses/reopens the body |
@@ -44,10 +44,11 @@ geometry.
   the ui flows."
 - **Exactly eight.** New persistent UI must land INSIDE an existing section
   (or be ruled a new section by the user — never invented by a worker).
-- **Floating layers are NOT sections.** Dialogs, popovers, dropdown menus,
+- **Floating layers are NOT sections.** Dialogs, dropdown menus,
   context menus, and in-viewport docks belong to the section that spawns them
   (the map texture picker is C-adjacent but owned by D's map-paint mode; the
-  model context menu is E's).
+  model context menu is E's). Paint Brush and Ink are no longer floating
+  layers: while painting they are persistent C renderers (req_3270).
 - **Sections wrap the fixed-region contract, they don't replace it** — each
   SECTIONS entry points at its `REGIONS` key (req_2627), which still owns the
   pixel constants content lays out against. C and G can omit their body while

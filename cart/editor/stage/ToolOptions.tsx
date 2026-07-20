@@ -31,9 +31,8 @@ export default function ToolOptions(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  /** The paint controls segment (AppFrame builds it — ink/size/flow/shape/resolution).
-   *  THIS action bar is the toolbar paint tools belong to (req_2552: the row where the
-   *  Paint/Vertex/wireframe buttons live), rendered while painting a model. */
+  /** Compact paint tool + resolution segment. Persistent brush/ink controls are
+   *  projected into the left dock while this center-stage context is active. */
   paintBar?: any;
   /** Explicit outliner selection size. A 2+ part selection owns Merge, so the generic
    *  face-dissolve verb must not be offered for the same host face selection. */
@@ -80,10 +79,8 @@ export default function ToolOptions(props: {
             </C.HW_IconButton>
           </Fragment>
         ) : null}
-        {/* The PAINT segment (req_2552) — the full brush controls (fill/brush/pick, ink,
-            size, flow, shape, resolution) live HERE in the action bar while painting,
-            plus the face-safety pill (the one control the segment doesn't carry). The
-            old fill/brush icon pair + DETAIL pill died here: the segment IS those. */}
+        {/* Paint keeps its compact tool/resolution strip here; the full GIMP-style
+            brush and ink surfaces remain open in Section C (req_3270). */}
         {props.state.modelTool.paint && props.paintBar ? (
           <Fragment>
             <C.HW_OptionDivider />

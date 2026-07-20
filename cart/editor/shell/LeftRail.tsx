@@ -1,5 +1,6 @@
-// SECTION B — Left Rail (see shell/regions.ts SECTIONS): the contextual source-
-// library buttons. Selecting the active button again folds Section C away.
+// SECTION B — Left Rail (see shell/regions.ts SECTIONS): contextual input panes.
+// Source libraries yield to Tool Options + Ink while the stage is painting.
+// Selecting the active button again folds Section C away.
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { leftPanelsFor, resolvedPanelId, type LeftPanelId } from '../data/panelSystem';
@@ -7,11 +8,12 @@ import type { WorkspaceDocumentKind } from '../data/types';
 
 export default function LeftRail(props: {
   documentKind: WorkspaceDocumentKind;
+  paintActive: boolean;
   activePane: string;
   collapsed: boolean;
   onPane: (pane: LeftPanelId) => void;
 }) {
-  const panes = leftPanelsFor(props.documentKind);
+  const panes = leftPanelsFor(props.documentKind, props.paintActive);
   const activePane = resolvedPanelId(panes, props.activePane);
   return (
     <C.HW_LeftRail>

@@ -13,7 +13,7 @@
 //            shared face-painting law.
 //   RECENT — the live recently-used materials row (EditorState.recentMaterialIds).
 //   grid   — search ("search skins…") over the RANKED catalog, paged like the
-//            ink popover (every tile is a live <Effect> thumb via AssetPreview,
+//            Ink panel (every tile is a live <Effect> thumb via AssetPreview,
 //            so the page size is the live-Effect budget). Footer: pager, honest
 //            count, and the "default" chip that clears the target back to the
 //            kind look (all faces when untargeted).
@@ -48,7 +48,7 @@ const QUICK_VERBS: { id: string; label: string; keyHint: string; closes: boolean
 
 const MENU_W = 240;
 // Tile geometry: 3 across inside MENU_W. Every mounted tile is a live <Effect>
-// thumbnail, so the PAGE is the live-Effect budget — the ink popover's discipline.
+// thumbnail, so the PAGE is the live-Effect budget — the Ink panel's discipline.
 const TILE_W = 68;
 const TILE_H = 38;
 const PAGE_SIZE = 12;
