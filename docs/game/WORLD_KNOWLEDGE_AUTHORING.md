@@ -15,16 +15,68 @@ become one giant runtime object:
 
 The recommendation in one sentence:
 
-> Build a wiki-shaped **World Bible** over a typed **World Knowledge graph**;
-> compile that graph into compact entity, schedule, route, text, and mission
-> indexes; let runtime events project new internet records without ever changing
-> authored truth.
+> Keep project-owned Markdown files containing declarative `<block>` records as
+> the source of truth; make the wiki-shaped **World Bible** an explicitly
+> divergent draft/editor over those files; compile the confirmed on-disk form
+> into compact entity, schedule, route, text, and mission indexes.
 
 The distinction matters. A wiki is the right way for a human to browse and edit
 lore. A pile of wiki pages is the wrong source of truth for a game that must
 answer questions such as "who works here Tuesday night?", "which account is
 secretly controlled by this person?", "can this position be targeted by a gig?",
-and "what evidence caused this headline?" quickly and deterministically.
+and "what evidence caused this headline?" quickly and deterministically. The
+typed graph is a derived view of block identities and `@[ref]` links, not a
+separate authoring database.
+
+---
+
+## 0. Source ownership: disk wins
+
+Clarified by USER ASK `req_3264` and `req_3265`: the canonical authoring form is
+the human-readable Markdown-with-block file described in `req_2742` and
+`project_mission_block_authoring.md`.
+
+The editor is **not** an automatic writer. It loads the last confirmed on-disk
+file into a draft, lets that draft diverge, and makes the divergence visible.
+Changing a field, binding a logo, selecting a world space, or accepting generated
+content changes only the editor draft. Updating the canonical file requires a
+formal, explicit **Write to Disk** confirmation after reviewing the proposed
+patch.
+
+```text
+on-disk Markdown + <blocks>  ──parse──>  editor base
+          │                                │
+          │                         draft-only edits
+          │                                │
+          │                         review exact diff
+          │                                │
+          └──── explicit confirmation <────┘
+                         │
+                  atomic disk write
+                         │
+            re-parse + validate canonical form
+```
+
+The visible ownership states are:
+
+| State | Meaning | Permitted next actions |
+|---|---|---|
+| `DISK` | Draft, loaded base, and current disk file agree | Edit draft |
+| `DRAFT CHANGED` | Editor draft differs; disk still equals the loaded base | Review, Write to Disk, or Revert Draft |
+| `DISK CHANGED` | An external text editor changed disk; local draft is clean | Review and Reload from Disk |
+| `CONFLICT` | Both editor draft and disk changed from the loaded base | Three-way review; never overwrite automatically |
+
+The editor may autosave its **draft recovery history** so a crash does not erase
+work. Recovery data is not canonical content and must remain labeled as a draft.
+Compile, ship, other tools, and a fresh editor open read the confirmed on-disk
+files. An optional preview may run a draft only if it is unmistakably labeled
+`DRAFT PREVIEW`; it can never masquerade as a normal compile.
+
+The write door re-reads the file and checks the expected content hash immediately
+before replacement. If the file changed after the diff was prepared, the write
+stops in `CONFLICT`. The writer preserves all untouched prose, comments,
+formatting, block ordering, and incomplete ideas byte-for-byte; it patches only
+the spans the user confirmed.
 
 ---
 
@@ -40,6 +92,9 @@ parallel system:
 - the previous-era mission and story contracts under
   `cart/hmsc-int/game/missions/` and `cart/hmsc-int/game/story/`;
 - the previous-era append-only store at `cart/hmsc-int/data/index.ts`;
+- the recovered `<block>` design in
+  `/home/siah/.claude/projects/-home-siah-creative-reactjit/memory/project_mission_block_authoring.md`
+  and its original USER ASK `req_2742`;
 - the active editor's document, command, world-marker, and game-file surfaces;
 - `/home/siah/creative/engaige`, including its live databases, lore corpus,
   site registry, NPC context builder, social autopilot, news recursion, event
@@ -53,8 +108,10 @@ The binding constraints are:
    become a per-game JavaScript runtime.
 2. Runtime state has two clocks: frames and the V8 state tick. Opening the
    World Bible, phone, or an in-world website must not pause either clock.
-3. Authored edits are append-only concern events with one global sequence;
-   compile consumes materialized snapshots, not edit history.
+3. Project-owned Markdown-with-block files are the canonical authoring source.
+   Editor changes remain a visibly divergent draft until a reviewed, explicitly
+   confirmed disk write. V20 history may preserve/recover drafts, but compile
+   consumes only the confirmed disk-derived snapshot.
 4. Ambient population is distributional. A named persistent person exists only
    when authored or promoted; a business roster must not accidentally tenure
    every cashier in the city.
@@ -671,7 +728,15 @@ Gigs
 Recommended behavior:
 
 - `Characters`, `Locations`, and `Missions` in the existing content tree become
-  views over World Knowledge rather than parallel registries.
+  views over the parsed on-disk block files rather than parallel registries.
+- Every open document visibly reports `DISK`, `DRAFT CHANGED`, `DISK CHANGED`,
+  or `CONFLICT`; a dirty dot alone is too ambiguous for a two-authority surface.
+- Editing a field, prose, relation, asset, or world binding changes the draft
+  only. It never silently mutates the corresponding source file.
+- **Review Changes** shows both a semantic block diff and the exact textual patch.
+  **Write to Disk** names every target path and requires formal confirmation.
+- **Reload from Disk** is explicit when it would discard draft changes. External
+  file changes are detected and surfaced, not automatically merged.
 - Opening a person, business, site, document, position, or place creates a normal
   workspace document keyed by its stable source ID.
 - `[[` opens typed entity autocomplete. Selecting an entity writes its ID token,
@@ -697,55 +762,77 @@ prevents the in-world wiki from becoming a backdoor to secret authored truth.
 
 ---
 
-## 11. Persistence and the deep interface
+## 11. On-disk source, editor draft, and the deep interface
 
-The active editor needs the V20 semantics, not a direct import from the retired
-surface.
+The content source is a project directory of Markdown files with declarative
+blocks such as `<business>`, `<npc>`, `<space>`, `<mechanic>`, `<mission>`, and
+`<objective>`. Ordinary Markdown around the blocks is retained designer prose.
+`<ref>` supplies stable identity; `@[ref]` links files and blocks. JSON,
+indexes, snapshots, and the gamefile are derived products.
 
-The proposed ground-floor module is deliberately small:
+The active editor still needs V20 history semantics for draft recovery and undo,
+but that history is not allowed to replace the files or silently publish into
+them. The deep boundary separates draft mutation from disk mutation:
 
 ```ts
-WORLD_KNOWLEDGE.open(projectRoot) -> WorldKnowledgeStore
+WORLD_KNOWLEDGE.open(projectRoot) -> WorldKnowledgeSession
 
-WorldKnowledgeStore.apply(command) -> KnowledgeEvent[]
-WorldKnowledgeStore.snapshot() -> WorldKnowledgeSnapshot
-WorldKnowledgeStore.stateAt(globalSeq) -> WorldKnowledgeSnapshot
-WorldKnowledgeStore.query(query) -> QueryResult
-WorldKnowledgeStore.validate(context) -> Diagnostic[]
-WorldKnowledgeStore.compile(context) -> { pack, report }
+WorldKnowledgeSession.diskSnapshot() -> WorldKnowledgeSnapshot
+WorldKnowledgeSession.draftSnapshot() -> WorldKnowledgeSnapshot
+WorldKnowledgeSession.applyDraft(command) -> KnowledgeEvent[]
+WorldKnowledgeSession.stateAt(globalSeq) -> WorldKnowledgeSnapshot
+WorldKnowledgeSession.query(query, source: 'disk' | 'draft') -> QueryResult
+WorldKnowledgeSession.validate(source: 'disk' | 'draft') -> Diagnostic[]
+WorldKnowledgeSession.prepareDiskWrite() -> WriteProposal
+WorldKnowledgeSession.confirmDiskWrite(proposalId, expectedDiskHash) -> WriteResult
+WorldKnowledgeSession.reloadFromDisk() -> ReloadResult
+WorldKnowledgeSession.compileDisk(context) -> { pack, report }
 ```
+
+There is deliberately no `apply()` method whose meaning might include a disk
+write. `applyDraft` can only touch the draft/history store. `confirmDiskWrite` is
+the single canonical-write door and requires a proposal created from a reviewed
+diff plus the expected disk hash.
 
 The implementation hides:
 
-- append-only SQLite concern streams;
-- one global sequence across concerns;
-- snapshot plus tail boot;
-- corruption quarantine;
-- batched commits;
-- schema-version decoding;
-- indexes/backlinks;
-- compile caching.
+- concrete-syntax parsing with source spans;
+- stable-ref resolution and backlinks;
+- semantic and exact-text diff construction;
+- optimistic disk-hash conflict detection;
+- atomic file replacement;
+- byte-preserving patch application outside confirmed spans;
+- append-only draft/history concern streams with one global sequence;
+- draft snapshot plus tail boot and crash recovery;
+- corruption quarantine and schema-version decoding;
+- compiled query indexes and caches.
 
-Suggested concerns are broad and stable, not one stream per UI widget:
+Suggested draft/history concerns remain broad and stable:
 
-1. `knowledge` — entities, facts, and structural relations;
-2. `internet` — sites, accounts, documents, claims, and routes;
-3. `missions` — gig templates and hook bindings;
-4. `tuning` — calendar, schedules, cadence, rewards, refill, and media policy.
+1. `knowledge-draft` — proposed entity, fact, and structural-relation edits;
+2. `internet-draft` — proposed site, account, document, claim, and route edits;
+3. `missions-draft` — proposed gig, mission, and hook edits;
+4. `tuning-draft` — proposed calendar, schedule, cadence, and balance edits.
 
-Every registration includes its snapshot materializer. Unknown future event
-kinds are tolerated by old readers. The editor writes events; compile and ship
-read snapshots.
+Every draft concern includes its recovery materializer. Unknown future events
+are tolerated by old readers. On open, the editor parses disk first, then offers
+to recover a divergent draft explicitly; it never applies recovered work to disk
+without confirmation.
 
-React components call commands and render query results. They do not mutate the
-graph, allocate IDs, fold history, validate routes, or build mission affordances.
+Human text editing, the World Bible, and generation are three producers of the
+same block format, but only the human text editor writes directly by definition.
+The World Bible and generators produce drafts/patch proposals. React components
+dispatch draft commands and render queries; they do not write files, allocate
+canonical IDs, resolve conflicts, validate refs, or compile mission affordances.
 
 ---
 
 ## 12. Compile products and shipped representation
 
-The authoring snapshot compiles into a `WorldKnowledgePack` inside the game-logic
-stream. It should not add one map lump per page or ship a SQLite database.
+The confirmed on-disk block files parse into an authoring snapshot, which
+compiles into a `WorldKnowledgePack` inside the game-logic stream. It should not
+add one map lump per page, ship a SQLite database, or compile an unconfirmed
+editor draft by accident.
 
 The logical sections are:
 
@@ -893,6 +980,14 @@ integrity, and mission solvability.
 
 ### Pure authoring/compiler tests
 
+- editor mutations leave canonical files byte-identical until confirmation;
+- Write to Disk names its paths and applies only the reviewed proposal;
+- untouched prose/comments/formatting remain byte-identical after a block edit;
+- an external disk change between proposal and confirmation produces conflict
+  and never overwrites either version;
+- reload/revert require confirmation before discarding a divergent draft;
+- compile reads disk even while a different draft is open;
+- recovered V20 draft history remains visibly noncanonical;
 - ID/type/reference validation;
 - rename stability;
 - fact versus claim isolation;
@@ -964,15 +1059,19 @@ Recommended fixture:
 
 The slice is complete only when:
 
-1. every referenced entity and route opens;
-2. Tuesday-at-time preview resolves workers, openings, and markers;
-3. both gig bindings validate and the headless verifier can complete them;
-4. renaming the business changes labels without changing any IDs or links;
-5. the false public claim never becomes mission/world truth;
-6. the incident's media chain can be rebuilt from its source events;
-7. AI-off still produces a coherent internet;
-8. the phone and in-world screen consume the same content channel;
-9. the runtime performance gate remains silent.
+1. changing the business in the World Bible leaves its source file untouched;
+2. Review Changes shows the exact proposed block/text patch;
+3. explicit Write to Disk updates the named file and re-parses it cleanly;
+4. an external text edit creates `DISK CHANGED` or `CONFLICT`, never data loss;
+5. every referenced entity and route opens;
+6. Tuesday-at-time preview resolves workers, openings, and markers;
+7. both gig bindings validate and the headless verifier can complete them;
+8. renaming the business changes labels without changing any IDs or links;
+9. the false public claim never becomes mission/world truth;
+10. the incident's media chain can be rebuilt from its source events;
+11. AI-off still produces a coherent internet;
+12. the phone and in-world screen consume the same content channel;
+13. the runtime performance gate remains silent.
 
 ---
 
@@ -980,31 +1079,42 @@ The slice is complete only when:
 
 ### Phase 0 — contract and fixture
 
-- finalize IDs, record unions, command/event vocabulary, and diagnostics;
-- make the small vertical-slice fixture as plain data;
+- finalize the Markdown `<block>` grammar, `<ref>`/`@[ref]` rules, record unions,
+  command/event vocabulary, and diagnostics;
+- make the small vertical-slice fixture as real hand-editable source files;
+- build parser/writer golden fixtures proving byte preservation outside edited
+  spans, before any visual editor work;
 - port the existing mission row validator vocabulary into an active-surface
   contract without importing the old route;
 - write schedule, fact/claim, link, and affordance tests before UI work.
 
-Exit: the snapshot/compiler contract answers all first-slice queries headlessly.
+Exit: disk files parse, validate, round-trip, and answer all first-slice queries
+headlessly without a writer touching unconfirmed content.
 
-### Phase 1 — durable World Knowledge store
+### Phase 1 — canonical files and durable draft boundary
 
-- implement active-editor append-only concerns and one global sequence;
-- snapshot-plus-tail boot, batch, quarantine, time travel, and backup;
-- command boundary and pure materializers;
+- implement disk/base/draft snapshots plus explicit state reporting;
+- implement active-editor append-only **draft** concerns and one global sequence;
+- add snapshot-plus-tail draft recovery, batch, quarantine, time travel, and
+  backup without treating recovery as canonical;
+- add semantic/raw diff, write proposal, formal confirmation, expected-hash
+  conflict detection, atomic patch, re-parse, and revert/reload boundaries;
 - typed query/backlink indexes.
 
-Exit: cold reopen and time travel preserve the fixture byte-for-byte.
+Exit: cold reopen and time travel preserve both canonical files and a divergent
+draft; only confirmed proposals can change disk.
 
 ### Phase 2 — World Bible workspace
 
 - content-tree views, record documents, inspector relations, typed reference
   autocomplete, backlinks, diagnostics, schedule grid, and At Time preview;
+- persistent `DISK`/`DRAFT CHANGED`/`DISK CHANGED`/`CONFLICT` indicators,
+  Review Changes, Write to Disk confirmation, Reload, and Revert Draft;
 - world-marker binding through the existing map surface;
 - business roster as a position/occupancy projection.
 
-Exit: the entire fixture can be authored without raw JSON.
+Exit: the entire fixture can be authored without raw JSON while the user always
+knows whether they are looking at disk or a divergent editor draft.
 
 ### Phase 3 — fake-internet floor
 
@@ -1066,24 +1176,28 @@ per-frame work.
 The proposal proceeds with these recommendations unless a later ruling changes
 them:
 
-1. **World Bible is the editor; World Knowledge is the model.** Never store a
-   disconnected page when a typed entity/relation owns the information.
-2. **Authored named people are tenured.** Common workers remain seeded occupants
+1. **On-disk Markdown-with-block files are the source of truth.** Editor and
+   generated changes remain drafts until an exact diff receives formal Write to
+   Disk confirmation; compile reads disk.
+2. **World Bible is a projection and deliberate writer, not an authority.** Its
+   parsed model, backlinks, and structured forms come from `<ref>`/`@[ref]`
+   blocks, and its writer preserves untouched human prose byte-for-byte.
+3. **Authored named people are tenured.** Common workers remain seeded occupants
    until promotion.
-3. **Job means Position plus Occupancy.** It is not a string on an NPC or an
+4. **Job means Position plus Occupancy.** It is not a string on an NPC or an
    embedded worker tuple on a business.
-4. **DOB is stored; age is derived.** Week/day/hour are views of one world
+5. **DOB is stored; age is derived.** Week/day/hour are views of one world
    instant.
-5. **Accounts are entities.** Handles are not loose strings, and controller
+6. **Accounts are entities.** Handles are not loose strings, and controller
    truth is separate from public ownership.
-6. **Facts and Claims never share authority.** The internet is allowed to lie;
+7. **Facts and Claims never share authority.** The internet is allowed to lie;
    mission/world predicates are not allowed to believe it by accident.
-7. **No dead links and no fake counts.** Both become compiler contracts.
-8. **Static authored floor first.** Event templates second; bounded AI prose
+8. **No dead links and no fake counts.** Both become compiler contracts.
+9. **Static authored floor first.** Event templates second; bounded AI prose
    last.
-9. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
+10. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
    and validation only.
-10. **Compile repeated presentation.** Site/layout/text templates are small
+11. **Compile repeated presentation.** Site/layout/text templates are small
     dictionaries over dense instances; only dirty visible records update.
 
 If these hold, the wiki is much more than a lore notebook. It becomes the place

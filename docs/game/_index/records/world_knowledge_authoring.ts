@@ -5,7 +5,7 @@ export const world_knowledge_authoring: DocIndex = {
   file: 'WORLD_KNOWLEDGE_AUTHORING.md',
   purpose: ['npc', 'world_gen', 'scripting', 'persistence', 'ui', 'agent_llm'],
   summary:
-    'Candidate architecture for a wiki-shaped World Bible over typed World Knowledge: stable people/organization/position/place/account/site/document/fact/claim/gig records compile into dense schedule, route, search, text, and mission-affordance indexes; runtime story events project causally linked internet artifacts without changing authored truth. Engaige contributes content-density and recursion disciplines, while its free-text identities, random schedules, event firehose, and fact-inventing AI are explicitly retired from the port shape.',
+    'Candidate format-first architecture: project-owned Markdown files with declarative <block> records, stable <ref> identities, @[ref] links, and surrounding human prose are canonical; the wiki-shaped World Bible holds a visibly divergent draft and requires review plus formal Write to Disk confirmation. Confirmed disk content derives typed people/organization/position/place/account/site/document/fact/claim/gig records and compiles into dense schedule, route, search, text, and mission-affordance indexes. Engaige contributes content-density and recursion disciplines, while its free-text identities, random schedules, event firehose, and fact-inventing AI are retired.',
   interfaces: [
     {
       name: 'WORLD_KNOWLEDGE',
@@ -13,7 +13,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'module',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Candidate deep boundary for the active editor: apply typed authoring commands into append-only concern events, materialize/query/validate a WorldKnowledgeSnapshot, and compile a WorldKnowledgePack. The module hides global sequencing, snapshot+tail boot, schema decoding, backlinks, typed reference validation, batching, quarantine, and compile caches; React renders queries and dispatches commands only.',
+        'Candidate deep boundary for the active editor: parse canonical Markdown-with-block files into a disk snapshot; apply commands only to a separately journaled draft; query/validate either source; prepare semantic+textual write proposals; and mutate disk only through formal confirmation guarded by the expected disk hash. The module hides concrete syntax spans, byte-preserving patches, disk/base/draft state, conflict detection, draft recovery/global sequencing, backlinks, typed reference validation, atomic writes, and compile caches; normal compile always reads disk.',
       dependsOn: ['V20 persistence semantics', 'WorldMarker', 'GAME_MISSIONS', 'GAME_STORY'],
       consumers: ['cart/editor', 'cart/editor/play', 'framework game loader'],
       status: 'candidate',
@@ -24,7 +24,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'data_model',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Materialized authored truth split into stable typed entities and relations: Person; Organization; Position plus time-varying Occupancy; Place bound to semantic WorldMarker ids; Account and InternetSite; Fact versus public Claim; InternetDocument blocks/routes; ShiftPattern; and tuning-keyed GigTemplate. Display labels and prose never replace ids, age is derived from DOB, and jobs/business workers are projections over position occupancy.',
+        'Derived parse of the confirmed on-disk block source, split into stable typed entities and relations: Person; Organization; Position plus time-varying Occupancy; Place bound to semantic WorldMarker ids; Account and InternetSite; Fact versus public Claim; InternetDocument blocks/routes; ShiftPattern; and tuning-keyed GigTemplate. <ref> owns identity, @[ref] owns links, surrounding prose is preserved, age derives from DOB, and jobs/business workers project from position occupancy.',
       dependsOn: ['WorldMarker'],
       status: 'candidate',
     },
@@ -45,7 +45,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'component',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Proposed active-editor workspace view: existing content tree and document tabs browse wiki-shaped entity pages; the inspector edits strict relations and map bindings; backlinks/where-used, typed [[id]] autocomplete, weekly and At Time projections, site preview, gig-template creation, and navigable compile diagnostics all operate on WORLD_KNOWLEDGE rather than a second shell or raw JSON editor.',
+        'Proposed active-editor workspace view over canonical block files: existing content tree and document tabs browse wiki-shaped pages while the inspector edits a separate draft. Every document shows DISK, DRAFT CHANGED, DISK CHANGED, or CONFLICT; Review Changes exposes semantic and exact-text diffs; Write to Disk names target paths and requires formal confirmation. Backlinks/where-used, typed ref autocomplete, map bindings, At Time projections, site preview, and diagnostics reuse the active shell.',
       dependsOn: ['WORLD_KNOWLEDGE', 'WorldMarker'],
       consumers: ['cart/editor'],
       status: 'candidate',
@@ -75,9 +75,18 @@ export const world_knowledge_authoring: DocIndex = {
       name: 'Wiki is a lens over typed world knowledge',
       purpose: ['ui', 'npc', 'world_gen', 'scripting'],
       description:
-        'Human authoring stays readable and backlink-driven, but canonical machine relationships are typed records. Person job/home, business workers/locations/sites, social handles, shifts, and gigs are projections and relations rather than duplicated page fields or free-text tuples.',
+        'Human-readable Markdown-with-block files are canonical. The wiki parses them into typed forms and backlinks, while Person job/home, business workers/locations/sites, social handles, shifts, and gigs remain linked records rather than duplicated free-text tuples. The editor can propose changes but cannot silently publish them.',
       examples: ['world_knowledge_authoring'],
       promoteTo: 'WORLD_KNOWLEDGE',
+      status: 'promote',
+    },
+    {
+      name: 'Explicit draft-to-disk write boundary',
+      purpose: ['persistence', 'ui', 'maintenance'],
+      description:
+        'Editor actions mutate a visibly divergent recoverable draft only. Review Changes prepares a semantic and exact-text patch; formal Write to Disk confirmation is the sole publish door, guarded by the expected disk hash and stopped by external edits. Compile reads confirmed disk, while recovered drafts remain labeled noncanonical.',
+      examples: ['world_knowledge_authoring', 'project_mission_block_authoring'],
+      promoteTo: 'WORLD_KNOWLEDGE.confirmDiskWrite',
       status: 'promote',
     },
     {
@@ -108,12 +117,21 @@ export const world_knowledge_authoring: DocIndex = {
   ],
   hazards: [
     {
+      name: 'automatic editor writes erase the source-of-truth distinction',
+      purpose: ['persistence', 'ui', 'maintenance'],
+      description:
+        'If a field edit, world binding, generated suggestion, or draft recovery immediately rewrites the Markdown file, the user cannot distinguish editor state from canonical disk state, review exact changes, or protect simultaneous hand edits. Autosaving a draft is acceptable; silently publishing it is not.',
+      evidence: ['USER ASK req_3265', 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md §0/§11'],
+      fix: 'Expose DISK/DRAFT CHANGED/DISK CHANGED/CONFLICT, prepare a reviewable patch, require formal Write to Disk confirmation, re-check the disk hash, and compile disk only.',
+      severity: 'high',
+    },
+    {
       name: 'wiki page mistaken for canonical game state',
       purpose: ['ui', 'npc', 'scripting', 'persistence'],
       description:
-        'Storing NPC job/home, business workers, schedules, accounts, and gigs as independent prose/page fields creates contradictions and makes future mission queries unprovable. The wiki must edit typed records and show their projections, never become a second unstructured truth store.',
+        'Treating the World Bible draft or an internal database as canonical splits authority from the human-readable block files; separately duplicating NPC job/home, business workers, schedules, accounts, and gigs also makes future queries contradictory. The wiki must remain a projection and deliberate patch producer over disk.',
       evidence: ['docs/game/WORLD_KNOWLEDGE_AUTHORING.md §3–§6', '/home/siah/creative/engaige/server/data/*.db'],
-      fix: 'Put stable ids and typed relationships under WORLD_KNOWLEDGE; derive page fields and rosters through queries.',
+      fix: 'Keep <ref>/@[ref] block files canonical; derive typed fields and rosters through queries; publish editor changes only through the confirmed write boundary.',
       severity: 'high',
     },
     {
