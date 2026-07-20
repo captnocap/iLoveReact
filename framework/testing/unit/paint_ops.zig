@@ -163,5 +163,7 @@ test "operand sizes match the frozen wire format" {
     try std.testing.expectEqual(@as(?usize, 8), paint_ops.operandSize(3));
     try std.testing.expectEqual(@as(?usize, 44), paint_ops.operandSize(4));
     try std.testing.expectEqual(@as(?usize, 48), paint_ops.operandSize(5));
+    try std.testing.expectEqual(@as(?usize, paint_ops.POLYGON_OPERAND_SIZE), paint_ops.operandSize(6));
+    try std.testing.expectEqual(@as(usize, 532), paint_ops.POLYGON_OPERAND_SIZE);
     try std.testing.expectEqual(@as(?usize, null), paint_ops.operandSize(9));
 }

@@ -24,7 +24,7 @@ function presetShape(p: typeof BRUSH_PRESETS[number]): BrushShape {
 const TOOL_LABEL: Record<BrushTool, string> = {
   brush: 'Brush', eraser: 'Eraser', line: 'Line', rect: 'Rect', ellipse: 'Oval',
   fill: 'Fill', eyedropper: 'Pick', smudge: 'Smudge', blur: 'Blur', text: 'Text',
-  marquee: 'Marquee', lasso: 'Lasso',
+  marquee: 'Marquee', lasso: 'Lasso', pen: 'Pen Path',
 };
 
 const DEFAULT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'eyedropper'];

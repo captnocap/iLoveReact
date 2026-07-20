@@ -31,8 +31,12 @@ const TEXT = '#e8edf6';
 const DIM = '#8b93a3';
 const ACCENT = '#6ea8fe';
 
-const SHADER_PAGE_SIZE = 15;
-const SHADER_GRID_COLS = 5;
+// Content-browser density: eight columns × six rows exposes 48 materials at
+// once (3.2× the old popover-shaped 5×3 catalog) without shrinking hit targets
+// below a dependable 36px cell.
+const SHADER_PAGE_SIZE = 48;
+const SHADER_GRID_COLS = 8;
+const SHADER_THUMB_SIZE = 32;
 
 type ShaderInk = Extract<Brush['ink'], { kind: 'shader' }>;
 
@@ -62,7 +66,7 @@ export type PaintPanelProps = PaintInkControls & {
 };
 
 const COLOR_BLEND_MODES = BLEND_MODES.filter((mode): mode is Exclude<BlendMode, 'erase'> => mode !== 'erase');
-const BLEND_TOOLS = new Set<BrushTool>(['brush', 'eraser', 'line', 'rect', 'ellipse']);
+const BLEND_TOOLS = new Set<BrushTool>(['brush', 'eraser', 'line', 'rect', 'ellipse', 'pen']);
 
 function PaintPanelShell(props: {
   icon: string;
@@ -322,12 +326,12 @@ function ShaderLibrary(props: {
         </Pressable>
       </Row>
 
-      <Col style={{ gap: 6, minHeight: 290 }}>
+      <Col style={{ gap: 4, minHeight: 224 }}>
         {groupsOnPage ? (
           <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{groupsOnPage.toUpperCase()}</Text>
         ) : null}
         {gridRows.map((row, rowIndex) => (
-          <Row key={`${page}-${rowIndex}`} style={{ gap: 6 }}>
+          <Row key={`${page}-${rowIndex}`} style={{ gap: 4 }}>
             {row.map((item) => {
               const active = item.spec.id === props.shaderInk?.surface;
               const variantIndex = active ? activeVariant : 0;
@@ -336,9 +340,9 @@ function ShaderLibrary(props: {
                   key={item.spec.id}
                   tooltip={`${item.spec.label} — ${item.group}`}
                   onPress={() => props.onPick(item.spec, variantIndex)}
-                  style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: active ? ACCENT : 'transparent' }}
+                  style={{ width: 36, height: 36, padding: 1, borderRadius: 6, borderWidth: 2, borderColor: active ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <ShaderThumb shader={item.spec.shader} data={shaderVariantData(item.spec, variantIndex, props.paletteFor)} size={44} />
+                  <ShaderThumb shader={item.spec.shader} data={shaderVariantData(item.spec, variantIndex, props.paletteFor)} size={SHADER_THUMB_SIZE} />
                 </Pressable>
               );
             })}

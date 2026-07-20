@@ -27,6 +27,7 @@ const mesh_edit = @import("mesh_edit.zig");
 const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
 const mesh_journal_log = @import("mesh_journal_log.zig");
 const path_array = @import("path_array.zig");
+const path_plane = @import("path_plane.zig");
 const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
@@ -2294,6 +2295,17 @@ pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []con
         ensureGlassTrailing();
     } else journalDiscard(&snap);
     return r;
+}
+
+/// Turn one closed normalized pen path into a camera-facing plane through the
+/// current orbit focus, then append it through the ordinary part transaction.
+pub fn meshAppendPathPlane(points: []const f32, expected_parts: u32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (points.len < 6 or points.len % 2 != 0 or points.len > paint_program.MAX_POLYGON_POINTS * 2) return fail;
+    const camera = path_plane.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    var plane = path_plane.build(std.heap.c_allocator, points, camera, g_paint_vp_w, g_paint_vp_h) orelse return fail;
+    defer plane.deinit(std.heap.c_allocator);
+    return meshAppendGroup(plane.verts, @intCast(plane.verts.len / 8), plane.groups, expected_parts);
 }
 
 fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
@@ -5827,6 +5839,11 @@ pub fn hasPaintMaterial() bool {
 pub fn paintProgramRead() ?[]u8 {
     return paint_program.serialize();
 }
+/// Exact raster underneath the current program. Persisted independently so a
+/// user-edited PNG remains the base rather than being mistaken for UI imagery.
+pub fn paintProgramBaseline() ?[]const u8 {
+    return paint_program.baseline();
+}
 /// Replay a serialized stroke program onto the resident model, rebuilding the atlas from
 /// the recipe. Sets the program's detail first (re-tessellate + re-upload the mesh — which
 /// the paint module can't do) so face+bary dabs land at the resolution they were made.
@@ -5845,6 +5862,17 @@ pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, bl
         if (@as(u32, d) != model_paint.detail()) _ = setPaintDetail(@intCast(d));
     }
     return paint_program.apply(io, environ, blob);
+}
+
+/// Replay a program over a raster baseline that the package loader has already
+/// installed. Detail must match because rebuilding it here would erase that raster.
+pub fn paintProgramApplyOverBase(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+    if (g_paint_layout_stale or g_edit_verts == null or g_edit_count == 0) return false;
+    const stored_detail = paint_program.programDetail(blob) orelse return false;
+    if (@as(u32, stored_detail) != model_paint.detail()) return false;
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.applyOverCurrentBaseline(io, environ, blob);
 }
 
 // ── Stroke journal + paint layers (req_2672) ────────────────────────────────────────
@@ -5987,6 +6015,9 @@ pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
     }
     model_paint.setBase(m, .{ r, g, b, 255 });
     model_paint.clearAtlas();
+    // Even an untouched atlas is a durable authoring result. Capturing it now
+    // lets a cold reopen restore without presenting the creation prompt again.
+    paint_program.adoptCurrentAtlasAsBaseline();
     g_paint_layout_stale = false;
     return true;
 }
@@ -6099,6 +6130,48 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     return @intCast(hit.face);
 }
 
+/// Fill one closed screen-authored pen path on a single logical UV island.
+/// Every flattened point is raycast through the live camera; crossing a quad's
+/// triangulation is allowed, crossing into another authored face is refused.
+/// `points` are interleaved normalized viewport coordinates.
+pub fn paintPolygonAt(points: []const f32, r: u8, g: u8, b: u8, flow: f32, blend: u8) bool {
+    if (!model_paint.hasTarget() or g_paint_layout_stale) return false;
+    if (points.len < 6 or points.len % 2 != 0 or points.len > paint_program.MAX_POLYGON_POINTS * 2) return false;
+    const mapped = std.heap.c_allocator.alloc(f32, points.len) catch return false;
+    defer std.heap.c_allocator.free(mapped);
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    var island: ?u32 = null;
+    var representative_face: u32 = 0;
+    var index: usize = 0;
+    while (index < points.len) : (index += 2) {
+        const nx = points[index + 0];
+        const ny = points[index + 1];
+        if (!std.math.isFinite(nx) or !std.math.isFinite(ny) or nx < 0.0 or nx > 1.0 or ny < 0.0 or ny > 1.0) return false;
+        const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, nx * g_paint_vp_w, ny * g_paint_vp_h) orelse return false;
+        if (mesh_edit.scopedFaceHit(@intCast(hit.face)) < 0) return false;
+        const hit_island = model_paint.islandIndexForFace(hit.face) orelse return false;
+        if (island) |expected| {
+            if (hit_island != expected) return false;
+        } else {
+            island = hit_island;
+            representative_face = hit.face;
+        }
+        const uv = model_paint.faceBaryToIslandUv(hit.face, hit.u, hit.v) orelse return false;
+        mapped[index + 0] = uv[0];
+        mapped[index + 1] = uv[1];
+    }
+
+    const mat = model_paint.hasMaterialInk();
+    const safe_blend: u8 = if (blend <= 7) blend else 0;
+    paint_program.beginRecordedOp();
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    const wrote = model_paint.paintPolygon(representative_face, mapped, .{ r, g, b, 255 }, mat, flow, safe_blend);
+    if (!wrote) return false;
+    paint_program.recordPolygon(representative_face, mapped, flow, safe_blend, mat, .{ r, g, b });
+    return true;
+}
+
 /// Set the paint DENSITY (texels per meter — Blockbench 16x semantics; 1 = fill-only
 /// look). Rebuilds the island atlas, rewrites the resident mesh UVs in place, then
 /// re-uploads the whole mesh so the new mapping draws. Returns the ACTUAL density after
@@ -6173,6 +6246,43 @@ pub fn estimatePaintAtlasFit(fit_texels: u32) ?PaintEstimate {
 /// The live island rects (for the UV inspector's structure overlay), or null.
 pub fn paintIslands() ?[]const paint_islands_mod.Island {
     return model_paint.layoutIslands();
+}
+
+/// Apply one complete UV-island rectangle table to the live model. The atlas
+/// pixels and paint-program baseline move with the rectangles, then the same
+/// resident vertex buffer the viewport renders receives the rewritten UVs.
+pub fn applyUvIslandRects(rects: []const u32) bool {
+    const verts = g_edit_verts orelse return false;
+    const atlas = model_paint.atlas() orelse return false;
+    const islands = model_paint.layoutIslands() orelse return false;
+    if (rects.len != islands.len * 4) return false;
+    const old_rects = std.heap.c_allocator.alloc(u32, rects.len) catch return false;
+    defer std.heap.c_allocator.free(old_rects);
+    if (!model_paint.copyLayoutRects(old_rects)) return false;
+
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.applyIslandRects(rects, verts, g_edit_count)) return false;
+    // A missing baseline is valid; an allocation failure here degrades future
+    // paint undo to the normal clear+base fallback without invalidating the UV edit.
+    _ = paint_program.remapBaseline(old_rects, rects, atlas.w, atlas.h);
+    const face_count = g_edit_count / 3;
+    // No retained GPU row is a valid pre-first-draw state. The CPU edit mesh is
+    // already authoritative and will seed that row when it appears; a missing
+    // cache must not make a completed UV edit report failure to the author.
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
+/// Replace the current atlas with an equal-sized externally edited raster. This
+/// is an explicit bake boundary: the imported PNG becomes the new undo baseline
+/// and subsequent strokes continue on the existing layer table.
+pub fn replacePaintAtlas(rgba: []const u8) bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.setAtlas(rgba)) return false;
+    paint_program.adoptCurrentAtlasAsBaseline();
+    return true;
 }
 
 // ── Paint variants (save / load a whole painting) ───────────────────────────────────

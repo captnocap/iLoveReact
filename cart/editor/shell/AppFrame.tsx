@@ -206,8 +206,8 @@ import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 
 const FACADE_PREVIEW_DETAILS = [128, FACADE_TEXELS_PER_METER, 512] as const;
-const MODEL_PAINT_TOOLS = ['fill', 'brush', 'eyedropper'] as const;
-const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'eyedropper', 'marquee', 'lasso'] as const;
+const MODEL_PAINT_TOOLS = ['fill', 'brush', 'pen', 'eyedropper'] as const;
+const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'pen', 'eyedropper', 'marquee', 'lasso'] as const;
 const COLOR_STUDIO_UNDO_CAP = 32;
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
@@ -1888,6 +1888,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-scale') api.gizmo(1);
         else if (commandId === 'mesh-rotate') api.gizmo(2);
         else if (commandId === 'mesh-paint') api.paint();
+        else if (commandId === 'mesh-path-plane') api.pathPlane();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-cam-lock') api.camLock();
@@ -1903,6 +1904,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-cut') api.basicCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
         else if (commandId === 'mesh-paint-brush') api.brushTool('brush');
+        else if (commandId === 'mesh-paint-pen') api.brushTool('pen');
         else if (commandId === 'mesh-paint-safety') api.cycleSafety();
         else if (commandId === 'mesh-paint-detail') api.cycleDetail();
       });
@@ -3168,6 +3170,39 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
     const bridge = (globalThis as any).__modelFocusBridge;
     if (bridge?.paintLive) bridge.refreshUv?.();
+  };
+
+  // A Pen Plane is generated against the live host camera, so its geometry never
+  // takes a cart-side seed detour. Register only the metadata/range that the host
+  // append reports, then focus the new row like every other Add Part flow.
+  const registerPathPlanePart = (range: { lo: number; hi: number }) => {
+    const current = stateRef.current;
+    const modelId = activePartsModelId(current);
+    if (!modelId || range.hi <= range.lo) {
+      setState((prev) => ({ ...prev, status: 'Path Plane was created, but no active model could own its outliner row' }));
+      return;
+    }
+    const parts = current.modelParts[modelId] ?? [];
+    const number = parts.filter((part) => part.id.startsWith('part:path:')).length + 1;
+    const placed: ModelPart = {
+      id: `part:path:${current.seq}`,
+      name: `Path Plane ${number}`,
+      visible: true,
+      color: '#ad77ff',
+      lo: range.lo,
+      hi: range.hi,
+    };
+    const nextParts = [...parts, placed];
+    selectedPartIdsRef.current = [placed.id];
+    setSelectedPartIds([placed.id]);
+    pushPartSetToHost(current, nextParts, [placed.id], placed.id);
+    setState((prev) => ({
+      ...prev,
+      seq: prev.seq + 1,
+      modelParts: { ...prev.modelParts, [modelId]: [...(prev.modelParts[modelId] ?? []), placed] },
+      modelActivePartId: placed.id,
+      status: `created ${placed.name} from the closed pen path`,
+    }));
   };
 
   // 'new' verb — ALWAYS a fresh model document seeded with this one part (mount composes it), even
@@ -5042,6 +5077,7 @@ export default function AppFrame() {
     onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
     onImportModel: guarded(() => setImportPartOpen(true)),
     onStampRanges: stampModelPartRanges,
+    onPathPlaneCreated: registerPathPlanePart,
     roleNamer: roleNamerSession
       ? {
           role: roleNamerSession.queue[roleNamerSession.at]!,

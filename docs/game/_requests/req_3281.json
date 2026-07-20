@@ -1,0 +1,18 @@
+{
+  "id": "req_3281",
+  "at": "2026-07-20T09:08:50.749Z",
+  "origin": "codex:019f7e48",
+  "text": "also for your remapping of the uv, your gonna want to make sure to give us a much better means to do it because it currently is constrained to a very very tiny window and will literally become impossible past a base cube [Image #1]",
+  "status": "doing",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:08:58.356Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

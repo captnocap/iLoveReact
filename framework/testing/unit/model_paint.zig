@@ -256,3 +256,59 @@ test "all advertised analytic brush kinds rasterize distinct footprints" {
         try testing.expect(hash != other);
     };
 }
+
+test "authored UV rectangle edits carry pixels and rewrite displayed UVs atomically" {
+    var joined: [12 * 8]f32 = undefined;
+    @memcpy(joined[0 .. 6 * 8], &QUAD_VERTS);
+    @memcpy(joined[6 * 8 ..], &QUAD_VERTS);
+    var vertex: usize = 6;
+    while (vertex < 12) : (vertex += 1) joined[vertex * 8] += 2.0;
+
+    model_paint.setTarget(904, &joined, 12);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0, 1, 1 }, &joined, 12);
+    model_paint.setDetail(32, &joined, 12);
+    defer {
+        model_paint.setDetail(1, &joined, 12);
+        model_paint.test_support.clearTargetAndSource();
+    }
+    model_paint.paintStamp(0, 0.33, 0.33, 8, .{ 251, 31, 47, 255 }, 1);
+    const before_color = model_paint.faceColor(0).?;
+    const before_u = joined[6];
+    const before_v = joined[7];
+    const islands = model_paint.layoutIslands().?;
+    try testing.expectEqual(@as(usize, 2), islands.len);
+
+    var old_rects: [8]u32 = undefined;
+    try testing.expect(model_paint.copyLayoutRects(&old_rects));
+    const swapped = [8]u32{
+        old_rects[4], old_rects[5], old_rects[2], old_rects[3],
+        old_rects[0], old_rects[1], old_rects[6], old_rects[7],
+    };
+    try testing.expect(model_paint.applyIslandRects(&swapped, &joined, 12));
+    try testing.expectEqual(before_color, model_paint.faceColor(0).?);
+    try testing.expect(before_u != joined[6] or before_v != joined[7]);
+    var adopted: [8]u32 = undefined;
+    try testing.expect(model_paint.copyLayoutRects(&adopted));
+    try testing.expectEqualSlices(u32, &swapped, &adopted);
+}
+
+test "closed pen polygon fills one logical island across its triangle diagonal" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(905, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(48, &quad, 6);
+    model_paint.setBase(.solid, .{ 10, 20, 30, 255 });
+    model_paint.clearAtlas();
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    try testing.expectEqual(model_paint.islandIndexForFace(0).?, model_paint.islandIndexForFace(1).?);
+    const outline = [_]f32{ 0.08, 0.08, 0.92, 0.08, 0.92, 0.92, 0.08, 0.92 };
+    try testing.expect(model_paint.paintPolygon(0, &outline, .{ 240, 60, 90, 255 }, false, 1, 0));
+    const first = model_paint.faceColor(0).?;
+    const second = model_paint.faceColor(1).?;
+    try testing.expect(first[0] > 220 and first[1] < 80);
+    try testing.expect(second[0] > 220 and second[1] < 80);
+}

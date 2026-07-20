@@ -1266,6 +1266,32 @@ pub fn baryOnFace(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, face: u32
     return .{ u, v };
 }
 
+/// Stable authored-island identity for a displayed triangle. Pen paths may
+/// cross triangulation diagonals, but every sampled point must remain on this
+/// one logical face/island.
+pub fn islandIndexForFace(face: u32) ?u32 {
+    const lay = &(g_layout orelse return null);
+    if (face >= g_facecount) return null;
+    return lay.tri_island[face];
+}
+
+/// Map a face barycentric hit to normalized coordinates inside its authored
+/// island rectangle. Unlike triangle-local barycentrics, these coordinates are
+/// continuous across every triangle that belongs to the same n-gon.
+pub fn faceBaryToIslandUv(face: u32, u: f32, v: f32) ?[2]f32 {
+    const lay = &(g_layout orelse return null);
+    if (face >= g_facecount) return null;
+    const island = lay.islands[lay.tri_island[face]];
+    if (island.w == 0 or island.h == 0) return null;
+    const corners = triTexelCorners(lay, face);
+    const x = corners[0][0] + u * (corners[1][0] - corners[0][0]) + v * (corners[2][0] - corners[0][0]);
+    const y = corners[0][1] + u * (corners[1][1] - corners[0][1]) + v * (corners[2][1] - corners[0][1]);
+    return .{
+        (x - @as(f32, @floatFromInt(island.x))) / @as(f32, @floatFromInt(island.w)),
+        (y - @as(f32, @floatFromInt(island.y))) / @as(f32, @floatFromInt(island.h)),
+    };
+}
+
 // ── Material ink: paint WITH a shader, not a flat colour ─────────────────────────
 // A brush can "dip into a bucket of shader": the host renders a shader recipe to a
 // small RGBA image (material_tex.bakePixels) and hands the pixels here; a dab then
@@ -1534,6 +1560,87 @@ fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8) void {
     }
 }
 
+fn pointInPolygon(points: []const f32, x: f32, y: f32) bool {
+    const count = points.len / 2;
+    if (count < 3) return false;
+    var inside = false;
+    var i: usize = 0;
+    var j: usize = count - 1;
+    while (i < count) : (i += 1) {
+        const xi = points[i * 2 + 0];
+        const yi = points[i * 2 + 1];
+        const xj = points[j * 2 + 0];
+        const yj = points[j * 2 + 1];
+        if ((yi > y) != (yj > y)) {
+            const crossing = (xj - xi) * (y - yi) / (yj - yi) + xi;
+            if (x < crossing) inside = !inside;
+        }
+        j = i;
+    }
+    return inside;
+}
+
+/// Fill one closed pen polygon expressed in normalized authored-island space.
+/// The final raster is clipped to the island silhouette, so a concave outline
+/// may cross triangulation diagonals without bleeding into a packed neighbor.
+/// This is the single execution boundary used by both live authoring and
+/// paint-program replay.
+pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow: f32, blend: u8) bool {
+    const buf = g_rgba orelse return false;
+    const lay = &(g_layout orelse return false);
+    if (face >= g_facecount or points.len < 6 or points.len % 2 != 0) return false;
+    const island_index = lay.tri_island[face];
+    const island = lay.islands[island_index];
+    if (island.w == 0 or island.h == 0) return false;
+    const amount = std.math.clamp(flow, 0.0, 1.0);
+    if (amount <= 0.0) return false;
+
+    var min_u: f32 = 1.0;
+    var min_v: f32 = 1.0;
+    var max_u: f32 = 0.0;
+    var max_v: f32 = 0.0;
+    var point: usize = 0;
+    while (point < points.len) : (point += 2) {
+        const u = points[point + 0];
+        const v = points[point + 1];
+        if (!std.math.isFinite(u) or !std.math.isFinite(v)) return false;
+        min_u = @min(min_u, u);
+        min_v = @min(min_v, v);
+        max_u = @max(max_u, u);
+        max_v = @max(max_v, v);
+    }
+    min_u = std.math.clamp(min_u, 0.0, 1.0);
+    min_v = std.math.clamp(min_v, 0.0, 1.0);
+    max_u = std.math.clamp(max_u, 0.0, 1.0);
+    max_v = std.math.clamp(max_v, 0.0, 1.0);
+    if (max_u <= min_u or max_v <= min_v) return false;
+
+    const island_w_f: f32 = @floatFromInt(island.w);
+    const island_h_f: f32 = @floatFromInt(island.h);
+    const x0 = island.x + @as(u32, @intFromFloat(@floor(min_u * island_w_f)));
+    const y0 = island.y + @as(u32, @intFromFloat(@floor(min_v * island_h_f)));
+    const x1 = island.x + @min(island.w - 1, @as(u32, @intFromFloat(@floor(max_u * island_w_f))));
+    const y1 = island.y + @min(island.h - 1, @as(u32, @intFromFloat(@floor(max_v * island_h_f))));
+    var wrote = false;
+    var ty = y0;
+    while (ty <= y1) : (ty += 1) {
+        var tx = x0;
+        while (tx <= x1) : (tx += 1) {
+            const fx: f32 = @floatFromInt(tx);
+            const fy: f32 = @floatFromInt(ty);
+            const u = (fx + 0.5 - @as(f32, @floatFromInt(island.x))) / island_w_f;
+            const v = (fy + 0.5 - @as(f32, @floatFromInt(island.y))) / island_h_f;
+            if (!pointInPolygon(points, u, v)) continue;
+            if (!pointInIsland(lay, island_index, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
+            const ink = if (mat) sampleMatAtTexel(island, fx, fy) else rgba;
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0);
+            wrote = true;
+        }
+    }
+    if (wrote) markRows(y0, y1);
+    return wrote;
+}
+
 /// Stamp a brush dab: a disc of `radius` texels around the hit, in the face's ISLAND
 /// space. The dab centre is the barycentric interpolation of the face's island-texel
 /// corners, and clipping is the island's whole SILHOUETTE (every member triangle) —
@@ -1796,6 +1903,146 @@ pub fn estimateAtlasFit(fit_texels: u32) ?AtlasEstimate {
     var lay = paint_islands.buildFit(alloc, pos[0 .. @as(usize, g_facecount) * 9], groups, @max(64, fit_texels), MAX_ATLAS_DIM, ATLAS_BUDGET) orelse return null;
     defer lay.deinit(alloc);
     return .{ .w = lay.atlas_w, .h = lay.atlas_h, .density = lay.density };
+}
+
+/// Copy the current island rectangles into a flat [x,y,w,h,...] table. The UV
+/// editor sends this exact table back through applyIslandRects, keeping the
+/// bridge a single validated batch instead of four mutation calls per island.
+pub fn copyLayoutRects(out: []u32) bool {
+    const lay = &(g_layout orelse return false);
+    if (out.len != lay.islands.len * 4) return false;
+    for (lay.islands, 0..) |island, index| {
+        out[index * 4 + 0] = island.x;
+        out[index * 4 + 1] = island.y;
+        out[index * 4 + 2] = island.w;
+        out[index * 4 + 3] = island.h;
+    }
+    return true;
+}
+
+fn validIslandRectTable(rects: []const u32, atlas_w: u32, atlas_h: u32) bool {
+    if (rects.len == 0 or rects.len % 4 != 0 or atlas_w == 0 or atlas_h == 0) return false;
+    var index: usize = 0;
+    while (index < rects.len) : (index += 4) {
+        const x = rects[index + 0];
+        const y = rects[index + 1];
+        const w = rects[index + 2];
+        const h = rects[index + 3];
+        if (w == 0 or h == 0 or x >= atlas_w or y >= atlas_h) return false;
+        if (w > atlas_w - x or h > atlas_h - y) return false;
+    }
+    return true;
+}
+
+/// Resample every old island rectangle into its new rectangle inside an atlas of
+/// unchanged dimensions. This public pure boundary also remaps paint_program's
+/// runtime baseline, so paint undo keeps using the authored UV arrangement.
+pub fn remapRgbaRects(
+    destination: []u8,
+    source: []const u8,
+    atlas_w: u32,
+    atlas_h: u32,
+    old_rects: []const u32,
+    new_rects: []const u32,
+) bool {
+    const byte_len = @as(usize, atlas_w) * @as(usize, atlas_h) * 4;
+    if (destination.len != byte_len or source.len != byte_len or old_rects.len != new_rects.len) return false;
+    if (!validIslandRectTable(old_rects, atlas_w, atlas_h) or !validIslandRectTable(new_rects, atlas_w, atlas_h)) return false;
+
+    var byte: usize = 0;
+    while (byte < destination.len) : (byte += 4) {
+        destination[byte + 0] = DEFAULT_FACE[0];
+        destination[byte + 1] = DEFAULT_FACE[1];
+        destination[byte + 2] = DEFAULT_FACE[2];
+        destination[byte + 3] = DEFAULT_FACE[3];
+    }
+    var index: usize = 0;
+    while (index < old_rects.len) : (index += 4) {
+        const ox = old_rects[index + 0];
+        const oy = old_rects[index + 1];
+        const ow = old_rects[index + 2];
+        const oh = old_rects[index + 3];
+        const nx = new_rects[index + 0];
+        const ny = new_rects[index + 1];
+        const nw = new_rects[index + 2];
+        const nh = new_rects[index + 3];
+        var py: u32 = 0;
+        while (py < nh) : (py += 1) {
+            const sy = oy + @min(oh - 1, py * oh / nh);
+            var px: u32 = 0;
+            while (px < nw) : (px += 1) {
+                const sx = ox + @min(ow - 1, px * ow / nw);
+                const src = (@as(usize, sy) * atlas_w + sx) * 4;
+                const dst = (@as(usize, ny + py) * atlas_w + (nx + px)) * 4;
+                @memcpy(destination[dst .. dst + 4], source[src .. src + 4]);
+            }
+        }
+    }
+    return true;
+}
+
+/// Atomically adopt a complete UV island rectangle table. Painted pixels move
+/// with their islands, corner UVs receive the same affine transform, and the
+/// caller's displayed vertex buffer is rewritten only after every validation and
+/// allocation has succeeded. Overlap is permitted deliberately (stacked UVs are
+/// a normal authoring operation); table order determines the visible top copy.
+pub fn applyIslandRects(new_rects: []const u32, verts: []f32, vert_count: u32) bool {
+    const lay = &(g_layout orelse return false);
+    const live = g_rgba orelse return false;
+    if (new_rects.len != lay.islands.len * 4 or vert_count != g_facecount * 3) return false;
+    if (verts.len < @as(usize, vert_count) * 8 or !validIslandRectTable(new_rects, g_atlas_w, g_atlas_h)) return false;
+
+    const old_rects = alloc.alloc(u32, new_rects.len) catch return false;
+    defer alloc.free(old_rects);
+    if (!copyLayoutRects(old_rects)) return false;
+    const source = alloc.dupe(u8, live) catch return false;
+    defer alloc.free(source);
+    const remapped = alloc.alloc(u8, live.len) catch return false;
+    if (!remapRgbaRects(remapped, source, g_atlas_w, g_atlas_h, old_rects, new_rects)) {
+        alloc.free(remapped);
+        return false;
+    }
+
+    for (lay.islands, 0..) |*island, island_index| {
+        const table = island_index * 4;
+        const old_x: f32 = @floatFromInt(island.x);
+        const old_y: f32 = @floatFromInt(island.y);
+        const old_w: f32 = @floatFromInt(@max(1, island.w));
+        const old_h: f32 = @floatFromInt(@max(1, island.h));
+        const new_x: f32 = @floatFromInt(new_rects[table + 0]);
+        const new_y: f32 = @floatFromInt(new_rects[table + 1]);
+        const new_w: f32 = @floatFromInt(new_rects[table + 2]);
+        const new_h: f32 = @floatFromInt(new_rects[table + 3]);
+        var face: u32 = 0;
+        while (face < g_facecount) : (face += 1) {
+            if (lay.tri_island[face] != @as(u32, @intCast(island_index))) continue;
+            var corner: usize = 0;
+            while (corner < 3) : (corner += 1) {
+                const uv = (@as(usize, face) * 3 + corner) * 2;
+                const local_u = (lay.corner_uv[uv + 0] - old_x) / old_w;
+                const local_v = (lay.corner_uv[uv + 1] - old_y) / old_h;
+                lay.corner_uv[uv + 0] = new_x + local_u * new_w;
+                lay.corner_uv[uv + 1] = new_y + local_v * new_h;
+            }
+        }
+        island.x = new_rects[table + 0];
+        island.y = new_rects[table + 1];
+        island.w = new_rects[table + 2];
+        island.h = new_rects[table + 3];
+    }
+
+    const atlas_w_f: f32 = @floatFromInt(g_atlas_w);
+    const atlas_h_f: f32 = @floatFromInt(g_atlas_h);
+    var vertex: u32 = 0;
+    while (vertex < vert_count) : (vertex += 1) {
+        verts[vertex * 8 + 6] = lay.corner_uv[@as(usize, vertex) * 2 + 0] / atlas_w_f;
+        verts[vertex * 8 + 7] = lay.corner_uv[@as(usize, vertex) * 2 + 1] / atlas_h_f;
+    }
+    alloc.free(live);
+    g_rgba = remapped;
+    g_has_dirty = false;
+    markRows(0, g_atlas_h - 1);
+    return true;
 }
 
 /// The live island rects (packed atlas layout) — the UV inspector draws these so the

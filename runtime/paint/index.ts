@@ -9,6 +9,8 @@ export * from './glyphs';
 export * from './stroke';
 export * from './numericInput';
 export * from './blend';
+export * from './path';
+export { PenPathOverlay } from './PenPathOverlay';
 export { stampBrushDab, brushDabRgb, jitterSeed, scatteredDabPoint } from './stamp';
 export * from './theme';
 export * from './icons';

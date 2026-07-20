@@ -144,7 +144,7 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // edit confirmation. Mirrored up through ModelToolSnapshot so the shell's central
 // gate (AppFrame) can see it without owning the session.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
 export type FacadePaintState = { brush: Brush; tool: BrushTool; detail: number };
@@ -154,6 +154,7 @@ export type ModelToolApi = {
   /** Exact uniform factor around the active host selection pivot. */
   scaleBy: (factor: number) => boolean;
   paint: () => void;
+  pathPlane: () => void;
   focus: () => void;
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the mesh editor's orbit view.

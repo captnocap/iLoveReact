@@ -219,9 +219,10 @@ export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
   return manifest !== null && manifest.id === id && manifest.kind === kind;
 }
 
-export type ModelBasePaint = { version: 1; detail: number; program: string };
+export type ModelBasePaint = { version: 1 | 2 | 3; detail: number; program: string; layout?: number[]; rasterBase?: true };
 
 const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
+const PAINT_RASTER_BASE_FILE = 'atlases/raster-base.png';
 
 /** A structural mesh save leaves the previous paint assets recoverable on disk,
  *  but this marker prevents them from being silently rebound to the new topology. */
@@ -233,8 +234,23 @@ export function modelPaintLayoutIsStale(pkg: Pick<ModelPackage, 'kind' | 'id'>):
 export function parseModelBasePaintText(text: string): ModelBasePaint | null {
   try {
     const value = JSON.parse(text) as Partial<ModelBasePaint>;
-    if (value.version !== 1 || typeof value.program !== 'string' || !value.program) return null;
-    return { version: 1, detail: typeof value.detail === 'number' && Number.isFinite(value.detail) ? value.detail : 1, program: value.program };
+    if (value.version !== 1 && value.version !== 2 && value.version !== 3) return null;
+    if (typeof value.program !== 'string' || (value.version !== 3 && !value.program)) return null;
+    if (value.version === 3 && value.rasterBase !== true) return null;
+    const layout = value.version === 2 || value.version === 3
+      ? Array.isArray(value.layout) && value.layout.length > 0 && value.layout.length % 4 === 0
+        && value.layout.every((entry, index) => Number.isInteger(entry) && entry >= 0 && (index % 4 < 2 || entry > 0))
+        ? value.layout.slice()
+        : null
+      : undefined;
+    if ((value.version === 2 || value.version === 3) && !layout) return null;
+    return {
+      version: value.version,
+      detail: typeof value.detail === 'number' && Number.isFinite(value.detail) ? value.detail : 1,
+      program: value.program,
+      ...(layout ? { layout } : {}),
+      ...(value.version === 3 ? { rasterBase: true as const } : {}),
+    };
   } catch { return null; }
 }
 
@@ -245,6 +261,12 @@ export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): Mode
   const text = readFile(`${dir}/atlases/base.paint.json`);
   if (!text) return null;
   return parseModelBasePaintText(text);
+}
+
+/** Encoded PNG for a v3 paint record's exact raster baseline. */
+export function readModelRasterBase(pkg: Pick<ModelPackage, 'kind' | 'id'>): string | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  return dir ? readFileBase64(`${dir}/${PAINT_RASTER_BASE_FILE}`) : null;
 }
 
 // Patch the durable-identity fields of an EXISTING on-disk manifest in place
@@ -509,14 +531,35 @@ export function writeModelArtifacts(
         remove(paintedMetaPath); // a failed painted write must not leave a stamp endorsing the old blob
       }
     }
-    const program = host.__model_paint_program_read?.();
-    if (typeof program === 'string' && program.length > 0) {
+    const programValue = host.__model_paint_program_read?.();
+    const program = typeof programValue === 'string' ? programValue : '';
+    const baselineValue = host.__model_paint_baseline_read?.();
+    const baseline = typeof baselineValue === 'string' ? baselineValue : '';
+    const layout = Array.isArray(atlas.islands) && atlas.islands.length > 0 ? atlas.islands : null;
+    const basePaintPath = `${atlasDir}/base.paint.json`;
+    const rasterBasePath = `${dir}/${PAINT_RASTER_BASE_FILE}`;
+    if (baseline && layout) {
+      const rasterWritten = host.__image_write_png?.(rasterBasePath, baseline, atlas.w, atlas.h) === 1;
       const basePaint: ModelBasePaint = {
-        version: 1,
+        version: 3,
         detail: typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1,
         program,
+        layout,
+        rasterBase: true,
       };
-      paintProgramWritten = writeFileBytesAtomic(`${atlasDir}/base.paint.json`, textBytes(JSON.stringify(basePaint)));
+      paintProgramWritten = rasterWritten && writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
+    } else if (program.length > 0) {
+      if (exists(rasterBasePath)) remove(rasterBasePath);
+      const basePaint: ModelBasePaint = {
+        version: layout ? 2 : 1,
+        detail: typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1,
+        program,
+        ...(layout ? { layout } : {}),
+      };
+      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
+    } else {
+      if (exists(rasterBasePath)) remove(rasterBasePath);
+      if (exists(basePaintPath)) remove(basePaintPath);
     }
   } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
   return docWritten && paintProgramWritten;

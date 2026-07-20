@@ -30,6 +30,7 @@ export type OutlinerHandlers = {
   // A file-backed mount reports where each part landed in the host mesh (the import's
   // range is only known after the host parses the file) — AppFrame stamps lo/hi.
   onStampRanges: (modelId: string, ranges: PartRange[]) => void;
+  onPathPlaneCreated: (range: PartRange) => void;
   // The guided role-naming pass (req_3263): while a session is live, part-row
   // clicks ASSIGN the current role instead of selecting. The strip shows the
   // role being asked for; skip passes a role the model doesn't have.
@@ -103,6 +104,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
           initialFileParts={{ path: fileBase.sourcePath, basePartId: fileBase.id, baseColor: fileBase.color, baseHidden: !fileBase.visible, appends }}
           allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
           onPartRanges={(ranges) => outliner.onStampRanges(model.id, ranges)}
+          onPathPlaneCreated={outliner.onPathPlaneCreated}
         />
       </C.HW_ModelDocument>
     );
@@ -146,6 +148,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
         initialTitle={model.name}
         initialMesh={seed}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
+        onPathPlaneCreated={outliner!.onPathPlaneCreated}
       />
     ) : (
       <C.HW_ModelDocEmpty>

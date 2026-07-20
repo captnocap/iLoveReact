@@ -108,5 +108,12 @@ export function toolIconLayers(tool: BrushTool): IconLayer[] {
       ];
     case 'lasso': // freehand loop + tail
       return [{ d: 'M 7,4 C 5,9 -7,9 -9,2 C -11,-6 0,-10 7,-6 C 12,-3 10,3 4,4 C -1,5 -3,2 -1,0 M 4,4 L 9,9', fill: false }];
+    case 'pen': // Bezier pen nib + two-anchor curve
+      return [
+        { d: 'M -9,6 C -5,-7 3,-7 8,2', fill: false },
+        { d: circle(-9, 6, 1.8), fill: true },
+        { d: circle(8, 2, 1.8), fill: true },
+        { d: poly([[-1, -1], [5, 5], [1, 10], [-5, 4]]), fill: false },
+      ];
   }
 }

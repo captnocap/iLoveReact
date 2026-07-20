@@ -35,14 +35,18 @@ import {
 // stamping is a Zig host capability (model_paint.zig via the __model_paint_* doors), so this
 // is the brush MODEL driving a host backend, not a second brush implementation.
 import {
-  blendModeIndex, BrushKit, BRUSH_SHAPE_ID, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
+  blendModeIndex, BrushKit, BRUSH_SHAPE_ID, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME, PenPathOverlay,
   type Brush, type BrushTool, type Palette,
 } from '@reactjit/runtime/paint';
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { modelPaintLayoutIsStale, readModelBasePaint, writeModelArtifacts } from '../data/modelPackageStore';
+import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, writeModelArtifacts } from '../data/modelPackageStore';
+import { resolvePackageDir } from '../data/modelPackageStore';
+import { readFileBase64 } from '../../../runtime/hooks/fs';
+import { image as imageOps } from '../../../runtime/image';
+import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
@@ -85,7 +89,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -94,7 +98,18 @@ export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boo
 // ModelToolSnapshot prop path (data/types.ts + AppFrame own that plumbing).
 // `scope` is the honest readout of what the preview FILTERS to (req_2619 P): the active
 // part's group range when island group ids let us tell its islands apart, else 'whole model'.
-export type ModelFocusUv = { src: string | null; w: number; h: number; detail: number; note: string | null; scope: string };
+export type ModelFocusUv = {
+  key: string;
+  revision: number;
+  rgba: Uint8Array | null;
+  islands: UvIslandRect[];
+  w: number;
+  h: number;
+  detail: number;
+  note: string | null;
+  scope: string;
+  diskPath?: string;
+};
 export type ModelFocusShape = {
   verts: number; // welded verts (0 until the host builds topology in vertex/edge mode — read '—')
   edges: number; // welded edges (same honesty rule)
@@ -111,6 +126,8 @@ export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   paintLive: boolean;
   refreshUv: () => void;
+  applyUvLayout: (rects: Uint32Array) => boolean;
+  reloadUvAtlas: () => string;
   shape: ModelFocusShape | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
@@ -127,6 +144,7 @@ export type ModelToolApi = {
   gizmo: (t: number) => void;
   scaleBy: (factor: number) => boolean;
   paint: () => void;
+  pathPlane: () => void;
   focus: () => void;
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
@@ -209,6 +227,9 @@ export type ModelViewProps = {
   // Fired after a file-parts mount with each part's authored-group range in the freshly
   // loaded host mesh — the shell stamps these onto its outliner parts (lo/hi).
   onPartRanges?: (ranges: PartRange[]) => void;
+  // A path-plane append is born inside the host; report its fresh range so the
+  // shell can add the matching outliner row without recreating geometry.
+  onPathPlaneCreated?: (range: PartRange) => void;
   // The model's package identity, so the viewer can find its saved paintings on disk and
   // restore the latest instead of re-prompting for a new atlas every open (req_2526).
   paintTarget?: PaintTarget;
@@ -417,6 +438,8 @@ const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.(
 // the range. Only the new part's geometry (append) or a range (hide/delete) crosses the bridge.
 const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array, expectedPartCount: number) =>
   readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups, expectedPartCount));
+const meshAppendPathPlane = (points: Float32Array, expectedPartCount: number) =>
+  readTopoResult(host.__mesh_append_path_plane?.(points, expectedPartCount));
 const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
   readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
 // ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
@@ -626,7 +649,7 @@ const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -634,6 +657,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
+  const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
   // View bookmarks (req_3067/req_3074): named orbit poses the user pins and jumps back
@@ -720,6 +744,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // free-form face-safety mode (0 clip · 1 lock); `detail` is the patch resolution.
   const [brush, setBrush] = useState<Brush>(() => toolTwig?.brush ?? { ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } });
   const [brushTool, setBrushTool] = useState<BrushTool>(toolTwig?.brushTool ?? 'fill');
+  const [penRevision, setPenRevision] = useState(0);
   const [palette, setPalette] = useState<Palette>(() => toolTwig?.palette ?? defaultPalette());
   const [safety, setSafety] = useState(toolTwig?.safety ?? 0); // 0 clip · 1 lock
   const [detail, setDetail] = useState(toolTwig?.detail ?? 1); // paint density, texels/meter (1 = fill-only look)
@@ -986,6 +1011,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setSelMode(mode);
     if (mode !== 0) {
       setPaintMode(false);
+      setPathPlaneMode(false);
       setFocusMode(false);
       meshFocusTool(false);
     }
@@ -997,6 +1023,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const chooseSelMode = (m: number) => {
     setSelMode(m);
     setPaintMode(false);
+    setPathPlaneMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     // Topology is shown by the host's boundary-edge overlay (real model edges, no
@@ -1035,12 +1062,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // (req_2618 G). File imports have no vertices cart-side → null (honest-empty).
   const [boundsCenter, setBoundsCenter] = useState<[number, number, number] | null>(null);
   // ── UV / atlas inspector ─────────────────────────────────────────────────────
-  // The LIVE atlas as an image — the actual UV layout the paint system built. Read
-  // back via __model_atlas_read, PNG-encoded by the host codec (__imageops_encode_raw);
-  // refreshed on entry/detail change/manual refresh, not per stroke (a read+encode per
-  // dab would drag the brush). RENDERED IN THE FOCUS PANEL (Inspector's UV section,
-  // req_2643 OO) via the model-focus bridge below — the floating viewport card is GONE.
+  // The LIVE atlas bytes + island geometry. The raster is uploaded directly to a
+  // Paintable by the focus panel; outlines, selection and handles stay live geometry.
+  // No temp PNG and no UI state baked into the pixels.
   const [uvPanel, setUvPanel] = useState<ModelFocusUv | null>(null);
+  const uvRevisionRef = useRef(0);
   const UV_PREVIEW_BYTE_CAP = 32 * 1024 * 1024; // reading a 100MB atlas into JS would stall the app
   // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
   // door's base64 by hand. ~1MB for a 512² atlas; one-shot per refresh, not per frame.
@@ -1069,12 +1095,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     return out;
   };
-  // The preview PNG goes to a rotating temp FILE and <Image src={path}> shows it —
-  // the texture cache keys on the path, so each refresh gets a fresh name and the
-  // previous file is removed. No data URLs, no pixel base64 in JS on the way out.
-  const uvFileRef = useRef<string | null>(null);
   const buildUvPanel = () => {
-    const fail = (w: number, h: number, d: number, note: string) => setUvPanel({ src: null, w, h, detail: d, note, scope: 'whole model' });
+    const fail = (w: number, h: number, d: number, note: string) => setUvPanel({
+      key: `${model?.key ?? 'none'}-${w}x${h}`,
+      revision: ++uvRevisionRef.current,
+      rgba: null,
+      islands: [],
+      w,
+      h,
+      detail: d,
+      note,
+      scope: 'whole model',
+    });
     const j = host.__model_atlas_read?.();
     if (typeof j !== 'string' || !j) {
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
@@ -1096,55 +1128,47 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
-    // Draw the layout ONTO the preview: darken each ISLAND's rect border — the real
-    // face-shaped layout the paint system built (one island per authored face, sized by
-    // its physical footprint × density), comparable to a hand unwrap. The host omits
-    // `islands` when there are too many to outline; the caption carries the structure.
-    //
-    // ACTIVE-PART filter (req_2619 P): the door now emits each island's authored group
-    // id (parallel `groups` array), and part ranges ARE group-id ranges — so when the
-    // shell has published the active part's range (__modelActivePartRange, AppFrame's
-    // selectPart), the active part's islands keep full strength and every other
-    // island's INTERIOR dims. The scope readout tells exactly which state is shown.
-    const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
-    const hasGroups = Boolean(o.islands && o.groups && o.groups.length * 4 === o.islands.length);
-    const filtering = Boolean(hasGroups && activeRange && activeRange.hi > activeRange.lo);
-    let scope = 'whole model';
-    if (o.islands && o.islands.length >= 4) {
-      const darken = (x: number, y: number, k: number) => {
-        if (x < 0 || y < 0 || x >= o.w || y >= o.h) return;
-        const i = (y * o.w + x) * 4;
-        rgba[i + 0] = Math.round(rgba[i + 0]! * k);
-        rgba[i + 1] = Math.round(rgba[i + 1]! * k);
-        rgba[i + 2] = Math.round(rgba[i + 2]! * k);
-      };
-      for (let k = 0; k + 3 < o.islands.length; k += 4) {
-        const [ix, iy, iw, ih] = [o.islands[k]!, o.islands[k + 1]!, o.islands[k + 2]!, o.islands[k + 3]!];
-        const grp = hasGroups ? o.groups![k / 4]! : -1;
-        const inActive = filtering && grp >= activeRange!.lo && grp < activeRange!.hi;
-        if (filtering && !inActive) {
-          // Off-part island: dim the whole rect so the active part's islands pop.
-          for (let y = iy; y < iy + ih; y++) for (let x = ix; x < ix + iw; x++) darken(x, y, 0.35);
-          continue;
-        }
-        for (let x = ix; x < ix + iw; x++) { darken(x, iy, 0.45); darken(x, iy + ih - 1, 0.45); }
-        for (let y = iy; y < iy + ih; y++) { darken(ix, y, 0.45); darken(ix + iw - 1, y, 0.45); }
-      }
-      if (filtering) scope = `part [${activeRange!.lo},${activeRange!.hi}) — others dimmed`;
+    const islands = parseUvIslandRects(o.islands, o.groups);
+    const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
+    setUvPanel({
+      key: `${model?.key ?? 'model'}-${o.w}x${o.h}`,
+      revision: ++uvRevisionRef.current,
+      rgba,
+      islands,
+      w: o.w,
+      h: o.h,
+      detail: o.detail,
+      note: islands.length ? null : 'atlas has no editable island metadata',
+      scope: `whole model · ${islands.length} islands`,
+      ...(packageDir ? { diskPath: `${packageDir}/atlases/base.png` } : {}),
+    });
+  };
+  const applyUvLayout = (rects: Uint32Array): boolean => {
+    const ok = host.__model_uv_layout_apply?.(rects) === 1;
+    if (!ok) return false;
+    onDocumentMutated?.();
+    buildUvPanel();
+    return true;
+  };
+  const reloadUvAtlas = (): string => {
+    if (!paintTarget) return 'Reload refused — this viewer has no package-backed paint target.';
+    const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
+    if (!dir) return 'Reload refused — save the model package first.';
+    const encoded = readFileBase64(`${dir}/atlases/base.png`);
+    if (!encoded) return 'Reload refused — atlases/base.png does not exist yet.';
+    const decoded = imageOps(encoded).raw();
+    const atlas = uvPanel;
+    if (!decoded || !atlas) return 'Reload refused — base.png could not be decoded.';
+    if (decoded.width !== atlas.w || decoded.height !== atlas.h) {
+      return `Reload refused — PNG is ${decoded.width}×${decoded.height}; the live atlas is ${atlas.w}×${atlas.h}.`;
     }
-    const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
-    if (!(png instanceof Uint8Array)) {
-      fail(o.w, o.h, o.detail, 'PNG encode failed (host codec)');
-      return;
-    }
-    const path = `/tmp/reactjit-uv-atlas-${Date.now()}.png`;
-    if (host.__imageops_write_file?.(path, png) !== true) {
-      fail(o.w, o.h, o.detail, `could not write ${path}`);
-      return;
-    }
-    if (uvFileRef.current && uvFileRef.current !== path) host.__fs_remove?.(uvFileRef.current);
-    uvFileRef.current = path;
-    setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null, scope });
+    if (host.__model_atlas_replace?.(decoded.rgba) !== 1) return 'Reload refused by the live paint target.';
+    // Persist the imported raster as the program's true baseline immediately;
+    // this is texture data, not a screenshot or a transient preview artifact.
+    writeModelArtifacts(paintTarget);
+    onDocumentMutated?.();
+    buildUvPanel();
+    return 'Reloaded atlases/base.png into the live model.';
   };
   // Refresh the UV/atlas panel when it is LIVE (paint mode) — invoked off every mesh
   // adopt / topo op and at stroke end, so the panel tracks the real atlas without the
@@ -1152,6 +1176,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const refreshUvIfLive = () => { if (paintMode) buildUvPanel(); };
 
   const enterPaint = () => {
+    setPathPlaneMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     setSelMode(0);
@@ -1186,7 +1211,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
         if (basePaint) {
           changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
-          if (host.__model_paint_program_apply?.(basePaint.program) === 1) {
+          const layoutOk = !basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1;
+          let restored = false;
+          if (layoutOk && basePaint.version === 3) {
+            const encoded = readModelRasterBase(paintTarget!);
+            const decoded = encoded ? imageOps(encoded).raw() : null;
+            if (decoded && host.__model_atlas_replace?.(decoded.rgba) === 1) {
+              restored = !basePaint.program || host.__model_paint_program_apply_over_base?.(basePaint.program) === 1;
+            }
+          } else if (layoutOk) {
+            restored = host.__model_paint_program_apply?.(basePaint.program) === 1;
+          }
+          if (restored) {
             atlasReadyRef.current = true;
             enterPaint();
             return;
@@ -1207,6 +1243,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     enterPaint();
   };
+  const togglePathPlane = () => {
+    if (!model) return;
+    setPaintMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    setSelMode(0);
+    meshSetMode(0);
+    setPathPlaneMode((active) => !active);
+  };
   // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
   const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
     if (paintTarget && !paintTargetOnDisk && !(onRequireFirstSave?.() ?? false)) return;
@@ -1225,7 +1270,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setAtlasPrompt(false);
     enterPaint();
   };
-  const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
+  const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setPathPlaneMode(false); setSelMode(0); meshSetMode(0); } return nv; });
   // Camera lock is a pure view toggle — it doesn't leave the current tool/mode; the
   // host gate is what freezes the orbit. Pushed on every change AND at mount, so a
   // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
@@ -1377,6 +1422,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     gizmo: chooseGizmoTool,
     scaleBy: meshScaleBy,
     paint: togglePaint,
+    pathPlane: togglePathPlane,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     camLock: toggleCamLock,
@@ -1582,8 +1628,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -1598,6 +1644,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       uv: uvPanel,
       paintLive: paintMode,
       refreshUv: buildUvPanel,
+      applyUvLayout,
+      reloadUvAtlas,
       shape: model
         ? {
           verts: selInfo.verts,
@@ -2272,7 +2320,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           recenter, Focus-tool pan) is owned by the HOST's native model-editor input loop in
           engine.zig — zero JS per event, no React render per move. When this Pressable isn't
           mounted, viewport mouse events reach that native loop directly. */}
-      {model && paintMode && (
+      {model && paintMode && brushTool !== 'pen' && (
         <Pressable
           onMouseDown={(p: any) => {
             const x = p?.x ?? 0, y = p?.y ?? 0;
@@ -2318,6 +2366,54 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />
       )}
+
+      {model && paintMode && brushTool === 'pen' ? (
+        <PenPathOverlay
+          resetKey={`${model.key}:${penRevision}`}
+          label="Pen fill · keep every anchor on one authored face"
+          onCancel={() => setPenRevision((revision) => revision + 1)}
+          onConfirm={(points) => {
+            const rgb = brushRgb(brush);
+            const ok = host.__model_paint_polygon?.(points, rgb[0], rgb[1], rgb[2], brush.flow, blendModeIndex(brush.blend)) === 1;
+            if (!ok) {
+              setError('Pen fill refused — keep the complete outline on one visible authored face');
+              return;
+            }
+            host.__mesh_paint_stroke_end?.();
+            onDocumentMutated?.();
+            refreshUvIfLive();
+            setError(null);
+            setPenRevision((revision) => revision + 1);
+          }}
+        />
+      ) : null}
+
+      {model && pathPlaneMode ? (
+        <PenPathOverlay
+          resetKey={`path-plane:${model.key}:${penRevision}`}
+          accent="#ad77ff"
+          label="Path Plane · draw its outline on the focus plane"
+          onCancel={() => setPathPlaneMode(false)}
+          onConfirm={(points) => {
+            const result = meshAppendPathPlane(points, partRangesRef.current.length);
+            if (!adoptMesh(result) || result?.lo == null || result?.hi == null) {
+              setError('Path Plane refused — use a simple closed outline and keep the model document active');
+              return;
+            }
+            const range = { lo: result.lo, hi: result.hi };
+            const [rr, gg, bb] = hexToRgb01('#ad77ff');
+            host.__model_paint_group_range?.(range.lo, range.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
+            if (!resyncPartRanges()) {
+              partRangesRef.current = [...partRangesRef.current, range];
+              meshSetPartRanges(partRangesRef.current);
+            }
+            onPathPlaneCreated?.(range);
+            onDocumentMutated?.();
+            setError(null);
+            setPathPlaneMode(false);
+          }}
+        />
+      ) : null}
 
       {/* Title strip — only changes on load, so this render is the one-and-only. */}
       <Row
@@ -2443,7 +2539,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             brush={brush} onBrushChange={setBrush}
             tool={brushTool} onToolChange={chooseBrushTool}
             palette={palette} onPaletteChange={setPalette}
-            tools={['fill', 'brush', 'eyedropper']}
+            tools={['fill', 'brush', 'pen', 'eyedropper']}
             theme={DARK_THEME} width={218}
           />
         </Col>

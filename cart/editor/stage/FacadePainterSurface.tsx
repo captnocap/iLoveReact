@@ -9,6 +9,7 @@ import { readSurfacePixels, type SurfacePixels } from '../../../runtime/capture'
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import type { Brush, BrushTool, PaintInk } from '../../../runtime/paint/model';
+import { PenPathOverlay } from '../../../runtime/paint/PenPathOverlay';
 import { dabsForStrokePath } from '../../../runtime/paint/stroke';
 import { stampBrushDab } from '../../../runtime/paint/stamp';
 import {
@@ -129,6 +130,7 @@ export default function FacadePainterSurface(props: {
   const baselineRef = useRef<Uint8Array | null>(null);
   const selectionDrawRef = useRef<SelectionPx | null>(null);
   const [selection, setSelection] = useState<SelectionPx | null>(null);
+  const [penRevision, setPenRevision] = useState(0);
 
   const programKey = JSON.stringify(layers.map((layer) => [layer.id, layer.strokes]));
   const captures = useMemo(() => {
@@ -176,6 +178,11 @@ export default function FacadePainterSurface(props: {
     scratch.paint.clearColor(0, 0, 0, 0);
     const recipe = brushForStroke(stroke, detail);
     const points = pointsToPixels(stroke.points, facade, detail);
+    if (stroke.tool === 'pen') {
+      if (points.length < 6) return null;
+      scratch.paint.polygon(new Float32Array(points), recipe.flow);
+      return scratch.paint.readback();
+    }
     for (const dab of dabsForStrokePath(stroke.tool, points, recipe.size, recipe.spacing)) {
       stampBrushDab(scratch.paint, recipe, [1, 1, 1], dab.x, dab.y, dab.radius, null, false);
     }
@@ -222,9 +229,9 @@ export default function FacadePainterSurface(props: {
     const bx = selection.points[selection.points.length - 2]!, by = selection.points[selection.points.length - 1]!;
     return { x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) };
   })() : undefined;
-  const needsScratch = brush.ink.kind === 'shader' || selection?.kind === 'lasso' || brush.blend !== 'normal';
+  const needsScratch = tool === 'pen' || brush.ink.kind === 'shader' || selection?.kind === 'lasso' || brush.blend !== 'normal';
   const maskingErase = needsScratch && (tool === 'eraser' || brush.blend === 'erase');
-  const controllerTool: BrushTool = maskingErase ? 'brush' : tool;
+  const controllerTool: BrushTool = maskingErase || tool === 'pen' ? 'brush' : tool;
   const controllerBrush: Brush = maskingErase
     ? { ...brush, blend: 'normal', ink: { kind: 'color', hex: '#ffffff' } }
     : brush;
@@ -259,6 +266,40 @@ export default function FacadePainterSurface(props: {
     });
   };
 
+  const commitPenPath = (normalized: Float32Array) => {
+    if (normalized.length < 6) return;
+    const pixels = new Float32Array(normalized.length);
+    for (let index = 0; index < normalized.length; index += 2) {
+      pixels[index] = normalized[index]! * size.w;
+      pixels[index + 1] = normalized[index + 1]! * size.h;
+    }
+    scratch.paint.clearColor(0, 0, 0, 0);
+    scratch.paint.polygon(pixels, brush.flow);
+    const mask = scratch.paint.readback();
+    const base = activePaint.readback();
+    if (!mask || !base) return;
+    compositeFacadeStrokeMask(base, mask, size.w, size.h, brush.ink, brush.blend === 'erase', selection ?? undefined, shaderFor(brush.ink), brush.blend);
+    activePaint.upload(base);
+    props.onStroke(facade.id, {
+      ink: cloneInk(brush.ink),
+      brush: {
+        stamp: { ...brush.stamp },
+        sizeMeters: brush.size / detail,
+        hardness: brush.hardness,
+        flow: brush.flow,
+        scatter: brush.scatter,
+        angleDeg: brush.angleDeg,
+        aspect: brush.aspect,
+        spacing: brush.spacing,
+        blend: brush.blend,
+      },
+      tool: 'pen',
+      points: pointsToMeters([...pixels], facade, detail),
+      selection: strokeSelection(selection, facade, detail),
+    });
+    setPenRevision((revision) => revision + 1);
+  };
+
   const stroke = useBrushStroke({
     paint: needsScratch ? scratch.paint : activePaint,
     texW: size.w,
@@ -279,6 +320,7 @@ export default function FacadePainterSurface(props: {
   });
 
   const onDown = (event: any) => {
+    if (tool === 'pen') return;
     const point = mapPoint(event.x, event.y);
     if (!point) return;
     if (tool === 'marquee' || tool === 'lasso') {
@@ -295,6 +337,7 @@ export default function FacadePainterSurface(props: {
     stroke.handlers.onMouseDown(event);
   };
   const onMove = (event: any) => {
+    if (tool === 'pen') return;
     const drawing = selectionDrawRef.current;
     if (drawing) {
       const point = mapPoint(event.x, event.y);
@@ -310,6 +353,7 @@ export default function FacadePainterSurface(props: {
     stroke.handlers.onMouseMove(event);
   };
   const onUp = (event: any) => {
+    if (tool === 'pen') return;
     if (selectionDrawRef.current) {
       selectionDrawRef.current = null;
       return;
@@ -374,10 +418,11 @@ export default function FacadePainterSurface(props: {
             {layers.filter((layer) => layer.visible).map((layer) => <Effect key={layer.id} shader={LAYER_DISPLAY} textures={[layerId(layer.id)]} style={{ position: 'absolute', left: 0, top: 0, width: viewW, height: viewH, opacity: layer.opacity }} />)}
             {stampPreviews}
             {selectionOutline.length >= 4 ? <Graph style={{ position: 'absolute', left: 0, top: 0, width: viewW, height: viewH }} viewX={0} viewY={0} viewZoom={1} originTopLeft><Graph.Polyline points={selectionOutline} stroke="#f4d35e" strokeWidth={FACADE_PAINTER_TUNING.selectionStrokeWidthPx} /></Graph> : null}
+            {tool === 'pen' ? <PenPathOverlay resetKey={`${facade.id}:${activeLayerId}:${penRevision}`} label="Pen fill · click corners · drag curves · close, then confirm" onConfirm={commitPenPath} onCancel={() => setPenRevision((revision) => revision + 1)} /> : null}
           </Pressable>
         </Box>
       </Row>
-      <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>{tool === 'lasso' ? 'Lasso clips the next strokes to its exact polygon.' : tool === 'marquee' ? 'Marquee clips the next strokes to its rectangle.' : brush.ink.kind === 'shader' && !shaderFor(brush.ink) ? 'Shader ink is warming up…' : ''}</Text>
+      <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>{tool === 'pen' ? 'Pen closes a precise Bezier outline and fills it on the active layer.' : tool === 'lasso' ? 'Lasso clips the next strokes to its exact polygon.' : tool === 'marquee' ? 'Marquee clips the next strokes to its rectangle.' : brush.ink.kind === 'shader' && !shaderFor(brush.ink) ? 'Shader ink is warming up…' : ''}</Text>
     </Col>
   );
 }

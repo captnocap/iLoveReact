@@ -206,6 +206,7 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-scale-by', menu: 'Edit', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
   { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-path-plane', menu: 'Edit', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
   // Camera lock (req_2893): freeze the orbit view where the user set it — every camera
@@ -247,9 +248,10 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-merge-down', menu: 'Edit', scope: 'model', name: 'Merge Selected Parts', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
   // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
   { id: 'mesh-import-part', menu: 'Edit', scope: 'model', name: 'Add From Library...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, tool: true },
-  // Paint sub-tools — the two brush behaviours plus the free-form face-safety and detail toggles.
+  // Paint sub-tools — bucket, free brush, and the shared closed pen path.
   { id: 'mesh-paint-fill', menu: 'Edit', scope: 'model', name: 'Fill Face', icon: 'PaintBucket', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint-brush', menu: 'Edit', scope: 'model', name: 'Free Brush', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-pen', menu: 'Edit', scope: 'model', name: 'Pen Fill', icon: 'PenTool', key: 'V', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint-safety', menu: 'Edit', scope: 'model', name: 'Face Safety', icon: 'Lock', key: 'X', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-paint-detail', menu: 'Edit', scope: 'model', name: 'Brush Detail', icon: 'Grid2x2', key: 'Y', context: true, native: true, undoable: false, tool: true },
 ];
@@ -377,7 +379,7 @@ const MESH_SUBMENU: MenuNode = {
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
-    section('Paint'), cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
+    section('Paint'), cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-pen'), cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
     { kind: 'sub', id: 'Paint Resolution', label: 'Paint Resolution', icon: 'Grid3x3', scope: 'model', children: PAINT_RES_COMMANDS.map((c) => cmd(c.id)) },
   ],
 };
@@ -425,7 +427,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -527,10 +529,10 @@ export function modelContextMenuLayout(hasActivePart: boolean, selectedPartCount
   };
 }
 
-// The two brush behaviours (fill · free-form), surfaced as toolbar icon buttons only while painting.
+// Paint behaviours, surfaced as toolbar icon buttons only while painting.
 export function meshPaintCommands(tool: { paint: boolean }): Command[] {
   if (!tool.paint) return [];
-  return [commandById('mesh-paint-fill'), commandById('mesh-paint-brush')];
+  return [commandById('mesh-paint-fill'), commandById('mesh-paint-brush'), commandById('mesh-paint-pen')];
 }
 
 export function isMeshToolCommand(id: string): boolean {
@@ -539,7 +541,7 @@ export function isMeshToolCommand(id: string): boolean {
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; focus: boolean; wire: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
@@ -551,8 +553,10 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-scale': return tool.selMode !== 0 && tool.gizmoTool === 1;
     case 'mesh-rotate': return tool.selMode !== 0 && tool.gizmoTool === 2;
     case 'mesh-paint': return tool.paint;
+    case 'mesh-path-plane': return tool.pathPlane === true;
     case 'mesh-paint-fill': return tool.paint && tool.brushTool === 'fill';
-    case 'mesh-paint-brush': return tool.paint && tool.brushTool !== 'fill';
+    case 'mesh-paint-brush': return tool.paint && tool.brushTool === 'brush';
+    case 'mesh-paint-pen': return tool.paint && tool.brushTool === 'pen';
     case 'mesh-focus': return tool.focus;
     case 'mesh-wire': return tool.wire;
     case 'mesh-cam-lock': return tool.camLock === true;

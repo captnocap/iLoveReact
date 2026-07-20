@@ -959,6 +959,20 @@ fn hostMeshAppendGroup(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, json);
 }
 
+/// __mesh_append_path_plane(Float32Array normalizedXY, expectedParts) → append JSON.
+/// Geometry stays behind the same validated part boundary as every other Add Part.
+fn hostMeshAppendPathPlane(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnString(info, "{\"ok\":0}");
+    if (bytes.len % @sizeOf(f32) != 0) return setReturnString(info, "{\"ok\":0}");
+    const expected_raw = argToI32(info, 1) orelse return setReturnString(info, "{\"ok\":0}");
+    if (expected_raw < 0) return setReturnString(info, "{\"ok\":0}");
+    const points: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const result = scene3d.meshAppendPathPlane(points, @intCast(expected_raw));
+    if (result.ok) state.markDirty();
+    setMeshAppendReturn(info, result);
+}
+
 /// __mesh_set_group_hidden(lo, hi, hidden) → JSON {"ok","key","count"}. Hide/show the part in
 /// the group range, moving its triangles to/from a host stash (non-destructive of edits).
 fn hostMeshSetGroupHidden(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1996,6 +2010,24 @@ fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNumber(info, if (face >= 0) 1 else 0);
 }
 
+/// __model_paint_polygon(Float32Array normalizedXY, r, g, b, flow, blend) → 1|0.
+/// The scene boundary raycasts and validates the complete path before touching
+/// the atlas, then records it as one durable paint-journal unit.
+fn hostModelPaintPolygon(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnNumber(info, 0);
+    if (bytes.len % @sizeOf(f32) != 0) return setReturnNumber(info, 0);
+    const points: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
+    const flow: f32 = @floatCast(argToF64(info, 4) orelse 1.0);
+    const blend_raw = argToI32(info, 5) orelse 0;
+    const ok = scene3d.paintPolygonAt(points, r, g, b, flow, @intCast(if (blend_raw >= 0 and blend_raw <= 7) blend_raw else 0));
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_paint_material(key, wgsl, data, size, scale) → 1 if the shader baked and is now
 /// the active brush ink, 0 otherwise. Renders the shader recipe (key + WGSL + optional
 /// Float32Array params) to a size×size image the host samples per dab — "dip the brush into a
@@ -2122,9 +2154,9 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 /// "groups":[g,...],"data":"<base64 rgba>"} for the current painting, or "" if there's
 /// no paint target. `detail` is the applied density (texels/meter); `islands` is the
 /// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
-/// authored group id (req_2619 P — the UV inspector filters islands to the active
-/// part's group range) — both omitted when the mesh has more islands than are worth
-/// outlining. The editor also persists this as a paint variant.
+/// authored group id. Every island is emitted: the UV editor is an authoring surface,
+/// so silently dropping a large model's rectangles is not an acceptable optimization.
+/// The editor also persists this as a paint variant.
 fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.c_allocator;
@@ -2151,30 +2183,56 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "");
         return;
     };
-    const MAX_OUTLINED_ISLANDS = 4096; // a 26k-triangle soup's rects would drown the JSON
     if (scene3d.paintIslands()) |isls| {
-        if (isls.len <= MAX_OUTLINED_ISLANDS) {
-            w.writeAll(",\"islands\":[") catch return setReturnString(info, "");
-            for (isls, 0..) |isl, i| {
-                w.print("{s}{d},{d},{d},{d}", .{ if (i == 0) "" else ",", isl.x, isl.y, isl.w, isl.h }) catch return setReturnString(info, "");
-            }
-            w.writeAll("]") catch return setReturnString(info, "");
-            // Parallel per-island GROUP ids (req_2619 P): island k's authored group is
-            // groups[k] (4294967295 = a loose ungrouped triangle's island). A parallel
-            // array, not a 5-tuple, so every existing 4-stride islands consumer keeps
-            // working; the UV inspector filters islands to the active part's group range.
-            w.writeAll(",\"groups\":[") catch return setReturnString(info, "");
-            for (isls, 0..) |isl, i| {
-                w.print("{s}{d}", .{ if (i == 0) "" else ",", isl.group }) catch return setReturnString(info, "");
-            }
-            w.writeAll("]") catch return setReturnString(info, "");
+        w.writeAll(",\"islands\":[") catch return setReturnString(info, "");
+        for (isls, 0..) |isl, i| {
+            w.print("{s}{d},{d},{d},{d}", .{ if (i == 0) "" else ",", isl.x, isl.y, isl.w, isl.h }) catch return setReturnString(info, "");
         }
+        w.writeAll("]") catch return setReturnString(info, "");
+        w.writeAll(",\"groups\":[") catch return setReturnString(info, "");
+        for (isls, 0..) |isl, i| {
+            w.print("{s}{d}", .{ if (i == 0) "" else ",", isl.group }) catch return setReturnString(info, "");
+        }
+        w.writeAll("]") catch return setReturnString(info, "");
     }
     w.print(",\"data\":\"{s}\"}}", .{b64}) catch {
         setReturnString(info, "");
         return;
     };
     setReturnString(info, out.written());
+}
+
+/// __model_uv_layout_apply(Uint32Array[x,y,w,h,...]) → 1 on atomic success.
+/// The table must describe every current island; validation and pixel/UV remap
+/// happen together behind scene3d's single deep boundary.
+fn hostModelUvLayoutApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % (4 * @sizeOf(u32)) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const rects: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ok = scene3d.applyUvIslandRects(rects);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_atlas_replace(Uint8Array rgba) → 1. External texture editors write
+/// atlases/base.png; this door reloads its decoded, equal-sized RGBA into the
+/// current atlas without repacking the authored UV rectangles.
+fn hostModelAtlasReplace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const rgba = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const ok = scene3d.replacePaintAtlas(rgba);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
 }
 
 /// __model_paint_sample(x, y) → packed 0xRRGGBB colour under the viewport pixel, -1 on a
@@ -2267,6 +2325,19 @@ fn hostModelPaintProgramRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnString(info, b64);
 }
 
+/// __model_paint_baseline_read() → base64 RGBA for the exact raster beneath the
+/// stroke program, or "" when no baseline has been authored yet.
+fn hostModelPaintBaselineRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const rgba = scene3d.paintProgramBaseline() orelse return setReturnString(info, "");
+    const enc = std.base64.standard.Encoder;
+    const b64 = alloc.alloc(u8, enc.calcSize(rgba.len)) catch return setReturnString(info, "");
+    defer alloc.free(b64);
+    _ = enc.encode(b64, rgba);
+    setReturnString(info, b64);
+}
+
 /// __model_paint_program_apply(base64) → 1 on success, 0 on failure. Replay a saved stroke
 /// program onto the resident model, rebuilding the atlas from the recipe (re-baking any shader
 /// inks from their embedded WGSL). The self-contained restore that replaces atlas-blit.
@@ -2294,6 +2365,24 @@ fn hostModelPaintProgramApply(info_c: ?*const v8.c.FunctionCallbackInfo) callcon
         return;
     };
     const ok = scene3d.paintProgramApply(host.io, host.environ, blob);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_paint_program_apply_over_base(base64) → 1 on success. The caller has
+/// already installed raster-base.png; this adopts/replays the editable recipe on top.
+fn hostModelPaintProgramApplyOverBase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const alloc = std.heap.c_allocator;
+    const b64 = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(b64);
+    const dec = std.base64.standard.Decoder;
+    const n = dec.calcSizeForSlice(b64) catch return setReturnNumber(info, 0);
+    const blob = alloc.alloc(u8, n) catch return setReturnNumber(info, 0);
+    defer alloc.free(blob);
+    dec.decode(blob, b64) catch return setReturnNumber(info, 0);
+    const ok = scene3d.paintProgramApplyOverBase(host.io, host.environ, blob);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -3153,6 +3242,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_delete_group_range", hostMeshDeleteGroupRange);
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
+    v8_runtime.registerHostFn("__mesh_append_path_plane", hostMeshAppendPathPlane);
     v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);
     v8_runtime.registerHostFn("__mesh_undo", hostMeshUndo);
     v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);
@@ -3203,6 +3293,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_mode", hostModelPaintMode);
     v8_runtime.registerHostFn("__model_paint_stroke_begin", hostModelPaintStrokeBegin);
     v8_runtime.registerHostFn("__model_paint_stamp", hostModelPaintStamp);
+    v8_runtime.registerHostFn("__model_paint_polygon", hostModelPaintPolygon);
     v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
@@ -3210,6 +3301,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
+    v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
+    v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
     v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
     v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
@@ -3219,7 +3312,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
+    v8_runtime.registerHostFn("__model_paint_baseline_read", hostModelPaintBaselineRead);
     v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);
+    v8_runtime.registerHostFn("__model_paint_program_apply_over_base", hostModelPaintProgramApplyOverBase);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
     v8_runtime.registerHostFn("__file_sha256", hostFileSha256);

@@ -6,6 +6,9 @@ pub const OP_DAB: u8 = 2;
 pub const OP_FILL: u8 = 3;
 pub const OP_DAB_SHAPED: u8 = 4;
 pub const OP_DAB_BLENDED: u8 = 5;
+pub const OP_POLYGON: u8 = 6;
+pub const MAX_POLYGON_POINTS: usize = 64;
+pub const POLYGON_OPERAND_SIZE: usize = 4 + 4 + 4 + 4 + MAX_POLYGON_POINTS * 2 * 4 + 4;
 
 /// A live dab is necessarily the newest write into the shared atlas.  Once a
 /// stroke commits, replay is required when that direct write does not already
@@ -24,6 +27,7 @@ pub fn operandSize(tag: u8) ?usize {
         OP_FILL => 8,
         OP_DAB_SHAPED => 44,
         OP_DAB_BLENDED => 48,
+        OP_POLYGON => POLYGON_OPERAND_SIZE,
         else => null,
     };
 }

@@ -1,9 +1,10 @@
-//! paint_program.zig — a model painting stored as its STROKE PROGRAM, not its pixels.
+//! paint_program.zig — editable strokes over an explicit authored raster baseline.
 //!
-//! GUIDING_LIGHT ("Worked Example: painted textures"): store the recipe (the strokes
-//! + their params), never the rasterized atlas. Every authoring dab/fill on the model
-//! paint target is APPENDED here as a resolution-independent op. Serialized, this tiny
-//! program IS the durable form; replayed once at load it rebuilds the atlas exactly.
+//! Every authoring dab/fill on the model paint target is appended here as a
+//! resolution-independent op. The program remains the editable durable recipe; the
+//! package additionally stores the exact raster UNDER it so generated bases, part
+//! colors, and externally edited PNGs survive a cold replay without flattening later
+//! strokes into that image.
 //!
 //! req_2672 grows the program into the painter's WHOLE editing model:
 //!
@@ -13,8 +14,8 @@
 //!     program onto the atlas — the program is the truth, so undo is replay, never a
 //!     pixel diff. A baseline atlas snapshot (taken before the first stroke) anchors
 //!     the replay so paint that predates the program (part tints, the atlas base)
-//!     survives every undo. The baseline is a runtime cache only — persistence stays
-//!     strokes-only.
+//!     survives every undo. Package v3 persists that baseline beside the program as
+//!     raster-base.png; it is source texture data, never a screenshot of the editor.
 //!
 //!   • LAYERS — the stroke program IS the layer system (USER ASK req_2672: "i want to
 //!     write some stupid shit like 'i like it' first and then fuck off everything
@@ -60,8 +61,12 @@ const OP_DAB_SHAPED = paint_ops.OP_DAB_SHAPED;
 // v4: OP_DAB_SHAPED + blend-mode u32. A new tag keeps every v3 stream readable
 // without making the op walker guess which operand layout it encountered.
 const OP_DAB_BLENDED = paint_ops.OP_DAB_BLENDED;
+// v5: a closed pen fill. Fixed-width storage keeps the generic op walker deep
+// and strict: count selects the live prefix, the remaining point slots are zero.
+const OP_POLYGON = paint_ops.OP_POLYGON;
+pub const MAX_POLYGON_POINTS = paint_ops.MAX_POLYGON_POINTS;
 const MAGIC = [4]u8{ 'R', 'J', 'P', 'P' };
-const VERSION: u16 = 4; // v1 flat faces · v2 stable keys · v3 shapes · v4 blend modes
+const VERSION: u16 = 5; // v1 flat faces · v2 stable keys · v3 shapes · v4 blends · v5 pen polygons
 const MAT_BAKE_SIZE: u32 = 256;
 
 /// Ungrouped faces carry this group key; the ordinal is then the raw face index.
@@ -103,12 +108,13 @@ var g_active_rgb: [3]u8 = .{ 0, 0, 0 };
 
 var g_recording: bool = true; // false during replay, so replay never re-records
 
-// ── Baseline atlas (runtime-only undo anchor; never persisted) ──────────────────────
+// ── Baseline atlas (undo anchor + package raster base) ──────────────────────────────
 // Captured once, right before the first program op lands (or right after a loaded
 // program's base-clear). replayAll restores it first, so paint that is NOT in the
 // program — part tints laid at load, the chosen atlas base — survives undo instead of
-// being wiped by the clear. Dropped on reset; a dimension mismatch (detail changed)
-// falls back to clearAtlas + base.
+// being wiped by the clear. The package writer persists this exact buffer separately
+// from the stroke recipe, so an external texture edit remains the base on cold reopen.
+// Dropped on reset; a dimension mismatch (detail changed) falls back to clearAtlas + base.
 var g_baseline: ?[]u8 = null;
 
 fn dropBaseline() void {
@@ -125,6 +131,44 @@ fn captureBaselineIfNeeded() void {
 fn forceBaselineCapture() void {
     dropBaseline();
     captureBaselineIfNeeded();
+}
+
+/// Carry the runtime-only undo baseline through an authored UV rectangle edit.
+/// Stroke ops are face/barycentric recipes and therefore need no rewrite; only
+/// this cached raster anchor still contains the old island placement.
+pub fn remapBaseline(old_rects: []const u32, new_rects: []const u32, atlas_w: u32, atlas_h: u32) bool {
+    const source = g_baseline orelse return true;
+    const destination = alloc.alloc(u8, source.len) catch {
+        // The baseline is only an undo acceleration cache. If it cannot move
+        // with the authored UVs, discard it so replay takes the established
+        // clear+base path instead of restoring pixels at stale coordinates.
+        dropBaseline();
+        return false;
+    };
+    if (!model_paint.remapRgbaRects(destination, source, atlas_w, atlas_h, old_rects, new_rects)) {
+        alloc.free(destination);
+        dropBaseline();
+        return false;
+    }
+    alloc.free(source);
+    g_baseline = destination;
+    return true;
+}
+
+/// An externally edited atlas PNG is a deliberate raster bake. Keep the layer
+/// names, retire the old stroke recipe/history, and make the imported pixels the
+/// baseline beneath every stroke authored from this point onward.
+pub fn adoptCurrentAtlasAsBaseline() void {
+    _ = endStrokeUnit();
+    snapshotLayersForCarry();
+    reset();
+    forceBaselineCapture();
+}
+
+/// Read-only package boundary for the exact raster beneath the recorded strokes.
+/// Callers must copy/encode before any paint mutation.
+pub fn baseline() ?[]const u8 {
+    return g_baseline;
 }
 
 // ── Hide-stable face keys: (authored group, intra-group ordinal) ────────────────────
@@ -676,6 +720,26 @@ pub fn recordFill(face: u32, mat: bool, rgb: [3]u8) void {
     appendOpenU32(key.ord);
 }
 
+/// Record one bounded closed pen fill in normalized authored-island space.
+pub fn recordPolygon(face: u32, points: []const f32, flow: f32, blend: u8, mat: bool, rgb: [3]u8) void {
+    if (!g_recording or points.len < 6 or points.len % 2 != 0) return;
+    const point_count = @min(points.len / 2, MAX_POLYGON_POINTS);
+    openUnit("pen fill");
+    emitInk(mat, rgb);
+    g_open_fill_seen.clearRetainingCapacity();
+    const key = faceKeyOf(face);
+    g_open.append(alloc, OP_POLYGON) catch {};
+    appendOpenU32(key.group);
+    appendOpenU32(key.ord);
+    appendOpenU32(@intCast(point_count));
+    appendOpenF32(flow);
+    var index: usize = 0;
+    while (index < MAX_POLYGON_POINTS * 2) : (index += 1) {
+        appendOpenF32(if (index < point_count * 2) points[index] else 0.0);
+    }
+    appendOpenU32(if (blend <= 7) blend else 0);
+}
+
 /// Commit the open stroke unit: pointer-up (or any journal/serialize boundary). The
 /// pre-state snapshot journals FIRST — the open ops aren't in g_strokes yet, so the
 /// current committed state IS the pre-state. False when nothing was recorded.
@@ -1036,6 +1100,27 @@ fn runStrokeOps(io: std.Io, environ: *const std.process.Environ.Map, ops: []cons
                 flushInk(io, environ, ink);
                 if (ink.mat_active) model_paint.paintFaceTex(face) else model_paint.paintFaceRgb(face, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2] });
             },
+            OP_POLYGON => {
+                const group = c.u32v() orelse return;
+                const ord = c.u32v() orelse return;
+                const count_raw = c.u32v() orelse return;
+                const flow = c.f32v() orelse return;
+                var points: [MAX_POLYGON_POINTS * 2]f32 = undefined;
+                for (&points) |*value| value.* = c.f32v() orelse return;
+                const blend = c.u32v() orelse return;
+                const count: usize = @intCast(@min(count_raw, @as(u32, MAX_POLYGON_POINTS)));
+                if (count < 3) continue;
+                const face = resolveFace(res, group, ord) orelse continue;
+                flushInk(io, environ, ink);
+                _ = model_paint.paintPolygon(
+                    face,
+                    points[0 .. count * 2],
+                    .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 },
+                    ink.mat_active,
+                    flow,
+                    @intCast(if (blend <= 7) blend else 0),
+                );
+            },
             else => return,
         }
     }
@@ -1271,6 +1356,29 @@ pub fn apply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const 
     // it back under the strokes (req_2551). The post-clear atlas is the undo baseline.
     model_paint.activateBase();
     model_paint.clearAtlas();
+    forceBaselineCapture();
+    replayAll(io, environ);
+    return true;
+}
+
+/// Adopt a serialized program while preserving the atlas already resident as its
+/// baseline. Package restore uses this after loading raster-base.png; ordinary
+/// apply() deliberately reconstructs the generated base instead.
+pub fn applyOverCurrentBaseline(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+    var c = Cursor{ .b = blob };
+    const magic = c.bytes(4) orelse return false;
+    if (!std.mem.eql(u8, magic, &MAGIC)) return false;
+    const ver = c.u16v() orelse return false;
+    if (ver < 1 or ver > VERSION) return false;
+    _ = c.u16v() orelse return false;
+    _ = c.u32v() orelse return false;
+
+    dropLayerCarry();
+    reset();
+    if (!applyParse(&c, ver, blob)) {
+        reset();
+        return false;
+    }
     forceBaselineCapture();
     replayAll(io, environ);
     return true;

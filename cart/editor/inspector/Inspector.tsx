@@ -28,6 +28,7 @@ import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
+import UvEditor from './UvEditor';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -41,12 +42,6 @@ function useModelFocusBridge(): ModelFocusBridge | null {
   }, []);
   return snap;
 }
-
-// UV preview space inside the FIXED focus panel (req_2627: content imports its space):
-// the section's 12px gutters come off the panel's constant inner width; height is
-// BOUNDED so the non-scrolling model-focus body keeps its other slices on screen.
-const UV_IMG_W = REGIONS.focusPanel.innerWidth - 24;
-const UV_IMG_MAX_H = 170;
 
 function fmtCount(value: number): string {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
@@ -101,18 +96,13 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 // UV — the atlas section relocated INTO the focus panel from the floating viewport
 // card (req_2643 OO). The header carries the active OUTLINER part's name (req_2619 P:
 // the UV read is per-outliner even while storage stays whole-model) plus the dims/
-// density readout on one line; the refresh verb is a fallback, never REQUIRED (the
-// viewer auto-refreshes off adoptMesh/applyTopo/stroke-end while paint is live).
-// __model_atlas_read now emits per-island GROUP ids (req_2619 P), so the preview
-// FILTERS to the active part: its islands full-strength, every other island dimmed
-// (the viewer bakes the dim at read time from __modelActivePartRange). The scope row
-// reads whichever state is actually shown — uv.scope is set by the same bake.
+// density readout on one line. Atlas pixels are a raw Paintable substrate; every
+// island remains live selectable geometry above it, including off-part islands.
 // extraCount is the multi-select overflow (req_2659d): 'CUBE 1 +2' = primary + 2 more.
 function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge | null; partName: string; extraCount: number }) {
   const uv = bridge?.uv ?? null;
-  const scale = uv && uv.src ? Math.min(UV_IMG_W / Math.max(1, uv.w), UV_IMG_MAX_H / Math.max(1, uv.h)) : 0;
   return (
-    <C.HW_Section>
+    <C.HW_Section style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
       <C.HW_SectionHead>
         <C.HW_AccentBar />
         <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
@@ -122,10 +112,8 @@ function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge 
           <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
-      {uv && uv.src ? (
-        <C.HW_UvFrame style={{ width: Math.max(24, Math.round(uv.w * scale)), height: Math.max(24, Math.round(uv.h * scale)) }}>
-          <C.HW_UvImage src={uv.src} />
-        </C.HW_UvFrame>
+      {uv && uv.rgba && bridge ? (
+        <UvEditor uv={uv} bridge={bridge} />
       ) : uv ? (
         <C.HW_ReadRow>
           <C.HW_UvNote>{uv.note ?? 'no atlas'}</C.HW_UvNote>
@@ -366,7 +354,7 @@ export default function Inspector(props: {
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
     const paneTitle = activePane === 'paint' ? 'MODEL · PAINT' : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
     return (
-      <C.HW_RightPanel>
+      <C.HW_RightPanel style={{ width: activePane === 'paint' ? REGIONS.focusPanel.atlasWidth : REGIONS.focusPanel.width }}>
         <C.HW_Inspector>
           <C.HW_PanelHead>
             <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
@@ -430,8 +418,8 @@ export default function Inspector(props: {
               </>
             ) : activePane === 'paint' ? (
               <>
-                <ModelPaintVariants key={activeModel.id} model={activeModel} />
                 <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
+                <ModelPaintVariants key={activeModel.id} model={activeModel} />
               </>
             ) : (
               <RigSection

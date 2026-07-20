@@ -1198,6 +1198,28 @@ pub fn build(b: *std.Build) void {
     model_paint_test_step.dependOn(&run_model_paint_test.step);
     model_paint_test_step.dependOn(&run_model_paint_carry_test.step);
 
+    // ── pen path → concave camera-facing plane — headless, no GPU ──────────
+    const path_plane_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/path_plane.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const path_plane_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/path_plane.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    path_plane_test_mod.addImport("path_plane", path_plane_impl_test_mod);
+    const path_plane_test = b.addTest(.{
+        .name = "path-plane-test",
+        .root_module = path_plane_test_mod,
+    });
+    const run_path_plane_test = b.addRunArtifact(path_plane_test);
+    const path_plane_test_step = b.step("test-path-plane", "Run pen-path triangulation/projection unit tests");
+    path_plane_test_step.dependOn(&run_path_plane_test.step);
+
     // ── model-stage scale cue unit tests — headless, no GPU ───────────────────
     // Pins the ruled metre contract consumed by the native modeling-stage overlay:
     // coarse tile, collider, visual head top, and ruler tick cadence.
