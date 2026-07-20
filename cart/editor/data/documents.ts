@@ -17,7 +17,7 @@ export const WORLD_BIBLE_DOCUMENT: WorkspaceDocument = {
   id: WORLD_BIBLE_DOCUMENT_ID,
   kind: 'knowledge',
   title: 'World Bible',
-  subtitle: 'world/knowledge',
+  subtitle: '',
 };
 
 // The playtest drop-in tab (GLOBALS req_2770): ONE document, upserted by the

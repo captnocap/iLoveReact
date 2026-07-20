@@ -50,9 +50,8 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
-      <C.HW_Pill onPress={props.onWorldBible} tooltip="Open the project World Bible">
+      <C.HW_Pill onPress={props.onWorldBible} tooltip="Open World Bible">
         <Icon name="BookOpen" size={12} color={accentFor('primary')} />
-        <C.HW_PillText>World Bible</C.HW_PillText>
       </C.HW_Pill>
       <C.HW_Pill onPress={() => props.onCommand('open-map', 'chrome')} tooltip={`Active map: ${props.state.activeMapName} (${props.state.activeMapStem}) — open map workspaces`}>
         <Icon name="MapPinned" size={12} color={accentFor('primary')} />

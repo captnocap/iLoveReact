@@ -181,7 +181,7 @@ export function prepareKnowledgeWrite(session: KnowledgeSession, currentDiskSour
   const refreshed = refreshKnowledgeDisk(session, currentDiskSource);
   const state = knowledgeSourceState(refreshed);
   if (!isKnowledgeSourcePath(refreshed.path)) {
-    return { ok: false, session: refreshed, state, error: 'The proposed World Bible path is outside the canonical one-page directory.', diagnostics: [] };
+    return { ok: false, session: refreshed, state, error: 'The proposed path is outside the World Bible directory.', diagnostics: [] };
   }
   if (refreshed.diskHash !== refreshed.baseHash) {
     return {
@@ -189,8 +189,8 @@ export function prepareKnowledgeWrite(session: KnowledgeSession, currentDiskSour
       session: refreshed,
       state,
       error: state === 'CONFLICT'
-        ? 'Both the draft and the canonical file changed. Reload or resolve the text outside the writer.'
-        : 'The canonical file changed on disk. Reload it before preparing a write.',
+        ? 'Both the draft and the file changed. Reload or resolve the file manually.'
+        : 'The file changed on disk. Reload it before reviewing this write.',
       diagnostics: [],
     };
   }
@@ -229,7 +229,7 @@ export function confirmKnowledgeWrite(
     return { ok: false, session, state: knowledgeSourceState(session), error: 'The reviewed proposal payload was altered. Nothing was written.' };
   }
   if (proposal.before !== session.baseSource || proposal.expectedDiskHash !== session.baseHash) {
-    return { ok: false, session, state: knowledgeSourceState(session), error: 'The proposal no longer belongs to this loaded disk base.' };
+    return { ok: false, session, state: knowledgeSourceState(session), error: 'The proposal no longer matches the loaded file version.' };
   }
   const rerendered = renderProposal(session);
   if (!rerendered.ok || !rerendered.page
@@ -242,7 +242,7 @@ export function confirmKnowledgeWrite(
   const current = port.read(session.path);
   const refreshed = refreshKnowledgeDisk(session, current);
   if (sourceHash(current) !== proposal.expectedDiskHash) {
-    return { ok: false, session: refreshed, state: knowledgeSourceState(refreshed), error: 'Canonical disk bytes changed after review. Nothing was written.' };
+    return { ok: false, session: refreshed, state: knowledgeSourceState(refreshed), error: 'The file changed after review. Nothing was written.' };
   }
   const reparsed = parseKnowledgePage(proposal.after, session.path);
   if (!reparsed || reparsed.diagnostics.some((item) => item.severity === 'error')) {
@@ -255,7 +255,7 @@ export function confirmKnowledgeWrite(
       : port.writeAtomic(session.path, proposal.after) ? 'written' : 'failed';
   if (compareWrite === 'changed') {
     const changed = refreshKnowledgeDisk(refreshed, port.read(session.path));
-    return { ok: false, session: changed, state: knowledgeSourceState(changed), error: 'Canonical disk bytes changed during the final expected-content check. Nothing was written.' };
+    return { ok: false, session: changed, state: knowledgeSourceState(changed), error: 'The file changed during the final expected-content check. Nothing was written.' };
   }
   if (compareWrite === 'failed') {
     const afterFailure = refreshKnowledgeDisk(refreshed, port.read(session.path));
@@ -264,8 +264,8 @@ export function confirmKnowledgeWrite(
       session: afterFailure,
       state: knowledgeSourceState(afterFailure),
       error: afterFailure.diskSource === proposal.after
-        ? 'Reviewed bytes reached canonical disk, but the durability check failed. Reload and verify before continuing.'
-        : 'Atomic write failed; canonical disk bytes were not accepted.',
+        ? 'The file was replaced, but the durability check failed. Reload and verify it before continuing.'
+        : 'Atomic write failed; the file was not changed.',
     };
   }
   const persisted = port.read(session.path);

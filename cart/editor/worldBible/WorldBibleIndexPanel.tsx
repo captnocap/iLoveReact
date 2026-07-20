@@ -1,7 +1,7 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { classifiers as W } from '../../../runtime/classifier';
 import { accentFor } from '../workspace.cls';
-import { worldBibleController, stateColor, type WorldBibleKindFilter } from './controller';
+import { WORLD_KNOWLEDGE_ROOT, worldBibleController, stateColor, type WorldBibleKindFilter } from './controller';
 import { KNOWLEDGE_KINDS, type KnowledgeDraft, type KnowledgeKind } from './blockFormat';
 import type { KnowledgeSession, KnowledgeSourceState } from './session';
 import { useWorldBibleSnapshot } from './useWorldBible';
@@ -52,6 +52,13 @@ function sourceState(session: KnowledgeSession): KnowledgeSourceState {
   return state;
 }
 
+function sourceStateLabel(state: KnowledgeSourceState): string | null {
+  if (state === 'DRAFT CHANGED') return 'UNSAVED';
+  if (state === 'DISK CHANGED') return 'FILE CHANGED';
+  if (state === 'CONFLICT') return 'CONFLICT';
+  return null;
+}
+
 export default function WorldBibleIndexPanel() {
   const snapshot = useWorldBibleSnapshot();
   const needle = snapshot.query.trim().toLowerCase();
@@ -64,12 +71,12 @@ export default function WorldBibleIndexPanel() {
     <W.WB_IndexPanel testID="world-bible-index">
       <W.WB_IndexHead>
         <Icon name="BookOpen" size={14} color={accentFor('primary')} />
-        <W.WB_IndexTitle>WORLD BIBLE</W.WB_IndexTitle>
-        <W.WB_MicroText>{snapshot.sessions.length} PAGES</W.WB_MicroText>
+        <W.WB_IndexTitle>PAGES</W.WB_IndexTitle>
+        <W.WB_MicroText>{snapshot.sessions.length}</W.WB_MicroText>
         <W.WB_IconButton tooltip={`New ${newKind} page draft`} onPress={() => worldBibleController.beginNew(newKind)} testID="world-bible-new-page">
           <Icon name="Plus" size={13} color={accentFor('primary')} />
         </W.WB_IconButton>
-        <W.WB_IconButton tooltip="Recheck canonical files" onPress={() => worldBibleController.refreshDisk()} testID="world-bible-refresh">
+        <W.WB_IconButton tooltip="Refresh files" onPress={() => worldBibleController.refreshDisk()} testID="world-bible-refresh">
           <Icon name="RefreshCw" size={12} color={accentFor('textDim')} />
         </W.WB_IconButton>
       </W.WB_IndexHead>
@@ -101,6 +108,7 @@ export default function WorldBibleIndexPanel() {
           const active = snapshot.selectedPath === session.path;
           const Row = active ? W.WB_PageRowOn : W.WB_PageRow;
           const state = sourceState(session);
+          const stateLabel = sourceStateLabel(state);
           return (
             <Row key={session.path} onPress={() => worldBibleController.selectPath(session.path)}>
               <W.WB_KindMark style={{ backgroundColor: KIND_COLORS[session.draft.kind] }} />
@@ -108,14 +116,14 @@ export default function WorldBibleIndexPanel() {
                 <W.WB_PageName>{session.draft.name}</W.WB_PageName>
                 <W.WB_PageRef>{session.draft.ref}</W.WB_PageRef>
               </W.WB_PageCopy>
-              <W.WB_StateTiny style={{ color: stateColor(state) }}>{state === 'DRAFT CHANGED' ? 'DRAFT' : state === 'DISK CHANGED' ? 'DISK Δ' : state}</W.WB_StateTiny>
+              {stateLabel ? <W.WB_StateTiny style={{ color: stateColor(state) }}>{stateLabel}</W.WB_StateTiny> : null}
             </Row>
           );
         })}
       </W.WB_PageList>
       <W.WB_IndexFoot>
-        <W.WB_MicroText>{visible.length} SHOWN</W.WB_MicroText>
-        <W.WB_MicroText style={{ marginLeft: 'auto' }}>DISK IS CANONICAL</W.WB_MicroText>
+        {/* The ownership invariant lives here once. Other surfaces report only state or action. */}
+        <W.WB_MicroText>Source of truth · {WORLD_KNOWLEDGE_ROOT}</W.WB_MicroText>
       </W.WB_IndexFoot>
     </W.WB_IndexPanel>
   );

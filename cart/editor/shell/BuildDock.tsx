@@ -101,18 +101,6 @@ export default function BuildDock({
   if (isKnowledgeDoc) {
     return (
       <C.HW_BuildDock>
-        <C.HW_DockGroup>
-          <Icon name="BookOpen" size={13} color={accentFor('primary')} />
-          <C.HW_DockLabel>WORLD BIBLE</C.HW_DockLabel>
-          <C.HW_DockValue>world/knowledge</C.HW_DockValue>
-        </C.HW_DockGroup>
-        <C.HW_DockDivider />
-        <C.HW_DockGroup>
-          <C.HW_DockLabel>DISK</C.HW_DockLabel>
-          <C.HW_DockValue>CANONICAL</C.HW_DockValue>
-          <C.HW_DockLabel>CTRL+S</C.HW_DockLabel>
-          <C.HW_DockValue>REVIEW SELECTED</C.HW_DockValue>
-        </C.HW_DockGroup>
         <C.HW_Spacer />
         <C.HW_DockPerfButton onPress={onPerf}>
           <C.HW_DockLabel>FPS:</C.HW_DockLabel>

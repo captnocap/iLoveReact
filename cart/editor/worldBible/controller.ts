@@ -324,7 +324,7 @@ export class WorldBibleController {
       pathDiagnostics.push({
         severity: 'error',
         code: 'path-duplicate',
-        message: `Canonical path "${path}" is targeted by ${owners.map((owner) => owner.draft.ref).join(', ')}.`,
+        message: `File "${path}" is targeted by ${owners.map((owner) => owner.draft.ref).join(', ')}.`,
         path,
       });
     }
@@ -907,12 +907,12 @@ export class WorldBibleController {
     this.selectedRef = selected?.draft.ref ?? null;
     this.loaded = true;
     this.notice = restoredClaims
-      ? `${restoredClaims} interrupted canonical write claim${restoredClaims === 1 ? '' : 's'} restored from durable prior bytes`
+      ? `Recovered ${restoredClaims} interrupted file write${restoredClaims === 1 ? '' : 's'}`
       : restoredDraftClaims
-      ? `${restoredDraftClaims} interrupted draft recovery write${restoredDraftClaims === 1 ? '' : 's'} restored from the newest valid durable envelope`
+      ? `Recovered ${restoredDraftClaims} interrupted draft save${restoredDraftClaims === 1 ? '' : 's'}`
       : recovered.count
-      ? `${recovered.count} noncanonical draft${recovered.count === 1 ? '' : 's'} recovered; disk remains source of truth`
-      : sessions.length ? `${sessions.length} canonical World Bible pages loaded` : `No pages found in ${WORLD_KNOWLEDGE_ROOT}`;
+      ? `Recovered ${recovered.count} draft${recovered.count === 1 ? '' : 's'}`
+      : '';
     this.recomputeDiagnostics();
     this.publish();
   }
@@ -935,7 +935,7 @@ export class WorldBibleController {
     const matches = this.sessions.filter((session) => session.draft.ref === ref);
     if (matches.length !== 1) {
       if (matches.length > 1) {
-        this.notice = `Ref ${ref} is ambiguous; select the page by canonical path.`;
+        this.notice = `Ref ${ref} is ambiguous; select the page by file path.`;
         this.publish();
       }
       return;
@@ -946,7 +946,7 @@ export class WorldBibleController {
     this.proposal = null;
     this.clearPendingDiscard();
     this.clearTransientDiagnostics();
-    this.notice = `Opened ${ref}`;
+    this.notice = '';
     this.recomputeDiagnostics();
     this.publish();
   }
@@ -961,7 +961,7 @@ export class WorldBibleController {
     this.proposal = null;
     this.clearPendingDiscard();
     this.clearTransientDiagnostics();
-    this.notice = `Opened ${session.draft.ref}`;
+    this.notice = '';
     this.recomputeDiagnostics();
     this.publish();
   }
@@ -1000,7 +1000,7 @@ export class WorldBibleController {
     this.proposal = null;
     this.clearPendingDiscard();
     this.clearTransientDiagnostics();
-    this.notice = `New ${kind} draft — no file exists until Write to Disk is confirmed`;
+    this.notice = `New ${kind} draft`;
     this.persistRecovery();
     this.recomputeDiagnostics();
     this.publish();
@@ -1033,7 +1033,7 @@ export class WorldBibleController {
     this.proposal = null;
     this.clearPendingDiscard();
     this.clearTransientDiagnostics();
-    this.notice = `${nextDraft.ref} is a draft; canonical disk is unchanged`;
+    this.notice = '';
     this.persistRecovery();
     this.scheduleDiagnostics();
     this.publish();
@@ -1103,7 +1103,7 @@ export class WorldBibleController {
         this.controllerDiagnostics.set(`external:${session.path}`, {
           severity: 'error',
           code: 'external-reload-malformed',
-          message: `Canonical bytes changed at ${session.path}, but they do not parse cleanly. The current draft was preserved.`,
+          message: `The file changed at ${session.path}, but it does not parse cleanly. The draft was preserved.`,
           path: session.path,
         });
         continue;
@@ -1122,7 +1122,7 @@ export class WorldBibleController {
         this.controllerDiagnostics.set(`source:${path}`, {
           severity: 'error',
           code: 'entity-missing',
-          message: 'Canonical World Bible source does not contain one clean supported entity block.',
+          message: 'The file does not contain one valid supported entity block.',
           path,
         });
       }
@@ -1135,7 +1135,7 @@ export class WorldBibleController {
     this.selectedRef = selected?.draft.ref ?? null;
     this.proposal = null;
     if (this.mode === 'review') this.mode = selected && knowledgeDraftChanged(selected) ? 'edit' : 'read';
-    this.notice = 'Canonical files rechecked';
+    this.notice = 'Files rechecked';
     this.recomputeDiagnostics();
     this.publish();
   }
@@ -1171,8 +1171,8 @@ export class WorldBibleController {
     }
     const ok = this.writeRecoveryNow();
     this.notice = ok
-      ? 'Noncanonical World Bible recovery settled before play; disk remains canonical.'
-      : 'Play blocked because the noncanonical World Bible recovery draft could not be secured.';
+      ? 'Draft recovery saved'
+      : 'Play blocked because the draft recovery file could not be saved.';
     this.publish();
     return ok;
   }
@@ -1195,8 +1195,8 @@ export class WorldBibleController {
         severity: 'error',
         code: 'path-duplicate',
         message: unbasedDraftTargetsExistingFile
-          ? `New draft ${session.draft.ref} targets ${session.path}, but that canonical file already exists. Resolve the collision before review.`
-          : `Canonical path "${session.path}" is targeted by ${pathOwners.map((owner) => owner.draft.ref).join(', ')}. Resolve the collision before review.`,
+          ? `New draft ${session.draft.ref} targets ${session.path}, but that file already exists. Resolve the collision before review.`
+          : `File "${session.path}" is targeted by ${pathOwners.map((owner) => owner.draft.ref).join(', ')}. Resolve the collision before review.`,
         path: session.path,
       });
     }
@@ -1213,7 +1213,7 @@ export class WorldBibleController {
       this.proposal = null;
       this.mode = 'edit';
       this.transientDiagnostics = collisions;
-      this.notice = 'Review blocked: this draft has an ambiguous ref or canonical target path.';
+      this.notice = 'Review blocked: this draft has an ambiguous ref or file path.';
       this.recomputeDiagnostics();
       this.publish();
       return false;
@@ -1232,7 +1232,7 @@ export class WorldBibleController {
     this.proposal = prepared.proposal;
     this.mode = 'review';
     this.transientDiagnostics = prepared.proposal.diagnostics;
-    this.notice = `Reviewing exact patch for ${prepared.proposal.path}`;
+    this.notice = `Reviewing ${prepared.proposal.path}`;
     this.recomputeDiagnostics();
     this.publish();
     return true;
@@ -1263,7 +1263,7 @@ export class WorldBibleController {
     this.mode = 'read';
     this.clearPendingDiscard();
     this.clearTransientDiagnostics();
-    this.notice = `Wrote and re-parsed ${result.session.path}`;
+    this.notice = `Wrote ${result.session.path}`;
     this.writeRecoveryNow();
     this.recomputeDiagnostics();
     this.publish();
@@ -1293,10 +1293,10 @@ export class WorldBibleController {
         this.controllerDiagnostics.set(`external:${session.path}`, {
           severity: 'error',
           code: 'external-reload-malformed',
-          message: `Cannot reload ${session.path}: canonical bytes are malformed. The draft was preserved.`,
+          message: `Cannot reload ${session.path}: the file is malformed. The draft was preserved.`,
           path: session.path,
         });
-        this.notice = `Cannot reload malformed canonical bytes from ${session.path}; the draft was preserved.`;
+        this.notice = `Cannot reload malformed file ${session.path}; the draft was preserved.`;
         this.recomputeDiagnostics();
         this.publish();
         return false;
@@ -1305,9 +1305,7 @@ export class WorldBibleController {
     this.pendingDiscard = action;
     this.pendingDiscardPath = session.path;
     this.proposal = null;
-    this.notice = action === 'reload'
-      ? `Confirmation required: reload disk and discard the in-app draft for ${session.path}.`
-      : `Confirmation required: discard the in-app draft for ${session.path}.`;
+    this.notice = '';
     this.recomputeDiagnostics();
     this.publish();
     return true;
@@ -1317,7 +1315,7 @@ export class WorldBibleController {
     if (!this.pendingDiscard) return;
     this.writeRecoveryNow();
     this.clearPendingDiscard();
-    this.notice = 'Discard canceled; the in-app draft remains unchanged.';
+    this.notice = '';
     this.recomputeDiagnostics();
     this.publish();
   }
@@ -1355,10 +1353,10 @@ export class WorldBibleController {
         this.controllerDiagnostics.set(`external:${session.path}`, {
           severity: 'error',
           code: 'external-reload-malformed',
-          message: `Cannot reload ${session.path}: canonical bytes are malformed. The draft was preserved.`,
+          message: `Cannot reload ${session.path}: the file is malformed. The draft was preserved.`,
           path: session.path,
         });
-        this.notice = `Cannot reload malformed canonical bytes from ${session.path}; the draft was preserved.`;
+        this.notice = `Cannot reload malformed file ${session.path}; the draft was preserved.`;
         this.clearPendingDiscard();
         this.recomputeDiagnostics();
         this.publish();
@@ -1378,19 +1376,19 @@ export class WorldBibleController {
       this.selectedPath = next.path;
       this.selectedRef = next.draft.ref;
       this.controllerDiagnostics.delete(`external:${session.path}`);
-      this.notice = `Reloaded canonical disk bytes from ${next.path}`;
+      this.notice = `Reloaded ${next.path}`;
     } else if (session.baseSource === null) {
       this.sessions = this.sessions.filter((candidate) => candidate !== session);
       const selected = this.sessions[0] ?? null;
       this.selectedPath = selected?.path ?? null;
       this.selectedRef = selected?.draft.ref ?? null;
-      this.notice = 'Unwritten new page draft discarded; disk was never touched';
+      this.notice = 'Draft discarded';
     } else {
       const next = revertKnowledgeDraft(session);
       this.replaceSession(session, next);
       this.selectedPath = next.path;
       this.selectedRef = next.draft.ref;
-      this.notice = `Draft reverted to loaded disk base for ${next.path}`;
+      this.notice = `Reverted ${next.path}`;
     }
     this.clearPendingDiscard();
     this.proposal = null;

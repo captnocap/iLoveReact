@@ -1827,11 +1827,11 @@ export default function AppFrame() {
     if (activeSurface(stateRef.current) === 'knowledge') {
       if (commandId === 'save-snapshot') {
         const reviewing = worldBibleController.reviewSelected();
-        setState((prev) => ({ ...prev, openMenu: null, status: reviewing ? 'Selected World Bible page is ready for write review' : 'Selected World Bible page has no reviewable changes' }));
+        setState((prev) => ({ ...prev, openMenu: null, status: reviewing ? 'Ready for review' : 'No changes to review' }));
         return;
       }
       if (commandId === 'undo-local' || commandId === 'redo-local') {
-        setState((prev) => ({ ...prev, openMenu: null, status: 'World Bible: use Revert Draft or edit the keyed fields; canonical disk is unchanged' }));
+        setState((prev) => ({ ...prev, openMenu: null, status: 'Undo and redo are unavailable here' }));
         return;
       }
     }
@@ -4858,9 +4858,7 @@ export default function AppFrame() {
       materialFocused: false,
       contextOpen: false,
       modelDirty: autosaved ? { ...prev.modelDirty, [autosaved.id]: false } : prev.modelDirty,
-      status: autosaved
-        ? `Autosaved "${autosaved.name}"; World Bible opened — canonical source is world/knowledge`
-        : 'World Bible opened — canonical source is world/knowledge',
+      status: autosaved ? `Autosaved "${autosaved.name}"` : prev.status,
     }));
   };
 
@@ -4950,21 +4948,21 @@ export default function AppFrame() {
         activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
         activeDomain: 'world-bible',
         leftPanelCollapsed: false,
-        status: 'World Bible draft is not on disk — review it, or keep the recovery draft and close',
+        status: 'Unsaved draft',
       }));
       requestUnsavedDecision(
-        'World Bible — canonical disk is unchanged; recovery draft is noncanonical',
-        () => setState((prev) => ({ ...prev, status: 'World Bible write review remains open — canonical disk is unchanged' })),
+        'World Bible draft',
+        () => setState((prev) => ({ ...prev, status: 'Review open' })),
         () => {
           if (!worldBibleController.flushRecovery()) {
-            setState((prev) => ({ ...prev, status: 'World Bible recovery write failed — tab remains open' }));
+            setState((prev) => ({ ...prev, status: 'Draft recovery failed; tab remains open' }));
             return;
           }
           closeWorkspaceDocument(documentId, true);
-          setState((prev) => ({ ...prev, status: 'World Bible tab closed — noncanonical recovery draft kept' }));
+          setState((prev) => ({ ...prev, status: 'Draft kept' }));
         },
-        () => setState((prev) => ({ ...prev, status: 'World Bible close cancelled — recovery draft remains open' })),
-        { save: 'Return to review', discard: 'Keep draft & close' },
+        () => setState((prev) => ({ ...prev, status: 'Close canceled' })),
+        { save: 'Review changes', discard: 'Keep draft & close' },
       );
       return;
     }
@@ -5326,7 +5324,7 @@ export default function AppFrame() {
       requestWorldBibleReview();
       if (playing) navigate.push('/editor');
       requestUnsavedDecision(
-        'World Bible — canonical disk is unchanged; recovery draft is noncanonical',
+        'World Bible draft',
         () => setState((prev) => ({
           ...prev,
           workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
@@ -5334,11 +5332,11 @@ export default function AppFrame() {
           activeDomain: 'world-bible',
           leftPanelCollapsed: false,
           materialFocused: false,
-          status: 'World Bible write review remains open — canonical disk is unchanged',
+          status: 'Review open',
         })),
         () => {
           if (!worldBibleController.flushRecovery()) {
-            setState((prev) => ({ ...prev, status: 'World Bible recovery write failed — exit cancelled' }));
+            setState((prev) => ({ ...prev, status: 'Draft recovery failed; exit canceled' }));
             return;
           }
           // Keep the previously active document in place until this choice so
@@ -5346,8 +5344,8 @@ export default function AppFrame() {
           // or world after the World Bible recovery copy is durable.
           closeEditorNormally();
         },
-        () => setState((prev) => ({ ...prev, status: 'Exit cancelled — World Bible recovery draft remains open' })),
-        { save: 'Return to review', discard: 'Keep draft & exit' },
+        () => setState((prev) => ({ ...prev, status: 'Exit canceled' })),
+        { save: 'Review changes', discard: 'Keep draft & exit' },
       );
       return;
     }
