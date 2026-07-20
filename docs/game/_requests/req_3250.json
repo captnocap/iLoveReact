@@ -1,0 +1,36 @@
+{
+  "id": "req_3250",
+  "at": "2026-07-20T04:37:16.901Z",
+  "origin": "codex:019f7a9c",
+  "text": "and to be clear then me deleting that planne does this [Image #1] which i have the painting stored this time but yeah",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:37:34.498Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T04:44:56.572Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed: delete part replaced the paint target without the atlas/program carry already used by append, then UV island rebuild remapped saved pixels. Unified paint-stable add/delete/hide/show plus undo/redo carry; 20 paint tests cover delete survivor and delete-last empty midpoint; ReleaseFast build passes."
+    },
+    {
+      "at": "2026-07-20T04:45:56.964Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the paint corruption at its structural target-replacement boundary: deleting, hiding, showing, adding, duplicating, or mirroring whole parts now carries exact atlas pixels plus the durable stroke program through the rebuild and through mesh undo/redo. Delete-last to an empty mesh preserves its carry for undo, while adding fresh geometry to an intentionally emptied document cannot resurrect old paint.",
+  "shas": [
+    "0fe95daa6"
+  ],
+  "resolvedAt": "2026-07-20T04:45:56.964Z"
+}

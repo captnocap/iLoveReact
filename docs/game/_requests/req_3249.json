@@ -1,0 +1,36 @@
+{
+  "id": "req_3249",
+  "at": "2026-07-20T04:35:28.135Z",
+  "origin": "codex:019f7a9c",
+  "text": "ok this is what fucked me last time and i cant figure it out so your gonna have to, so when i add a plane to this model, it is coming in like this[Image #1] which when pulling on it, pulls on the eye which last time then broke the paint so wtf is it doing",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:35:34.098Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T04:44:56.564Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Confirmed the added plane is a four-vertex Blockbench-style XZ quad viewed edge-on at model origin; hardened native edit scope so focus changes clear prior selection and every transform independently rejects out-of-scope verts. 34 mesh-edit tests and ReleaseFast editor build pass."
+    },
+    {
+      "at": "2026-07-20T04:45:56.956Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the added object is the reference-compatible four-vertex XZ plane, merely viewed edge-on and intersecting the head at model origin. Native edit-scope changes now clear selections from the prior outliner, and transforms independently reject every selected vertex, edge, or face outside the active part scope, preventing a new plane from ever moving head geometry through stale selection.",
+  "shas": [
+    "0fe95daa6"
+  ],
+  "resolvedAt": "2026-07-20T04:45:56.956Z"
+}
