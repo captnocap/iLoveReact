@@ -29,6 +29,7 @@ const liveMeshHash = m_live_inputs.liveMeshHash;
 const meshPosKey = m_live_inputs.meshPosKey;
 const LiveMeshRef = m_live_inputs.LiveMeshRef;
 const pendingLiveMeshFor = m_live_inputs.pendingLiveMeshFor;
+const pendingLiveLightsFor = m_live_inputs.pendingLiveLightsFor;
 const pendingLiveMatsFor = m_live_inputs.pendingLiveMatsFor;
 const SKIN_BOX_OUTSET = m_live_inputs.SKIN_BOX_OUTSET;
 const pendingSkinBoxesFor = m_live_inputs.pendingSkinBoxesFor;
@@ -550,6 +551,29 @@ pub fn appendLiveSkinBoxes(self: anytype) void {
     }
 }
 
+fn appendLiveLights(self: anytype) void {
+    const pending = pendingLiveLightsFor(self.node_id) orelse return;
+    for (pending.lights[0..pending.count]) |light| {
+        self.kid_list.append(self.allocator, .{
+            .scene3d_light = true,
+            .scene3d_light_type = if (light.kind == .spot) "spot" else "point",
+            .scene3d_pos_x = light.position[0],
+            .scene3d_pos_y = light.position[1],
+            .scene3d_pos_z = light.position[2],
+            .scene3d_dir_x = light.direction[0],
+            .scene3d_dir_y = light.direction[1],
+            .scene3d_dir_z = light.direction[2],
+            .scene3d_color_r = light.color[0],
+            .scene3d_color_g = light.color[1],
+            .scene3d_color_b = light.color[2],
+            .scene3d_intensity = light.intensity,
+            .scene3d_range = light.range,
+            .scene3d_spread = if (light.kind == .spot) light.cone_degrees else 0,
+            .scene3d_cast_shadow = light.casts_shadow,
+        }) catch {};
+    }
+}
+
 pub fn applyLiveMeshProps(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     if (self.stream == null) self.kid_list.shrinkRetainingCapacity(self.perm_node_count);
     defer self.root.children = self.kid_list.items; // append may realloc; re-point the root
@@ -609,4 +633,5 @@ pub fn applyLiveMeshProps(self: anytype, io: std.Io, environ: *const std.process
         }
     }
     appendLiveSkinBoxes(self);
+    appendLiveLights(self);
 }

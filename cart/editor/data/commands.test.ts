@@ -121,6 +121,14 @@ test('Export Prop exposes gameplay roles for intersections and transit stops', (
   }
 });
 
+test('Export Flora exposes one semantic lane choice per custom species', () => {
+  const exportMenu = menuNodes('File').find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export');
+  const flora = exportMenu?.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export Flora');
+  assert(!!flora, 'File menu lost Export Flora');
+  const commandIds = flora!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
+  assert(commandIds.join('|') === 'export-flora-grass|export-flora-tree|export-flora-bush', `flora export lanes drifted: ${commandIds.join(', ')}`);
+});
+
 test('dead placeholder commands and their empty menus are absent', () => {
   const commandIds = new Set(COMMANDS.map((command) => command.id));
   const removed = [

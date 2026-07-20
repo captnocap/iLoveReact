@@ -88,6 +88,21 @@ const EXPORT_PROP_COMMANDS: Command[] = PROP_EXPORT_TARGETS.map((target) => ({
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 
+const EXPORT_FLORA_COMMANDS: Command[] = [
+  { id: 'export-flora-grass', name: 'Grass / Groundcover', icon: 'Sprout' },
+  { id: 'export-flora-tree', name: 'Tree', icon: 'Trees' },
+  { id: 'export-flora-bush', name: 'Bush / Shrub', icon: 'Leaf' },
+].map((target) => ({
+  ...target,
+  menu: 'File' as const,
+  submenu: 'Export Flora',
+  key: '',
+  context: false,
+  native: true,
+  undoable: false,
+  scope: 'model' as const,
+}));
+
 // Export → Player / NPC Model (req_2771): export the OPEN model as a CHARACTER.
 // Opens the role dialog — the game's ONE played model vs an NPC population
 // model — and the confirmed role lands in manifest.placeable (req_2718 truth).
@@ -122,6 +137,7 @@ export const COMMANDS: Command[] = [
   { id: 'save-snapshot', menu: 'File', name: 'Save', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'global' },
   ...EXPORT_BUILD_COMMANDS,
   ...EXPORT_PROP_COMMANDS,
+  ...EXPORT_FLORA_COMMANDS,
   EXPORT_CHARACTER_COMMAND,
   // ── Edit ──────────────────────────────────────────────────────────────────────────────────
   // Undo/redo route per surface in runCommand (model → host mesh journal; world → local history).
@@ -129,6 +145,7 @@ export const COMMANDS: Command[] = [
   { id: 'redo-local', menu: 'Edit', name: 'Redo', icon: 'Redo2', key: 'Ctrl+Shift+Z', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'open-preferences', menu: 'Edit', name: 'Preferences...', icon: 'Settings', key: 'Ctrl+,', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'duplicate-selection', menu: 'Edit', name: 'Duplicate Selection', icon: 'Copy', key: 'D', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
+  { id: 'create-prefab', menu: 'Edit', name: 'Create Prefab from Selection...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   // Delete acts on whatever's selected on the active surface (world object or mesh element).
   { id: 'delete-selection', menu: 'Edit', name: 'Delete Selection', icon: 'Trash2', key: 'Del', context: true, native: true, undoable: true, tool: true, scope: 'global', needsSelection: true },
   ...ADD_MESH_COMMANDS,
@@ -405,14 +422,15 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
         { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
         { kind: 'sub', id: 'Export Prop', label: 'Prop', icon: 'Armchair', scope: 'model', children: EXPORT_PROP_COMMANDS.map((c) => cmd(c.id)) },
+        { kind: 'sub', id: 'Export Flora', label: 'Flora', icon: 'Sprout', scope: 'model', children: EXPORT_FLORA_COMMANDS.map((c) => cmd(c.id)) },
         cmd('export-character'),
       ],
     },
   ],
-  Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
+  Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
 };

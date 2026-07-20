@@ -18,6 +18,7 @@ import { authoredPieceFor, isAuthoredPiece, type PlaceableKind } from './authore
 import { authoredMeshBounds, type MeshBounds } from './authoredMesh';
 import { assetById } from '../data/catalog';
 import { METERS_PER_LEVEL } from './isoStage';
+import type { SurfaceFloraPatch } from './surfaceFlora';
 
 /** The base kind of any placeable: an authored piece's affinity (or 'prop'), or
  *  a catalog row's kind. Drives snap mode + storey rules for all placeables. */
@@ -111,6 +112,8 @@ export type PlacedPiece = {
   // live loader draws them at yaw + rate×clock; colliders keep the authored yaw.
   // Absent or 0 ⇒ static.
   spinDegPerSec?: number;
+  /** Flora stroke recipes attached to Studio-rigged flora faces. */
+  surfaceFlora?: SurfaceFloraPatch[];
   // Procedural building-site provenance. Present only on the single real floor
   // piece reserving that site; it is not a parallel parcel or fake building.
   generatedSite?: GeneratedSiteProvenance;
@@ -164,8 +167,10 @@ export function pickAuthoredPlacement(
     const b = authoredMeshBounds(authored.modelId, authored.pkgId);
     if (!b) continue;
     // Ray → piece-local frame: translate to the placement point, un-rotate the
-    // yaw (inverse of the boxSegments local→world rotation).
-    const a = (-piece.yawDegrees * Math.PI) / 180;
+    // yaw (inverse of the renderer/WorldViewport local→world rotation).
+    // The renderer's +Y yaw maps local→world as
+    // [x*c + z*s, -x*s + z*c]. Its inverse is the ordinary +yaw matrix below.
+    const a = (piece.yawDegrees * Math.PI) / 180;
     const ca = Math.cos(a);
     const sa = Math.sin(a);
     const ox = ray.origin.x - piece.x;
@@ -178,7 +183,8 @@ export function pickAuthoredPlacement(
   }
   if (!best) return null;
   // World hit point straight from t (frame-independent). The entry face names
-  // the outward normal in the pick's local frame; rotate it back by +yaw
+  // the outward normal in the pick's local frame; rotate it back by the
+  // renderer's local→world yaw
   // (the exact inverse of the un-rotate above). Null when the ray started
   // inside the box — there is no entry face to name (req_3050 sticker stamps
   // need the normal; piece picking only needs t).
@@ -373,7 +379,15 @@ export function resolveMovedPlacement(piece: PlacedPiece, wx: number, wz: number
 /** The biggest single drag-run (req_2747): 20×20 cells of floor. A drag past
  *  this truncates LOUDLY (console + the run just stops growing) rather than
  *  silently stamping thousands of pieces from one wild gesture. */
-export const RUN_PLACEMENT_CAP = 400;
+/** Authored-piece mutation budgets. Drag runs are pointer previews and stay
+ * deliberately small; named compositions may represent a whole building or
+ * scene and cross the command boundary as one (larger) atomic batch. */
+export const WORLD_PIECE_AUTHORING_TUNING = Object.freeze({
+  maxRunPiecesPerStroke: 400,
+  maxCompositionPieces: 4096,
+});
+
+export const RUN_PLACEMENT_CAP = WORLD_PIECE_AUTHORING_TUNING.maxRunPiecesPerStroke;
 
 /** Whether a placeable participates in a drag run. This is a semantic-kind
  *  capability: exported build pieces inherit it from their wall/floor/etc.

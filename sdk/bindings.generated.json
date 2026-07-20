@@ -3545,6 +3545,14 @@
           "zig": "hostClearLivePieces"
         },
         {
+          "js": "__compiled_world_set_live_lights",
+          "zig": "hostSetLiveLights"
+        },
+        {
+          "js": "__compiled_world_clear_live_lights",
+          "zig": "hostClearLiveLights"
+        },
+        {
           "js": "__compiled_world_set_physics",
           "zig": "hostSetPhysics"
         },

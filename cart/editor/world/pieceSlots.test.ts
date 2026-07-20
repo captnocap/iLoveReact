@@ -10,8 +10,9 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-pieceSlots.test.js
 
-import { faceRoleForHit, pieceSlotRoles, slotRefForBox } from './pieceSlots';
+import { faceRoleForHit, pieceSlotEntries, pieceSlotRoles, slotRefForBox } from './pieceSlots';
 import type { PlacedPiece } from './pieces';
+import { setAuthoredPieces } from './authoredRegistry';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -63,9 +64,15 @@ test('single-surface kinds take their one role from any face', () => {
   assert(faceRoleForHit('sign.shop.downtown', 0, { x: 0, y: 0, z: 1 }) === 'face', 'sign face');
 });
 
-test('non-catalog ids expose no slots — nothing to paint', () => {
-  assert(pieceSlotRoles('model:exported-wall').length === 0, 'authored ids have no catalog roles');
-  assert(faceRoleForHit('model:exported-wall', 0, { x: 0, y: 0, z: 1 }) === null, 'authored hit is a no-op');
+test('authored ids expose their rigged face roles in stable order', () => {
+  setAuthoredPieces([{
+    id: 'model:exported-wall', modelId: 'exported-wall', pkgId: 'studio:exported-wall',
+    label: 'Exported Wall', kind: 'wall', hex: '#fff',
+    textureSlots: [{ id: 'outside', label: 'Outside' }, { id: 'inside', label: 'Inside' }],
+  }]);
+  assert(pieceSlotRoles('model:exported-wall').join(',') === 'outside,inside', 'authored face roles were not published');
+  assert(pieceSlotEntries('model:exported-wall').map((slot) => slot.label).join(',') === 'Outside,Inside', 'authored face-role labels were not published');
+  setAuthoredPieces([]);
 });
 
 // ── slotRefForBox (req_2886) — a painted slot must govern ONLY its own box ──

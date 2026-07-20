@@ -9,11 +9,12 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { mapPathCancel, mapPathCommit, mapPathControlDelete, mapPathDelete, mapPathStats, mapPathUndoPoint, type MapPathStats } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
-import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
+import { FLORA_BRUSH_DEFINITIONS, FLORA_DENSITY_TUNING } from '../world/floraKinds';
 import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 import { addZonePatch, PAINTABLE_TILE_KINDS, saveMapFile, type MapPaintChannel, type MapPaintState } from './mapPaint';
 import { CHANNELS, CHANNEL_META, cycle, GIZMOS, GIZMO_META, PROFILES, SHAPES, TERRAIN_TOOLS, TERRAIN_TOOL_META } from './mapPaintUi';
 import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch, pathLevelLabel, roadCarriagewayWidthM } from './transportPathUi';
+import type { AuthoredFloraSpecies } from '../world/floraSpecies';
 
 const ICON_PANEL = '#101923';
 const ICON_PANEL_ON = '#12283a';
@@ -174,10 +175,10 @@ function materialLabel(state: MapPaintState): string {
   return [material?.name ?? binding.fn, variant && variant !== 'Std' ? variant : ''].filter(Boolean).join(' ');
 }
 
-function channelCount(state: MapPaintState, channel: MapPaintChannel): string {
+function channelCount(state: MapPaintState, channel: MapPaintChannel, customFloraCount = 0): string {
   if (channel === 'terrain') return String(TERRAIN_TOOLS.length);
   if (channel === 'tile') return String(PAINTABLE_TILE_KINDS.length);
-  if (channel === 'flora') return String(FLORA_KIND_DEFINITIONS.length);
+  if (channel === 'flora') return String(FLORA_BRUSH_DEFINITIONS.length + customFloraCount);
   if (channel === 'zone') return String(state.zones.length);
   if (channel === 'road') return String(mapPathStats().paths);
   return '1';
@@ -355,18 +356,37 @@ function TileTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
   );
 }
 
-function FloraTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
+function FloraTray(props: { state: MapPaintState; customFlora: readonly AuthoredFloraSpecies[]; onPatch: (patch: Partial<MapPaintState>) => void }) {
   const s = props.state;
   return (
     <Fragment>
-      {FLORA_KIND_DEFINITIONS.map((def, idx) => (
+      <ScalarPanel
+        label="Density"
+        value={Math.round(s.floraDensity * 100)}
+        min={FLORA_DENSITY_TUNING.min * 100}
+        max={FLORA_DENSITY_TUNING.max * 100}
+        step={FLORA_DENSITY_TUNING.step * 100}
+        unit="%"
+        onValue={(value) => props.onPatch({ floraDensity: value / 100 })}
+      />
+      {FLORA_BRUSH_DEFINITIONS.map((def) => (
         <SwatchTile
           key={def.kind}
           color={def.color}
           label={def.label}
-          tooltip={`${def.label} (${def.lane} lane)`}
-          on={idx === s.floraKindIdx}
-          onPress={() => props.onPatch({ floraKindIdx: idx, mode: 'paint' })}
+          tooltip={`${def.label} (${def.lane} lane) — density comes from this stroke's slider`}
+          on={!s.floraSpeciesId && def.kindIndex === s.floraKindIdx}
+          onPress={() => props.onPatch({ floraKindIdx: def.kindIndex, floraSpeciesId: null, mode: 'paint' })}
+        />
+      ))}
+      {props.customFlora.map((species) => (
+        <SwatchTile
+          key={species.id}
+          color={species.hex}
+          label={species.label}
+          tooltip={`${species.label} (custom ${species.lane} flora)`}
+          on={species.id === s.floraSpeciesId}
+          onPress={() => props.onPatch({ floraSpeciesId: species.id, mode: 'paint' })}
         />
       ))}
     </Fragment>
@@ -567,7 +587,7 @@ function WaterTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPa
   );
 }
 
-function ChannelTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
+function ChannelTray(props: { state: MapPaintState; customFlora: readonly AuthoredFloraSpecies[]; onPatch: (patch: Partial<MapPaintState>) => void }) {
   if (props.state.channel === 'terrain') return <TerrainTray {...props} />;
   if (props.state.channel === 'tile') return <TileTray {...props} />;
   if (props.state.channel === 'water') return <WaterTray {...props} />;
@@ -576,7 +596,7 @@ function ChannelTray(props: { state: MapPaintState; onPatch: (patch: Partial<Map
   return <PathTray {...props} />;
 }
 
-function Tray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
+function Tray(props: { state: MapPaintState; customFlora: readonly AuthoredFloraSpecies[]; onPatch: (patch: Partial<MapPaintState>) => void }) {
   return (
     <Fragment>
       {props.state.channel !== 'road' ? <BrushControls {...props} /> : null}
@@ -587,6 +607,7 @@ function Tray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintSt
 
 export default function MapPaintDock(props: {
   state: MapPaintState;
+  customFlora: readonly AuthoredFloraSpecies[];
   onPatch: (patch: Partial<MapPaintState>) => void;
 }) {
   const s = props.state;
@@ -604,7 +625,7 @@ export default function MapPaintDock(props: {
             <Cat key={channel} tooltip={CHANNEL_META[channel].tooltip} onPress={() => props.onPatch({ channel })}>
               <Icon name={CHANNEL_META[channel].icon} size={12} color={accentFor(on ? 'primary' : 'textDim')} />
               <Txt>{CHANNEL_META[channel].label}</Txt>
-              <C.HW_BuildCatCount>{channelCount(s, channel)}</C.HW_BuildCatCount>
+              <C.HW_BuildCatCount>{channelCount(s, channel, props.customFlora.length)}</C.HW_BuildCatCount>
             </Cat>
           );
         })}
@@ -612,7 +633,7 @@ export default function MapPaintDock(props: {
         <MiniIcon icon="Save" tooltip="Save the painted map to the map file" onPress={saveMapFile} />
       </C.HW_BuildBarRow>
       <C.HW_BuildTray>
-        <Tray state={s} onPatch={props.onPatch} />
+        <Tray state={s} customFlora={props.customFlora} onPatch={props.onPatch} />
       </C.HW_BuildTray>
     </C.HW_BuildBar>
   );

@@ -17,7 +17,7 @@ import {
   EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf,
   bindingsToFloats, floatsToBindings, type TileMaterialBinding,
 } from '../render3d/groundFormula';
-import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
+import { FLORA_BRUSH_DEFINITIONS, FLORA_DENSITY_TUNING, FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import {
   LEGACY_MAP_FILE,
@@ -60,6 +60,10 @@ export type MapPaintState = TransportPathChrome & {
   texturePickerOpen: boolean;
   /** armed flora kind — index into FLORA_KIND_DEFINITIONS */
   floraKindIdx: number;
+  /** population strength persisted by each flora stroke (0..1) */
+  floraDensity: number;
+  /** Null selects the native kind index; custom package flora uses its stable id. */
+  floraSpeciesId: string | null;
   /** the zone list (names/colors are cart content; cells live host-side) */
   zones: MapZoneDef[];
   /** armed zone — index into zones */
@@ -86,7 +90,9 @@ export function defaultMapPaint(): MapPaintState {
     tileBindings: [],
     tileBindIdx: -1,
     texturePickerOpen: false,
-    floraKindIdx: 1, // 'Grass'
+    floraKindIdx: FLORA_BRUSH_DEFINITIONS[0]!.kindIndex,
+    floraDensity: FLORA_DENSITY_TUNING.default,
+    floraSpeciesId: null,
     zones: [],
     zoneIdx: 0,
     pathKind: 'road',
@@ -263,6 +269,7 @@ function pushMapTool(s: MapPaintState): void {
     kindIdx: s.tileKindIdx,
     floraKindIdx: s.floraKindIdx,
     floraLane: flora ? FLORA_LANE_INDEX[flora.lane] : 0,
+    floraDensity: s.floraDensity,
     zoneIdx: s.zones.length ? Math.min(s.zoneIdx, s.zones.length - 1) : -1,
     bindIdx: s.tileBindIdx,
   });

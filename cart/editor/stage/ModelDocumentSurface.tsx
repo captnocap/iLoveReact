@@ -4,6 +4,7 @@ import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, Primitiv
 import ModelView, { type PartRange } from './ModelView';
 import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/assetCatalog';
 import type { ModelOutlinerDragItem, ModelOutlinerDropTarget } from '../data/modelOutliner';
+import type { LightRig } from '../model/editMesh';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -54,8 +55,9 @@ type ViewerSource =
   | { kind: 'missing'; title: string; label: string }
   | null;
 
-export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState, outliner, modelOnDisk, onRequireFirstSave, onDocumentMutated }: {
+export default function ModelDocumentSurface({ model, lights, triggerProps, onToolApi, onToolState, outliner, modelOnDisk, onRequireFirstSave, onDocumentMutated }: {
   model: ModelPackage | null;
+  lights: readonly LightRig[];
   // Right-click trigger from the app-root context menu (useContextMenu lives in
   // AppFrame so the menu lands at the cursor — see ModelContextMenu). Spread onto
   // the surface so a right-click here opens it.
@@ -103,6 +105,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
           initialTitle={model.name}
           initialFileParts={{ path: fileBase.sourcePath, basePartId: fileBase.id, baseColor: fileBase.color, baseHidden: !fileBase.visible, appends }}
           allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
+          authoredLights={lights}
           onPartRanges={(ranges) => outliner.onStampRanges(model.id, ranges)}
           onPathPlaneCreated={outliner.onPathPlaneCreated}
         />
@@ -148,6 +151,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
         initialTitle={model.name}
         initialMesh={seed}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
+        authoredLights={lights}
         onPathPlaneCreated={outliner!.onPathPlaneCreated}
       />
     ) : (
@@ -167,8 +171,8 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
 
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
-      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} />;
+      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} />
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}

@@ -285,6 +285,11 @@ pub fn installValidated(chunk_rows: []const f32, path_rows: []const f32, stats: 
         copyCells(chunk.flora[0][0..], chunk_rows[grass_start..tree_start]);
         copyCells(chunk.flora[1][0..], chunk_rows[tree_start..bush_start]);
         copyCells(chunk.flora[2][0..], chunk_rows[bush_start .. base + CHUNK_STRIDE]);
+        for (chunk.flora, 0..) |lane, lane_index| {
+            for (lane, 0..) |kind, cell_index| {
+                chunk.flora_density[lane_index][cell_index] = if (kind == chunks.EMPTY_CELL) 0 else chunks.FLORA_DENSITY_FULL;
+            }
+        }
         @memset(chunk.materials[0..], chunks.EMPTY_CELL);
         chunk.dirty = .{ .tiles = true, .height = true, .water = true, .flora = true, .zones = true };
     }

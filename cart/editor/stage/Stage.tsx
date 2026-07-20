@@ -21,6 +21,8 @@ import BuildBar from './BuildBar';
 import MapPaintDock from './MapPaintDock';
 import { worldToolFor } from '../world/worldTool';
 import WorldBibleSurface from '../worldBible/WorldBibleSurface';
+import type { PieceSelectionIntent } from '../world/selection';
+import type { FloraPaintSample, WorldFloraBrush } from '../world/surfaceFlora';
 
 export default function Stage(props: {
   state: EditorState;
@@ -41,10 +43,11 @@ export default function Stage(props: {
   onObject: (id: string) => void;
   onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onMovePiece: (id: string, destination: PlacedPiece) => void;
-  onSelectPiece: (id: string | null, additive: boolean) => void;
+  onSelectPiece: (id: string | null, intent: PieceSelectionIntent) => void;
   onPieceContext: (id: string, x: number, y: number, role: string | null) => void;
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
+  onPaintFlora: (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
@@ -98,6 +101,9 @@ export default function Stage(props: {
             globals={props.state.worldGlobals}
             pieces={props.state.worldPieces}
             authoredPieces={props.state.authoredBuildPieces}
+            worldFlora={props.state.worldFlora}
+            floraSpecies={props.state.authoredFloraSpecies}
+            prefabs={props.state.worldPrefabs}
           />
         ) : activeDocument.kind === 'facade' ? (
           (() => {
@@ -118,6 +124,7 @@ export default function Stage(props: {
         ) : activeDocument.kind === 'world' ? (
           <WorldEditorSurface
             paintActive={props.state.mapPaint.active}
+            mapPaint={props.state.mapPaint}
             mapStem={props.state.activeMapStem}
             mapZones={props.state.mapPaint.zones}
             floor={props.state.floorIndex}
@@ -128,16 +135,21 @@ export default function Stage(props: {
             armedPieceId={props.state.armedPieceId}
             armedYawDegrees={props.state.armedYawDegrees}
             authoredPieces={props.state.authoredBuildPieces}
+            prefabs={props.state.worldPrefabs}
+            worldFlora={props.state.worldFlora}
+            floraSpecies={props.state.authoredFloraSpecies}
             onPlace={props.onPlacePiece}
             onMove={props.onMovePiece}
             onSelect={props.onSelectPiece}
             onPieceContext={props.onPieceContext}
             onPaintFaces={props.onPaintFaces}
             onStampSticker={props.onStampSticker}
+            onPaintFlora={props.onPaintFlora}
           />
         ) : activeDocument.kind === 'model' ? (
           <ModelDocumentSurface
             model={activeModel}
+            lights={activeModel ? (props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []) : []}
             triggerProps={props.modelContextTrigger}
             onToolApi={props.onModelToolApi}
             onToolState={props.onModelToolState}
@@ -171,10 +183,10 @@ export default function Stage(props: {
             Build (Place) mode. Last child so it paints + hit-tests over the
             world surface's pointer-capture Pressable. */}
         {activeDocument.kind === 'world' && !props.state.mapPaint.active && worldToolFor(props.state.activeCommandId) === 'place' ? (
-          <BuildBar armedPieceId={props.state.armedPieceId} onArm={props.onArmPiece} />
+          <BuildBar armedPieceId={props.state.armedPieceId} prefabs={props.state.worldPrefabs} onArm={props.onArmPiece} />
         ) : null}
         {activeDocument.kind === 'world' && (props.state.mapPaint.active || props.state.mapPaint.texturePickerOpen) ? (
-          <MapPaintDock state={props.state.mapPaint} onPatch={props.onMapPaint} />
+          <MapPaintDock state={props.state.mapPaint} customFlora={props.state.authoredFloraSpecies} onPatch={props.onMapPaint} />
         ) : null}
       </C.HW_StageViewport>
       <StageTabs

@@ -10,6 +10,8 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'activeMapName'
   | 'activeCommandId'
   | 'worldPieces'
+  | 'worldFlora'
+  | 'worldPrefabs'
   | 'worldFacades'
   | 'objects'
   | 'selectedObjectId'
@@ -40,6 +42,8 @@ export function mapAuthoringSlicesFor(
     activeMapName: name,
     activeCommandId: 'select-tool',
     worldPieces: save.pieces.slice(),
+    worldFlora: save.worldFlora.slice(),
+    worldPrefabs: save.prefabs.slice(),
     worldFacades: save.facades.slice(),
     objects: save.objects.slice(),
     selectedObjectId: save.objects.find((object) => !object.hidden)?.id ?? 'obj-tile',

@@ -118,6 +118,8 @@ export interface MapTool {
   /** armed flora kind index + its population lane (0 grass, 1 tree, 2 bush) */
   floraKindIdx?: number;
   floraLane?: number;
+  /** per-stroke population strength, persisted per painted cell (0..1) */
+  floraDensity?: number;
   /** armed zone list index */
   zoneIdx?: number;
   /** armed material binding (tile-binding table index; -1 = the kind's
@@ -150,7 +152,7 @@ export type MapAuthoringEvent = {
 };
 
 const AUTHORING_EVENT_KINDS: readonly MapAuthoringEventKind[] = ['stroke', 'road.commit', 'road.delete', 'chunk.grow', 'zone.drop', 'tile.bindings', 'path.control.add', 'path.control.delete'];
-const MAP_EVENT_FLOATS = 32;
+const MAP_EVENT_FLOATS = 33;
 
 function enumValue<T>(items: readonly T[], raw: number | undefined, fallback: T): T {
   const idx = Math.max(0, Math.min(items.length - 1, Number.isFinite(raw) ? Math.trunc(raw!) : 0));
@@ -241,7 +243,7 @@ export function mapOpenNeighbors(cx: number, cz: number): { cx: number; cz: numb
 
 /** Arm the paint tool. Everything a stroke needs crosses ONCE here (UI rate). */
 export function mapSetTool(tool: MapTool): void {
-  const buf = new Float32Array(18);
+  const buf = new Float32Array(19);
   buf[0] = CHANNEL_INDEX[tool.channel];
   buf[1] = MODE_INDEX[tool.mode ?? 'paint'];
   buf[2] = TERRAIN_TOOL_INDEX[tool.terrainTool ?? 'brush'];
@@ -260,6 +262,7 @@ export function mapSetTool(tool: MapTool): void {
   buf[15] = tool.floraLane ?? 0;
   buf[16] = tool.zoneIdx ?? -1;
   buf[17] = tool.bindIdx ?? -1;
+  buf[18] = Math.max(0, Math.min(1, tool.floraDensity ?? 1));
   callHost('__map_set_tool', undefined, buf);
 }
 
@@ -602,21 +605,22 @@ export function mapEventDrain(): MapAuthoringEvent[] {
         bindIdx: intValue(raw[base + 15]),
         floraKindIdx: intValue(raw[base + 16]),
         floraLane: intValue(raw[base + 17]),
-        zoneIdx: intValue(raw[base + 18]),
+        floraDensity: raw[base + 18] ?? 1,
+        zoneIdx: intValue(raw[base + 19]),
       },
-      start: { x: raw[base + 19] ?? 0, z: raw[base + 20] ?? 0 },
-      end: { x: raw[base + 21] ?? 0, z: raw[base + 22] ?? 0 },
+      start: { x: raw[base + 20] ?? 0, z: raw[base + 21] ?? 0 },
+      end: { x: raw[base + 22] ?? 0, z: raw[base + 23] ?? 0 },
       stats: {
-        samples: intValue(raw[base + 23]),
-        stamps: intValue(raw[base + 24]),
-        touched: intValue(raw[base + 25]),
-        waterDry: (raw[base + 26] ?? 0) >= 0.5,
+        samples: intValue(raw[base + 24]),
+        stamps: intValue(raw[base + 25]),
+        touched: intValue(raw[base + 26]),
+        waterDry: (raw[base + 27] ?? 0) >= 0.5,
       },
-      durationMs: raw[base + 27] ?? 0,
-      id: intValue(raw[base + 28]),
-      auxA: intValue(raw[base + 29]),
-      auxB: intValue(raw[base + 30]),
-      droppedBefore: intValue(raw[base + 31]),
+      durationMs: raw[base + 28] ?? 0,
+      id: intValue(raw[base + 29]),
+      auxA: intValue(raw[base + 30]),
+      auxB: intValue(raw[base + 31]),
+      droppedBefore: intValue(raw[base + 32]),
     });
   }
   return events;
@@ -641,13 +645,16 @@ export function mapReadWater(cx: number, cz: number): Float32Array | null {
   return ab ? new Float32Array(ab.slice(0)) : null;
 }
 
-export type MapCellChannel = 'tiles' | 'zones' | 'floraGrass' | 'floraTree' | 'floraBush';
+export type MapCellChannel = 'tiles' | 'zones' | 'floraGrass' | 'floraTree' | 'floraBush' | 'floraDensityGrass' | 'floraDensityTree' | 'floraDensityBush';
 const CELL_CHANNEL_INDEX: Record<MapCellChannel, number> = {
   tiles: 0,
   zones: 1,
   floraGrass: 2,
   floraTree: 3,
   floraBush: 4,
+  floraDensityGrass: 6,
+  floraDensityTree: 7,
+  floraDensityBush: 8,
 };
 
 /** Copy of a chunk's 120×120 cell grid for one cell channel (-1 = empty). */

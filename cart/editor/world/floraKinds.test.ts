@@ -7,7 +7,7 @@
 //     --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-flora-kinds.test.js
 
-import { FLORA_KIND_DEFINITIONS, FLORA_SPECS, FLORA_SPEC } from './floraKinds';
+import { FLORA_BRUSH_DEFINITIONS, FLORA_KIND_DEFINITIONS, FLORA_SPECS, FLORA_SPEC } from './floraKinds';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -33,6 +33,13 @@ test('one catalog definition owns exactly one host triple', () => {
     assert(FLORA_SPECS[at + 1] === def.population.count, `${def.kind} count drifted`);
     assert(Math.abs(FLORA_SPECS[at + 2]! - def.population.chance) < 1e-6, `${def.kind} chance drifted`);
   });
+});
+
+test('authoring tray exposes one brush per actual recipe, never density presets', () => {
+  assert(new Set(FLORA_BRUSH_DEFINITIONS.map((definition) => definition.population.spec)).size === FLORA_BRUSH_DEFINITIONS.length, 'brush tray repeats a flora recipe');
+  assert(!FLORA_BRUSH_DEFINITIONS.some((definition) => /sparse|lush|dense/i.test(definition.label)), 'density preset leaked into brush labels');
+  assert(FLORA_BRUSH_DEFINITIONS.find((definition) => definition.kind === 'grassLush')?.label === 'Grass', 'canonical grass brush missing');
+  assert(FLORA_BRUSH_DEFINITIONS.find((definition) => definition.kind === 'palmDense')?.label === 'Palm Tree', 'canonical palm brush missing');
 });
 
 test('new tree species append to the tree lane with distinct recipes', () => {

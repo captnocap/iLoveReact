@@ -12,13 +12,15 @@
 // pieceShapes decomposition (window cutout + pane, door leaf, roof slopes),
 // triangulated by pieceThumbMesh. Both go through the ONE product-shot pipeline
 // (library/modelThumb): a static Scene3D with the auto-framed 3/4 orbit camera.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import { C } from '../workspace.cls';
 import { placeablesByKind, placeableKind, authoredPieceFor, type PlaceableEntry, type PlaceableKind } from '../world/authoredRegistry';
 import { catalogPieceThumbParts } from '../world/pieceThumbMesh';
 import { authoredMeshData } from '../world/authoredMesh';
 import { buildPartsThumbView, type PartsThumbView } from '../library/modelThumb';
+import { stampWorldPrefab, type WorldPrefab } from '../world/prefabs';
+import type { PlacedPiece } from '../world/pieces';
 
 // Same shot backdrop as the model gallery (library/ModelThumbnail.tsx).
 const THUMB_BG = '#0e1622';
@@ -74,14 +76,86 @@ function PieceThumb({ entry }: { entry: PlaceableEntry }) {
   );
 }
 
-export default function BuildBar(props: { armedPieceId: string | null; onArm: (pieceId: string) => void }) {
+function transformThumbVertices(vertices: Float32Array, piece: PlacedPiece): Float32Array {
+  const out = new Float32Array(vertices.length);
+  const yaw = piece.yawDegrees * Math.PI / 180;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  for (let at = 0; at + 7 < vertices.length; at += 8) {
+    const x = vertices[at]!;
+    const z = vertices[at + 2]!;
+    const nx = vertices[at + 3]!;
+    const nz = vertices[at + 5]!;
+    out[at] = piece.x + x * cos + z * sin;
+    out[at + 1] = piece.y + vertices[at + 1]!;
+    out[at + 2] = piece.z - x * sin + z * cos;
+    out[at + 3] = nx * cos + nz * sin;
+    out[at + 4] = vertices[at + 4]!;
+    out[at + 5] = -nx * sin + nz * cos;
+    out[at + 6] = vertices[at + 6]!;
+    out[at + 7] = vertices[at + 7]!;
+  }
+  return out;
+}
+
+function prefabThumbView(prefab: WorldPrefab): PartsThumbView | null {
+  const hit = VIEW_CACHE.get(prefab.id);
+  if (hit) return hit;
+  const parts = stampWorldPrefab(prefab, { x: 0, y: 0, z: 0, floor: 0 }, 0).flatMap((piece, index) => {
+    const authored = authoredPieceFor(piece.pieceId);
+    if (authored) {
+      const vertices = authoredMeshData(authored.modelId, authored.pkgId);
+      return vertices ? [{
+        key: `${prefab.id}:${index}:authored`,
+        vertices: transformThumbVertices(vertices, piece),
+        count: Math.floor(vertices.length / 8),
+        color: authored.hex,
+      }] : [];
+    }
+    return catalogPieceThumbParts(piece.pieceId).map((part) => ({
+      ...part,
+      key: `${prefab.id}:${index}:${part.key}`,
+      vertices: transformThumbVertices(part.vertices, piece),
+    }));
+  });
+  const view = buildPartsThumbView(parts);
+  if (view) VIEW_CACHE.set(prefab.id, view);
+  return view;
+}
+
+function PrefabThumb({ prefab }: { prefab: WorldPrefab }) {
+  const view = useMemo(() => prefabThumbView(prefab), [prefab.id]);
+  if (!view) return <C.HW_BuildPieceThumb style={{ backgroundColor: '#4b3b72' }} />;
+  return (
+    <C.HW_BuildPieceThumb>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={THUMB_BG} showGrid={false} showAxes={false}>
+        <Scene3D.Camera position={view.cam.pos} target={view.cam.target} fov={view.cam.fov} />
+        <Scene3D.AmbientLight color="#ffffff" intensity={0.5} />
+        <Scene3D.DirectionalLight direction={[0.4, 1, -0.35]} color="#ffffff" intensity={0.85} />
+        {view.meshes.map((mesh, index) => (
+          <Scene3D.Mesh key={index} geometry={mesh.geometry} params={{}} material={mesh.opacity !== undefined ? { color: mesh.color, opacity: mesh.opacity } : mesh.color} position={[0, 0, 0]} />
+        ))}
+      </Scene3D>
+    </C.HW_BuildPieceThumb>
+  );
+}
+
+type PaletteKind = PlaceableKind | 'prefabs';
+
+export default function BuildBar(props: { armedPieceId: string | null; prefabs: readonly WorldPrefab[]; onArm: (pieceId: string) => void }) {
   // Catalog pieces + authored (exported-mesh) pieces, grouped by kind.
-  const groups = placeablesByKind();
+  const groups = [
+    ...placeablesByKind().map((group) => ({ ...group, kind: group.kind as PaletteKind })),
+    ...(props.prefabs.length > 0 ? [{ kind: 'prefabs' as const, label: 'Prefabs', entries: [] }] : []),
+  ];
   // The visible category defaults to the armed piece's kind (so re-entering Build
   // lands on what you last armed), else the first group. Local state — switching
   // categories is pure browsing; only clicking a PIECE arms (writes EditorState).
-  const armedKind = props.armedPieceId ? placeableKind(props.armedPieceId) : undefined;
-  const [activeKind, setActiveKind] = useState<PlaceableKind>(armedKind ?? groups[0]?.kind ?? 'wall');
+  const armedKind: PaletteKind | undefined = props.armedPieceId?.startsWith('prefab.')
+    ? 'prefabs'
+    : props.armedPieceId ? placeableKind(props.armedPieceId) : undefined;
+  const [activeKind, setActiveKind] = useState<PaletteKind>(armedKind ?? groups[0]?.kind ?? 'wall');
+  useEffect(() => { if (armedKind) setActiveKind(armedKind); }, [armedKind]);
   const active = groups.find((g) => g.kind === activeKind) ?? groups[0];
 
   return (
@@ -94,13 +168,25 @@ export default function BuildBar(props: { armedPieceId: string | null; onArm: (p
           return (
             <Cat key={g.kind} onPress={() => setActiveKind(g.kind)}>
               <Txt>{g.label}</Txt>
-              <C.HW_BuildCatCount>{g.entries.length}</C.HW_BuildCatCount>
+              <C.HW_BuildCatCount>{g.kind === 'prefabs' ? props.prefabs.length : g.entries.length}</C.HW_BuildCatCount>
             </Cat>
           );
         })}
       </C.HW_BuildBarRow>
       <C.HW_BuildTray>
-        {active?.entries.map((entry) => {
+        {active?.kind === 'prefabs' ? props.prefabs.map((prefab) => {
+          const on = prefab.id === props.armedPieceId;
+          const Tile = on ? C.HW_BuildPieceTileOn : C.HW_BuildPieceTile;
+          const Label = on ? C.HW_BuildPieceTileLabelOn : C.HW_BuildPieceTileLabel;
+          return (
+            <Tile key={prefab.id} onPress={() => props.onArm(prefab.id)}>
+              <PrefabThumb prefab={prefab} />
+              <C.HW_BuildPieceTileLabelBox>
+                <Label>▦ {prefab.label} · {prefab.pieces.length}</Label>
+              </C.HW_BuildPieceTileLabelBox>
+            </Tile>
+          );
+        }) : active?.entries.map((entry) => {
           const on = entry.id === props.armedPieceId;
           const Tile = on ? C.HW_BuildPieceTileOn : C.HW_BuildPieceTile;
           const Label = on ? C.HW_BuildPieceTileLabelOn : C.HW_BuildPieceTileLabel;

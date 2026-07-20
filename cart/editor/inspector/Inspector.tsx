@@ -12,7 +12,7 @@ import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, SNAP_MODES, effectiveModelPackage } from '../data/content';
 import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
 import { objectMetricRows } from '../data/readouts';
-import type { Asset, EditorState, WorkspaceDocumentKind, WorldObject } from '../data/types';
+import type { Asset, EditorState, ModelTextureSlot, WorkspaceDocumentKind, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
 import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
@@ -29,6 +29,7 @@ import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
+import type { LightRig } from '../model/editMesh';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -222,6 +223,9 @@ export default function Inspector(props: {
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
   onSetModelRig: (pkgId: string, rig: PropRig) => void;
+  onSetModelTextureSlots: (pkgId: string, slots: ModelTextureSlot[]) => void;
+  onSetModelLights: (pkgId: string, lights: LightRig[]) => void;
+  onModelTextureMembershipChanged: (pkgId: string, message: string, dirty?: boolean) => void;
   // World-piece focus-panel material edits.
   onAssignSlot: (id: string, role: string) => void;
   onClearSlot: (id: string, role: string) => void;
@@ -425,6 +429,11 @@ export default function Inspector(props: {
               <RigSection
                 rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
                 onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
+                textureSlots={props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []}
+                onTextureSlotsChange={(slots) => props.onSetModelTextureSlots(activeModel.id, slots)}
+                onTextureMembershipChanged={(message, dirty) => props.onModelTextureMembershipChanged(activeModel.id, message, dirty)}
+                lights={props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []}
+                onLightsChange={(lights) => props.onSetModelLights(activeModel.id, lights)}
               />
             )}
           </C.HW_InspectorBodyFixed>

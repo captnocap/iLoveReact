@@ -38,6 +38,7 @@ import { isAuthoredPiece } from '../world/authoredRegistry';
 // actually fire on the world surface (D was ceded to WASD, req_2558 — no dead hints).
 const QUICK_VERBS: { id: string; label: string; keyHint: string; closes: boolean }[] = [
   { id: 'duplicate-selection', label: 'Copy', keyHint: '', closes: true },
+  { id: 'create-prefab', label: 'Create Prefab…', keyHint: '', closes: true },
   // Rotate keeps the menu open (like the model menu's light switches) so 180°/270°
   // is two more clicks without re-picking; the header's yaw readout tracks live.
   { id: WORLD_PIECE_ROTATE_COMMAND_ID, label: 'Rotate 90°', keyHint: 'R', closes: false },

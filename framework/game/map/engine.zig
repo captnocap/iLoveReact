@@ -67,6 +67,8 @@ pub const Tool = struct {
     /// armed flora kind + its population lane (0 grass, 1 tree, 2 bush)
     flora_kind_idx: i16 = chunks.EMPTY_CELL,
     flora_lane: u8 = 0,
+    /// quantized population strength written with each flora dab
+    flora_density: u8 = chunks.FLORA_DENSITY_FULL,
     /// armed zone list index
     zone_idx: i16 = chunks.EMPTY_CELL,
 };
@@ -892,8 +894,10 @@ fn paintGlobalCell(gtx: i32, gtz: i32, erase: bool) void {
         .flora => {
             const lane = @min(g_tool.flora_lane, chunks.FLORA_LAYER_COUNT - 1);
             const kind: i16 = if (erase) chunks.EMPTY_CELL else g_tool.flora_kind_idx;
-            if (ch.flora[lane][idx] != kind) {
+            const density: u8 = if (erase) 0 else g_tool.flora_density;
+            if (ch.flora[lane][idx] != kind or ch.flora_density[lane][idx] != density) {
                 ch.flora[lane][idx] = kind;
+                ch.flora_density[lane][idx] = density;
                 ch.dirty.flora = true;
             }
         },
@@ -1492,6 +1496,20 @@ pub const FloraSpec = struct {
     count: u16,
     /// per-cell spawn chance 0..1 (1 = every painted cell grows)
     chance: f32,
+
+    pub fn atDensity(self: FloraSpec, density: u8) ?FloraSpec {
+        if (density == 0) return null;
+        var scaled = self;
+        if (self.count > 0) {
+            const numerator = @as(u32, self.count) * density + chunks.FLORA_DENSITY_FULL / 2;
+            scaled.count = @intCast(numerator / chunks.FLORA_DENSITY_FULL);
+            if (scaled.count == 0) return null;
+        } else {
+            scaled.chance *= @as(f32, @floatFromInt(density)) / @as(f32, @floatFromInt(chunks.FLORA_DENSITY_FULL));
+            if (scaled.chance <= 0) return null;
+        }
+        return scaled;
+    }
 };
 
 const MAX_FLORA_RECIPE_ID: u16 = foliage.SPEC_MAX;
@@ -2187,10 +2205,13 @@ test "flora population boundary accepts appended recipes and rejects unknown ids
     const dense_bush = floraSpec(1).?;
     try std.testing.expectEqual(@as(u8, 12), dense_bush.spec);
     try std.testing.expectEqual(@as(u16, 9), dense_bush.count);
+    try std.testing.expectEqual(@as(u16, 5), dense_bush.atDensity(128).?.count);
     const wild_weed = floraSpec(2).?;
     try std.testing.expectEqual(@as(u8, 16), wild_weed.spec);
     try std.testing.expectEqual(@as(u16, 0), wild_weed.count);
     try std.testing.expectEqual(@as(f32, 0.8), wild_weed.chance);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), wild_weed.atDensity(128).?.chance, 0.002);
+    try std.testing.expect(wild_weed.atDensity(0) == null);
     try std.testing.expect(floraSpec(3) == null);
 }
 
@@ -2200,12 +2221,19 @@ test "flora paints its lane; zone paints membership; erase clears" {
     _ = chunks.growChunk(0, 0).?;
     const ch = chunks.chunkAt(0, 0).?;
 
-    setTool(.{ .channel = .flora, .radius_m = 0, .flora_kind_idx = 5, .flora_lane = 1 });
+    setTool(.{ .channel = .flora, .radius_m = 0, .flora_kind_idx = 5, .flora_lane = 1, .flora_density = 128 });
     strokeBegin(std.testing.io, 0, 0);
     _ = strokeEnd(std.testing.io);
     const idx = chunks.cellIndex(60, 60).?;
     try std.testing.expectEqual(@as(i16, 5), ch.flora[1][idx]);
+    try std.testing.expectEqual(@as(u8, 128), ch.flora_density[1][idx]);
     try std.testing.expectEqual(chunks.EMPTY_CELL, ch.flora[0][idx]);
+
+    setTool(.{ .channel = .flora, .mode = .erase, .radius_m = 0, .flora_lane = 1 });
+    strokeBegin(std.testing.io, 0, 0);
+    _ = strokeEnd(std.testing.io);
+    try std.testing.expectEqual(chunks.EMPTY_CELL, ch.flora[1][idx]);
+    try std.testing.expectEqual(@as(u8, 0), ch.flora_density[1][idx]);
 
     setTool(.{ .channel = .zone, .radius_m = 0, .zone_idx = 2 });
     strokeBegin(std.testing.io, 0, 0);

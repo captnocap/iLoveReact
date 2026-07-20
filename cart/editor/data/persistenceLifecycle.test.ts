@@ -12,6 +12,8 @@ function dirtyState(id: string) {
   const pkg: ModelPackage = { id, name: 'Draft', kind: 'props', folderId: `model-${id}` as any };
   state.modelParts[id] = [{ id: 'part:1', name: 'Part', visible: true, color: '#fff' }];
   state.modelRigs[id] = {};
+  state.modelTextureSlots[id] = [{ id: 'screen_1', label: 'Screen', purpose: 'screen' }];
+  state.modelLights[id] = [{ id: 'light-1', kind: 'point', position: [0, 1, 0], color: '#ffffff', intensity: 1, range: 4 }];
   state.modelDirty[id] = true;
   state.modelOverrides[id] = { name: 'Renamed Draft' };
   state.modelDupes = [pkg];
@@ -23,6 +25,8 @@ test('discard drops every ephemeral model-authoring slice', () => {
   const next = discardModelWorkingCopyState(dirtyState('draft'), 'draft', false);
   assert(next.modelParts.draft === undefined, 'part working copy survived');
   assert(next.modelRigs.draft === undefined, 'rig working copy survived');
+  assert(next.modelTextureSlots.draft === undefined, 'face-role working copy survived');
+  assert(next.modelLights.draft === undefined, 'light working copy survived');
   assert(next.modelDirty.draft === undefined, 'dirty marker survived');
   assert(next.modelOverrides.draft === undefined, 'unsaved identity override survived');
   assert(!next.modelDupes.some((item) => item.id === 'draft'), 'unsaved session package survived');

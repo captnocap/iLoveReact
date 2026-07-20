@@ -14,6 +14,7 @@ import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type Buil
 import { listPaintSkins, type PaintSkin } from '../data/paintVariants';
 import { modelPackageById } from '../data/content';
 import type { PropExportRole } from '../data/propExports';
+import type { ModelTextureSlot } from '../data/types';
 
 /** Everything a placeable can BE: a build-piece affinity, or a free-placing prop. */
 export type PlaceableKind = BuildKind | 'prop';
@@ -37,6 +38,8 @@ export type AuthoredBuildPiece = {
   propRole?: PropExportRole;
   /** swatch colour for the build-bar chip. */
   hex: string;
+  /** Named face roles authored in the model Rig panel, in resident slot order. */
+  textureSlots?: ModelTextureSlot[];
 };
 
 let AUTHORED: AuthoredBuildPiece[] = [];
@@ -88,6 +91,24 @@ export function setAuthoredPieces(list: readonly AuthoredBuildPiece[]): void {
 
 export function authoredList(): readonly AuthoredBuildPiece[] {
   return AUTHORED;
+}
+
+/** Resolve against an explicit snapshot. Live-world hydration uses this instead
+ *  of depending on the parent effect that mirrors EditorState into AUTHORED. */
+export function authoredPieceFrom(
+  list: readonly AuthoredBuildPiece[] | null | undefined,
+  pieceId: string,
+): AuthoredBuildPiece | null {
+  // Hot reload can retain a caller compiled against pushLiveWorld's former
+  // two-argument shape. Fall back to the mirrored registry so refreshing this
+  // module never turns that retained closure into `undefined.find(...)`.
+  const source = list ?? AUTHORED;
+  const hit = source.find((piece) => piece.id === pieceId);
+  if (hit) return hit;
+  const at = pieceId.lastIndexOf(SKIN_MARK);
+  if (at < 0) return null;
+  const baseId = pieceId.slice(0, at);
+  return source.find((piece) => piece.id === baseId) ?? null;
 }
 
 /** Resolve a placeable id to its authored piece — a skinned id (`…#p<skin>`)

@@ -19,6 +19,7 @@
 // modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
+import type { LightRig } from '../model/editMesh';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
@@ -241,6 +242,9 @@ export type ModelViewProps = {
   paintTargetOnDisk?: boolean;
   onRequireFirstSave?: () => boolean;
   onDocumentMutated?: () => void;
+  /** Model-local emitted lights from the Rig draft. They illuminate the same
+   * geometry here that each placed instance illuminates in World. */
+  authoredLights?: readonly LightRig[];
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -652,7 +656,7 @@ const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [] }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -2343,6 +2347,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             keeps its DEFAULT warm sun (light_color (1.0, 0.95, 0.9), 3d.zig) — which is why
             "Flat" never actually looked flat. Only an explicit intensity 0 kills it. */}
         <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={paintMode || litFlat || !litKey ? 0 : (litFill ? 0.35 : 0.55)} />
+        {/* Rig emitters stay mounted in ordinary model view so placement-local
+            positions, aim, color, reach, and cone are judged against the mesh.
+            Paint mode suppresses them: authored atlas color remains exact. */}
+        {!paintMode ? authoredLights.map((light) => light.kind === 'spot' ? (
+          <Scene3D.SpotLight
+            key={light.id}
+            position={light.position}
+            direction={light.dir ?? [0, -1, 0]}
+            color={light.color}
+            intensity={light.intensity}
+            range={light.range}
+            cone={light.spread ?? 32}
+            castsShadow={light.castsShadow !== false}
+          />
+        ) : (
+          <Scene3D.PointLight
+            key={light.id}
+            position={light.position}
+            color={light.color}
+            intensity={light.intensity}
+            range={light.range}
+          />
+        )) : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}

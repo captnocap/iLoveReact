@@ -167,6 +167,28 @@ fn hostClearLivePieces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_live_lights(nodeId, Float32Array rows) carries the
+// fixed 14-float point/spot wire validated by world_loader/live_lights.zig.
+fn hostSetLiveLights(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadLights");
+        return;
+    };
+    world_loader.setLiveLights(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
+fn hostClearLiveLights(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearLiveLights(node_id);
+    setReturnString(info, "ok");
+}
+
 // ── live physics globals (GLOBALS req_2770) ─────────────────────────────────
 // __compiled_world_set_physics(nodeId, Float32Array[13]) overrides the mounted
 // loader's physics tuning THIS frame — the same 13 floats, same order, as the
@@ -547,6 +569,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_clear_camera", hostClearCamera);
     v8_runtime.registerHostFn("__compiled_world_set_live_pieces", hostSetLivePieces);
     v8_runtime.registerHostFn("__compiled_world_clear_live_pieces", hostClearLivePieces);
+    v8_runtime.registerHostFn("__compiled_world_set_live_lights", hostSetLiveLights);
+    v8_runtime.registerHostFn("__compiled_world_clear_live_lights", hostClearLiveLights);
     v8_runtime.registerHostFn("__compiled_world_set_physics", hostSetPhysics);
     v8_runtime.registerHostFn("__compiled_world_clear_physics", hostClearPhysics);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_props", hostSetLiveMeshProps);

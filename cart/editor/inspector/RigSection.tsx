@@ -10,6 +10,7 @@
 // Controls sit on the shared inspector column grid (req_2626 II): label column,
 // [−] value [+] steppers / value-cycle chips, reserved end column — the exact
 // OverrideField idiom.
+import { useEffect, useState } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import {
   describePropRig,
@@ -18,6 +19,12 @@ import {
   type PropRig,
   type CoverClass,
 } from '../../../runtime/skeleton';
+import type { ModelFacePurpose, ModelTextureSlot } from '../data/types';
+import type { LightRig, V3 } from '../model/editMesh';
+import { createTextureSlotFromSelection } from '../model/modelTextureSlotAuthoring';
+import { MODEL_LIGHT_TUNING, newModelLight, normalizeModelLights } from '../model/modelLights';
+
+const host = globalThis as any;
 
 // Enable-time defaults, mirroring the old prop table's common rows (a junk
 // container searched in 3s with a coin-flip fill; a 0.45m chair; a kickable
@@ -27,6 +34,8 @@ const DEFAULT_SEAT: NonNullable<PropRig['seat']> = { pose: 'sit', seatHeightMete
 const DEFAULT_DYNAMICS: NonNullable<PropRig['dynamics']> = { bodyRadiusMeters: 0.3, restitution: 0.4 };
 
 const COVER_CYCLE: (CoverClass | undefined)[] = [undefined, 'soft', 'hard'];
+const FACE_PURPOSES: readonly ModelFacePurpose[] = ['material', 'screen', 'flora'];
+const LIGHT_COLORS = ['#ffd27d', '#ffffff', '#ff8a5b', '#8fc7ff', '#9fffc5', '#d7a6ff'] as const;
 
 function cycleNext<T>(options: readonly T[], current: T): T {
   const at = options.indexOf(current);
@@ -79,9 +88,94 @@ function CycleRow(props: { label: string; value: string; tooltip: string; onNext
   );
 }
 
-export default function RigSection(props: { rig: PropRig; onChange: (rig: PropRig) => void }) {
+export default function RigSection(props: {
+  rig: PropRig;
+  onChange: (rig: PropRig) => void;
+  textureSlots: ModelTextureSlot[];
+  onTextureSlotsChange: (slots: ModelTextureSlot[]) => void;
+  onTextureMembershipChanged: (message: string, dirty?: boolean) => void;
+  lights: LightRig[];
+  onLightsChange: (lights: LightRig[]) => void;
+}) {
   const { rig } = props;
+  const [selectedLightId, setSelectedLightId] = useState<string | null>(props.lights[0]?.id ?? null);
+  useEffect(() => {
+    if (selectedLightId && props.lights.some((light) => light.id === selectedLightId)) return;
+    setSelectedLightId(props.lights[0]?.id ?? null);
+  }, [props.lights, selectedLightId]);
   const patch = (part: Partial<PropRig>) => props.onChange({ ...rig, ...part });
+  const addTextureSlot = (purpose: ModelFacePurpose) => {
+    const result = createTextureSlotFromSelection(
+      props.textureSlots,
+      (index) => Number(host.__mesh_texture_slot_assign?.(index) ?? 0),
+      { purpose },
+    );
+    if (!result.slot) {
+      props.onTextureMembershipChanged('Select one or more faces in Face mode before adding a texture role', false);
+      return;
+    }
+    props.onTextureSlotsChange([...result.slots]);
+    props.onTextureMembershipChanged(
+      `created ${result.slot.label} from ${result.assignedFaces} selected face${result.assignedFaces === 1 ? '' : 's'}`,
+    );
+  };
+  const renameTextureSlot = (index: number, label: string) => props.onTextureSlotsChange(
+    props.textureSlots.map((slot, at) => at === index ? { ...slot, label } : slot),
+  );
+  const cycleTexturePurpose = (index: number) => props.onTextureSlotsChange(
+    props.textureSlots.map((slot, at) => {
+      if (at !== index) return slot;
+      const current = slot.purpose ?? 'material';
+      const purpose = cycleNext(FACE_PURPOSES, current);
+      return { ...slot, ...(purpose === 'material' ? { purpose: undefined } : { purpose }) };
+    }),
+  );
+  const assignTextureSlot = (index: number) => {
+    const changed = Number(host.__mesh_texture_slot_assign?.(index) ?? 0);
+    props.onTextureMembershipChanged(changed > 0
+      ? `assigned ${changed} face${changed === 1 ? '' : 's'} to ${props.textureSlots[index]?.label ?? 'texture role'}`
+      : 'Texture role needs selected faces in Face mode');
+  };
+  const selectTextureSlot = (index: number) => {
+    const selected = Number(host.__mesh_texture_slot_select?.(index) ?? 0);
+    props.onTextureMembershipChanged(selected > 0
+      ? `selected ${selected} triangle${selected === 1 ? '' : 's'} in ${props.textureSlots[index]?.label ?? 'texture role'}`
+      : `${props.textureSlots[index]?.label ?? 'Texture role'} has no faces`, false);
+  };
+  const removeTextureSlot = (index: number) => {
+    host.__mesh_texture_slot_remove?.(index);
+    props.onTextureSlotsChange(props.textureSlots.filter((_, at) => at !== index));
+  };
+  const clearSelectedTextureSlots = () => {
+    const changed = Number(host.__mesh_texture_slot_clear?.() ?? 0);
+    props.onTextureMembershipChanged(changed > 0
+      ? `cleared texture roles from ${changed} selected face${changed === 1 ? '' : 's'}`
+      : 'Clear needs selected rigged faces in Face mode');
+  };
+  const addLight = () => {
+    if (props.lights.length >= MODEL_LIGHT_TUNING.maxPerModel) return;
+    const light = newModelLight(props.lights);
+    props.onLightsChange([...props.lights, light]);
+    setSelectedLightId(light.id);
+  };
+  const selectedLight = props.lights.find((light) => light.id === selectedLightId) ?? null;
+  const editLight = (patch: Partial<LightRig>) => {
+    if (!selectedLight) return;
+    props.onLightsChange(props.lights.map((light) => light.id === selectedLight.id ? { ...light, ...patch } : light));
+  };
+  const editLightVector = (field: 'position' | 'dir', axis: 0 | 1 | 2, value: number) => {
+    if (!selectedLight) return;
+    const fallback: V3 = field === 'position' ? [0, 0, 0] : [0, -1, 0];
+    const next = [...(selectedLight[field] ?? fallback)] as V3;
+    next[axis] = value;
+    editLight({ [field]: next });
+  };
+  const removeSelectedLight = () => {
+    if (!selectedLight) return;
+    const next = props.lights.filter((light) => light.id !== selectedLight.id);
+    props.onLightsChange(next);
+    setSelectedLightId(next[0]?.id ?? null);
+  };
   return (
     <C.HW_Section>
       <C.HW_SectionHead>
@@ -90,6 +184,112 @@ export default function RigSection(props: { rig: PropRig; onChange: (rig: PropRi
         <C.HW_Spacer />
         <C.HW_KeyText>{describePropRig(rig)}</C.HW_KeyText>
       </C.HW_SectionHead>
+
+      <C.HW_SectionHead>
+        <C.HW_AccentBar style={{ backgroundColor: accentFor('active') }} />
+        <C.HW_SectionTitle style={{ color: accentFor('active') }}>FACE RIGS</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_OvBtn tooltip="rig selected faces as a material surface" onPress={() => addTextureSlot('material')}><C.HW_OvBtnText>M</C.HW_OvBtnText></C.HW_OvBtn>
+        <C.HW_OvBtn tooltip="rig selected faces as a live screen" onPress={() => addTextureSlot('screen')}><C.HW_OvBtnText>S</C.HW_OvBtnText></C.HW_OvBtn>
+        <C.HW_OvBtn tooltip="rig selected faces as a flora-paintable surface" onPress={() => addTextureSlot('flora')}><C.HW_OvBtnText>F</C.HW_OvBtnText></C.HW_OvBtn>
+      </C.HW_SectionHead>
+      {props.textureSlots.map((slot, index) => (
+        <C.HW_TextureRole key={slot.id}>
+          <C.HW_TextureRoleNameRow>
+            <C.HW_RenameInput value={slot.label} onChange={(label: string) => renameTextureSlot(index, label)} />
+            <C.HW_OvBtn tooltip="remove this role and return its faces to paint" onPress={() => removeTextureSlot(index)}><C.HW_OvBtnText>×</C.HW_OvBtnText></C.HW_OvBtn>
+          </C.HW_TextureRoleNameRow>
+          <C.HW_TextureRoleActionRow>
+            <C.HW_VerbPrimary tooltip="cycle this face rig between material, screen, and flora surface" onPress={() => cycleTexturePurpose(index)}>
+              <C.HW_VerbText>{(slot.purpose ?? 'material').toUpperCase()}</C.HW_VerbText>
+            </C.HW_VerbPrimary>
+            <C.HW_VerbPrimary tooltip="select every face rigged to this role" onPress={() => selectTextureSlot(index)}>
+              <C.HW_VerbText>select faces</C.HW_VerbText>
+            </C.HW_VerbPrimary>
+            <C.HW_VerbPrimary tooltip="assign the selected authored faces to this role" onPress={() => assignTextureSlot(index)}>
+              <C.HW_VerbText>assign selected</C.HW_VerbText>
+            </C.HW_VerbPrimary>
+          </C.HW_TextureRoleActionRow>
+        </C.HW_TextureRole>
+      ))}
+      {props.textureSlots.length === 0 ? (
+        <C.HW_ReadRow>
+          <C.HW_ReadValue>select faces, then M / S / F</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : null}
+      {props.textureSlots.length > 0 ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>selected faces</C.HW_FormLabel>
+          <C.HW_Spacer />
+          <C.HW_OvToggle tooltip="return selected faces to the model's painted atlas" onPress={clearSelectedTextureSlots}>
+            <C.HW_OvToggleText>use paint</C.HW_OvToggleText>
+          </C.HW_OvToggle>
+          <C.HW_OvResetIdle />
+        </C.HW_ReadRow>
+      ) : null}
+
+      <C.HW_SectionHead>
+        <C.HW_AccentBar style={{ backgroundColor: '#ffd27d' }} />
+        <C.HW_SectionTitle style={{ color: '#ffd27d' }}>EMITTED LIGHTS</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_KeyText>{`${props.lights.length}/${MODEL_LIGHT_TUNING.maxPerModel}`}</C.HW_KeyText>
+        <C.HW_OvBtn tooltip="add a model-local spotlight" onPress={addLight}><C.HW_OvBtnText>+</C.HW_OvBtnText></C.HW_OvBtn>
+      </C.HW_SectionHead>
+      {props.lights.map((light) => {
+        const active = light.id === selectedLightId;
+        const Button = active ? C.HW_OvToggleOn : C.HW_OvToggle;
+        const Label = active ? C.HW_OvToggleTextOn : C.HW_OvToggleText;
+        return (
+          <C.HW_ReadRow key={light.id}>
+            <C.HW_FormLabel>{light.id}</C.HW_FormLabel>
+            <C.HW_Spacer />
+            <C.HW_Swatch style={{ backgroundColor: light.color }} />
+            <Button tooltip="edit this emitted light" onPress={() => setSelectedLightId(light.id)}><Label>{light.kind === 'spot' ? 'spot' : 'bulb'}</Label></Button>
+            <C.HW_OvResetIdle />
+          </C.HW_ReadRow>
+        );
+      })}
+      {props.lights.length === 0 ? (
+        <C.HW_ReadRow><C.HW_ReadValue>none — add a point or spot emitter</C.HW_ReadValue></C.HW_ReadRow>
+      ) : null}
+      {selectedLight ? (
+        <>
+          <CycleRow
+            label="type"
+            value={selectedLight.kind === 'spot' ? 'spot' : 'bulb'}
+            tooltip="Spot is aimed and may cast a shadow; bulb shines in every direction"
+            onNext={() => editLight(selectedLight.kind === 'spot'
+              ? { kind: 'point', dir: undefined, spread: undefined, castsShadow: undefined }
+              : { kind: 'spot', dir: [0, -1, 0], spread: MODEL_LIGHT_TUNING.defaultConeDegrees, castsShadow: true })}
+          />
+          <CycleRow
+            label="color"
+            value={selectedLight.color}
+            tooltip="cycle the emitter color"
+            onNext={() => editLight({ color: cycleNext(LIGHT_COLORS, selectedLight.color as typeof LIGHT_COLORS[number]) })}
+          />
+          {(['x', 'y', 'z'] as const).map((label, axis) => (
+            <StepRow key={`light-pos-${label}`} label={`pos ${label}`} value={selectedLight.position[axis]} step={0.25} min={-1000} max={1000} onSet={(value) => editLightVector('position', axis as 0 | 1 | 2, value)} />
+          ))}
+          {selectedLight.kind === 'spot' ? (['x', 'y', 'z'] as const).map((label, axis) => (
+            <StepRow key={`light-dir-${label}`} label={`aim ${label}`} value={(selectedLight.dir ?? [0, -1, 0])[axis]} step={0.1} min={-1} max={1} onSet={(value) => editLightVector('dir', axis as 0 | 1 | 2, value)} />
+          )) : null}
+          <StepRow label="bright" value={selectedLight.intensity} step={0.5} min={MODEL_LIGHT_TUNING.minIntensity} max={MODEL_LIGHT_TUNING.maxIntensity} onSet={(intensity) => editLight({ intensity })} />
+          <StepRow label="reach" value={selectedLight.range} step={0.5} min={MODEL_LIGHT_TUNING.minRangeMeters} max={MODEL_LIGHT_TUNING.maxRangeMeters} fmt={(value) => `${value.toFixed(1)}m`} onSet={(range) => editLight({ range })} />
+          {selectedLight.kind === 'spot' ? (
+            <>
+              <StepRow label="cone" value={selectedLight.spread ?? MODEL_LIGHT_TUNING.defaultConeDegrees} step={1} min={MODEL_LIGHT_TUNING.minConeDegrees} max={MODEL_LIGHT_TUNING.maxConeDegrees} fmt={(value) => `${Math.round(value)}°`} onSet={(spread) => editLight({ spread })} />
+              <ToggleRow label="shadow" on={selectedLight.castsShadow !== false} tooltip="let this spotlight own a shadow map when available" onToggle={() => editLight({ castsShadow: selectedLight.castsShadow === false })} />
+            </>
+          ) : null}
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>selected light</C.HW_FormLabel>
+            <C.HW_Spacer />
+            <C.HW_OvToggle tooltip="remove this emitted light" onPress={removeSelectedLight}><C.HW_OvToggleText>remove</C.HW_OvToggleText></C.HW_OvToggle>
+            <C.HW_OvResetIdle />
+          </C.HW_ReadRow>
+        </>
+      ) : null}
 
       <ToggleRow
         label="searchable"

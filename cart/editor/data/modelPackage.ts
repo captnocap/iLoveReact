@@ -22,7 +22,10 @@
 //
 // The manifest and its sibling artifacts are the durable, portable model.
 // path and source derive from that package home on load.
-import type { ContentFolderId, ModelAtlas, ModelPackage, ModelPaintVariant, ModelPlaceable } from './types';
+import type { ContentFolderId, ModelAtlas, ModelPackage, ModelPaintVariant, ModelPlaceable, ModelTextureSlot } from './types';
+import type { LightRig } from '../model/editMesh';
+import { normalizeModelLights } from '../model/modelLights';
+import { normalizeModelTextureSlots } from '../model/modelTextureSlotAuthoring';
 import type { Skeleton } from '../../../runtime/skeleton';
 
 export const MODELS_HOME = 'cart/editor/data/models';
@@ -64,6 +67,8 @@ export type ModelManifest = {
   // the palette derives from these on boot — localstore only caches.
   placeable?: ModelPlaceable;
   skeleton?: Skeleton;
+  textureSlots?: ModelTextureSlot[];
+  lights?: LightRig[];
 };
 
 // kind -> category directory. One category folder groups its models, matching
@@ -135,6 +140,8 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
     paints: pkg.paints,
     placeable: pkg.placeable,
     skeleton: pkg.skeleton,
+    textureSlots: normalizeModelTextureSlots(pkg.textureSlots),
+    lights: pkg.lights ? normalizeModelLights(pkg.lights) : undefined,
   };
 }
 
@@ -168,6 +175,8 @@ export function manifestToPackage(manifest: ModelManifest, dir: string): ModelPa
     semanticKind: manifest.semanticKind,
     placeable: manifest.placeable,
     skeleton: manifest.skeleton,
+    textureSlots: normalizeModelTextureSlots(manifest.textureSlots),
+    lights: manifest.lights ? normalizeModelLights(manifest.lights) : undefined,
     // A saved primitive package re-arms its generator on load (semanticKind IS the
     // seed kind), so reopening it from disk still builds viewable geometry — the
     // manifest carries identity; mesh-blob readback is a later slice.

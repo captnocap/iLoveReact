@@ -129,14 +129,34 @@ test('legacy v1 is accepted only through explicit migration', () => {
   try { parseWorldSaveText(legacy, 'legacy'); } catch { rejected = true; }
   assert(rejected, 'unscoped v1 save was accepted as an ordinary named document');
   const migrated = parseWorldSaveText(legacy, 'legacy', { allowLegacyV1: true });
-  assert(migrated.version === 2 && migrated.document === 'legacy', 'legacy save was not upgraded into the named boundary');
+  assert(migrated.version === 4 && migrated.document === 'legacy', 'legacy save was not upgraded into the named boundary');
   assert(migrated.objects.length === 0, 'pre-object legacy save did not receive the safe empty default');
+  assert(migrated.worldFlora.length === 0, 'pre-flora legacy save did not receive the safe empty default');
 });
 
 test('older v2 saves gain an empty semantic-object concern', () => {
   const priorV2 = JSON.stringify({ version: 2, document: 'map-a', seq: 7, pieces: [], zones: [] });
   const loaded = parseWorldSaveText(priorV2, 'map-a');
   assert(loaded.objects.length === 0, 'missing objects did not default to an empty concern');
+  assert(loaded.worldFlora.length === 0, 'missing custom flora did not default to an empty concern');
+});
+
+test('v4 preserves bounded surface and terrain flora recipes', () => {
+  const save = emptyWorldSave('flora-map', 10);
+  save.pieces = [{
+    ...piece('planter'),
+    surfaceFlora: [{
+      id: 'surface-flora-10', speciesId: 'builtin-flora:grassLush', role: 'flora-1', triangle: 0,
+      lx: 0.2, ly: 0.5, lz: 0.3, density: 0.65, radiusM: 1.5, seed: 41,
+    }],
+  }];
+  save.worldFlora = [{
+    id: 'world-flora-11', speciesId: 'custom-flora:hedge', x: 4, y: 0, z: 8,
+    density: 0.4, radiusM: 2, seed: 42,
+  }];
+  const loaded = parseWorldSaveText(JSON.stringify(save), 'flora-map');
+  assert(loaded.pieces[0]!.surfaceFlora?.[0]?.density === 0.65, 'surface flora recipe was lost');
+  assert(loaded.worldFlora[0]?.speciesId === 'custom-flora:hedge', 'terrain flora recipe was lost');
 });
 
 test('New/Open replaces every authored map slice instead of merging', () => {
@@ -152,6 +172,8 @@ test('New/Open replaces every authored map slice instead of merging', () => {
   assert(slices.activeMapStem === 'clean-map', 'active stem not replaced');
   assert(slices.activeMapName === 'Clean Map', 'active friendly name not replaced');
   assert(slices.worldPieces.length === 1 && slices.worldPieces[0]!.id === 'target-only', 'pieces merged or leaked');
+  assert(slices.worldFlora.length === 0, 'old terrain flora leaked into the target map');
+  assert(slices.worldPrefabs.length === 0, 'old prefab definitions leaked into the target map');
   assert(slices.objects.length === 1 && slices.objects[0]!.id === 'target-trigger', 'semantic objects merged or leaked');
   assert(slices.selectedObjectId === 'target-trigger', 'selection did not move inside the target document');
   assert(!slices.mapPaint.zones.some((zone) => zone.id === 'old-zone'), 'old zone leaked');

@@ -224,9 +224,10 @@ fn hostInstallGenerated(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
 
 // ── tool + stroke doors ───────────────────────────────────────────────────────
 
-// 18 floats since req_2693 ([17] = armed material binding); a 17-float pack
-// from an older bundle still arms (bind_idx falls to the kind default).
-const TOOL_FLOATS: usize = 18;
+// 19 floats: per-stroke flora density appended without moving prior fields.
+// Older 17/18-float bundles still arm with their historical defaults.
+const TOOL_FLOATS: usize = 19;
+const TOOL_FLOATS_V2: usize = 18;
 const TOOL_FLOATS_V1: usize = 17;
 
 fn enumFromF32(comptime E: type, raw: f32) E {
@@ -263,7 +264,11 @@ fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         .flora_kind_idx = @trunc(@max(-1, p[14])),
         .flora_lane = @trunc(@max(0, @min(2, p[15]))),
         .zone_idx = @trunc(@max(-1, p[16])),
-        .bind_idx = if (p.len >= TOOL_FLOATS) @trunc(@max(-1, p[17])) else chunks.EMPTY_CELL,
+        .bind_idx = if (p.len >= TOOL_FLOATS_V2) @trunc(@max(-1, p[17])) else chunks.EMPTY_CELL,
+        .flora_density = if (p.len >= TOOL_FLOATS and std.math.isFinite(p[18]))
+            @intFromFloat(@round(@max(0, @min(1, p[18])) * chunks.FLORA_DENSITY_FULL))
+        else
+            chunks.FLORA_DENSITY_FULL,
     });
 }
 
@@ -584,7 +589,7 @@ fn hostStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF32Buffer(info, stroke_out[0..]);
 }
 
-const MAP_EVENT_FLOATS: usize = 32;
+const MAP_EVENT_FLOATS: usize = 33;
 var map_event_buf: [engine.AUTHORING_EVENT_CAP]engine.AuthoringEvent = undefined;
 var map_event_out: [1 + engine.AUTHORING_EVENT_CAP * MAP_EVENT_FLOATS]f32 = undefined;
 
@@ -616,20 +621,21 @@ fn hostEventDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         map_event_out[base + 15] = e.tool.bind_idx;
         map_event_out[base + 16] = e.tool.flora_kind_idx;
         map_event_out[base + 17] = e.tool.flora_lane;
-        map_event_out[base + 18] = e.tool.zone_idx;
-        map_event_out[base + 19] = e.start_x;
-        map_event_out[base + 20] = e.start_z;
-        map_event_out[base + 21] = e.end_x;
-        map_event_out[base + 22] = e.end_z;
-        map_event_out[base + 23] = @floatFromInt(e.stats.samples);
-        map_event_out[base + 24] = @floatFromInt(e.stats.stamps);
-        map_event_out[base + 25] = @floatFromInt(e.stats.touched);
-        map_event_out[base + 26] = if (e.stats.water_dry) 1 else 0;
-        map_event_out[base + 27] = e.duration_ms;
-        map_event_out[base + 28] = @floatFromInt(e.id);
-        map_event_out[base + 29] = @floatFromInt(e.aux_a);
-        map_event_out[base + 30] = @floatFromInt(e.aux_b);
-        map_event_out[base + 31] = @floatFromInt(e.dropped_before);
+        map_event_out[base + 18] = @as(f32, @floatFromInt(e.tool.flora_density)) / chunks.FLORA_DENSITY_FULL;
+        map_event_out[base + 19] = e.tool.zone_idx;
+        map_event_out[base + 20] = e.start_x;
+        map_event_out[base + 21] = e.start_z;
+        map_event_out[base + 22] = e.end_x;
+        map_event_out[base + 23] = e.end_z;
+        map_event_out[base + 24] = @floatFromInt(e.stats.samples);
+        map_event_out[base + 25] = @floatFromInt(e.stats.stamps);
+        map_event_out[base + 26] = @floatFromInt(e.stats.touched);
+        map_event_out[base + 27] = if (e.stats.water_dry) 1 else 0;
+        map_event_out[base + 28] = e.duration_ms;
+        map_event_out[base + 29] = @floatFromInt(e.id);
+        map_event_out[base + 30] = @floatFromInt(e.aux_a);
+        map_event_out[base + 31] = @floatFromInt(e.aux_b);
+        map_event_out[base + 32] = @floatFromInt(e.dropped_before);
     }
     setReturnF32Buffer(info, map_event_out[0 .. 1 + n * MAP_EVENT_FLOATS]);
 }
@@ -786,7 +792,14 @@ fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     const channel = argToF64(info, 2) orelse 0;
-    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 6) @trunc(channel) else 0)) {
+    const channel_index: u8 = if (channel > 0 and channel < 9) @trunc(channel) else 0;
+    if (channel_index >= 6) {
+        const density = chunk.flora_density[channel_index - 6][0..];
+        for (density, 0..) |value, i| cell_scratch[i] = value;
+        setReturnF32Buffer(info, cell_scratch[0..]);
+        return;
+    }
+    const src: []const i16 = switch (channel_index) {
         1 => chunk.zones[0..],
         2 => chunk.flora[0][0..],
         3 => chunk.flora[1][0..],

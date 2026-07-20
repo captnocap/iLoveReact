@@ -8,6 +8,7 @@
 //   tools/v8cli /tmp/editor-piece-placement-command.test.js
 import {
   PiecePlacementRejected,
+  WORLD_PIECE_PLACEMENT_LIMITS,
   applyPiecePlacementForward,
   applyPiecePlacementInverse,
   planPiecePlacement,
@@ -15,7 +16,7 @@ import {
   type PiecePlacementPolicy,
   type PiecePlacementWorld,
 } from './piecePlacementCommand';
-import type { PlacedPiece } from './pieces';
+import { RUN_PLACEMENT_CAP, type PlacedPiece } from './pieces';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -79,6 +80,38 @@ test('a drag-run remains one transaction while allocating one stable id per piec
   same(plan.transaction.placed.map((p) => p.id), ['bp_20', 'bp_21', 'bp_22'], 'drag-run ids drifted');
   assert(plan.transaction.gestureMode === 'drag-run' && plan.transaction.forward.append.length === 3, 'drag-run split into another shape');
   assert(plan.next.nextPieceId === 23, 'drag-run allocator depth is wrong');
+});
+
+test('scene-sized composition batches are not clipped to the pointer drag-run budget', () => {
+  assert(WORLD_PIECE_PLACEMENT_LIMITS.maxBatchSize > RUN_PLACEMENT_CAP, 'composition and drag-run budgets collapsed together');
+  const candidates = Array.from({ length: RUN_PLACEMENT_CAP + 1 }, (_, index) => candidate(index * 3 + 1.5, 1.5));
+  const plan = planPiecePlacement(world([], 100), {
+    documentId: 'main',
+    candidates,
+    gestureMode: 'click',
+  }, policy);
+  assert(plan.transaction.placed.length === RUN_PLACEMENT_CAP + 1, 'scene-sized composition was clipped at the drag-run cap');
+});
+
+test('copy/prefab candidates retain and detach semantic attachments', () => {
+  const surfaceFlora = [{
+    id: 'surface-flora-1', speciesId: 'builtin-flora:grassLush', role: 'flora_1', triangle: 0,
+    lx: 0.2, ly: 0.4, lz: 0.3, density: 0.5, radiusM: 1, seed: 7,
+  }];
+  const stickers = [{
+    id: 'sticker-1', stickerId: 'logo', role: 'front', lx: 0, ly: 1, lz: 0,
+    nx: 0, ny: 0, nz: -1, scale: 1, rot: 0,
+  }];
+  const plan = planPiecePlacement(world([], 12), {
+    documentId: 'main',
+    candidates: [candidate(1.5, 1.5, { surfaceFlora, stickers, spinDegPerSec: 45 })],
+    gestureMode: 'click',
+  }, policy);
+  const placed = plan.transaction.placed[0]!;
+  assert(placed.surfaceFlora?.[0]?.speciesId === 'builtin-flora:grassLush', 'surface flora was dropped');
+  assert(placed.stickers?.[0]?.stickerId === 'logo' && placed.spinDegPerSec === 45, 'sticker/spin was dropped');
+  assert(placed.surfaceFlora !== surfaceFlora && placed.surfaceFlora?.[0] !== surfaceFlora[0], 'surface recipes retained mutable source references');
+  assert(placed.stickers !== stickers && placed.stickers?.[0] !== stickers[0], 'stickers retained mutable source references');
 });
 
 test('replacement inverse restores full victims, selection, and exact original order', () => {

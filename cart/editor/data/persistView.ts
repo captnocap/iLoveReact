@@ -26,9 +26,11 @@ import type { EditorState } from './types';
 const VIEW_HOT_KEY = 'editor:view:v2';
 const MODEL_WORK_HOT_KEY = 'editor:model-work:v1';
 
-type ModelWorkHot = Pick<EditorState, 'modelParts' | 'modelRigs'>;
+type ModelWorkHot = Pick<EditorState, 'modelParts' | 'modelRigs' | 'modelTextureSlots' | 'modelLights'>;
 let lastModelParts: EditorState['modelParts'] | null = null;
 let lastModelRigs: EditorState['modelRigs'] | null = null;
+let lastModelTextureSlots: EditorState['modelTextureSlots'] | null = null;
+let lastModelLights: EditorState['modelLights'] | null = null;
 
 // Transient surfaces that should NOT spring back open after a reload — even if
 // a menu/dialog/popover was open when the reload fired, the rehydrated view
@@ -81,6 +83,8 @@ export function loadPersistedState(): EditorState {
   const world = load.status === 'ok' ? load.save : null;
   if (world) {
     base.worldPieces = world.pieces;
+    base.worldFlora = world.worldFlora;
+    base.worldPrefabs = world.prefabs;
     base.objects = world.objects;
     base.selectedObjectId = world.objects.find((object) => !object.hidden)?.id ?? 'obj-tile';
     base.seq = Math.max(base.seq, world.seq);
@@ -126,6 +130,8 @@ export function loadPersistedState(): EditorState {
     activeMapStem: base.activeMapStem,
     activeMapName: base.activeMapName,
     worldPieces: base.worldPieces,
+    worldFlora: base.worldFlora,
+    worldPrefabs: base.worldPrefabs,
     objects: base.objects,
     selectedObjectId: base.selectedObjectId,
     selectedPieceId: null,
@@ -164,18 +170,24 @@ export function persistState(state: EditorState): void {
   // Model part seeds can contain large typed vertex arrays. They are a separate
   // twig written only when that authored structure actually changes; colour
   // drags, camera/tool state, and selection no longer stringify it repeatedly.
-  if (state.modelParts !== lastModelParts || state.modelRigs !== lastModelRigs) {
+  if (state.modelParts !== lastModelParts || state.modelRigs !== lastModelRigs || state.modelTextureSlots !== lastModelTextureSlots || state.modelLights !== lastModelLights) {
     lastModelParts = state.modelParts;
     lastModelRigs = state.modelRigs;
+    lastModelTextureSlots = state.modelTextureSlots;
+    lastModelLights = state.modelLights;
     setHotState<ModelWorkHot>(MODEL_WORK_HOT_KEY, {
       modelParts: state.modelParts,
       modelRigs: state.modelRigs,
+      modelTextureSlots: state.modelTextureSlots,
+      modelLights: state.modelLights,
     });
   }
 
   const {
     modelParts: _modelParts,
     modelRigs: _modelRigs,
+    modelTextureSlots: _modelTextureSlots,
+    modelLights: _modelLights,
     history: _history,
     redo: _redo,
     worldUndo: _worldUndo,
@@ -187,6 +199,8 @@ export function persistState(state: EditorState): void {
   setHotState(VIEW_HOT_KEY, {
     ...view,
     worldPieces: [],
+    worldFlora: [],
+    worldPrefabs: [],
     objects: [],
     selectedObjectId: 'obj-tile',
     selectedPieceId: null,

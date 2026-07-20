@@ -9,6 +9,8 @@
 //   tools/v8cli /tmp/editor-authored-mesh.test.js
 
 import { authoredMeshBounds, cacheAuthoredMesh } from './authoredMesh';
+import { setAuthoredPieces } from './authoredRegistry';
+import { pickAuthoredPlacement } from './pieces';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -39,6 +41,19 @@ test('re-exporting one model invalidates its previous wireframe bounds', () => {
   assert(replaced?.minX === -5 && replaced.maxX === 7, 'x bounds came from the previous export');
   assert(replaced?.minY === 0 && replaced.maxY === 9, 'ground-rebased y bounds came from the previous export');
   assert(replaced?.minZ === -4 && replaced.maxZ === 6, 'z bounds came from the previous export');
+});
+
+test('rotated authored picking follows the renderer yaw convention', () => {
+  const modelId = 'test:rotated-pick';
+  cacheAuthoredMesh(modelId, new Float32Array([
+    ...vertex(0, 0, 0),
+    ...vertex(2, 0, 1),
+    ...vertex(0, 1, 1),
+  ]));
+  setAuthoredPieces([{ id: `prop:${modelId}`, modelId, pkgId: 'missing:test', label: 'Pick', kind: 'prop', hex: '#fff' }]);
+  const placement = { id: 'placed', pieceId: `prop:${modelId}`, x: 0, y: 0, z: 0, yawDegrees: 90, floor: 0 };
+  const hit = pickAuthoredPlacement({ origin: { x: 0.5, y: 0.5, z: -5 }, dir: { x: 0, y: 0, z: 1 } }, [placement], 10);
+  assert(hit?.piece.id === 'placed' && Math.abs(hit.t - 3) < 1e-6, '90° asymmetric authored bounds were picked in the opposite yaw frame');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

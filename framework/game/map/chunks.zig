@@ -48,6 +48,7 @@ pub const SAMPLE_CELLS: usize = SAMPLE_COLS * SAMPLE_COLS; // 58_081
 pub const FLORA_LAYER_COUNT: usize = 3;
 
 pub const EMPTY_CELL: i16 = -1;
+pub const FLORA_DENSITY_FULL: u8 = std.math.maxInt(u8);
 
 // ── the chunk ─────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ pub const Chunk = struct {
     zones: [TILE_CELLS]i16,
     /// flora kind index per cell per lane (grass/tree/bush), EMPTY_CELL = none
     flora: [FLORA_LAYER_COUNT][TILE_CELLS]i16,
+    /// stroke-authored population strength per flora cell (0 empty, 255 full).
+    flora_density: [FLORA_LAYER_COUNT][TILE_CELLS]u8,
     /// terrain heights (meters) on the (2/tile + 1)² sample grid (heightData.ts:31)
     height: [SAMPLE_CELLS]f32,
     /// painted water DEPTH on the same sample grid; > 0 = wet (chunks.ts:37)
@@ -90,6 +93,7 @@ pub const Chunk = struct {
         @memset(self.materials[0..], EMPTY_CELL);
         @memset(self.zones[0..], EMPTY_CELL);
         for (self.flora[0..]) |*lane| @memset(lane[0..], EMPTY_CELL);
+        for (self.flora_density[0..]) |*lane| @memset(lane[0..], 0);
         @memset(self.height[0..], 0);
         @memset(self.water[0..], 0);
         self.dirty = .{};
@@ -265,6 +269,7 @@ test "chunk buffers initialize to the empty painting" {
     try std.testing.expectEqual(EMPTY_CELL, chunk.tiles[0]);
     try std.testing.expectEqual(EMPTY_CELL, chunk.zones[TILE_CELLS - 1]);
     try std.testing.expectEqual(EMPTY_CELL, chunk.flora[2][7]);
+    try std.testing.expectEqual(@as(u8, 0), chunk.flora_density[2][7]);
     try std.testing.expectEqual(@as(f32, 0), chunk.height[SAMPLE_CELLS - 1]);
     try std.testing.expectEqual(@as(f32, 0), chunk.water[0]);
     try std.testing.expect(!chunk.dirty.any());

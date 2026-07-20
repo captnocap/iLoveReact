@@ -177,7 +177,7 @@ export type WorldPiecesPlaceArgs = {
   documentId: string;
   candidates: readonly PiecePlacementCandidate[];
   gesture: PlacementGesture;
-  stamp?: Pick<PlacedPiece, 'slots' | 'overrides'> | null;
+  stamp?: Pick<PlacedPiece, 'slots' | 'overrides' | 'stickers' | 'surfaceFlora' | 'spinDegPerSec'> | null;
 };
 
 export type WorldPiecesPlaceResult = {

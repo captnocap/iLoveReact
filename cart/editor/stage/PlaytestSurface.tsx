@@ -22,6 +22,8 @@ import { pushPlayerModel, playerCharacterPackage } from '../world/playerModelPus
 import { packPhysicsGlobals, type WorldGlobals } from '../data/globals';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
+import type { AuthoredFloraSpecies } from '../world/floraSpecies';
+import type { WorldFloraPatch } from '../world/surfaceFlora';
 
 const g: any = globalThis;
 
@@ -29,6 +31,8 @@ export default function PlaytestSurface(props: {
   globals: WorldGlobals;
   pieces: readonly PlacedPiece[];
   authoredPieces: readonly AuthoredBuildPiece[];
+  worldFlora: readonly WorldFloraPatch[];
+  floraSpecies: readonly AuthoredFloraSpecies[];
 }) {
   const loaderRef = useRef<any>(null);
   // The host binary predates the physics door → say so instead of silently
@@ -68,15 +72,19 @@ export default function PlaytestSurface(props: {
 
   // The authored world rides in through the shared live doors (world/livePush).
   useEffect(() => {
-    pushLiveWorld(Number(loaderRef.current?.id ?? 0), props.pieces);
-  }, [props.pieces]);
-  useEffect(() => {
-    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), props.authoredPieces);
+    const push = () => pushLiveWorld(Number(loaderRef.current?.id ?? 0), props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies);
     if (push()) return;
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.authoredPieces]);
+  }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies]);
+  useEffect(() => {
+    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), props.authoredPieces, props.floraSpecies);
+    if (push()) return;
+    let tries = 0;
+    const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
+    return () => clearInterval(t);
+  }, [props.authoredPieces, props.floraSpecies]);
 
   return (
     <C.HW_WorldEditorSurface>

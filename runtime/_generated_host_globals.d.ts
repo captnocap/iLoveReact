@@ -875,6 +875,8 @@ declare global {
   function __compiled_world_clear_camera(...args: unknown[]): unknown;
   function __compiled_world_set_live_pieces(...args: unknown[]): unknown;
   function __compiled_world_clear_live_pieces(...args: unknown[]): unknown;
+  function __compiled_world_set_live_lights(...args: unknown[]): unknown;
+  function __compiled_world_clear_live_lights(...args: unknown[]): unknown;
   function __compiled_world_set_physics(...args: unknown[]): unknown;
   function __compiled_world_clear_physics(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_props(...args: unknown[]): unknown;

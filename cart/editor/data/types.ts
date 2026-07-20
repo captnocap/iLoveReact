@@ -10,7 +10,7 @@ import type {
 import type { DecalDoc } from '../textures/decal';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
-import type { EditMesh } from '../model/editMesh';
+import type { EditMesh, LightRig } from '../model/editMesh';
 import type { MapPaintState } from '../stage/mapPaint';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
@@ -19,6 +19,10 @@ import type { Skeleton, PropRig } from '../../../runtime/skeleton';
 import type { WorldGlobals } from './globals';
 import type { PathArrayParams } from './pathArray';
 import type { PropExportRole } from './propExports';
+import type { FloraLane } from '../world/floraKinds';
+import type { AuthoredFloraSpecies } from '../world/floraSpecies';
+import type { WorldFloraPatch } from '../world/surfaceFlora';
+import type { WorldPrefab } from '../world/prefabs';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -340,6 +344,13 @@ export type ModelPaintVariant = {
   color: string;
 };
 
+/** A named role authored onto stable model faces. `id` is the durable key;
+ * labels may be renamed without breaking placements. Missing `purpose` means
+ * the legacy/default material role. Screen delivery and flora scattering both
+ * consume the same stable face membership instead of inventing parallel masks. */
+export type ModelFacePurpose = 'material' | 'screen' | 'flora';
+export type ModelTextureSlot = { id: string; label: string; purpose?: ModelFacePurpose };
+
 // Per-model UI mutations (right-click actions). Package manifests are disk truth;
 // these overrides are the live projection used during the current render cycle.
 export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolean };
@@ -357,6 +368,10 @@ export type ModelPlaceable =
   | { as: 'build-piece'; kind: BuildKind; edit?: WallEdit }
   // Role defaults to scenery for manifests written before semantic prop export.
   | { as: 'prop'; role?: PropExportRole }
+  // A model exported as one flora species joins the matching paint lane. The
+  // package mesh remains the resident visual; paint strokes store only its
+  // stable package-backed species id plus density.
+  | { as: 'flora'; lane: FloraLane }
   | { as: 'character'; role: CharacterRole };
 
 export type ModelPackage = {
@@ -388,6 +403,10 @@ export type ModelPackage = {
   // exports with. Both live in the manifest — disk truth (req_2718).
   placeable?: ModelPlaceable;
   skeleton?: Skeleton;
+  textureSlots?: ModelTextureSlot[];
+  /** Model-local emitted lights, authored in Rig and consumed by every placed
+   * instance in Studio preview, World, and Play. */
+  lights?: LightRig[];
   // A freshly-authored primitive (File → New Mesh → …). The viewer builds the geometry
   // from the in-cart EditMesh generators (cuboid/cylinder/…, via editMeshToGeometry), the
   // same path studio models take, so it opens as clean grouped faces and edits in the host.
@@ -440,7 +459,7 @@ export type HistoryEvent = {
 // conflated with the undo mechanism. Host-side map paint strokes are NOT covered
 // (they never flow through EditorState); the empty-stack status says so.
 export type WorldUndoSlices = Partial<Pick<EditorState,
-  'worldPieces' | 'objects' | 'authoredBuildPieces' | 'selectedPieceId' | 'selectedPieceIds' | 'selectedObjectId' | 'armedPieceId'>>;
+  'worldPieces' | 'worldFlora' | 'worldPrefabs' | 'objects' | 'authoredBuildPieces' | 'authoredFloraSpecies' | 'selectedPieceId' | 'selectedPieceIds' | 'selectedObjectId' | 'armedPieceId'>>;
 export type WorldUndoEntry = {
   label: string;
   before: WorldUndoSlices;
@@ -559,6 +578,8 @@ export type EditorState = {
   // the Inspector edits; `armedPieceId` is the palette piece Build mode drops.
   // These retire the phantom `objects`/`selectedObjectId` mock for world work.
   worldPieces: PlacedPiece[];
+  /** Named, decomposable compositions captured from ordinary world pieces. */
+  worldPrefabs: WorldPrefab[];
   selectedPieceId: string | null;
   /** Additive world selection. `selectedPieceId` remains the primary/focused
    *  member for the existing Inspector and edit commands. */
@@ -570,7 +591,7 @@ export type EditorState = {
   // Copy stamp (req_2733): Copy on a placed piece arms its definition AND carries its
   // per-instance slots/overrides here, so every subsequent placement drops a true clone
   // (a copy that loses its materials isn't a copy). Cleared by a palette arm.
-  armedStamp: Pick<PlacedPiece, 'slots' | 'overrides'> | null;
+  armedStamp: Pick<PlacedPiece, 'slots' | 'overrides' | 'stickers' | 'surfaceFlora' | 'spinDegPerSec'> | null;
   // Recently USED materials (req_2737), most recent first, capped — every slot
   // assign pushes here, and the quick menu surfaces them as its RECENT row.
   // Live usage, distinct from the catalog's static `recent` flag.
@@ -581,11 +602,19 @@ export type EditorState = {
   // boot scan of materialized packages and mirrored into authoredRegistry;
   // localstore only caches it.
   authoredBuildPieces: AuthoredBuildPiece[];
+  /** Package-backed models exported as species for the flora painter. */
+  authoredFloraSpecies: AuthoredFloraSpecies[];
+  /** Custom package-backed flora painted on terrain; native kinds live in RMAP. */
+  worldFlora: WorldFloraPatch[];
   // Per-model RIG drafts (req_2712/2713) keyed by package id — the Inspector's
   // Rig section edits these (pockets/placements/seats/cover/dynamics); export
   // compiles the draft into the manifest's skeleton. Session-live projection:
   // the manifest skeleton is the durable record (skeletonToPropRig re-projects).
   modelRigs: Record<string, PropRig>;
+  /** Session draft of named face texture roles; the manifest is durable truth. */
+  modelTextureSlots: Record<string, ModelTextureSlot[]>;
+  /** Session draft of model-local emitted lights; manifest is durable truth. */
+  modelLights: Record<string, LightRig[]>;
   objects: WorldObject[];
   assetOverrides: Record<string, AssetOverride>;
   modelOverrides: Record<string, ModelOverride>;

@@ -26,7 +26,9 @@ pub const MAGIC: u32 = 0x50414d52; // "RMAP"
 /// as roads with their original 5 m fillet.
 /// v4 (req_2933/req_2934): path anchors gain signed storey elevation and the
 /// tail gains semantic path controls (TC Stops keyed by path id + distance).
-pub const VERSION: u32 = 4;
+/// v5: each flora lane gains a quantized per-cell stroke density channel.
+/// Older maps migrate occupied flora to full density, preserving their output.
+pub const VERSION: u32 = 5;
 
 /// Floats per tile-binding row (engine.zig BINDING_FLOATS — kept in sync by
 /// the loadMap/saveMap call sites passing engine-owned buffers).
@@ -70,6 +72,23 @@ fn rleWriteCells(sink: *Sink, cells: []const i16) void {
         while (i + run < cells.len and cells[i + run] == v and run < 65535) run += 1;
         sink.put(u16, @intCast(run));
         sink.put(i16, v);
+        run_count += 1;
+        i += run;
+    }
+    if (!sink.overflow) std.mem.writeInt(u32, sink.buf[count_at..][0..4], run_count, .little);
+}
+
+fn rleWriteBytes(sink: *Sink, cells: []const u8) void {
+    var i: usize = 0;
+    var run_count: u32 = 0;
+    const count_at = sink.n;
+    sink.put(u32, 0);
+    while (i < cells.len) {
+        const value = cells[i];
+        var run: usize = 1;
+        while (i + run < cells.len and cells[i + run] == value and run < 65535) run += 1;
+        sink.put(u16, @intCast(run));
+        sink.put(u8, value);
         run_count += 1;
         i += run;
     }
@@ -154,6 +173,23 @@ fn rleReadCells(src: *Source, cells: []i16) void {
     if (i != cells.len) src.bad = true;
 }
 
+fn rleReadBytes(src: *Source, cells: []u8) void {
+    const runs = src.get(u32);
+    var i: usize = 0;
+    var r: u32 = 0;
+    while (r < runs) : (r += 1) {
+        const run = src.get(u16);
+        const value = src.get(u8);
+        if (src.bad) return;
+        var k: u16 = 0;
+        while (k < run and i < cells.len) : (k += 1) {
+            cells[i] = value;
+            i += 1;
+        }
+    }
+    if (i != cells.len) src.bad = true;
+}
+
 fn rleReadQuantized(src: *Source, samples: []f32, scratch: []i16) void {
     rleReadCells(src, scratch[0..samples.len]);
     if (src.bad) return;
@@ -189,8 +225,9 @@ var g_tile_scratch: [chunks.TILE_CELLS]i16 = undefined;
 /// Worst-case byte budget for the current painting (every run length 1).
 pub fn saveSizeUpperBound() usize {
     const per_cell_channel = 8 + chunks.TILE_CELLS * 4;
+    const per_density_channel = 8 + chunks.TILE_CELLS * 3;
     const per_sample_channel = 8 + chunks.SAMPLE_CELLS * 4;
-    const per_chunk = 8 + per_cell_channel * 6 + per_sample_channel * 2;
+    const per_chunk = 8 + per_cell_channel * 6 + per_density_channel * chunks.FLORA_LAYER_COUNT + per_sample_channel * 2;
     const path_bytes = 16 + transport.MAX_PATHS * (32 + transport.MAX_POINTS_PER_PATH * 12);
     const control_bytes = 8 + transport.MAX_CONTROLS * 16;
     const binding_bytes = 8 + 256 * BINDING_FLOATS * 4;
@@ -216,6 +253,7 @@ fn writePainting(sink: *Sink, under: *const std.AutoHashMapUnmanaged(u64, [2]i16
         rleWriteCells(sink, g_tile_scratch[0..]);
         rleWriteCells(sink, chunk.zones[0..]);
         for (chunk.flora) |lane| rleWriteCells(sink, lane[0..]);
+        for (chunk.flora_density) |lane| rleWriteBytes(sink, lane[0..]);
         rleWriteQuantized(sink, chunk.height[0..], g_cell_scratch[0..]);
         rleWriteQuantized(sink, chunk.water[0..], g_cell_scratch[0..]);
     }
@@ -303,6 +341,15 @@ pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_cou
         if (version >= 2) rleReadCells(&src, chunk.materials[0..]);
         rleReadCells(&src, chunk.zones[0..]);
         for (&chunk.flora) |*lane| rleReadCells(&src, lane[0..]);
+        if (version >= 5) {
+            for (&chunk.flora_density) |*lane| rleReadBytes(&src, lane[0..]);
+        } else {
+            for (chunk.flora, 0..) |lane, lane_index| {
+                for (lane, 0..) |kind, cell_index| {
+                    chunk.flora_density[lane_index][cell_index] = if (kind == chunks.EMPTY_CELL) 0 else chunks.FLORA_DENSITY_FULL;
+                }
+            }
+        }
         rleReadQuantized(&src, chunk.height[0..], g_cell_scratch[0..]);
         rleReadQuantized(&src, chunk.water[0..], g_cell_scratch[0..]);
         if (src.bad) return false;
@@ -391,6 +438,7 @@ test "save/load round-trips every channel and road plus rail recipes" {
     chunk.materials[7] = 1;
     chunk.zones[9] = 1;
     chunk.flora[1][11] = 5;
+    chunk.flora_density[1][11] = 96;
     chunk.height[100] = 4.25;
     chunk.water[100] = 4.25;
 
@@ -424,6 +472,7 @@ test "save/load round-trips every channel and road plus rail recipes" {
     try std.testing.expectEqual(@as(i16, chunks.EMPTY_CELL), back.materials[8]);
     try std.testing.expectEqual(@as(i16, 1), back.zones[9]);
     try std.testing.expectEqual(@as(i16, 5), back.flora[1][11]);
+    try std.testing.expectEqual(@as(u8, 96), back.flora_density[1][11]);
     try std.testing.expectApproxEqAbs(@as(f32, 4.25), back.height[100], 0.005);
     try std.testing.expectApproxEqAbs(@as(f32, 4.25), back.water[100], 0.005);
     try std.testing.expect(back.dirty.any());
@@ -445,6 +494,40 @@ test "save/load round-trips every channel and road plus rail recipes" {
     var controls: [transport.MAX_CONTROLS]transport.Control = undefined;
     try std.testing.expectEqual(@as(usize, 1), transport.collectControls(controls[0..]));
     try std.testing.expectEqual(rail_id, controls[0].path_id);
+}
+
+test "v4 flora migrates occupied cells to full density" {
+    chunks.clearAll();
+    transport.clearAll();
+    defer chunks.clearAll();
+    defer transport.clearAll();
+
+    const chunk = chunks.growChunk(0, 0).?;
+    chunk.flora[0][17] = 2;
+    const bytes = try std.testing.allocator.alloc(u8, saveSizeUpperBound());
+    defer std.testing.allocator.free(bytes);
+    var sink = Sink{ .buf = bytes };
+    sink.put(u32, MAGIC);
+    sink.put(u32, 4);
+    sink.put(u32, 0); // bindings
+    sink.put(u32, 1); // chunks
+    sink.put(i32, chunk.cx);
+    sink.put(i32, chunk.cz);
+    rleWriteCells(&sink, chunk.tiles[0..]);
+    rleWriteCells(&sink, chunk.materials[0..]);
+    rleWriteCells(&sink, chunk.zones[0..]);
+    for (chunk.flora) |lane| rleWriteCells(&sink, lane[0..]);
+    rleWriteQuantized(&sink, chunk.height[0..], g_cell_scratch[0..]);
+    rleWriteQuantized(&sink, chunk.water[0..], g_cell_scratch[0..]);
+    sink.put(u32, 0); // paths
+    sink.put(u32, 0); // controls
+
+    var bindings: [8][BINDING_FLOATS]f32 = undefined;
+    var binding_count: usize = 0;
+    try std.testing.expect(load(bytes[0..sink.n], bindings[0..], &binding_count));
+    const restored = chunks.chunkAt(0, 0).?;
+    try std.testing.expectEqual(chunks.FLORA_DENSITY_FULL, restored.flora_density[0][17]);
+    try std.testing.expectEqual(@as(u8, 0), restored.flora_density[0][18]);
 }
 
 test "v4 round-trips signed storey elevations and stable path identity" {

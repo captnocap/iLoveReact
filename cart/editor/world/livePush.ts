@@ -10,7 +10,7 @@
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, type ResidentMesh, type MeshRef } from './meshProps';
-import { isAuthoredPiece, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredPieceFrom, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData, groundRebase } from './authoredMesh';
 import { exists, readFile, readFileBase64, stat } from '../../../runtime/hooks/fs';
 import { base64ToBytes } from '../../../runtime/workspace';
@@ -22,6 +22,10 @@ import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
 import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
+import { encodeLiveLights, normalizeModelLights, placeModelLight, type WorldLight } from '../model/modelLights';
+import type { AuthoredFloraSpecies } from './floraSpecies';
+import type { WorldFloraPatch } from './surfaceFlora';
+import { builtinSurfaceFloraResidentMeshes, customFloraResidentAdapters, surfaceFloraMeshRefs } from './surfaceFlora';
 
 const g: any = globalThis;
 
@@ -132,12 +136,30 @@ function residentMeshFor(
 /** Push the placed-piece world onto a mounted loader node: box instances, face
  *  skins, and authored mesh-prop refs. No-ops (loudly, when pieces exist) until
  *  the node id and the doors are live. */
-export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): void {
+export function pushLiveWorld(
+  nodeId: number,
+  pieces: readonly PlacedPiece[],
+  authoredPieces?: readonly AuthoredBuildPiece[],
+  worldFlora: readonly WorldFloraPatch[] = [],
+  floraSpecies: readonly AuthoredFloraSpecies[] = [],
+): boolean {
   if (!nodeId || typeof g.__compiled_world_set_live_pieces !== 'function') {
     if (pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
-    return;
+    return false;
   }
   g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(pieces));
+  if (typeof g.__compiled_world_set_live_lights === 'function') {
+    const lights: WorldLight[] = [];
+    for (const piece of pieces) {
+      const authored = authoredPieceFrom(authoredPieces, piece.pieceId);
+      if (!authored) continue;
+      const pkg = modelPackageById(authored.pkgId);
+      for (const light of normalizeModelLights(pkg?.lights)) {
+        lights.push(placeModelLight(light, piece));
+      }
+    }
+    g.__compiled_world_set_live_lights(nodeId, encodeLiveLights(lights));
+  }
   // Real textures (req_2575 Stage B): faces wearing an assigned material push
   // their WGSL shader once, then a skin box per face so the loader samples it
   // over the flat live box. Unskinned faces stay flat. Doors gated behind their
@@ -164,6 +186,7 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
     // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
     // world-space meshes, so the ref is identity.
     refs.push(...liveFacadeRefs());
+    refs.push(...surfaceFloraMeshRefs(pieces, worldFlora, floraSpecies));
     // SPINPROP req_3128: the v2 door carries per-placement spin. Presence-gated —
     // a host binary that predates it still draws everything via v1 (spin dropped).
     if (typeof g.__compiled_world_set_live_mesh_props2 === 'function') {
@@ -173,16 +196,21 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
       g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
     }
   }
+  return true;
 }
 
 /** Keep the authored meshes RESIDENT so their placements can draw (req_2577).
  *  Returns false while the loader node / door isn't up yet — callers retry. */
-export function pushResidentMeshes(nodeId: number, authoredPieces: readonly AuthoredBuildPiece[]): boolean {
+export function pushResidentMeshes(
+  nodeId: number,
+  authoredPieces: readonly AuthoredBuildPiece[],
+  floraSpecies: readonly AuthoredFloraSpecies[] = [],
+): boolean {
   if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
   const meshes: ResidentMesh[] = [];
   let painted = 0;
   let skins = 0;
-  for (const ap of authoredPieces) {
+  for (const ap of [...authoredPieces, ...customFloraResidentAdapters(floraSpecies)]) {
     const pkg = modelPackageById(ap.pkgId);
     const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
     const currentGeometry = authoredMeshData(ap.modelId, ap.pkgId);
@@ -234,6 +262,7 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
       }
     }
   }
+  meshes.push(...builtinSurfaceFloraResidentMeshes());
   meshes.push(...liveFacadeResidentMeshes()); // graffiti facade quads (req_3057)
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
   console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);

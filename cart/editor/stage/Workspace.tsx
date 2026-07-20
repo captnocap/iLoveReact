@@ -6,6 +6,7 @@ import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
+import type { PieceSelectionIntent } from '../world/selection';
 
 export default function Workspace(props: {
   state: EditorState;
@@ -32,7 +33,7 @@ export default function Workspace(props: {
   /** World-piece model callbacks (req_2563 Phase 1) — routed down to WorldEditorSurface. */
   onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onMovePiece: (id: string, destination: PlacedPiece) => void;
-  onSelectPiece: (id: string | null, additive: boolean) => void;
+  onSelectPiece: (id: string | null, intent: PieceSelectionIntent) => void;
   onPieceContext: (id: string, x: number, y: number, role: string | null) => void;
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;

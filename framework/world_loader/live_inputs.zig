@@ -8,6 +8,7 @@ const constructor = @import("../world/constructor.zig");
 const game_physics = @import("../game/physics.zig");
 const instance_collider_policy = @import("../world/instance_collider_policy.zig");
 const live_mesh_doors = @import("../world/live_mesh_doors.zig");
+const live_lights = @import("live_lights.zig");
 const config = @import("config.zig");
 const loader_state = @import("state.zig");
 const instances = @import("instances.zig");
@@ -182,6 +183,46 @@ pub fn clearLivePieces(node_id: u32) void {
     p.rows = &.{};
     p.count = 0;
     p.gen +%= 1;
+}
+
+// ── authored point/spot lights (LIGHTRIG) ───────────────────────────────────
+// A fixed table is deliberate: light rigs are small package metadata, and the
+// editor may duplicate many lit props in one stroke. Ingress therefore copies
+// into a bounded allocation-free slot rather than growing process-global state.
+pub const PendingLiveLights = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    lights: [live_lights.MAX_LIGHTS]live_lights.Light = undefined,
+    count: usize = 0,
+};
+var g_pending_live_lights: [MAX_EMBEDDED_LOADERS]PendingLiveLights = [_]PendingLiveLights{.{}} ** MAX_EMBEDDED_LOADERS;
+
+pub fn pendingLiveLightsFor(node_id: u32) ?*PendingLiveLights {
+    for (&g_pending_live_lights) |*pending| {
+        if (pending.set and pending.node_id == node_id) return pending;
+    }
+    return null;
+}
+
+pub fn setLiveLights(node_id: u32, bytes: []const u8) void {
+    var slot: ?*PendingLiveLights = pendingLiveLightsFor(node_id);
+    if (slot == null) {
+        for (&g_pending_live_lights) |*pending| {
+            if (!pending.set) {
+                slot = pending;
+                break;
+            }
+        }
+    }
+    const pending = slot orelse return;
+    pending.node_id = node_id;
+    pending.set = true;
+    pending.count = live_lights.decode(bytes, pending.lights[0..]);
+}
+
+pub fn clearLiveLights(node_id: u32) void {
+    const pending = pendingLiveLightsFor(node_id) orelse return;
+    pending.count = 0;
 }
 
 // ── live editor MESH-prop overlay (LIVEMESH req_1812) ───────────────────────

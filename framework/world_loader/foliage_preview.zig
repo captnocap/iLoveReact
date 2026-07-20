@@ -166,6 +166,7 @@ pub const FoliageChunkSnap = struct {
     cx: i32,
     cz: i32,
     flora: [map_chunks.FLORA_LAYER_COUNT][map_chunks.TILE_CELLS]i16,
+    flora_density: [map_chunks.FLORA_LAYER_COUNT][map_chunks.TILE_CELLS]u8,
     floor: [map_paint.FLOOR_CELLS]f32,
 };
 
@@ -311,6 +312,7 @@ pub fn snapshotPaintedChunks(runtime: anytype) bool {
         dst.cx = chunk.cx;
         dst.cz = chunk.cz;
         dst.flora = chunk.flora;
+        dst.flora_density = chunk.flora_density;
         if (paintSlotFloorFor(runtime, chunk.cx, chunk.cz)) |floor| {
             @memcpy(dst.floor[0..], floor);
         } else {
@@ -501,7 +503,8 @@ pub fn buildFoliageRows(runtime: anytype, job: FoliageJob) FoliageResult {
                 while (lane < map_chunks.FLORA_LAYER_COUNT) : (lane += 1) {
                     const kind = chunk_snap.flora[lane][idx];
                     if (kind < 0 or kind >= @as(i16, @intCast(map_paint.MAX_PALETTE))) continue;
-                    const spec = job.specs[@intCast(kind)] orelse continue;
+                    const base_spec = job.specs[@intCast(kind)] orelse continue;
+                    const spec = base_spec.atDensity(chunk_snap.flora_density[lane][idx]) orelse continue;
                     const recipe = foliage.specFromWire(spec.spec) orelse continue;
                     const wx = min_x + @as(f32, @floatFromInt(lx)) + 0.5;
                     const wz = min_z + @as(f32, @floatFromInt(lz)) + 0.5;

@@ -20,6 +20,8 @@ import {
 import { validFacade, type Facade } from '../world/facades';
 import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
+import { validWorldPrefab, type WorldPrefab } from '../world/prefabs';
+import { SURFACE_FLORA_TUNING, type SurfaceFloraPatch, type WorldFloraPatch } from '../world/surfaceFlora';
 import {
   LEGACY_WORLD_FILE,
   finishLegacyMapImport,
@@ -29,12 +31,16 @@ import {
 } from './mapDocuments';
 
 export type WorldSave = {
-  version: 2;
+  version: 4;
   /** Must equal the containing directory stem. */
   document: string;
   /** EditorState.seq at save time — restored so minted ids never collide. */
   seq: number;
   pieces: PlacedPiece[];
+  /** Package-backed custom flora painted on terrain. */
+  worldFlora: WorldFloraPatch[];
+  /** Named compositions; stamping decomposes them back into `pieces`. */
+  prefabs: WorldPrefab[];
   /** Semantic map objects/markers (triggers, mission points, etc.). */
   objects: WorldObject[];
   /** Zone definitions; painted zone cells live in painting.rmap. */
@@ -126,6 +132,10 @@ function validPiece(value: unknown): value is PlacedPiece {
     }
   }
   if (piece.spinDegPerSec !== undefined && !finite(piece.spinDegPerSec)) return false;
+  if (piece.surfaceFlora !== undefined) {
+    if (!Array.isArray(piece.surfaceFlora) || piece.surfaceFlora.length > SURFACE_FLORA_TUNING.maxPatchesPerPiece) return false;
+    if (!piece.surfaceFlora.every(validSurfaceFloraPatch)) return false;
+  }
   if (piece.stickers !== undefined) {
     if (!Array.isArray(piece.stickers)) return false;
     for (const s of piece.stickers) {
@@ -145,6 +155,32 @@ function validPiece(value: unknown): value is PlacedPiece {
     if (!Number.isInteger((piece.z - PIECE_MODULE_METERS / 2) / PIECE_MODULE_METERS)) return false;
   }
   return true;
+}
+
+function validDensity(value: unknown): value is number {
+  return finite(value) && value >= 0 && value <= 1;
+}
+
+function validSurfaceFloraPatch(value: unknown): value is SurfaceFloraPatch {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string'
+    && typeof value.speciesId === 'string'
+    && typeof value.role === 'string'
+    && finite(value.triangle) && Number.isInteger(value.triangle) && value.triangle >= 0
+    && finite(value.lx) && finite(value.ly) && finite(value.lz)
+    && validDensity(value.density)
+    && finite(value.radiusM) && value.radiusM > 0
+    && finite(value.seed) && Number.isInteger(value.seed) && value.seed >= 0;
+}
+
+function validWorldFloraPatch(value: unknown): value is WorldFloraPatch {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string'
+    && typeof value.speciesId === 'string'
+    && finite(value.x) && finite(value.y) && finite(value.z)
+    && validDensity(value.density)
+    && finite(value.radiusM) && value.radiusM > 0
+    && finite(value.seed) && Number.isInteger(value.seed) && value.seed >= 0;
 }
 
 function validZone(value: unknown): value is MapZoneDef {
@@ -187,6 +223,22 @@ function validateUniqueGeneratedSiteIds(pieces: readonly PlacedPiece[]): void {
   }
 }
 
+function validatePrefabPayloads(prefabs: readonly WorldPrefab[]): void {
+  const ids = new Set<string>();
+  for (const prefab of prefabs) {
+    if (ids.has(prefab.id)) throw new Error(`prefab '${prefab.id}' is duplicated`);
+    ids.add(prefab.id);
+    for (let index = 0; index < prefab.pieces.length; index += 1) {
+      const source = prefab.pieces[index]! as WorldPrefab['pieces'][number] & { generatedSite?: unknown };
+      if (source.generatedSite !== undefined) throw new Error(`prefabs[${prefab.id}].pieces[${index}] carries generated-site provenance`);
+      const { floorOffset, ...candidate } = source;
+      if (!validPiece({ ...candidate, id: `prefab-check-${index}`, floor: floorOffset })) {
+        throw new Error(`prefabs[${prefab.id}].pieces[${index}] is malformed`);
+      }
+    }
+  }
+}
+
 /** Strict parser used by boot and Open. v1 had no document id and is accepted
  * only through the one-time fixed-file migration path. */
 export function parseWorldSaveText(text: string, expectedStem: string, options: ParseOptions = {}): WorldSave {
@@ -199,19 +251,29 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     objects?: unknown;
     zones?: unknown;
     facades?: unknown;
+    prefabs?: unknown;
+    worldFlora?: unknown;
   };
   const legacy = raw.version === 1 && options.allowLegacyV1 === true;
-  if (raw.version !== 2 && !legacy) throw new Error(`unrecognized world save version ${raw.version}`);
+  const priorV2 = raw.version === 2;
+  const priorV3 = raw.version === 3;
+  if (raw.version !== 4 && !priorV3 && !priorV2 && !legacy) throw new Error(`unrecognized world save version ${raw.version}`);
   if (!legacy && raw.document !== expected) {
     throw new Error(`document id '${String(raw.document)}' does not match directory '${expected}'`);
   }
   const pieces = validatedArray(raw.pieces, 'pieces', validPiece);
   validateUniqueGeneratedSiteIds(pieces);
+  const prefabs = validatedArray(raw.prefabs, 'prefabs', validWorldPrefab, true);
+  validatePrefabPayloads(prefabs);
+  const worldFlora = validatedArray(raw.worldFlora, 'worldFlora', validWorldFloraPatch, true);
+  if (worldFlora.length > SURFACE_FLORA_TUNING.maxWorldPatches) throw new Error('worldFlora exceeds its bounded recipe budget');
   return {
-    version: 2,
+    version: 4,
     document: expected,
     seq: typeof raw.seq === 'number' && Number.isFinite(raw.seq) && raw.seq > 0 ? Math.trunc(raw.seq) : 1,
     pieces,
+    worldFlora,
+    prefabs,
     objects: validatedArray(raw.objects, 'objects', validObject, true),
     zones: validatedArray(raw.zones, 'zones', validZone, true),
     facades: validatedArray(raw.facades ?? [], 'facades', validFacade, true),
@@ -219,7 +281,7 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
 }
 
 export function emptyWorldSave(stem: string, seq = 1): WorldSave {
-  return { version: 2, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], objects: [], zones: [], facades: [] };
+  return { version: 4, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], worldFlora: [], prefabs: [], objects: [], zones: [], facades: [] };
 }
 
 /** Read one named document without changing any active state. Open uses the
@@ -276,12 +338,16 @@ function snapshot(
   zones: readonly MapZoneDef[],
   seq: number,
   facades: readonly Facade[],
+  prefabs: readonly WorldPrefab[],
+  worldFlora: readonly WorldFloraPatch[],
 ): WorldSave {
   return {
-    version: 2,
+    version: 4,
     document: sanitizeMapDocumentName(stem),
     seq: Math.max(1, Math.trunc(seq)),
     pieces: pieces as PlacedPiece[],
+    worldFlora: worldFlora as WorldFloraPatch[],
+    prefabs: prefabs as WorldPrefab[],
     objects: objects as WorldObject[],
     zones: zones as MapZoneDef[],
     facades: facades as Facade[],
@@ -309,12 +375,14 @@ export function scheduleWorldSave(
   seq: number,
   options: { enabled?: boolean; delayMs?: number } = {},
   facades: readonly Facade[] = [],
+  prefabs: readonly WorldPrefab[] = [],
+  worldFlora: readonly WorldFloraPatch[] = [],
 ): void {
   if (options.enabled === false) {
     cancelWorldSave();
     return;
   }
-  queued = snapshot(stem, pieces, objects, zones, seq, facades);
+  queued = snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora);
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(writeQueued, Math.max(0, options.delayMs ?? 400));
 }
@@ -336,7 +404,9 @@ export function flushWorldSave(
   zones: readonly MapZoneDef[],
   seq: number,
   facades: readonly Facade[] = [],
+  prefabs: readonly WorldPrefab[] = [],
+  worldFlora: readonly WorldFloraPatch[] = [],
 ): boolean {
   cancelWorldSave();
-  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades));
+  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora));
 }

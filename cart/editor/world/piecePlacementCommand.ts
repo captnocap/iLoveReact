@@ -7,12 +7,13 @@
 // filesystem dependency. A command authority can therefore run it against the
 // editor adapter or a headless/in-memory adapter through the same entrance.
 import {
-  RUN_PLACEMENT_CAP,
   placementSlotKey,
+  WORLD_PIECE_AUTHORING_TUNING,
   type MaterialRef,
   type PlacedPiece,
   type PlacementGesture,
 } from './pieces';
+import { SURFACE_FLORA_TUNING } from './surfaceFlora';
 
 /** Stable identity of the authored action. `place-piece` elsewhere is the
  * report-only tool choice; this is the mutation that commits resolved pieces. */
@@ -21,7 +22,7 @@ export const WORLD_PIECES_PLACE_COMMAND_ID = 'world.pieces.place';
 /** The current UI supports storeys Ground..128. The command repeats the bound
  * at its trust boundary so a remote/headless caller cannot bypass the UI clamp. */
 export const WORLD_PIECE_PLACEMENT_LIMITS = Object.freeze({
-  maxBatchSize: RUN_PLACEMENT_CAP,
+  maxBatchSize: WORLD_PIECE_AUTHORING_TUNING.maxCompositionPieces,
   maxFloor: 128,
 });
 
@@ -129,6 +130,8 @@ function clonePiece<T extends PiecePlacementCandidate | PlacedPiece>(piece: T): 
     ...piece,
     ...(slots ? { slots } : {}),
     ...(piece.overrides ? { overrides: { ...piece.overrides } } : {}),
+    ...(piece.stickers ? { stickers: piece.stickers.map((sticker) => ({ ...sticker })) } : {}),
+    ...(piece.surfaceFlora ? { surfaceFlora: piece.surfaceFlora.map((patch) => ({ ...patch })) } : {}),
   };
 }
 
@@ -176,6 +179,34 @@ function validateCandidateStructure(candidate: PiecePlacementCandidate, index: n
     for (const [path, value] of Object.entries(candidate.overrides)) {
       if (!path || (typeof value !== 'boolean' && !finite(value))) {
         reject('invalid-candidate', `candidate ${index} override '${path}' is malformed`, index);
+      }
+    }
+  }
+  if (candidate.spinDegPerSec !== undefined && !finite(candidate.spinDegPerSec)) {
+    reject('invalid-candidate', `candidate ${index} spin rate must be finite`, index);
+  }
+  if (candidate.stickers !== undefined) {
+    if (!Array.isArray(candidate.stickers)) reject('invalid-candidate', `candidate ${index} stickers must be an array`, index);
+    for (const sticker of candidate.stickers) {
+      if (!sticker || typeof sticker !== 'object'
+        || typeof sticker.id !== 'string' || typeof sticker.stickerId !== 'string' || typeof sticker.role !== 'string'
+        || ![sticker.lx, sticker.ly, sticker.lz, sticker.nx, sticker.ny, sticker.nz, sticker.scale, sticker.rot].every(finite)
+        || sticker.scale <= 0 || !Number.isInteger(sticker.rot)) {
+        reject('invalid-candidate', `candidate ${index} carries a malformed sticker`, index);
+      }
+    }
+  }
+  if (candidate.surfaceFlora !== undefined) {
+    if (!Array.isArray(candidate.surfaceFlora) || candidate.surfaceFlora.length > SURFACE_FLORA_TUNING.maxPatchesPerPiece) {
+      reject('invalid-candidate', `candidate ${index} surface flora exceeds its bounded recipe budget`, index);
+    }
+    for (const patch of candidate.surfaceFlora) {
+      if (!patch || typeof patch !== 'object'
+        || typeof patch.id !== 'string' || typeof patch.speciesId !== 'string' || typeof patch.role !== 'string'
+        || !Number.isInteger(patch.triangle) || patch.triangle < 0
+        || ![patch.lx, patch.ly, patch.lz, patch.density, patch.radiusM, patch.seed].every(finite)
+        || patch.density < 0 || patch.density > 1 || patch.radiusM <= 0 || !Number.isInteger(patch.seed) || patch.seed < 0) {
+        reject('invalid-candidate', `candidate ${index} carries a malformed surface flora recipe`, index);
       }
     }
   }

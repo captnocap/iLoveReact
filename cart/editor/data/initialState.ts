@@ -9,6 +9,7 @@ import { activeMapDocumentStem, mapDocumentName } from './mapDocuments';
 import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
+import { authoredFloraIdFor, type AuthoredFloraSpecies } from '../world/floraSpecies';
 
 // Authored placeables: the ON-DISK MANIFEST is the source of truth (USER RULING
 // req_2718 — the package declares "I am a prop / a wall piece"); localstore is
@@ -45,18 +46,34 @@ export function bootAuthoredPieces(): AuthoredBuildPiece[] {
     if (!pkg.placeable) continue;
     // Characters (player/NPC exports, req_2771) are compile-bake material, not
     // build-bar placeables — they never join the palette.
-    if (pkg.placeable.as === 'character') continue;
+    if (pkg.placeable.as === 'character' || pkg.placeable.as === 'flora') continue;
     const kind = pkg.placeable.as === 'prop' ? ('prop' as const) : pkg.placeable.kind;
     const modelId = authoredModelIdForPackage(pkg.id);
     fromDisk.push({
       id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
       ...(pkg.placeable.as === 'build-piece' && pkg.placeable.edit ? { edit: pkg.placeable.edit } : {}),
       ...(pkg.placeable.as === 'prop' ? { propRole: pkg.placeable.role ?? 'scenery' } : {}),
+      ...(pkg.textureSlots?.length ? { textureSlots: pkg.textureSlots } : {}),
     });
   }
   const seen = new Set(fromDisk.map((p) => p.id));
   const legacy = loadAuthoredPieces().filter((p) => !seen.has(p.id) && MODEL_PACKAGES.some((m) => m.id === p.pkgId));
   return [...fromDisk, ...legacy];
+}
+
+export function bootAuthoredFloraSpecies(): AuthoredFloraSpecies[] {
+  return MODEL_PACKAGES.flatMap((pkg) => {
+    if (pkg.placeable?.as !== 'flora') return [];
+    const modelId = authoredModelIdForPackage(pkg.id);
+    return [{
+      id: authoredFloraIdFor(modelId),
+      modelId,
+      pkgId: pkg.id,
+      label: pkg.name,
+      lane: pkg.placeable.lane,
+      hex: pkg.color,
+    }];
+  });
 }
 
 export const INITIAL_OBJECTS: WorldObject[] = [
@@ -141,6 +158,7 @@ export function initialState(): EditorState {
     worldUndo: [],
     worldRedo: [],
     worldPieces: [],
+    worldPrefabs: [],
     selectedPieceId: null,
     // Default armed piece = a concrete floor (the placeholder Place piece the
     // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
@@ -149,7 +167,11 @@ export function initialState(): EditorState {
     armedStamp: null,
     recentMaterialIds: [],
     authoredBuildPieces: bootAuthoredPieces(),
+    authoredFloraSpecies: bootAuthoredFloraSpecies(),
+    worldFlora: [],
     modelRigs: {},
+    modelTextureSlots: {},
+    modelLights: {},
     objects: INITIAL_OBJECTS,
     assetOverrides: {},
     modelOverrides: {},

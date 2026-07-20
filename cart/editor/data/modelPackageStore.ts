@@ -143,11 +143,13 @@ export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
   const dir = claimPackageDir(pkg);
   if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
   const manifest = packageToManifest(pkg);
-  if (manifest.placeable === undefined || manifest.skeleton === undefined) {
+  if (manifest.placeable === undefined || manifest.skeleton === undefined || manifest.textureSlots === undefined || manifest.lights === undefined) {
     const prior = readManifest(pkg.kind, pkg.id);
     if (prior) {
       manifest.placeable = manifest.placeable ?? prior.placeable;
       manifest.skeleton = manifest.skeleton ?? prior.skeleton;
+      manifest.textureSlots = manifest.textureSlots ?? prior.textureSlots;
+      manifest.lights = manifest.lights ?? prior.lights;
     }
   }
   const wrote = writeFile(`${dir}/manifest.json`, serializeManifest(manifest));
@@ -312,7 +314,7 @@ export function settleRenamedPackageDir(kind: ModelPackageKind, id: string): boo
 export function updateManifestPlaceable(
   kind: ModelPackageKind,
   id: string,
-  patch: Partial<Pick<ModelManifest, 'placeable' | 'skeleton'>>,
+  patch: Partial<Pick<ModelManifest, 'placeable' | 'skeleton' | 'textureSlots' | 'lights'>>,
 ): boolean {
   return patchManifest(kind, id, patch);
 }

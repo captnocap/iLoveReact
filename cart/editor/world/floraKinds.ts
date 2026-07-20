@@ -94,6 +94,55 @@ export const FLORA_KIND_DEFINITIONS: readonly FloraKindDefinition[] = [
   { kind: 'wildWeedBush', label: 'Wild Weed Bush', color: '#39723b', lane: 'bush', population: { spec: FLORA_SPEC.wildWeedBush, count: 0, chance: 1 } },
 ];
 
+export const FLORA_DENSITY_TUNING = {
+  min: 0.05,
+  max: 1,
+  step: 0.05,
+  default: 0.5,
+  wireMax: 255,
+} as const;
+
+/**
+ * The paint tray is a species picker, not a density-preset picker. Persisted
+ * kind indices above remain append-only for old RMAPs, while this authoring
+ * view deliberately exposes one representative for each actual foliage
+ * recipe. Population strength belongs to the stroke's density value.
+ */
+const FLORA_BRUSH_KINDS: readonly FloraKind[] = [
+  'grassLush',
+  'grassTall',
+  'grassReeds',
+  'grassFlowers',
+  'palmDense',
+  'pine',
+  'maple',
+  'oak',
+  'cedar',
+  'spruce',
+  'bush',
+  'bushLow',
+  'bushDense',
+  'hydrangeaMophead',
+  'hydrangeaPanicle',
+  'leafyThicket',
+  'wildWeedBush',
+];
+
+const FLORA_BRUSH_LABELS: Readonly<Partial<Record<FloraKind, string>>> = {
+  grassLush: 'Grass',
+  palmDense: 'Palm Tree',
+  bushDense: 'Tall Bush',
+};
+
+export type FloraBrushDefinition = FloraKindDefinition & { kindIndex: number };
+
+export const FLORA_BRUSH_DEFINITIONS: readonly FloraBrushDefinition[] = FLORA_BRUSH_KINDS.map((kind) => {
+  const kindIndex = FLORA_KIND_DEFINITIONS.findIndex((definition) => definition.kind === kind);
+  if (kindIndex < 0) throw new Error(`missing flora brush kind '${kind}'`);
+  const definition = FLORA_KIND_DEFINITIONS[kindIndex]!;
+  return { ...definition, label: FLORA_BRUSH_LABELS[kind] ?? definition.label, kindIndex };
+});
+
 /** The zone authoring swatch palette (zoneData.ts ZONE_COLORS clone). */
 export const ZONE_COLORS = ['#a78bfa', '#f472b6', '#fb923c', '#34d399', '#60a5fa', '#facc15', '#f87171', '#22d3ee'];
 

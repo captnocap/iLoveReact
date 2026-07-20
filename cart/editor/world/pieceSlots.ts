@@ -11,6 +11,8 @@ import { catalogRowFor } from './buildCatalog';
 import type { BuildKind } from './buildCatalog';
 import type { FaceSlot } from './pieceShapes';
 import type { MaterialRef, PlacedPiece } from './pieces';
+import { authoredPieceFor } from './authoredRegistry';
+import { modelPackageById } from '../data/content';
 
 // Role sets mirror what the piece's decomposition can actually WEAR (pieceShapes
 // tags every box with a FaceSlot; pieceSkins maps role → box). Plates carry the
@@ -36,9 +38,20 @@ const SLOTS_BY_KIND: Record<BuildKind, string[]> = {
 /** The material-slot roles a piece exposes, from its catalog kind (empty for a
  *  non-catalog id). (The Phase-4 "primary slot tints the whole live box" rule
  *  is gone — req_2886: overlay colours resolve per-box via slotRefForBox.) */
-export function pieceSlotRoles(pieceId: string): string[] {
+export type PieceSlotRole = { id: string; label: string };
+
+/** Stable storage ids plus their author-facing labels. Catalog pieces use the
+ * semantic id as their label; authored models may rename labels without moving
+ * any saved per-placement `piece.slots[id]` binding. */
+export function pieceSlotEntries(pieceId: string): PieceSlotRole[] {
+  const authored = authoredPieceFor(pieceId);
+  if (authored) return (modelPackageById(authored.pkgId)?.textureSlots ?? authored.textureSlots ?? []).map((slot) => ({ ...slot }));
   const row = catalogRowFor(pieceId);
-  return row ? SLOTS_BY_KIND[row.kind] ?? ['surface'] : [];
+  return row ? (SLOTS_BY_KIND[row.kind] ?? ['surface']).map((id) => ({ id, label: id })) : [];
+}
+
+export function pieceSlotRoles(pieceId: string): string[] {
+  return pieceSlotEntries(pieceId).map((slot) => slot.id);
 }
 
 /** The material governing a decomposition box: the piece's slot for that box's
@@ -76,7 +89,9 @@ const DEG = Math.PI / 180;
  *  (the same swap its frontSlot/backSlot carries), so no extra swap here.
  *  Quarter-turn placements only (the piece grammar's rotation step); a free-yaw
  *  piece would mis-classify u/v, not crash. Null = the piece exposes no slots
- *  (non-catalog ids — authored/prop meshes) so there is nothing to paint. */
+ *  (a catalog piece with no roles, or an authored prop before face rigging) so
+ *  there is nothing to paint. Multi-role authored meshes use the explicit
+ *  right-click role menu because their current raycast is bounds-only. */
 export function faceRoleForHit(
   pieceId: string,
   yawDegrees: number,
@@ -84,6 +99,10 @@ export function faceRoleForHit(
 ): string | null {
   const roles = pieceSlotRoles(pieceId);
   if (roles.length === 0) return null;
+  // Authored meshes currently raycast by their placement bounds, not a triangle
+  // id. The right-click menu can name every rigged role, but a viewport stroke
+  // must not guess which polygon an AABB normal meant.
+  if (authoredPieceFor(pieceId)) return roles.length === 1 ? roles[0]! : null;
   if (roles.length === 1) return roles[0]!;
   const cos = Math.cos(yawDegrees * DEG);
   const sin = Math.sin(yawDegrees * DEG);

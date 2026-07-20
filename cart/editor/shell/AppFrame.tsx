@@ -41,11 +41,11 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
-import { pieceKindOf, PIECE_SPIN_RATE_DEG_PER_SEC } from '../world/pieces';
+import { pieceKindOf, PIECE_MODULE_METERS, PIECE_SPIN_RATE_DEG_PER_SEC } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
@@ -148,8 +148,12 @@ import {
   modelPartRecords,
 } from '../model/outlinerCommand';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
-import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
+import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
+import { normalizeModelLights } from '../model/modelLights';
+import { connectedPieceIds, pieceSelectionVolume, type PieceSelectionIntent } from '../world/selection';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
+import PrefabDialog from './PrefabDialog';
+import { mintWorldPrefabId, prefabFromPieces } from '../world/prefabs';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
 // bridge is useIFTTT's, whose events carry ctrlKey/shiftKey flags but NO `mods` object —
 // useModifiers' fallback modifiers never update off those events, which is what killed
@@ -205,7 +209,9 @@ import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
 import { buildCatalogIndex, validateBuildPlacement } from '../../../runtime/game/build';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
-import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
+import { FLORA_KIND_DEFINITIONS, type FloraLane } from '../world/floraKinds';
+import { authoredFloraIdFor, type AuthoredFloraSpecies } from '../world/floraSpecies';
+import { applyFloraPaintSamples, type FloraPaintSample, type WorldFloraBrush } from '../world/surfaceFlora';
 import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 
 const FACADE_PREVIEW_DETAILS = [128, FACADE_TEXELS_PER_METER, 512] as const;
@@ -342,6 +348,7 @@ export default function AppFrame() {
   const roleNamerRef = useRef(roleNamerSession);
   roleNamerRef.current = roleNamerSession;
   const [scaleByOpen, setScaleByOpen] = useState(false);
+  const [prefabCaptureOpen, setPrefabCaptureOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
   const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
@@ -457,6 +464,7 @@ export default function AppFrame() {
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
+    if (prefabCaptureOpen) return { id: 'prefab-capture', label: 'Create Prefab' };
     if (preferencesOpen) return { id: 'preferences', label: 'Preferences', closerCommandId: 'open-preferences' };
     if (hotUpdatePromptOpen) return { id: 'hot-update', label: 'Code Update' };
     if (unsavedDocumentName) return { id: 'unsaved-changes', label: 'Unsaved Changes' };
@@ -619,7 +627,7 @@ export default function AppFrame() {
             redo: [],
             worldPieces: [...plan.next.pieces],
             selectedPieceId: plan.next.selectedPieceId,
-            selectedPieceIds: plan.next.selectedPieceId ? [plan.next.selectedPieceId] : [],
+            selectedPieceIds: transaction.placed.map((piece) => piece.id),
             status: `${verb} ${what}${replaced && count > 1 ? ` (replaced ${replaced})` : ''}`,
           };
           const next = recordWorldEdit(
@@ -1209,8 +1217,8 @@ export default function AppFrame() {
     scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq, {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
-    }, state.worldFacades);
-  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.worldFacades, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+    }, state.worldFacades, state.worldPrefabs, state.worldFlora);
+  }, [state.activeMapStem, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // Facade quads follow the active map into every world view (req_3057) —
   // livePush reads this registry when it re-pushes resident meshes/refs.
@@ -1376,11 +1384,16 @@ export default function AppFrame() {
     if (!pkg) return false;
 
     const rigDraft = current.modelRigs[pkg.id];
+    const textureSlots = current.modelTextureSlots[pkg.id] ?? pkg.textureSlots ?? [];
+    const lights = normalizeModelLights(current.modelLights[pkg.id] ?? pkg.lights ?? []);
     const rigModelId = authoredModelIdForPackage(pkg.id);
     const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
-    const pkgToSave: ModelPackage = rigDraft && rigBounds
-      ? { ...pkg, skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) }
-      : pkg;
+    const pkgToSave: ModelPackage = {
+      ...pkg,
+      ...(rigDraft && rigBounds ? { skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) } : {}),
+      textureSlots,
+      lights,
+    };
     const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
     const result = materializeModelPackage(pkgToSave);
     const liveRows = current.modelParts[pkg.id] ?? [];
@@ -1394,7 +1407,10 @@ export default function AppFrame() {
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
     if (ok) {
       consumePartShrinkAuthorization(pkg.id);
-      registerSavedPackage(pkgToSave);
+      // Existing package rows must be replaced too: world/livePush resolves
+      // emitted lights and face rigs through MODEL_PACKAGES, so a successful
+      // Save has to become live truth immediately, not only after a restart.
+      upsertSavedPackage(pkgToSave);
       const depths = undoDepths(current);
       savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
     }
@@ -1424,7 +1440,7 @@ export default function AppFrame() {
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
     const current = stateRef.current;
-    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades);
+    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades, current.worldPrefabs, current.worldFlora);
     const mapOk = flushMapDocumentPainting(current.activeMapStem);
     const globalsOk = saveGlobalsNow(current.worldGlobals);
     const ok = worldOk && mapOk && globalsOk;
@@ -1562,7 +1578,7 @@ export default function AppFrame() {
 
     const outgoingStem = state.activeMapStem;
     const outgoingZones = state.mapPaint.zones;
-    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades)) {
+    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades, state.worldPrefabs, state.worldFlora)) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
       return;
     }
@@ -1839,6 +1855,17 @@ export default function AppFrame() {
       createNewMap('untitled');
       return;
     }
+    if (commandId === 'create-prefab') {
+      const current = stateRef.current;
+      const selected = current.selectedPieceIds.filter((id) => current.worldPieces.some((piece) => piece.id === id));
+      if (selected.length === 0) {
+        setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'select one or more world pieces before creating a prefab' }));
+      } else {
+        setPrefabCaptureOpen(true);
+        setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `name this ${selected.length}-piece prefab` }));
+      }
+      return;
+    }
     // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
     // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
     if (commandId.startsWith('mesh-paint-res-')) {
@@ -1946,11 +1973,24 @@ export default function AppFrame() {
       const doc = current.workspaceDocuments.find((d) => d.id === current.activeWorkspaceDocumentId);
       if (doc?.kind === 'world') {
         if (command.id === 'duplicate-selection') {
-          if (current.selectedPieceId) copyPiece(current.selectedPieceId);
+          if (current.selectedPieceIds.length > 1) duplicateSelectedPieces();
+          else if (current.selectedPieceId) copyPiece(current.selectedPieceId);
           else setState((prev) => ({ ...prev, status: 'select a placed piece to copy' }));
           return;
         }
         if (command.id === 'delete-selection' || command.id === WORLD_PIECE_DELETE_COMMAND_ID) {
+          if (current.selectedPieceIds.length > 1) {
+            const ids = new Set(current.selectedPieceIds);
+            setState((prev) => recordWorldEdit(prev, {
+              ...prev,
+              worldPieces: prev.worldPieces.filter((piece) => !ids.has(piece.id)),
+              selectedPieceId: null,
+              selectedPieceIds: [],
+              contextOpen: false,
+              status: `deleted ${ids.size} selected pieces`,
+            }, `delete ${ids.size} pieces`));
+            return;
+          }
           invokeApplicationCommand(WORLD_PIECE_DELETE_COMMAND_ID, {
             documentId: current.activeMapStem,
             pieceId: current.selectedPieceId ?? '',
@@ -1958,6 +1998,18 @@ export default function AppFrame() {
           return;
         }
         if (current.selectedPieceId) {
+          if (current.selectedPieceIds.length > 1) {
+            const ids = new Set(current.selectedPieceIds);
+            setState((prev) => recordWorldEdit(prev, {
+              ...prev,
+              worldPieces: prev.worldPieces.map((piece) => ids.has(piece.id)
+                ? { ...piece, yawDegrees: (piece.yawDegrees + 90) % 360 }
+                : piece),
+              contextOpen: false,
+              status: `rotated ${ids.size} selected pieces 90°`,
+            }, `rotate ${ids.size} pieces`));
+            return;
+          }
           invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
             documentId: current.activeMapStem,
             pieceId: current.selectedPieceId,
@@ -2050,7 +2102,7 @@ export default function AppFrame() {
       saveActiveModelNow('Saved');
       return;
     }
-    if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop')) {
+    if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop') || command.id.startsWith('export-flora-')) {
       // Export → Build Piece → <kind> (req_2583) / Export → Prop (req_2712):
       // register the OPEN model as a placeable and arm it. THE MANIFEST IS THE
       // RECORD (USER RULING req_2718): the export writes `placeable` (+ the
@@ -2058,12 +2110,15 @@ export default function AppFrame() {
       // and every boot re-derives the palette from that scan — localstore only
       // caches. The status ALWAYS reports — a silent no-op is what made this
       // feel dead before.
-      const propTarget = propExportTargetForCommand(command.id);
+      const floraLane: FloraLane | null = command.id.startsWith('export-flora-')
+        ? command.id.slice('export-flora-'.length) as FloraLane
+        : null;
+      const propTarget = floraLane ? null : propExportTargetForCommand(command.id);
       const exportTarget = propTarget
         ? null
         : buildPieceExportTarget(command.id.slice('export-build-piece-'.length));
       const kind: PlaceableKind | null = propTarget ? 'prop' : (exportTarget?.kind ?? null);
-      if (!kind) {
+      if (!kind && !floraLane) {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Unknown build-piece export target: ${command.id}` }));
         return;
       }
@@ -2125,13 +2180,17 @@ export default function AppFrame() {
       // Inspector's Rig section; else the stored skeleton re-projected) into the
       // exported skeleton — contact positions measured off the REAL mesh bounds,
       // never hand-typed. A build piece keeps whatever skeleton it already has.
-      const placeable: ModelPlaceable = kind === 'prop'
-        ? { as: 'prop', role: propTarget?.role ?? 'scenery' }
-        : { as: 'build-piece', kind, ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}) };
+      const placeable: ModelPlaceable = floraLane
+        ? { as: 'flora', lane: floraLane }
+        : kind === 'prop'
+          ? { as: 'prop', role: propTarget?.role ?? 'scenery' }
+          : { as: 'build-piece', kind: kind!, ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}) };
       const bounds = authoredMeshBounds(modelId, pkg.id);
       const rig = state.modelRigs[pkg.id] ?? (pkg.skeleton ? skeletonToPropRig(pkg.skeleton) : {});
       const skeleton = kind === 'prop' && bounds ? propRigToSkeleton(modelId, modelId, rig, bounds) : pkg.skeleton;
-      const pkgExported: ModelPackage = { ...pkg, placeable, skeleton };
+      const textureSlots = state.modelTextureSlots[pkg.id] ?? pkg.textureSlots ?? [];
+      const lights = normalizeModelLights(state.modelLights[pkg.id] ?? pkg.lights ?? []);
+      const pkgExported: ModelPackage = { ...pkg, placeable, skeleton, textureSlots, lights };
       // DISK TRUTH: write the declaration into the package. A never-saved model
       // materializes first (export implies save — the mesh blob must be on disk
       // for any other machine to render this placeable at all).
@@ -2142,15 +2201,50 @@ export default function AppFrame() {
         const res = materializeModelPackage(pkgExported);
         disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
       } else {
-        disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton })
+        disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton, textureSlots, lights })
           ? 'manifest updated'
           : 'MANIFEST WRITE FAILED — export is session-only';
       }
       upsertSavedPackage(pkgExported); // the live roster carries the declaration this session
+      if (floraLane) {
+        const species: AuthoredFloraSpecies = {
+          id: authoredFloraIdFor(modelId),
+          modelId,
+          pkgId: pkg.id,
+          label: pkg.name,
+          lane: floraLane,
+          hex: pkg.color,
+        };
+        const armedMapPaint = {
+          ...stateRef.current.mapPaint,
+          active: true,
+          channel: 'flora' as const,
+          mode: 'paint' as const,
+          floraSpeciesId: species.id,
+        };
+        const hostPaintPatch = applyMapPaintEffects(stateRef.current.mapPaint, armedMapPaint) ?? {};
+        setState((prev) => ({
+          ...prev,
+          openMenu: null,
+          actionMenu: 'Build',
+          authoredBuildPieces: prev.authoredBuildPieces.filter((entry) => entry.pkgId !== pkg.id),
+          authoredFloraSpecies: [...prev.authoredFloraSpecies.filter((entry) => entry.pkgId !== pkg.id), species],
+          modelDupes: prev.modelDupes.some((model) => model.id === pkg.id)
+            ? prev.modelDupes.map((model) => model.id === pkg.id ? pkgExported : model)
+            : firstMaterialize ? [...prev.modelDupes, pkgExported] : prev.modelDupes,
+          mapPaint: { ...armedMapPaint, ...hostPaintPatch },
+          status: vcount > 0
+            ? `Exported "${pkg.name}" as ${floraLane} flora (${vcount} verts) — ${disk}. Flora brush armed.`
+            : `Exported "${pkg.name}" as ${floraLane} flora, but its geometry is unreachable (0 verts). Save the model and retry.`,
+        }));
+        return;
+      }
+      if (!kind) return;
       const piece: AuthoredBuildPiece = {
         id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
         ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}),
         ...(propTarget ? { propRole: propTarget.role } : {}),
+        ...(textureSlots.length > 0 ? { textureSlots } : {}),
       };
       // A painted export contributes one palette tile per STORED painting, with
       // no extra mutable base duplicate. Arm the newest visible skin (or the
@@ -2165,6 +2259,7 @@ export default function AppFrame() {
         openMenu: null,
         actionMenu: 'Build',
         authoredBuildPieces: [...prev.authoredBuildPieces.filter((p) => p.id !== piece.id), piece],
+        authoredFloraSpecies: prev.authoredFloraSpecies.filter((entry) => entry.pkgId !== pkg.id),
         armedPieceId,
         armedYawDegrees: 0,
         // The gallery/tree memo keys off modelDupes: a first materialize joins it
@@ -2351,7 +2446,7 @@ export default function AppFrame() {
   // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
-  const WORLD_UNDO_KEYS = ['worldPieces', 'objects', 'authoredBuildPieces', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId'] as const;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId'] as const;
   const recordWorldEdit = (
     prev: EditorState,
     next: EditorState,
@@ -2481,21 +2576,79 @@ export default function AppFrame() {
     }, 'viewport');
   };
 
-  const selectPiece = (id: string | null, additive = false) => {
+  const selectPiece = (id: string | null, intent: PieceSelectionIntent = 'replace') => {
     setState((prev) => {
-      // Shift without a drag is the additive-selection gesture. Missing empty
-      // ground while holding it must not discard the set the author is building.
-      if (!id && additive) return prev;
+      // A modifier miss preserves the set being built; a plain miss clears it.
+      if (!id && intent !== 'replace') return prev;
+      if (!id) return {
+        ...prev,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        status: 'cleared world selection',
+      };
+      if (intent === 'toggle') {
+        const wasSelected = prev.selectedPieceIds.includes(id);
+        const selectedPieceIds = wasSelected
+          ? prev.selectedPieceIds.filter((selectedId) => selectedId !== id)
+          : [...prev.selectedPieceIds, id];
+        return {
+          ...prev,
+          selectedPieceId: wasSelected ? selectedPieceIds[selectedPieceIds.length - 1] ?? null : id,
+          selectedPieceIds,
+          status: `${wasSelected ? 'removed' : 'added'} ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id} · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`,
+        };
+      }
+      const selectedPieceIds = intent === 'connected' ? connectedPieceIds(prev.worldPieces, id) : [id];
       return {
         ...prev,
         selectedPieceId: id,
-        selectedPieceIds: id
-          ? (additive ? [...prev.selectedPieceIds.filter((selectedId) => selectedId !== id), id] : [id])
-          : [],
-        status: id
-          ? `${additive ? 'added' : 'selected'} ${prev.worldPieces.find((p) => p.id === id)?.pieceId ?? id}${additive ? ` · ${prev.selectedPieceIds.includes(id) ? prev.selectedPieceIds.length : prev.selectedPieceIds.length + 1} pieces` : ''}`
-          : 'cleared world selection',
+        selectedPieceIds,
+        status: intent === 'connected'
+          ? `selected touching component · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`
+          : `selected ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id}`,
       };
+    });
+  };
+
+  const paintWorldFlora = (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => {
+    if (!samples.length) return;
+    setState((prev) => {
+      const result = applyFloraPaintSamples(prev.worldPieces, prev.worldFlora, samples, brush, prev.seq);
+      if (result.added === 0 && result.removed === 0) return { ...prev, status: 'flora stroke changed nothing' };
+      return recordWorldEdit(prev, {
+        ...prev,
+        seq: result.sequence,
+        worldPieces: result.pieces,
+        worldFlora: result.worldFlora,
+        status: brush.mode === 'erase'
+          ? `erased ${result.removed} flora patch${result.removed === 1 ? '' : 'es'}`
+          : `painted ${result.added} flora patch${result.added === 1 ? '' : 'es'} at ${Math.round(brush.density * 100)}% density`,
+      }, `${brush.mode} flora`);
+    });
+  };
+
+  const captureSelectedPrefab = (label: string) => {
+    setPrefabCaptureOpen(false);
+    setState((prev) => {
+      const selected = prev.worldPieces.filter((piece) => prev.selectedPieceIds.includes(piece.id));
+      if (selected.length === 0) return { ...prev, status: 'prefab capture cancelled — the selection disappeared' };
+      try {
+        const id = mintWorldPrefabId(label, prev.worldPrefabs);
+        const prefab = prefabFromPieces(id, label, selected);
+        return recordWorldEdit(prev, {
+          ...prev,
+          worldPrefabs: [...prev.worldPrefabs, prefab],
+          armedPieceId: prefab.id,
+          armedYawDegrees: 0,
+          armedStamp: null,
+          activeCommandId: 'place-piece',
+          actionMenu: 'Build',
+          contextOpen: false,
+          status: `created prefab “${prefab.label}” from ${prefab.pieces.length} semantic pieces — armed to stamp`,
+        }, `create prefab ${prefab.label}`);
+      } catch (error) {
+        return { ...prev, status: `prefab capture failed: ${(error as Error).message}` };
+      }
     });
   };
 
@@ -2524,6 +2677,33 @@ export default function AppFrame() {
       modelRigs: { ...prev.modelRigs, [pkgId]: rig },
       modelDirty: { ...prev.modelDirty, [pkgId]: true },
       status: `rig: ${describePropRig(rig)}`,
+    }));
+  };
+
+  const setModelTextureSlots = (pkgId: string, textureSlots: ModelTextureSlot[]) => {
+    setState((prev) => ({
+      ...prev,
+      modelTextureSlots: { ...prev.modelTextureSlots, [pkgId]: textureSlots },
+      modelDirty: { ...prev.modelDirty, [pkgId]: true },
+      status: `${textureSlots.length} face texture role${textureSlots.length === 1 ? '' : 's'}`,
+    }));
+  };
+
+  const setModelLights = (pkgId: string, lights: LightRig[]) => {
+    const normalized = normalizeModelLights(lights);
+    setState((prev) => ({
+      ...prev,
+      modelLights: { ...prev.modelLights, [pkgId]: normalized },
+      modelDirty: { ...prev.modelDirty, [pkgId]: true },
+      status: `${normalized.length} emitted light${normalized.length === 1 ? '' : 's'}`,
+    }));
+  };
+
+  const markModelTextureMembershipDirty = (pkgId: string, message: string, dirty = true) => {
+    setState((prev) => ({
+      ...prev,
+      ...(dirty ? { modelDirty: { ...prev.modelDirty, [pkgId]: true } } : {}),
+      status: message,
     }));
   };
 
@@ -2687,7 +2867,15 @@ export default function AppFrame() {
         ...prev,
         armedPieceId: piece.pieceId,
         armedYawDegrees: 0,
-        armedStamp: piece.slots || piece.overrides ? { slots: piece.slots, overrides: piece.overrides } : null,
+        armedStamp: piece.slots || piece.overrides || piece.stickers || piece.surfaceFlora || piece.spinDegPerSec
+          ? {
+              slots: piece.slots ? Object.fromEntries(Object.entries(piece.slots).map(([role, ref]) => [role, { ...ref }])) : undefined,
+              overrides: piece.overrides ? { ...piece.overrides } : undefined,
+              stickers: piece.stickers?.map((sticker) => ({ ...sticker })),
+              surfaceFlora: piece.surfaceFlora?.map((patch) => ({ ...patch })),
+              spinDegPerSec: piece.spinDegPerSec,
+            }
+          : null,
         selectedPieceId: null,
         selectedPieceIds: [],
         activeCommandId: 'place-piece',
@@ -2695,6 +2883,27 @@ export default function AppFrame() {
         status: `copied ${piece.pieceId} — click to stamp copies, Esc to put it down`,
       };
     });
+  };
+
+  const duplicateSelectedPieces = () => {
+    const current = stateRef.current;
+    const selected = current.worldPieces.filter((piece) => current.selectedPieceIds.includes(piece.id));
+    if (selected.length < 2) return;
+    const volumes = selected.map(pieceSelectionVolume).filter((volume): volume is NonNullable<typeof volume> => !!volume);
+    const minX = Math.min(...volumes.map((volume) => volume.cx - Math.abs(volume.widthAxis[0]) * volume.halfWidth - Math.abs(volume.depthAxis[0]) * volume.halfDepth));
+    const maxX = Math.max(...volumes.map((volume) => volume.cx + Math.abs(volume.widthAxis[0]) * volume.halfWidth + Math.abs(volume.depthAxis[0]) * volume.halfDepth));
+    const width = Number.isFinite(minX) && Number.isFinite(maxX) ? maxX - minX : PIECE_MODULE_METERS;
+    const offsetX = Math.max(PIECE_MODULE_METERS, Math.ceil((width + PIECE_MODULE_METERS) / PIECE_MODULE_METERS) * PIECE_MODULE_METERS);
+    placePieces(selected.map((piece) => ({
+      ...piece,
+      id: '',
+      x: piece.x + offsetX,
+      generatedSite: undefined,
+      slots: piece.slots ? Object.fromEntries(Object.entries(piece.slots).map(([role, ref]) => [role, { ...ref }])) : undefined,
+      overrides: piece.overrides ? { ...piece.overrides } : undefined,
+      stickers: piece.stickers?.map((sticker) => ({ ...sticker })),
+      surfaceFlora: piece.surfaceFlora?.map((patch) => ({ ...patch })),
+    })), { mode: 'click', inputAtMs: Date.now(), pointerX: 0, pointerY: 0 });
   };
 
   const pressLeftPanel = (pressed: LeftPanelId) => {
@@ -4547,6 +4756,7 @@ export default function AppFrame() {
         else if (block.id === 'import-part') setImportPartOpen(false);
         else if (block.id === 'path-array') setPathArrayPrompt(null);
         else if (block.id === 'scale-by') setScaleByOpen(false);
+        else if (block.id === 'prefab-capture') setPrefabCaptureOpen(false);
         return;
       }
       if (key.length === 1 || ['enter', 'delete', 'backspace', 'tab', 'space'].includes(key)) {
@@ -4806,7 +5016,16 @@ export default function AppFrame() {
     if (doc?.kind !== 'model' || !doc.sourceId) return null;
     const pkg = effectiveModelPackage(doc.sourceId, s.modelOverrides, s.modelDupes);
     if (!pkg || !s.modelDirty[pkg.id] || !isMaterialized(pkg.kind, pkg.id)) return null;
-    if (!materializeModelPackage(pkg).ok) return null;
+    const rigDraft = s.modelRigs[pkg.id];
+    const rigModelId = authoredModelIdForPackage(pkg.id);
+    const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
+    const pkgToSave: ModelPackage = {
+      ...pkg,
+      ...(rigDraft && rigBounds ? { skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) } : {}),
+      textureSlots: s.modelTextureSlots[pkg.id] ?? pkg.textureSlots ?? [],
+      lights: normalizeModelLights(s.modelLights[pkg.id] ?? pkg.lights ?? []),
+    };
+    if (!materializeModelPackage(pkgToSave).ok) return null;
     // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
     // the NEXT mount seeds from the package, so this write is what edits survive by.
     const liveRows = s.modelParts[pkg.id] ?? [];
@@ -4816,6 +5035,7 @@ export default function AppFrame() {
       meshDocPartRangesFromRows(liveRows) ?? undefined,
       partShrinkSaveOptions(pkg.id, liveRows.length),
     )) return null;
+    upsertSavedPackage(pkgToSave);
     consumePartShrinkAuthorization(pkg.id);
     savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
@@ -5462,6 +5682,7 @@ export default function AppFrame() {
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
             onPaintFaces={paintPieceFaces}
+            onPaintFlora={paintWorldFlora}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}
@@ -5503,6 +5724,9 @@ export default function AppFrame() {
             onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
             modelOnDisk={activeModelOnDisk}
             onSetModelRig={setModelRig}
+            onSetModelTextureSlots={setModelTextureSlots}
+            onSetModelLights={setModelLights}
+            onModelTextureMembershipChanged={markModelTextureMembershipDirty}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
             // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
@@ -5628,6 +5852,15 @@ export default function AppFrame() {
           <ScaleByDialog
             onCancel={() => { setScaleByOpen(false); setState((prev) => ({ ...prev, status: 'scale by cancelled' })); }}
             onApply={applyScaleBy}
+          />
+        </RenderProbe>
+      ) : null}
+      {prefabCaptureOpen ? (
+        <RenderProbe id="Prefab Dialog">
+          <PrefabDialog
+            pieceCount={state.selectedPieceIds.length}
+            onCancel={() => { setPrefabCaptureOpen(false); setState((prev) => ({ ...prev, status: 'prefab capture cancelled' })); }}
+            onCreate={captureSelectedPrefab}
           />
         </RenderProbe>
       ) : null}
