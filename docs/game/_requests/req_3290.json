@@ -3,7 +3,7 @@
   "at": "2026-07-20T10:18:02.910Z",
   "origin": "codex:019f7e48",
   "text": "ok so this one doesnt make sense how can this be true at the same time and how the hell do i even make any sense of it [Image #1] its in slivers but the uv is a rectangle around it and then i move it and paint the thing and its not painting jack [Image #2]",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-20T10:29:42.355Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Exposed exact transformed triangle corners through the atlas bridge, changed the UV panel to render and hit-test real authored-face silhouettes with a separate transform box, kept Paint armed during panel-local UV transforms, and added regressions proving brush dabs follow moved UV geometry.",
+  "shas": [
+    "6487b60ed"
+  ],
+  "resolvedAt": "2026-07-20T10:29:42.355Z"
 }
