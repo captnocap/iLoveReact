@@ -1,0 +1,30 @@
+{
+  "id": "req_3248",
+  "at": "2026-07-20T04:07:30.200Z",
+  "origin": "codex:019f7a9c",
+  "text": "uh.... -_- so i was painting a model, i then went to add a new plane to it and that plane spawned in not as a plane at all, and so i tried to undo it and it completely fucked all the painting",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T04:07:42.096Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T04:23:45.627Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Paint/Add Part journal collision at all relevant boundaries. Add Primitive now exits Paint before opening its dialog and defensively refuses stale paint-live callers; the host snapshots and restores exact atlas texels, the active atlas base, and the stroke program across append plus add/duplicate/mirror undo-redo; and the plane primitive is pinned as one indexed quad before lowering. Added a framework-layer atlas-carry regression and passed 18 model-paint tests, 9 indexed edit-mesh tests, and the full ReleaseFast editor build. Read-only recovery audit also found the latest he_ad on-disk base paint program and an older explicit Painting 1 variant intact.",
+  "shas": [
+    "0548a1302"
+  ],
+  "resolvedAt": "2026-07-20T04:23:45.627Z"
+}
