@@ -128,6 +128,7 @@ export type ModelFocusBridge = {
   paintLive: boolean;
   refreshUv: () => void;
   applyUvLayout: (rects: Uint32Array) => boolean;
+  applyUvGeometry: (corners: Float32Array) => boolean;
   selectUvIsland: (index: number, additive: boolean) => boolean;
   reloadUvAtlas: () => string;
   shape: ModelFocusShape | null;
@@ -1174,6 +1175,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return true;
   };
+  const applyUvGeometry = (corners: Float32Array): boolean => {
+    const ok = host.__model_uv_geometry_apply?.(corners) === 1;
+    if (!ok) return false;
+    onDocumentMutated?.();
+    buildUvPanel();
+    return true;
+  };
   const selectUvIsland = (index: number, additive: boolean): boolean => {
     if (!Number.isInteger(index) || index < 0) return false;
     // Paint owns the 3D surface and deliberately has no edit-selection tint. Keep
@@ -1691,6 +1699,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       paintLive: paintMode,
       refreshUv: buildUvPanel,
       applyUvLayout,
+      applyUvGeometry,
       selectUvIsland,
       reloadUvAtlas,
       shape: model

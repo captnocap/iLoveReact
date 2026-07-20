@@ -1,13 +1,16 @@
 import {
+  flattenUvFaceCorners,
   flattenUvIslandRects,
   hitUvIsland,
   moveUvIsland,
+  moveUvIslandVertex,
   parseUvIslandRects,
   resizeUvIsland,
   resizeUvIslandFromCorner,
   shouldPanUvCanvas,
   uniformUvPack,
   uvIslandBoundaryPath,
+  uvIslandVertices,
 } from './uvLayout';
 
 let passed = 0, failed = 0;
@@ -23,7 +26,40 @@ test('UV rect parsing and flattening preserve every island and group', () => {
   );
   assert(parsed.length === 2 && parsed[1]!.group === 23, 'island metadata was dropped');
   assert(parsed[0]!.triangles?.length === 1 && parsed[1]!.triangles?.length === 1, 'triangle silhouettes were dropped');
+  assert(parsed[0]!.triangles?.[0]?.face === 0 && parsed[1]!.triangles?.[0]?.face === 1, 'render-face row identity was dropped');
   assert([...flattenUvIslandRects(parsed)].join(',') === '1,2,3,4,8,9,5,6', 'rect serialization drifted');
+  assert([...flattenUvFaceCorners(parsed)!].join(',') === '1,2,4,2,1,6,8,9,13,9,8,15', 'exact face-corner serialization drifted');
+});
+
+test('real UV handles sit on triangle vertices and collapse shared fan corners', () => {
+  const rect = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [0, 0.5, 0.5, 9.5, 0.5, 9.5, 9.5, 0, 0.5, 0.5, 9.5, 9.5, 0.5, 9.5],
+  )[0]!;
+  const vertices = uvIslandVertices(rect);
+  assert(vertices.length === 4, `quad exposed ${vertices.length} handles instead of its four real corners`);
+  assert(vertices[0]!.x === 0.5 && vertices[0]!.y === 0.5, 'first handle missed the authored UV vertex');
+});
+
+test('moving a UV vertex rewrites coincident face corners without moving the rest', () => {
+  const rect = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [0, 0.5, 0.5, 9.5, 0.5, 9.5, 9.5, 0, 0.5, 0.5, 9.5, 9.5, 0.5, 9.5],
+  )[0]!;
+  const changed = moveUvIslandVertex(rect, 0, 2, 3, 32, 32);
+  const corners = flattenUvFaceCorners([changed])!;
+  assert(corners[0] === 2.5 && corners[1] === 3.5, 'first triangle did not follow its real vertex');
+  assert(corners[6] === 2.5 && corners[7] === 3.5, 'shared triangle corner tore at the fan seam');
+  assert(corners[2] === 9.5 && corners[3] === 0.5 && corners[10] === 0.5 && corners[11] === 9.5, 'unselected UV vertices moved');
+});
+
+test('whole-island movement changes sampling coordinates, not triangle-local geometry', () => {
+  const rect = parseUvIslandRects([10, 20, 10, 10], [1], [0, 10.5, 20.5, 19.5, 20.5, 10.5, 29.5])[0]!;
+  const moved = moveUvIsland(rect, 20, 15, 64, 64);
+  const corners = flattenUvFaceCorners([moved])!;
+  assert([...corners].join(',') === '30.5,35.5,39.5,35.5,30.5,44.5', 'moving the shape failed to move its exact texture-sampling coordinates');
 });
 
 test('move and resize stay inside the atlas without requiring text selection', () => {

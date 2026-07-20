@@ -310,6 +310,61 @@ test "authored UV rectangle edits keep texture pixels fixed and rewrite displaye
     try testing.expect(dabbed[1] > 220 and dabbed[0] < 30);
 }
 
+test "exact UV vertices deform face sampling while atlas pixels stay fixed" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(906, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    const atlas = model_paint.atlas().?;
+    const stripes = try testing.allocator.dupe(u8, atlas.rgba);
+    defer testing.allocator.free(stripes);
+    var y: u32 = 0;
+    while (y < atlas.h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < atlas.w) : (x += 1) {
+            const pixel = (@as(usize, y) * atlas.w + x) * 4;
+            stripes[pixel + 0] = @intCast(x % 251);
+            stripes[pixel + 1] = @intCast(y % 251);
+            stripes[pixel + 2] = @intCast((x + y) % 251);
+            stripes[pixel + 3] = 255;
+        }
+    }
+    try testing.expect(model_paint.setAtlas(stripes));
+    const fixed_atlas_hash = atlasHash(model_paint.atlas().?.rgba);
+
+    var corners: [12]f32 = undefined;
+    var face: u32 = 0;
+    while (face < 2) : (face += 1) {
+        const triangle = model_paint.uvTriangle(face) orelse return error.TestUnexpectedResult;
+        @memcpy(corners[@as(usize, face) * 6 ..][0..6], triangle.corners[0..]);
+    }
+    const atlas_w_f: f32 = @floatFromInt(atlas.w);
+    const atlas_h_f: f32 = @floatFromInt(atlas.h);
+    @memcpy(corners[0..6], &[_]f32{ 0.5, 0.5, atlas_w_f - 0.5, 0.5, 0.5, atlas_h_f - 0.5 });
+    try testing.expect(model_paint.applyCornerUvs(&corners, &quad, 6));
+    try testing.expectEqual(fixed_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
+
+    const deformed = model_paint.uvTriangle(0) orelse return error.TestUnexpectedResult;
+    try testing.expectEqualSlices(f32, corners[0..6], deformed.corners[0..]);
+    try testing.expectApproxEqAbs(corners[0] / atlas_w_f, quad[6], 0.0001);
+    try testing.expectApproxEqAbs(corners[1] / atlas_h_f, quad[7], 0.0001);
+    const left_sample = model_paint.sampleTexel(0, 0.1, 0.1) orelse return error.TestUnexpectedResult;
+    const right_sample = model_paint.sampleTexel(0, 0.8, 0.1) orelse return error.TestUnexpectedResult;
+    try testing.expect(left_sample[0] != right_sample[0]);
+
+    const before_reject = deformed.corners;
+    var invalid = corners;
+    invalid[0] = -1;
+    try testing.expect(!model_paint.applyCornerUvs(&invalid, &quad, 6));
+    try testing.expectEqualSlices(f32, before_reject[0..], model_paint.uvTriangle(0).?.corners[0..]);
+    try testing.expectEqual(fixed_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
+}
+
 test "closed pen polygon fills one logical island across its triangle diagonal" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(905, &quad, 6);

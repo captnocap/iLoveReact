@@ -106,6 +106,11 @@ declare global {
   function __model_paint_atlas_estimate(...args: unknown[]): unknown;
   function __model_paint_fit_estimate(...args: unknown[]): unknown;
   function __model_atlas_read(...args: unknown[]): unknown;
+  function __model_uv_layout_apply(...args: unknown[]): unknown;
+  function __model_uv_geometry_apply(...args: unknown[]): unknown;
+  function __model_uv_selection_read(...args: unknown[]): unknown;
+  function __model_uv_island_select(...args: unknown[]): unknown;
+  function __model_atlas_replace(...args: unknown[]): unknown;
   function __model_paint_sample(...args: unknown[]): unknown;
   function __model_atlas_palette(...args: unknown[]): unknown;
   function __image_write_png(...args: unknown[]): unknown;

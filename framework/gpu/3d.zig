@@ -4334,7 +4334,7 @@ const OV_MAX_EDGE_LINES: u32 = 40000;
 // only — never by touching vertex colors or the paint atlas (the bake bugs of
 // req_2611/req_2613 came from tinting atlas pixels; overlay geometry cannot bake).
 const OV_FACE_TINT = [4]f32{ 0.55, 0.66, 0.92, 0.10 }; // unselected face wash
-const OV_FACE_TINT_SEL = [4]f32{ 1.0, 0.52, 0.16, 0.22 }; // selected face wash (over atlas orange)
+const OV_FACE_TINT_SEL = [4]f32{ 1.0, 0.52, 0.16, 0.22 }; // selected face wash over true atlas colour
 const OV_FACE_DOT = [3]f32{ 0.72, 0.79, 0.95 }; // centroid dot fill
 const OV_FACE_DOT_PX: f32 = 3.0;
 const OV_FACE_DOT_SEL_PX: f32 = 5.0;
@@ -6294,6 +6294,22 @@ pub fn applyUvIslandRects(rects: []const u32) bool {
     // No retained GPU row is a valid pre-first-draw state. The CPU edit mesh is
     // already authoritative and will seed that row when it appears; a missing
     // cache must not make a completed UV edit report failure to the author.
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
+/// Apply the complete face-corner UV table to the live model. Unlike the legacy
+/// rectangle transform, this preserves arbitrary triangle/polygon deformation:
+/// only sampling coordinates move over a byte-for-byte fixed atlas.
+pub fn applyUvCornerGeometry(corners: []const f32) bool {
+    const verts = g_edit_verts orelse return false;
+    if (corners.len != @as(usize, model_paint.faceCount()) * 6) return false;
+
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.applyCornerUvs(corners, verts, g_edit_count)) return false;
+    paint_program.adoptCurrentAtlasAsBaseline();
+    const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
     return true;
 }

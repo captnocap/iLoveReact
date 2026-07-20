@@ -2033,6 +2033,81 @@ pub fn applyIslandRects(new_rects: []const u32, verts: []f32, vert_count: u32) b
     return true;
 }
 
+fn validCornerUvTable(corners: []const f32, face_count: u32, atlas_w: u32, atlas_h: u32) bool {
+    if (face_count == 0 or corners.len != @as(usize, face_count) * 6 or atlas_w == 0 or atlas_h == 0) return false;
+    const atlas_w_f: f32 = @floatFromInt(atlas_w);
+    const atlas_h_f: f32 = @floatFromInt(atlas_h);
+    var index: usize = 0;
+    while (index < corners.len) : (index += 2) {
+        const x = corners[index + 0];
+        const y = corners[index + 1];
+        if (!std.math.isFinite(x) or !std.math.isFinite(y)) return false;
+        if (x < 0.0 or x > atlas_w_f or y < 0.0 or y > atlas_h_f) return false;
+    }
+    return true;
+}
+
+/// Atomically adopt the exact absolute atlas coordinate of every render-face
+/// corner. This is the UV editor's geometry boundary: a triangle is authored by
+/// its three real points, while island rectangles are re-derived metadata used
+/// for hit testing and paint clipping. The atlas raster is never written here.
+pub fn applyCornerUvs(new_corners: []const f32, verts: []f32, vert_count: u32) bool {
+    const lay = &(g_layout orelse return false);
+    if (g_rgba == null or vert_count != g_facecount * 3) return false;
+    if (verts.len < @as(usize, vert_count) * 8) return false;
+    if (!validCornerUvTable(new_corners, g_facecount, g_atlas_w, g_atlas_h)) return false;
+
+    // Derive every island bound before mutating live state. A malformed layout
+    // therefore cannot leave half the islands on old geometry and half on new.
+    const derived = alloc.alloc(u32, lay.islands.len * 4) catch return false;
+    defer alloc.free(derived);
+    const atlas_w_f: f32 = @floatFromInt(g_atlas_w);
+    const atlas_h_f: f32 = @floatFromInt(g_atlas_h);
+    for (lay.islands, 0..) |_, island_index| {
+        var min_x = atlas_w_f;
+        var min_y = atlas_h_f;
+        var max_x: f32 = 0.0;
+        var max_y: f32 = 0.0;
+        var found = false;
+        var face: u32 = 0;
+        while (face < g_facecount) : (face += 1) {
+            if (lay.tri_island[face] != @as(u32, @intCast(island_index))) continue;
+            found = true;
+            var corner: usize = 0;
+            while (corner < 3) : (corner += 1) {
+                const uv = @as(usize, face) * 6 + corner * 2;
+                min_x = @min(min_x, new_corners[uv + 0]);
+                min_y = @min(min_y, new_corners[uv + 1]);
+                max_x = @max(max_x, new_corners[uv + 0]);
+                max_y = @max(max_y, new_corners[uv + 1]);
+            }
+        }
+        if (!found) return false;
+        const left: u32 = @min(g_atlas_w - 1, @as(u32, @intFromFloat(@floor(min_x))));
+        const top: u32 = @min(g_atlas_h - 1, @as(u32, @intFromFloat(@floor(min_y))));
+        const right: u32 = std.math.clamp(@as(u32, @intFromFloat(@ceil(max_x))), left + 1, g_atlas_w);
+        const bottom: u32 = std.math.clamp(@as(u32, @intFromFloat(@ceil(max_y))), top + 1, g_atlas_h);
+        derived[island_index * 4 + 0] = left;
+        derived[island_index * 4 + 1] = top;
+        derived[island_index * 4 + 2] = right - left;
+        derived[island_index * 4 + 3] = bottom - top;
+    }
+
+    @memcpy(lay.corner_uv, new_corners);
+    for (lay.islands, 0..) |*island, island_index| {
+        island.x = derived[island_index * 4 + 0];
+        island.y = derived[island_index * 4 + 1];
+        island.w = derived[island_index * 4 + 2];
+        island.h = derived[island_index * 4 + 3];
+    }
+    var vertex: u32 = 0;
+    while (vertex < vert_count) : (vertex += 1) {
+        verts[vertex * 8 + 6] = lay.corner_uv[@as(usize, vertex) * 2 + 0] / atlas_w_f;
+        verts[vertex * 8 + 7] = lay.corner_uv[@as(usize, vertex) * 2 + 1] / atlas_h_f;
+    }
+    return true;
+}
+
 /// The live island rects (packed atlas layout) — the UV inspector draws these so the
 /// panel shows real face-shaped islands. Null when there's no layout.
 pub fn layoutIslands() ?[]const paint_islands.Island {

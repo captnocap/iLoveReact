@@ -14,9 +14,10 @@
 //! that. The same welded topology drives the coming gizmo (it transforms logical vertices →
 //! writes back to every incident corner) and lives in harmony with the paint layers.
 //!
-//! Face highlight rides the existing paint atlas (save the face's base colour, tint it the
-//! selection orange, restore on deselect) — no second texture. Vertex/edge MARKERS render
-//! through the overlay-geometry pass (next slice); selection state + picking are here now.
+//! Selection appearance is rendered by 3d.zig's screen-space overlay. It never rides the
+//! paint atlas: selection must not obscure a UV's true multi-colour sample or create a
+//! save/restore path capable of carrying pixels as geometry moves. Selection state and
+//! picking live here; all presentation stays in the overlay pass.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -82,9 +83,6 @@ pub fn flipSelectedTriangleWinding(verts: []f32, triangle_count: u32, selected: 
     return flipped;
 }
 
-/// Selection orange (matches the Studio's selectFaceColor), blended 0.7 over a face's base.
-const SELECT_RGB: [3]f32 = .{ 255, 138, 61 };
-const SELECT_MIX: f32 = 0.7;
 /// Click radius (pixels) for screen-nearest vertex / edge picking.
 const VERT_PX: f32 = 12;
 const EDGE_PX: f32 = 9;
@@ -150,13 +148,11 @@ var g_mirror_affect: ?[]bool = null; // scratch: verts written as mirror targets
 var g_sel_vert: ?[]bool = null;
 var g_sel_edge: ?[]bool = null;
 var g_sel_face: ?[]bool = null;
-// Faces currently tinted as selected, each holding the EXACT saved patch bytes to
-// restore on deselect. Storing the whole patch (not one base colour) preserves sub-face
-// free-form paint when detail>1 — a flat base restore would wipe it (req_2281).
+// Legacy atlas-highlight patches. New selection never populates this map; retaining
+// restoration lets a hot-reloaded host safely unwind a patch created by older code.
 var g_face_base: std.AutoHashMapUnmanaged(u32, []u8) = .empty;
-const SELECT_TINT: [4]u8 = .{ 255, 138, 61, 255 };
-// Tint suspension depth (suspendFaceTint/resumeFaceTint). While > 0 the atlas holds TRUE
-// paint only — applyFaceHighlight defers until the outermost resume re-applies the tint.
+// Compatibility depth for existing atlas mutation guards. The atlas now holds true
+// paint at every depth; nested callers still balance through this strict boundary.
 var g_tint_suspend: u32 = 0;
 // Pre-press snapshot of the active set, so a press that turns into an orbit-drag can
 // undo its instant pick (select on mousedown for paint-like immediacy, revert if you drag).
@@ -195,9 +191,8 @@ pub fn faceSelectedPub(face: u32) bool {
     const selected = g_sel_face orelse return false;
     return face < selected.len and selected[face];
 }
-/// A selected (tinted) face's TRUE base colour, read from its saved pre-tint patch —
-/// null when the face carries no tint (read the live atlas instead). Colour snapshots
-/// (the mesh-edit journal, quality carry) use this so the selection orange never bakes.
+/// Legacy patch read. New screen-space selection leaves the atlas true, so this is
+/// normally null and callers read the live atlas directly.
 pub fn savedFaceBaseColor(face: u32) ?[4]u8 {
     const patch = g_face_base.get(face) orelse return null;
     return model_paint.faceColorFromPatch(face, patch);
@@ -1886,70 +1881,13 @@ fn segDist2(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
     return dx * dx + dy * dy;
 }
 
-// ── Face highlight (rides the paint atlas) ───────────────────────────────────────
-fn blendSelect(base: [4]u8) [4]u8 {
-    var out: [4]u8 = base;
-    var c: usize = 0;
-    while (c < 3) : (c += 1) {
-        const b: f32 = base[c];
-        const v = b * (1.0 - SELECT_MIX) + SELECT_RGB[c] * SELECT_MIX;
-        out[c] = @trunc(std.math.clamp(v, 0, 255));
-    }
-    out[3] = 255;
-    return out;
-}
-
-/// Reconcile the atlas tint with g_sel_face: restore everything, then re-save + re-tint
-/// the selected set in TWO PHASES (save all patches first, tint after).
-///
-/// The phase split is load-bearing (req_2613): two faces' tint texel sets can OVERLAP —
-/// a low-density island degenerates both quad-halves to near-identical centroid discs —
-/// so the old interleaved save-tint-save-tint left a LATER face's saved patch holding an
-/// EARLIER face's tint on the shared texels. Deselect then wrote that embedded tint back
-/// as if it were paint: the "stuck orange faces with 0 selected" bake. Single picks never
-/// hit it; any multi-face selection (marquee, select-all, part select) did. Saving every
-/// patch BEFORE the first tint keeps the invariant "every stored patch is pre-tint clean",
-/// which makes restore order irrelevant and keeps savedFaceBaseColor honest.
+// ── Face selection presentation hand-off ─────────────────────────────────────────
+/// Selection presentation belongs to the renderer's translucent overlay. Reconcile
+/// only unwinds a legacy standing patch; it never writes highlight pixels into the
+/// authored atlas. This keeps UV movement a pure coordinate edit and preserves every
+/// colour under a selected face.
 fn applyFaceHighlight() void {
-    if (g_tint_suspend > 0) return; // atlas is being rebuilt/read — resumeFaceTint reconciles
-    if (model_paint.faceCount() == 0) return;
-    // In non-face modes, nothing should be tinted.
-    if (g_mode != .face) {
-        restoreAllFaces();
-        return;
-    }
-    const sel = g_sel_face orelse return;
-    // Unchanged set → keep the standing tint (the per-move marquee reconcile hits this).
-    var want: usize = 0;
-    var same = true;
-    for (sel, 0..) |b, f| {
-        if (!b) continue;
-        want += 1;
-        if (!g_face_base.contains(@intCast(f))) same = false;
-    }
-    if (same and want == g_face_base.count()) return;
     restoreAllFaces();
-    // Phase 1: save every selected face's island rect from the still-clean atlas.
-    var f: u32 = 0;
-    while (f < sel.len) : (f += 1) {
-        if (!sel[f]) continue;
-        const plen = model_paint.facePatchLen(f);
-        if (plen == 0) continue;
-        const patch = alloc.alloc(u8, plen) catch continue;
-        if (!model_paint.saveFacePatch(f, patch)) {
-            alloc.free(patch);
-            continue;
-        }
-        g_face_base.put(alloc, f, patch) catch {
-            alloc.free(patch);
-            continue;
-        };
-    }
-    // Phase 2: tint — no save happens after this point, so no patch can embed a tint.
-    var it = g_face_base.iterator();
-    while (it.next()) |entry| {
-        model_paint.tintFacePatch(entry.key_ptr.*, SELECT_TINT, SELECT_MIX);
-    }
 }
 
 fn restoreAllFaces() void {
@@ -1961,20 +1899,14 @@ fn restoreAllFaces() void {
     g_face_base.clearRetainingCapacity();
 }
 
-/// Lift the selection tint out of the atlas (keeping the selection sets) before an
-/// operation that rebuilds, overwrites, paints, or persists the paint atlas/layout.
-/// Depth-counted: nested guarded ops (atlas apply → detail change) reconcile exactly
-/// once, at the outermost resume. Without this a layout rebuild carries the LIVE atlas
-/// colour — the selection orange — into the new atlas, baking the highlight into paint
-/// the selection sets say isn't selected, and the saved base patches (sized for the old
-/// layout) silently fail to restore.
+/// Compatibility guard around atlas mutation/read boundaries. Depth counting remains
+/// so nested callers preserve their contract; selection itself no longer mutates pixels.
 pub fn suspendFaceTint() void {
     if (g_tint_suspend == 0) restoreAllFaces();
     g_tint_suspend += 1;
 }
 
-/// Re-apply the tint from the selection sets against the settled atlas — base patches
-/// are re-captured from the NEW atlas/layout, so a later deselect is exact.
+/// Balance a compatibility guard. The settled atlas remains true authored paint.
 pub fn resumeFaceTint() void {
     if (g_tint_suspend > 0) g_tint_suspend -= 1;
     if (g_tint_suspend == 0) applyFaceHighlight();
@@ -2143,7 +2075,7 @@ test "edge selection by index sets edge mode and supports additive sets" {
     try testing.expectEqual(@as(u32, 2), selectedEdgeCountPub());
 }
 
-test "vertex pick selects the nearest welded corner; face highlight saves+restores" {
+test "vertex pick selects the nearest welded corner; face selection leaves atlas true" {
     setupQuad();
     defer {
         reset();
@@ -2157,14 +2089,13 @@ test "vertex pick selects the nearest welded corner; face highlight saves+restor
     const n = pick(cam, 800, 600, sp[0], sp[1], false);
     try testing.expectEqual(@as(i32, 1), n);
 
-    // Face mode: select face 0, confirm it tints, then clearing restores the base.
+    // Face mode: selection state changes, but its renderer overlay never changes paint.
     setMode(.face);
     const base0 = model_paint.faceColor(0).?;
     _ = pick(cam, 800, 600, 400, 300, false); // centre ray → a face
     try testing.expect(selCount() == 1);
-    const tinted = model_paint.faceColor(0).?;
-    // The hit face is no longer the plain default grey.
-    try testing.expect(tinted[0] != base0[0] or tinted[1] != base0[1] or tinted[2] != base0[2]);
+    const selected_color = model_paint.faceColor(0).?;
+    try testing.expectEqual(base0, selected_color);
     clearSelection();
     const restored = model_paint.faceColor(0).?;
     try testing.expectEqual(base0[0], restored[0]);
@@ -2293,7 +2224,7 @@ test "axis scale and rotate operate around the selection pivot" {
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(1)[0], 0.0001);
 }
 
-test "tint suspension lifts the highlight for atlas rebuilds and re-applies it after (req_2611)" {
+test "selection and nested tint guards keep the authored atlas byte-exact" {
     setupQuad();
     defer {
         reset();
@@ -2301,29 +2232,24 @@ test "tint suspension lifts the highlight for atlas rebuilds and re-applies it a
     }
     const base0 = model_paint.faceColor(0).?;
     try testing.expect(selectFaceByIndex(0, false));
-    const tinted = model_paint.faceColor(0).?;
-    try testing.expect(tinted[0] != base0[0] or tinted[1] != base0[1] or tinted[2] != base0[2]);
+    try testing.expectEqual(base0, model_paint.faceColor(0).?);
 
-    // Suspended: the atlas holds TRUE paint (what a layout rebuild's colour carry reads),
-    // and a selection change made meanwhile must not tint.
+    // Nested legacy guards remain balanced while selection changes underneath them.
     suspendFaceTint();
     const clean = model_paint.faceColor(0).?;
     try testing.expectEqual(base0[0], clean[0]);
     try testing.expectEqual(base0[1], clean[1]);
     try testing.expectEqual(base0[2], clean[2]);
-    try testing.expect(selectFaceByIndex(1, false)); // reconciles only at resume
+    try testing.expect(selectFaceByIndex(1, false));
     const still_clean = model_paint.faceColor(1).?;
     try testing.expectEqual(base0[0], still_clean[0]);
 
-    // Nested suspend folds into one reconcile at the OUTERMOST resume.
     suspendFaceTint();
     resumeFaceTint();
     try testing.expectEqual(base0[0], model_paint.faceColor(1).?[0]);
 
     resumeFaceTint();
-    const retinted = model_paint.faceColor(1).?;
-    try testing.expect(retinted[0] != base0[0] or retinted[1] != base0[1] or retinted[2] != base0[2]);
-    // Face 0 fell out of the selection during suspension — it must be back to base.
+    try testing.expectEqual(base0, model_paint.faceColor(1).?);
     try testing.expectEqual(base0[0], model_paint.faceColor(0).?[0]);
 
     clearSelection();

@@ -6,19 +6,17 @@ import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../ru
 import { accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
 import {
-  flattenUvIslandRects,
+  flattenUvFaceCorners,
   hitUvIsland,
   moveUvIsland,
-  resizeUvIslandFromCorner,
+  moveUvIslandVertex,
   shouldPanUvCanvas,
   uniformUvPack,
   uvIslandBoundaryPath,
-  uvRectPath,
-  uvTrianglePath,
+  uvIslandVertices,
   UV_LAYOUT_TUNING,
   type UvCanvasTool,
   type UvIslandRect,
-  type UvResizeCorner,
 } from '../model/uvLayout';
 
 const ATLAS_SHADER = `
@@ -33,7 +31,7 @@ type ScreenPoint = { x: number; y: number };
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
   | { kind: 'move'; index: number; start: ScreenPoint; seed: UvIslandRect }
-  | { kind: 'resize'; index: number; corner: UvResizeCorner; start: ScreenPoint; seed: UvIslandRect };
+  | { kind: 'vertex'; index: number; vertex: number; start: ScreenPoint; seed: UvIslandRect };
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
@@ -186,7 +184,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     y: (screen.y - viewRef.current.y) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
   });
   const commit = (next: UvIslandRect[], label: string) => {
-    if (!bridge.applyUvLayout(flattenUvIslandRects(next))) {
+    const corners = flattenUvFaceCorners(next);
+    if (!corners || !bridge.applyUvGeometry(corners)) {
       const restored = initialRects();
       rectsRef.current = restored;
       setRects(restored);
@@ -207,21 +206,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
   const active = activeRange ? rects.filter((rect) => rect.group >= activeRange.lo && rect.group < activeRange.hi) : [];
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
-  const rectScreenPath = (items: readonly UvIslandRect[]) => uvRectPath(items, view.scale, view.scale, view.x, view.y);
   const shapeScreenPath = (items: readonly UvIslandRect[]) => uvIslandBoundaryPath(items, view.scale, view.scale, view.x, view.y);
-  const fillScreenPath = (items: readonly UvIslandRect[]) => uvTrianglePath(items, view.scale, view.scale, view.x, view.y);
-  const handlePoints: { corner: UvResizeCorner; x: number; y: number }[] = selectedRect ? [
-    { corner: 'nw', x: view.x + selectedRect.x * view.scale, y: view.y + selectedRect.y * view.scale },
-    { corner: 'ne', x: view.x + (selectedRect.x + selectedRect.w) * view.scale, y: view.y + selectedRect.y * view.scale },
-    { corner: 'se', x: view.x + (selectedRect.x + selectedRect.w) * view.scale, y: view.y + (selectedRect.y + selectedRect.h) * view.scale },
-    { corner: 'sw', x: view.x + selectedRect.x * view.scale, y: view.y + (selectedRect.y + selectedRect.h) * view.scale },
-  ] : [];
-  const hitHandle = (point: ScreenPoint): UvResizeCorner | null => {
-    const radius = UV_LAYOUT_TUNING.resizeHandlePx;
+  const handlePoints = selectedRect ? uvIslandVertices(selectedRect).map((vertex, index) => ({
+    index,
+    x: view.x + vertex.x * view.scale,
+    y: view.y + vertex.y * view.scale,
+  })) : [];
+  const hitHandle = (point: ScreenPoint): number => {
+    const radius = UV_LAYOUT_TUNING.vertexHandleHitPx;
     for (const handle of handlePoints) {
-      if (Math.abs(point.x - handle.x) <= radius && Math.abs(point.y - handle.y) <= radius) return handle.corner;
+      if (Math.abs(point.x - handle.x) <= radius && Math.abs(point.y - handle.y) <= radius) return handle.index;
     }
-    return null;
+    return -1;
   };
   const zoomAt = (point: ScreenPoint, factor: number) => {
     const current = viewRef.current;
@@ -289,9 +285,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             gestureRef.current = { kind: 'pan', start: screen, seed: viewRef.current };
             return;
           }
-          const corner = hitHandle(screen);
-          if (corner && selectedRect) {
-            gestureRef.current = { kind: 'resize', index: selected, corner, start: atlasPoint(screen), seed: selectedRect };
+          const vertex = hitHandle(screen);
+          if (vertex >= 0 && selectedRect) {
+            gestureRef.current = { kind: 'vertex', index: selected, vertex, start: atlasPoint(screen), seed: selectedRect };
             return;
           }
           const point = atlasPoint(screen);
@@ -313,8 +309,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const point = atlasPoint(screen);
           const dx = point.x - gesture.start.x;
           const dy = point.y - gesture.start.y;
-          const changed = gesture.kind === 'resize'
-            ? resizeUvIslandFromCorner(gesture.seed, gesture.corner, dx, dy, uv.w, uv.h)
+          const changed = gesture.kind === 'vertex'
+            ? moveUvIslandVertex(gesture.seed, gesture.vertex, dx, dy, uv.w, uv.h)
             : moveUvIsland(gesture.seed, dx, dy, uv.w, uv.h);
           setRects((current) => {
             const next = current.map((rect, index) => index === gesture.index ? changed : rect);
@@ -326,13 +322,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const gesture = gestureRef.current;
           gestureRef.current = null;
           if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV face over the fixed texture');
-          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV face over the fixed texture');
+          if (gesture?.kind === 'vertex') commit(rectsRef.current, 'moved UV vertex over the fixed texture');
         }}
         onMouseLeave={() => {
           const gesture = gestureRef.current;
           gestureRef.current = null;
           if (gesture?.kind === 'move') commit(rectsRef.current, 'moved UV face over the fixed texture');
-          if (gesture?.kind === 'resize') commit(rectsRef.current, 'resized UV face over the fixed texture');
+          if (gesture?.kind === 'vertex') commit(rectsRef.current, 'moved UV vertex over the fixed texture');
         }}
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#0d1016' }}
       >
@@ -345,12 +341,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={3.2} />
           <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#c7d0df" strokeWidth={1.15} />
           {active.length ? <Graph.Path d={shapeScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.65} /> : null}
-          {selectedRect ? <Graph.Path d={fillScreenPath([selectedRect])} fill="#f4d35e2b" stroke="none" /> : null}
           {selectedRect ? <Graph.Path d={shapeScreenPath([selectedRect])} fill="none" stroke="#ffffff" strokeWidth={2.2} /> : null}
-          {selectedRect ? <Graph.Path d={rectScreenPath([selectedRect])} fill="none" stroke="#f4d35e99" strokeWidth={1} /> : null}
         </Graph>
         {handlePoints.map((handle) => (
-          <Box key={handle.corner} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />
+          <Box key={handle.index} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />
         ))}
       </Pressable>
 

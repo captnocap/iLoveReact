@@ -2241,6 +2241,25 @@ fn hostModelUvLayoutApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_uv_geometry_apply(Float32Array[x0,y0,x1,y1,x2,y2,...]) → 1.
+/// One six-float row is required for every current render face. The scene boundary
+/// validates the complete table before rewriting any resident UV or island bound.
+fn hostModelUvGeometryApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % (6 * @sizeOf(f32)) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const corners: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const ok = scene3d.applyUvCornerGeometry(corners);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_uv_selection_read() → JSON [islandIndex,...]. The UV panel polls this
 /// only when the native model selection commits, avoiding an expensive atlas-byte
 /// read merely to synchronize selection chrome.
@@ -3360,6 +3379,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
+    v8_runtime.registerHostFn("__model_uv_geometry_apply", hostModelUvGeometryApply);
     v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
     v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);

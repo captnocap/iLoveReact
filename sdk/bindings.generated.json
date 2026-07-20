@@ -428,6 +428,26 @@
           "zig": "hostModelAtlasRead"
         },
         {
+          "js": "__model_uv_layout_apply",
+          "zig": "hostModelUvLayoutApply"
+        },
+        {
+          "js": "__model_uv_geometry_apply",
+          "zig": "hostModelUvGeometryApply"
+        },
+        {
+          "js": "__model_uv_selection_read",
+          "zig": "hostModelUvSelectionRead"
+        },
+        {
+          "js": "__model_uv_island_select",
+          "zig": "hostModelUvIslandSelect"
+        },
+        {
+          "js": "__model_atlas_replace",
+          "zig": "hostModelAtlasReplace"
+        },
+        {
           "js": "__model_paint_sample",
           "zig": "hostModelPaintSample"
         },
