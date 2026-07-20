@@ -1,0 +1,29 @@
+{
+  "id": "req_3288",
+  "at": "2026-07-20T10:03:42.292Z",
+  "origin": "pane",
+  "text": "this is good, run with it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-20T10:03:44.908Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T12:07:26.399Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the active editor World Bible as an on-disk-source-of-truth wiki: lossless keyed Markdown block parsing, explicit public/secret/author visibility, canonical publishing provenance, searchable and backlinked entity pages, divergent recovery drafts, exact frozen patch review, and confirmation-only writes. Integrated knowledge as a first-class editor document with close and Play safeguards, added linked people/business/place/position/shift/mechanic seed fixtures, and hardened the native expected-content writer with serialized no-overwrite claims, transaction-bound durable crash ownership, lock-scoped recovery finalization, retained canonical predecessors, bounded draft history, and focused TypeScript/Zig concurrency and recovery coverage.",
+  "shas": [
+    "dd0add0c1"
+  ],
+  "resolvedAt": "2026-07-20T12:07:26.399Z"
+}
