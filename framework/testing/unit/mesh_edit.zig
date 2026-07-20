@@ -31,6 +31,34 @@ test "paint face hits cannot cross the active outliner scope" {
     try testing.expectEqual(@as(i32, 1), mesh_edit.scopedFaceHit(1));
 }
 
+test "changing outliner scope drops stale vertex selection before transform" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+        3, 0, 0, 0, 0, 1, 0, 0,
+        4, 0, 0, 0, 0, 1, 0, 0,
+        3, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3250, soup[0..], 6, &.{ 0, 1 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.vertex);
+    mesh_edit.setEditScope(0, 1);
+    try testing.expectEqual(@as(i32, 3), mesh_edit.selectAll());
+    try testing.expectEqual(@as(u32, 3), mesh_edit.selCount());
+
+    mesh_edit.setEditScope(1, 2);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.selCount());
+    try testing.expect(!mesh_edit.translateSelection(.{ 5, 0, 0 }).changed);
+
+    try testing.expectEqual(@as(i32, 3), mesh_edit.selectAll());
+    const moved = mesh_edit.translateSelection(.{ 1, 0, 0 });
+    try testing.expect(moved.changed);
+    try testing.expectEqual(@as(u32, 1), moved.first_face);
+    try testing.expectEqual(@as(u32, 1), moved.last_face);
+}
+
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
     var verts = [_]f32{
         // Selected triangle: +Z winding, distinct UVs on every corner.

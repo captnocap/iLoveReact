@@ -639,6 +639,10 @@ pub fn setEditScope(lo: u32, hi: u32) void {
         g_scope_active = false;
         g_scope_count = 0;
     }
+    g_scope_built = 0;
+    // Scope is an edit-ownership boundary, not a visual filter. A focused part must
+    // never inherit a vertex/edge/face selection from the previously focused part.
+    clearSelection();
 }
 
 /// Restrict editing to the UNION of several group ranges — flattened [lo,hi) pairs, the
@@ -658,6 +662,8 @@ pub fn setEditScopeRanges(pairs: []const u32) void {
         g_scope_count += 1;
     }
     g_scope_active = g_scope_count > 0;
+    g_scope_built = 0;
+    clearSelection();
 }
 
 /// Read-only flattened [lo,hi) scope ranges for diagnostics. Empty means the whole
@@ -1209,7 +1215,7 @@ fn fillAffectedVerts() ?[]bool {
             const sel = g_sel_vert orelse return null;
             var i: u32 = 0;
             while (i < sel.len) : (i += 1) {
-                if (sel[i]) markAffected(mask, i, &count);
+                if (sel[i] and vertInScopePub(i)) markAffected(mask, i, &count);
             }
         },
         .edge => {
@@ -1217,7 +1223,7 @@ fn fillAffectedVerts() ?[]bool {
             const edges = g_edges orelse return null;
             var e: u32 = 0;
             while (e < sel.len and e < g_edge_count) : (e += 1) {
-                if (!sel[e]) continue;
+                if (!sel[e] or !edgeInScopePub(e)) continue;
                 markAffected(mask, edges[e * 2 + 0], &count);
                 markAffected(mask, edges[e * 2 + 1], &count);
             }
@@ -1227,7 +1233,7 @@ fn fillAffectedVerts() ?[]bool {
             const corners = g_corner_vert orelse return null;
             var f: u32 = 0;
             while (f < sel.len) : (f += 1) {
-                if (!sel[f]) continue;
+                if (!sel[f] or !faceInScope(f)) continue;
                 markAffected(mask, corners[f * 3 + 0], &count);
                 markAffected(mask, corners[f * 3 + 1], &count);
                 markAffected(mask, corners[f * 3 + 2], &count);

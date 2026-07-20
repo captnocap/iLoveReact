@@ -221,8 +221,10 @@ fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]
 pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     const carried_base_active = g_carry_base_active;
     // The pixel carry must survive clear() until the groups-driven rebuild consumes it,
-    // but its base gate is consumed by this target swap exactly once.
-    g_carry_base_active = null;
+    // but its base gate is consumed by the next NON-EMPTY target swap exactly once.
+    // An empty target is the midpoint of delete-last → undo; consuming the gate there
+    // made the restored program clear onto grey even when its exact pixels survived.
+    if (vert_count >= 3) g_carry_base_active = null;
     clear();
     g_base_active = carried_base_active orelse false; // fresh load = false; edit carry = same document/base
     if (vert_count < 3) return;

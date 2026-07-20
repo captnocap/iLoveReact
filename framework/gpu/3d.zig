@@ -2045,6 +2045,37 @@ pub fn meshDeleteGroupRange(lo: u32, hi: u32) bool {
     return deleteMaskedFaces(verts, tri_count, mask, "delete part");
 }
 
+/// Structural part operations preserve every surviving face's stable paint key
+/// (authored group + intra-group ordinal). Arm both halves of the same-document
+/// target swap together: exact atlas texels for the immediate image, and the full
+/// stroke program/journal for later save, replay, and paint undo. Topology edits that
+/// can change a survivor's key must not use this path.
+fn beginPaintStableReplace() void {
+    // An empty target can be the midpoint of delete-last → undo. In that state the
+    // previous target's carry is the only exact raster left; do not erase it by trying
+    // to snapshot a nonexistent live atlas.
+    if (model_paint.atlas() != null) {
+        mesh_edit.suspendFaceTint();
+        model_paint.snapshotAtlasForCarry();
+        mesh_edit.resumeFaceTint();
+    }
+    paint_program.carryProgramAcrossNextTarget();
+}
+
+fn cancelPaintStableReplace() void {
+    model_paint.dropAtlasCarry();
+    paint_program.cancelProgramCarry();
+}
+
+fn paintStableJournalLabel(label: []const u8) bool {
+    return std.mem.eql(u8, label, "add part") or
+        std.mem.eql(u8, label, "duplicate part") or
+        std.mem.eql(u8, label, "mirror part") or
+        std.mem.eql(u8, label, "delete part") or
+        std.mem.eql(u8, label, "hide part") or
+        std.mem.eql(u8, label, "show part");
+}
+
 fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
     // Drop the selection FIRST (same rule as detach/glass): the orange tint is
     // real atlas pixels with per-face saved patches, and both are keyed by the
@@ -2076,7 +2107,10 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     defer std.heap.c_allocator.free(owned);
 
     var snap = journalSnapshotCurrent(label);
+    const paint_stable = std.mem.eql(u8, label, "delete part");
+    if (paint_stable) beginPaintStableReplace();
     const ok = replaceActiveEditMesh(owned, kept);
+    if (!ok and paint_stable) cancelPaintStableReplace();
     if (ok) {
         if (kept > 0 and has_groups) {
             model_source.setFaceGroups(groups.items);
@@ -2185,19 +2219,12 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     };
     defer std.heap.c_allocator.free(owned);
 
-    // Appending groups preserves every existing paint-program face key. Carry the
-    // true atlas (selection tint lifted) and the recorded program BEFORE setTarget
-    // destroys the old target. This is the missing half of req_2660: hide/show did
-    // it, Add Part did not, so adding a plane flattened painted models.
-    mesh_edit.suspendFaceTint();
-    model_paint.snapshotAtlasForCarry();
-    mesh_edit.resumeFaceTint();
-    paint_program.carryProgramAcrossNextTarget();
+    // Appending groups preserves every existing paint-program face key. Appending
+    // onto an emptied document is a fresh paint domain, however: group ids may be
+    // reused, so discard any delete-last carry instead of resurrecting old paint.
+    if (cur_count > 0) beginPaintStableReplace() else cancelPaintStableReplace();
     const ok = replaceActiveEditMesh(owned, cur_count + new_count);
-    if (!ok) {
-        model_paint.dropAtlasCarry();
-        paint_program.cancelProgramCarry();
-    }
+    if (!ok) cancelPaintStableReplace();
     if (ok) {
         model_source.setFaceGroups(groups.items);
         // The appended part joins the host's part-range truth (req_2644): grow the
@@ -2238,16 +2265,11 @@ var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .empty;
 pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool) bool {
     if (!model_paint.hasTarget()) return false;
     var snap = journalSnapshotCurrent(if (hidden) "hide part" else "show part");
-    // req_2660 (paint survives hide/show): the op replaces the resident mesh, which
-    // DESTROYS the paint atlas before the re-layout — stash it (tint lifted so only
-    // true paint rides) and the groups-driven rebuild inside hide/show blits every
-    // surviving island's texels back. Without this, every sub-face stroke wiped on
-    // each eye toggle (the flat per-face colour carry was the only survivor).
-    mesh_edit.suspendFaceTint();
-    model_paint.snapshotAtlasForCarry();
-    mesh_edit.resumeFaceTint();
+    // Hide/show removes or restores whole stable groups, so both the pixels and the
+    // recorded program remain valid across the target swap.
+    beginPaintStableReplace();
     const ok = if (hidden) hideGroup(lo, hi) else showGroup(lo, hi);
-    if (!ok) model_paint.dropAtlasCarry(); // failed op — never let a stale stash blit later
+    if (!ok) cancelPaintStableReplace(); // failed op — never let a stale stash blit later
     if (ok) journalCommit(&snap) else journalDiscard(&snap);
     return ok;
 }
@@ -2776,24 +2798,13 @@ pub fn meshRedoLabel() []const u8 {
 fn journalInstall(e: *const JournalEntry) bool {
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
-    // Add/duplicate/mirror only append fresh authored groups. Their undo/redo removes
-    // or restores those groups without changing any survivor's (group, ordinal) paint
-    // identity, so carry exact texels + the stroke program through the target swap.
+    // Part-only journals add/remove whole stable groups; survivor paint identity is
+    // unchanged, so undo/redo must preserve exact pixels AND the durable program.
     // Other topology journals may rewrite identity and keep the conservative reset.
-    const paint_stable = std.mem.eql(u8, e.label, "add part") or
-        std.mem.eql(u8, e.label, "duplicate part") or
-        std.mem.eql(u8, e.label, "mirror part");
-    if (paint_stable) {
-        mesh_edit.suspendFaceTint();
-        model_paint.snapshotAtlasForCarry();
-        mesh_edit.resumeFaceTint();
-        paint_program.carryProgramAcrossNextTarget();
-    }
+    const paint_stable = paintStableJournalLabel(e.label);
+    if (paint_stable) beginPaintStableReplace();
     if (!replaceActiveEditMesh(vcopy, e.count)) {
-        if (paint_stable) {
-            model_paint.dropAtlasCarry();
-            paint_program.cancelProgramCarry();
-        }
+        if (paint_stable) cancelPaintStableReplace();
         return false;
     }
     // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).
