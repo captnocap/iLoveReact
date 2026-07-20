@@ -1800,8 +1800,7 @@ export default function AppFrame() {
     // model in view. Opens the size/resolution dialog in add mode; the outliner + shares this path.
     if (commandId.startsWith('add-mesh-')) {
       const kind = commandId.slice('add-mesh-'.length) as PrimitiveKind;
-      addPartSourceRef.current = source;
-      setState((prev) => ({ ...prev, openMenu: null, contextOpen: false, actionMenu: 'Edit', newMeshPrompt: { kind, mode: 'add' } }));
+      addPart(kind, source);
       return;
     }
     // Studio-parity mesh ops — these change PART structure (or journaled mesh state),
@@ -3012,9 +3011,26 @@ export default function AppFrame() {
   // Adding a mesh (menu or outliner) opens the size/resolution dialog instead of dropping a
   // fixed unit primitive — you author the dimensions upfront, like the old studio mesh editor.
   // The outliner + adds a part to the model in view → the 'add' verb (append), never a new document.
-  const addPart = (kind: PrimitiveKind) => {
-    addPartSourceRef.current = 'dock';
-    setState((prev) => ({ ...prev, newMeshPrompt: { kind, mode: 'add' } }));
+  const addPart = (kind: PrimitiveKind, source = 'dock') => {
+    const previous = stateRef.current;
+    // Paint and topology are different journals over different resident state. Leave
+    // Paint synchronously BEFORE opening the size dialog, so the eventual append can
+    // never replace a live paint target and Ctrl+Z afterward belongs to Mesh undo.
+    // Updating the shell mirror now closes the effect-roundtrip race where a very fast
+    // Apply still saw paint=true after ModelView had already disarmed it.
+    if (previous.modelTool.paint) modelToolApiRef.current?.paint();
+    addPartSourceRef.current = source;
+    const next: EditorState = {
+      ...previous,
+      openMenu: null,
+      contextOpen: false,
+      actionMenu: 'Edit',
+      modelTool: previous.modelTool.paint ? { ...previous.modelTool, paint: false } : previous.modelTool,
+      newMeshPrompt: { kind, mode: 'add' },
+      status: previous.modelTool.paint ? 'Paint closed safely — choose the part to add.' : previous.status,
+    };
+    stateRef.current = next;
+    setState(next);
   };
   // Range of a part in the host mesh: its stored [lo, hi) (set on seed/append). The host mesh
   // is authoritative — these ids are stable across deletes and appends within a session.
@@ -3024,13 +3040,20 @@ export default function AppFrame() {
   // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
   // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
   const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams, source = 'dock') => {
-    const activeModel = activePartsModelId(state);
+    // Defensive half of the mode boundary: all UI paths leave Paint in addPart(), but
+    // automation or a stale caller must be refused instead of mutating the paint target.
+    const live = stateRef.current;
+    if (live.modelTool.paint) {
+      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Add Part refused while Paint is active — exit Paint first; painting was not changed.' }));
+      return;
+    }
+    const activeModel = activePartsModelId(live);
     if (!activeModel) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
       return;
     }
-    const parts = state.modelParts[activeModel] ?? [];
-    const part = makePart(kind, parts, state.seq, params);
+    const parts = live.modelParts[activeModel] ?? [];
+    const part = makePart(kind, parts, live.seq, params);
     // An EMPTIED model has no live viewer to append into (the workspace shows NO
     // VISIBLE PARTS and ModelView is unmounted, host mesh gone with it) — seed the
     // part as the new base instead; the viewer remounts composing it, the same way
@@ -3065,7 +3088,7 @@ export default function AppFrame() {
     // the native gizmo/topology scope must receive the appended range synchronously.
     selectedPartIdsRef.current = [placed.id];
     setSelectedPartIds([placed.id]);
-    pushPartSetToHost(state, nextParts, [placed.id], placed.id);
+    pushPartSetToHost(live, nextParts, [placed.id], placed.id);
     setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
     const bridge = (globalThis as any).__modelFocusBridge;
     if (bridge?.paintLive) bridge.refreshUv?.();

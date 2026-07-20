@@ -1177,13 +1177,26 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const model_paint_carry_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/model_paint.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_paint_carry_test_mod.addImport("model_paint", model_paint_test_mod);
     const model_paint_test = b.addTest(.{
         .name = "model-paint-test",
         .root_module = model_paint_test_mod,
     });
     const run_model_paint_test = b.addRunArtifact(model_paint_test);
+    const model_paint_carry_test = b.addTest(.{
+        .name = "model-paint-carry-test",
+        .root_module = model_paint_carry_test_mod,
+    });
+    const run_model_paint_carry_test = b.addRunArtifact(model_paint_carry_test);
     const model_paint_test_step = b.step("test-model-paint", "Run the model-paint raycast/atlas unit tests");
     model_paint_test_step.dependOn(&run_model_paint_test.step);
+    model_paint_test_step.dependOn(&run_model_paint_carry_test.step);
 
     // ── model-stage scale cue unit tests — headless, no GPU ───────────────────
     // Pins the ruled metre contract consumed by the native modeling-stage overlay:

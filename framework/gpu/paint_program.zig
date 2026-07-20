@@ -268,6 +268,23 @@ fn ensureLayers() void {
 var g_carry_layers: ?[]Layer = null;
 var g_carry_active: u32 = 0;
 var g_carry_next: u32 = 1;
+// A topology replace normally starts a genuinely new program because face identity may
+// have changed. A part APPEND is different: every existing (group, ordinal) key remains
+// valid and only fresh groups are added. That operation arms this one-shot before
+// setPaintTarget() resets the module, keeping the exact live program + paint journal.
+// The atlas itself is carried by model_paint; the old baseline is deliberately dropped
+// because its packed UV layout belongs to the pre-append mesh. A later replay rebuilds
+// the same strokes over the carried atlas base on the new layout.
+var g_carry_program_once: bool = false;
+
+pub fn carryProgramAcrossNextTarget() void {
+    _ = endStrokeUnit();
+    g_carry_program_once = true;
+}
+
+pub fn cancelProgramCarry() void {
+    g_carry_program_once = false;
+}
 
 pub fn snapshotLayersForCarry() void {
     dropLayerCarry();
@@ -463,6 +480,19 @@ pub fn redoStroke(io: std.Io, environ: *const std.process.Environ.Map) bool {
 /// pending layer-table carry (snapshotLayersForCarry) so an edit-mesh replace keeps the
 /// user's layer setup while dropping the strokes the new topology invalidated.
 pub fn reset() void {
+    if (g_carry_program_once) {
+        g_carry_program_once = false;
+        // replaceActiveEditMesh also takes the ordinary layer-only snapshot. The full
+        // program already owns those layers, so discard that redundant deep copy.
+        dropLayerCarry();
+        g_open.clearRetainingCapacity();
+        g_open_fill_seen.clearRetainingCapacity();
+        g_open_live = false;
+        g_have_active = false;
+        dropBaseline();
+        invalidateFaceKeys();
+        return;
+    }
     g_open.clearRetainingCapacity();
     g_open_live = false;
     freeStrokeList(&g_strokes);

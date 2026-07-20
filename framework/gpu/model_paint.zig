@@ -219,8 +219,12 @@ fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]
 /// all-loose. The groups setter triggers scene3d.refreshPaintLayout → rebuildLayout,
 /// which re-islands by authored face.
 pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
+    const carried_base_active = g_carry_base_active;
+    // The pixel carry must survive clear() until the groups-driven rebuild consumes it,
+    // but its base gate is consumed by this target swap exactly once.
+    g_carry_base_active = null;
     clear();
-    g_base_active = false; // a freshly loaded model has no atlas yet — don't lay a template (req_2551)
+    g_base_active = carried_base_active orelse false; // fresh load = false; edit carry = same document/base
     if (vert_count < 3) return;
     const fc = vert_count / 3;
     g_key_hash = key_hash;
@@ -283,6 +287,11 @@ const CarryIsle = struct { group: u32, x: u32, y: u32, w: u32, h: u32 };
 var g_carry_isles: ?[]CarryIsle = null;
 var g_carry_rgba: ?[]u8 = null;
 var g_carry_w: u32 = 0;
+// setTarget() normally deactivates the atlas base because a fresh document has not
+// created one. An edit-time atlas carry is the SAME document, so remember that gate
+// across the destructive target swap as well as the pixels. Without it, the next paint
+// undo/replay after an append clears to grey underneath an otherwise intact program.
+var g_carry_base_active: ?bool = null;
 
 /// Stash the CURRENT atlas + island rects for the next carry-rebuild. Call with the
 /// selection tint lifted (the stash must hold TRUE paint, req_2611). Survives
@@ -301,6 +310,7 @@ pub fn snapshotAtlasForCarry() void {
     g_carry_rgba = rgba;
     g_carry_isles = isles;
     g_carry_w = g_atlas_w;
+    g_carry_base_active = g_base_active;
 }
 
 /// Free the stash without consuming it — the op that took it failed.
@@ -310,6 +320,7 @@ pub fn dropAtlasCarry() void {
     g_carry_rgba = null;
     g_carry_isles = null;
     g_carry_w = 0;
+    g_carry_base_active = null;
 }
 
 /// Blit every new island whose authored group has a stashed twin, old rect → new rect
@@ -1642,6 +1653,21 @@ pub fn layoutIslands() ?[]const paint_islands.Island {
     const lay = &(g_layout orelse return null);
     return lay.islands;
 }
+
+/// Narrow unit-test boundary for setting the authored groups that drive island carry.
+/// Keeping this here ensures the test manipulates the SAME private model_source instance
+/// as the paint target instead of accidentally constructing a second module-global copy.
+pub const test_support = struct {
+    pub fn setFaceGroupsAndRebuild(groups: []const u32, verts: []f32, vert_count: u32) void {
+        model_source.setFaceGroups(groups);
+        rebuildLayout(verts, vert_count);
+    }
+
+    pub fn clearTargetAndSource() void {
+        clear();
+        model_source.clear();
+    }
+};
 
 // ── Tests ───────────────────────────────────────────────────────────────────────
 test "density clamps: a huge face at high density stays inside the GPU limits" {

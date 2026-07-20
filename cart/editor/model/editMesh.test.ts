@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorMesh, symmetrize, type EditMesh, type V3 } from './editMesh';
+import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -47,6 +47,19 @@ const positionSetKey = (positions: V3[]) => positions
   .map((position) => position.map((value) => value.toFixed(6)).join(','))
   .sort()
   .join('|');
+
+test('the plane primitive is one intact indexed quad before host append', () => {
+  const source = plane(2, 3);
+  assert(source.verts.length === 4, `plane should have four vertices, got ${source.verts.length}`);
+  assert(source.faces.length === 1 && source.faces[0].loop.length === 4,
+    `plane should be one quad, got ${source.faces.map((face) => face.loop.length).join(',')}`);
+  assert(source.verts.every((vertex) => vertex[1] === 0), 'plane vertices left the XZ plane');
+  const lowered = editMeshToGeometry(source);
+  assert(lowered.positions.length === 6 * 8, `one quad should lower to two render triangles, got ${lowered.positions.length / 8} vertices`);
+  for (let vertex = 0; vertex < 6; vertex += 1) {
+    assert(lowered.positions[vertex * 8 + 1] === 0, `lowered plane vertex ${vertex} has y=${lowered.positions[vertex * 8 + 1]}`);
+  }
+});
 
 test('equal-length non-planar mirror quads carry the same physical diagonal', () => {
   // A square in YZ with alternating X is the exact tie that defeats "shortest

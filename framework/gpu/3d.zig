@@ -2185,7 +2185,19 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     };
     defer std.heap.c_allocator.free(owned);
 
+    // Appending groups preserves every existing paint-program face key. Carry the
+    // true atlas (selection tint lifted) and the recorded program BEFORE setTarget
+    // destroys the old target. This is the missing half of req_2660: hide/show did
+    // it, Add Part did not, so adding a plane flattened painted models.
+    mesh_edit.suspendFaceTint();
+    model_paint.snapshotAtlasForCarry();
+    mesh_edit.resumeFaceTint();
+    paint_program.carryProgramAcrossNextTarget();
     const ok = replaceActiveEditMesh(owned, cur_count + new_count);
+    if (!ok) {
+        model_paint.dropAtlasCarry();
+        paint_program.cancelProgramCarry();
+    }
     if (ok) {
         model_source.setFaceGroups(groups.items);
         // The appended part joins the host's part-range truth (req_2644): grow the
@@ -2764,7 +2776,26 @@ pub fn meshRedoLabel() []const u8 {
 fn journalInstall(e: *const JournalEntry) bool {
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
-    if (!replaceActiveEditMesh(vcopy, e.count)) return false;
+    // Add/duplicate/mirror only append fresh authored groups. Their undo/redo removes
+    // or restores those groups without changing any survivor's (group, ordinal) paint
+    // identity, so carry exact texels + the stroke program through the target swap.
+    // Other topology journals may rewrite identity and keep the conservative reset.
+    const paint_stable = std.mem.eql(u8, e.label, "add part") or
+        std.mem.eql(u8, e.label, "duplicate part") or
+        std.mem.eql(u8, e.label, "mirror part");
+    if (paint_stable) {
+        mesh_edit.suspendFaceTint();
+        model_paint.snapshotAtlasForCarry();
+        mesh_edit.resumeFaceTint();
+        paint_program.carryProgramAcrossNextTarget();
+    }
+    if (!replaceActiveEditMesh(vcopy, e.count)) {
+        if (paint_stable) {
+            model_paint.dropAtlasCarry();
+            paint_program.cancelProgramCarry();
+        }
+        return false;
+    }
     // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).
     for (g_hidden_groups.items) |h| {
         std.heap.c_allocator.free(h.verts);
