@@ -2151,7 +2151,8 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 }
 
 /// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
-/// "groups":[g,...],"data":"<base64 rgba>"} for the current painting, or "" if there's
+/// "groups":[g,...],"triangles":[island,x0,y0,x1,y1,x2,y2,...],
+/// "data":"<base64 rgba>"} for the current painting, or "" if there's
 /// no paint target. `detail` is the applied density (texels/meter); `islands` is the
 /// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
 /// authored group id. Every island is emitted: the UV editor is an authoring surface,
@@ -2192,6 +2193,25 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         w.writeAll(",\"groups\":[") catch return setReturnString(info, "");
         for (isls, 0..) |isl, i| {
             w.print("{s}{d}", .{ if (i == 0) "" else ",", isl.group }) catch return setReturnString(info, "");
+        }
+        w.writeAll("]") catch return setReturnString(info, "");
+        w.writeAll(",\"triangles\":[") catch return setReturnString(info, "");
+        const face_count = scene3d.paintFaceCount();
+        var face: u32 = 0;
+        var emitted: usize = 0;
+        while (face < face_count) : (face += 1) {
+            const triangle = scene3d.paintUvTriangle(face) orelse continue;
+            w.print("{s}{d},{d},{d},{d},{d},{d},{d}", .{
+                if (emitted == 0) "" else ",",
+                triangle.island,
+                triangle.corners[0],
+                triangle.corners[1],
+                triangle.corners[2],
+                triangle.corners[3],
+                triangle.corners[4],
+                triangle.corners[5],
+            }) catch return setReturnString(info, "");
+            emitted += 1;
         }
         w.writeAll("]") catch return setReturnString(info, "");
     }

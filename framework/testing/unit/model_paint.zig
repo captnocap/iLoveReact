@@ -287,6 +287,10 @@ test "authored UV rectangle edits keep texture pixels fixed and rewrite displaye
     };
     try testing.expect(model_paint.applyIslandRects(&moved_and_resized, &joined, 12));
     try testing.expectEqual(before_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
+    const moved_triangle = model_paint.uvTriangle(0) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(@as(u32, 0), moved_triangle.island);
+    try testing.expect(moved_triangle.corners[0] >= @as(f32, @floatFromInt(moved_and_resized[0])));
+    try testing.expect(moved_triangle.corners[1] >= @as(f32, @floatFromInt(moved_and_resized[1])));
     const after_color = model_paint.faceColor(0).?;
     try testing.expect(!std.mem.eql(u8, before_color[0..], after_color[0..]));
     try testing.expect(before_u != joined[6] or before_v != joined[7]);
@@ -295,6 +299,15 @@ test "authored UV rectangle edits keep texture pixels fixed and rewrite displaye
     var adopted: [8]u32 = undefined;
     try testing.expect(model_paint.copyLayoutRects(&adopted));
     try testing.expectEqualSlices(u32, &moved_and_resized, &adopted);
+
+    // A later brush dab follows the transformed triangle corners. This is the
+    // cylinder-sliver regression: moving a UV must not leave painting behind in
+    // the original packing cell.
+    const before_dab_hash = atlasHash(model_paint.atlas().?.rgba);
+    model_paint.paintStamp(0, 0.33, 0.33, 4, .{ 7, 239, 113, 255 }, 1);
+    try testing.expect(before_dab_hash != atlasHash(model_paint.atlas().?.rgba));
+    const dabbed = model_paint.sampleTexel(0, 0.33, 0.33) orelse return error.TestUnexpectedResult;
+    try testing.expect(dabbed[1] > 220 and dabbed[0] < 30);
 }
 
 test "closed pen polygon fills one logical island across its triangle diagonal" {

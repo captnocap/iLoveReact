@@ -6248,6 +6248,13 @@ pub fn paintIslands() ?[]const paint_islands_mod.Island {
     return model_paint.layoutIslands();
 }
 
+/// Exact UV silhouette for one displayed triangle. The atlas bridge emits these
+/// beside island bounds so non-rectangular authored faces remain intelligible.
+pub const PaintUvTriangle = model_paint.UvTriangle;
+pub fn paintUvTriangle(face: u32) ?PaintUvTriangle {
+    return model_paint.uvTriangle(face);
+}
+
 /// True when the active 3D authored-face selection contains this UV island.
 /// An authored n-gon may contain several render triangles; any selected member
 /// identifies the shared island because normal face picking selects the group.

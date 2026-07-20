@@ -1126,7 +1126,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
-    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; data: string };
+    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; triangles?: number[]; data: string };
     try {
       o = JSON.parse(j);
     } catch {
@@ -1142,7 +1142,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
-    const islands = parseUvIslandRects(o.islands, o.groups);
+    const islands = parseUvIslandRects(o.islands, o.groups, o.triangles);
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     setUvPanel({
       key: `${model?.key ?? 'model'}-${o.w}x${o.h}`,
@@ -1176,6 +1176,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
   const selectUvIsland = (index: number, additive: boolean): boolean => {
     if (!Number.isInteger(index) || index < 0) return false;
+    // Paint owns the 3D surface and deliberately has no edit-selection tint. Keep
+    // this UV selection panel-local while painting so moving a sliver does not
+    // silently disarm the brush. Outside Paint, route through the native face
+    // selection so the UV and 3D outlines remain one authoritative selection.
+    if (paintMode) return true;
     // A UV face click is an authored-face selection action. Leave the mutually
     // exclusive paint/path/focus tools immediately so the host door cannot be
     // rejected by a paint session that React has not torn down yet.

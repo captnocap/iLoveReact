@@ -1950,6 +1950,25 @@ pub fn copyLayoutRects(out: []u32) bool {
     return true;
 }
 
+/// Exact displayed-triangle geometry for the UV editor. `corners` are absolute
+/// atlas texels; `island` ties the triangle to the transform bounds returned by
+/// copyLayoutRects. The panel renders these silhouettes instead of pretending a
+/// fan sliver occupies its entire rectangular packing box.
+pub const UvTriangle = struct {
+    island: u32,
+    corners: [6]f32,
+};
+
+pub fn uvTriangle(face: u32) ?UvTriangle {
+    const lay = &(g_layout orelse return null);
+    if (face >= g_facecount) return null;
+    const c = triTexelCorners(lay, face);
+    return .{
+        .island = lay.tri_island[face],
+        .corners = .{ c[0][0], c[0][1], c[1][0], c[1][1], c[2][0], c[2][1] },
+    };
+}
+
 fn validIslandRectTable(rects: []const u32, atlas_w: u32, atlas_h: u32) bool {
     if (rects.len == 0 or rects.len % 4 != 0 or atlas_w == 0 or atlas_h == 0) return false;
     var index: usize = 0;

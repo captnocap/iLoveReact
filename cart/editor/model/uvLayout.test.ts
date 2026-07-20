@@ -7,6 +7,7 @@ import {
   resizeUvIslandFromCorner,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvIslandBoundaryPath,
 } from './uvLayout';
 
 let passed = 0, failed = 0;
@@ -15,8 +16,13 @@ function test(name: string, fn: () => void) { try { fn(); passed += 1; log(`  ok
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 test('UV rect parsing and flattening preserve every island and group', () => {
-  const parsed = parseUvIslandRects([1, 2, 3, 4, 8, 9, 5, 6], [17, 23]);
+  const parsed = parseUvIslandRects(
+    [1, 2, 3, 4, 8, 9, 5, 6],
+    [17, 23],
+    [0, 1, 2, 4, 2, 1, 6, 1, 8, 9, 13, 9, 8, 15],
+  );
   assert(parsed.length === 2 && parsed[1]!.group === 23, 'island metadata was dropped');
+  assert(parsed[0]!.triangles?.length === 1 && parsed[1]!.triangles?.length === 1, 'triangle silhouettes were dropped');
   assert([...flattenUvIslandRects(parsed)].join(',') === '1,2,3,4,8,9,5,6', 'rect serialization drifted');
 });
 
@@ -39,6 +45,22 @@ test('four-corner resize keeps the opposite corner fixed', () => {
 test('hit testing chooses the smallest overlapping island', () => {
   const rects = parseUvIslandRects([0, 0, 20, 20, 5, 5, 3, 3], [1, 2]);
   assert(hitUvIsland(rects, 6, 6) === 1, 'nested island was unreachable');
+});
+
+test('triangle hit testing rejects empty space inside a sliver bounding box', () => {
+  const rects = parseUvIslandRects([0, 0, 20, 20], [1], [0, 0, 0, 20, 0, 0, 2]);
+  assert(hitUvIsland(rects, 10, 1) === 0, 'visible sliver was not selectable');
+  assert(hitUvIsland(rects, 10, 15) === -1, 'empty bounding-box space masqueraded as UV geometry');
+});
+
+test('island boundary removes an authored quad triangulation diagonal', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [0, 0, 0, 10, 0, 10, 10, 0, 0, 0, 10, 10, 0, 10],
+  );
+  const path = uvIslandBoundaryPath(rects, 1, 1);
+  assert((path.match(/ L /g) ?? []).length === 4, 'shared triangle edge leaked into the authored-face outline');
 });
 
 test('primary drag selects one face while hand tool or middle drag pans', () => {

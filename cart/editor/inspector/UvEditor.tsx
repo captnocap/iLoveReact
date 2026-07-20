@@ -12,7 +12,9 @@ import {
   resizeUvIslandFromCorner,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvIslandBoundaryPath,
   uvRectPath,
+  uvTrianglePath,
   UV_LAYOUT_TUNING,
   type UvCanvasTool,
   type UvIslandRect,
@@ -206,6 +208,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const active = activeRange ? rects.filter((rect) => rect.group >= activeRange.lo && rect.group < activeRange.hi) : [];
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const rectScreenPath = (items: readonly UvIslandRect[]) => uvRectPath(items, view.scale, view.scale, view.x, view.y);
+  const shapeScreenPath = (items: readonly UvIslandRect[]) => uvIslandBoundaryPath(items, view.scale, view.scale, view.x, view.y);
+  const fillScreenPath = (items: readonly UvIslandRect[]) => uvTrianglePath(items, view.scale, view.scale, view.x, view.y);
   const handlePoints: { corner: UvResizeCorner; x: number; y: number }[] = selectedRect ? [
     { corner: 'nw', x: view.x + selectedRect.x * view.scale, y: view.y + selectedRect.y * view.scale },
     { corner: 'ne', x: view.x + (selectedRect.x + selectedRect.w) * view.scale, y: view.y + selectedRect.y * view.scale },
@@ -338,10 +342,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Effect shader={ATLAS_SHADER} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, borderWidth: 1, borderColor: '#354052', pointerEvents: 'none' }} />
         <Graph style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          <Graph.Path d={rectScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={3.2} />
-          <Graph.Path d={rectScreenPath(rects)} fill="none" stroke="#c7d0df" strokeWidth={1.15} />
-          {active.length ? <Graph.Path d={rectScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.65} /> : null}
-          {selectedRect ? <Graph.Path d={rectScreenPath([selectedRect])} fill="#f4d35e2b" stroke="#ffffff" strokeWidth={2.2} /> : null}
+          <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={3.2} />
+          <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#c7d0df" strokeWidth={1.15} />
+          {active.length ? <Graph.Path d={shapeScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.65} /> : null}
+          {selectedRect ? <Graph.Path d={fillScreenPath([selectedRect])} fill="#f4d35e2b" stroke="none" /> : null}
+          {selectedRect ? <Graph.Path d={shapeScreenPath([selectedRect])} fill="none" stroke="#ffffff" strokeWidth={2.2} /> : null}
+          {selectedRect ? <Graph.Path d={rectScreenPath([selectedRect])} fill="none" stroke="#f4d35e99" strokeWidth={1} /> : null}
         </Graph>
         {handlePoints.map((handle) => (
           <Box key={handle.corner} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />
