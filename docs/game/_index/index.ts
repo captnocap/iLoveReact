@@ -44,6 +44,7 @@ import { hmsc_int } from './records/hmsc_int';
 import { physics3d } from './records/physics3d';
 import { skybox_void } from './records/skybox_void';
 import { request_ledger } from './records/request_ledger';
+import { world_knowledge_authoring } from './records/world_knowledge_authoring';
 
 export type {
   DocIndex, InterfaceRecord, PatternRecord, HazardRecord,
@@ -53,6 +54,7 @@ export type {
 export const ALL_DOCS: DocIndex[] = [
   bake_geometry, editor_color_library, editor_deej, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_map_documents, editor_map_paint_history, editor_painted_placements, editor_sections, editor_spin_props, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
+  world_knowledge_authoring,
 ];
 
 // ── flattened views (each row carries its owning doc) ───────────────────────
