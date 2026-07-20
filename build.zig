@@ -1011,6 +1011,27 @@ pub fn build(b: *std.Build) void {
     const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
     layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
 
+    // React mutation placement: keyed APPEND/INSERT_BEFORE operations must
+    // move one native child reference rather than duplicate it.
+    const host_tree_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/host_tree.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const host_tree_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/host_tree.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    host_tree_test_mod.addImport("host_tree", host_tree_impl_test_mod);
+    const host_tree_test = b.addTest(.{
+        .name = "host-tree-test",
+        .root_module = host_tree_test_mod,
+    });
+    const run_host_tree_test = b.addRunArtifact(host_tree_test);
+    const host_tree_test_step = b.step("test-host-tree", "Run native React child-placement tests");
+    host_tree_test_step.dependOn(&run_host_tree_test.step);
+
     // ── slider math unit tests (SLIDER-0611 / MEDIASLIDER-0705) ─────
     const slider_math_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/slider_math.zig"),

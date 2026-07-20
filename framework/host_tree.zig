@@ -299,7 +299,7 @@ pub fn appendChild(parent_id: u32, child_id: u32) !void {
     _ = try ensureNode(parent_id);
     _ = try ensureNode(child_id);
     // Already in the tree ⇒ React is REPOSITIONING this node, not mounting it.
-    const is_move = g_parent_id.get(child_id) != null;
+    const is_move = detachForPlacement(child_id);
     if (g_children_ids.getPtr(parent_id)) |list| try list.append(g_alloc, child_id);
     try g_parent_id.put(child_id, parent_id);
     dirtyForPlacement(parent_id, child_id, is_move);
@@ -307,8 +307,12 @@ pub fn appendChild(parent_id: u32, child_id: u32) !void {
 }
 
 pub fn insertBefore(parent_id: u32, child_id: u32, before_id: u32) !void {
+    _ = try ensureNode(parent_id);
     _ = try ensureNode(child_id);
-    const is_move = g_parent_id.get(child_id) != null;
+    // "Move X before X" is already satisfied. Detaching first would lose the
+    // reference point and incorrectly append X to the end.
+    if (child_id == before_id) return;
+    const is_move = detachForPlacement(child_id);
     if (g_children_ids.getPtr(parent_id)) |list| {
         var idx: usize = list.items.len;
         for (list.items, 0..) |x, i| if (x == before_id) {
@@ -334,12 +338,38 @@ fn dirtyForPlacement(parent_id: u32, child_id: u32, is_move: bool) void {
     if (is_move) markSubtreeDirty(parent_id) else markSubtreeDirty(child_id);
 }
 
+/// React mutation-mode APPEND/INSERT_BEFORE operations reposition an existing
+/// keyed child. Remove its previous reference first so a move cannot leave the
+/// same node id in both its stale and current sibling positions.
+fn detachForPlacement(child_id: u32) bool {
+    var removed = false;
+    if (g_parent_id.get(child_id)) |old_parent_id| {
+        if (g_children_ids.getPtr(old_parent_id)) |list| {
+            removed = removeAllIds(list, child_id) or removed;
+        }
+        // A cross-parent move changes the old parent's ordered child set too.
+        markSubtreeDirty(old_parent_id);
+    }
+    removed = removeAllIds(&g_root_child_ids, child_id) or removed;
+    _ = g_parent_id.remove(child_id);
+    return removed;
+}
+
+fn removeAllIds(list: *std.ArrayList(u32), child_id: u32) bool {
+    var removed = false;
+    var i: usize = list.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (list.items[i] != child_id) continue;
+        _ = list.orderedRemove(i);
+        removed = true;
+    }
+    return removed;
+}
+
 pub fn removeChild(parent_id: u32, child_id: u32) void {
     if (g_children_ids.getPtr(parent_id)) |list| {
-        for (list.items, 0..) |x, i| if (x == child_id) {
-            _ = list.orderedRemove(i);
-            break;
-        };
+        _ = removeAllIds(list, child_id);
     }
     // Stamp dirty BEFORE clearing the parent link so the walk reaches
     // the (former) parent's ancestors. After this the detached subtree
@@ -351,6 +381,7 @@ pub fn removeChild(parent_id: u32, child_id: u32) void {
 
 pub fn appendToRoot(child_id: u32) !void {
     _ = try ensureNode(child_id);
+    _ = detachForPlacement(child_id);
     try g_root_child_ids.append(g_alloc, child_id);
     _ = g_parent_id.remove(child_id);
     markSubtreeDirty(child_id);
@@ -359,6 +390,8 @@ pub fn appendToRoot(child_id: u32) !void {
 
 pub fn insertBeforeRoot(child_id: u32, before_id: u32) !void {
     _ = try ensureNode(child_id);
+    if (child_id == before_id) return;
+    _ = detachForPlacement(child_id);
     var idx: usize = g_root_child_ids.items.len;
     for (g_root_child_ids.items, 0..) |x, i| if (x == before_id) {
         idx = i;
@@ -371,10 +404,7 @@ pub fn insertBeforeRoot(child_id: u32, before_id: u32) !void {
 }
 
 pub fn removeFromRoot(child_id: u32) void {
-    for (g_root_child_ids.items, 0..) |x, i| if (x == child_id) {
-        _ = g_root_child_ids.orderedRemove(i);
-        break;
-    };
+    _ = removeAllIds(&g_root_child_ids, child_id);
     markSubtreeDirty(child_id);
     _ = g_parent_id.remove(child_id);
     g_dirty = true;

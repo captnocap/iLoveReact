@@ -463,6 +463,34 @@ function markParent(parent: Instance | null, child: Instance | TextInstance): vo
   assignHostWindow(child, inherited);
 }
 
+/**
+ * React uses appendChild/insertBefore for both mounts and keyed reorders.
+ * Detach an already-placed child before inserting its single mirror entry at
+ * the new position. TUI and inspector consumers walk this mirror directly.
+ */
+function detachForPlacement(child: Instance | TextInstance): boolean {
+  const siblings = child.parent
+    ? (child.parent.children as Array<Instance | TextInstance>)
+    : (rootInstances as Array<Instance | TextInstance>);
+  let removed = false;
+  for (let i = siblings.length - 1; i >= 0; i--) {
+    if (siblings[i] !== child) continue;
+    siblings.splice(i, 1);
+    removed = true;
+  }
+  return removed;
+}
+
+function placeBefore(
+  siblings: Array<Instance | TextInstance>,
+  child: Instance | TextInstance,
+  before: Instance | TextInstance
+): void {
+  const idx = siblings.indexOf(before);
+  if (idx === -1) siblings.push(child);
+  else siblings.splice(idx, 0, child);
+}
+
 function buildWindowOwnerMap(): { ownerById: Map<number, number>; windowRoots: Set<number> } {
   const ownerById = new Map<number, number>();
   const windowRoots = new Set<number>();
@@ -1181,9 +1209,10 @@ export const hostConfig: HostConfig<
 
   appendChild(parent: Instance, child: Instance | TextInstance) {
     hostLog(`[hostConfig] appendChild parent=${parent.id} child=${child.id}`);
+    const isMove = detachForPlacement(child);
     markParent(parent, child);
     (parent.children as any[]).push(child);
-    if (!isInstance(child)) {
+    if (!isMove && !isInstance(child)) {
       recordChurn('create-text', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
     }
     emit({ op: 'APPEND', parentId: parent.id, childId: child.id });
@@ -1191,9 +1220,10 @@ export const hostConfig: HostConfig<
 
   appendChildToContainer(container: Container, child: Instance | TextInstance) {
     hostLog(`[hostConfig] appendChildToContainer container=${container.id} child=${child.id}`);
+    const isMove = detachForPlacement(child);
     markParent(null, child);
     rootInstances.push(child as Instance);
-    if (!isInstance(child)) {
+    if (!isMove && !isInstance(child)) {
       recordChurn('create-text-root', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
     }
     emit({ op: 'APPEND_TO_ROOT', childId: child.id });
@@ -1202,8 +1232,10 @@ export const hostConfig: HostConfig<
   removeChild(parent: Instance, child: Instance | TextInstance) {
     hostLog(`[hostConfig] removeChild parent=${parent.id} child=${child.id}`);
     debugLog.log('recon', `removeChild parent=${parent.id} child=${child.id}`);
-    const idx = (parent.children as any[]).indexOf(child);
-    if (idx !== -1) (parent.children as any[]).splice(idx, 1);
+    const siblings = parent.children as Array<Instance | TextInstance>;
+    for (let i = siblings.length - 1; i >= 0; i--) {
+      if (siblings[i] === child) siblings.splice(i, 1);
+    }
     const windowId = isInstance(child)
       ? child.hostWindowId
       : (WINDOW_HOST_TYPES.has(parent.type) ? parent.id : parent.hostWindowId);
@@ -1215,8 +1247,9 @@ export const hostConfig: HostConfig<
 
   removeChildFromContainer(_container: Container, child: Instance | TextInstance) {
     hostLog(`[hostConfig] removeChildFromContainer child=${child.id}`);
-    const idx = rootInstances.indexOf(child as Instance);
-    if (idx !== -1) rootInstances.splice(idx, 1);
+    for (let i = rootInstances.length - 1; i >= 0; i--) {
+      if (rootInstances[i] === child) rootInstances.splice(i, 1);
+    }
     const windowId = isInstance(child) ? child.hostWindowId : null;
     recordChurn('remove-root', child);
     markParent(null, child);
@@ -1230,15 +1263,12 @@ export const hostConfig: HostConfig<
     before: Instance | TextInstance
   ) {
     hostLog(`[hostConfig] insertBefore parent=${parent.id} child=${child.id} before=${before.id}`);
-    const arr = parent.children as any[];
-    const idx = arr.indexOf(before);
-    if (idx !== -1) {
-      arr.splice(idx, 0, child);
-    } else {
-      arr.push(child);
-    }
+    if (child === before) return;
+    const isMove = detachForPlacement(child);
+    const arr = parent.children as Array<Instance | TextInstance>;
+    placeBefore(arr, child, before);
     markParent(parent, child);
-    if (!isInstance(child)) {
+    if (!isMove && !isInstance(child)) {
       recordChurn('insert-text', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
     }
     emit({
@@ -1255,12 +1285,9 @@ export const hostConfig: HostConfig<
     before: Instance | TextInstance
   ) {
     hostLog(`[hostConfig] insertInContainerBefore child=${child.id} before=${before.id}`);
-    const idx = rootInstances.indexOf(before as Instance);
-    if (idx !== -1) {
-      rootInstances.splice(idx, 0, child as Instance);
-    } else {
-      rootInstances.push(child as Instance);
-    }
+    if (child === before) return;
+    detachForPlacement(child);
+    placeBefore(rootInstances as Array<Instance | TextInstance>, child, before);
     markParent(null, child);
     emit({
       op: 'INSERT_BEFORE_ROOT',
