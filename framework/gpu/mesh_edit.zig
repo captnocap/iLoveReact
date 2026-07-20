@@ -390,6 +390,30 @@ pub fn solidifyOffsets(
 pub fn selectedEdgeCountPub() u32 {
     return countTrue(g_sel_edge);
 }
+
+/// The three boundary vertices implied by two adjacent selected edges.  Create
+/// Face uses this as the triangle form of Blockbench's 3-vertex fill; previously
+/// the host accepted only two disjoint edges (quad bridge) and silently refused
+/// this common hole-repair gesture.
+pub fn triangleFromAdjacentEdges(e0: Edge, e1: Edge, out: *[3]u32) bool {
+    var shared: ?u32 = null;
+    var a: ?u32 = null;
+    var b: ?u32 = null;
+    for (e0) |v| {
+        if (v == e1[0] or v == e1[1]) {
+            if (shared != null) return false;
+            shared = v;
+        } else a = v;
+    }
+    const joint = shared orelse return false;
+    for (e1) |v| {
+        if (v != joint) b = v;
+    }
+    if (a == null or b == null or a.? == b.?) return false;
+    out.* = .{ a.?, joint, b.? };
+    return true;
+}
+
 pub fn selectedEdgesPub(out: []Edge) u32 {
     if (!ensureTopology()) return 0;
     const sel = g_sel_edge orelse return 0;
@@ -2012,6 +2036,14 @@ fn buildCubeSoup(soup: *[12 * 3 * 8]f32) void {
             w += 8;
         }
     }
+}
+
+test "two adjacent selected edges imply the missing triangle" {
+    var order: [3]u32 = undefined;
+    try testing.expect(triangleFromAdjacentEdges(.{ 4, 7 }, .{ 7, 9 }, &order));
+    try testing.expectEqualSlices(u32, &.{ 4, 7, 9 }, &order);
+    try testing.expect(!triangleFromAdjacentEdges(.{ 4, 7 }, .{ 8, 9 }, &order));
+    try testing.expect(!triangleFromAdjacentEdges(.{ 4, 7 }, .{ 7, 4 }, &order));
 }
 
 test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {

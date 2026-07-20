@@ -3075,7 +3075,7 @@ export default function AppFrame() {
     }
     const geo = composeModelParts([{ ...part, visible: true }]);
     const range = geo.positions.length > 0
-      ? withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, part.color))
+      ? withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, part.color, parts.length))
       : null;
     if (!range) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
@@ -4054,7 +4054,7 @@ export default function AppFrame() {
         if (geo.vertices.length === 0) continue;
         const row = meta[index];
         const color = row?.color ?? nextColor();
-        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color));
+        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color, existing.length + added.length));
         if (!r) continue;
         added.push({
           id: `part:imp:${state.seq}:${added.length}`,
@@ -4070,12 +4070,12 @@ export default function AppFrame() {
       const built = primitiveMeshData(pkg.primitive);
       const color = nextColor();
       const r = built.positions.length > 0
-        ? withNativeMeshActionSource(source, () => api.appendPart(built.positions, built.faceGroups, color))
+        ? withNativeMeshActionSource(source, () => api.appendPart(built.positions, built.faceGroups, color, existing.length + added.length))
         : null;
       if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi });
     } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
       const color = nextColor();
-      const r = withNativeMeshActionSource(source, () => api.appendModelFile(pkg.viewerPath, color));
+      const r = withNativeMeshActionSource(source, () => api.appendModelFile(pkg.viewerPath, color, existing.length + added.length));
       if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
     }
     if (added.length === 0) {

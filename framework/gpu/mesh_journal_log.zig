@@ -226,6 +226,32 @@ pub fn hasExactPartRange(ranges: []const u32, lo: u32, hi: u32) bool {
     return false;
 }
 
+/// Prove the boundary required before a structural outliner append: the host has
+/// exactly the number of parts the cart says are already present, its ranges are
+/// ordered/disjoint, and every resident face belongs to one of them.  Appending
+/// while this is false would turn a metadata disagreement into shared edit
+/// identity (coincident vertices then weld under the wrong part).
+pub fn ownsExactPartPartition(groups: []const u32, ranges: []const u32, expected_parts: usize) bool {
+    if (ranges.len != expected_parts * 2 or !structurallyValidRanges(ranges)) return false;
+    if (groups.len == 0) return expected_parts == 0;
+    if (expected_parts == 0) return false;
+    for (groups) |group| {
+        if (group == NO_FACE_GROUP or findPartInRanges(ranges, group) == null) return false;
+    }
+    var range_index: usize = 0;
+    while (range_index + 1 < ranges.len) : (range_index += 2) {
+        var owns_face = false;
+        for (groups) |group| {
+            if (group >= ranges[range_index] and group < ranges[range_index + 1]) {
+                owns_face = true;
+                break;
+            }
+        }
+        if (!owns_face) return false;
+    }
+    return true;
+}
+
 fn structurallyValidRanges(ranges: []const u32) bool {
     if (ranges.len % 2 != 0) return false;
     var previous_hi: u32 = 0;
@@ -238,6 +264,20 @@ fn structurallyValidRanges(ranges: []const u32) bool {
         previous_hi = hi;
     }
     return true;
+}
+
+fn findPartInRanges(ranges: []const u32, group: u32) ?usize {
+    var lo: usize = 0;
+    var hi: usize = ranges.len / 2;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (group < ranges[mid * 2]) {
+            hi = mid;
+        } else if (group >= ranges[mid * 2 + 1]) {
+            lo = mid + 1;
+        } else return mid;
+    }
+    return null;
 }
 
 fn findPart(parts: []const PartSummary, group: u32) ?usize {

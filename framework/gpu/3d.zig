@@ -1298,17 +1298,29 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     }
 
     var ok = false;
-    if (selected_count == 2 and !edgeSharesVertex(edges[0], edges[1])) {
-        const a = mesh_edit.vertPosPub(edges[0][0]);
-        const b = mesh_edit.vertPosPub(edges[0][1]);
-        var c = mesh_edit.vertPosPub(edges[1][0]);
-        var d = mesh_edit.vertPosPub(edges[1][1]);
-        if (dist2(a, d) + dist2(b, c) < dist2(a, c) + dist2(b, d)) {
-            const tmp = c;
-            c = d;
-            d = tmp;
+    if (selected_count == 2) {
+        if (!edgeSharesVertex(edges[0], edges[1])) {
+            const a = mesh_edit.vertPosPub(edges[0][0]);
+            const b = mesh_edit.vertPosPub(edges[0][1]);
+            var c = mesh_edit.vertPosPub(edges[1][0]);
+            var d = mesh_edit.vertPosPub(edges[1][1]);
+            if (dist2(a, d) + dist2(b, c) < dist2(a, c) + dist2(b, d)) {
+                const tmp = c;
+                c = d;
+                d = tmp;
+            }
+            ok = appendQuadSplit(&verts, a, b, d, c);
+        } else {
+            var order: [3]u32 = undefined;
+            if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
+                ok = appendTri(
+                    &verts,
+                    mesh_edit.vertPosPub(order[0]),
+                    mesh_edit.vertPosPub(order[1]),
+                    mesh_edit.vertPosPub(order[2]),
+                );
+            }
         }
-        ok = appendQuadSplit(&verts, a, b, d, c);
     } else {
         var order: [4]u32 = undefined;
         if (closedEdgeLoopOrder(edges, &order)) |n| {
@@ -2031,6 +2043,11 @@ pub fn meshDeleteGroupRange(lo: u32, hi: u32) bool {
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0 or hi <= lo) return false;
+    const live_ranges = model_source.partRanges() orelse return false;
+    if (!mesh_journal_log.hasExactPartRange(live_ranges, lo, hi)) {
+        std.log.err("[mesh-part] refused delete of stale/non-part range [{d},{d})", .{ lo, hi });
+        return false;
+    }
 
     const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
     defer std.heap.c_allocator.free(mask);
@@ -2165,7 +2182,31 @@ pub const AppendResult = struct { ok: bool, lo: u32, hi: u32, count: u32 };
 /// JS. `new_verts` is interleaved 8 f32/vert; `new_groups` is one authored id per new triangle
 /// (part-local, 0-based). Returns the new group range [lo, hi). Journaled as "add part";
 /// duplicate/mirror capture their own label and call the inner op directly.
-pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
+pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []const u32, expected_parts: u32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    const current_faces = g_edit_count / 3;
+    if (current_faces == 0) {
+        if (expected_parts != 0) return fail;
+    } else {
+        const current_groups = captureFaceGroups() orelse return fail;
+        defer std.heap.c_allocator.free(current_groups);
+        var partition_groups: std.ArrayListUnmanaged(u32) = .empty;
+        defer partition_groups.deinit(std.heap.c_allocator);
+        partition_groups.appendSlice(std.heap.c_allocator, current_groups) catch return fail;
+        // Hidden parts are absent from the displayed soup but remain members of
+        // the same ownership partition in their host stash.
+        for (g_hidden_groups.items) |hidden| {
+            partition_groups.appendSlice(std.heap.c_allocator, hidden.groups) catch return fail;
+        }
+        const live_ranges = model_source.partRanges() orelse return fail;
+        if (!mesh_journal_log.ownsExactPartPartition(partition_groups.items, live_ranges, expected_parts)) {
+            std.log.err(
+                "[mesh-part] refused append: cart expects {d} parts, host has {d} ranges over {d} faces",
+                .{ expected_parts, live_ranges.len / 2, current_faces },
+            );
+            return fail;
+        }
+    }
     var snap = journalSnapshotCurrent("add part");
     const r = appendGroupInner(new_verts, new_count, new_groups);
     if (r.ok) {

@@ -75,6 +75,17 @@ test "part boundary accepts a complete live range and rejects a stale subrange" 
     try testing.expect(!journal_log.hasExactPartRange(&ranges, 0, 32));
 }
 
+test "append boundary requires the cart and host to share one complete partition" {
+    const ranges = [_]u32{ 0, 4, 6, 10 };
+    const groups = [_]u32{ 0, 3, 6, 9 };
+    try testing.expect(journal_log.ownsExactPartPartition(&groups, &ranges, 2));
+    try testing.expect(!journal_log.ownsExactPartPartition(&groups, &ranges, 1));
+    try testing.expect(!journal_log.ownsExactPartPartition(&.{ 0, 5, 6 }, &ranges, 2));
+    try testing.expect(!journal_log.ownsExactPartPartition(&.{ 0, journal_log.NO_FACE_GROUP }, &ranges, 2));
+    try testing.expect(!journal_log.ownsExactPartPartition(&.{ 0, 3 }, &ranges, 2));
+    try testing.expect(!journal_log.ownsExactPartPartition(&groups, &.{ 0, 7, 6, 10 }, 2));
+}
+
 test "valid part ranges count every face exactly once" {
     var summary = try journal_log.analyze(testing.allocator, .{
         .vertex_count = 15,

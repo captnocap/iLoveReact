@@ -909,9 +909,12 @@ fn hostMeshDeleteGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_append_group(f32Verts, count, u32Groups) → JSON {"ok","key","count","lo","hi"}.
+/// __mesh_append_group(f32Verts, count, u32Groups, expectedParts) → JSON
+/// {"ok","key","count","lo","hi"}.
 /// Append a new part's triangles to the LIVE edit mesh (preserving prior edits) with a fresh
-/// authored-group range. Only the new part's geometry crosses the bridge.
+/// authored-group range. `expectedParts` is the cart's pre-append outliner count: the host
+/// refuses the mutation unless its complete ownership partition agrees. Only the new part's
+/// geometry crosses the bridge.
 fn hostMeshAppendGroup(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const vbytes = argBytes(info, 0) orelse {
@@ -929,7 +932,16 @@ fn hostMeshAppendGroup(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     }
     const verts: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, vbytes));
     const groups: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, gbytes));
-    const r = scene3d.meshAppendGroup(verts, @intCast(count), groups);
+    const expected_raw = argToI32(info, 3) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (expected_raw < 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const expected_parts: u32 = @intCast(expected_raw);
+    const r = scene3d.meshAppendGroup(verts, @intCast(count), groups, expected_parts);
     if (!r.ok) {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1324,7 +1336,7 @@ fn hostMeshTopoSolidify(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_append_file(path) → JSON {"ok","key","count","lo","hi"}. Parse a .glb/.obj in
+/// __mesh_append_file(path, expectedParts) → JSON {"ok","key","count","lo","hi"}. Parse a .glb/.obj in
 /// the host and APPEND it to the live edit mesh as a new part (per-triangle groups) —
 /// cross-model reuse without the file's geometry ever crossing the bridge.
 fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1341,6 +1353,14 @@ fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         return;
     };
     defer mesh.deinit(std.heap.c_allocator);
+    const expected_raw = argToI32(info, 1) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (expected_raw < 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
     const tris = mesh.vert_count / 3;
     if (tris == 0) {
         setReturnString(info, "{\"ok\":0}");
@@ -1352,7 +1372,7 @@ fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     defer std.heap.c_allocator.free(groups);
     for (groups, 0..) |*g, i| g.* = @intCast(i);
-    const r = scene3d.meshAppendGroup(mesh.verts[0 .. @as(usize, mesh.vert_count) * 8], mesh.vert_count, groups);
+    const r = scene3d.meshAppendGroup(mesh.verts[0 .. @as(usize, mesh.vert_count) * 8], mesh.vert_count, groups, @intCast(expected_raw));
     if (r.ok) state.markDirty();
     setMeshAppendReturn(info, r);
 }

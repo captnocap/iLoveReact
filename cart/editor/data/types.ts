@@ -172,7 +172,7 @@ export type ModelToolApi = {
   loopCut: () => void;
   basicCut: () => void;
   deleteSelection: () => void;
-  appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
+  appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".
   setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
@@ -197,7 +197,7 @@ export type ModelToolApi = {
   // Thicken the selected faces in place (inner skin + rim walls).
   solidifySelection: () => boolean;
   // Parse a .glb/.obj in the host and append it as a new part (cross-model reuse).
-  appendModelFile: (path: string, color: string) => { lo: number; hi: number } | null;
+  appendModelFile: (path: string, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Undo/redo the host mesh journal. note = the parts-metadata JSON the restored
   // snapshot carried (set via the journal-note door), for outliner resync.
   undoMesh: () => { ok: boolean; label: string; note: string | null } | null;

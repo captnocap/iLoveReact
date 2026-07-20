@@ -150,7 +150,7 @@ export type ModelToolApi = {
   referenceImages: () => void;
   // Host-authoritative part ops: append a new part (returns its group range), hide/show a
   // part's range, delete a part's range. The host mesh is the source of truth.
-  appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
+  appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Both return the host op's outcome ({ok, count} — count = triangles remaining) so the
   // shell reports it loudly; null = the door itself failed.
   setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
@@ -164,7 +164,7 @@ export type ModelToolApi = {
   mergeFaces: () => boolean;
   glassSelection: () => boolean;
   solidifySelection: () => boolean;
-  appendModelFile: (path: string, color: string) => { lo: number; hi: number } | null;
+  appendModelFile: (path: string, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   undoMesh: () => { ok: boolean; label: string; note: string | null } | null;
   redoMesh: () => { ok: boolean; label: string; note: string | null } | null;
   setPartRangesMirror: (ranges: { lo: number; hi: number }[]) => void;
@@ -414,8 +414,8 @@ const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.(
 // A part is metadata + a group range; its geometry lives in the host mesh. Adding APPENDS to
 // the live edit mesh (preserving prior edits — no JS recompose); hide/delete are host ops on
 // the range. Only the new part's geometry (append) or a range (hide/delete) crosses the bridge.
-const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array) =>
-  readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups));
+const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array, expectedPartCount: number) =>
+  readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups, expectedPartCount));
 const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
   readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
 // ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
@@ -455,7 +455,7 @@ const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) 
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
 const meshGlass = () => readTopoResult(host.__mesh_topo_glass?.());
 const meshSolidify = () => readTopoResult(host.__mesh_topo_solidify?.(0));
-const meshAppendFile = (path: string) => readTopoResult(host.__mesh_append_file?.(path));
+const meshAppendFile = (path: string, expectedPartCount: number) => readTopoResult(host.__mesh_append_file?.(path, expectedPartCount));
 const meshUndoDoor = () => readTopoResult(host.__mesh_undo?.());
 const meshRedoDoor = () => readTopoResult(host.__mesh_redo?.());
 // The parts-metadata note the restored snapshot carried (the shell sets it after every
@@ -1372,8 +1372,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // The HOST maintains the part-range truth through each op (req_2644); adoptMesh resyncs
     // the mirror from __mesh_part_ranges. The push fallback only fires when the mesh had no
     // ranges yet (first part op on an unparted mesh — the cart still authors the seed).
-    appendPart: (positions, faceGroups, color) => {
-      const r = meshAppendGroup(positions, faceGroups);
+    appendPart: (positions, faceGroups, color, expectedPartCount) => {
+      const r = meshAppendGroup(positions, faceGroups, expectedPartCount);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       // The appended part's authored grouping IS cart-side here — keep the authored
       // face count true through Add Part (req_2618 G: the SHAPE strip must not keep
@@ -1393,13 +1393,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
     },
     deletePartRange: (lo, hi) => {
-      const r = meshDeleteGroupRange(lo, hi);
+      const live = resolveLivePartRange(lo, hi);
+      const r = meshDeleteGroupRange(live.lo, live.hi);
       const ok = adoptMesh(r) && Boolean(r?.ok);
       // Deleting a PART is a structural change the cart authors: the pair leaves the
       // range list (the host kept the id-span — its faces are gone, the row follows).
       // Only on a host-confirmed delete — a failed op keeps the mirror true to the mesh.
       if (ok) {
-        partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
+        partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== live.lo || pr.hi !== live.hi);
         meshSetPartRanges(partRangesRef.current);
       }
       return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
@@ -1452,8 +1453,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     mergeFaces: () => adoptMesh(meshMergeFaces()),
     glassSelection: () => adoptMesh(meshGlass()),
     solidifySelection: () => adoptMesh(meshSolidify()),
-    appendModelFile: (path, color) => {
-      const r = meshAppendFile(path);
+    appendModelFile: (path, color, expectedPartCount) => {
+      const r = meshAppendFile(path, expectedPartCount);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       const [rr, gg, bb] = hexToRgb01(color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
@@ -1693,9 +1694,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     host.__model_paint_group_range?.(0, tris, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
     const ranges: PartRange[] = [{ partId: spec.basePartId, lo: 0, hi: tris }];
     partRangesRef.current = [{ lo: 0, hi: tris }];
+    // Establish the base ownership boundary before replaying appended parts;
+    // each append now proves the resident host partition before it mutates.
+    meshSetPartRanges(partRangesRef.current);
     let current = loaded;
     for (const ap of spec.appends) {
-      const r = meshAppendGroup(ap.positions, ap.faceGroups);
+      const r = meshAppendGroup(ap.positions, ap.faceGroups, ranges.length);
       if (!r?.ok || r.lo == null || r.hi == null) continue;
       const [ar, ag, ab] = hexToRgb01(ap.color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(ar * 255), Math.round(ag * 255), Math.round(ab * 255));
@@ -2117,7 +2121,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'addpart') {
           const kind = (a[0] || 'cube') as Parameters<typeof primitiveMeshData>[0];
           const geo = primitiveMeshData(kind);
-          const r = toolApiRef.current?.appendPart(geo.positions, geo.faceGroups, '#8fb6c9');
+          const r = toolApiRef.current?.appendPart(geo.positions, geo.faceGroups, '#8fb6c9', partRangesRef.current.length);
           console.error(`[meshops] addpart:${kind} → ${JSON.stringify(r)}`);
         }
         // orbit:dx,dy — swing the host orbit camera (for POV-dependent shots, e.g. the
