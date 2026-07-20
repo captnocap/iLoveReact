@@ -366,6 +366,11 @@
       background: var(--surface-hover);
     }
 
+    .nav-item.active {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+
     .nav-item .nav-icon {
       color: var(--text-faint);
       font: 10px/1 var(--mono);
@@ -410,6 +415,10 @@
 
     .page-link[data-kind="mechanic"] .page-kind-dot {
       background: var(--cyan);
+    }
+
+    .page-link[data-kind="position"] .page-kind-dot {
+      background: var(--red);
     }
 
     .page-link-title {
@@ -728,6 +737,17 @@
       line-height: 1.65;
     }
 
+    .authoring-notice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      color: var(--text-faint);
+      font-family: var(--sans);
+      font-size: 9px;
+      line-height: 1.4;
+    }
+
     .article h2 {
       margin: 32px 0 12px;
       padding-bottom: 7px;
@@ -1019,6 +1039,50 @@
       text-transform: uppercase;
     }
 
+    .fact-scope,
+    .visibility-tag {
+      display: inline-flex;
+      align-items: center;
+      width: max-content;
+      min-height: 15px;
+      padding: 0 5px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      font: 700 7px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .fact-scope {
+      margin-top: 4px;
+    }
+
+    .fact-scope.public,
+    .visibility-tag.public {
+      border-color: #315c3e;
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .fact-scope.secret,
+    .visibility-tag.secret {
+      border-color: #6a3a35;
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .fact-scope.author,
+    .visibility-tag.author {
+      border-color: #4a416e;
+      background: #201c31;
+      color: var(--violet);
+    }
+
+    .article h2 .visibility-tag {
+      margin-left: 7px;
+      vertical-align: 3px;
+    }
+
     .fact-value {
       min-width: 0;
       overflow-wrap: anywhere;
@@ -1162,6 +1226,10 @@
       line-height: 1.35;
     }
 
+    .field-hint.warning {
+      color: var(--yellow);
+    }
+
     .readonly-input {
       color: var(--text-dim) !important;
       font-family: var(--mono) !important;
@@ -1175,7 +1243,7 @@
 
     .fact-edit-row {
       display: grid;
-      grid-template-columns: 160px minmax(0, 1fr);
+      grid-template-columns: 160px minmax(0, 1fr) 112px;
       border-bottom: 1px solid var(--border-soft);
     }
 
@@ -1185,7 +1253,9 @@
 
     .fact-edit-key {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
+      flex-direction: column;
+      justify-content: center;
       padding: 0 10px;
       background: #0a1016;
       color: var(--text-dim);
@@ -1193,12 +1263,19 @@
       text-transform: uppercase;
     }
 
-    .fact-edit-row input {
+    .fact-edit-row input,
+    .fact-edit-row select {
       height: 35px;
       padding: 0 10px;
       border: 0;
       border-left: 1px solid var(--border-soft);
       background: #080d13;
+    }
+
+    .fact-edit-row select {
+      color: var(--text-dim);
+      font: 8px/1 var(--mono);
+      text-transform: uppercase;
     }
 
     .edit-footer {
@@ -1564,7 +1641,7 @@
           <div class="eyebrow">Project knowledge</div>
           <div class="sidebar-title-row">
             <div class="sidebar-title">World Bible</div>
-            <div class="page-count">6 pages</div>
+            <div id="page-count" class="page-count">6 pages</div>
           </div>
           <div class="search-wrap">
             <input id="wiki-search" class="search" type="search" placeholder="Search pages or refs" aria-label="Search World Bible">
@@ -1574,34 +1651,16 @@
 
         <div class="sidebar-scroll">
           <div class="nav-label">Browse</div>
-          <button class="nav-item" type="button"><span class="nav-icon">#</span><span>All pages</span><span class="nav-count">6</span></button>
-          <button class="nav-item" type="button"><span class="nav-icon">@</span><span>People</span><span class="nav-count">1</span></button>
-          <button class="nav-item" type="button"><span class="nav-icon">□</span><span>Businesses</span><span class="nav-count">1</span></button>
-          <button class="nav-item" type="button"><span class="nav-icon">◇</span><span>Places</span><span class="nav-count">2</span></button>
-          <button class="nav-item" type="button"><span class="nav-icon">:</span><span>Mechanics</span><span class="nav-count">1</span></button>
-          <button class="nav-item" type="button"><span class="nav-icon">!</span><span>Missions</span><span class="nav-count">0</span></button>
+          <button class="nav-item" type="button" data-kind-filter="all"><span class="nav-icon">#</span><span>All pages</span><span class="nav-count" data-kind-count="all">6</span></button>
+          <button class="nav-item" type="button" data-kind-filter="person"><span class="nav-icon">@</span><span>People</span><span class="nav-count" data-kind-count="person">1</span></button>
+          <button class="nav-item" type="button" data-kind-filter="business"><span class="nav-icon">□</span><span>Businesses</span><span class="nav-count" data-kind-count="business">1</span></button>
+          <button class="nav-item" type="button" data-kind-filter="place"><span class="nav-icon">◇</span><span>Places</span><span class="nav-count" data-kind-count="place">2</span></button>
+          <button class="nav-item" type="button" data-kind-filter="position"><span class="nav-icon">+</span><span>Positions</span><span class="nav-count" data-kind-count="position">1</span></button>
+          <button class="nav-item" type="button" data-kind-filter="mechanic"><span class="nav-icon">:</span><span>Mechanics</span><span class="nav-count" data-kind-count="mechanic">1</span></button>
+          <button class="nav-item" type="button" data-kind-filter="mission"><span class="nav-icon">!</span><span>Missions</span><span class="nav-count" data-kind-count="mission">0</span></button>
 
           <div class="nav-label">Pages</div>
-          <div id="page-list">
-            <button class="page-link active" type="button" data-ref="biz.cropduster_labs" data-kind="business" data-search="cropduster labs business biz.cropduster_labs">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">CropDuster Labs</span><span class="page-link-meta">Business</span></span>
-            </button>
-            <button class="page-link" type="button" data-ref="npc.rowena_pike" data-kind="person" data-search="rowena pike person npc.rowena_pike">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">Rowena Pike</span><span class="page-link-meta">Person</span></span>
-            </button>
-            <button class="page-link" type="button" data-ref="place.east_mercer_depot" data-kind="place" data-search="east mercer depot place place.east_mercer_depot">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">East Mercer Depot</span><span class="page-link-meta">Place</span></span>
-            </button>
-            <button class="page-link" type="button" data-ref="place.whetstone_arms" data-kind="place" data-search="whetstone arms home place place.whetstone_arms">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">Whetstone Arms</span><span class="page-link-meta">Place</span></span>
-            </button>
-            <button class="page-link" type="button" data-ref="position.site_manager" data-kind="business" data-search="site manager position position.site_manager">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">Site Manager</span><span class="page-link-meta">Position</span></span>
-            </button>
-            <button class="page-link" type="button" data-ref="mechanic.shift_occupancy" data-kind="mechanic" data-search="shift occupancy mechanic mechanic.shift_occupancy">
-              <i class="page-kind-dot"></i><span><span class="page-link-title">Shift Occupancy</span><span class="page-link-meta">Mechanic</span></span>
-            </button>
-          </div>
+          <div id="page-list"></div>
         </div>
 
         <div class="sidebar-source">
@@ -1652,6 +1711,7 @@
 
             <div class="wiki-grid">
               <article class="article">
+                <div class="authoring-notice"><span class="visibility-tag author">Authoring view</span> Includes knowledge that a player-facing projection cannot read.</div>
                 <p id="page-lead" class="lead"></p>
                 <div id="page-sections"></div>
 
@@ -1671,6 +1731,11 @@
                   <div class="source-card-label">On-disk source</div>
                   <div id="source-path" class="source-path">world/knowledge/businesses/cropduster-labs.md</div>
                   <div class="source-note">This page is a view over the block file. Editing creates a draft; only confirmed review updates disk.</div>
+                </div>
+                <div class="source-card">
+                  <div class="source-card-label">Player-facing projection</div>
+                  <div id="public-projection-summary" class="source-path"></div>
+                  <div class="source-note">Compile is fail-closed: only explicit public blocks and facts enter. Headings never control visibility.</div>
                 </div>
               </aside>
             </div>
@@ -1703,7 +1768,7 @@
                 <div class="field">
                   <label for="edit-ref">Stable ref</label>
                   <input id="edit-ref" class="readonly-input" readonly>
-                  <span class="field-hint">Labels can change; links keep this identity.</span>
+                  <span id="kind-warning" class="field-hint">Labels can change; links keep this identity. Its prefix is a convention—Kind above owns type.</span>
                 </div>
                 <div class="field">
                   <label for="edit-logo">Image / logo asset</label>
@@ -1719,13 +1784,13 @@
 
             <div class="edit-section">
               <div class="edit-section-title">Facts and relations</div>
-              <div class="edit-section-note">The GUI displays labels, while relations store stable <code>@[ref]</code> links.</div>
+              <div class="edit-section-note">Each row has a stable semantic key and explicit visibility. Order is presentation only; relations store stable <code>@[ref]</code> links.</div>
               <div id="facts-editor" class="facts-editor"></div>
             </div>
 
             <div class="edit-section">
               <div class="edit-section-title">Page prose</div>
-              <div class="edit-section-note">Literal lore and design notes stay readable around the entity blocks.</div>
+              <div class="edit-section-note">Only explicit <code>&lt;public&gt;</code> blocks may enter a player-facing wiki. <code>&lt;notes&gt;</code> and unwrapped prose remain author-only.</div>
               <div class="field">
                 <textarea id="edit-prose" class="prose"></textarea>
               </div>
@@ -1785,6 +1850,13 @@
 
   <script>
     (() => {
+      // Fact identity is the semantic key, never this object's enumeration order.
+      // Labels are presentation and may change without breaking diff/merge identity.
+      const keyedFacts = (rows) => Object.fromEntries(rows.map(([key, label, value, visibility = 'author']) => [
+        key,
+        { label, value, visibility },
+      ]));
+
       const pages = {
         'biz.cropduster_labs': {
           ref: 'biz.cropduster_labs',
@@ -1793,21 +1865,22 @@
           initials: 'CD',
           asset: 'asset.logo.cropduster_labs',
           path: 'world/knowledge/businesses/cropduster-labs.md',
-          summary: 'CropDuster Labs is a pest-control contractor operating from an aging depot in East Mercer. Its municipal work keeps the lights on; its disposal practices are less carefully documented.',
-          prose: '## Overview\n\nCropDuster began as a two-truck extermination outfit and grew by underbidding municipal contracts. The company is locally known for fast response times, exhausted crews, and invoices that rarely match the first estimate.\n\n## Designer notes\n\nKeep the business useful before it becomes suspicious. Its staff, building, and shifts should exist even if no website or social platform is ever authored.',
-          facts: [
-            ['Legal name', 'CropDuster Laboratories LLC'],
-            ['Location', '@[place.east_mercer_depot]'],
-            ['Manager', '@[npc.rowena_pike]'],
-            ['Positions', '3 authored · 2 occupied'],
-            ['World space', 'east_mercer/depot_04'],
-          ],
+          summary: 'CropDuster Labs is a pest-control contractor operating from an aging depot in East Mercer. Its municipal crews are known for quick response times and invoices that rarely match the first estimate.',
+          prose: '<public>\nCropDuster Labs provides residential, commercial, and municipal pest-control services throughout East Mercer.\n</public>\n\n<notes>\nKeep the business useful before it becomes suspicious. Its staff, building, and shifts should exist even if no website or social platform is ever authored. The disposal-practice fact is a reveal.\n</notes>',
+          facts: keyedFacts([
+            ['legal_name', 'Legal name', 'CropDuster Laboratories LLC', 'public'],
+            ['location', 'Location', '@[place.east_mercer_depot]', 'public'],
+            ['manager', 'Manager', '@[npc.rowena_pike]', 'public'],
+            ['positions', 'Positions', '3 authored · 2 occupied', 'author'],
+            ['world_space', 'World space', 'east_mercer/depot_04', 'author'],
+            ['disposal_practice', 'Disposal practice', 'Storm-drain dumping', 'secret'],
+          ]),
           sections: `
-            <h2>Overview</h2>
+            <h2>Overview <span class="visibility-tag public">Public</span></h2>
             <p>CropDuster began as a two-truck extermination outfit and grew by underbidding municipal contracts. The company now works from <button class="entity-link" data-ref="place.east_mercer_depot">East Mercer Depot</button>, managed by <button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button>.</p>
             <p>The business can exist as world knowledge without automatically owning a website, social account, marketplace listing, or mission.</p>
 
-            <h2>People and positions</h2>
+            <h2>People and positions <span class="visibility-tag author">Authoring view</span></h2>
             <table class="position-table">
               <thead><tr><th>Position</th><th>Occupant</th><th>Usual shift</th></tr></thead>
               <tbody>
@@ -1817,17 +1890,20 @@
               </tbody>
             </table>
 
-            <h2>World binding</h2>
+            <h2>World binding <span class="visibility-tag author">Author only</span></h2>
             <div class="world-link-card">
               <div class="map-thumb"></div>
               <div class="world-link-copy"><strong>East Mercer Depot</strong><span>world space · east_mercer/depot_04</span></div>
               <button class="button" type="button" data-toast="This linked field would open the existing map surface at the depot.">Open in map</button>
             </div>
 
-            <h2>Platform presences</h2>
+            <h2>Platform presences <span class="visibility-tag author">Author only</span></h2>
             <div class="platform-empty"><strong>None authored</strong><p>This is intentional. A site or account will become its own linked page only after its gameplay purpose is understood.</p></div>
 
-            <h2>Designer notes</h2>
+            <h2>Operational truth <span class="visibility-tag secret">Secret</span></h2>
+            <p>Waste from restricted treatments is sometimes emptied into the storm drain behind the vehicle bay. This is authoritative world truth, but the public-wiki compiler cannot read it.</p>
+
+            <h2>Designer notes <span class="visibility-tag author">Author only</span></h2>
             <p>Keep the business useful before it becomes suspicious. Its staff, building, and shifts should exist even if no fake-internet platform is ever authored.</p>`,
           backlinks: [
             ['npc.rowena_pike', 'Rowena Pike', 'job'],
@@ -1843,22 +1919,24 @@
           asset: '',
           path: 'world/knowledge/people/rowena-pike.md',
           summary: 'Rowena Pike is the site manager at CropDuster Labs. She is competent, underslept, and more loyal to her crew than to the company that signs her checks.',
-          prose: '## Biography\n\nRowena became site manager after the previous manager disappeared during a regulatory audit. She sleeps lightly and keeps duplicate keys to every locked room in the depot.\n\n## Designer notes\n\nHer job and home are links to other established entities, not prose-only aliases.',
-          facts: [
-            ['Born', '1988-11-03'],
-            ['Job', '@[position.site_manager]'],
-            ['Employer', '@[biz.cropduster_labs]'],
-            ['Home', '@[place.whetstone_arms]'],
-            ['Platform presences', 'None authored'],
-          ],
+          prose: '<public>\nRowena Pike manages the East Mercer site for CropDuster Labs.\n</public>\n\n<notes>\nHer job and home are links to other established entities, not prose-only aliases. Duplicate depot keys are private story material.\n</notes>',
+          facts: keyedFacts([
+            ['date_of_birth', 'Born', '1988-11-03', 'author'],
+            ['job', 'Job', '@[position.site_manager]', 'public'],
+            ['employer', 'Employer', '@[biz.cropduster_labs]', 'public'],
+            ['home', 'Home', '@[place.whetstone_arms]', 'secret'],
+            ['platform_presences', 'Platform presences', 'None authored', 'author'],
+          ]),
           sections: `
-            <h2>Biography</h2>
-            <p>Rowena became site manager after the previous manager disappeared during a regulatory audit. She works for <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button> and returns most nights to <button class="entity-link" data-ref="place.whetstone_arms">Whetstone Arms</button>.</p>
-            <h2>Known relations</h2>
+            <h2>Biography <span class="visibility-tag public">Public</span></h2>
+            <p>Rowena is the site manager for <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button> at its East Mercer depot.</p>
+            <h2>Private routine <span class="visibility-tag secret">Secret</span></h2>
+            <p>She returns most nights to <button class="entity-link" data-ref="place.whetstone_arms">Whetstone Arms</button> and keeps duplicate keys to every locked room in the depot.</p>
+            <h2>Known relations <span class="visibility-tag author">Authoring view</span></h2>
             <p>Her position is stable world data. Her biography can remain incomplete until a story or mission needs more specificity.</p>
-            <h2>Platform presences</h2>
+            <h2>Platform presences <span class="visibility-tag author">Author only</span></h2>
             <div class="platform-empty"><strong>None authored</strong><p>Being a named NPC does not automatically create social accounts or public pages.</p></div>
-            <h2>Designer notes</h2>
+            <h2>Designer notes <span class="visibility-tag author">Author only</span></h2>
             <p>Her job and home are links to other established entities, not prose-only aliases.</p>`,
           backlinks: [
             ['biz.cropduster_labs', 'CropDuster Labs', 'manager'],
@@ -1873,19 +1951,19 @@
           asset: 'asset.photo.east_mercer_depot',
           path: 'world/knowledge/places/east-mercer-depot.md',
           summary: 'A corrugated industrial depot boxed between a drainage channel and the East Mercer freight spur.',
-          prose: '## Description\n\nThe depot contains a reception cage, chemical storage, vehicle bay, break room, and an office overlooking the floor.\n\n## Designer notes\n\nThe wiki keeps the semantic place link. Detailed geometry remains in the map surface.',
-          facts: [
-            ['District', 'East Mercer'],
-            ['World space', 'east_mercer/depot_04'],
-            ['Occupant', '@[biz.cropduster_labs]'],
-            ['Interior map', 'interiors/depot_small_02'],
-          ],
+          prose: '<public>\nAn industrial depot beside the East Mercer freight spur.\n</public>\n\n<notes>\nThe wiki keeps the semantic place link. Detailed geometry remains in the map surface.\n</notes>',
+          facts: keyedFacts([
+            ['district', 'District', 'East Mercer', 'public'],
+            ['world_space', 'World space', 'east_mercer/depot_04', 'author'],
+            ['occupant', 'Occupant', '@[biz.cropduster_labs]', 'public'],
+            ['interior_map', 'Interior map', 'interiors/depot_small_02', 'author'],
+          ]),
           sections: `
-            <h2>Description</h2>
+            <h2>Description <span class="visibility-tag public">Public</span></h2>
             <p>The depot contains a reception cage, chemical storage, vehicle bay, break room, and an office overlooking the floor. Its current tenant is <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button>.</p>
-            <h2>World binding</h2>
+            <h2>World binding <span class="visibility-tag author">Author only</span></h2>
             <div class="world-link-card"><div class="map-thumb"></div><div class="world-link-copy"><strong>east_mercer/depot_04</strong><span>city map · semantic place binding</span></div><button class="button" type="button" data-toast="This would open the existing map surface rather than embedding another map editor here.">Open in map</button></div>
-            <h2>Designer notes</h2>
+            <h2>Designer notes <span class="visibility-tag author">Author only</span></h2>
             <p>The wiki keeps the semantic place link. Detailed geometry remains in the map surface.</p>`,
           backlinks: [
             ['biz.cropduster_labs', 'CropDuster Labs', 'location'],
@@ -1899,9 +1977,13 @@
           asset: '',
           path: 'world/knowledge/places/whetstone-arms.md',
           summary: 'A narrow apartment building above a pawn shop on Whetstone Avenue.',
-          prose: '## Description\n\nThe building is established only as far as current lore requires. Individual apartments can be added when a resident or mission needs one.',
-          facts: [['District', 'Whetstone'], ['World space', 'whetstone/block_12'], ['Residents', '1 authored']],
-          sections: `<h2>Description</h2><p>A narrow apartment building above a pawn shop on Whetstone Avenue. <button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> rents one of its rear units.</p><h2>Designer notes</h2><p>The building is established only as far as current lore requires. Individual apartments can be added when a resident or mission needs one.</p>`,
+          prose: '<public>\nA narrow apartment building above a pawn shop on Whetstone Avenue.\n</public>\n\n<notes>\nIndividual apartments can be added when a resident or mission needs one.\n</notes>',
+          facts: keyedFacts([
+            ['district', 'District', 'Whetstone', 'public'],
+            ['world_space', 'World space', 'whetstone/block_12', 'author'],
+            ['residents', 'Residents', '1 authored', 'author'],
+          ]),
+          sections: `<h2>Description <span class="visibility-tag public">Public</span></h2><p>A narrow apartment building above a pawn shop on Whetstone Avenue.</p><h2>Known resident <span class="visibility-tag secret">Secret</span></h2><p><button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> rents one of its rear units.</p><h2>Designer notes <span class="visibility-tag author">Author only</span></h2><p>The building is established only as far as current lore requires. Individual apartments can be added when a resident or mission needs one.</p>`,
           backlinks: [['npc.rowena_pike', 'Rowena Pike', 'home']],
         },
         'position.site_manager': {
@@ -1912,9 +1994,14 @@
           asset: '',
           path: 'world/knowledge/positions/site-manager.md',
           summary: 'The stable management position for CropDuster Labs at East Mercer Depot. The position survives changes in occupant.',
-          prose: '## Responsibilities\n\nOpens the depot, assigns field crews, receives complaints, and controls keys to restricted storage.',
-          facts: [['Organization', '@[biz.cropduster_labs]'], ['Workplace', '@[place.east_mercer_depot]'], ['Occupant', '@[npc.rowena_pike]'], ['Shift', 'Mon–Fri · 08:00–17:00']],
-          sections: `<h2>Responsibilities</h2><p>Opens the depot, assigns field crews, receives complaints, and controls keys to restricted storage.</p><h2>Current occupancy</h2><p><button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> currently occupies this position at <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button>.</p>`,
+          prose: '<notes>\nOpens the depot, assigns field crews, receives complaints, and controls keys to restricted storage. This position is authoring structure, not automatically public biography.\n</notes>',
+          facts: keyedFacts([
+            ['organization', 'Organization', '@[biz.cropduster_labs]', 'author'],
+            ['workplace', 'Workplace', '@[place.east_mercer_depot]', 'author'],
+            ['occupant', 'Occupant', '@[npc.rowena_pike]', 'author'],
+            ['shift', 'Shift', 'Mon–Fri · 08:00–17:00', 'author'],
+          ]),
+          sections: `<h2>Responsibilities <span class="visibility-tag author">Author only</span></h2><p>Opens the depot, assigns field crews, receives complaints, and controls keys to restricted storage.</p><h2>Current occupancy <span class="visibility-tag author">Author only</span></h2><p><button class="entity-link" data-ref="npc.rowena_pike">Rowena Pike</button> currently occupies this position at <button class="entity-link" data-ref="biz.cropduster_labs">CropDuster Labs</button>.</p>`,
           backlinks: [['biz.cropduster_labs', 'CropDuster Labs', 'position'], ['npc.rowena_pike', 'Rowena Pike', 'job']],
         },
         'mechanic.shift_occupancy': {
@@ -1925,9 +2012,13 @@
           asset: '',
           path: 'world/knowledge/mechanics/shift-occupancy.md',
           summary: 'Positions own ordinary shift patterns; occupants fill those positions over time. Jobs are not duplicated strings on NPC and business pages.',
-          prose: '## Rule\n\nA position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.\n\n## Why\n\nThis lets a recurring racket bind to a job while a personal grievance binds to the current person.',
-          facts: [['Status', 'Draft mechanic'], ['Consumes', 'Position · Occupancy · Shift'], ['Produces', 'At-time occupant query']],
-          sections: `<h2>Rule</h2><p>A position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.</p><h2>Why</h2><p>This lets a recurring racket bind to a job while a personal grievance binds to the current person. This page is intentionally prose-first; the mechanic can be compiled later without forcing its design into a bespoke GUI now.</p>`,
+          prose: '<notes>\n## Rule\n\nA position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.\n\n## Why\n\nThis lets a recurring racket bind to a job while a personal grievance binds to the current person.\n</notes>',
+          facts: keyedFacts([
+            ['status', 'Status', 'Draft mechanic', 'author'],
+            ['consumes', 'Consumes', 'Position · Occupancy · Shift', 'author'],
+            ['produces', 'Produces', 'At-time occupant query', 'author'],
+          ]),
+          sections: `<h2>Rule <span class="visibility-tag author">Author only</span></h2><p>A position remains stable while its occupant can change. Querying a world instant resolves which occupant, if any, is responsible for that position.</p><h2>Why <span class="visibility-tag author">Author only</span></h2><p>This lets a recurring racket bind to a job while a personal grievance binds to the current person. This page is intentionally prose-first; the mechanic can be compiled later without forcing its design into a bespoke GUI now.</p>`,
           backlinks: [['position.site_manager', 'Site Manager', 'uses mechanic']],
         },
       };
@@ -1937,6 +2028,7 @@
 
       let currentRef = 'biz.cropduster_labs';
       let mode = 'read';
+      let activeKindFilter = 'all';
       let toastTimer = 0;
 
       const $ = (selector) => document.querySelector(selector);
@@ -1951,8 +2043,16 @@
           .replaceAll("'", '&#039;');
       }
 
+      function pageComparable(page) {
+        if (!page) return page;
+        return {
+          ...page,
+          facts: Object.fromEntries(Object.entries(page.facts).sort(([left], [right]) => left.localeCompare(right))),
+        };
+      }
+
       function isChanged(page) {
-        return JSON.stringify(page) !== JSON.stringify(diskPages[page.ref]);
+        return JSON.stringify(pageComparable(page)) !== JSON.stringify(pageComparable(diskPages[page.ref]));
       }
 
       function kindLabel(kind) {
@@ -1961,6 +2061,22 @@
 
       function kindPlural(kind) {
         return ({ business: 'Businesses', person: 'People', place: 'Places', position: 'Positions', mechanic: 'Mechanics' })[kind] || `${kind}s`;
+      }
+
+      function conventionalKindForRef(ref) {
+        const prefix = ref.split('.')[0];
+        return ({ biz: 'business', npc: 'person', place: 'place', position: 'position', mechanic: 'mechanic' })[prefix];
+      }
+
+      function renderKindWarning() {
+        const convention = conventionalKindForRef($('#edit-ref').value);
+        const selectedKind = $('#edit-kind').value;
+        const warning = $('#kind-warning');
+        const mismatched = Boolean(convention && convention !== selectedKind);
+        warning.classList.toggle('warning', mismatched);
+        warning.textContent = mismatched
+          ? `Convention warning: this ref looks like ${convention}, but Kind is authoritative and currently ${selectedKind}.`
+          : 'Labels can change; links keep this identity. Its prefix is a convention—Kind above owns type.';
       }
 
       function showToast(message) {
@@ -1977,6 +2093,50 @@
         const target = pages[match[1]];
         if (!target) return `<span class="muted">${escapeHtml(value)}</span>`;
         return `<a href="#${escapeHtml(target.ref)}" data-ref="${escapeHtml(target.ref)}">${escapeHtml(target.title)}</a>`;
+      }
+
+      function publicProjection(page) {
+        const publicBlocks = [...page.prose.matchAll(/<public>([\s\S]*?)<\/public>/g)]
+          .map((match) => match[1].trim());
+        const publicFacts = Object.fromEntries(
+          Object.entries(page.facts).filter(([, fact]) => fact.visibility === 'public'),
+        );
+        return {
+          ref: page.ref,
+          kind: page.kind,
+          title: page.title,
+          blocks: publicBlocks,
+          facts: publicFacts,
+        };
+      }
+
+      function renderPageList() {
+        const query = $('#wiki-search').value.trim().toLowerCase();
+        const allPages = Object.values(pages);
+        const visiblePages = allPages.filter((page) => {
+          const kindMatches = activeKindFilter === 'all' || page.kind === activeKindFilter;
+          const searchText = `${page.title} ${page.ref} ${page.kind}`.toLowerCase();
+          return kindMatches && (query === '' || searchText.includes(query));
+        });
+
+        $('#page-count').textContent = `${allPages.length} ${allPages.length === 1 ? 'page' : 'pages'}`;
+        $$('[data-kind-count]').forEach((element) => {
+          const kind = element.dataset.kindCount;
+          element.textContent = kind === 'all' ? allPages.length : allPages.filter((page) => page.kind === kind).length;
+        });
+        $$('[data-kind-filter]').forEach((button) => {
+          button.classList.toggle('active', button.dataset.kindFilter === activeKindFilter);
+        });
+
+        $('#page-list').innerHTML = visiblePages.map((page) => `
+          <button class="page-link ${page.ref === currentRef ? 'active' : ''}" type="button" data-ref="${escapeHtml(page.ref)}" data-kind="${escapeHtml(page.kind)}">
+            <i class="page-kind-dot"></i>
+            <span><span class="page-link-title">${escapeHtml(page.title)}</span><span class="page-link-meta">${escapeHtml(kindLabel(page.kind))}</span></span>
+          </button>`).join('') || '<div class="source-note">No pages match this view.</div>';
+
+        $$('.page-link').forEach((button) => {
+          button.addEventListener('click', () => selectPage(button.dataset.ref));
+        });
       }
 
       function renderState(page) {
@@ -2003,6 +2163,7 @@
 
       function renderRead() {
         const page = pages[currentRef];
+        renderPageList();
         $('#tab-page-title').textContent = page.title;
         $('#breadcrumb-kind').textContent = kindPlural(page.kind).toUpperCase();
         $('#breadcrumb-title').textContent = page.title.toUpperCase();
@@ -2013,6 +2174,9 @@
         $('#infobox-title').textContent = page.title;
         $('#infobox-kind').textContent = `${kindLabel(page.kind)} entity`;
         $('#source-path').textContent = page.path;
+        const publicView = publicProjection(page);
+        const excludedFactCount = Object.keys(page.facts).length - Object.keys(publicView.facts).length;
+        $('#public-projection-summary').textContent = `${publicView.blocks.length} public prose block · ${Object.keys(publicView.facts).length} public facts included · ${excludedFactCount} non-public facts excluded`;
 
         const kindBadge = $('#kind-badge');
         kindBadge.textContent = kindLabel(page.kind);
@@ -2022,10 +2186,10 @@
         logo.textContent = page.initials;
         logo.className = `entity-logo ${page.kind}`;
 
-        $('#fact-list').innerHTML = page.facts.map(([label, value]) => `
+        $('#fact-list').innerHTML = Object.values(page.facts).map((fact) => `
           <div class="fact-row">
-            <div class="fact-label">${escapeHtml(label)}</div>
-            <div class="fact-value">${linkedValue(value)}</div>
+            <div class="fact-label">${escapeHtml(fact.label)}<span class="fact-scope ${escapeHtml(fact.visibility)}">${escapeHtml(fact.visibility === 'author' ? 'Author only' : fact.visibility)}</span></div>
+            <div class="fact-value">${linkedValue(fact.value)}</div>
           </div>`).join('');
 
         $('#backlink-list').innerHTML = page.backlinks.length
@@ -2037,7 +2201,6 @@
             </div>`).join('')
           : '<div class="backlink-row muted">No pages link here yet.</div>';
 
-        $$('.page-link').forEach((button) => button.classList.toggle('active', button.dataset.ref === currentRef));
         renderState(page);
         bindDynamicActions();
       }
@@ -2051,11 +2214,17 @@
         $('#edit-logo').value = page.asset;
         $('#edit-summary').value = page.summary;
         $('#edit-prose').value = page.prose;
-        $('#facts-editor').innerHTML = page.facts.map(([label, value], index) => `
+        $('#facts-editor').innerHTML = Object.entries(page.facts).map(([key, fact]) => `
           <div class="fact-edit-row">
-            <div class="fact-edit-key">${escapeHtml(label)}</div>
-            <input data-fact-index="${index}" aria-label="${escapeHtml(label)}" value="${escapeHtml(value)}">
+            <div class="fact-edit-key"><span>${escapeHtml(fact.label)}</span><br><span class="muted">${escapeHtml(key)}</span></div>
+            <input data-fact-key="${escapeHtml(key)}" aria-label="${escapeHtml(fact.label)}" value="${escapeHtml(fact.value)}">
+            <select data-fact-visibility="${escapeHtml(key)}" aria-label="${escapeHtml(fact.label)} visibility">
+              <option value="public" ${fact.visibility === 'public' ? 'selected' : ''}>Public</option>
+              <option value="secret" ${fact.visibility === 'secret' ? 'selected' : ''}>Secret</option>
+              <option value="author" ${fact.visibility === 'author' ? 'selected' : ''}>Author only</option>
+            </select>
           </div>`).join('');
+        renderKindWarning();
         renderState(page);
       }
 
@@ -2066,8 +2235,11 @@
         page.asset = $('#edit-logo').value.trim();
         page.summary = $('#edit-summary').value;
         page.prose = $('#edit-prose').value;
-        $$('#facts-editor input[data-fact-index]').forEach((input) => {
-          page.facts[Number(input.dataset.factIndex)][1] = input.value;
+        $$('#facts-editor input[data-fact-key]').forEach((input) => {
+          page.facts[input.dataset.factKey].value = input.value;
+        });
+        $$('#facts-editor select[data-fact-visibility]').forEach((select) => {
+          page.facts[select.dataset.factVisibility].visibility = select.value;
         });
       }
 
@@ -2099,8 +2271,16 @@
         if (page.asset !== disk.asset) changes.push(['Image / logo', `${disk.asset || 'None'} → ${page.asset || 'None'}`]);
         if (page.summary !== disk.summary) changes.push(['Introduction', 'Prose changed']);
         if (page.prose !== disk.prose) changes.push(['Page prose', 'Prose changed']);
-        page.facts.forEach(([label, value], index) => {
-          if (!disk.facts[index] || disk.facts[index][1] !== value) changes.push([label, `${disk.facts[index]?.[1] || 'None'} → ${value}`]);
+        const factKeys = new Set([...Object.keys(disk.facts), ...Object.keys(page.facts)]);
+        factKeys.forEach((key) => {
+          const before = disk.facts[key];
+          const after = page.facts[key];
+          const label = after?.label || before?.label || key;
+          if (!before) changes.push([`${label} [${key}]`, `Added · ${after.visibility} · ${after.value}`]);
+          else if (!after) changes.push([`${label} [${key}]`, 'Removed']);
+          else if (before.label !== after.label || before.value !== after.value || before.visibility !== after.visibility) {
+            changes.push([`${label} [${key}]`, `${before.visibility}: ${before.value} → ${after.visibility}: ${after.value}`]);
+          }
         });
         return changes;
       }
@@ -2111,8 +2291,16 @@
         if (disk.summary !== page.summary) return [disk.summary, page.summary];
         if (disk.prose !== page.prose) return [disk.prose, page.prose];
         if (disk.title !== page.title) return [`title: ${disk.title}`, `title: ${page.title}`];
-        const factIndex = page.facts.findIndex((fact, index) => fact[1] !== disk.facts[index]?.[1]);
-        if (factIndex >= 0) return [disk.facts[factIndex]?.join(': ') || '', page.facts[factIndex].join(': ')];
+        const factKeys = new Set([...Object.keys(disk.facts), ...Object.keys(page.facts)]);
+        const factKey = [...factKeys].find((key) => JSON.stringify(page.facts[key]) !== JSON.stringify(disk.facts[key]));
+        if (factKey) {
+          const before = disk.facts[factKey];
+          const after = page.facts[factKey];
+          const sourceLine = (fact) => fact
+            ? `<fact key="${factKey}" visibility="${fact.visibility}">${fact.value}</fact>`
+            : '(missing)';
+          return [sourceLine(before), sourceLine(after)];
+        }
         return ['(no text change)', '(no text change)'];
       }
 
@@ -2168,19 +2356,17 @@
         });
       }
 
-      $$('.page-link').forEach((button) => {
-        button.addEventListener('click', () => selectPage(button.dataset.ref));
-      });
-
-      $('#wiki-search').addEventListener('input', (event) => {
-        const query = event.target.value.trim().toLowerCase();
-        $$('.page-link').forEach((button) => {
-          button.hidden = query !== '' && !button.dataset.search.includes(query);
+      $('#wiki-search').addEventListener('input', renderPageList);
+      $$('[data-kind-filter]').forEach((button) => {
+        button.addEventListener('click', () => {
+          activeKindFilter = button.dataset.kindFilter;
+          renderPageList();
         });
       });
 
       $('#read-tab').addEventListener('click', () => setMode('read'));
       $('#edit-tab').addEventListener('click', () => setMode('edit'));
+      $('#edit-kind').addEventListener('change', renderKindWarning);
       $('#edit-page-button').addEventListener('click', () => setMode('edit'));
       $('#cancel-edit-button').addEventListener('click', () => setMode('read'));
       $$('.review-button').forEach((button) => button.addEventListener('click', openReview));

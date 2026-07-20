@@ -232,6 +232,46 @@ never becomes a second source of world truth.
 This split is what lets the fake internet lie convincingly without making the
 simulation incoherent.
 
+### 3.5 Authoring text is not public knowledge
+
+Clarified by USER ASK `req_3283`: the player-facing knowledge boundary is an
+explicit source-format boundary, not a page-title or heading convention. A
+heading named `Designer notes` is useful presentation, but it has no security
+meaning and the compiler must never infer visibility from it.
+
+The source grammar is allowlisted:
+
+```text
+<business>
+  <ref>biz.cropduster_labs</ref>
+
+  <fact key="location" visibility="public">@[place.east_mercer_depot]</fact>
+  <fact key="disposal_practice" visibility="secret">storm-drain dumping</fact>
+
+  <public>
+  CropDuster Labs provides pest-control services throughout East Mercer.
+  </public>
+</business>
+
+<notes>
+The disposal-practice fact is a reveal. Do not hint at it in public copy.
+</notes>
+```
+
+- `<public>` prose is eligible for a player-facing wiki/site projection.
+- facts require stable keys and explicit knowledge visibility; only `public`
+  facts are eligible for a public projection;
+- `secret` facts remain authoritative world/mission truth but are excluded from
+  the public projection;
+- `<notes>` and ordinary Markdown outside an explicitly public block are
+  author-only by default and never enter a shipped player-facing knowledge view.
+
+This is deliberately fail-closed. The public compiler selects explicit public
+blocks and facts; it does not compile the whole page and attempt to subtract
+private material afterward. A later runtime revelation creates an appropriate
+event-derived Claim/Document projection—it does not silently change the source
+fact's visibility.
+
 ---
 
 ## 4. Stable identity first
@@ -253,6 +293,35 @@ shift:night-moderation
 
 IDs are never inferred from the current display name after creation. Renaming
 "Patriot Pat" must not break a mission, URL, backlink, or save.
+
+Entity `kind` is authoritative. A prefix such as `biz.`, `npc.`, or `place.` is
+an author-friendly naming convention and ID allocator hint, never a second type
+system. Parsers, page indexes, colors, validators, and compilers read the `kind`
+field. A prefix/kind mismatch may produce an editorial warning, but it cannot
+change the record's type or override `kind`; typed references validate against
+the target record's field.
+
+In the text syntax, an entity block tag is the serialization of that same field,
+not another copy: `<business>` parses to `kind: 'business'`, and changing the GUI
+kind makes the writer propose changing that tag. The source must not also contain
+`<kind>business</kind>` inside the specialized block. There is one discriminator
+represented once per layer.
+
+Facts and editable fields are also keyed, never positional:
+
+```ts
+type AuthoredFactField = {
+  key: FactKey       // stable identity within the owning entity
+  label: string      // editable presentation
+  value: FactValue
+  visibilityKey: KnowledgeScopeKey
+}
+```
+
+`key`, not array index or display order, owns diff/merge identity and the source
+span patched by the writer. Inserting or moving `location` before `manager`
+therefore does not report every following field as changed. Display labels may
+change without changing the key. Duplicate or missing keys are invalid.
 
 References are typed at the boundary. A field expecting a `PlaceId` cannot
 silently accept a `PersonId`, even though both serialize as compact integer IDs
@@ -426,6 +495,8 @@ Only appropriate knowledge scopes can reveal the controller.
 ```ts
 type Fact = {
   id: FactId
+  key: FactKey
+  label: string
   subjectId: EntityId
   predicateKey: PredicateKey
   value: EntityId | ScalarKey | string | boolean
@@ -718,6 +789,10 @@ active editor. It should reuse the existing workspace-document tabs, navigation,
 search, and command authority rather than create a second editor shell or a
 specialized UI for every entity kind.
 
+The standalone interaction/layout checkpoint is
+[WORLD_BIBLE_WIKI_MOCK.html](WORLD_BIBLE_WIKI_MOCK.html). It is a browser mock,
+not a second implementation surface.
+
 ### Default layout
 
 ```text
@@ -797,9 +872,12 @@ prevents the in-world wiki from becoming a backdoor to secret authored truth.
 
 The content source is a project directory of Markdown files with declarative
 blocks such as `<business>`, `<npc>`, `<space>`, `<mechanic>`, `<mission>`, and
-`<objective>`. Ordinary Markdown around the blocks is retained designer prose.
-`<ref>` supplies stable identity; `@[ref]` links files and blocks. JSON,
-indexes, snapshots, and the gamefile are derived products.
+`<objective>`. Ordinary Markdown around the blocks and explicit `<notes>` blocks
+are retained author-only prose; player-facing prose must opt in through
+`<public>`. `<ref>` supplies stable identity; the entity block tag serializes the
+single parsed `kind` field; keyed facts supply merge identity/visibility; and
+`@[ref]` links files and blocks. JSON, indexes, snapshots, and the gamefile are
+derived products.
 
 The active editor still needs V20 history semantics for draft recovery and undo,
 but that history is not allowed to replace the files or silently publish into
@@ -828,6 +906,9 @@ diff plus the expected disk hash.
 The implementation hides:
 
 - concrete-syntax parsing with source spans;
+- keyed field/fact identity independent of presentation order;
+- kind-field authority independent of optional ref prefixes;
+- fail-closed public/secret/author-only block projection;
 - stable-ref resolution and backlinks;
 - semantic and exact-text diff construction;
 - optimistic disk-hash conflict detection;
@@ -973,6 +1054,9 @@ navigable in the editor.
 ### Errors
 
 - duplicate or malformed stable ID;
+- a specialized entity block that also carries a redundant/contradictory kind
+  element;
+- duplicate or missing fact/field key within one owning entity;
 - typed reference targets the wrong kind;
 - missing entity, asset, map marker, route, site, or tuning key;
 - duplicate site domain or duplicate route within a site;
@@ -988,10 +1072,14 @@ navigable in the editor.
 - a generated mission row containing a number;
 - an authoritative predicate sourced only from a public Claim;
 - a secret fact leaked into a public document projection;
+- a player-facing projection containing `<notes>`, unwrapped author prose, or a
+  non-public fact;
+- a public prose block referencing a fact not visible to that projection;
 - a page-displayed count without a backing query or explicit flavor-text mark.
 
 ### Warnings
 
+- a conventional ref prefix disagrees with the authoritative `kind` field;
 - new lore record has fewer than two meaningful existing crosslinks;
 - document has no inbound route/backlink;
 - organization has locations but no site/account presence, or vice versa;
@@ -1021,12 +1109,19 @@ integrity, and mission solvability.
 - recovered V20 draft history remains visibly noncanonical;
 - ID/type/reference validation;
 - rename stability;
+- inserting/reordering keyed facts changes only the inserted/moved key, never
+  every following row;
+- field-label changes preserve fact identity and source-span ownership;
+- kind-field authority with a mismatched conventional ref prefix;
+- entity block tag round-trips exactly once as the parsed kind field;
 - fact versus claim isolation;
 - backlinks and route resolution;
 - weekly/overnight/exception schedule resolution;
 - DOB-to-age projection at boundary dates;
 - position occupancy and vacancy/refill projections;
 - public/secret knowledge filtering;
+- public projection contains byte-for-byte none of `<notes>`, unwrapped author
+  prose, or secret fact values, regardless of Markdown heading names;
 - metric-token counts equal underlying rows;
 - deterministic snapshot compile produces byte-identical packs;
 - Engaige-import fixtures report aliases and unresolved references rather than
@@ -1093,7 +1188,13 @@ The slice is complete only when:
 7. the logo and world-space relation are visible without bespoke business or map
    editors inside the page;
 8. literal mechanic prose round-trips byte-for-byte outside confirmed edits;
-9. no platform presence is generated simply because the business or NPC exists.
+9. inserting a fact between existing facts produces one keyed addition rather
+   than positional changes to every following fact;
+10. page kind, navigation grouping, colors, and validation all derive from the
+    `kind` field rather than the ref prefix;
+11. a minimal public projection contains the benign CropDuster description but
+    contains neither designer notes nor the secret disposal-practice fact;
+12. no platform presence is generated simply because the business or NPC exists.
 
 Only after this slice works should one established entity be used to choose and
 prove the first in-game platform projection end to end.
@@ -1105,6 +1206,7 @@ prove the first in-game platform projection end to end.
 ### Phase 0 — contract and fixture
 
 - finalize the Markdown `<block>` grammar, `<ref>`/`@[ref]` rules, record unions,
+  keyed facts, authoritative `kind`, `<public>`/`<notes>` boundaries,
   command/event vocabulary, and diagnostics;
 - make the small vertical-slice fixture as real hand-editable source files;
 - build parser/writer golden fixtures proving byte preservation outside edited
@@ -1133,6 +1235,7 @@ draft; only confirmed proposals can change disk.
 
 - ordinary wiki index/search, readable entity pages, one editing view, simple
   facts/assets/relations, typed reference autocomplete, and backlinks;
+- keyed fact editing and explicit public/secret/author-only visibility badges;
 - persistent `DISK`/`DRAFT CHANGED`/`DISK CHANGED`/`CONFLICT` indicators,
   Review Changes, Write to Disk confirmation, Reload, and Revert Draft;
 - a plain world-space reference that can open the existing map surface;
@@ -1213,25 +1316,32 @@ them:
 3. **The first GUI is an ordinary wiki.** Pages, search, links, backlinks, small
    facts/assets, and read/edit/review are the floor; specialized inspectors,
    dashboards, graph canvases, and platform CMS tools must prove a later need.
-4. **Entity first, platform later.** Establish a business, NPC, place, or mechanic
+4. **Facts are keyed, not positional.** Stable semantic keys own diff, merge, and
+   writer spans; labels and order are presentation only.
+5. **The `kind` field is authoritative.** Ref prefixes are helpful conventions,
+   never a parallel type system.
+6. **Player-facing knowledge is an explicit allowlist.** Only `<public>` prose
+   and public facts compile into public wiki/site views; notes, unwrapped prose,
+   and secret facts are excluded by construction.
+7. **Entity first, platform later.** Establish a business, NPC, place, or mechanic
    independently; add a website, account, listing, document, or mission only when
    its gameplay purpose is known, as a separate linked entity.
-5. **Authored named people are tenured.** Common workers remain seeded occupants
+8. **Authored named people are tenured.** Common workers remain seeded occupants
    until promotion.
-6. **Job means Position plus Occupancy.** It is not a string on an NPC or an
+9. **Job means Position plus Occupancy.** It is not a string on an NPC or an
    embedded worker tuple on a business.
-7. **DOB is stored; age is derived.** Week/day/hour are views of one world
+10. **DOB is stored; age is derived.** Week/day/hour are views of one world
    instant.
-8. **Accounts are entities.** Handles are not loose strings, and controller
+11. **Accounts are entities.** Handles are not loose strings, and controller
    truth is separate from public ownership.
-9. **Facts and Claims never share authority.** The internet is allowed to lie;
+12. **Facts and Claims never share authority.** The internet is allowed to lie;
    mission/world predicates are not allowed to believe it by accident.
-10. **No dead links and no fake counts.** Both become compiler contracts.
-11. **Static authored floor first.** Event templates second; bounded AI prose
+13. **No dead links and no fake counts.** Both become compiler contracts.
+14. **Static authored floor first.** Event templates second; bounded AI prose
    last.
-12. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
+15. **Engaige is a quarry, not a dependency.** Import through ID canonicalization
    and validation only.
-13. **Compile repeated presentation.** Site/layout/text templates are small
+16. **Compile repeated presentation.** Site/layout/text templates are small
     dictionaries over dense instances; only dirty visible records update.
 
 If these hold, the wiki begins as a good lore notebook and identity registry. It

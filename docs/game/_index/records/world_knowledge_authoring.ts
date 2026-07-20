@@ -5,7 +5,7 @@ export const world_knowledge_authoring: DocIndex = {
   file: 'WORLD_KNOWLEDGE_AUTHORING.md',
   purpose: ['npc', 'world_gen', 'scripting', 'persistence', 'ui', 'agent_llm'],
   summary:
-    'Candidate format-first architecture: project-owned Markdown files with declarative <block> records, stable <ref> identities, @[ref] links, and surrounding human prose are canonical. The first in-app World Bible is deliberately an ordinary wiki—pages, search, links, backlinks, simple facts/assets, and read/edit/review—with a visibly divergent draft and formal Write to Disk confirmation. It establishes entities before any gameplay-needed website, account, listing, document, or mission is designed as a separate linked projection.',
+    'Candidate format-first architecture: project-owned Markdown files with declarative <block> records, stable <ref> identities, an authoritative kind field, keyed non-positional facts, @[ref] links, and explicit public/secret/author-only knowledge boundaries are canonical. The first in-app World Bible is deliberately an ordinary wiki with a visibly divergent draft and formal Write to Disk confirmation. It establishes entities before any gameplay-needed platform projection.',
   interfaces: [
     {
       name: 'WORLD_KNOWLEDGE',
@@ -13,7 +13,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'module',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Candidate deep boundary for the active editor: parse canonical Markdown-with-block files into a disk snapshot; apply commands only to a separately journaled draft; query/validate either source; prepare semantic+textual write proposals; and mutate disk only through formal confirmation guarded by the expected disk hash. The module hides concrete syntax spans, byte-preserving patches, disk/base/draft state, conflict detection, draft recovery/global sequencing, backlinks, typed reference validation, atomic writes, and compile caches; normal compile always reads disk.',
+        'Candidate deep boundary for the active editor: parse canonical Markdown-with-block files into a disk snapshot; use stable fact keys rather than row positions; treat kind as authoritative and ref prefixes as advisory; project only explicit public blocks/facts into player-facing knowledge; journal edits in a separate draft; and mutate disk only through reviewed hash-guarded confirmation. It hides source spans, byte-preserving patches, conflict detection, backlinks, visibility validation, atomic writes, and compile caches.',
       dependsOn: ['V20 persistence semantics', 'WorldMarker', 'GAME_MISSIONS', 'GAME_STORY'],
       consumers: ['cart/editor', 'cart/editor/play', 'framework game loader'],
       status: 'candidate',
@@ -45,7 +45,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'component',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Proposed deliberately simple active-editor wiki over canonical block files: index/search, ordinary readable entity pages, one editing view, small facts/assets/relations, typed-ref links, backlinks, and basic diagnostics. Every page shows DISK, DRAFT CHANGED, DISK CHANGED, or CONFLICT; Review Changes exposes semantic and exact-text diffs; Write to Disk names target paths and requires confirmation. Platform previews, graph canvases, schedule dashboards, bespoke inspectors, and gig wizards are deferred until proven necessary.',
+        'Proposed deliberately simple active-editor wiki over canonical block files: index/search, ordinary readable entity pages, one editing view, keyed facts/assets/relations, typed-ref links, backlinks, basic diagnostics, and visible public/secret/author-only scopes. Navigation and styling derive from the authoritative kind field. Every page exposes disk/draft state and reviewed Write to Disk confirmation; specialized platform tools remain deferred.',
       dependsOn: ['WORLD_KNOWLEDGE', 'WorldMarker'],
       consumers: ['cart/editor'],
       status: 'candidate',
@@ -56,7 +56,7 @@ export const world_knowledge_authoring: DocIndex = {
       kind: 'data_model',
       sourceFile: 'docs/game/WORLD_KNOWLEDGE_AUTHORING.md',
       description:
-        'Authority split that lets the fake internet lie safely: Fact is authored/runtime world truth with knowledge scope; Claim is what a document asserts, denies, speculates, or satirizes. Internet/NPC sentiment consumes claims, while mission predicates and simulation consume facts. Optional AI can phrase a supplied claim set but cannot mint facts, ids, numbers, predicates, objectives, or deltas.',
+        'Authority and visibility split that lets the fake internet lie without leaking authoring truth: keyed Facts are world truth with explicit knowledge scopes; Claims are document assertions; only allowlisted <public> prose and public facts enter player-facing wiki/site projections; <notes>, unwrapped author prose, and secret facts do not. Optional AI can phrase supplied claims but cannot mint facts, scopes, ids, predicates, or deltas.',
       status: 'candidate',
     },
     {
@@ -99,6 +99,33 @@ export const world_knowledge_authoring: DocIndex = {
       status: 'promote',
     },
     {
+      name: 'Semantic fact keys, not row positions',
+      purpose: ['persistence', 'ui', 'maintenance'],
+      description:
+        'Every editable fact has a stable semantic key separate from its display label and order. Diff, merge, recovery, and byte-preserving source patches address that key, so inserting or moving one fact cannot renormalize the identity of every later row.',
+      examples: ['world_knowledge_authoring', 'world_bible_wiki_mock'],
+      promoteTo: 'WORLD_KNOWLEDGE',
+      status: 'promote',
+    },
+    {
+      name: 'Kind field authority; ref prefix advisory',
+      purpose: ['format', 'ui', 'maintenance'],
+      description:
+        'The explicit kind field owns entity type for validation, navigation, styling, and compilation. A biz./npc./place. prefix is an allocation convention and mismatch warning only; no consumer infers or overrides type from the ref string.',
+      examples: ['world_knowledge_authoring', 'world_bible_wiki_mock'],
+      promoteTo: 'WORLD_KNOWLEDGE',
+      status: 'promote',
+    },
+    {
+      name: 'Player knowledge is a source-level allowlist',
+      purpose: ['scripting', 'ui', 'format', 'maintenance'],
+      description:
+        'Only explicit <public> prose blocks and public-scoped keyed facts may enter player-facing wiki/site projections. <notes>, unwrapped author prose, and secret facts are excluded by construction; Markdown headings never act as visibility controls.',
+      examples: ['world_knowledge_authoring'],
+      promoteTo: 'FactClaimBoundary',
+      status: 'promote',
+    },
+    {
       name: 'Authored floor plus causally bounded media ceiling',
       purpose: ['scripting', 'agent_llm', 'npc'],
       description:
@@ -125,6 +152,33 @@ export const world_knowledge_authoring: DocIndex = {
     },
   ],
   hazards: [
+    {
+      name: 'positional facts turn insertion into mass mutation',
+      purpose: ['persistence', 'ui', 'maintenance'],
+      description:
+        'Index-addressed facts make an insertion or reorder appear to change every subsequent row, producing noisy diffs, ambiguous merges, and source-span patches aimed at the wrong semantic field.',
+      evidence: ['USER ASK req_3283', 'docs/game/WORLD_BIBLE_WIKI_MOCK.html semanticChanges'],
+      fix: 'Give each fact a stable semantic key independent of label/order; diff and patch by key; reject duplicate or missing keys.',
+      severity: 'high',
+    },
+    {
+      name: 'ref prefix and kind field become competing type systems',
+      purpose: ['format', 'ui', 'maintenance'],
+      description:
+        'If consumers infer type from biz./npc./place. while other consumers read kind, one entity can be grouped, styled, validated, and compiled as different types. Agent-authored batches amplify the mismatch.',
+      evidence: ['USER ASK req_3283', 'WORLD_BIBLE_WIKI_MOCK Site Manager sidebar mismatch'],
+      fix: 'Make kind authoritative everywhere; treat the ref prefix as an allocator convention and optional mismatch warning only.',
+      severity: 'high',
+    },
+    {
+      name: 'authoring prose leaks into player knowledge',
+      purpose: ['scripting', 'ui', 'format'],
+      description:
+        'Compiling whole wiki pages and subtracting sections by heading lets designer notes and secret reveals enter public in-game sites when headings are renamed, omitted, or nested unexpectedly.',
+      evidence: ['USER ASK req_3283', 'CropDuster disposal-practices reveal'],
+      fix: 'Fail closed: compile only explicit <public> blocks and public facts; never use headings as visibility boundaries; prove excluded bytes are absent from the public pack.',
+      severity: 'high',
+    },
     {
       name: 'premature platform CMS obscures entity authoring',
       purpose: ['ui', 'scripting', 'maintenance'],
