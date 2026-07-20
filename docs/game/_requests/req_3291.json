@@ -1,0 +1,30 @@
+{
+  "id": "req_3291",
+  "at": "2026-07-20T10:56:34.176Z",
+  "origin": "codex:019f7e48",
+  "text": "ok now i think we have some backwards logic here, when i drag this thing around first of all the points should be on the actual verts here and second is that so ok if i bring this up to the top band that has all the colors [Image #1] it is not painting that face multi colors what it is doing is carrying that color and applying it to those faces in the shape it has",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T10:56:43.640Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T11:16:04.998Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented real UV-vertex editing and fixed-atlas sampling. UV handles now sit on unique authored triangle/polygon vertices; shared fan corners move together; commits send a complete face-ordered Float32 corner table through a validated atomic host boundary; island rectangles are re-derived metadata. Removed the UV selection fill/bounding handles and retired the legacy atlas-writing face-selection tint in favor of the existing screen-space overlay, so selection cannot mask or carry texture colors. Added TS regressions for exact handles/corners and Zig regressions proving deformed faces sample multiple fixed texture colors while the atlas hash remains unchanged.",
+  "shas": [
+    "bb2eab7fd"
+  ],
+  "resolvedAt": "2026-07-20T11:16:04.998Z"
+}
