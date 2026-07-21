@@ -390,6 +390,81 @@ test "camera occlusion: rotated wall reports through the oriented frame" {
     try testing.expectEqual(@as(f32, 11), out[4]);
 }
 
+test "camera spring arm: non-solid elevated floor band blocks the camera" {
+    var input = [_]f32{0} ** (physics.INPUT_HEADER_FLOATS + physics.RECT_FLOATS);
+    const at = physics.INPUT_HEADER_FLOATS;
+    input[at..][0..physics.RECT_FLOATS].* = .{
+        -4, -4, 4, 4,
+        3.2, // top
+        0, // walkable platform: no player side-push
+        0.85,
+        0.02,
+        3.0, // finite underside
+    };
+
+    const cap = physics.cameraOcclusionStepColliders(
+        input[0..],
+        1,
+        0,
+        0,
+        5.5,
+        -6,
+        0,
+        1.5,
+        0,
+        0,
+    );
+    try testing.expectApproxEqAbs(@as(f32, 2.704), cap, 0.002);
+}
+
+test "camera spring arm: rotated non-solid elevated floor band blocks the camera" {
+    var input = [_]f32{0} ** (physics.INPUT_HEADER_FLOATS + physics.ORIENTED_FLOATS);
+    const at = physics.INPUT_HEADER_FLOATS;
+    input[at..][0..physics.ORIENTED_FLOATS].* = .{
+        -4,  -4, 4,    4,
+        3.2, 0,  0.85, 0.02,
+        3.0, 0,  0,    std.math.pi / 4.0,
+    };
+
+    const cap = physics.cameraOcclusionStepColliders(
+        input[0..],
+        0,
+        1,
+        0,
+        5.5,
+        -6,
+        0,
+        1.5,
+        0,
+        0,
+    );
+    try testing.expect(cap > 0);
+}
+
+test "camera spring arm: unbounded non-solid ground is not an occluder" {
+    var input = [_]f32{0} ** (physics.INPUT_HEADER_FLOATS + physics.RECT_FLOATS);
+    const at = physics.INPUT_HEADER_FLOATS;
+    input[at..][0..physics.RECT_FLOATS].* = .{
+        -10,                                  -10, 10,   10,
+        0,                                    0,   0.85, 0.02,
+        physics.SOLID_TO_GROUND_FLOOR_METERS,
+    };
+
+    const cap = physics.cameraOcclusionStepColliders(
+        input[0..],
+        1,
+        0,
+        0,
+        -0.5,
+        -5,
+        0,
+        -0.5,
+        5,
+        0,
+    );
+    try testing.expectEqual(@as(f32, 0), cap);
+}
+
 test "ground collide: entity bounces with rect surface restitution" {
     physics.clearHeightfields();
     // Bouncy ground (restitution 1.0), entity restitution 0.9.

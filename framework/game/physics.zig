@@ -86,6 +86,9 @@ pub const CAMERA_OCCLUSION_RECT_FLOATS: usize = RECT_FLOATS + 1;
 pub const CAMERA_OCCLUSION_ORIENTED_FLOATS: usize = ORIENTED_FLOATS + 1;
 pub const MAX_CAMERA_OCCLUSION_HITS: usize = 64;
 pub const CAMERA_OCCLUSION_OUTPUT_FLOATS: usize = 4 + MAX_CAMERA_OCCLUSION_HITS;
+// Wire sentinel for a collider band that extends down without a finite underside.
+// A non-solid row carrying this value is terrain/ground, not overhead geometry.
+pub const SOLID_TO_GROUND_FLOOR_METERS: f32 = -1e9;
 // req_0938: a heightfield whose surface sits more than this ABOVE the camera
 // pivot is a CEILING/ROOF the player is under — it must not cap the spring-arm
 // eye (the rek when you walk under a roof a storey-plus overhead). Heightfields
@@ -300,6 +303,16 @@ fn clamp(n: f32, a: f32, b: f32) f32 {
 
 fn bandFloor(raw: f32) f32 {
     return if (std.math.isFinite(raw)) raw else -1000000;
+}
+
+/// Player collision and camera occlusion have different meanings for the rect
+/// `solid` flag. A thin floor is non-solid so its sides do not push the player,
+/// but its finite vertical band must still stop a camera passing through it.
+/// Unbounded non-solid ground rows stay out of the spring-arm query; terrain has
+/// its own heightfield occlusion path.
+fn blocksCamera(blocks_player: f32, raw_floor: f32) bool {
+    return blocks_player > 0.5 or
+        (std.math.isFinite(raw_floor) and raw_floor > SOLID_TO_GROUND_FLOOR_METERS);
 }
 
 /// Upload/replace a terrain grid by id. Called once when a landform loads
@@ -798,11 +811,12 @@ pub fn cameraOcclusionConfiguredHits(
 /// Spring-arm distance for a third-person camera, queried against the SAME
 /// packed collider buffer the physics step consumes (`step_input`). The no-V8
 /// compiled-game loader has no V8 occlusion door, so it reuses this to collide
-/// its camera with the authored walls exactly like the editor's JS spring-arm.
+/// its camera with authored walls and finite-height platform bands exactly like
+/// the editor's JS spring-arm.
 /// Rects start at INPUT_HEADER_FLOATS (the loader builds no entity section),
-/// oriented rects follow. Returns the distance from `pivot` to the nearest wall's
+/// oriented rects follow. Returns the distance from `pivot` to the nearest band's
 /// PIVOT-FACING face (its far side, accounting for box thickness) — i.e. the
-/// farthest the eye may sit and still be clear of every wall (0 = clear). The
+/// farthest the eye may sit and still be clear of every band (0 = clear). The
 /// caller pulls the eye in to `result - skin`.
 pub fn cameraOcclusionStepColliders(
     step_input: []const f32,
@@ -837,7 +851,7 @@ pub fn cameraOcclusionStepColliders(
     var r: usize = 0;
     while (r < rect_count) : (r += 1) {
         const at = rect_base + r * RECT_FLOATS;
-        if (step_input[at + 5] <= 0.5) continue; // solid only
+        if (!blocksCamera(step_input[at + 5], step_input[at + 8])) continue;
         if (segmentAabbSpan(
             cam_x,
             cam_y,
@@ -860,7 +874,7 @@ pub fn cameraOcclusionStepColliders(
     var o: usize = 0;
     while (o < oriented_count) : (o += 1) {
         const at = oriented_base + o * ORIENTED_FLOATS;
-        if (step_input[at + 5] <= 0.5) continue;
+        if (!blocksCamera(step_input[at + 5], step_input[at + 8])) continue;
         const yaw = step_input[at + 11];
         const cs = @cos(yaw);
         const sn = @sin(yaw);

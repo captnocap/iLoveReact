@@ -111,22 +111,23 @@ pub fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
     };
 }
 
-/// Pull the desired eye in to the near side of any wall/roof between it and the
-/// pivot (the compiled-game spring-arm — parity with the editor's JS one).
+/// Pull the desired eye in to the near side of any wall, roof, or elevated floor
+/// between it and the pivot (the compiled-game spring-arm — parity with the
+/// editor's JS one).
 pub fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
     const dxp = want.pos.x - want.pivot.x;
     const dyp = want.pos.y - want.pivot.y;
     const dzp = want.pos.z - want.pivot.z;
     const base = @sqrt(dxp * dxp + dyp * dyp + dzp * dzp);
     if (base <= 0.0001) return want.pos;
-    // The eye must clear BOTH the wall/roof boxes AND the terrain/ramp
+    // The eye must clear BOTH authored collider bands AND the terrain/ramp
     // heightfields (a separate collider type) — take the most restrictive cap.
     var cap: f32 = -1;
     if (maybe_colliders) |colliders| {
         if (colliders.rect_count != 0 or colliders.oriented_count != 0) {
             // cameraOcclusionStepColliders assumes rects at INPUT_HEADER_FLOATS
             // (no entity section) — skip past the body slots when present.
-            const wall = game_physics.cameraOcclusionStepColliders(
+            const geometry = game_physics.cameraOcclusionStepColliders(
                 colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
                 colliders.rect_count,
                 colliders.oriented_count,
@@ -138,7 +139,7 @@ pub fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 
                 want.pivot.z,
                 CAMERA_SPRING_SWEEP_RADIUS_METERS,
             );
-            if (wall > 0) cap = wall;
+            if (geometry > 0) cap = geometry;
         }
     }
     const terrain = game_physics.cameraOcclusionHeightfields(
