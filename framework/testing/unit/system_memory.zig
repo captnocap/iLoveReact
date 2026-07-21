@@ -48,6 +48,25 @@ test "parse meminfo total and available fields in bytes" {
     try testing.expectEqual(@as(u64, 22334455 * 1024), parsed.available_bytes);
 }
 
+test "system memory event byte counts stay exact across the V8 number bridge" {
+    // system_signals dispatches these as i64 arguments through callGlobal2Int;
+    // V8 represents them as JS Numbers. Pin representative RAM/VRAM values,
+    // including the values that exposed the missing-listener reload failure.
+    const samples = [_]u64{
+        2_884_562_944,
+        25_753_026_560,
+        32_960_339_968,
+        67_245_187_072,
+        1_099_511_627_776,
+    };
+    for (samples) |sample| {
+        const native: i64 = @intCast(sample);
+        const js_number: f64 = @floatFromInt(native);
+        const round_trip: i64 = @trunc(js_number);
+        try testing.expectEqual(native, round_trip);
+    }
+}
+
 test "native allocator snapshot is internally consistent" {
     const allocator = system_memory.readAllocatorSnapshot();
     // On the Linux/glibc test host this also proves the mallinfo2 ABI. On other

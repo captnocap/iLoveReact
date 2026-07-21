@@ -1,9 +1,9 @@
 // system_signals.zig — producer side of OS-level signals exposed via the
 // useIFTTT bus. Sister to clipboard_watch.zig; same dispatch shape:
 //
-//   OS event ──► this module ──► __ifttt_onSystem*(...) eval ──► JS busEmit
+//   OS event ──► this module ──► optional __ifttt_onSystem* call ──► JS busEmit
 //
-// All numeric payloads are passed inline (safe to format). String payloads
+// Numeric payloads cross the typed V8 global-call boundary. String payloads
 // are stashed in module-level buffers and pulled by the JS handler via the
 // matching __sys_*_get host function so we never have to JSON-escape paths.
 //
@@ -95,25 +95,21 @@ pub fn notifyFocus(host: *HostContext, gained: bool) void {
     const want: i8 = if (gained) 1 else 0;
     if (last_focused == want) return;
     last_focused = want;
-    var buf: [96]u8 = undefined;
-    const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemFocus({d})", .{want}) catch return;
-    fire(host, sentinel);
+    fireInt(host, "__ifttt_onSystemFocus", @intCast(want));
 }
 
 pub fn notifyDrop(host: *HostContext, path: []const u8) void {
     const n = @min(path.len, drop_path_buf.len);
     @memcpy(drop_path_buf[0..n], path[0..n]);
     drop_path_len = n;
-    fire(host, "__ifttt_onSystemDrop()");
+    fire0(host, "__ifttt_onSystemDrop");
 }
 
 /// Pointer device flipped (mouse ⇄ pen). Engine calls this on the change edge
 /// only (mouse_state.updatePointerDevice returns true), so no dedupe needed here.
 /// dev: 0 = mouse, 1 = pen — matches mouse_state.PointerDevice.
 pub fn notifyPointerDevice(host: *HostContext, dev: u8) void {
-    var buf: [96]u8 = undefined;
-    const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemPointerDevice({d})", .{dev}) catch return;
-    fire(host, sentinel);
+    fireInt(host, "__ifttt_onSystemPointerDevice", @intCast(dev));
 }
 
 pub fn notifyResize(host: *HostContext, w: f32, h: f32) void {
@@ -128,9 +124,7 @@ pub fn notifyResize(host: *HostContext, w: f32, h: f32) void {
     const new_tier = classifyBpTier(w);
     if (new_tier == last_bp_tier) return;
     last_bp_tier = new_tier;
-    var buf: [128]u8 = undefined;
-    const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemResize({d:.0},{d:.0})", .{ w, h }) catch return;
-    fire(host, sentinel);
+    fire2Float(host, "__ifttt_onSystemResize", w, h);
 }
 
 // JS getters — let cart modules read the current viewport size on import
@@ -174,9 +168,7 @@ pub fn tick(host: *HostContext, dt_ms: u32) void {
             const dy = y - cursor_last_y;
             cursor_last_x = x;
             cursor_last_y = y;
-            var buf: [192]u8 = undefined;
-            const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemCursor({d:.0},{d:.0},{d:.0},{d:.0})", .{ x, y, dx, dy }) catch return;
-            fire(host, sentinel);
+            fire4Float(host, "__ifttt_onSystemCursor", x, y, dx, dy);
         }
     }
 
@@ -196,21 +188,15 @@ pub fn tickPostPaint(host: *HostContext, dt_sec: f32) void {
         if (hang_announced) {
             // Recovered — announce end of hang as count=0. Edge-only fire.
             hang_announced = false;
-            fire(host, "__ifttt_onSystemHang(0)");
+            fireInt(host, "__ifttt_onSystemHang", 0);
         }
         return;
     }
     consecutive_slow += 1;
-    var buf: [128]u8 = undefined;
-    if (std.fmt.bufPrintZ(&buf, "__ifttt_onSystemSlowFrame({d:.2})", .{ms})) |sentinel| {
-        fire(host, sentinel);
-    } else |_| {}
+    fireFloat(host, "__ifttt_onSystemSlowFrame", ms);
     if (consecutive_slow >= HANG_FRAMES and !hang_announced) {
         hang_announced = true;
-        var hbuf: [96]u8 = undefined;
-        if (std.fmt.bufPrintZ(&hbuf, "__ifttt_onSystemHang({d})", .{consecutive_slow})) |sentinel| {
-            fire(host, sentinel);
-        } else |_| {}
+        fireInt(host, "__ifttt_onSystemHang", @intCast(consecutive_slow));
     }
 }
 
@@ -237,10 +223,7 @@ fn pollMem(host: *HostContext) void {
     if (used == last_ram_used and total == last_ram_total) return;
     last_ram_used = used;
     last_ram_total = total;
-    var fbuf: [192]u8 = undefined;
-    if (std.fmt.bufPrintZ(&fbuf, "__ifttt_onSystemRam({d},{d})", .{ used, total })) |sentinel| {
-        fire(host, sentinel);
-    } else |_| {}
+    fire2U64(host, "__ifttt_onSystemRam", used, total);
 }
 
 fn pollVram(host: *HostContext) void {
@@ -259,10 +242,7 @@ fn pollVram(host: *HostContext) void {
         if (used == last_vram_used and total == last_vram_total) return;
         last_vram_used = used;
         last_vram_total = total;
-        var fbuf: [192]u8 = undefined;
-        if (std.fmt.bufPrintZ(&fbuf, "__ifttt_onSystemVram({d},{d})", .{ used, total })) |sentinel| {
-            fire(host, sentinel);
-        } else |_| {}
+        fire2U64(host, "__ifttt_onSystemVram", used, total);
         return;
     }
     // No discoverable VRAM source — silently skip. NVIDIA proprietary needs
@@ -291,8 +271,54 @@ fn readU64File(io: std.Io, path: []const u8) ?u64 {
     return parseFirstNumber(buf[0..n]);
 }
 
-fn fire(host: *HostContext, sentinel: [:0]const u8) void {
+fn beginFire(host: *HostContext) void {
     v8_runtime.callGlobal(host, "__beginJsEvent");
-    v8_runtime.evalExpr(host, sentinel);
+}
+
+fn endFire(host: *HostContext) void {
     v8_runtime.callGlobal(host, "__endJsEvent");
+}
+
+/// System-signal listeners are optional. Every dispatch uses V8's typed global
+/// boundary, which silently drops a call when a freshly-reset context has not
+/// installed that callback yet. Evaluating a bare callback name would throw
+/// and flood stderr until the next successful reload.
+fn fire0(host: *HostContext, callback: [*:0]const u8) void {
+    beginFire(host);
+    v8_runtime.callGlobal(host, callback);
+    endFire(host);
+}
+
+fn fireInt(host: *HostContext, callback: [*:0]const u8, value: i64) void {
+    beginFire(host);
+    v8_runtime.callGlobalInt(host, callback, value);
+    endFire(host);
+}
+
+fn fireFloat(host: *HostContext, callback: [*:0]const u8, value: f32) void {
+    beginFire(host);
+    v8_runtime.callGlobalFloat(host, callback, value);
+    endFire(host);
+}
+
+fn fire2Float(host: *HostContext, callback: [*:0]const u8, a: f32, b: f32) void {
+    beginFire(host);
+    v8_runtime.callGlobal2Float(host, callback, a, b);
+    endFire(host);
+}
+
+fn fire4Float(host: *HostContext, callback: [*:0]const u8, a: f32, b: f32, c_value: f32, d: f32) void {
+    beginFire(host);
+    v8_runtime.callGlobal4Float(host, callback, a, b, c_value, d);
+    endFire(host);
+}
+
+fn fire2U64(host: *HostContext, callback: [*:0]const u8, a: u64, b: u64) void {
+    // OS memory byte counts are far below i64 max on supported hosts. Keeping
+    // the bridge signed matches V8's existing integer-call surface.
+    const a_i64: i64 = @intCast(a);
+    const b_i64: i64 = @intCast(b);
+    beginFire(host);
+    v8_runtime.callGlobal2Int(host, callback, a_i64, b_i64);
+    endFire(host);
 }

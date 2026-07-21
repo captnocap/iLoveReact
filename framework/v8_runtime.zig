@@ -426,6 +426,19 @@ pub fn callGlobal2Float(host: *HostContext, name: [*:0]const u8, a: f32, b: f32)
     });
 }
 
+pub fn callGlobal4Float(host: *HostContext, name: [*:0]const u8, a: f32, b: f32, c: f32, d: f32) void {
+    const iso = g_isolate orelse return;
+    var hscope: v8.HandleScope = undefined;
+    hscope.init(iso);
+    defer hscope.deinit();
+    callGlobalWithArgs(host, name, &.{
+        v8.Number.init(iso, @floatCast(a)).toValue(),
+        v8.Number.init(iso, @floatCast(b)).toValue(),
+        v8.Number.init(iso, @floatCast(c)).toValue(),
+        v8.Number.init(iso, @floatCast(d)).toValue(),
+    });
+}
+
 pub fn callGlobal3Int(host: *HostContext, name: [*:0]const u8, a: i64, b: i64, c: i64) void {
     const iso = g_isolate orelse return;
     var hscope: v8.HandleScope = undefined;
