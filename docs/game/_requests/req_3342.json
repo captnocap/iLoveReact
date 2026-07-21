@@ -1,0 +1,28 @@
+{
+  "id": "req_3342",
+  "at": "2026-07-21T11:32:34.034Z",
+  "origin": "codex:019f7e48",
+  "text": "uh now so if i map uv to a texture image when then exporting it does it only take from the image exactly what is needed for the uv or is it carrying it all?",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T11:32:39.582Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T11:33:20.580Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected the active editor's texture import, model-package writer, and compiled resident-mesh export paths to answer the export-semantics question. The current implementation adopts the complete imported raster at native dimensions, writes the complete live atlas to atlases/base.png, and embeds that entire encoded PNG in the exported resident mesh; UVs limit sampling only, and no crop or island repack occurs. No code change was requested or made.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T11:33:20.580Z"
+}
