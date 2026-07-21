@@ -424,6 +424,33 @@ test "exact UV vertices deform face sampling while atlas pixels stay fixed" {
     try testing.expectEqual(fixed_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
 }
 
+test "painting a UV over transparent atlas space reveals ink and preserves glass opacity" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(910, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    model_paint.paintFaceAlpha(0, 87);
+    const atlas = model_paint.atlas().?;
+    const transparent = try testing.allocator.alloc(u8, atlas.rgba.len);
+    defer testing.allocator.free(transparent);
+    @memset(transparent, 0);
+    try testing.expect(model_paint.setAtlas(transparent));
+
+    model_paint.paintStamp(0, 0.33, 0.33, 4, .{ 7, 239, 113, 255 }, 1);
+    const brushed = model_paint.sampleTexel(0, 0.33, 0.33) orelse return error.TestUnexpectedResult;
+    try testing.expectEqualSlices(u8, &[_]u8{ 7, 239, 113, 87 }, brushed[0..]);
+
+    try testing.expect(model_paint.setAtlas(transparent));
+    model_paint.paintFaceRgb(0, .{ 251, 101, 17 });
+    const filled = model_paint.sampleTexel(0, 0.33, 0.33) orelse return error.TestUnexpectedResult;
+    try testing.expectEqualSlices(u8, &[_]u8{ 251, 101, 17, 87 }, filled[0..]);
+}
+
 test "closed pen polygon fills one logical island across its triangle diagonal" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(905, &quad, 6);

@@ -32,6 +32,10 @@ const alloc = std.heap.c_allocator;
 var g_key_hash: u64 = 0; // intern-key hash of the mesh being painted
 var g_positions: ?[]f32 = null; // facecount*9 floats: 3 verts (xyz) per face, model space
 var g_facecount: u32 = 0;
+// Glass opacity belongs to the authored face, not whichever atlas texel its UV happens
+// to sample today. Keeping it beside the target lets a brush establish visible pixels
+// after a UV moves over transparent packing space without turning glass opaque.
+var g_face_alpha: ?[]u8 = null;
 var g_atlas_w: u32 = 0;
 var g_atlas_h: u32 = 0;
 // The island layout (paint_islands.zig): one island per authored face, sized by its
@@ -69,6 +73,23 @@ var g_has_dirty: bool = false;
 pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
 pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ 0, 0, 0, 0 };
 
+fn faceAlpha(face: u32) u8 {
+    const rows = g_face_alpha orelse return DEFAULT_FACE[3];
+    if (@as(usize, face) >= rows.len) return DEFAULT_FACE[3];
+    return rows[@as(usize, face)];
+}
+
+fn ensureFaceAlpha(face_count: u32) void {
+    if (g_face_alpha) |rows| {
+        if (rows.len == face_count) return;
+        alloc.free(rows);
+        g_face_alpha = null;
+    }
+    const rows = alloc.alloc(u8, face_count) catch return;
+    @memset(rows, DEFAULT_FACE[3]);
+    g_face_alpha = rows;
+}
+
 fn markRows(lo: u32, hi: u32) void {
     if (!g_has_dirty) {
         g_dirty_lo = lo;
@@ -95,14 +116,10 @@ pub fn consumeDirtyRows() ?[2]u32 {
 pub fn clearAtlas() void {
     const buf = g_rgba orelse return;
     if (g_layout == null or g_facecount == 0) return;
-    const face_alpha = alloc.alloc(u8, g_facecount) catch return;
-    defer alloc.free(face_alpha);
-    var face: u32 = 0;
-    while (face < g_facecount) : (face += 1) face_alpha[face] = (faceColor(face) orelse DEFAULT_FACE)[3];
     @memset(buf, 0);
-    face = 0;
+    var face: u32 = 0;
     while (face < g_facecount) : (face += 1) {
-        paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, face_alpha[face]);
+        paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, faceAlpha(face));
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
@@ -235,6 +252,7 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     const fc = vert_count / 3;
     g_key_hash = key_hash;
     g_facecount = fc;
+    ensureFaceAlpha(fc);
 
     // CPU positions for raycasting (9 floats/face).
     const pos = alloc.alloc(f32, @as(usize, fc) * 9) catch return;
@@ -270,6 +288,13 @@ fn setTargetPreservingAtlasInner(key_hash: u64, verts: []const f32, vert_count: 
     if (verts.len < need) return error.InvalidGeometry;
     const fc = vert_count / 3;
     if (groups) |rows| if (rows.len < @as(usize, fc)) return error.InvalidGroups;
+
+    const alpha_new = try alloc.alloc(u8, fc);
+    errdefer alloc.free(alpha_new);
+    for (alpha_new, 0..) |*alpha, face| alpha.* = if (g_face_alpha) |old|
+        if (face < old.len) old[face] else DEFAULT_FACE[3]
+    else
+        DEFAULT_FACE[3];
 
     const positions_new = try alloc.alloc(f32, @as(usize, fc) * 9);
     errdefer alloc.free(positions_new);
@@ -333,6 +358,8 @@ fn setTargetPreservingAtlasInner(key_hash: u64, verts: []const f32, vert_count: 
     g_isl_tris = triangles_new;
     g_positions = positions_new;
     g_key_hash = key_hash;
+    if (g_face_alpha) |old| alloc.free(old);
+    g_face_alpha = alpha_new;
     g_facecount = fc;
     g_rgba = live_rgba;
     g_has_dirty = false;
@@ -463,6 +490,7 @@ fn collectFaceGroups(fc: u32) ?[]u32 {
 fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     const fc = g_facecount;
     const pos = g_positions orelse return;
+    ensureFaceAlpha(fc);
 
     // Snapshot per-face base colours before the old layout goes away.
     var snap: ?[]u8 = null;
@@ -586,6 +614,8 @@ pub fn clear() void {
     freeLayoutState();
     if (g_positions) |p| alloc.free(p);
     g_positions = null;
+    if (g_face_alpha) |rows| alloc.free(rows);
+    g_face_alpha = null;
     g_facecount = 0;
     g_key_hash = 0;
     // g_density_req deliberately survives — edits/reloads keep their chosen density.
@@ -595,8 +625,9 @@ pub fn clear() void {
 /// centroid texel is always written, so a sliver face still takes the colour (and
 /// faceColor reads it back). `face` out of range is ignored (a raycast miss passes -1
 /// up the stack, never here). Null rgb/alpha leaves that part of each texel untouched —
-/// the atlas alpha channel IS the per-face glass state (editGlassFirstVert derives the
-/// transparent-run split from it), so USER paint must write rgb only.
+/// authored face opacity is supplied separately from colour (editGlassFirstVert derives
+/// the transparent-run split from it), so user paint can reveal transparent UV space
+/// while still re-applying the face's glass opacity.
 fn paintFaceTexels(face: u32, rgb: ?[3]u8, alpha: ?u8) void {
     const buf = g_rgba orelse return;
     const lay = &(g_layout orelse return);
@@ -634,19 +665,25 @@ fn paintFaceTexels(face: u32, rgb: ?[3]u8, alpha: ?u8) void {
 /// carry, glass toggle). Alpha is the glass channel; user paint goes through
 /// paintFaceRgb instead so it never un-glasses a face.
 pub fn paintFace(face: u32, rgba: [4]u8) void {
+    if (g_face_alpha) |rows| {
+        if (@as(usize, face) < rows.len) rows[@as(usize, face)] = rgba[3];
+    }
     paintFaceTexels(face, .{ rgba[0], rgba[1], rgba[2] }, rgba[3]);
 }
 
-/// Paint one face's COLOUR only, preserving each texel's alpha — the user-paint fill
-/// (fill brush, part tints, atlas bases). A glass face painted this way stays glass:
-/// stained glass, not un-glassed (req_2928).
+/// Paint one face's COLOUR and re-assert its separately retained opacity — the
+/// user-paint fill, part tints and atlas bases. A glass face stays glass, while a face
+/// moved over transparent packing space gains visible painted texels (req_2928).
 pub fn paintFaceRgb(face: u32, rgb: [3]u8) void {
-    paintFaceTexels(face, rgb, null);
+    paintFaceTexels(face, rgb, faceAlpha(face));
 }
 
 /// Rewrite one face's ALPHA only, preserving the painted colour — re-asserts the glass
 /// state over an atlas blit (a saved painting knows nothing about the mesh's glass).
 pub fn paintFaceAlpha(face: u32, alpha: u8) void {
+    if (g_face_alpha) |rows| {
+        if (@as(usize, face) < rows.len) rows[@as(usize, face)] = alpha;
+    }
     paintFaceTexels(face, null, alpha);
 }
 
@@ -786,7 +823,7 @@ pub fn faceColor(face: u32) ?[4]u8 {
     if (face >= g_facecount) return null;
     const ct = faceCentroidTexel(lay, face);
     const d = (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4;
-    return .{ buf[d], buf[d + 1], buf[d + 2], buf[d + 3] };
+    return .{ buf[d], buf[d + 1], buf[d + 2], faceAlpha(face) };
 }
 
 /// A face's representative colour read from a SAVED patch (saveFacePatch bytes) instead
@@ -803,7 +840,7 @@ pub fn faceColorFromPatch(face: u32, patch: []const u8) ?[4]u8 {
     if (px >= r[2] or py >= r[3]) return null;
     const d = (@as(usize, py) * r[2] + px) * 4;
     if (d + 3 >= patch.len) return null;
-    return .{ patch[d], patch[d + 1], patch[d + 2], patch[d + 3] };
+    return .{ patch[d], patch[d + 1], patch[d + 2], faceAlpha(face) };
 }
 
 // ── Per-face rect save/restore/tint (the selection highlight rides this) ──────────
@@ -1583,15 +1620,17 @@ fn blendChannel(base: f32, ink: f32, mode: u8) f32 {
     return target * 255.0;
 }
 
-/// Blend one texel toward `ink` by `amt` — COLOUR only. The alpha channel is the
-/// per-face glass state, so a brush stroke never touches it: painting a glass face
-/// gives stained glass, not un-glassed (req_2928).
-fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8) void {
+/// Blend one texel toward `ink` by `amt`, then establish the authored face's opacity.
+/// This matters when edited UVs point at transparent packing space: colour written
+/// under alpha zero is invisible. `alpha` is face metadata, so glass remains stained
+/// glass instead of becoming opaque while newly painted blank texels become visible.
+fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8, alpha: u8) void {
     inline for (0..3) |c| {
         const base: f32 = buf[d + c];
         const target = blendChannel(base, ink[c], mode);
         buf[d + c] = @intFromFloat(std.math.clamp(base + (target - base) * amt, 0.0, 255.0));
     }
+    buf[d + 3] = alpha;
 }
 
 fn pointInPolygon(points: []const f32, x: f32, y: f32) bool {
@@ -1625,6 +1664,7 @@ pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow
     if (face >= g_facecount or points.len < 6 or points.len % 2 != 0) return false;
     const island_index = lay.tri_island[face];
     const island = lay.islands[island_index];
+    const alpha = faceAlpha(face);
     if (island.w == 0 or island.h == 0) return false;
     const amount = std.math.clamp(flow, 0.0, 1.0);
     if (amount <= 0.0) return false;
@@ -1667,7 +1707,7 @@ pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow
             if (!pointInPolygon(points, u, v)) continue;
             if (!pointInIsland(lay, island_index, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink = if (mat) sampleMatAtTexel(island, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0, alpha);
             wrote = true;
         }
     }
@@ -1689,6 +1729,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     if (face >= g_facecount) return;
     const isl_idx = lay.tri_island[face];
     const isl = lay.islands[isl_idx];
+    const alpha = faceAlpha(face);
     const flow_amt = std.math.clamp(flow, 0.0, 1.0);
     if (flow_amt <= 0.0) return;
 
@@ -1705,12 +1746,12 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
                 const fy: f32 = @floatFromInt(ty);
                 if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
                 const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend);
+                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend, alpha);
             }
         }
         const ct = faceCentroidTexel(lay, face);
         const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, @floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
-        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend);
+        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend, alpha);
         markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
         return;
     }
@@ -1768,7 +1809,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend, alpha);
         }
     }
     markRows(y0, y1);
