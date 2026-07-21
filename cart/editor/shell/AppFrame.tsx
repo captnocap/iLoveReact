@@ -150,7 +150,7 @@ import {
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
 import { normalizeModelLights } from '../model/modelLights';
-import { connectedPieceIds, pieceSelectionVolume, type PieceSelectionIntent } from '../world/selection';
+import { connectedPieceIds, pieceSelectionVolume, rotatePieceSelection, type PieceSelectionIntent } from '../world/selection';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 import PrefabDialog from './PrefabDialog';
 import { mintWorldPrefabId, prefabFromPieces } from '../world/prefabs';
@@ -2002,11 +2002,9 @@ export default function AppFrame() {
             const ids = new Set(current.selectedPieceIds);
             setState((prev) => recordWorldEdit(prev, {
               ...prev,
-              worldPieces: prev.worldPieces.map((piece) => ids.has(piece.id)
-                ? { ...piece, yawDegrees: (piece.yawDegrees + 90) % 360 }
-                : piece),
+              worldPieces: rotatePieceSelection(prev.worldPieces, [...ids], current.selectedPieceId, 1),
               contextOpen: false,
-              status: `rotated ${ids.size} selected pieces 90°`,
+              status: `rotated ${ids.size} selected pieces 90° as one unit`,
             }, `rotate ${ids.size} pieces`));
             return;
           }

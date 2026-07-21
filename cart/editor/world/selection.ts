@@ -8,6 +8,7 @@ export type PieceSelectionIntent = 'replace' | 'toggle' | 'connected';
  * absorbs authored/serialized float noise at faces intended to coincide. */
 export const WORLD_SELECTION_TUNING = Object.freeze({
   contactToleranceMeters: 0.01,
+  quarterTurnDegrees: 90,
 });
 
 type Axis2 = readonly [number, number];
@@ -102,4 +103,42 @@ export function connectedPieceIds(pieces: readonly PlacedPiece[], rootId: string
     }
   }
   return pieces.filter((_, index) => selected.has(index)).map((piece) => piece.id);
+}
+
+function normalizeYaw(yawDegrees: number): number {
+  return ((yawDegrees % 360) + 360) % 360;
+}
+
+/** Rotate a transient multi-selection as one rigid composition. The active
+ * piece is the stable shared pivot, taking the place of the building-instance
+ * origin used by hmsc-int. Quarter-turn coordinate swaps are exact so four
+ * turns return every placement to its original coordinates without drift. */
+export function rotatePieceSelection(
+  pieces: readonly PlacedPiece[],
+  selectedIds: readonly string[],
+  activePieceId: string | null,
+  quarterTurns: -1 | 1,
+): PlacedPiece[] {
+  if (quarterTurns !== -1 && quarterTurns !== 1) {
+    throw new Error('selection rotation must be exactly one quarter turn');
+  }
+  const selected = new Set(selectedIds);
+  const selectedPieces = pieces.filter((piece) => selected.has(piece.id));
+  if (selectedPieces.length === 0) return pieces.slice();
+  const pivot = selectedPieces.find((piece) => piece.id === activePieceId) ?? selectedPieces[0]!;
+  const yawDelta = quarterTurns * WORLD_SELECTION_TUNING.quarterTurnDegrees;
+
+  return pieces.map((piece) => {
+    if (!selected.has(piece.id)) return piece;
+    const dx = piece.x - pivot.x;
+    const dz = piece.z - pivot.z;
+    const rotatedX = quarterTurns === 1 ? dz : -dz;
+    const rotatedZ = quarterTurns === 1 ? -dx : dx;
+    return {
+      ...piece,
+      x: pivot.x + rotatedX,
+      z: pivot.z + rotatedZ,
+      yawDegrees: normalizeYaw(piece.yawDegrees + yawDelta),
+    };
+  });
 }
