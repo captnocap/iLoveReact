@@ -1,0 +1,30 @@
+{
+  "id": "req_3323",
+  "at": "2026-07-21T07:57:36.671Z",
+  "origin": "codex:019f7e48",
+  "text": "alright lets go further here. so first of all im not really a fan of this grey backing it all lands on, it should be transparent unless there is paint there. but also lets just do a side by side of our uv capability vs blockbench bar for bar. \n\nhere is block bench adding a cylinder: [Image #1]\n\nus adding a cylinder: [Image #2]\n\nnext\n\nblockbench creating a texture map: [Image #3]\n\nours creating a texture map: [Image #4]\n\nok immediately we have some big disconnects here. first of all look at block bench again: [Image #5] ok its on a transparent background, and it has the cylinder top and bottom in the same shape. \n\nours: [Image #6] no shape, random assortment, huge open grey space\n\ntheirs: [Image #7] the top piece here is one piece even though its segments\n\nours: [Image #8] segments, no single piece.\n\ntheirs: [Image #9][Image #10] can be further manipulated to how you wish [Image #11] break out a slice \n\ntheirs: when rotating, there is a clear line where the rotation happens to be at level[Image #12] with a blue line\n\nours: [Image #13] no rotate control, no line to show when leveled on any axis",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T07:57:53.192Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T08:34:23.096Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced triangle-box UV editing with topology-aware connected islands: cylinder caps now pack as coherent radial pieces, exact face corners remain editable over a fixed atlas, detached faces rebuild seams atomically, unused atlas space is transparent, and island/face transforms plus rotation snapping are exposed in the full-height inspector.",
+  "shas": [
+    "8a2a45f48"
+  ],
+  "resolvedAt": "2026-07-21T08:34:23.095Z"
+}

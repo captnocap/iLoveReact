@@ -1,0 +1,30 @@
+{
+  "id": "req_3324",
+  "at": "2026-07-21T08:20:42.130Z",
+  "origin": "codex:019f7e48",
+  "text": "good start, heres the next steps\n\nthe top of the cylinder is now one whole piece, which means it does not allow for breaking it up, but the example i showed you did allow for that. here lets look side by side again\n\ntheirs: [Image #1]\nours: [Image #2]\n\nnotice you do not see any edges in ours. how do you isloate the one and detatch? just double click it, to isloate the single piece in a grouped piece. \n\nnext\n\nwe need to make it so pulling on vert is not just free by nature, it should snap to some grid space with a modifier for free pulling \n\n\none more thing is you need to make it clear where the available space is to use, this looks like i have the full vertical, yet there is a invisible wall about half way down [Image #3]",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T08:20:51.771Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T08:34:23.105Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Kept authored wedge structure visible inside connected UV islands, added double-click isolation of the exact face, snapped vertex pulls to whole texels by default with Alt for free movement, and confined checker/grid chrome to a strongly outlined real atlas boundary so out-of-bounds canvas space is unmistakable.",
+  "shas": [
+    "8a2a45f48"
+  ],
+  "resolvedAt": "2026-07-21T08:34:23.104Z"
+}
