@@ -1,0 +1,30 @@
+{
+  "id": "req_3325",
+  "at": "2026-07-21T08:39:22.093Z",
+  "origin": "codex:019f7e48",
+  "text": "good we are looking better one thing immediately is the moment i start dragging i go from 240fps to ~45 fps, huge performance loss",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T08:39:59.034Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T08:54:52.399Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the UV drag hot-path rebuild: raw pointer samples now retain the exact newest geometry in refs and coalesce React previews to host-frame cadence; static islands and active-part outlines are reference-cached; checker compositing moved into the atlas shader; grid, face, boundary, selection, rotation, and guide lines now use the native Graph.Polyline segment primitive instead of rebuilding and parsing Graph.Path strings. Added segment parity regressions and passed 17/17 UV tests, editor TypeScript check, and ReleaseFast ship.",
+  "shas": [
+    "c0247aa30"
+  ],
+  "resolvedAt": "2026-07-21T08:54:52.399Z"
+}

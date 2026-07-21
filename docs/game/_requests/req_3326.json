@@ -1,0 +1,30 @@
+{
+  "id": "req_3326",
+  "at": "2026-07-21T08:42:46.817Z",
+  "origin": "codex:019f7e48",
+  "text": "uh also here is a bug i found immediately: i dragged a uv to a blank space, then i went and painted the actual mesh, nothing shows up",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T08:42:53.513Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T08:54:52.407Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed painting after a UV is moved onto transparent atlas space. Face opacity is now retained independently of sampled atlas pixels; brush, fill, material, and polygon paint establish that authored opacity on newly painted texels, so alpha-zero destinations become visible while glass faces keep their glass alpha. Added a native regression covering brush and fill over a transparent destination; all 34 model-paint tests pass.",
+  "shas": [
+    "536d41538"
+  ],
+  "resolvedAt": "2026-07-21T08:54:52.407Z"
+}
