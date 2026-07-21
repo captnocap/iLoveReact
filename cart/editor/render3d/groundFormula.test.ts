@@ -19,6 +19,17 @@ test('every road grammar cell resolves to the semantic Road material instead of 
   assert(tileBindingFor('median').fn === 'road', 'median is not Road');
 });
 
+test('ground composition disables the row-relative fill palette contract', () => {
+  assert(
+    EDITOR_GROUND_FORMULA.includes('let n = 0; // ground stream carries cells, not a fill palette'),
+    'generated fill palette count was not neutralized for the ground D stream',
+  );
+  assert(
+    !EDITOR_GROUND_FORMULA.includes('let n = i32(D[mat_data_base + 5u] + 0.5)'),
+    'ground formula still interprets bindCount/cell data as a material palette',
+  );
+});
+
 test('ground shader rotates catalog UVs for east-west road grammar', () => {
   assert(EDITOR_GROUND_FORMULA.includes('var roadAlongX = undercoatToken == 0 && ((roadMark & 1) != 0 || semanticKind =='), 'directional road dispatch missing');
   assert(EDITOR_GROUND_FORMULA.includes('if (undercoatToken == 0 && roadMark == 0'), 'visual undercoat is incorrectly inheriting road rotation');

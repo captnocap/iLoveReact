@@ -127,7 +127,11 @@ const SLAB_JOINT_FNS = new Set([
 // slice; it would ride a dedicated section of the ground stream, not the fill
 // contract). Both edits assert their pattern so generator drift fails LOUD.
 const D_DECL = '@group(0) @binding(1) var<storage, read> D: array<f32>;';
-const MAT_PAL_COUNT_LINE = 'let n = i32(D[5] + 0.5);';
+// mat_pal is row-relative so the same generated functions can serve one fill
+// or Paint's packed thumbnail grid. Ground owns a different D stream entirely,
+// therefore its composition must neutralize the row-relative palette count.
+// Keep this exact drift guard paired with build-shaders.ts's generated line.
+const MAT_PAL_COUNT_LINE = 'let n = i32(D[mat_data_base + 5u] + 0.5);';
 
 function composedFillFuncs(): string {
   if (!FILL_FUNCS.includes(D_DECL)) {
