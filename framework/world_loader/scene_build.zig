@@ -584,6 +584,10 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
                 try appendMeshPropNode(self, mesh, inst, key, 0, first_slot_start, 0, null, null);
             }
             for (mesh.slots, 0..) |slot, si| {
+                // Named face-texture roles retain their manifest index before any
+                // face is assigned. They consume a material-table position but no
+                // geometry node in either the baked or live draw path.
+                if (slot.count == 0) continue;
                 const key = try std.fmt.allocPrint(self.allocator, "{s}:slot-{d}", .{ mesh.key, si });
                 self.player_geom_keys.append(self.allocator, key) catch |err| {
                     self.allocator.free(key);

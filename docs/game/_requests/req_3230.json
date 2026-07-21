@@ -1,0 +1,30 @@
+{
+  "id": "req_3230",
+  "at": "2026-07-19T16:05:22.739Z",
+  "origin": "codex:019f7a9c",
+  "text": "hm. im still getting no loop cut through a cylinder. [Image #1] but its not breaking like it was. still, why cant the cylinder top cut",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T16:05:37.163Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:20:52.227Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Matched the cylinder path to js-bench-editor at the topology boundary. New cylinders now use explicit top and bottom center vertices with one real triangle per cap side, so the indexed Loop Cut walk can enter a terminal cap triangle exactly as the reference does instead of stopping at a ReactJIT-only n-gon. Existing cylinders authored with the old convex planar n-gon caps are promoted in-host only when every rim edge proves the cylinder side-quad fan; arbitrary imported n-gons still stop safely. Added TS primitive/traversal coverage and a Zig legacy-cylinder regression; the focused mesh suite is 28/28 and the ReleaseFast editor build passes.",
+  "shas": [
+    "bedcbeef6"
+  ],
+  "resolvedAt": "2026-07-19T16:20:52.227Z"
+}

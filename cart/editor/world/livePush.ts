@@ -8,7 +8,7 @@
 //   pushResidentMeshes — the authored-mesh catalog a placement references
 //                        (req_2577); returns false until the loader node exists.
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
-import { pieceSkinBoxes } from './pieceSkins';
+import { liveMaterialFor, pieceSkinBoxes, type LiveMaterial } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredPieceFrom, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData, groundRebase } from './authoredMesh';
@@ -22,6 +22,7 @@ import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
 import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
+import { compileTextureSlotMesh } from '../model/modelTextureSlots';
 import { encodeLiveLights, normalizeModelLights, placeModelLight, type WorldLight } from '../model/modelLights';
 import type { AuthoredFloraSpecies } from './floraSpecies';
 import type { WorldFloraPatch } from './surfaceFlora';
@@ -96,11 +97,31 @@ function residentMeshFor(
     const doc = pkg ? packageMeshDoc(pkg) : null;
     const parts = pkg ? packageMeshDocParts(pkg) : null;
     const collisionBoxes = compileOutlinerCollisionBoxes(collisionVertices ?? vertices, doc, parts);
+    const textureSlots = pkg?.textureSlots ?? ap.textureSlots ?? [];
+    if (textureSlots.length > 0) {
+      try {
+        const compiled = compileTextureSlotMesh(vertices, doc?.faceMaterials, doc?.faceGroups, textureSlots);
+        return {
+          key,
+          vertices: compiled.vertices,
+          ...(compiled.materialUvs ? { materialUvs: compiled.materialUvs } : {}),
+          png,
+          slots: compiled.slots,
+          ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}),
+        };
+      } catch (error) {
+        console.warn(`[authored-slots] '${ap.label}' rejected: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      }
+    }
     return { key, vertices, png, ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}) };
   }
   if (!pkg) {
     console.warn(`[authored-door] '${ap.label}' has no model package; resident door skipped`);
     return null;
+  }
+  if ((pkg.textureSlots ?? ap.textureSlots ?? []).length > 0) {
+    console.warn(`[authored-slots] '${ap.label}' is an animated door: face texture roles cannot share the door-leaf partition yet; the door keeps its painted atlas`);
   }
   const doc = packageMeshDoc(pkg);
   const parts = packageMeshDocParts(pkg);
@@ -165,9 +186,7 @@ export function pushLiveWorld(
   // over the flat live box. Unskinned faces stay flat. Doors gated behind their
   // presence so an older host without them still renders the flat geometry.
   const skin = pieceSkinBoxes(pieces);
-  if (typeof g.__compiled_world_set_live_material === 'function') {
-    for (const m of skin.materials) g.__compiled_world_set_live_material(nodeId, m.hash, 0, m.wgsl, new Float32Array(m.data), m.opacity);
-  }
+  const liveMaterials = new Map<number, LiveMaterial>(skin.materials.map((material) => [material.hash, material]));
   if (typeof g.__compiled_world_set_live_skin_boxes === 'function') {
     g.__compiled_world_set_live_skin_boxes(nodeId, skin.boxes);
   }
@@ -177,10 +196,21 @@ export function pushLiveWorld(
     const refs: MeshRef[] = [];
     for (const piece of pieces) {
       if (!isAuthoredPiece(piece.pieceId)) continue;
+      const authored = authoredPieceFrom(authoredPieces, piece.pieceId);
+      const authoredPackage = authored ? modelPackageById(authored.pkgId) : null;
+      const roleMaterials = (authoredPackage?.textureSlots ?? authored?.textureSlots ?? []).map((slot) => {
+        const ref = piece.slots?.[slot.id];
+        if (!ref) return 0;
+        const material = liveMaterialFor(ref);
+        if (!material) return 0;
+        liveMaterials.set(material.hash, material);
+        return material.hash;
+      });
       refs.push({
         key: authoredResidentKeyOf(piece.pieceId),
         x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees,
         ...(piece.spinDegPerSec ? { spin: piece.spinDegPerSec } : {}),
+        ...(roleMaterials.some((hash) => hash !== 0) ? { materials: roleMaterials } : {}),
       });
     }
     // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
@@ -194,6 +224,11 @@ export function pushLiveWorld(
     } else {
       if (refs.some((r) => r.spin)) console.warn('[place] this host predates spinning props — rebuild the dev host to see them turn');
       g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
+    }
+  }
+  if (typeof g.__compiled_world_set_live_material === 'function') {
+    for (const material of liveMaterials.values()) {
+      g.__compiled_world_set_live_material(nodeId, material.hash, 0, material.wgsl, new Float32Array(material.data), material.opacity);
     }
   }
   return true;

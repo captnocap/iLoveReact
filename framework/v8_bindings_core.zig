@@ -29,8 +29,10 @@ const paint_program = @import("gpu/paint_program.zig");
 const capture = @import("gpu/capture.zig");
 const root = @import("root");
 
-// Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
-// from the original at any level (model_set_quality) without re-reading the file.
+// Retained source mesh + its path, so the live quality slider can re-decimate from the
+// current document baseline at any level without re-reading the file. The baseline is
+// reversible session state; Save persists the chosen displayed projection when one is
+// active, and reopening makes that reduced topology the next baseline (req_3315).
 //
 // PAINT IS RESOLUTION-INDEPENDENT: g_source_colors is the authoritative per-face paint
 // (at full-res facecount). Whatever quality is displayed, painting a displayed face
@@ -629,6 +631,49 @@ fn hostMeshSetFaceGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, 1);
 }
 
+/// __mesh_set_face_materials(u32Rows) → 1|0. Restore RJMD's stable texture-role
+/// index per render triangle immediately after the geometry/group load.
+fn hostMeshSetFaceMaterials(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnNumber(info, 0);
+    if (bytes.len == 0 or bytes.len % @sizeOf(u32) != 0) return setReturnNumber(info, 0);
+    const materials: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    setReturnNumber(info, if (scene3d.meshEditSetFaceMaterials(materials)) 1 else 0);
+}
+
+/// __mesh_texture_slot_assign(index) / _clear() mutate metadata on the selected
+/// authored faces. Return the number of authored faces whose role changed.
+fn hostMeshTextureSlotAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const material: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const changed = scene3d.meshTextureSlotAssign(material);
+    if (changed > 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
+fn hostMeshTextureSlotClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const changed = scene3d.meshTextureSlotAssign(std.math.maxInt(u32));
+    if (changed > 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
+fn hostMeshTextureSlotRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const material: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const changed = scene3d.meshTextureSlotRemove(material);
+    if (changed > 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
+fn hostMeshTextureSlotSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const material: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const selected = scene3d.meshTextureSlotSelect(material);
+    state.markDirty();
+    setReturnNumber(info, selected);
+}
+
 /// __mesh_edit_mode(m) — set the selection mode: 0 none, 1 vertex, 2 edge, 3 face. The
 /// host-native counterpart to the Studio's JS mode toolbar; selection lives in the host.
 fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -748,7 +793,12 @@ fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
 
 fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     if (!ok) {
-        setReturnString(info, "{\"ok\":0}");
+        var buf: [512]u8 = undefined;
+        const json = if (scene3d.meshLcFallbackReason()) |reason|
+            std.fmt.bufPrint(&buf, "{{\"ok\":0,\"fallbackReason\":\"{s}\"}}", .{reason})
+        else
+            std.fmt.bufPrint(&buf, "{{\"ok\":0}}", .{});
+        setReturnString(info, json catch "{\"ok\":0}");
         return;
     }
     const key = scene3d.meshEditActiveKey() orelse {
@@ -839,7 +889,8 @@ fn hostMeshLcBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
 /// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON {"ok","key","count","fallbackReason"?}.
 /// Install the cut at these popup params as the live mesh (the live preview — not
 /// journaled). offsetFrac is 0..1 of the face's span on the chosen axis; 0.5 is the
-/// even comb. fallbackReason is present whenever the host changed to plane semantics.
+/// even comb. fallbackReason explains a refused topological preview; no plane fallback
+/// exists in the indexed Blockbench-style walk.
 fn hostMeshLcPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const dir = argToI32(info, 0) orelse 0;
@@ -973,14 +1024,17 @@ fn hostMeshAppendPathPlane(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshAppendReturn(info, result);
 }
 
-/// __mesh_set_group_hidden(lo, hi, hidden) → JSON {"ok","key","count"}. Hide/show the part in
-/// the group range, moving its triangles to/from a host stash (non-destructive of edits).
+/// __mesh_set_group_hidden(lo, hi, hidden, journal=1) → JSON {"ok","key","count"}.
+/// Hide/show the part in the group range, moving its triangles to/from a host stash
+/// (non-destructive of edits). Cold hydration passes journal=0 because restoring saved
+/// presentation state is not a new user edit.
 fn hostMeshSetGroupHidden(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
     const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
     const hidden = (argToI32(info, 2) orelse 0) != 0;
-    const ok = scene3d.meshSetGroupHidden(lo, hi, hidden);
+    const journal = (argToI32(info, 3) orelse 1) != 0;
+    const ok = scene3d.meshSetGroupHidden(lo, hi, hidden, journal);
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
 }
@@ -1818,17 +1872,19 @@ fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnNumber(info, if (capture.writeRgbaPng(io, path, rgba, w, h)) 1 else 0);
 }
 
-/// __model_mesh_write(path) → 1 on success. Writes the active model's full-res mesh
+/// __model_mesh_write(path) → 1 on success. Writes the active model's durable mesh
 /// (interleaved 8 f32/vert, raw little-endian) to `path`, so a model's package folder
-/// carries its own geometry (mesh/base.blob) instead of an empty dir (req_2533). vert
-/// count = filesize / 32.
+/// carries its own geometry instead of an empty dir. A live quality projection is the
+/// durable mesh by user choice (req_3315). vert count = filesize / 32.
 fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
-    const verts = model_source.verts() orelse return setReturnNumber(info, 0);
+    var document = scene3d.modelDocumentSnapshot(alloc) orelse return setReturnNumber(info, 0);
+    defer document.deinit(alloc);
+    const verts = document.verts;
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
@@ -1850,7 +1906,9 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
-    const verts = scene3d.paintedMeshVerts() orelse return setReturnNumber(info, 0);
+    var document = scene3d.paintedDocumentSnapshot(alloc) orelse return setReturnNumber(info, 0);
+    defer document.deinit(alloc);
+    const verts = document.verts;
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
@@ -1860,13 +1918,14 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
-/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v2) — the
+/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v3) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
-/// header u32×7 [magic 'RJMD', version=2, vertCount, faceCount, hasGroups, rangeCount,
-/// glassFirstVertex],
-/// then vertCount×8 f32 source verts, then faceCount u32 authored-face-group ids (when
-/// hasGroups=1), then rangeCount×2 u32 flattened [lo,hi) per-part group ranges. All
+/// header u32×8 [magic 'RJMD', version=3, vertCount, faceCount, hasGroups, rangeCount,
+/// glassFirstVertex, hasMaterials],
+/// then vertCount×8 f32 durable verts, then faceCount u32 authored-face-group ids (when
+/// hasGroups=1), faceCount u32 texture-role indices (when hasMaterials=1), then
+/// rangeCount×2 u32 flattened [lo,hi) per-part group ranges. All
 /// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
 fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -1874,15 +1933,31 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const alloc = std.heap.c_allocator;
     const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
     defer alloc.free(path);
-    const verts = model_source.verts() orelse return setReturnNumber(info, 0);
+    var document = scene3d.modelDocumentSnapshot(alloc) orelse return setReturnNumber(info, 0);
+    defer document.deinit(alloc);
+    const verts = document.verts;
     if (verts.len < 8) return setReturnNumber(info, 0);
     const vert_count: u32 = @intCast(verts.len / 8);
     const face_count: u32 = vert_count / 3;
-    const groups = model_source.faceGroups();
+    const groups: ?[]const u32 = if (document.groups) |rows| rows else null;
+    const materials: ?[]const u32 = if (document.materials) |rows| rows else null;
     const ranges = model_source.partRanges();
     const has_groups: u32 = if (groups != null and groups.?.len == face_count) 1 else 0;
+    var has_materials: u32 = 0;
+    if (materials) |rows| {
+        if (rows.len == face_count) {
+            for (rows) |material| if (material != model_source.NO_FACE_MATERIAL) {
+                has_materials = 1;
+                break;
+            };
+        }
+    }
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
     if (!meshdoc_format.rangesValid(ranges, range_count)) return setReturnNumber(info, 0);
+    if (!meshdoc_format.rangesOwnEveryFace(ranges, groups, range_count)) {
+        std.log.err("[meshdoc] refused write: at least one Outliner range has no resident visible/hidden faces, or a face has no range owner", .{});
+        return setReturnNumber(info, 0);
+    }
     if (argToI32(info, 1)) |expected| {
         if (expected < 0 or @as(u32, @intCast(expected)) != range_count) return setReturnNumber(info, 0);
     }
@@ -1892,8 +1967,8 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch return setReturnNumber(info, 0);
     const file = std.Io.Dir.cwd().createFile(io, tmp_path, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    const glass_first_vertex = @min(scene3d.modelGlassFirstVertex(), vert_count);
-    const header = [7]u32{ 0x444D4A52, 2, vert_count, face_count, has_groups, range_count, glass_first_vertex };
+    const glass_first_vertex = @min(document.glass_first_vertex, vert_count);
+    const header = [8]u32{ 0x444D4A52, 3, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials };
     file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch {
         file.close(io);
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
@@ -1906,6 +1981,13 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     };
     if (has_groups == 1) {
         file.writeStreamingAll(io, std.mem.sliceAsBytes(groups.?[0..face_count])) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
+    }
+    if (has_materials == 1) {
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(materials.?[0..face_count])) catch {
             file.close(io);
             std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
             return setReturnNumber(info, 0);
@@ -2495,8 +2577,9 @@ fn hostFileSha256(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// __model_set_quality(grid) → JSON {"key","count"} | "". Re-decimate the retained
 /// full-res source mesh to clustering resolution `grid` (2..1024; higher = more
 /// detail), swap it in as the resident + paint target under a quality-specific key, and
-/// return it for the cart to mount. The camera is left alone (no re-frame) so the model
-/// doesn't jump while you scrub. Resets paint (the topology changed).
+/// nominate that displayed topology for the next durable model save. The retained
+/// baseline still makes slider changes reversible until Save/reopen establishes the
+/// chosen reduction as the document's new full source. The camera is left alone.
 fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const grid: u32 = @intCast(std.math.clamp(argToI32(info, 0) orelse 64, 2, 1024));
@@ -2519,7 +2602,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer std.heap.c_allocator.free(key);
 
-    scene3d.setPaintTarget(key, dec.mesh.verts, dec.mesh.vert_count);
+    scene3d.setQualityPaintTarget(key, dec.mesh.verts, dec.mesh.vert_count);
     if (!scene3d.stashHostMesh(key, dec.mesh.verts, dec.mesh.vert_count)) {
         setReturnString(info, "");
         return;
@@ -3286,6 +3369,11 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_preview_file", hostMeshPreviewFile);
     v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
     v8_runtime.registerHostFn("__mesh_set_face_groups", hostMeshSetFaceGroups);
+    v8_runtime.registerHostFn("__mesh_set_face_materials", hostMeshSetFaceMaterials);
+    v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
+    v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
+    v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);
+    v8_runtime.registerHostFn("__mesh_texture_slot_select", hostMeshTextureSlotSelect);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);

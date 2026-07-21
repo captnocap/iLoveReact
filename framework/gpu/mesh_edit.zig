@@ -25,6 +25,9 @@ const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 
 pub const partRangesValid = model_source.partRangesValid;
+pub const MeshDocFaceBlock = model_source.MeshDocFaceBlock;
+pub const composeMeshDocSnapshot = model_source.composeMeshDocSnapshot;
+pub const meshDocRangesOwnEveryFace = model_source.meshDocRangesOwnEveryFace;
 
 const alloc = std.heap.c_allocator;
 
@@ -452,6 +455,32 @@ pub fn selectedEdgePartPub() ?u32 {
     if (a >= parts.len or b >= parts.len or parts[a] != parts[b]) return null;
     return parts[a];
 }
+
+/// One authoritative outliner-part owner for the complete selected-edge set.
+/// Welded vertex ids are already keyed by part, so this preserves the identity the
+/// user actually selected instead of asking a later triangle scan to infer it again
+/// from coincident seam geometry. Null means no edge is selected or the selection
+/// crosses part boundaries; NO_PART remains a legitimate result for an unparted mesh.
+pub fn selectedEdgesCommonPartPub() ?u32 {
+    if (!ensureTopology()) return null;
+    const selected = g_sel_edge orelse return null;
+    const edges = g_edges orelse return null;
+    const parts = g_vert_part orelse return null;
+    var owner: ?u32 = null;
+    var edge: u32 = 0;
+    while (edge < selected.len and edge < g_edge_count) : (edge += 1) {
+        if (!selected[edge]) continue;
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        if (a >= parts.len or b >= parts.len or parts[a] != parts[b]) return null;
+        if (owner) |part| {
+            if (part != parts[a]) return null;
+        } else {
+            owner = parts[a];
+        }
+    }
+    return owner;
+}
 pub fn edgeAverageNormalPub(edge_idx: u32) [3]f32 {
     if (!ensureTopology()) return .{ 0, 1, 0 };
     const edges = g_edges orelse return .{ 0, 1, 0 };
@@ -645,6 +674,16 @@ pub const test_support = if (builtin.is_test) struct {
     pub fn regroup(groups: []const u32) void {
         model_source.setFaceGroups(groups);
         faceGroupsChanged();
+    }
+
+    pub fn setPartRanges(ranges: []const u32) void {
+        model_source.setPartRanges(ranges);
+        reset();
+    }
+
+    pub fn replaceGroupedSoupSameFaceCount(key: u64, verts: []const f32, count: u32, groups: []const u32) bool {
+        model_source.setFaceGroups(groups);
+        return model_paint.setTargetPreservingAtlas(key, verts, count, groups);
     }
 
     pub fn clear() void {
@@ -1183,6 +1222,153 @@ fn addEdge(emap: *std.AutoHashMapUnmanaged(u64, u32), edges: *std.ArrayListUnman
     edges.append(alloc, b) catch return;
 }
 
+/// Adopt a different render diagonal for one or more authored quads without
+/// rebuilding logical vertex identity or dropping the active selection. The indexed
+/// face table has already installed the new triangle corner positions in model_paint;
+/// this updates the soup-facing corner/edge maps to match. Boundary edges and stable
+/// welded vertex ids are unchanged, so vertex selections survive directly and edge
+/// selections are restored by their endpoint ids.
+pub fn adoptSameFaceTriangulation() bool {
+    if (!ensureTopology()) return false;
+    const positions = model_paint.positions() orelse return false;
+    const face_count = model_paint.faceCount();
+    if (positions.len < @as(usize, face_count) * 9) return false;
+    const welded_positions = g_verts orelse return false;
+    const welded_parts = g_vert_part orelse return false;
+    if (welded_parts.len < g_vert_count) return false;
+
+    var welded_by_key = std.AutoHashMapUnmanaged(WeldKey, u32).empty;
+    defer welded_by_key.deinit(alloc);
+    welded_by_key.ensureTotalCapacity(alloc, g_vert_count) catch return false;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        const base = @as(usize, vertex) * 3;
+        welded_by_key.put(alloc, .{
+            .pos = weldKey(.{ welded_positions[base], welded_positions[base + 1], welded_positions[base + 2] }),
+            .part = welded_parts[vertex],
+        }, vertex) catch return false;
+    }
+
+    const new_corners = alloc.alloc(u32, @as(usize, face_count) * 3) catch return false;
+    var corners_adopted = false;
+    defer if (!corners_adopted) alloc.free(new_corners);
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const part = model_source.partIndexOf(model_source.faceGroupOf(face));
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const base = @as(usize, face) * 9 + @as(usize, corner) * 3;
+            new_corners[face * 3 + corner] = welded_by_key.get(.{
+                .pos = weldKey(.{ positions[base], positions[base + 1], positions[base + 2] }),
+                .part = part,
+            }) orelse return false;
+        }
+    }
+
+    var selected_edges = std.AutoHashMapUnmanaged(u64, void).empty;
+    defer selected_edges.deinit(alloc);
+    if (g_edges) |old_edges| {
+        if (g_sel_edge) |old_selection| {
+            var edge: u32 = 0;
+            while (edge < g_edge_count and edge < old_selection.len) : (edge += 1) {
+                if (!old_selection[edge]) continue;
+                selected_edges.put(alloc, edgeKey(old_edges[edge * 2], old_edges[edge * 2 + 1]), {}) catch return false;
+            }
+        }
+    }
+
+    var edge_map = std.AutoHashMapUnmanaged(u64, u32).empty;
+    defer edge_map.deinit(alloc);
+    var new_edges = std.ArrayListUnmanaged(u32).empty;
+    defer new_edges.deinit(alloc);
+    edge_map.ensureTotalCapacity(alloc, face_count * 3) catch return false;
+    new_edges.ensureTotalCapacity(alloc, @as(usize, face_count) * 6) catch return false;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        const a = new_corners[face * 3 + 0];
+        const b = new_corners[face * 3 + 1];
+        const c = new_corners[face * 3 + 2];
+        addEdge(&edge_map, &new_edges, a, b);
+        addEdge(&edge_map, &new_edges, b, c);
+        addEdge(&edge_map, &new_edges, c, a);
+    }
+    const new_edge_count: u32 = @intCast(new_edges.items.len / 2);
+    const new_boundary = alloc.alloc(bool, new_edge_count) catch return false;
+    var boundary_adopted = false;
+    defer if (!boundary_adopted) alloc.free(new_boundary);
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    if (!has_groups) {
+        @memset(new_boundary, true);
+    } else {
+        @memset(new_boundary, false);
+        const first_group = alloc.alloc(u32, new_edge_count) catch return false;
+        defer alloc.free(first_group);
+        const seen = alloc.alloc(bool, new_edge_count) catch return false;
+        defer alloc.free(seen);
+        const incidence = alloc.alloc(u16, new_edge_count) catch return false;
+        defer alloc.free(incidence);
+        @memset(seen, false);
+        @memset(incidence, 0);
+        face = 0;
+        while (face < face_count) : (face += 1) {
+            const group = model_source.faceGroupOf(face);
+            var corner: u32 = 0;
+            while (corner < 3) : (corner += 1) {
+                const a = new_corners[face * 3 + corner];
+                const b = new_corners[face * 3 + (corner + 1) % 3];
+                if (a == b) continue;
+                const edge = edge_map.get(edgeKey(a, b)) orelse continue;
+                if (incidence[edge] < std.math.maxInt(u16)) incidence[edge] += 1;
+                if (!seen[edge]) {
+                    seen[edge] = true;
+                    first_group[edge] = group;
+                } else if (first_group[edge] != group) {
+                    new_boundary[edge] = true;
+                }
+            }
+        }
+        var edge: u32 = 0;
+        while (edge < new_edge_count) : (edge += 1) {
+            if (incidence[edge] != 2) new_boundary[edge] = true;
+        }
+    }
+
+    const new_selection = alloc.alloc(bool, new_edge_count) catch return false;
+    var selection_adopted = false;
+    defer if (!selection_adopted) alloc.free(new_selection);
+    @memset(new_selection, false);
+    var edge: u32 = 0;
+    while (edge < new_edge_count) : (edge += 1) {
+        new_selection[edge] = selected_edges.contains(edgeKey(new_edges.items[edge * 2], new_edges.items[edge * 2 + 1]));
+    }
+    const owned_edges = new_edges.toOwnedSlice(alloc) catch return false;
+    var edges_adopted = false;
+    defer if (!edges_adopted) alloc.free(owned_edges);
+
+    if (g_corner_vert) |old| alloc.free(old);
+    if (g_edges) |old| alloc.free(old);
+    if (g_edge_boundary) |old| alloc.free(old);
+    if (g_sel_edge) |old| alloc.free(old);
+    if (g_scope_vert) |old| alloc.free(old);
+    if (g_scope_edge) |old| alloc.free(old);
+    if (g_snap) |old| alloc.free(old);
+    g_corner_vert = new_corners;
+    g_edges = owned_edges;
+    g_edge_boundary = new_boundary;
+    g_sel_edge = new_selection;
+    g_scope_vert = null;
+    g_scope_edge = null;
+    g_scope_built = 0;
+    g_snap = null;
+    g_edge_count = new_edge_count;
+    g_built_for = face_count;
+    corners_adopted = true;
+    edges_adopted = true;
+    boundary_adopted = true;
+    selection_adopted = true;
+    return true;
+}
+
 /// Is welded edge `e` a boundary edge (a real model edge, not a triangulation diagonal)?
 /// True when no topology/grouping is loaded, so callers default to showing every edge.
 pub fn edgeIsBoundaryPub(e: u32) bool {
@@ -1324,6 +1510,29 @@ pub const scale_factor_tuning = ScaleFactorTuning{
     .max = 50.0,
     .no_op_epsilon = 1e-5,
 };
+
+pub const ScaleByValueTuning = struct {
+    min_magnitude: f32,
+    max_magnitude: f32,
+    no_op_epsilon: f32,
+};
+
+/// Exact numeric Scale By is deliberately wider than drag scaling: a negative
+/// uniform factor mirrors the selection through its pivot, while mouse drags
+/// remain positive and never cross the zero singularity.
+pub const scale_by_value_tuning = ScaleByValueTuning{
+    .min_magnitude = 0.02,
+    .max_magnitude = 50.0,
+    .no_op_epsilon = 1e-5,
+};
+
+fn exactScaleByFactor(factor: f32) ?f32 {
+    if (!std.math.isFinite(factor)) return null;
+    const magnitude = @abs(factor);
+    if (magnitude < scale_by_value_tuning.min_magnitude or magnitude > scale_by_value_tuning.max_magnitude) return null;
+    if (@abs(factor - 1.0) < scale_by_value_tuning.no_op_epsilon) return null;
+    return factor;
+}
 
 const TransformKind = enum { translate, scale_axis, scale_uniform, rotate_axis };
 
@@ -1655,9 +1864,7 @@ pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation
 /// mutations made an exact-value command vulnerable to partial application if a
 /// later axis failed; this path transforms every selected position atomically.
 pub fn scaleSelectionUniform(pivot: [3]f32, factor_raw: f32) Mutation {
-    if (!std.math.isFinite(factor_raw)) return .{};
-    const factor = std.math.clamp(factor_raw, scale_factor_tuning.min, scale_factor_tuning.max);
-    if (@abs(factor - 1.0) < scale_factor_tuning.no_op_epsilon) return .{};
+    const factor = exactScaleByFactor(factor_raw) orelse return .{};
     return applyTransform(.scale_uniform, .{ 0, 0, 0 }, .{ 0, 0, 0 }, pivot, factor);
 }
 

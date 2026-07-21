@@ -5,9 +5,9 @@
 import { MAP_GENERATED_WIRE } from '../../../runtime/game/map';
 import {
   COASTAL_CITY_TUNING,
-  packCoastalCityPainting,
+  packCoastalCityPaintingStream,
   type CoastalCityPlan,
-  type PackedCoastalCityPainting,
+  type CoastalCityPaintingStream,
 } from '../data/coastalCity';
 import { FLORA_KIND_DEFINITIONS, type FloraKind, type FloraLane } from '../world/floraKinds';
 import { TILE_KINDS } from '../world/tileKinds';
@@ -44,9 +44,9 @@ function assertGeneratedWireParity(): void {
 }
 
 /** Compile one plan against the editor's actual tile/flora legend. */
-export function compileCoastalCityPainting(plan: CoastalCityPlan): PackedCoastalCityPainting {
+export function compileCoastalCityPainting(plan: CoastalCityPlan): CoastalCityPaintingStream {
   assertGeneratedWireParity();
-  return packCoastalCityPainting(plan, {
+  return packCoastalCityPaintingStream(plan, {
     tiles: {
       grass: tileIndex('grass'),
       sand: tileIndex('sand'),

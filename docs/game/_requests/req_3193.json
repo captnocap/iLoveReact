@@ -1,0 +1,28 @@
+{
+  "id": "req_3193",
+  "at": "2026-07-18T09:24:11.642Z",
+  "origin": "codex:019f744e",
+  "text": "uh ok so then tell me how many applications in the cart directoy call to the internet",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:24:20.664Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:29:03.771Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited cart application sources and separated native ReactJIT networking from loopback bridges and child-process networking. Four app roots directly issue non-loopback HTTP through the framework network hooks: cart/app, cart/browser, cart/image-gen, and cart/hmsc-int. The active cart/editor has no direct internet call sites. cart/browse-mvp.tsx and cart/research-lab.tsx talk only to a localhost-controlled Firefox process; cart/t3code can run git clone; assistant/CLI carts generally delegate vendor traffic to spawned processes, so those do not exercise the framework socket implementation.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:29:03.771Z"
+}

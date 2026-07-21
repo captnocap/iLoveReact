@@ -12,12 +12,35 @@
 //! Usage (both effect pipelines and the 3d ground pipeline):
 //!   var progress = CompileProgress{};
 //!   progress.start(io, environ, wgsl.len);
+//!   defer progress.finishMemory();  // register before resource defers
 //!   defer progress.stop();          // covers error paths
 //!   ... createShaderModule / createRenderPipeline ...
 //!   progress.finishOk();            // stops, prints "compiled in Xs", saves baseline
 
 const std = @import("std");
 const log = @import("../diag/log.zig");
+const system_memory = @import("../diag/system_memory.zig");
+
+pub const MemoryStats = struct {
+    compile_count: u64 = 0,
+    last_peak_growth_bytes: u64 = 0,
+    last_retained_growth_bytes: u64 = 0,
+    last_trim_released_bytes: u64 = 0,
+};
+
+var g_compile_count: std.atomic.Value(u64) = .init(0);
+var g_last_peak_growth: std.atomic.Value(u64) = .init(0);
+var g_last_retained_growth: std.atomic.Value(u64) = .init(0);
+var g_last_trim_released: std.atomic.Value(u64) = .init(0);
+
+pub fn memoryStats() MemoryStats {
+    return .{
+        .compile_count = g_compile_count.load(.monotonic),
+        .last_peak_growth_bytes = g_last_peak_growth.load(.monotonic),
+        .last_retained_growth_bytes = g_last_retained_growth.load(.monotonic),
+        .last_trim_released_bytes = g_last_trim_released.load(.monotonic),
+    };
+}
 
 /// The last slow compile's `<wgsl bytes> <duration ms>`, persisted per machine
 /// so the NEXT cold compile (source changed, driver upgraded) can show a %.
@@ -67,6 +90,9 @@ pub const CompileProgress = struct {
     wgsl_len: usize = 0,
     wgsl_kb: u64 = 0,
     expected_ms: ?u64 = null,
+    rss_before_bytes: u64 = 0,
+    rss_peak_bytes: std.atomic.Value(u64) = .init(0),
+    memory_finished: bool = false,
 
     /// Heartbeats stay quiet this long so cache-hit compiles never log.
     pub const SILENT_MS: i64 = 1000;
@@ -79,8 +105,30 @@ pub const CompileProgress = struct {
         self.wgsl_len = wgsl_len;
         self.wgsl_kb = @max(1, wgsl_len / 1024);
         self.expected_ms = expectedMs(io, environ, wgsl_len);
+        self.rss_before_bytes = system_memory.readSnapshot(io).process_rss_bytes;
+        self.rss_peak_bytes.store(self.rss_before_bytes, .monotonic);
+        self.memory_finished = false;
         self.group.concurrent(io, loop, .{self}) catch return;
         self.running = true;
+    }
+
+    /// Finish the compile's memory story after callers have released temporary
+    /// shader modules and pipeline layouts. Register this defer immediately
+    /// after start(), before resource defers, so LIFO teardown runs in the right
+    /// order. Records the cold-compile peak and retained delta, then asks glibc
+    /// to return freed compiler arenas to the OS.
+    pub fn finishMemory(self: *CompileProgress) void {
+        if (self.memory_finished) return;
+        self.memory_finished = true;
+        self.stop();
+        const before_trim = system_memory.readSnapshot(self.io).process_rss_bytes;
+        const peak = @max(self.rss_peak_bytes.load(.monotonic), before_trim);
+        _ = system_memory.trimAllocator();
+        const after_trim = system_memory.readSnapshot(self.io).process_rss_bytes;
+        g_last_peak_growth.store(peak -| self.rss_before_bytes, .monotonic);
+        g_last_retained_growth.store(after_trim -| self.rss_before_bytes, .monotonic);
+        g_last_trim_released.store(before_trim -| after_trim, .monotonic);
+        _ = g_compile_count.fetchAdd(1, .monotonic);
     }
 
     /// Idempotent — success paths stop before printing their completion line
@@ -111,6 +159,9 @@ pub const CompileProgress = struct {
         var last_line_ms: i64 = 0;
         while (true) {
             try std.Io.sleep(self.io, .fromMilliseconds(200), .awake);
+            const rss = system_memory.readSnapshot(self.io).process_rss_bytes;
+            const prior_peak = self.rss_peak_bytes.load(.monotonic);
+            if (rss > prior_peak) self.rss_peak_bytes.store(rss, .monotonic);
             const elapsed = self.elapsedMs();
             if (elapsed < SILENT_MS) continue;
             if (elapsed - last_line_ms < LINE_EVERY_MS) continue;
@@ -144,6 +195,9 @@ test "compile heartbeat task starts and cancels through injected Io" {
     var environ = try std.testing.environ.createMap(std.testing.allocator);
     defer environ.deinit();
     var progress = CompileProgress{};
+    const count_before = memoryStats().compile_count;
     progress.start(std.testing.io, &environ, 1024);
     progress.stop();
+    progress.finishMemory();
+    try std.testing.expectEqual(count_before + 1, memoryStats().compile_count);
 }

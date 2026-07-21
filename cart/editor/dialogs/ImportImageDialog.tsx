@@ -47,7 +47,7 @@ export default function ImportImageDialog(props: {
 
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-      <Pressable onPress={props.onCancel} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+      <Pressable onPress={props.onCancel} hoverStyle={{}} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
       <Col style={{ width: 620, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 14, padding: 16, gap: 12 }}>
         <Row style={{ alignItems: 'center', gap: 8 }}>
           <Icon name="Image" size={14} color={ACCENT} />

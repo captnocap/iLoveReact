@@ -10,6 +10,7 @@ const foliage = @import("../world/foliage.zig");
 const flora_geometry = @import("../world/flora_geometry.zig");
 const live_mesh_doors = @import("../world/live_mesh_doors.zig");
 const streaming = @import("../world/streaming.zig");
+const map_chunks = @import("../game/map/chunks.zig");
 const Node = layout.Node;
 const m_config = @import("config.zig");
 const m_state = @import("state.zig");
@@ -47,6 +48,20 @@ const applyLiveColliders = m_live_inputs.applyLiveColliders;
 const FoliageSnapSlot = m_foliage_preview.FoliageSnapSlot;
 const FoliageRowSet = m_foliage_preview.FoliageRowSet;
 const FoliageMailbox = m_foliage_preview.FoliageMailbox;
+
+pub const MapMemoryStats = struct {
+    foliage_rows_used_bytes: u64 = 0,
+    foliage_rows_capacity_bytes: u64 = 0,
+    foliage_snapshot_bytes: u64 = 0,
+    paint_residency_bytes: u64 = 0,
+
+    pub fn add(self: *MapMemoryStats, other: MapMemoryStats) void {
+        self.foliage_rows_used_bytes += other.foliage_rows_used_bytes;
+        self.foliage_rows_capacity_bytes += other.foliage_rows_capacity_bytes;
+        self.foliage_snapshot_bytes += other.foliage_snapshot_bytes;
+        self.paint_residency_bytes += other.paint_residency_bytes;
+    }
+};
 
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
@@ -304,6 +319,11 @@ pub const Runtime = struct {
     /// Whole map-engine snapshot last reconciled into the retained paint slots.
     /// Chunk dirty bits cover brush edits; this identity covers reset/load.
     paint_map_revision: u64 = 0,
+    /// Sparse authoring projections consume world/streaming.zig's active
+    /// bubble directly. These persistent masks carry its demotion hysteresis;
+    /// the fixed physical terrain slots are only storage for the selected set.
+    paint_detail_resident: [map_chunks.SLOT_COUNT]bool = @splat(false),
+    paint_foliage_resident: [map_chunks.SLOT_COUNT]bool = @splat(false),
     paint_slot_used: [MAX_PAINT_SLOTS]bool = @splat(false),
     paint_slot_chunk: [MAX_PAINT_SLOTS][2]i32 = @splat(.{ 0, 0 }),
     paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
@@ -337,13 +357,6 @@ pub const Runtime = struct {
     foliage_want: bool = false,
     foliage_want_log: bool = false,
     paint_foliage_ver: u32 = 0,
-    /// req_2838: preview-budget attention tracking. The regen spends the row
-    /// budget NEAREST-FIRST from the anchor (brush hover, else camera look).
-    /// When any family clipped, the preview FOLLOWS the author — a fresh regen
-    /// fires once the anchor drifts half a chunk, re-spending the budget
-    /// around the new spot so the place being painted is always dressed.
-    paint_foliage_clipped: bool = false,
-    paint_foliage_anchor: [2]f32 = .{ 0, 0 },
     paint_water_kids_first: ?usize = null,
     paint_slot_water_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
     paint_slot_water_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
@@ -376,6 +389,42 @@ pub const Runtime = struct {
         const allocator = self.allocator;
         self.deinit(io);
         allocator.destroy(self);
+    }
+
+    /// Allocation-free owner read for Map Paint's retained loader projection.
+    /// Foliage row totals come from worker-published atomics; never inspect the
+    /// mutable row slices here because the off-display set may be reallocating.
+    pub fn mapMemoryStats(self: *const Runtime) MapMemoryStats {
+        var stats: MapMemoryStats = .{};
+        for (&self.foliage_sets) |*set| {
+            const memory = set.memory();
+            stats.foliage_rows_used_bytes += memory.used_bytes;
+            stats.foliage_rows_capacity_bytes += memory.capacity_bytes;
+        }
+        stats.foliage_snapshot_bytes = @as(u64, @intCast(self.foliage_snap.chunks.len)) *
+            @sizeOf(m_foliage_preview.FoliageChunkSnap);
+
+        for (self.paint_slot_key) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += buf.len;
+        }
+        for (self.paint_slot_floor) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += @as(u64, @intCast(buf.len)) * @sizeOf(f32);
+        }
+        for (self.paint_slot_ground) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += @as(u64, @intCast(buf.len)) * @sizeOf(f32);
+        }
+        for (self.paint_slot_water_key) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += buf.len;
+        }
+        for (self.paint_slot_depths) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += @as(u64, @intCast(buf.len)) * @sizeOf(f32);
+        }
+        for (self.paint_slot_surface) |maybe| {
+            if (maybe) |buf| stats.paint_residency_bytes += @as(u64, @intCast(buf.len)) * @sizeOf(f32);
+        }
+        stats.paint_residency_bytes += @as(u64, @intCast(self.transport_committed_rows.capacity)) * @sizeOf(f32);
+        stats.paint_residency_bytes += @as(u64, @intCast(self.transport_preview_rows.capacity)) * @sizeOf(f32);
+        return stats;
     }
 
     const runtime_lifecycle = @import("runtime_lifecycle.zig");

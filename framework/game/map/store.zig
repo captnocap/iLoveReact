@@ -44,18 +44,28 @@ const HEIGHT_Q: f32 = 100; // meters → hundredths
 // ── the writer ────────────────────────────────────────────────────────────────
 
 const Sink = struct {
-    buf: []u8,
+    /// Null is the counting pass used by saveSize(). The exact same encoder
+    /// walks the painting in both modes, so callers never reserve the
+    /// every-cell-is-a-run upper bound merely to discover the real size.
+    buf: ?[]u8,
     n: usize = 0,
     overflow: bool = false,
 
     fn put(self: *Sink, comptime T: type, v: T) void {
         const bytes = std.mem.asBytes(&v);
-        if (self.n + bytes.len > self.buf.len) {
-            self.overflow = true;
-            return;
+        if (self.buf) |buf| {
+            if (self.n + bytes.len > buf.len) {
+                self.overflow = true;
+                return;
+            }
+            @memcpy(buf[self.n .. self.n + bytes.len], bytes);
         }
-        @memcpy(self.buf[self.n .. self.n + bytes.len], bytes);
         self.n += bytes.len;
+    }
+
+    fn patchU32(self: *Sink, at: usize, value: u32) void {
+        if (self.overflow) return;
+        if (self.buf) |buf| std.mem.writeInt(u32, buf[at..][0..4], value, .little);
     }
 };
 
@@ -75,7 +85,7 @@ fn rleWriteCells(sink: *Sink, cells: []const i16) void {
         run_count += 1;
         i += run;
     }
-    if (!sink.overflow) std.mem.writeInt(u32, sink.buf[count_at..][0..4], run_count, .little);
+    sink.patchU32(count_at, run_count);
 }
 
 fn rleWriteBytes(sink: *Sink, cells: []const u8) void {
@@ -92,7 +102,7 @@ fn rleWriteBytes(sink: *Sink, cells: []const u8) void {
         run_count += 1;
         i += run;
     }
-    if (!sink.overflow) std.mem.writeInt(u32, sink.buf[count_at..][0..4], run_count, .little);
+    sink.patchU32(count_at, run_count);
 }
 
 fn quantize(z: f32) i16 {
@@ -204,15 +214,36 @@ fn rleReadQuantized(src: *Source, samples: []f32, scratch: []i16) void {
 /// 0 = tile, 1 = material (the g_road_under value layout).
 fn baseCells(chunk: *const chunks.Chunk, cells: []const i16, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), which: usize, out: []i16) void {
     @memcpy(out, cells);
-    var it = under.iterator();
-    while (it.next()) |entry| {
-        const gx: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.* >> 32)));
-        const gz: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.*)));
-        const cx = chunks.chunkOfGlobalTile(gx);
-        const cz = chunks.chunkOfGlobalTile(gz);
-        if (cx != chunk.cx or cz != chunk.cz) continue;
-        if (chunks.cellIndex(gx - cx * chunks.CHUNK_TILES, gz - cz * chunks.CHUNK_TILES)) |idx| {
-            out[idx] = entry.value_ptr.*[which];
+    // A city road network can own more undercoat cells than one chunk has
+    // tiles. Scanning that global map once per chunk becomes O(chunks×roads),
+    // so switch to one lookup per local cell when the global set is denser.
+    if (under.count() <= chunks.TILE_CELLS) {
+        var it = under.iterator();
+        while (it.next()) |entry| {
+            const gx: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.* >> 32)));
+            const gz: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.*)));
+            const cx = chunks.chunkOfGlobalTile(gx);
+            const cz = chunks.chunkOfGlobalTile(gz);
+            if (cx != chunk.cx or cz != chunk.cz) continue;
+            if (chunks.cellIndex(gx - cx * chunks.CHUNK_TILES, gz - cz * chunks.CHUNK_TILES)) |idx| {
+                out[idx] = entry.value_ptr.*[which];
+            }
+        }
+        return;
+    }
+    const origin_x = chunk.cx * chunks.CHUNK_TILES;
+    const origin_z = chunk.cz * chunks.CHUNK_TILES;
+    var local_z: i32 = 0;
+    while (local_z < chunks.CHUNK_TILES) : (local_z += 1) {
+        var local_x: i32 = 0;
+        while (local_x < chunks.CHUNK_TILES) : (local_x += 1) {
+            const gx = origin_x + local_x;
+            const gz = origin_z + local_z;
+            const key = (@as(u64, @as(u32, @bitCast(gx))) << 32) | @as(u64, @as(u32, @bitCast(gz)));
+            if (under.get(key)) |base| {
+                const idx = @as(usize, @intCast(local_z)) * chunks.TILE_COLS + @as(usize, @intCast(local_x));
+                out[idx] = base[which];
+            }
         }
     }
 }
@@ -232,6 +263,17 @@ pub fn saveSizeUpperBound() usize {
     const control_bytes = 8 + transport.MAX_CONTROLS * 16;
     const binding_bytes = 8 + 256 * BINDING_FLOATS * 4;
     return 16 + binding_bytes + chunks.chunkCount() * per_chunk + path_bytes + control_bytes;
+}
+
+/// Exact encoded byte count for the current painting. This intentionally runs
+/// the real RLE encoder in counting mode: large worlds are usually far smaller
+/// than the pathological upper bound, and a second linear pass is cheaper than
+/// reserving hundreds of megabytes of unused scratch for every save/history
+/// decision.
+pub fn saveSize(under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) usize {
+    var sink = Sink{ .buf = null };
+    writePainting(&sink, under, bindings);
+    return sink.n;
 }
 
 fn writePainting(sink: *Sink, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) void {
@@ -298,7 +340,7 @@ fn writePainting(sink: *Sink, under: *const std.AutoHashMapUnmanaged(u64, [2]i16
 }
 
 /// Serialize the whole painting into dst. Returns bytes written, or 0 when dst
-/// is too small (LOUD — callers size with saveSizeUpperBound()).
+/// is too small (LOUD — production callers size with saveSize()).
 pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) usize {
     var sink = Sink{ .buf = dst };
     writePainting(&sink, under, bindings);
@@ -455,10 +497,13 @@ test "save/load round-trips every channel and road plus rail recipes" {
 
     var empty_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
     const bindings = [_][BINDING_FLOATS]f32{ .{ 41, 2, 1, 0 }, .{ 7, 0, 2, 1 } };
-    const buf = std.testing.allocator.alloc(u8, saveSizeUpperBound()) catch unreachable;
+    const exact_size = saveSize(&empty_under, bindings[0..]);
+    try std.testing.expect(exact_size > 0);
+    try std.testing.expect(exact_size <= saveSizeUpperBound());
+    const buf = std.testing.allocator.alloc(u8, exact_size) catch unreachable;
     defer std.testing.allocator.free(buf);
     const n = save(buf, &empty_under, bindings[0..]);
-    try std.testing.expect(n > 0);
+    try std.testing.expectEqual(exact_size, n);
 
     var bind_back: [8][BINDING_FLOATS]f32 = undefined;
     var bind_count: usize = 0;

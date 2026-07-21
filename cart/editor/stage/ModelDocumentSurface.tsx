@@ -3,6 +3,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView, { type PartRange } from './ModelView';
 import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/assetCatalog';
+import { meshDocHiddenRanges } from '../data/meshDoc';
 import type { ModelOutlinerDragItem, ModelOutlinerDropTarget } from '../data/modelOutliner';
 import type { LightRig } from '../model/editMesh';
 
@@ -51,7 +52,7 @@ export type OutlinerApi = OutlinerHandlers & {
 // fan-triangulated soup back into the original authored faces.
 type ViewerSource =
   | { kind: 'path'; path: string }
-  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array }
+  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array; faceMaterials?: Uint32Array }
   | { kind: 'missing'; title: string; label: string }
   | null;
 
@@ -126,8 +127,8 @@ export default function ModelDocumentSurface({ model, lights, triggerProps, onTo
     // journals into mesh/doc.blob. Composing seeds on remount was the bug that reopened a
     // touched-up model as bare primitives (and a restart, whose rows hydrate seedless from
     // the package, composed to NOTHING). Never-saved docs have no meshdoc and keep the
-    // composed-seed mount. Hidden rows re-sync on the first eye toggle (the doc mounts all
-    // parts visible; visibility is a live host op, not mount state).
+    // composed-seed mount. The saved doc always contains ALL parts; saved hidden ranges
+    // are removed from the live draw only after that complete geometry is resident.
     const doc = packageMeshDoc(model);
     const mountDoc = doc && doc.vertices.length >= 8 ? doc : null;
     // Each part's group range → its outliner colour, so the viewer tints the parts on load.
@@ -141,7 +142,16 @@ export default function ModelDocumentSurface({ model, lights, triggerProps, onTo
     // (add/hide/delete) mutates the host mesh in place (no remount, no JS recompose), so
     // edits persist. A remount happens only on a real doc switch.
     const seed = mountDoc
-      ? { key: model.id, name: model.name, vertices: mountDoc.vertices, count: Math.floor(mountDoc.vertices.length / 8), faceGroups: mountDoc.faceGroups ?? undefined, partColors }
+      ? {
+          key: model.id,
+          name: model.name,
+          vertices: mountDoc.vertices,
+          count: Math.floor(mountDoc.vertices.length / 8),
+          faceGroups: mountDoc.faceGroups ?? undefined,
+          faceMaterials: mountDoc.faceMaterials ?? undefined,
+          partColors,
+          hiddenRanges: meshDocHiddenRanges(mountDoc.ranges, rowsByLo),
+        }
       : composed.positions.length > 0
         ? { key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }
         : null;
@@ -172,7 +182,7 @@ export default function ModelDocumentSurface({ model, lights, triggerProps, onTo
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
       ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} />;
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups, faceMaterials: viewer.faceMaterials }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
@@ -255,7 +265,7 @@ function resolveViewer(model: ModelPackage): ViewerSource {
   // a saved-then-reopened model must show its EDITS, not re-arm its primitive seed.
   const doc = packageMeshDoc(model);
   if (doc && doc.vertices.length >= 8) {
-    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined };
+    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined, faceMaterials: doc.faceMaterials ?? undefined };
   }
   // A freshly-authored primitive builds its geometry on the spot (cuboid → grouped soup),
   // keyed by the doc id so each new cube is its own resident mesh.

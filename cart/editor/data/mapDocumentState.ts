@@ -18,6 +18,8 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'selectedPieceId'
   | 'selectedPieceIds'
   | 'armedStamp'
+  | 'armedPieceId'
+  | 'armedYawDegrees'
   | 'worldUndo'
   | 'worldRedo'
   | 'floorIndex'
@@ -50,6 +52,8 @@ export function mapAuthoringSlicesFor(
     selectedPieceId: null,
     selectedPieceIds: [],
     armedStamp: null,
+    armedPieceId: 'floor.concrete.common',
+    armedYawDegrees: 0,
     worldUndo: [],
     worldRedo: [],
     floorIndex: 0,

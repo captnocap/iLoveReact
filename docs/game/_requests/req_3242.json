@@ -1,0 +1,30 @@
+{
+  "id": "req_3242",
+  "at": "2026-07-20T03:23:25.741Z",
+  "origin": "codex:019f7a9c",
+  "text": "so this is what happens: new mesh -> add cube -> add 2nd cube -> drag cube 1 below cube 2 -> stays as cube 1 above cube 2 -> click drag area -> reveals cube 1 is under cube 2 and its above it",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:24:07.779Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:32:48.621Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the actual keyed-child placement contract below the outliner: React append/insert mutations now detach an already-mounted child before placing it, and the Zig host enforces the same one-ID/one-position invariant for sibling, cross-parent, and root moves. Added TS mirror coverage and focused Zig host-tree tests; both pass, and the ReleaseFast editor build succeeds. User visual verification remains the final gate for the two-cube drag sequence and 60-second spikewatch.",
+  "shas": [
+    "5fcd5190b"
+  ],
+  "resolvedAt": "2026-07-20T03:32:48.621Z"
+}

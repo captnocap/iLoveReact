@@ -1,0 +1,28 @@
+{
+  "id": "req_3196",
+  "at": "2026-07-18T17:49:50.651Z",
+  "origin": "codex:019f744e",
+  "text": "HA yeah that end result of -81 lines is way more healthy from the get go. Curious if any of the 'idioms of 0.16' made it into the changes or not, here are some for example [Unary Float Builtins Forward Result Type](https://ziglang.org/download/0.16.0/release-notes.html#toc-Unary-Float-Builtins-Forward-Result-Type)\nPreviously Zig would not forward a result type through the following builtin functions,\n\n@sqrt\n@sin\n@cos\n@tan\n@exp\n@exp2\n@log\n@log2\n@log10\n@floor\n@ceil\n@trunc\n@round\n\nThis has now been changed. Where previous you couldn't write,\n\nconst x: f64 = @sqrt(@floatFromInt(N));\n\nsince @sqrt would not forward the f64 result type to @floatFromInt, now you can.\n\n[@floor, @ceil, @round, @trunc Conversion to Integers](https://ziglang.org/download/0.16.0/release-notes.html#toc-floor-ceil-round-trunc-Conversion-to-Integers)\n@floor, @ceil, @round, and @trunc now can be used to convert a floating-point value to an integer value:\nfloat-conversion.zig\n\nconst std = @import(\"std\");\nconst expectEqual = std.testing.expectEqual;\n\ntest \"round to int\" {\n    try example(12, 12.34);\n    try example(13, 12.50);\n}\n\nfn example(expected: u8, value: f32) !void {\n    const actual: u8 = @round(value);\n    try expectEqual(expected, actual);\n}\n\nShell\n\n$ zig test float-conversion.zig\n1/1 float-conversion.test.round to int...OK\nAll 1 tests passed.\n\n@intFromFloat is now redundant with @trunc and is therefore deprecated.\n\n[Allow Small Integer Types to Coerce to Floats](https://ziglang.org/download/0.16.0/release-notes.html#toc-Allow-Small-Integer-Types-to-Coerce-to-Floats)\nIf all possible values of an integer type can fit in a floating point type without rounding, the integer may coerce to the float without an explicit conversion. This is determined by comparing the number of bits of precision in the integer type and the significand in the floating point type. Larger integer types will still require @floatFromInt.\n\nvar foo_int: u24 = 123;\nvar foo_float: f32 = @floatFromInt(foo_int);\n\nvar bar_int: u25 = 123;\nvar bar_float: f32 = @floatFromInt(bar_int);\n\n ⬇️ \n\nvar foo_int: u24 = 123;\nvar foo_float: f32 = foo_int; // Safe coercion\n\nvar bar_int: u25 = 123;\nvar bar_float: f32 = @floatFromInt(bar_int); // Explicit conversion is still required",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T17:50:05.328Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T17:53:30.523Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited the exact -81-line correction commit and the full pre-to-post migration Zig surface against the cited Zig 0.16 float-language idioms. Confirmed that the migration intentionally adopted structural 0.16 APIs (explicit std.Io, Group, Queue, std.Io.net, process.Init), but did not perform a language-ergonomics pass: float builtin result forwarding was not introduced, direct floor/ceil/round/trunc-to-integer typing was not introduced, deprecated @intFromFloat remains widespread, and small safe integer-to-float coercions were not intentionally adopted. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T17:53:30.523Z"
+}

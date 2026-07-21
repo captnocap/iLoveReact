@@ -4,7 +4,7 @@
   "name": "deck_escape",
   "kind": "prop",
   "stage": "wip",
-  "folderId": "props",
+  "folderId": "model-primitive_cube_27",
   "semanticKind": "cube",
   "sourceKind": "primitive",
   "color": "#5a86c0",
@@ -15,5 +15,36 @@
   "mesh": {},
   "decompositions": [],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "textureSlots": [
+    {
+      "id": "surface_1",
+      "label": "Surface 1"
+    }
+  ],
+  "lights": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "primitive:cube:27",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cube:27"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
 }

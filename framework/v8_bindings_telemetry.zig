@@ -312,6 +312,7 @@ fn telSystemCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "breakpoint", s.breakpoint_tier);
     setObjectNumber(ctx, obj, "secondary_windows", s.secondary_window_count);
     const mem = system_memory.readSnapshot(io);
+    const mappings = system_memory.readMappingRss(io);
     setObjectNumber(ctx, obj, "process_rss_bytes", mem.process_rss_bytes);
     setObjectNumber(ctx, obj, "process_rss_peak_bytes", mem.process_rss_peak_bytes);
     setObjectNumber(ctx, obj, "process_rss_anon_bytes", mem.process_rss_anon_bytes);
@@ -325,22 +326,54 @@ fn telSystemCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "process_vm_lib_bytes", mem.process_vm_lib_bytes);
     setObjectNumber(ctx, obj, "process_vm_swap_bytes", mem.process_vm_swap_bytes);
     setObjectNumber(ctx, obj, "process_threads", mem.process_threads);
+    setObjectNumber(ctx, obj, "process_map_heap_rss_bytes", mappings.heap_bytes);
+    setObjectNumber(ctx, obj, "process_map_anonymous_rss_bytes", mappings.anonymous_bytes);
+    setObjectNumber(ctx, obj, "process_map_file_rss_bytes", mappings.file_bytes);
+    setObjectNumber(ctx, obj, "process_map_stack_rss_bytes", mappings.stack_bytes);
+    setObjectNumber(ctx, obj, "process_map_special_rss_bytes", mappings.special_bytes);
+    setObjectNumber(ctx, obj, "process_map_total_rss_bytes", mappings.total_bytes);
+    setObjectNumber(ctx, obj, "process_map_count", mappings.mapping_count);
+    setObjectBool(ctx, obj, "process_map_complete", mappings.complete);
     setObjectNumber(ctx, obj, "mem_total_bytes", mem.total_bytes);
     setObjectNumber(ctx, obj, "mem_available_bytes", mem.available_bytes);
-    // Per-subsystem attribution (mem_breakdown.zig). GPU fields are device-local
-    // (VRAM); js_*/host_* fields are process RSS. The cart keeps the two pools
-    // separate — see cart/editor/shell/memoryDiagnostics.ts.
+    // Per-subsystem attribution (mem_breakdown.zig). GPU fields describe owned
+    // device buffers; js_*/host_* fields describe process allocations. Reserved
+    // capacity is exposed separately from logical use so the cart never treats
+    // untouched address space as RSS.
     const mb = mem_breakdown.read();
     setObjectNumber(ctx, obj, "gpu_geom_intern_bytes", mb.geom_intern_bytes);
     setObjectNumber(ctx, obj, "gpu_glyph_atlas_bytes", mb.glyph_atlas_bytes);
     setObjectNumber(ctx, obj, "gpu_glyph_buffer_bytes", mb.glyph_buffer_bytes);
     setObjectNumber(ctx, obj, "gpu_ui_rect_bytes", mb.ui_rect_bytes);
     setObjectNumber(ctx, obj, "gpu_paint_texture_bytes", mb.paint_texture_bytes);
+    setObjectNumber(ctx, obj, "gpu_map_static_instances_used_bytes", mb.gpu_map_static_instances_used_bytes);
+    setObjectNumber(ctx, obj, "gpu_map_static_instances_capacity_bytes", mb.gpu_map_static_instances_capacity_bytes);
+    setObjectNumber(ctx, obj, "gpu_map_slim_instances_used_bytes", mb.gpu_map_slim_instances_used_bytes);
+    setObjectNumber(ctx, obj, "gpu_map_slim_instances_capacity_bytes", mb.gpu_map_slim_instances_capacity_bytes);
+    setObjectNumber(ctx, obj, "gpu_render3d_core_capacity_bytes", mb.gpu_render3d_core_capacity_bytes);
+    setObjectNumber(ctx, obj, "gpu_render3d_target_bytes", mb.gpu_render3d_target_bytes);
+    setObjectNumber(ctx, obj, "gpu_render3d_diffuse_texture_bytes", mb.gpu_render3d_diffuse_texture_bytes);
     setObjectNumber(ctx, obj, "js_heap_used_bytes", mb.js_heap_used_bytes);
     setObjectNumber(ctx, obj, "js_heap_total_bytes", mb.js_heap_total_bytes);
     setObjectNumber(ctx, obj, "js_external_bytes", mb.js_external_bytes);
     setObjectNumber(ctx, obj, "js_malloced_bytes", mb.js_malloced_bytes);
     setObjectNumber(ctx, obj, "host_mesh_stash_bytes", mb.host_mesh_stash_bytes);
+    setObjectNumber(ctx, obj, "host_map_chunks_bytes", mb.host_map_chunks_bytes);
+    setObjectNumber(ctx, obj, "host_map_foliage_rows_used_bytes", mb.host_map_foliage_rows_used_bytes);
+    setObjectNumber(ctx, obj, "host_map_foliage_rows_capacity_bytes", mb.host_map_foliage_rows_capacity_bytes);
+    setObjectNumber(ctx, obj, "host_map_foliage_snapshot_bytes", mb.host_map_foliage_snapshot_bytes);
+    setObjectNumber(ctx, obj, "host_map_paint_residency_bytes", mb.host_map_paint_residency_bytes);
+    setObjectNumber(ctx, obj, "host_map_roads_bytes", mb.host_map_roads_bytes);
+    setObjectNumber(ctx, obj, "host_map_history_bytes", mb.host_map_history_bytes);
+    setObjectNumber(ctx, obj, "host_libc_in_use_bytes", mb.host_libc_in_use_bytes);
+    setObjectNumber(ctx, obj, "host_libc_arena_bytes", mb.host_libc_arena_bytes);
+    setObjectNumber(ctx, obj, "host_libc_mmap_bytes", mb.host_libc_mmap_bytes);
+    setObjectNumber(ctx, obj, "host_libc_free_bytes", mb.host_libc_free_bytes);
+    setObjectNumber(ctx, obj, "host_libc_releasable_bytes", mb.host_libc_releasable_bytes);
+    setObjectNumber(ctx, obj, "shader_compile_count", mb.shader_compile_count);
+    setObjectNumber(ctx, obj, "shader_compile_last_peak_growth_bytes", mb.shader_compile_last_peak_growth_bytes);
+    setObjectNumber(ctx, obj, "shader_compile_last_retained_growth_bytes", mb.shader_compile_last_retained_growth_bytes);
+    setObjectNumber(ctx, obj, "shader_compile_last_trim_released_bytes", mb.shader_compile_last_trim_released_bytes);
     info.getReturnValue().set(obj.toValue());
 }
 

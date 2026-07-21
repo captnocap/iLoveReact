@@ -1,0 +1,28 @@
+{
+  "id": "req_3212",
+  "at": "2026-07-19T02:15:34.329Z",
+  "origin": "codex:019f744e",
+  "text": "also tho still 759M of unatrributed which is unhealthy",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:15:41.747Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:22:05.975Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the active process RSS and found that 178,428 KiB of the former 759 MiB remainder was exact kernel-reported file-backed RSS. Split file and shared RSS into a Process / OS owner so the remaining label is honestly anonymous (about 585 MiB), documented the still-unresolved allocator/Dawn territory, and passed focused diagnostics tests plus the ReleaseFast editor build; no commit was created.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:22:05.975Z"
+}

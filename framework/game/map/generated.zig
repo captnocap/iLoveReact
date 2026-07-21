@@ -13,6 +13,11 @@ const transport = @import("transport.zig");
 pub const WIRE_VERSION: u32 = 1;
 pub const CHUNK_HEADER_FLOATS: usize = 5;
 pub const CHUNK_STRIDE: usize = 2 + chunks.SAMPLE_CELLS * 2 + chunks.TILE_CELLS * 5;
+/// Streaming installs announce their complete sparse topology up front without
+/// materializing every channel in one V8 backing store:
+///   [version, chunkCount, cx0, cz0, cx1, cz1, ...]
+pub const MANIFEST_HEADER_FLOATS: usize = 2;
+pub const MANIFEST_RECORD_FLOATS: usize = 2;
 pub const PATH_HEADER_FLOATS: usize = 2;
 pub const PATH_RECORD_HEADER_FLOATS: usize = 8;
 
@@ -47,6 +52,10 @@ pub const Failure = enum(u8) {
     chunk_allocation = 27,
     path_commit = 28,
     road_plan_truncated = 29,
+    stream_inactive = 30,
+    stream_active = 31,
+    chunk_unexpected = 32,
+    chunk_missing = 33,
 };
 
 pub const Stats = struct {
@@ -66,9 +75,15 @@ pub fn failed(failure: Failure, stats: Stats) Result {
     return .{ .ok = false, .failure = failure, .stats = stats };
 }
 
-fn succeeded(stats: Stats) Result {
+pub fn succeeded(stats: Stats) Result {
     return .{ .ok = true, .failure = .none, .stats = stats };
 }
+
+pub const ChunkCoord = struct {
+    cx: i32,
+    cz: i32,
+    slot: usize,
+};
 
 fn exactUsize(raw: f32, max: usize) ?usize {
     if (!std.math.isFinite(raw) or raw < 0 or @trunc(raw) != raw) return null;
@@ -92,6 +107,53 @@ fn chunkStats(chunk_count: usize) Stats {
     return .{ .chunks = chunk_count };
 }
 
+fn parseChunkCoord(raw_cx: f32, raw_cz: f32, stats: Stats) union(enum) {
+    coord: ChunkCoord,
+    failure: Result,
+} {
+    const cx = exactI32(raw_cx, 0, chunks.MAX_CHUNK_COL) orelse {
+        if (!std.math.isFinite(raw_cx) or @trunc(raw_cx) != raw_cx) {
+            return .{ .failure = failed(.chunk_coordinate, stats) };
+        }
+        return .{ .failure = failed(.chunk_bounds, stats) };
+    };
+    const cz = exactI32(raw_cz, 0, chunks.MAX_CHUNK_ROW) orelse {
+        if (!std.math.isFinite(raw_cz) or @trunc(raw_cz) != raw_cz) {
+            return .{ .failure = failed(.chunk_coordinate, stats) };
+        }
+        return .{ .failure = failed(.chunk_bounds, stats) };
+    };
+    return .{ .coord = .{
+        .cx = cx,
+        .cz = cz,
+        .slot = @as(usize, @intCast(cz)) * chunks.SLOT_COLS + @as(usize, @intCast(cx)),
+    } };
+}
+
+fn validateChunkRecordAt(rows: []const f32, base: usize, stats: Stats) Result {
+    if (base > rows.len or rows.len - base < CHUNK_STRIDE) return failed(.chunk_shape, stats);
+    _ = switch (parseChunkCoord(rows[base], rows[base + 1], stats)) {
+        .coord => |coord| coord,
+        .failure => |result| return result,
+    };
+
+    const height_start = base + 2;
+    const water_start = height_start + chunks.SAMPLE_CELLS;
+    const cells_start = water_start + chunks.SAMPLE_CELLS;
+    for (rows[height_start..water_start]) |height| {
+        if (!std.math.isFinite(height)) return failed(.chunk_non_finite, stats);
+        if (height < -chunks.HEIGHT_LIMIT or height > chunks.HEIGHT_LIMIT) return failed(.height_range, stats);
+    }
+    for (rows[water_start..cells_start]) |depth| {
+        if (!std.math.isFinite(depth)) return failed(.chunk_non_finite, stats);
+        if (depth < 0) return failed(.water_depth, stats);
+    }
+    for (rows[cells_start .. base + CHUNK_STRIDE]) |cell| {
+        if (!validCellIndex(cell)) return failed(.cell_index, stats);
+    }
+    return succeeded(stats);
+}
+
 fn validateChunks(rows: []const f32) Result {
     if (rows.len < CHUNK_HEADER_FLOATS) return failed(.chunk_header, .{});
     for (rows[0..CHUNK_HEADER_FLOATS]) |value| {
@@ -109,34 +171,68 @@ fn validateChunks(rows: []const f32) Result {
     var chunk_index: usize = 0;
     while (chunk_index < chunk_count) : (chunk_index += 1) {
         const base = CHUNK_HEADER_FLOATS + chunk_index * CHUNK_STRIDE;
-        const cx = exactI32(rows[base], 0, chunks.MAX_CHUNK_COL) orelse {
-            if (!std.math.isFinite(rows[base]) or @trunc(rows[base]) != rows[base]) return failed(.chunk_coordinate, stats);
-            return failed(.chunk_bounds, stats);
+        const coord = switch (parseChunkCoord(rows[base], rows[base + 1], stats)) {
+            .coord => |value| value,
+            .failure => |result| return result,
         };
-        const cz = exactI32(rows[base + 1], 0, chunks.MAX_CHUNK_ROW) orelse {
-            if (!std.math.isFinite(rows[base + 1]) or @trunc(rows[base + 1]) != rows[base + 1]) return failed(.chunk_coordinate, stats);
-            return failed(.chunk_bounds, stats);
-        };
-        const slot = @as(usize, @intCast(cz)) * chunks.SLOT_COLS + @as(usize, @intCast(cx));
-        if (seen[slot]) return failed(.chunk_duplicate, stats);
-        seen[slot] = true;
-
-        const height_start = base + 2;
-        const water_start = height_start + chunks.SAMPLE_CELLS;
-        const cells_start = water_start + chunks.SAMPLE_CELLS;
-        for (rows[height_start..water_start]) |height| {
-            if (!std.math.isFinite(height)) return failed(.chunk_non_finite, stats);
-            if (height < -chunks.HEIGHT_LIMIT or height > chunks.HEIGHT_LIMIT) return failed(.height_range, stats);
-        }
-        for (rows[water_start..cells_start]) |depth| {
-            if (!std.math.isFinite(depth)) return failed(.chunk_non_finite, stats);
-            if (depth < 0) return failed(.water_depth, stats);
-        }
-        for (rows[cells_start .. base + CHUNK_STRIDE]) |cell| {
-            if (!validCellIndex(cell)) return failed(.cell_index, stats);
-        }
+        if (seen[coord.slot]) return failed(.chunk_duplicate, stats);
+        seen[coord.slot] = true;
+        const checked = validateChunkRecordAt(rows, base, stats);
+        if (!checked.ok) return checked;
     }
     return succeeded(stats);
+}
+
+/// Validate the complete coordinate topology for a bounded streaming install,
+/// then validate the complete semantic path wire. No native owner is touched.
+pub fn validateManifest(manifest_rows: []const f32, path_rows: []const f32) Result {
+    if (manifest_rows.len < MANIFEST_HEADER_FLOATS) return failed(.chunk_header, .{});
+    if (!std.math.isFinite(manifest_rows[0]) or !std.math.isFinite(manifest_rows[1])) {
+        return failed(.chunk_non_finite, .{});
+    }
+    if (manifest_rows[0] != WIRE_VERSION) return failed(.chunk_version, .{});
+    const chunk_count = exactUsize(manifest_rows[1], chunks.SLOT_COUNT) orelse return failed(.chunk_count, .{});
+    const stats = chunkStats(chunk_count);
+    if (manifest_rows.len != MANIFEST_HEADER_FLOATS + chunk_count * MANIFEST_RECORD_FLOATS) {
+        return failed(.chunk_shape, stats);
+    }
+
+    var seen: [chunks.SLOT_COUNT]bool = @splat(false);
+    var chunk_index: usize = 0;
+    while (chunk_index < chunk_count) : (chunk_index += 1) {
+        const base = MANIFEST_HEADER_FLOATS + chunk_index * MANIFEST_RECORD_FLOATS;
+        const coord = switch (parseChunkCoord(manifest_rows[base], manifest_rows[base + 1], stats)) {
+            .coord => |value| value,
+            .failure => |result| return result,
+        };
+        if (seen[coord.slot]) return failed(.chunk_duplicate, stats);
+        seen[coord.slot] = true;
+    }
+    return validatePaths(path_rows, stats);
+}
+
+/// A streaming chunk is one existing fixed record without the five-float bulk
+/// header. Its coordinate is part of the record and must match the manifest.
+pub fn validateChunkRecord(rows: []const f32, stats: Stats) Result {
+    if (rows.len != CHUNK_STRIDE) return failed(.chunk_shape, stats);
+    return validateChunkRecordAt(rows, 0, stats);
+}
+
+/// Accessors are intentionally only for callers that already passed one of the
+/// validators above; keeping parsing here prevents engine/binding wire drift.
+pub fn manifestCoord(manifest_rows: []const f32, chunk_index: usize) ChunkCoord {
+    const base = MANIFEST_HEADER_FLOATS + chunk_index * MANIFEST_RECORD_FLOATS;
+    return switch (parseChunkCoord(manifest_rows[base], manifest_rows[base + 1], chunkStats(chunk_index + 1))) {
+        .coord => |coord| coord,
+        .failure => unreachable,
+    };
+}
+
+pub fn chunkRecordCoord(rows: []const f32) ChunkCoord {
+    return switch (parseChunkCoord(rows[0], rows[1], chunkStats(1))) {
+        .coord => |coord| coord,
+        .failure => unreachable,
+    };
 }
 
 /// The wire speaks the editor's centered world coordinates. Transport recipes
@@ -260,40 +356,42 @@ fn copyCells(dst: []i16, src: []const f32) void {
     for (dst, src) |*cell, raw| cell.* = @trunc(raw);
 }
 
-/// Install a previously validated wire into empty chunk/transport owners.
-/// This can still fail on allocation or an unexpected transport commit; the
-/// engine wrapper is responsible for resetting its additional state then.
-pub fn installValidated(chunk_rows: []const f32, path_rows: []const f32, stats: Stats) Result {
-    const chunk_count: usize = @trunc(chunk_rows[1]);
-    var chunk_index: usize = 0;
-    while (chunk_index < chunk_count) : (chunk_index += 1) {
-        const base = CHUNK_HEADER_FLOATS + chunk_index * CHUNK_STRIDE;
-        const cx: i32 = @trunc(chunk_rows[base]);
-        const cz: i32 = @trunc(chunk_rows[base + 1]);
-        const chunk = chunks.growChunk(cx, cz) orelse return failed(.chunk_allocation, stats);
-        const height_start = base + 2;
-        const water_start = height_start + chunks.SAMPLE_CELLS;
-        const tile_start = water_start + chunks.SAMPLE_CELLS;
-        const zone_start = tile_start + chunks.TILE_CELLS;
-        const grass_start = zone_start + chunks.TILE_CELLS;
-        const tree_start = grass_start + chunks.TILE_CELLS;
-        const bush_start = tree_start + chunks.TILE_CELLS;
-        @memcpy(chunk.height[0..], chunk_rows[height_start..water_start]);
-        @memcpy(chunk.water[0..], chunk_rows[water_start..tile_start]);
-        copyCells(chunk.tiles[0..], chunk_rows[tile_start..zone_start]);
-        copyCells(chunk.zones[0..], chunk_rows[zone_start..grass_start]);
-        copyCells(chunk.flora[0][0..], chunk_rows[grass_start..tree_start]);
-        copyCells(chunk.flora[1][0..], chunk_rows[tree_start..bush_start]);
-        copyCells(chunk.flora[2][0..], chunk_rows[bush_start .. base + CHUNK_STRIDE]);
-        for (chunk.flora, 0..) |lane, lane_index| {
-            for (lane, 0..) |kind, cell_index| {
-                chunk.flora_density[lane_index][cell_index] = if (kind == chunks.EMPTY_CELL) 0 else chunks.FLORA_DENSITY_FULL;
-            }
+fn installChunkRecordAt(rows: []const f32, base: usize, stats: Stats) Result {
+    const cx: i32 = @trunc(rows[base]);
+    const cz: i32 = @trunc(rows[base + 1]);
+    const chunk = chunks.growChunk(cx, cz) orelse return failed(.chunk_allocation, stats);
+    const height_start = base + 2;
+    const water_start = height_start + chunks.SAMPLE_CELLS;
+    const tile_start = water_start + chunks.SAMPLE_CELLS;
+    const zone_start = tile_start + chunks.TILE_CELLS;
+    const grass_start = zone_start + chunks.TILE_CELLS;
+    const tree_start = grass_start + chunks.TILE_CELLS;
+    const bush_start = tree_start + chunks.TILE_CELLS;
+    @memcpy(chunk.height[0..], rows[height_start..water_start]);
+    @memcpy(chunk.water[0..], rows[water_start..tile_start]);
+    copyCells(chunk.tiles[0..], rows[tile_start..zone_start]);
+    copyCells(chunk.zones[0..], rows[zone_start..grass_start]);
+    copyCells(chunk.flora[0][0..], rows[grass_start..tree_start]);
+    copyCells(chunk.flora[1][0..], rows[tree_start..bush_start]);
+    copyCells(chunk.flora[2][0..], rows[bush_start .. base + CHUNK_STRIDE]);
+    for (chunk.flora, 0..) |lane, lane_index| {
+        for (lane, 0..) |kind, cell_index| {
+            chunk.flora_density[lane_index][cell_index] = if (kind == chunks.EMPTY_CELL) 0 else chunks.FLORA_DENSITY_FULL;
         }
-        @memset(chunk.materials[0..], chunks.EMPTY_CELL);
-        chunk.dirty = .{ .tiles = true, .height = true, .water = true, .flora = true, .zones = true };
     }
+    @memset(chunk.materials[0..], chunks.EMPTY_CELL);
+    chunk.dirty = .{ .tiles = true, .height = true, .water = true, .flora = true, .zones = true };
+    return succeeded(stats);
+}
 
+/// Copy one already-validated, headerless chunk record into the canonical sparse
+/// owner. Streaming callers validate membership/duplication before this point.
+pub fn installValidatedChunkRecord(rows: []const f32, stats: Stats) Result {
+    return installChunkRecordAt(rows, 0, stats);
+}
+
+/// Commit a previously validated semantic path wire into an empty owner.
+pub fn installValidatedPaths(path_rows: []const f32, stats: Stats) Result {
     const path_count: usize = @trunc(path_rows[1]);
     var cursor: usize = PATH_HEADER_FLOATS;
     var path_index: usize = 0;
@@ -330,6 +428,20 @@ pub fn installValidated(chunk_rows: []const f32, path_rows: []const f32, stats: 
         if (transport.commitDraft() == null) return failed(.path_commit, stats);
     }
     return succeeded(stats);
+}
+
+/// Install a previously validated wire into empty chunk/transport owners.
+/// This can still fail on allocation or an unexpected transport commit; the
+/// engine wrapper is responsible for resetting its additional state then.
+pub fn installValidated(chunk_rows: []const f32, path_rows: []const f32, stats: Stats) Result {
+    const chunk_count: usize = @trunc(chunk_rows[1]);
+    var chunk_index: usize = 0;
+    while (chunk_index < chunk_count) : (chunk_index += 1) {
+        const base = CHUNK_HEADER_FLOATS + chunk_index * CHUNK_STRIDE;
+        const installed = installChunkRecordAt(chunk_rows, base, stats);
+        if (!installed.ok) return installed;
+    }
+    return installValidatedPaths(path_rows, stats);
 }
 
 /// Standalone owner-level replacement used by focused tests. Engine callers
@@ -433,6 +545,11 @@ test "generated wire reports bounded chunk and transport failures" {
     chunk_rows[CHUNK_HEADER_FLOATS] = chunks.MAX_CHUNK_COL + 1;
     try std.testing.expectEqual(Failure.chunk_bounds, validate(chunk_rows, &no_paths).failure);
     chunk_rows[CHUNK_HEADER_FLOATS] = 0;
+    chunk_rows[CHUNK_HEADER_FLOATS + 1] = chunks.MAX_CHUNK_ROW + 1;
+    try std.testing.expectEqual(Failure.chunk_bounds, validate(chunk_rows, &no_paths).failure);
+    chunk_rows[CHUNK_HEADER_FLOATS + 1] = chunks.MAX_CHUNK_ROW;
+    try std.testing.expect(validate(chunk_rows, &no_paths).ok);
+    chunk_rows[CHUNK_HEADER_FLOATS + 1] = 0;
 
     const short_path = [_]f32{
         WIRE_VERSION,                      1,
@@ -473,4 +590,23 @@ test "generated wire reports bounded chunk and transport failures" {
         -40,                                     0,
     };
     try std.testing.expectEqual(Failure.path_profile, validate(chunk_rows, &rail_with_road_fields).failure);
+}
+
+test "streaming manifest validates the complete sparse topology" {
+    const no_paths = [_]f32{ WIRE_VERSION, 0 };
+    var manifest = [_]f32{
+        WIRE_VERSION,
+        2,
+        0,
+        0,
+        0,
+        chunks.MAX_CHUNK_ROW,
+    };
+    const checked = validateManifest(&manifest, &no_paths);
+    try std.testing.expect(checked.ok);
+    try std.testing.expectEqual(@as(usize, 2), checked.stats.chunks);
+
+    manifest[5] = 0;
+    try std.testing.expectEqual(Failure.chunk_duplicate, validateManifest(&manifest, &no_paths).failure);
+    try std.testing.expectEqual(Failure.chunk_shape, validateManifest(manifest[0 .. manifest.len - 1], &no_paths).failure);
 }

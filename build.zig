@@ -1073,6 +1073,23 @@ pub fn build(b: *std.Build) void {
     const system_memory_test_step = b.step("test-system-memory", "Run the system memory telemetry unit tests");
     system_memory_test_step.dependOn(&run_system_memory_test.step);
 
+    const compile_progress_test_mod = b.createModule(.{
+        // Root at framework/ so compile_progress's sibling diag imports remain
+        // inside the Zig 0.16 module boundary. The actual test stays under
+        // framework/testing/unit/ per repository convention.
+        .root_source_file = b.path("framework/compile_progress_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const compile_progress_test = b.addTest(.{
+        .name = "compile-progress-test",
+        .root_module = compile_progress_test_mod,
+    });
+    const run_compile_progress_test = b.addRunArtifact(compile_progress_test);
+    const compile_progress_test_step = b.step("test-compile-progress", "Run shader compile memory telemetry tests");
+    compile_progress_test_step.dependOn(&run_compile_progress_test.step);
+
     // ── pose worker mailbox tests (req_2845) ─────────────────────────
     // Pins the live-inference boundary: camera bytes are copied before the
     // render thread mutates them, only one frame may occupy the pipeline, and
@@ -1376,6 +1393,28 @@ pub fn build(b: *std.Build) void {
     const gpu_attribution_test_step = b.step("test-gpu-attribution", "Run GPU attribution unit tests");
     gpu_attribution_test_step.dependOn(&run_gpu_attribution_test.step);
 
+    // Retained static-instance source/reservation policy. Keep this pure test
+    // separate from WebGPU so populated-prefix uploads cannot regress behind a
+    // platform/device-dependent render test.
+    const static_instance_policy_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/static_instance_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const render3d_static_instances_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/render3d_static_instances.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    render3d_static_instances_test_mod.addImport("static_instance_policy", static_instance_policy_mod_for_tests);
+    const render3d_static_instances_test = b.addTest(.{
+        .name = "render3d-static-instances-test",
+        .root_module = render3d_static_instances_test_mod,
+    });
+    const run_render3d_static_instances_test = b.addRunArtifact(render3d_static_instances_test);
+    const render3d_static_instances_test_step = b.step("test-render3d-static-instances", "Run retained static-instance policy tests");
+    render3d_static_instances_test_step.dependOn(&run_render3d_static_instances_test.step);
+
     // ── Game physics/movement behavior tests (WO-1, P4) ───────────
     // Exercises framework/game/physics.zig (+ movement.zig via its
     // re-export) with packed input buffers: jump arc, gravity, ground
@@ -1536,27 +1575,29 @@ pub fn build(b: *std.Build) void {
         .root_module = terrain_grid_test_mod,
     });
     const run_terrain_grid_test = b.addRunArtifact(terrain_grid_test);
-    const world_loader_paint_residency_mod_for_tests = b.createModule(.{
-        .root_source_file = b.path("framework/world_loader/paint_residency.zig"),
+    const world_streaming_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/streaming.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const world_loader_paint_residency_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/testing/unit/world_loader_paint_residency.zig"),
+    const world_streaming_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_streaming.zig"),
         .target = target,
         .optimize = optimize,
     });
-    world_loader_paint_residency_test_mod.addImport("world_loader_paint_residency", world_loader_paint_residency_mod_for_tests);
-    const world_loader_paint_residency_test = b.addTest(.{
-        .name = "world-loader-paint-residency-test",
-        .root_module = world_loader_paint_residency_test_mod,
+    world_streaming_test_mod.addImport("world_streaming", world_streaming_mod_for_tests);
+    const world_streaming_test = b.addTest(.{
+        .name = "world-streaming-test",
+        .root_module = world_streaming_test_mod,
     });
-    const run_world_loader_paint_residency_test = b.addRunArtifact(world_loader_paint_residency_test);
+    const run_world_streaming_test = b.addRunArtifact(world_streaming_test);
+    const world_streaming_test_step = b.step("test-world-streaming", "Run world active-bubble streaming tests");
+    world_streaming_test_step.dependOn(&run_world_streaming_test.step);
     const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry and map-revision tests");
     world_loader_geometry_test_step.dependOn(&run_world_loader_geometry_test.step);
     world_loader_geometry_test_step.dependOn(&run_world_loader_paint_revision_test.step);
     world_loader_geometry_test_step.dependOn(&run_terrain_grid_test.step);
-    world_loader_geometry_test_step.dependOn(&run_world_loader_paint_residency_test.step);
+    world_loader_geometry_test_step.dependOn(&run_world_streaming_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against
@@ -1634,6 +1675,25 @@ pub fn build(b: *std.Build) void {
     const run_world_live_mesh_doors_test = b.addRunArtifact(world_live_mesh_doors_test);
     const world_live_mesh_doors_test_step = b.step("test-world-live-mesh-doors", "Run editor-live cooked-door state tests");
     world_live_mesh_doors_test_step.dependOn(&run_world_live_mesh_doors_test.step);
+
+    const world_mesh_prop_uv_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/mesh_prop_uv.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_mesh_prop_uv_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_mesh_prop_uv.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_mesh_prop_uv_test_mod.addImport("world_mesh_prop_uv", world_mesh_prop_uv_mod_for_tests);
+    const world_mesh_prop_uv_test = b.addTest(.{
+        .name = "world-mesh-prop-uv-test",
+        .root_module = world_mesh_prop_uv_test_mod,
+    });
+    const run_world_mesh_prop_uv_test = b.addRunArtifact(world_mesh_prop_uv_test);
+    const world_mesh_prop_uv_test_step = b.step("test-world-mesh-prop-uv", "Run resident face-material UV tests");
+    world_mesh_prop_uv_test_step.dependOn(&run_world_mesh_prop_uv_test.step);
 
     // ── Platform game-file behavior tests (PLATMOD spine step 2, P4) ──────
     // Exercises framework/world/gamefile.zig: the three-stream game-file reader,

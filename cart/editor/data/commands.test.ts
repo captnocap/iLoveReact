@@ -11,7 +11,7 @@
 
 import {
   COMMANDS, MENUS, commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
-  worldActionBarCommands, type MenuNode,
+  menuDropdownLeft, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
@@ -34,6 +34,11 @@ test('Save and Preferences are application commands on every document surface', 
   const preferences = commandById('open-preferences');
   assert(save.menu === 'File' && save.scope === 'global' && save.key === 'Ctrl+S', 'Save is not the global document command');
   assert(preferences.menu === 'Edit' && preferences.scope === 'global' && preferences.key === 'Ctrl+,', 'Preferences is not globally discoverable');
+});
+
+test('wide menu panels center on their chrome trigger before edge clamping', () => {
+  assert(menuDropdownLeft('File') === 12, 'File menu was left-edge anchored instead of centered and clamped');
+  assert(menuDropdownLeft('Window') < 448, 'Window menu still begins at its trigger left edge');
 });
 
 test('ordinary face selection still offers authored-face merge', () => {

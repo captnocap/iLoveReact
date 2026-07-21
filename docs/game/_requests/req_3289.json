@@ -1,0 +1,28 @@
+{
+  "id": "req_3289",
+  "at": "2026-07-20T10:11:02.007Z",
+  "origin": "codex:019f7e48",
+  "text": "nice job so does the uv have a break or is this a bug ? [Image #1]",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T10:11:08.392Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T10:12:09.900Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the visible horizontal stripe as the atlas's two-texel neutral-gray packing gutter being sampled by one continuous resized UV island; there is no face topology break and no code was changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T10:12:09.900Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3247",
+  "at": "2026-07-20T03:49:55.849Z",
+  "origin": "session:5a3945f7",
+  "text": "nice. so will paint also be able to procederally generate ? [Image #8] like the strokes",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:50:28.306Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:49:42.912Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design answer on procedural paint generation: today's Save Painting stores the baked atlas, which already works as a pick-one axis (shared UVs mean any painting fits any family head — paint variant × mesh mix is multiplicative for free). The generative step (recolor, jitter, region mixing, mirror-replay) needs paintings kept as stroke PROGRAMS — the direction the repo already ruled for map paint and roads. Recommended palette-slot colors (skin/lip/iris named slots) as the highest-yield knob, ~3-4 authored face programs, and persisting the stroke list into paints/ alongside the baked variant as the concrete next feature (sibling of the pose-variant save specced for mouth visemes).",
+  "shas": [],
+  "resolvedAt": "2026-07-20T06:49:42.912Z"
+}

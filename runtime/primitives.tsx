@@ -171,7 +171,32 @@ export const Image: any = ({ src, source, ...rest }: any) =>
 // One-liner wrapper for the host's icon renderer. Equivalent to
 // <Native type="Icon" .../> but cheaper to write/read everywhere.
 export const Icon: any = (props: any) => h('Icon', props);
-export const Pressable: any = (props: any) => h('Pressable', props, props.children);
+
+// Carts may opt into a consistent hover cue for ordinary press targets.  This
+// remains opt-in because canvases and click-away scrims intentionally have no
+// visible hover state.
+let defaultPressableHoverStyle: any = undefined;
+
+export function setDefaultPressableHoverStyle(style: any): void {
+  defaultPressableHoverStyle = style;
+}
+
+export const Pressable: any = (props: any) => {
+  const hoverStyle = props.hoverStyle === undefined && props.onPress
+    ? defaultPressableHoverStyle
+    : props.hoverStyle;
+  // `hoverStyle` is declarative metadata today; the native painter draws its
+  // hover affordance only for nodes explicitly marked hoverable.  Derive that
+  // opt-in for every visible Pressable treatment.  An empty hoverStyle remains
+  // the escape hatch for click-away scrims and invisible input surfaces.
+  const hoverable = props.hoverable ?? Boolean(
+    props.onPress && hoverStyle && Object.keys(hoverStyle).length > 0,
+  );
+  const resolved = hoverStyle === undefined && !hoverable
+    ? props
+    : { ...props, hoverStyle, hoverable };
+  return h('Pressable', resolved, props.children);
+};
 // ScrollView auto-persists its scroll position across dev-mode hot reloads.
 //
 // scroll_y lives on the Zig Node, so a fresh tree after a reload starts at

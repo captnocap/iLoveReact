@@ -296,6 +296,52 @@ pub fn retainedGeometryBytes() u64 {
     return g_retained_top;
 }
 
+pub const GpuMemoryStats = struct {
+    /// Actual allocation sizes for fixed/general render buffers. Includes the
+    /// 256 MiB retained vertex buffer; excludes the separately-reported elastic
+    /// static-instance pools so callers can sum without double counting.
+    core_buffer_capacity_bytes: u64 = 0,
+    /// Color + depth texture bytes for the persistent Scene3D render-target
+    /// pool, based on each live slot's dimensions.
+    render_target_bytes: u64 = 0,
+    /// Resident diffuse-cache and model-paint texture pixels.
+    diffuse_texture_bytes: u64 = 0,
+};
+
+/// Logical geometry use alone hid the renderer's large fixed allocations (most
+/// notably the 256 MiB retained vertex buffer). Report every allocation whose
+/// size the 3D owner can know exactly; driver/compiler bookkeeping remains a
+/// separate native-process concern.
+pub fn gpuMemoryStats() GpuMemoryStats {
+    var stats = GpuMemoryStats{};
+    if (g_vertex_buffer != null) stats.core_buffer_capacity_bytes += MAX_FRAME_VERTS * @sizeOf(Vertex);
+    if (g_retained_vbuf != null) stats.core_buffer_capacity_bytes += MAX_BUFFER_BYTES;
+    if (g_uniform_buffer != null) stats.core_buffer_capacity_bytes += @sizeOf(SceneUniforms);
+    if (g_instance_buf != null) stats.core_buffer_capacity_bytes += @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
+    if (g_slim_inst_buf != null) stats.core_buffer_capacity_bytes += @as(u64, MAX_INSTANCES) * @sizeOf(SlimInstance);
+    if (g_lights_buf != null) stats.core_buffer_capacity_bytes += MAX_LIGHTS * @sizeOf(Light);
+    if (g_shadow_tex != null) stats.core_buffer_capacity_bytes += @as(u64, SHADOW_MAP_SIZE) * SHADOW_MAP_SIZE * @sizeOf(f32);
+    if (g_shadow_uniform_buf != null) stats.core_buffer_capacity_bytes += @sizeOf(ShadowUniforms);
+    if (g_shadow_vp_buf != null) stats.core_buffer_capacity_bytes += 16 * @sizeOf(f32);
+    if (g_shadow_inst_buf != null) stats.core_buffer_capacity_bytes += @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
+    if (g_sky_uniform_buffer != null) stats.core_buffer_capacity_bytes += @sizeOf(SkyUniforms);
+    if (g_ground_inst_buf != null) stats.core_buffer_capacity_bytes += GROUND_POOL * @sizeOf(InstanceData);
+    if (g_ground_grid_vbuf != null) stats.core_buffer_capacity_bytes += @as(u64, g_ground_grid_vert_count) * @sizeOf(Vertex);
+    for (g_ground_data_buf) |buffer| {
+        if (buffer != null) stats.core_buffer_capacity_bytes += GROUND_DATA_FLOATS * @sizeOf(f32);
+    }
+    for (g_rt_pool) |slot| {
+        if (slot.color_texture != null) stats.render_target_bytes += @as(u64, slot.width) * slot.height * 4;
+        if (slot.depth_texture != null) stats.render_target_bytes += @as(u64, slot.width) * slot.height * 4;
+    }
+    for (g_tex_cache) |entry| {
+        if (entry.tex != null) stats.diffuse_texture_bytes += @as(u64, entry.w) * entry.h * 4;
+    }
+    if (g_paint_tex != null) stats.diffuse_texture_bytes += @as(u64, g_paint_tex_w) * g_paint_tex_h * 4;
+    if (g_default_tex != null) stats.diffuse_texture_bytes += 4;
+    return stats;
+}
+
 // ── Host-loaded mesh stash (drop-to-view, framework/world/mesh_import.zig) ───────
 // A GLB/OBJ dropped on a viewer is parsed ENTIRELY in the host and never crosses the
 // JS bridge as geometry — only a short intern key does (see __mesh_load_file). The
@@ -515,6 +561,11 @@ var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
 var g_edit_count: u32 = 0;
 var g_edit_revision: u32 = 0;
+// A quality slider result remains reversible against model_source's retained baseline
+// while the user scrubs, but Save must persist the mesh they chose and can actually
+// edit. When armed, the durable document snapshot reads the displayed projection;
+// reopening that document naturally makes the reduced topology its new full source.
+var g_save_displayed_projection: bool = false;
 // Indexed-aware edit operations preserve this table across previews and commits.
 // Rendering still consumes g_edit_verts; legacy topology replacements clear the table
 // and the next indexed operation imports their result once at that boundary.
@@ -539,6 +590,7 @@ fn adoptIndexedEditMesh(mesh: *indexed_edit_mesh.Mesh, lowered: *const indexed_e
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
     mesh.clearCutOrigins();
     mesh.adoptLoweredMetadata(lowered, groups, parts);
+    model_source.setFaceMaterials(lowered.materials);
     clearIndexedEditMesh();
     g_indexed_edit_mesh = mesh.*;
     mesh.* = .{ .allocator = std.heap.c_allocator };
@@ -549,9 +601,10 @@ fn cloneIndexedEditMeshOrImport(
     tri_count: u32,
     groups: ?[]const u32,
     parts: ?[]const u32,
+    materials: ?[]const u32,
 ) ?indexed_edit_mesh.Mesh {
     if (g_indexed_edit_mesh) |*mesh| return mesh.clone() catch null;
-    return indexed_edit_mesh.Mesh.fromSoup(std.heap.c_allocator, verts, tri_count, groups, parts) catch null;
+    return indexed_edit_mesh.Mesh.fromSoupWithMaterials(std.heap.c_allocator, verts, tri_count, groups, parts, materials) catch null;
 }
 
 fn ensureIndexedEditMesh() bool {
@@ -564,7 +617,14 @@ fn ensureIndexedEditMesh() bool {
     const parts = capturePartOfFaces();
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
     const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
-    g_indexed_edit_mesh = indexed_edit_mesh.Mesh.fromSoup(std.heap.c_allocator, verts, tri_count, groups_arg, parts) catch return false;
+    g_indexed_edit_mesh = indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        std.heap.c_allocator,
+        verts,
+        tri_count,
+        groups_arg,
+        parts,
+        model_source.faceMaterials(),
+    ) catch return false;
     return true;
 }
 
@@ -686,9 +746,22 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
 fn applyMeshMutation(m: mesh_edit.Mutation) bool {
     if (!m.changed) return false;
     if (!copyPaintPositionsToEditVerts(m.first_face, m.last_face)) return false;
+    var mirror_triangulation_changed = false;
     if (g_indexed_edit_mesh) |*mesh| {
         const verts = g_edit_verts orelse return false;
-        if (!mesh.updatePositionsFromInterleaved(verts, g_edit_count / 3)) clearIndexedEditMesh();
+        if (!mesh.updatePositionsFromInterleaved(verts, g_edit_count / 3)) {
+            clearIndexedEditMesh();
+        } else if (mesh_edit.mirrorMask() != 0 and model_source.count() == g_edit_count) {
+            mirror_triangulation_changed = (mesh.synchronizeMirrorDiagonals(mesh_edit.mirrorMask()) catch sync_failed: {
+                log.print("[mesh] live mirror could not synchronize indexed quad diagonals\n", .{});
+                clearIndexedEditMesh();
+                break :sync_failed 0;
+            }) > 0;
+        }
+    }
+    if (mirror_triangulation_changed and !installMirrorSynchronizedTriangulation()) {
+        log.print("[mesh] live mirror diagonal install rejected: same-face metadata invariant failed\n", .{});
+        clearIndexedEditMesh();
     }
     if (model_paint.positions()) |pos| {
         _ = model_source.updateGeometryFromDisplayed(pos, m.first_face, m.last_face);
@@ -719,6 +792,15 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     }
 }
 
+/// Install a reversible quality preview and nominate that exact resident topology for
+/// the next durable model snapshot. Geometry stays host-resident; only key/count cross
+/// the JS door. A structural edit later retains the displayed mesh as the new source and
+/// clears this nomination through replaceActiveEditMesh.
+pub fn setQualityPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    setPaintTarget(key, verts, count);
+    g_save_displayed_projection = g_edit_verts != null and g_edit_count == count;
+}
+
 pub fn meshEditActiveKey() ?[]const u8 {
     return g_edit_key;
 }
@@ -731,6 +813,8 @@ pub fn meshEditActiveCount() u32 {
 /// cannot filter the incoming mesh (req_2953).
 pub fn meshEditBeginModel() void {
     g_paint_layout_stale = false;
+    g_save_displayed_projection = false;
+    clearHiddenGroups();
     mesh_edit.resetForModelLoad();
 }
 
@@ -769,6 +853,73 @@ fn appendTriWithUvs(
     return true;
 }
 
+/// Re-lower a same-face-count indexed mesh after live mirror mode synchronized quad
+/// diagonals. This is not a structural edit: authored face slots, groups, materials,
+/// parts, atlas pixels, and the paint program all remain valid. Installing in place
+/// avoids the generic topology-replace path, which would clear selection and mark the
+/// paint layout stale even though only the two render triangles inside a quad changed.
+fn installMirrorSynchronizedTriangulation() bool {
+    const edit_verts = g_edit_verts orelse return false;
+    const mesh = &(g_indexed_edit_mesh orelse return false);
+    var lowered = mesh.lower() catch return false;
+    defer lowered.deinit();
+    if (lowered.tri_count * 3 != g_edit_count or
+        edit_verts.len < @as(usize, g_edit_count) * 8 or
+        model_source.count() != g_edit_count)
+    {
+        return false;
+    }
+
+    const current_groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(current_groups);
+    const current_parts = capturePartOfFaces();
+    defer if (current_parts) |parts| std.heap.c_allocator.free(parts);
+    const current_materials = captureFaceMaterials(lowered.tri_count) orelse return false;
+    defer std.heap.c_allocator.free(current_materials);
+    const parts_match = if (current_parts) |parts|
+        std.mem.eql(u32, parts, lowered.parts)
+    else blk: {
+        for (lowered.parts) |part| if (part != indexed_edit_mesh.NO_PART) break :blk false;
+        break :blk true;
+    };
+    if (!std.mem.eql(u32, current_groups, lowered.groups) or
+        !parts_match or
+        !std.mem.eql(u32, current_materials, lowered.materials))
+    {
+        return false;
+    }
+
+    var interleaved = std.ArrayListUnmanaged(f32).empty;
+    defer interleaved.deinit(std.heap.c_allocator);
+    interleaved.ensureTotalCapacity(std.heap.c_allocator, @as(usize, g_edit_count) * 8) catch return false;
+    var triangle: u32 = 0;
+    while (triangle < lowered.tri_count) : (triangle += 1) {
+        const position_base = @as(usize, triangle) * 9;
+        const uv_base = @as(usize, triangle) * 6;
+        const p0: [3]f32 = .{ lowered.positions[position_base], lowered.positions[position_base + 1], lowered.positions[position_base + 2] };
+        const p1: [3]f32 = .{ lowered.positions[position_base + 3], lowered.positions[position_base + 4], lowered.positions[position_base + 5] };
+        const p2: [3]f32 = .{ lowered.positions[position_base + 6], lowered.positions[position_base + 7], lowered.positions[position_base + 8] };
+        const uvs = [3][2]f32{
+            .{ lowered.uvs[uv_base], lowered.uvs[uv_base + 1] },
+            .{ lowered.uvs[uv_base + 2], lowered.uvs[uv_base + 3] },
+            .{ lowered.uvs[uv_base + 4], lowered.uvs[uv_base + 5] },
+        };
+        if (!appendTriWithUvs(&interleaved, p0, p1, p2, uvs)) return false;
+    }
+    if (interleaved.items.len != @as(usize, g_edit_count) * 8) return false;
+
+    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP)
+        null
+    else
+        current_groups;
+    if (!model_paint.setTargetPreservingAtlas(g_edit_key_hash, interleaved.items, g_edit_count, groups_arg)) return false;
+    if (!model_source.replaceGeometrySameTriangleCount(interleaved.items, g_edit_count)) return false;
+    @memcpy(edit_verts[0..interleaved.items.len], interleaved.items);
+    mesh.adoptLoweredMetadata(&lowered, groups_arg, lowered.parts);
+    if (!mesh_edit.adoptSameFaceTriangulation()) return false;
+    return if (lowered.tri_count > 0) patchActiveEditMesh(0, lowered.tri_count - 1) else true;
+}
+
 fn triArea2(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
     const cr = vcross(vsub(b, a), vsub(c, a));
     return vdot(cr, cr);
@@ -803,6 +954,19 @@ fn collectCurrentFaceColors() ?[]u8 {
         colors[f * 4 + 3] = c[3];
     }
     return colors;
+}
+
+/// Restore durable per-face colour metadata after a hide/show target rebuild without
+/// flattening the detailed paint raster. RGB stays source-side; only glass alpha is
+/// reasserted onto the live atlas.
+fn restoreFaceColorMetadata(colors: []const u8) void {
+    const face_count = g_edit_count / 3;
+    if (colors.len != @as(usize, face_count) * 4) return;
+    if (model_source.colors()) |destination| {
+        if (destination.len >= colors.len) @memcpy(destination[0..colors.len], colors);
+    }
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) model_paint.paintFaceAlpha(face, colors[@as(usize, face) * 4 + 3]);
 }
 
 fn applyCarriedFaceColors(old_colors: ?[]const u8, new_fc: u32) void {
@@ -861,6 +1025,11 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     if (count != 0 and (count < 3 or new_verts.len < need)) return false;
     const old_colors = collectCurrentFaceColors();
     defer if (old_colors) |c| std.heap.c_allocator.free(c);
+    const old_materials: ?[]u32 = if (model_source.faceMaterials()) |rows|
+        (std.heap.c_allocator.dupe(u32, rows) catch null)
+    else
+        null;
+    defer if (old_materials) |rows| std.heap.c_allocator.free(rows);
     // Part ranges are pure authored-group-id spans — they survive every EDIT replace
     // (retain() clears them, which is right for a fresh LOAD but was silently destroying
     // the outliner's part identity on every topology op; req_2644). Ops that change the
@@ -882,7 +1051,13 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     paint_program.snapshotLayersForCarry();
     setPaintTarget(key, new_verts, count);
     model_source.retain(key, new_verts[0..need], count);
+    // A structural edit at reduced quality commits that displayed topology as the
+    // authoritative source immediately; future saves no longer need projection mode.
+    g_save_displayed_projection = false;
     if (old_ranges) |r| model_source.setPartRanges(r);
+    // Position/winding/group-only replacements preserve triangle order. Topology
+    // replacements with a different face count install their explicit provenance.
+    if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
     applyCarriedFaceColors(old_colors, count / 3);
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
     return true;
@@ -908,6 +1083,11 @@ fn replaceActiveEditMeshPreservingAtlas(
     else
         null;
     defer if (old_ranges) |ranges| std.heap.c_allocator.free(ranges);
+    const old_materials: ?[]u32 = if (model_source.faceMaterials()) |rows|
+        (std.heap.c_allocator.dupe(u32, rows) catch null)
+    else
+        null;
+    defer if (old_materials) |rows| std.heap.c_allocator.free(rows);
     const old_hash = g_edit_key_hash;
     g_edit_revision +%= 1;
     const key = std.fmt.allocPrint(std.heap.c_allocator, "modelview-edit-{x}-{d}", .{ old_hash, g_edit_revision }) catch return false;
@@ -936,8 +1116,10 @@ fn replaceActiveEditMeshPreservingAtlas(
     key_copy_adopted = true;
 
     model_source.retain(key, new_verts[0..need], count);
+    g_save_displayed_projection = false;
     if (groups) |rows| model_source.setFaceGroups(rows);
     if (old_ranges) |ranges| model_source.setPartRanges(ranges);
+    if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
     if (!applyExactSourceFaceColors(colors, count / 3)) return false;
     return true;
 }
@@ -958,32 +1140,13 @@ fn appendCurrentDisplayed(list: *std.ArrayListUnmanaged(f32)) bool {
     return appendFloats(list, verts[0..need]);
 }
 
-/// The part owning the FIRST face that uses welded verts (va, vb) — where an edge op's
-/// new geometry belongs. NO_PART when nothing grouped uses the edge. Reads the CURRENT
-/// weld, so call it BEFORE the op replaces the mesh.
-fn partOfWeldedEdge(va: u32, vb: u32) u32 {
-    const fc = g_edit_count / 3;
-    var f: u32 = 0;
-    while (f < fc) : (f += 1) {
-        var has_a = false;
-        var has_b = false;
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const v = mesh_edit.cornerVertPub(f, k);
-            if (v == va) has_a = true;
-            if (v == vb) has_b = true;
-        }
-        if (has_a and has_b) return model_source.partIndexOf(model_source.faceGroupOf(f));
-    }
-    return model_source.NO_PART;
-}
-
 const FaceExtrudeEntity = struct {
     grouped: bool,
     group: u32,
     face: u32,
     part: u32,
     color: [4]u8,
+    material: u32,
 };
 
 fn faceExtrudePosKey(p: [3]f32) u64 {
@@ -1083,30 +1246,40 @@ fn appendFaceColor(list: *std.ArrayListUnmanaged(u8), c: [4]u8) bool {
     return true;
 }
 
-/// req_2644: an edge op (extrude / create face) appends faces and used to let retain()
-/// silently DROP the whole authored grouping — the mesh went ungrouped, and with it every
-/// part range. Re-apply the pre-op grouping, give the appended faces one fresh authored
-/// id, and fold them into `src_part`'s contiguous range (renormalize keeps the partition).
-fn adoptAppendedFaces(old_groups: ?[]const u32, old_faces: u32, src_part: u32) void {
-    const og = old_groups orelse return; // ungrouped import — nothing to maintain
+/// req_2644/req_3314: an edge op appends faces after retain() resets authored metadata.
+/// Restore the grouping, then renormalize from the PRE-OP face→part table plus the
+/// selected edges' explicit owner. Never re-infer old ownership from the replaced mesh:
+/// a detached seam is position-coincident with its source and that guess can hand every
+/// detached face back to the original outliner.
+fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_faces: u32, src_part: u32) bool {
+    const og = old_groups orelse return hostPartCount() == 0; // ungrouped import
     const fc = g_edit_count / 3;
-    if (fc <= old_faces or og.len < old_faces) return;
-    const groups = std.heap.c_allocator.alloc(u32, fc) catch return;
+    if (fc <= old_faces or og.len < old_faces) return false;
+    const groups = std.heap.c_allocator.alloc(u32, fc) catch return false;
     defer std.heap.c_allocator.free(groups);
     @memcpy(groups[0..old_faces], og[0..old_faces]);
-    const new_id: u32 = @intCast(maxGroupId(og[0..old_faces]) + 1);
+    const new_id = nextFreeGroupId(og[0..old_faces]);
     @memset(groups[old_faces..fc], new_id);
     model_source.setFaceGroups(groups);
     const pc = hostPartCount();
     if (pc > 0) {
-        const fp = std.heap.c_allocator.alloc(u32, fc) catch return;
+        const prior = old_parts orelse return false;
+        if (prior.len < old_faces or src_part >= pc) return false;
+        const fp = std.heap.c_allocator.alloc(u32, fc) catch return false;
         defer std.heap.c_allocator.free(fp);
-        var f: u32 = 0;
-        while (f < old_faces) : (f += 1) fp[f] = model_source.partIndexOf(og[f]);
+        @memcpy(fp[0..old_faces], prior[0..old_faces]);
         @memset(fp[old_faces..fc], src_part);
         renormalizePartRanges(fp, pc);
+        // Deep postcondition: every pre-existing face and every appended face still
+        // resolves to the owner carried into this transaction. A failed allocation or
+        // malformed range table rolls the caller back instead of committing corruption.
+        var face: u32 = 0;
+        while (face < fc) : (face += 1) {
+            if (model_source.partIndexOf(model_source.faceGroupOf(face)) != fp[face]) return false;
+        }
     }
     _ = refreshPaintLayout();
+    return true;
 }
 
 pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
@@ -1138,6 +1311,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
             .face = f,
             .part = if (grouped) model_source.partIndexOf(g) else model_source.NO_PART,
             .color = trueFaceColor(f),
+            .material = model_source.faceMaterialOf(f),
         };
     }
     const ent = entity orelse return false;
@@ -1162,6 +1336,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     defer face_part.deinit(std.heap.c_allocator);
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(std.heap.c_allocator);
+    var materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer materials.deinit(std.heap.c_allocator);
 
     f = 0;
     while (f < tri_count) : (f += 1) {
@@ -1175,6 +1351,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
             if (part_count > 0) face_part.append(std.heap.c_allocator, model_source.partIndexOf(g)) catch return false;
         }
         if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
+        materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
     }
 
     var next_group: u32 = if (has_groups) @intCast(maxGroupId(old_groups.?) + 1) else 0;
@@ -1192,6 +1369,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
             if (part_count > 0) face_part.append(std.heap.c_allocator, ent.part) catch return false;
         }
         if (!appendFaceColor(&colors, ent.color)) return false;
+        materials.append(std.heap.c_allocator, ent.material) catch return false;
     }
 
     i = 0;
@@ -1221,6 +1399,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
             }
         }
         if (!appendFaceColor(&colors, ent.color) or !appendFaceColor(&colors, ent.color)) return false;
+        materials.append(std.heap.c_allocator, indexed_edit_mesh.NO_MATERIAL) catch return false;
+        materials.append(std.heap.c_allocator, indexed_edit_mesh.NO_MATERIAL) catch return false;
     }
 
     const new_count: u32 = @intCast(out.items.len / 8);
@@ -1235,6 +1415,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         model_source.setFaceGroups(groups.items);
         if (part_count > 0) renormalizePartRanges(face_part.items, part_count) else _ = refreshPaintLayout();
     }
+    model_source.setFaceMaterials(materials.items);
     model_paint.applyColors(colors.items);
     if (model_source.colors()) |src| {
         const nbytes = @min(src.len, colors.items.len);
@@ -1300,11 +1481,22 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     const old_faces = g_edit_count / 3;
     const old_groups: ?[]u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) captureFaceGroups() else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
-    const src_part = partOfWeldedEdge(ep[0], ep[1]);
+    const old_parts = capturePartOfFaces();
+    defer if (old_parts) |parts| std.heap.c_allocator.free(parts);
+    const materials = captureFaceMaterials(g_edit_count / 3 + 2) orelse return false;
+    defer std.heap.c_allocator.free(materials);
+    @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
+    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
+    if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("extrude edge");
     const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
     if (ok) {
-        adoptAppendedFaces(old_groups, old_faces, src_part);
+        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
+            if (snap) |*before| _ = journalInstall(before);
+            journalDiscard(&snap);
+            return false;
+        }
+        model_source.setFaceMaterials(materials);
         _ = selectWeldedEdgeAt(c, d);
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
@@ -1428,16 +1620,27 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     };
     defer std.heap.c_allocator.free(owned);
     const added: u32 = @intCast((owned.len / 8) - @as(usize, g_edit_count));
-    // Grouping bookkeeping BEFORE the replace wipes it (req_2644): the bridged face
-    // joins the part of the first selected edge's face.
+    // Grouping bookkeeping BEFORE the replace wipes it (req_2644/req_3314): the
+    // bridged face joins the one explicit part shared by every selected edge.
     const old_faces = g_edit_count / 3;
     const old_groups: ?[]u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) captureFaceGroups() else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
-    const src_part = partOfWeldedEdge(edges[0][0], edges[0][1]);
+    const old_parts = capturePartOfFaces();
+    defer if (old_parts) |parts| std.heap.c_allocator.free(parts);
+    const materials = captureFaceMaterials(old_faces + added / 3) orelse return false;
+    defer std.heap.c_allocator.free(materials);
+    @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
+    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
+    if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
-        adoptAppendedFaces(old_groups, old_faces, src_part);
+        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
+            if (snap) |*before| _ = journalInstall(before);
+            journalDiscard(&snap);
+            return false;
+        }
+        model_source.setFaceMaterials(materials);
         // Create Face hands the next edit to its result: Face mode + exactly the new
         // authored face selected, so X can reverse an unlucky winding immediately.
         _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
@@ -1610,7 +1813,7 @@ pub fn meshTopoLoopCut() bool {
 
     const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
     const parts_arg: ?[]const u32 = if (base_part) |p| p else null;
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg) orelse return false;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.loopCutFromEdge(a, b, selected_part, 1, 0.5) catch return false)) return false;
     var cut = indexed.lower() catch return false;
@@ -1622,7 +1825,7 @@ pub fn meshTopoLoopCut() bool {
 
     var snap = journalSnapshotCurrent("loop cut");
     const install_groups: ?[]const u32 = if (groups_arg != null) cut.groups else null;
-    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut_colors);
+    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut.materials, cut_colors);
     if (ok) {
         if (base_part) |bp| {
             _ = bp;
@@ -1665,7 +1868,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
     const part_count = hostPartCount();
     const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts) orelse return false;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (parts) |face_parts| {
         if (part_count == 0) return false;
@@ -1693,7 +1896,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 
     var snap = journalSnapshotCurrent("symmetrize");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors);
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
@@ -1734,6 +1937,7 @@ const LcSession = struct {
     lo: [2]f32, // selected-face extent along each cut direction (dot-space)
     hi: [2]f32,
     keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
+    keep_part: u32, // part owning that face — a colliding group can never select a sibling
     snap: ?JournalEntry,
     // Overlay visibility (req_2625): the selection's world centroid at begin anchors
     // the handle; last_planes is a visual guide, not the cutting algorithm.
@@ -1749,6 +1953,11 @@ const LcSession = struct {
     // SNAPPED frac, so the raw position accumulates here or slow drags could never
     // cross a whole-unit detent. Every preview re-seeds it (steppers move both).
     drag_raw_frac: f32 = 0.5,
+    // Apply is legal only after the CURRENT params installed an actual preview. A
+    // failed preview used to fall through meshLoopCutFaceEnd(commit), renumber the
+    // untouched model, and reselect by group as though a cut had happened.
+    last_preview_ok: bool = false,
+    last_reason: ?[]const u8 = null,
 };
 var g_lc: ?LcSession = null;
 
@@ -1807,11 +2016,13 @@ fn lcInstallLowered(
     uvs: []const f32,
     tri_count: u32,
     groups: ?[]const u32,
+    materials: []const u32,
     colors: []const u8,
 ) bool {
     if (pos.len != @as(usize, tri_count) * 9 or
         uvs.len != @as(usize, tri_count) * 6 or
-        colors.len != @as(usize, tri_count) * 4) return false;
+        colors.len != @as(usize, tri_count) * 4 or
+        materials.len != tri_count) return false;
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
@@ -1836,6 +2047,7 @@ fn lcInstallLowered(
     };
     defer std.heap.c_allocator.free(owned);
     if (!replaceActiveEditMeshPreservingAtlas(owned, tri_count * 3, groups, colors)) return false;
+    model_source.setFaceMaterials(materials);
     mesh_edit.setMode(.face);
     return true;
 }
@@ -1894,7 +2106,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     const base_face_part = capturePartOfFaces();
     const groups_arg: ?[]const u32 = if (groups) |g| g else null;
     const parts_arg: ?[]const u32 = if (base_face_part) |p| p else null;
-    var base_mesh = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg) orelse {
+    var base_mesh = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse {
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
@@ -1925,6 +2137,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         .lo = seed.lo,
         .hi = seed.hi,
         .keep_group = seed.keep_group,
+        .keep_part = seed.part,
         .snap = journalSnapshotCurrent(if (basic) "cut" else "loop cut"),
         .sel_center = seed.center,
     };
@@ -1936,6 +2149,11 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
 /// successful partial ring, exactly as in js-bench-editor.
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *LcSession = if (g_lc) |*sp| sp else return false;
+    s.last_preview_ok = false;
+    s.last_reason = if (s.basic)
+        "Cut preview could not be built"
+    else
+        "Loop-cut preview could not be built";
     const d: usize = @min(dir, 1);
     const cut_count = @min(@max(cuts, 1), 64);
     const fraction = std.math.clamp(offset_frac, 0.0, 1.0);
@@ -1945,7 +2163,10 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     // topology is determined exclusively by the indexed edge walk below.
     var planes: [64]f32 = undefined;
     const span = s.hi[d] - s.lo[d];
-    if (span < 1e-6) return false;
+    if (span < 1e-6) {
+        s.last_reason = "Selected face has no usable cut span";
+        return false;
+    }
     const n_planes = lcPlanes(s.lo[d], s.hi[d], cut_count, fraction * span, &planes);
     s.last_dir = @intCast(d);
     s.last_planes = planes;
@@ -1966,7 +2187,13 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         preview.cutSelected(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false
     else
         preview.loopCut(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false;
-    if (!changed) return false;
+    if (!changed) {
+        s.last_reason = if (s.basic)
+            "This authored face cannot be split by the selected cut"
+        else
+            "No quad or triangle loop crosses this authored face — split the n-gon into quads first";
+        return false;
+    }
 
     var lowered = preview.lower() catch return false;
     defer lowered.deinit();
@@ -1980,10 +2207,12 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
     }
     const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
-    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors)) return false;
+    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors)) return false;
     if (s.last_mesh) |*mesh| mesh.deinit();
     s.last_mesh = preview;
     preview = .{ .allocator = std.heap.c_allocator };
+    s.last_preview_ok = true;
+    s.last_reason = null;
     return true;
 }
 
@@ -1992,25 +2221,36 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
 /// so the selection rides the cut like the studio's, req_0989). cancel restores the
 /// captured base exactly and leaves no undo entry.
 pub fn meshLoopCutFaceEnd(commit: bool) bool {
+    const active: *const LcSession = if (g_lc) |*session| session else return false;
+    // No preview was ever installed: closing a refused n-gon cut is literally inert.
+    // Do not re-key the mesh or mark the document dirty just for dismissing the popup.
+    if (!active.last_preview_ok and active.last_mesh == null) {
+        lcFree();
+        return false;
+    }
     var s = g_lc orelse return false;
     var ok = true;
-    if (commit) {
+    // Applying a semantic no-op is a cancel, not a topology transaction. Restore the
+    // captured base because a failed parameter change may follow an earlier successful
+    // preview that is still resident on screen.
+    if (commit and s.last_preview_ok) {
         journalCommit(&s.snap);
         // Renormalize the minted +side group ids back into their parts' contiguous
         // ranges (req_2644) — remember a face carrying the clicked face's group FIRST
         // so the −side re-select below survives the renumber.
+        const fp: ?[]const u32 = if (s.last_face_part) |p| p else if (s.base_face_part) |p| p else null;
         var keep_face: ?u32 = null;
         if (s.keep_group != model_source.NO_FACE_GROUP) {
             const fc = g_edit_count / 3;
             var f: u32 = 0;
             while (f < fc) : (f += 1) {
-                if (model_source.faceGroupOf(f) == s.keep_group) {
+                const part_matches = s.keep_part == model_source.NO_PART or fp == null or fp.?[f] == s.keep_part;
+                if (part_matches and model_source.faceGroupOf(f) == s.keep_group) {
                     keep_face = f;
                     break;
                 }
             }
         }
-        const fp: ?[]const u32 = if (s.last_face_part) |p| p else if (s.base_face_part) |p| p else null;
         if (fp) |face_part| renormalizePartRanges(face_part, s.part_count);
         if (s.last_mesh) |*mesh| {
             if (mesh.lower()) |lowered_value| {
@@ -2031,7 +2271,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         if (s.base_mesh.lower()) |lowered_value| {
             var lowered = lowered_value;
             defer lowered.deinit();
-            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, s.base_colors);
+            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, lowered.materials, s.base_colors);
         } else |_| {
             ok = false;
         }
@@ -2078,12 +2318,13 @@ pub fn meshLcState() ?LcState {
         .dir = sp.last_dir,
         .cuts = sp.last_cuts,
         .offset_frac = sp.last_offset_frac,
-        .fallback_reason = null,
+        .fallback_reason = sp.last_reason,
     };
 }
 
 pub fn meshLcFallbackReason() ?[]const u8 {
-    return null;
+    const sp: *const LcSession = if (g_lc) |*p| p else return null;
+    return sp.last_reason;
 }
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
@@ -2186,6 +2427,8 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
+    var materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer materials.deinit(std.heap.c_allocator);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         if (mask[f]) continue;
@@ -2196,6 +2439,7 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
             return false;
         }
         if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
+        materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch {};
     }
     const kept: u32 = @intCast(out.items.len / 8);
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
@@ -2210,11 +2454,15 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     const ok = replaceActiveEditMesh(owned, kept);
     if (!ok and paint_stable) cancelPaintStableReplace();
     if (ok) {
+        if (kept > 0) {
+            model_source.setFaceMaterials(materials.items);
+        }
         if (kept > 0 and has_groups) {
             model_source.setFaceGroups(groups.items);
             _ = refreshPaintLayout();
         } else if (kept == 0) {
             model_source.setPartRanges(&.{}); // no faces → no parts own anything
+            model_source.setFaceMaterials(&.{});
         }
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -2227,6 +2475,18 @@ fn captureFaceGroups() ?[]u32 {
     const out = std.heap.c_allocator.alloc(u32, fc) catch return null;
     var f: u32 = 0;
     while (f < fc) : (f += 1) out[f] = model_source.faceGroupOf(f);
+    return out;
+}
+
+/// Snapshot texture-role identity for an upcoming topology transaction. Existing
+/// rows occupy the prefix; callers fill any requested appended rows explicitly.
+fn captureFaceMaterials(total_faces: u32) ?[]u32 {
+    const current_faces = g_edit_count / 3;
+    if (total_faces < current_faces) return null;
+    const out = std.heap.c_allocator.alloc(u32, total_faces) catch return null;
+    var face: u32 = 0;
+    while (face < current_faces) : (face += 1) out[face] = model_source.faceMaterialOf(face);
+    if (total_faces > current_faces) @memset(out[current_faces..], indexed_edit_mesh.NO_MATERIAL);
     return out;
 }
 
@@ -2320,6 +2580,9 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
 
     const cur_groups = captureFaceGroups() orelse return fail;
     defer std.heap.c_allocator.free(cur_groups);
+    const cur_materials = std.heap.c_allocator.alloc(u32, cur_count / 3) catch return fail;
+    defer std.heap.c_allocator.free(cur_materials);
+    for (cur_materials, 0..) |*material, face| material.* = model_source.faceMaterialOf(@intCast(face));
     const offset: u32 = nextFreeGroupId(cur_groups);
 
     const cur_faces = cur_count / 3;
@@ -2391,6 +2654,11 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         replaceActiveEditMesh(owned, new_count);
     if (ok) {
         model_source.setFaceGroups(groups.items);
+        const materials = std.heap.c_allocator.alloc(u32, cur_faces + new_faces) catch return fail;
+        defer std.heap.c_allocator.free(materials);
+        @memcpy(materials[0..cur_faces], cur_materials);
+        @memset(materials[cur_faces..], indexed_edit_mesh.NO_MATERIAL);
+        model_source.setFaceMaterials(materials);
         // The appended part joins the host's part-range truth (req_2644): grow the
         // preserved ranges with its fresh pair so __mesh_part_ranges reads back the
         // full partition without waiting for a cart push.
@@ -2420,68 +2688,198 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
 
 // Host-side stash of a hidden part: its exact triangles (interleaved verts) + authored groups,
 // so hide is non-destructive and unhide restores the edited geometry (no JS round-trip).
-const HiddenGroup = struct { lo: u32, hi: u32, verts: []f32, groups: []u32 };
+const HiddenGroup = struct {
+    lo: u32,
+    hi: u32,
+    verts: []f32,
+    source_verts: []f32,
+    groups: []u32,
+    materials: []u32,
+    colors: []u8,
+};
 var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .empty;
+
+fn freeHiddenGroup(group: HiddenGroup) void {
+    std.heap.c_allocator.free(group.verts);
+    std.heap.c_allocator.free(group.source_verts);
+    std.heap.c_allocator.free(group.groups);
+    std.heap.c_allocator.free(group.materials);
+    std.heap.c_allocator.free(group.colors);
+}
+
+fn clearHiddenGroups() void {
+    for (g_hidden_groups.items) |group| freeHiddenGroup(group);
+    g_hidden_groups.clearRetainingCapacity();
+}
+
+fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_source.MeshDocSnapshot {
+    const use_displayed = painted or g_save_displayed_projection;
+    const visible = if (use_displayed) (g_edit_verts orelse return null) else (model_source.verts() orelse return null);
+    const visible_count = if (use_displayed) g_edit_count else model_source.count();
+    const visible_len = @as(usize, visible_count) * 8;
+    if (visible.len < visible_len or visible_len % 24 != 0) return null;
+    const displayed_colors = if (use_displayed) collectCurrentFaceColors() else null;
+    defer if (displayed_colors) |colors| std.heap.c_allocator.free(colors);
+    if (use_displayed and visible_len > 0 and displayed_colors == null) return null;
+    const visible_blocks: usize = if (visible_len > 0) 1 else 0;
+    if (visible_blocks == 0 and g_hidden_groups.items.len == 0) return null;
+    const displayed_groups = if (use_displayed and visible_blocks == 1) captureFaceGroups() else null;
+    defer if (displayed_groups) |groups| std.heap.c_allocator.free(groups);
+    const displayed_materials = if (use_displayed and visible_blocks == 1) captureFaceMaterials(visible_count / 3) else null;
+    defer if (displayed_materials) |materials| std.heap.c_allocator.free(materials);
+    if (use_displayed and visible_blocks == 1 and (displayed_groups == null or displayed_materials == null)) return null;
+    const blocks = allocator.alloc(model_source.MeshDocFaceBlock, g_hidden_groups.items.len + visible_blocks) catch return null;
+    defer allocator.free(blocks);
+    if (visible_blocks == 1) {
+        blocks[0] = .{
+            .verts = visible[0..visible_len],
+            .groups = if (use_displayed) displayed_groups else model_source.faceGroups(),
+            .materials = if (use_displayed) displayed_materials else model_source.faceMaterials(),
+            .colors = if (use_displayed) displayed_colors else model_source.colors(),
+        };
+    }
+    for (g_hidden_groups.items, 0..) |hidden, index| {
+        blocks[index + visible_blocks] = .{
+            .verts = if (painted) hidden.verts else hidden.source_verts,
+            .groups = hidden.groups,
+            .materials = hidden.materials,
+            .colors = hidden.colors,
+        };
+    }
+    return model_source.composeMeshDocSnapshot(allocator, blocks) catch null;
+}
+
+/// Complete durable source document. Visibility is presentation state: hidden
+/// triangles remain part of RJMD even though they are absent from the live draw mesh.
+pub fn modelDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+    return composeDocumentSnapshot(allocator, false);
+}
+
+/// Paint-space twin used by painted.blob so saving with an eye closed cannot turn
+/// editor visibility into a destructive runtime export.
+pub fn paintedDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+    return composeDocumentSnapshot(allocator, true);
+}
 
 /// Hide or show the part occupying authored-group range [lo, hi). Hiding moves its triangles
 /// out of the live mesh into a host stash (geometry never crosses the bridge); showing
 /// re-appends them with their original groups. Returns whether the mesh changed.
-pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool) bool {
-    if (!model_paint.hasTarget()) return false;
-    var snap = journalSnapshotCurrent(if (hidden) "hide part" else "show part");
+pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool, journal: bool) bool {
+    if (hidden and !model_paint.hasTarget()) return false;
+    var snap = if (journal) journalSnapshotCurrent(if (hidden) "hide part" else "show part") else null;
     // Hide/show removes or restores whole stable groups, so both the pixels and the
     // recorded program remain valid across the target swap.
     beginPaintStableReplace();
     const ok = if (hidden) hideGroup(lo, hi) else showGroup(lo, hi);
     if (!ok) cancelPaintStableReplace(); // failed op — never let a stale stash blit later
-    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    if (journal and ok) journalCommit(&snap) else journalDiscard(&snap);
     return ok;
 }
 
 fn hideGroup(lo: u32, hi: u32) bool {
     const cur_verts = g_edit_verts orelse return false;
+    const cur_source = model_source.verts() orelse return false;
     const cur_count = g_edit_count;
     const cur_faces = cur_count / 3;
+    const need = @as(usize, cur_count) * 8;
+    if (cur_verts.len < need or cur_source.len < need) return false;
     const cur_groups = captureFaceGroups() orelse return false;
     defer std.heap.c_allocator.free(cur_groups);
+    const cur_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(cur_colors);
 
     var keep: std.ArrayListUnmanaged(f32) = .empty;
+    defer keep.deinit(std.heap.c_allocator);
+    var keep_source: std.ArrayListUnmanaged(f32) = .empty;
+    defer keep_source.deinit(std.heap.c_allocator);
     var keep_g: std.ArrayListUnmanaged(u32) = .empty;
     defer keep_g.deinit(std.heap.c_allocator);
+    var keep_m: std.ArrayListUnmanaged(u32) = .empty;
+    defer keep_m.deinit(std.heap.c_allocator);
+    var keep_c: std.ArrayListUnmanaged(u8) = .empty;
+    defer keep_c.deinit(std.heap.c_allocator);
     var hid: std.ArrayListUnmanaged(f32) = .empty;
+    defer hid.deinit(std.heap.c_allocator);
+    var hid_source: std.ArrayListUnmanaged(f32) = .empty;
+    defer hid_source.deinit(std.heap.c_allocator);
     var hid_g: std.ArrayListUnmanaged(u32) = .empty;
+    defer hid_g.deinit(std.heap.c_allocator);
+    var hid_m: std.ArrayListUnmanaged(u32) = .empty;
+    defer hid_m.deinit(std.heap.c_allocator);
+    var hid_c: std.ArrayListUnmanaged(u8) = .empty;
+    defer hid_c.deinit(std.heap.c_allocator);
     var any = false;
     var f: u32 = 0;
     while (f < cur_faces) : (f += 1) {
         const g = cur_groups[f];
         const base = @as(usize, f) * 24;
-        if (base + 24 > cur_verts.len) break;
+        const color_base = @as(usize, f) * 4;
         if (g != model_source.NO_FACE_GROUP and g >= lo and g < hi) {
             any = true;
-            _ = appendFloats(&hid, cur_verts[base .. base + 24]);
-            hid_g.append(std.heap.c_allocator, g) catch {};
+            if (!appendFloats(&hid, cur_verts[base .. base + 24]) or
+                !appendFloats(&hid_source, cur_source[base .. base + 24])) return false;
+            hid_g.append(std.heap.c_allocator, g) catch return false;
+            hid_m.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
+            hid_c.appendSlice(std.heap.c_allocator, cur_colors[color_base .. color_base + 4]) catch return false;
         } else {
-            _ = appendFloats(&keep, cur_verts[base .. base + 24]);
-            keep_g.append(std.heap.c_allocator, g) catch {};
+            if (!appendFloats(&keep, cur_verts[base .. base + 24]) or
+                !appendFloats(&keep_source, cur_source[base .. base + 24])) return false;
+            keep_g.append(std.heap.c_allocator, g) catch return false;
+            keep_m.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
+            keep_c.appendSlice(std.heap.c_allocator, cur_colors[color_base .. color_base + 4]) catch return false;
         }
     }
-    if (!any or keep.items.len < 24 * 3) {
-        keep.deinit(std.heap.c_allocator);
-        hid.deinit(std.heap.c_allocator);
-        hid_g.deinit(std.heap.c_allocator);
-        return false;
-    }
+    if (!any) return false;
+    g_hidden_groups.ensureUnusedCapacity(std.heap.c_allocator, 1) catch return false;
     const hid_verts = hid.toOwnedSlice(std.heap.c_allocator) catch return false;
-    const hid_groups = hid_g.toOwnedSlice(std.heap.c_allocator) catch return false;
-    g_hidden_groups.append(std.heap.c_allocator, .{ .lo = lo, .hi = hi, .verts = hid_verts, .groups = hid_groups }) catch {};
+    const hid_source_verts = hid_source.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        return false;
+    };
+    const hid_groups = hid_g.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        std.heap.c_allocator.free(hid_source_verts);
+        return false;
+    };
+    const hid_materials = hid_m.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        std.heap.c_allocator.free(hid_source_verts);
+        std.heap.c_allocator.free(hid_groups);
+        return false;
+    };
+    const hid_colors = hid_c.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        std.heap.c_allocator.free(hid_source_verts);
+        std.heap.c_allocator.free(hid_groups);
+        std.heap.c_allocator.free(hid_materials);
+        return false;
+    };
+    const hidden = HiddenGroup{
+        .lo = lo,
+        .hi = hi,
+        .verts = hid_verts,
+        .source_verts = hid_source_verts,
+        .groups = hid_groups,
+        .materials = hid_materials,
+        .colors = hid_colors,
+    };
 
-    const owned = keep.toOwnedSlice(std.heap.c_allocator) catch return false;
+    const owned = keep.toOwnedSlice(std.heap.c_allocator) catch {
+        freeHiddenGroup(hidden);
+        return false;
+    };
     defer std.heap.c_allocator.free(owned);
     const kept: u32 = @intCast(owned.len / 8);
     const ok = replaceActiveEditMesh(owned, kept);
     if (ok) {
         model_source.setFaceGroups(keep_g.items);
+        model_source.setFaceMaterials(keep_m.items);
+        _ = model_source.replaceGeometrySameTriangleCount(keep_source.items, kept);
         _ = refreshPaintLayout();
+        restoreFaceColorMetadata(keep_c.items);
+        g_hidden_groups.appendAssumeCapacity(hidden);
+    } else {
+        freeHiddenGroup(hidden);
     }
     return ok;
 }
@@ -2496,36 +2894,55 @@ fn showGroup(lo: u32, hi: u32) bool {
     }
     const i = idx orelse return false;
     const entry = g_hidden_groups.items[i];
-    defer {
-        std.heap.c_allocator.free(entry.verts);
-        std.heap.c_allocator.free(entry.groups);
-        _ = g_hidden_groups.orderedRemove(i);
-    }
 
     const cur_verts = g_edit_verts orelse return false;
+    const cur_source = model_source.verts() orelse return false;
     const cur_count = g_edit_count;
+    const need = @as(usize, cur_count) * 8;
+    if (cur_verts.len < need or cur_source.len < need) return false;
     const cur_groups = captureFaceGroups() orelse return false;
     defer std.heap.c_allocator.free(cur_groups);
+    const cur_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(cur_colors);
+    const cur_materials = std.heap.c_allocator.alloc(u32, cur_count / 3) catch return false;
+    defer std.heap.c_allocator.free(cur_materials);
+    for (cur_materials, 0..) |*material, face| material.* = model_source.faceMaterialOf(@intCast(face));
 
     var out: std.ArrayListUnmanaged(f32) = .empty;
+    defer out.deinit(std.heap.c_allocator);
     if (!appendFloats(&out, cur_verts[0 .. @as(usize, cur_count) * 8]) or !appendFloats(&out, entry.verts)) {
-        out.deinit(std.heap.c_allocator);
         return false;
     }
+    var source_out: std.ArrayListUnmanaged(f32) = .empty;
+    defer source_out.deinit(std.heap.c_allocator);
+    if (!appendFloats(&source_out, cur_source[0..need]) or !appendFloats(&source_out, entry.source_verts)) return false;
     var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
-    for (cur_groups) |g| groups.append(std.heap.c_allocator, g) catch {};
-    for (entry.groups) |g| groups.append(std.heap.c_allocator, g) catch {};
+    groups.appendSlice(std.heap.c_allocator, cur_groups) catch return false;
+    groups.appendSlice(std.heap.c_allocator, entry.groups) catch return false;
+    var materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer materials.deinit(std.heap.c_allocator);
+    materials.appendSlice(std.heap.c_allocator, cur_materials) catch return false;
+    materials.appendSlice(std.heap.c_allocator, entry.materials) catch return false;
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
+    defer colors.deinit(std.heap.c_allocator);
+    colors.appendSlice(std.heap.c_allocator, cur_colors) catch return false;
+    colors.appendSlice(std.heap.c_allocator, entry.colors) catch return false;
 
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
-        out.deinit(std.heap.c_allocator);
         return false;
     };
     defer std.heap.c_allocator.free(owned);
-    const ok = replaceActiveEditMesh(owned, cur_count + @as(u32, @intCast(entry.verts.len / 8)));
+    const new_count = cur_count + @as(u32, @intCast(entry.verts.len / 8));
+    const ok = replaceActiveEditMesh(owned, new_count);
     if (ok) {
         model_source.setFaceGroups(groups.items);
+        model_source.setFaceMaterials(materials.items);
+        _ = model_source.replaceGeometrySameTriangleCount(source_out.items, new_count);
         _ = refreshPaintLayout();
+        restoreFaceColorMetadata(colors.items);
+        freeHiddenGroup(entry);
+        _ = g_hidden_groups.orderedRemove(i);
     }
     return ok;
 }
@@ -2568,11 +2985,20 @@ pub fn meshSurvivingGroups(lo: u32, hi: u32, out: []u32) u32 {
 
 const jalloc = std.heap.c_allocator;
 
-const JournalHidden = struct { lo: u32, hi: u32, verts: []f32, groups: []u32 };
+const JournalHidden = struct {
+    lo: u32,
+    hi: u32,
+    verts: []f32,
+    source_verts: []f32,
+    groups: []u32,
+    materials: []u32,
+    colors: []u8,
+};
 const JournalEntry = struct {
     verts: []f32,
     count: u32,
     groups: ?[]u32,
+    materials: ?[]u32,
     part_ranges: ?[]u32,
     colors: ?[]u8,
     hidden: []JournalHidden,
@@ -2657,10 +3083,14 @@ pub fn meshActionDrain(out: []MeshActionEvent) usize {
 fn journalEntryBytes(e: *const JournalEntry) usize {
     var n: usize = e.verts.len * @sizeOf(f32);
     if (e.groups) |g| n += g.len * @sizeOf(u32);
+    if (e.materials) |m| n += m.len * @sizeOf(u32);
     if (e.part_ranges) |p| n += p.len * @sizeOf(u32);
     if (e.colors) |c| n += c.len;
     n += e.hidden.len * @sizeOf(JournalHidden);
-    for (e.hidden) |h| n += h.verts.len * @sizeOf(f32) + h.groups.len * @sizeOf(u32);
+    for (e.hidden) |h| {
+        n += (h.verts.len + h.source_verts.len) * @sizeOf(f32);
+        n += h.groups.len * @sizeOf(u32) + h.materials.len * @sizeOf(u32) + h.colors.len;
+    }
     if (e.note) |note| n += note.len;
     return n;
 }
@@ -2668,11 +3098,15 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
 fn journalFreeEntry(e: *JournalEntry) void {
     jalloc.free(e.verts);
     if (e.groups) |g| jalloc.free(g);
+    if (e.materials) |m| jalloc.free(m);
     if (e.part_ranges) |p| jalloc.free(p);
     if (e.colors) |c| jalloc.free(c);
     for (e.hidden) |h| {
         jalloc.free(h.verts);
+        jalloc.free(h.source_verts);
         jalloc.free(h.groups);
+        jalloc.free(h.materials);
+        jalloc.free(h.colors);
     }
     if (e.hidden.len > 0) jalloc.free(e.hidden);
     if (e.note) |n| jalloc.free(n);
@@ -2694,6 +3128,7 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         .verts = v,
         .count = g_edit_count,
         .groups = null,
+        .materials = null,
         .part_ranges = null,
         .colors = null,
         .hidden = &.{},
@@ -2704,19 +3139,41 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         .action_kind = null,
     };
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
+    if (model_source.faceMaterials()) |rows| entry.materials = jalloc.dupe(u32, rows) catch null;
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
     entry.colors = collectCurrentFaceColors();
     if (g_hidden_groups.items.len > 0) {
         var hs: std.ArrayListUnmanaged(JournalHidden) = .empty;
         for (g_hidden_groups.items) |h| {
             const hv = jalloc.dupe(f32, h.verts) catch continue;
-            const hg = jalloc.dupe(u32, h.groups) catch {
+            const hsv = jalloc.dupe(f32, h.source_verts) catch {
                 jalloc.free(hv);
                 continue;
             };
-            hs.append(jalloc, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .groups = hg }) catch {
+            const hg = jalloc.dupe(u32, h.groups) catch {
                 jalloc.free(hv);
+                jalloc.free(hsv);
+                continue;
+            };
+            const hm = jalloc.dupe(u32, h.materials) catch {
+                jalloc.free(hv);
+                jalloc.free(hsv);
                 jalloc.free(hg);
+                continue;
+            };
+            const hc = jalloc.dupe(u8, h.colors) catch {
+                jalloc.free(hv);
+                jalloc.free(hsv);
+                jalloc.free(hg);
+                jalloc.free(hm);
+                continue;
+            };
+            hs.append(jalloc, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .source_verts = hsv, .groups = hg, .materials = hm, .colors = hc }) catch {
+                jalloc.free(hv);
+                jalloc.free(hsv);
+                jalloc.free(hg);
+                jalloc.free(hm);
+                jalloc.free(hc);
             };
         }
         entry.hidden = hs.toOwnedSlice(jalloc) catch &.{};
@@ -2855,11 +3312,13 @@ fn journalLogEntryView(entry: *const JournalEntry) mesh_journal_log.EntryView {
 fn journalCurrentStateBytes(groups: ?[]const u32) usize {
     var bytes = @as(usize, g_edit_count) * 8 * @sizeOf(f32);
     if (groups) |rows| bytes += rows.len * @sizeOf(u32);
+    if (model_source.faceMaterials()) |rows| bytes += rows.len * @sizeOf(u32);
     if (model_source.partRanges()) |ranges| bytes += ranges.len * @sizeOf(u32);
     if (model_source.colors()) |colors| bytes += colors.len;
     bytes += g_hidden_groups.items.len * @sizeOf(HiddenGroup);
     for (g_hidden_groups.items) |hidden| {
-        bytes += hidden.verts.len * @sizeOf(f32) + hidden.groups.len * @sizeOf(u32);
+        bytes += (hidden.verts.len + hidden.source_verts.len) * @sizeOf(f32);
+        bytes += hidden.groups.len * @sizeOf(u32) + hidden.materials.len * @sizeOf(u32) + hidden.colors.len;
     }
     if (g_journal_note) |note| bytes += note.len;
     return bytes;
@@ -2990,23 +3449,44 @@ fn journalInstall(e: *const JournalEntry) bool {
         return false;
     }
     // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).
-    for (g_hidden_groups.items) |h| {
-        std.heap.c_allocator.free(h.verts);
-        std.heap.c_allocator.free(h.groups);
-    }
-    g_hidden_groups.clearRetainingCapacity();
+    clearHiddenGroups();
     for (e.hidden) |h| {
         const hv = std.heap.c_allocator.dupe(f32, h.verts) catch continue;
-        const hg = std.heap.c_allocator.dupe(u32, h.groups) catch {
+        const hsv = std.heap.c_allocator.dupe(f32, h.source_verts) catch {
             std.heap.c_allocator.free(hv);
             continue;
         };
-        g_hidden_groups.append(std.heap.c_allocator, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .groups = hg }) catch {
+        const hg = std.heap.c_allocator.dupe(u32, h.groups) catch {
             std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
+            continue;
+        };
+        const hm = std.heap.c_allocator.dupe(u32, h.materials) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
             std.heap.c_allocator.free(hg);
+            continue;
+        };
+        const hc = std.heap.c_allocator.dupe(u8, h.colors) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
+            std.heap.c_allocator.free(hg);
+            std.heap.c_allocator.free(hm);
+            continue;
+        };
+        g_hidden_groups.append(std.heap.c_allocator, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .source_verts = hsv, .groups = hg, .materials = hm, .colors = hc }) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
+            std.heap.c_allocator.free(hg);
+            std.heap.c_allocator.free(hm);
+            std.heap.c_allocator.free(hc);
         };
     }
     if (e.groups) |g| model_source.setFaceGroups(g);
+    if (e.materials) |materials|
+        model_source.setFaceMaterials(materials)
+    else
+        model_source.clearFaceMaterials();
     // Tripwire (req_3049): restoring a snapshot that carries NO ranges over a mesh
     // that has them silently un-parts the model — the save then persists a doc that
     // reopens merged. Name it when it happens.
@@ -3102,6 +3582,8 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     defer groups.deinit(jalloc);
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(jalloc);
+    var copied_materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer copied_materials.deinit(jalloc);
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
     defer remap.deinit(jalloc);
     var next_local: u32 = 0;
@@ -3133,16 +3615,24 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
         groups.append(jalloc, gop.value_ptr.*) catch return fail;
         const c = trueFaceColor(f);
         colors.appendSlice(jalloc, c[0..]) catch return fail;
+        copied_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return fail;
     }
     if (groups.items.len == 0) return fail;
 
     var snap = journalSnapshotCurrent(if (mirror_axis >= 0) "mirror part" else "duplicate part");
     const first_new_face = model_paint.faceCount();
+    const installed_materials = captureFaceMaterials(first_new_face + @as(u32, @intCast(copied_materials.items.len))) orelse {
+        journalDiscard(&snap);
+        return fail;
+    };
+    defer jalloc.free(installed_materials);
+    @memcpy(installed_materials[first_new_face..], copied_materials.items);
     const r = appendGroupInner(out.items, @intCast(out.items.len / 8), groups.items);
     if (!r.ok) {
         journalDiscard(&snap);
         return r;
     }
+    model_source.setFaceMaterials(installed_materials);
     // The copy keeps the source's per-face paint — a duplicate reads as a twin.
     var i: u32 = 0;
     while (i < groups.items.len) : (i += 1) {
@@ -3304,6 +3794,8 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     defer groups.deinit(jalloc);
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(jalloc);
+    var materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer materials.deinit(jalloc);
     var all_ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer all_ranges.deinit(jalloc);
     var fresh_ranges: std.ArrayListUnmanaged(u32) = .empty;
@@ -3312,6 +3804,10 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     if (!appendFloats(&verts, cur_verts[0 .. @as(usize, g_edit_count) * 8])) return fail;
     groups.appendSlice(jalloc, cur_groups) catch return fail;
     colors.appendSlice(jalloc, cur_colors) catch return fail;
+    var material_face: u32 = 0;
+    while (material_face < cur_faces) : (material_face += 1) {
+        materials.append(jalloc, model_source.faceMaterialOf(material_face)) catch return fail;
+    }
     all_ranges.appendSlice(jalloc, part_ranges) catch return fail;
 
     var next_group: u32 = nextFreeGroupId(cur_groups);
@@ -3351,6 +3847,7 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
                 }
                 groups.append(jalloc, range_start + group_entry.value_ptr.*) catch return fail;
                 colors.appendSlice(jalloc, cur_colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return fail;
+                materials.append(jalloc, model_source.faceMaterialOf(f)) catch return fail;
                 copied_faces += 1;
             }
             if (copied_faces == 0 or next_local == 0) return fail;
@@ -3371,6 +3868,7 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
         return fail;
     }
     model_source.setFaceGroups(groups.items);
+    model_source.setFaceMaterials(materials.items);
     model_source.setPartRanges(all_ranges.items);
     if (!applyExactFaceColors(colors.items, @intCast(groups.items.len))) {
         if (snap) |*before| _ = journalInstall(before);
@@ -3588,7 +4086,7 @@ pub fn meshMergeSelectedFaces() bool {
     const base_colors = collectCurrentFaceColors() orelse return false;
     defer std.heap.c_allocator.free(base_colors);
     const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts) orelse return false;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.mergeSelected(mask) catch return false)) return false;
     var lowered = indexed.lower() catch return false;
@@ -3600,7 +4098,7 @@ pub fn meshMergeSelectedFaces() bool {
     var snap = journalSnapshotCurrent("merge faces");
     mesh_edit.clearSelection();
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors);
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
@@ -3671,6 +4169,8 @@ fn partitionGlassFaces(colors: []const u8) bool {
     defer new_groups.deinit(jalloc);
     var new_colors: std.ArrayListUnmanaged(u8) = .empty;
     defer new_colors.deinit(jalloc);
+    var new_materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer new_materials.deinit(jalloc);
 
     inline for (.{ true, false }) |want_opaque| {
         var f: u32 = 0;
@@ -3682,12 +4182,14 @@ fn partitionGlassFaces(colors: []const u8) bool {
             if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
             if (cur_groups) |g| new_groups.append(jalloc, g[f]) catch return false;
             new_colors.appendSlice(jalloc, colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return false;
+            new_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
         }
     }
     const count: u32 = @intCast(out.items.len / 8);
     if (count != g_edit_count) return false;
     if (!replaceActiveEditMesh(out.items, count)) return false;
     if (cur_groups != null) model_source.setFaceGroups(new_groups.items);
+    model_source.setFaceMaterials(new_materials.items);
     model_paint.applyColors(new_colors.items);
     if (model_source.colors()) |src| {
         const n = @min(src.len, new_colors.items.len);
@@ -3826,6 +4328,8 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     defer add_groups.deinit(jalloc);
     var add_colors: std.ArrayListUnmanaged(u8) = .empty;
     defer add_colors.deinit(jalloc);
+    var add_materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer add_materials.deinit(jalloc);
     var add_part: std.ArrayListUnmanaged(u32) = .empty;
     defer add_part.deinit(jalloc);
     var next_group: u32 = if (has_groups) nextFreeGroupId(cur_groups.?) else 0;
@@ -3856,6 +4360,7 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         }
         const c = trueFaceColor(f);
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
+        add_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
         if (base_part) |bp| add_part.append(jalloc, bp[f]) catch return false;
     }
     // Rim walls on the selection's boundary edges (incident to exactly ONE selected face).
@@ -3881,6 +4386,8 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         const c = trueFaceColor(fa);
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
+        add_materials.append(jalloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
+        add_materials.append(jalloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
         if (base_part) |bp| {
             add_part.append(jalloc, bp[fa]) catch return false;
             add_part.append(jalloc, bp[fa]) catch return false;
@@ -3891,10 +4398,21 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     mesh_edit.clearSelection();
     const first_new_face = tri_count;
     const new_count: u32 = @intCast(out.items.len / 8);
+    const materials = captureFaceMaterials(new_count / 3) orelse {
+        journalDiscard(&snap);
+        return false;
+    };
+    defer jalloc.free(materials);
+    if (add_materials.items.len != materials.len - first_new_face) {
+        journalDiscard(&snap);
+        return false;
+    }
+    @memcpy(materials[first_new_face..], add_materials.items);
     if (!replaceActiveEditMesh(out.items, new_count)) {
         journalDiscard(&snap);
         return false;
     }
+    model_source.setFaceMaterials(materials);
     if (has_groups) {
         var all_groups: std.ArrayListUnmanaged(u32) = .empty;
         defer all_groups.deinit(jalloc);
@@ -5724,6 +6242,80 @@ pub fn meshEditSetFaceGroups(groups: []const u32) void {
     model_source.setFaceGroups(groups);
     mesh_edit.faceGroupsChanged();
 }
+/// Restore the meshdoc's stable texture-role row (one index per render triangle).
+/// Like face groups, this is imported once into indexed topology and then follows
+/// face identity through cuts and splits.
+pub fn meshEditSetFaceMaterials(materials: []const u32) bool {
+    if (materials.len != g_edit_count / 3) return false;
+    clearIndexedEditMesh();
+    model_source.setFaceMaterials(materials);
+    return true;
+}
+
+/// Assign/clear a texture role on the CURRENT authored-face selection. Geometry and
+/// paint pixels do not move; only indexed face metadata changes, and it journals with
+/// the model so Undo cannot desynchronise the Rig panel from the meshdoc.
+pub fn meshTextureSlotAssign(material: u32) u32 {
+    if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return 0;
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return 0;
+    defer std.heap.c_allocator.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0 or !ensureIndexedEditMesh()) return 0;
+    var snap = journalSnapshotCurrent("texture slot");
+    const changed = g_indexed_edit_mesh.?.assignSelectedMaterial(mask, material);
+    if (changed == 0) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    var lowered = g_indexed_edit_mesh.?.lower() catch {
+        journalDiscard(&snap);
+        return 0;
+    };
+    defer lowered.deinit();
+    model_source.setFaceMaterials(lowered.materials);
+    journalCommit(&snap);
+    return changed;
+}
+
+/// Removing a named role compacts later indices and clears faces that wore it.
+pub fn meshTextureSlotRemove(material: u32) u32 {
+    if (!ensureIndexedEditMesh()) return 0;
+    var snap = journalSnapshotCurrent("remove texture slot");
+    var changed: u32 = 0;
+    for (g_indexed_edit_mesh.?.faces.items) |*face| {
+        if (!face.alive or face.material == indexed_edit_mesh.NO_MATERIAL) continue;
+        if (face.material == material) {
+            face.material = indexed_edit_mesh.NO_MATERIAL;
+            changed += 1;
+        } else if (face.material > material) {
+            face.material -= 1;
+            changed += 1;
+        }
+    }
+    if (changed == 0) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    var lowered = g_indexed_edit_mesh.?.lower() catch {
+        journalDiscard(&snap);
+        return 0;
+    };
+    defer lowered.deinit();
+    model_source.setFaceMaterials(lowered.materials);
+    journalCommit(&snap);
+    return changed;
+}
+
+pub fn meshTextureSlotSelect(material: u32) u32 {
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return 0;
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return 0;
+    defer std.heap.c_allocator.free(mask);
+    var face: u32 = 0;
+    while (face < tri_count) : (face += 1) mask[face] = model_source.faceMaterialOf(face) == material;
+    return mesh_edit.selectFacesByTriangleMask(mask);
+}
 /// Adopt the outliner's part ranges (flattened [lo,hi) group-id pairs) and rebuild the
 /// welded topology, so coincident verts in DIFFERENT parts stay separate logical verts.
 /// This is also where a PERSISTED doc's ranges arrive on load/resume — a doc saved
@@ -6532,6 +7124,34 @@ var g_slim_static_cache_len: usize = 0;
 // Per-frame staging window for foliage-card rows that overflow the retained pool (the
 // static→dynamic degrade path), the SlimInstance analogue of g_inst_scratch.
 var g_slim_inst_scratch: [MAX_INSTANCES]SlimInstance = undefined;
+
+pub const StaticInstanceMemoryStats = struct {
+    /// Occupied bump-prefix bytes. This includes retained entries that aged out
+    /// of the pointer cache but cannot be reclaimed until resetForReload.
+    standard_used_bytes: u64,
+    standard_capacity_bytes: u64,
+    slim_used_bytes: u64,
+    slim_capacity_bytes: u64,
+};
+
+/// Device-local retained instance pools used by the compiled/map world. `used`
+/// is the occupied logical prefix, while `capacity` is the current GPU buffer
+/// allocation. Neither number is process RSS and neither estimates driver
+/// bookkeeping outside these buffers.
+pub fn staticInstanceMemoryStats() StaticInstanceMemoryStats {
+    return .{
+        .standard_used_bytes = g_static_inst_top,
+        .standard_capacity_bytes = if (g_static_inst_buf != null)
+            @as(u64, g_static_inst_cap) * @sizeOf(InstanceData)
+        else
+            0,
+        .slim_used_bytes = g_slim_static_top,
+        .slim_capacity_bytes = if (g_slim_static_buf != null)
+            @as(u64, g_slim_static_cap) * @sizeOf(SlimInstance)
+        else
+            0,
+    };
+}
 
 // LOUD one-shot warnings for every instance-pool degrade (req_2708). A batch
 // that can't retain falls to per-frame staging; a full per-frame pool DROPS the
@@ -8619,9 +9239,10 @@ const StaticInstDraw = struct { offset: u64, count: u32 };
 /// staging window stays small. Returns null when the batch is malformed, the cache
 /// is full, or capacity is exhausted; the caller falls back to the dynamic path.
 ///
-/// The WHOLE array uploads (count = idata.len / stride), not the node's draw
-/// count: many nodes may draw sub-ranges of one shared upload (world streaming's
-/// per-chunk draws via scene3d_instance_first) and all resolve to this one entry.
+/// The WHOLE array is reserved and keys the cache (count = idata.len / stride),
+/// not the node's draw count: many nodes may draw sub-ranges of one shared upload
+/// (world streaming's per-chunk draws via scene3d_instance_first). Producers with
+/// stable over-allocation may opt into staging only their populated prefix.
 /// Stage `n` instance rows from `idata` into g_static_inst_buf starting at byte
 /// `dst_offset`, streaming through g_inst_scratch in MAX_INSTANCES chunks. Used
 /// for the first upload AND the in-place re-upload when a static batch's bytes
@@ -8656,19 +9277,21 @@ fn stageStaticInstanceBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32,
     }
 }
 
-fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32) ?StaticInstDraw {
+fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32, populated_hint: u32) ?StaticInstDraw {
     if (stride < 9 or idata.len < stride) return null;
     const icount: u32 = @intCast(idata.len / @as(usize, stride));
+    const populated_count = static_instance_policy.populatedRowCount(icount, populated_hint) orelse return null;
     const key = @intFromPtr(idata.ptr);
     var i: usize = 0;
     while (i < g_static_inst_cache_len) : (i += 1) {
         const e = &g_static_inst_cache[i];
         if (e.used and e.key == key and e.count == icount) {
             // DIRTYRECT: the loader edited the bytes in place and bumped the
-            // node version — re-upload the whole batch at its retained offset
-            // (offsets stay stable, so streamed sub-ranges remain valid).
+            // node version — re-upload the producer-declared populated prefix
+            // at its retained offset (offsets stay stable, so streamed sub-ranges
+            // remain valid; the default hint still uploads the whole source).
             if (e.version != version) {
-                stageStaticInstanceBytes(queue, idata, stride, icount, e.offset);
+                stageStaticInstanceBytes(queue, idata, stride, populated_count, e.offset);
                 e.version = version;
             }
             e.last_seen = g_dbg_frame;
@@ -8687,9 +9310,9 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
         g_static_inst_top = 0;
     }
     const used_count: u32 = @intCast(g_static_inst_top / @sizeOf(InstanceData));
-    // Retained static uploads must be whole-array because streamed draw nodes
-    // address sub-ranges by scene3d_instance_first. A partial upload makes any
-    // later range clamp to count=0, so turning the camera can drop whole chunks.
+    // Retained static RESERVATIONS must cover the whole source because streamed
+    // draw nodes address sub-ranges by scene3d_instance_first. The optional
+    // populated prefix changes staging only, never the stable address range.
     // A batch past the current capacity GROWS the pool (req_2843); only the
     // device's refusal drops to the loud per-frame degrade path below.
     if (!static_instance_policy.canRetainWholeBatch(icount, used_count, g_static_inst_cap)) {
@@ -8702,20 +9325,18 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
         staticRetainWarn("standard", "cache table", icount, used_count);
         return null;
     };
-    const n: u32 = icount;
-    if (n == 0) return null;
     const base_offset = g_static_inst_top;
-    stageStaticInstanceBytes(queue, idata, stride, n, base_offset);
-    g_static_inst_top += @as(u64, n) * @sizeOf(InstanceData);
-    slot.* = .{ .key = key, .count = n, .offset = base_offset, .used = true, .version = version, .last_seen = g_dbg_frame };
-    return .{ .offset = base_offset, .count = n };
+    stageStaticInstanceBytes(queue, idata, stride, populated_count, base_offset);
+    g_static_inst_top += @as(u64, icount) * @sizeOf(InstanceData);
+    slot.* = .{ .key = key, .count = icount, .offset = base_offset, .used = true, .version = version, .last_seen = g_dbg_frame };
+    return .{ .offset = base_offset, .count = icount };
 }
 
 // ── Foliage cards: the slim 24-byte twin of the static-instance staging above ──
 // Foliage source rows are stride-13 (transform12 + shape) like every foliage family;
 // the transform is px,py,pz, pitch,yaw,0(rz), wide,len,wide, r,g,b. We drop rz and
-// the duplicate width and pack to SlimInstance. Same whole-array retained-upload
-// contract as stageStaticInstanceBytes so streamed sub-ranges stay addressable.
+// the duplicate width and pack to SlimInstance. Same whole-source reservation +
+// optional populated-prefix staging contract as the standard instance path.
 fn stageStaticSlimBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: u32, dst_offset: u64) void {
     var done: u32 = 0;
     while (done < n) {
@@ -8741,16 +9362,17 @@ fn stageStaticSlimBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: 
     }
 }
 
-fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32) ?StaticInstDraw {
+fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32, populated_hint: u32) ?StaticInstDraw {
     if (stride < 12 or idata.len < stride) return null;
     const icount: u32 = @intCast(idata.len / @as(usize, stride));
+    const populated_count = static_instance_policy.populatedRowCount(icount, populated_hint) orelse return null;
     const key = @intFromPtr(idata.ptr);
     var i: usize = 0;
     while (i < g_slim_static_cache_len) : (i += 1) {
         const e = &g_slim_static_cache[i];
         if (e.used and e.key == key and e.count == icount) {
             if (e.version != version) {
-                stageStaticSlimBytes(queue, idata, stride, icount, e.offset);
+                stageStaticSlimBytes(queue, idata, stride, populated_count, e.offset);
                 e.version = version;
             }
             e.last_seen = g_dbg_frame;
@@ -8780,7 +9402,7 @@ fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: [
         return null;
     };
     const base_offset = g_slim_static_top;
-    stageStaticSlimBytes(queue, idata, stride, icount, base_offset);
+    stageStaticSlimBytes(queue, idata, stride, populated_count, base_offset);
     g_slim_static_top += @as(u64, icount) * @sizeOf(SlimInstance);
     slot.* = .{ .key = key, .count = icount, .offset = base_offset, .used = true, .version = version, .last_seen = g_dbg_frame };
     return .{ .offset = base_offset, .count = icount };
@@ -8817,6 +9439,7 @@ fn ensureGroundPipeline(io: std.Io, environ: *const std.process.Environ.Map, for
     // zero output otherwise (req_2692).
     var progress = compile_progress.CompileProgress{};
     progress.start(io, environ, wgsl.len);
+    defer progress.finishMemory();
     defer progress.stop();
     const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
     const sm = device.createShaderModule(&sm_desc) orelse {
@@ -9608,9 +10231,9 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
         if (leader.scene3d_instance_static) {
             if (leader.scene3d_instance_data) |idata| {
                 const sd_opt = if (is_slim)
-                    resolveStaticSlimInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version)
+                    resolveStaticSlimInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version, leader.scene3d_instance_populated_count)
                 else
-                    resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version);
+                    resolveStaticInstances(device, queue, idata, leader.scene3d_instance_stride, leader.scene3d_instance_version, leader.scene3d_instance_populated_count);
                 if (sd_opt) |sd| {
                     mvisited[gi] = true;
                     const first: u32 = @min(leader.scene3d_instance_first, sd.count);

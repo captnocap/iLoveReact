@@ -465,8 +465,8 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
 
 // Write the ACTIVE model's own geometry + atlas into its package, so the folders that back
 // its paintings aren't empty: a painting implies a mesh + an atlas, so mesh/ and atlases/
-// must populate too (req_2533). mesh/base.blob = full-res interleaved verts (via the host
-// door); mesh/doc.blob + mesh/parts.json = the editable model DOCUMENT (verts + face
+// must populate too (req_2533). mesh/base.blob = durable interleaved verts (the current
+// quality projection when the user chose one, req_3315); mesh/doc.blob + mesh/parts.json = the editable model DOCUMENT (verts + face
 // groups + part ranges + row metadata, req_2753 — what makes a reopened package the same
 // multi-part document instead of its primitive seed); atlases/base.png = the current
 // atlas readback. Best-effort — each piece is skipped when its host door or data is
@@ -521,10 +521,9 @@ export function writeModelArtifacts(
       // render the painted model exactly as the editor shows it.
       const paintedWritten = host.__model_painted_mesh_write?.(`${meshDir}/painted.blob`) === 1;
       // req_3133: stamp WHICH meshdoc revision this painted form belongs to. A
-      // painted.blob whose vertex count mismatches the doc is ambiguous — stale
-      // paint from before a geometry edit (drop it, req_2832) OR the CURRENT
-      // quality-DECIMATED display the user painted (the doc keeps the full-res
-      // source by design). A matching stamp resolves it: same save, same look.
+      // painted.blob whose vertex count mismatches the doc is stale paint from before
+      // a geometry edit (req_2832). Quality saves now persist the same chosen resident
+      // topology into the doc, so reduced paint and editable geometry agree by count.
       const paintedMetaPath = `${meshDir}/painted.json`;
       if (paintedWritten) {
         const doc = stat(`${meshDir}/doc.blob`);

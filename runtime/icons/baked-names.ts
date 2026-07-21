@@ -1963,6 +1963,7 @@ export const BAKED_ICON_NAMES: ReadonlySet<string> = new Set([
   "tool.text",
   "tool.marquee",
   "tool.lasso",
+  "tool.pen",
   "cat.floor",
   "cat.wall",
   "cat.ramp",

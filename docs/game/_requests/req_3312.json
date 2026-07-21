@@ -1,0 +1,28 @@
+{
+  "id": "req_3312",
+  "at": "2026-07-21T02:45:00.102Z",
+  "origin": "codex:019f7a9c",
+  "text": "this also really needs to stop its very annoying. this model has had mirror mode on the entire time, so the fact that [Image #1] this mirrored face are not doing the same thing. one is extruded out and the other is caved in but its the identical edits on both sides of it [Image #2]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T02:45:09.497Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:24:49.160Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Live mirrored edits now synchronize each stable indexed quad twin to the same physical diagonal before lowering back to render triangles. The same-face install preserves atlas pixels, authored groups/materials, part ranges, and active boundary-edge selection; the TypeScript twin uses the same canonical lower-face policy. Added host and TS regressions for opposite imported diagonals and selection preservation. Native mesh-edit tests, editMesh 10/10, and the full ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:24:49.159Z"
+}

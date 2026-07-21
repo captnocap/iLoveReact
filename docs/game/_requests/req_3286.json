@@ -1,0 +1,28 @@
+{
+  "id": "req_3286",
+  "at": "2026-07-20T09:56:46.237Z",
+  "origin": "codex:019f7a9c",
+  "text": "this landed horribly for one the ui for it is attrocious i dont even know whats happeneing here [Image #1] but secondly all of those added slots i show there came from nothing because i had no faces selected so how can it make a slot",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:56:58.503Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T10:05:36.398Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Face-texture role creation now requires selected authored faces: + assigns the selection atomically and refuses to mint empty metadata when selection is empty. Added focused regression coverage.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T10:05:36.397Z"
+}

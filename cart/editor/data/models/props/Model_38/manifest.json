@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "primitive:cube:38",
+  "name": "Model 38",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cube_38",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": []
+}

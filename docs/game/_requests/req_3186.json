@@ -1,0 +1,17 @@
+{
+  "id": "req_3186",
+  "at": "2026-07-18T08:52:51.846Z",
+  "origin": "one-off",
+  "text": "hey i just read the spec file u read against that passing on document and i am confused did you prompt codex to go agaist the spec or did they come back with code that was against it and you just went with it",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:53:27.592Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3243",
+  "at": "2026-07-20T03:25:58.297Z",
+  "origin": "session:5a3945f7",
+  "text": "hey nice [Image #5] thanks so uh  hm i just found a real ugly lookin bug. so i duplicated the heroin_bob_head and when t rying to rename it, it seems to have made 3 copies of it ? [Image #6] lol",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:26:26.214Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:37:01.106Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the 'duplicate then rename made 3 copies' report with req_3246: disk was never wrong (exactly ONE he_ad package dir, carrying all 15 recovered parts) — the extra rows were reconciler ghosts in the Assets tree. Cause: duplicate+rename stresses the array-sibling hazard — the name-sorted Models rows re-rank through a keyed sibling list on every rename keystroke while renameModel also moved the entire package directory per keystroke. Fixed in ab03a73a5: child lists get their own HW_TreeChildren container, the tree holds shape during an active rename, and the folder move settles once at finishRenameModel.",
+  "shas": [
+    "ab03a73a5"
+  ],
+  "resolvedAt": "2026-07-20T03:37:01.106Z"
+}

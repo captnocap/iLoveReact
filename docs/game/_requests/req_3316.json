@@ -1,0 +1,28 @@
+{
+  "id": "req_3316",
+  "at": "2026-07-21T03:51:27.992Z",
+  "origin": "codex:019f8078",
+  "text": "is it possible to convert stl format for importing?",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T03:51:32.599Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:51:51.089Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed current editor support is GLB/OBJ only (the native mesh loader and import UI reject STL). Blender is installed locally, so STL can reliably be converted to GLB for import. No conversion feature was added because the request asked feasibility; next step is either convert a supplied STL or add an editor-side Convert STL action.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:51:51.088Z"
+}

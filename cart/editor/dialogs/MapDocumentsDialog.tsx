@@ -115,7 +115,7 @@ export default function MapDocumentsDialog(props: {
                 style={{ width: 116, height: 32, color: coastalSeedValid ? TEXT : DANGER, backgroundColor: '#101114', borderWidth: 1, borderColor: coastalSeedValid ? BORDER : DANGER, borderRadius: 7, paddingLeft: 10, paddingRight: 10, fontSize: 12, fontFamily: MONO }}
               />
               <Text style={{ color: FAINT, fontSize: 10, flexGrow: 1 }}>
-                9×9 coastal baseline · terrain, water, roads, rail, and one floor anchor per building site
+                25×25 coastal city · 3 km × 3 km of terrain, water, roads, rail, and floor anchors
               </Text>
               <Pressable
                 onPress={() => { if (coastalSeedValid) props.onGenerateCoastal(name, parsedCoastalSeed, measuredTriangles); }}

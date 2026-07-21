@@ -2460,7 +2460,51 @@ export function mirrorEditAxes(base: EditMesh, next: EditMesh, moved: Iterable<n
       touched = true;
     }
   }
-  return touched ? { ...next, verts } : next;
+  if (!touched) return next;
+
+  // Vertex reflection is only half of live mirror editing. A non-planar quad's
+  // physical diagonal is authored topology; two pre-existing mirror faces may have
+  // imported opposite diagonals even though their four positions match perfectly.
+  // Canonicalize each reflected pair from the lower stable face index, exactly as
+  // the host's indexed face table does, so both sides fold in the same direction.
+  const result: EditMesh = { ...next, verts };
+  const faceByVertices = new Map<string, number>();
+  const faceKey = (loop: number[]) => [...loop].sort((a, b) => a - b).join(',');
+  result.faces.forEach((face, index) => { if (face.loop.length === 4) faceByVertices.set(faceKey(face.loop), index); });
+  let faces: EditMeshFace[] | undefined;
+  for (let sourceIndex = 0; sourceIndex < result.faces.length; sourceIndex += 1) {
+    const source = (faces ?? result.faces)[sourceIndex];
+    if (source.loop.length !== 4) continue;
+    for (const subset of subsets) {
+      const reflectedLoop: number[] = [];
+      for (const vertex of source.loop) {
+        const reflected: V3 = [...base.verts[vertex]] as V3;
+        for (const axis of subset) reflected[axis] = 2 * c - reflected[axis];
+        const twinVertex = byPos.get(key(reflected));
+        if (twinVertex == null) { reflectedLoop.length = 0; break; }
+        reflectedLoop.push(twinVertex);
+      }
+      if (reflectedLoop.length !== 4) continue;
+      const twinIndex = faceByVertices.get(faceKey(reflectedLoop));
+      if (twinIndex == null || twinIndex <= sourceIndex) continue;
+      const sourceDiagonal = source.diagonal ?? quadDiagonalVertices(result, source);
+      const reflectedDiagonal: number[] = [];
+      for (const vertex of sourceDiagonal) {
+        const reflected: V3 = [...base.verts[vertex]] as V3;
+        for (const axis of subset) reflected[axis] = 2 * c - reflected[axis];
+        const twinVertex = byPos.get(key(reflected));
+        if (twinVertex == null) { reflectedDiagonal.length = 0; break; }
+        reflectedDiagonal.push(twinVertex);
+      }
+      if (reflectedDiagonal.length !== 2) continue;
+      const twin = (faces ?? result.faces)[twinIndex];
+      if (!reflectedDiagonal.every((vertex) => twin.loop.includes(vertex))) continue;
+      if (!faces) faces = result.faces.map((face) => ({ ...face }));
+      faces[sourceIndex] = { ...faces[sourceIndex], diagonal: [sourceDiagonal[0], sourceDiagonal[1]] };
+      faces[twinIndex] = { ...faces[twinIndex], diagonal: [reflectedDiagonal[0], reflectedDiagonal[1]] };
+    }
+  }
+  return faces ? { ...result, faces } : result;
 }
 
 /** Single-plane symmetry — `mirrorEditAxes` for one axis (back-compat). Pure. */

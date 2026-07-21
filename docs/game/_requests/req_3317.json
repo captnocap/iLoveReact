@@ -1,0 +1,28 @@
+{
+  "id": "req_3317",
+  "at": "2026-07-21T03:53:18.208Z",
+  "origin": "codex:019f8078",
+  "text": "cool yeah go ahead and add it in-house for us",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T03:53:21.674Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:57:10.568Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added local STL import: File → Import Model now accepts .stl, invokes the installed Blender headlessly to convert to GLB, stores a durable model package recording the STL source, and opens it through the normal editor path. Verified focused command tests (5 passed), a real Blender STL→GLB smoke conversion, editor bundle, and ReleaseFast native editor build.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:57:10.568Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_3259",
+  "at": "2026-07-20T06:16:58.441Z",
+  "origin": "session:5a3945f7",
+  "text": "uh so for something like eye lid animation, if i want to be able to close the eyes for blinking what would you recommend to do because its just paint for the eyelids not a mesh itself like the mouth for lips behaves",
+  "status": "doing",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:17:32.628Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

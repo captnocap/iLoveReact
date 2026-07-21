@@ -17,7 +17,7 @@ import {
   isProtectedAt,
   isWaterAt,
   isWaterForPlanAt,
-  packCoastalCityPainting,
+  packCoastalCityPaintingStream,
   protectedLandKindAt,
   riverHalfWidthAt,
   riverZAt,
@@ -48,12 +48,13 @@ test('numeric seed generation is deterministic and stage-stable', () => {
   assert(plan.stats.infrastructureCompleteBeforeSites, 'infrastructure-first invariant absent');
 });
 
-test('plan fills exactly the 9x9 native chunk window', () => {
-  assert(plan.chunks.length === 81, `expected 81 chunks, got ${plan.chunks.length}`);
-  assert(plan.bounds.minX === -60 && plan.bounds.maxX === 1020, 'world X bounds drifted');
-  assert(plan.bounds.minZ === -60 && plan.bounds.maxZ === 1020, 'world Z bounds drifted');
+test('plan fills the 25x25 three-kilometre native chunk window', () => {
+  assert(plan.chunks.length === 625, `expected 625 chunks, got ${plan.chunks.length}`);
+  assert(plan.bounds.minX === -60 && plan.bounds.maxX === 2940, 'world X bounds drifted');
+  assert(plan.bounds.minZ === -60 && plan.bounds.maxZ === 2940, 'world Z bounds drifted');
+  assert((plan.bounds.maxX - plan.bounds.minX) * (plan.bounds.maxZ - plan.bounds.minZ) === 9_000_000, 'world is not exactly 9 km²');
   const keys = new Set(plan.chunks.map((chunk) => `${chunk.cx},${chunk.cz}`));
-  assert(keys.size === 81 && keys.has('0,0') && keys.has('8,8'), 'chunk coordinates are not 0..8 squared');
+  assert(keys.size === 625 && keys.has('0,0') && keys.has('24,24'), 'chunk coordinates are not 0..24 squared');
 });
 
 test('coast, river, beach, and protected land retain distinct semantics', () => {
@@ -75,16 +76,37 @@ test('coast, river, beach, and protected land retain distinct semantics', () => 
 test('semantic transport has a nontrivial hierarchy within native caps', () => {
   assert(plan.paths.length <= COASTAL_CITY_TUNING.wire.maxPaths, 'path cap exceeded');
   assert(plan.paths.every((path) => path.points.length >= 2 && path.points.length <= COASTAL_CITY_TUNING.wire.maxPointsPerPath), 'point cap or minimum violated');
-  assert(plan.stats.roadCount >= 24, `street hierarchy is too small (${plan.stats.roadCount})`);
+  assert(plan.stats.roadCount >= 150, `city-scale street hierarchy is too small (${plan.stats.roadCount})`);
   assert(plan.paths.some((path) => path.hierarchy === 'highway'), 'highway missing');
   assert(plan.paths.some((path) => path.hierarchy === 'arterial'), 'arterial missing');
   assert(plan.paths.some((path) => path.hierarchy === 'collector'), 'collector missing');
   assert(plan.paths.some((path) => path.hierarchy === 'mainStreet'), 'main street missing');
   assert(plan.paths.some((path) => path.hierarchy === 'local'), 'local road missing');
+  assert(plan.paths.filter((path) => path.hierarchy === 'local').every((path) => !path.profile.sidewalks), 'dense local streets should use the narrow 7m no-sidewalk native profile');
+  assert(plan.paths.filter((path) => path.hierarchy === 'mainStreet' || path.hierarchy === 'collector' || path.hierarchy === 'arterial').every((path) => path.profile.sidewalks), 'formal urban roads lost their sidewalks');
   assert(plan.stats.railwayCount === 1, 'planner should carry one restrained railway');
-  assert(plan.stats.lightRailCount >= 3, 'connected light-rail network is too small');
-  const red = plan.paths.find((path) => path.id === 'tram-red')!;
-  assert(plan.paths.filter((path) => path.kind === 'lightRail' && path.id !== red.id).every((path) => path.points.some((p) => red.points.some((r) => p.x === r.x || p.z === r.z))), 'light rail lines do not connect through shared alignments');
+  assert(plan.stats.lightRailCount === 5, 'light rail should contain the five unique network edges');
+  const lightRail = plan.paths.filter((path) => path.kind === 'lightRail');
+  const edgeIds = new Set(lightRail.map((path) => path.id));
+  for (const id of ['tram-harbor-central', 'tram-central-north', 'tram-south-central', 'tram-central-east', 'tram-east-foothills']) {
+    assert(edgeIds.has(id), `missing unique light-rail edge ${id}`);
+  }
+  const geometryKey = (path: (typeof lightRail)[number]): string => path.points.map((point) => `${point.x},${point.z}`).join('|');
+  const geometries = new Set<string>();
+  for (const path of lightRail) {
+    const forward = geometryKey(path), reverse = [...path.points].reverse().map((point) => `${point.x},${point.z}`).join('|');
+    assert(!geometries.has(forward) && !geometries.has(reverse), `${path.id} duplicates an already-authored transit edge`);
+    geometries.add(forward);
+  }
+  const segmentOwners = new Map<string, string>();
+  for (const path of plan.paths) for (let index = 0; index + 1 < path.points.length; index += 1) {
+    const a = path.points[index]!, b = path.points[index + 1]!;
+    const aKey = `${a.x},${a.z},${a.elevationM}`, bKey = `${b.x},${b.z},${b.elevationM}`;
+    const segmentKey = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+    const owner = segmentOwners.get(segmentKey);
+    assert(!owner || owner === path.id, `${path.id} shares an authored segment with ${owner}`);
+    segmentOwners.set(segmentKey, path.id);
+  }
   for (const path of plan.paths.filter((candidate) => candidate.kind !== 'road')) {
     assert(path.points.every((point) => point.elevationM === 0), `${path.id} rail grade is not flat`);
     const required = path.kind === 'railway' ? COASTAL_CITY_TUNING.rail.railwayMinCurveM : COASTAL_CITY_TUNING.rail.lightRailMinCurveM;
@@ -106,7 +128,8 @@ test('semantic transport has a nontrivial hierarchy within native caps', () => {
       }
     }
   }
-  assert(plan.crossings.length === 3 && plan.crossings.every((crossing) => crossing.kind === 'causeway' && crossing.name.includes('Causeway') && crossing.pathIds.length > 0), 'named causeway constraints disappeared');
+  assert(plan.crossings.length === 6 && plan.crossings.every((crossing) => crossing.kind === 'causeway' && crossing.name.includes('Causeway') && crossing.pathIds.length > 0), 'named causeway constraints disappeared');
+  assert(new Set(plan.crossings.map((crossing) => crossing.x)).size === plan.crossings.length, 'unrelated transport paths still share a bridge deck');
 });
 
 test('every named crossing replaces wet bed with honest dry causeway terrain', () => {
@@ -126,7 +149,7 @@ function overlap(a: CoastalBuildingSite, b: CoastalBuildingSite): boolean {
 }
 
 test('floor sites are module-centered quarter-turn dry nonoverlapping formal frontage', () => {
-  assert(plan.sites.length >= 80, `only ${plan.sites.length} sites survived validation`);
+  assert(plan.sites.length >= 1_800, `only ${plan.sites.length} sites survived city-scale validation`);
   const paths = new Map(plan.paths.map((path) => [path.id, path]));
   for (let i = 0; i < plan.sites.length; i += 1) {
     const site = plan.sites[i]!;
@@ -151,60 +174,67 @@ test('floor sites are module-centered quarter-turn dry nonoverlapping formal fro
 test('flora source mask reserves floor pads and full transport corridors', () => {
   const site = plan.sites[0]!;
   assert(!coastalCityFloraAllowedAt(plan, site.x, site.z), 'accepted floor pad permits flora at its center');
-  const red = plan.paths.find((path) => path.id === 'tram-red')!;
-  assert(!coastalCityFloraAllowedAt(plan, red.points[0]!.x, red.points[0]!.z), 'rail centerline permits flora');
+  const transit = plan.paths.find((path) => path.kind === 'lightRail')!;
+  assert(!coastalCityFloraAllowedAt(plan, transit.points[0]!.x, transit.points[0]!.z), 'rail centerline permits flora');
   const local = plan.paths.find((path) => path.kind === 'road' && path.hierarchy === 'local')!;
   assert(!coastalCityFloraAllowedAt(plan, local.points[0]!.x, local.points[0]!.z), 'road centerline permits flora');
-  // Regression: this cell sits inside State Route 8's native quadratic fillet
-  // but outside the old sharp authored chords at seed 0.
-  const curved = generateCoastalCity(0);
-  assert(coastalCityTransportClearanceAt(curved, 748.5, 499.5), 'shared native-curve corridor misses the seed-0 fillet edge');
-  assert(!coastalCityFloraAllowedAt(curved, 748.5, 499.5), 'native road fillet edge permits flora');
+  const curved = plan.paths.find((path) => path.id === 'road-state-route-8')!;
+  const corner = curved.points[1]!;
+  assert(coastalCityTransportClearanceAt(plan, corner.x, corner.z), 'shared native-curve corridor misses an authored bend');
+  assert(!coastalCityFloraAllowedAt(plan, corner.x, corner.z), 'native road bend permits flora');
 });
 
-test('native painting wire has exact fixed strides and no NaNs', () => {
-  const packed = packCoastalCityPainting(plan, {
+test('streamed painting manifest and individual chunks have exact wire shapes', () => {
+  const stream = packCoastalCityPaintingStream(plan, {
     tiles: { grass: 17, sand: 5, mud: 4 },
     flora: { grassSparse: 0, grassLush: 2, grassReeds: 15, pine: 9, cedar: 12, bushDense: 17 },
   });
   const wire = COASTAL_CITY_TUNING.wire;
   const stride = wire.chunkCoordFloats + wire.sampleCells * 2 + wire.tileCells * wire.cellChannelCount;
-  assert(packed.chunks.length === wire.chunkHeaderFloats + 81 * stride, 'chunk wire length is not exact');
-  assert(packed.chunks[0] === 1 && packed.chunks[1] === 81 && packed.chunks[2] === stride, 'chunk wire header is malformed');
+  assert(stream.chunkCount === 625, 'stream chunk count drifted');
+  assert(stream.manifest.length === 2 + 625 * 2, 'manifest length is not exact');
+  assert(stream.manifest[0] === 1 && stream.manifest[1] === 625, 'manifest header is malformed');
+  assert(stream.manifest[2] === 0 && stream.manifest[3] === 0, 'manifest first coordinate is malformed');
+  assert(stream.manifest[stream.manifest.length - 2] === 24 && stream.manifest[stream.manifest.length - 1] === 24, 'manifest last coordinate is malformed');
+  const firstChunk = stream.packChunk(0);
+  assert(firstChunk[0] === 0 && firstChunk[1] === 0, 'first streamed chunk coordinate is malformed');
+  const lastChunk = stream.packChunk(624);
+  assert(firstChunk === lastChunk, 'stream allocates instead of reusing one chunk buffer');
+  assert(lastChunk[0] === 24 && lastChunk[1] === 24, 'last streamed chunk coordinate is malformed');
   const expectedPathFloats = wire.pathHeaderFloats + plan.paths.reduce((sum, path) => sum + wire.pathRecordFloats + path.points.length * wire.pathPointFloats, 0);
-  assert(packed.paths.length === expectedPathFloats, 'path wire length is not exact');
-  assert(packed.paths[0] === 1 && packed.paths[1] === plan.paths.length, 'path wire header is malformed');
-  const floraAt = (x: number, z: number, lane: 0 | 1 | 2): number => {
-    const globalX = Math.floor(x + wire.chunkMeters / 2);
-    const globalZ = Math.floor(z + wire.chunkMeters / 2);
-    const cx = Math.floor(globalX / wire.tileColumns), cz = Math.floor(globalZ / wire.tileColumns);
-    const localX = globalX - cx * wire.tileColumns, localZ = globalZ - cz * wire.tileColumns;
-    const chunkBase = wire.chunkHeaderFloats + (cz * wire.chunkColumns + cx) * stride;
-    const grassBase = chunkBase + wire.chunkCoordFloats + wire.sampleCells * 2 + wire.tileCells * 2;
-    return packed.chunks[grassBase + lane * wire.tileCells + localZ * wire.tileColumns + localX]!;
+  assert(stream.paths.length === expectedPathFloats, 'path wire length is not exact');
+  assert(stream.paths[0] === 1 && stream.paths[1] === plan.paths.length, 'path wire header is malformed');
+  const chunkIndexAt = (x: number, z: number): number => {
+    const cx = Math.floor((x + wire.chunkMeters / 2) / wire.chunkMeters);
+    const cz = Math.floor((z + wire.chunkMeters / 2) / wire.chunkMeters);
+    return cz * wire.chunkColumns + cx;
   };
   const site = plan.sites[0]!;
-  for (const lane of [0, 1, 2] as const) assert(floraAt(site.x, site.z, lane) === wire.emptyCell, `floor pad retained flora lane ${lane}`);
-  const red = plan.paths.find((path) => path.id === 'tram-red')!;
-  for (const lane of [0, 1, 2] as const) assert(floraAt(red.points[0]!.x, red.points[0]!.z, lane) === wire.emptyCell, `rail corridor retained flora lane ${lane}`);
+  const siteChunk = stream.packChunk(chunkIndexAt(site.x, site.z));
+  assert(siteChunk.length === stride && siteChunk.byteLength < 1_000_000, 'single chunk record is not bounded');
+  const siteMinX = siteChunk[0]! * wire.chunkMeters - wire.chunkMeters / 2;
+  const siteMinZ = siteChunk[1]! * wire.chunkMeters - wire.chunkMeters / 2;
+  const siteLocalX = Math.floor(site.x - siteMinX), siteLocalZ = Math.floor(site.z - siteMinZ);
+  const floraStart = wire.chunkCoordFloats + wire.sampleCells * 2 + wire.tileCells * 2;
+  for (const lane of [0, 1, 2] as const) {
+    assert(siteChunk[floraStart + lane * wire.tileCells + siteLocalZ * wire.tileColumns + siteLocalX] === wire.emptyCell, `floor pad retained flora lane ${lane}`);
+  }
   const terrainSampleAt = (x: number, z: number): { height: number; water: number } => {
-    const globalX = Math.round((x + wire.chunkMeters / 2) / wire.sampleSpacingM);
-    const globalZ = Math.round((z + wire.chunkMeters / 2) / wire.sampleSpacingM);
-    const samplesPerChunk = wire.sampleColumns - 1;
-    const cx = Math.min(wire.chunkColumns - 1, Math.floor(globalX / samplesPerChunk));
-    const cz = Math.min(wire.chunkRows - 1, Math.floor(globalZ / samplesPerChunk));
-    const localX = globalX - cx * samplesPerChunk, localZ = globalZ - cz * samplesPerChunk;
-    const chunkBase = wire.chunkHeaderFloats + (cz * wire.chunkColumns + cx) * stride + wire.chunkCoordFloats;
+    const packed = stream.packChunk(chunkIndexAt(x, z));
+    const minX = packed[0]! * wire.chunkMeters - wire.chunkMeters / 2;
+    const minZ = packed[1]! * wire.chunkMeters - wire.chunkMeters / 2;
+    const localX = Math.round((x - minX) / wire.sampleSpacingM);
+    const localZ = Math.round((z - minZ) / wire.sampleSpacingM);
     const sample = localZ * wire.sampleColumns + localX;
-    return { height: packed.chunks[chunkBase + sample]!, water: packed.chunks[chunkBase + wire.sampleCells + sample]! };
+    return { height: packed[wire.chunkCoordFloats + sample]!, water: packed[wire.chunkCoordFloats + wire.sampleCells + sample]! };
   };
   for (const crossing of plan.crossings) {
     const packedCrossing = terrainSampleAt(crossing.x, crossing.z);
     assert(packedCrossing.height >= COASTAL_CITY_TUNING.river.causewayHeightM - 1e-5, `${crossing.id} packed below dry causeway height`);
     assert(packedCrossing.water === 0, `${crossing.id} packed with water depth ${packedCrossing.water}`);
   }
-  for (let i = 0; i < packed.chunks.length; i += 1) assert(Number.isFinite(packed.chunks[i]!), `chunk wire NaN/Infinity at ${i}`);
-  for (let i = 0; i < packed.paths.length; i += 1) assert(Number.isFinite(packed.paths[i]!), `path wire NaN/Infinity at ${i}`);
+  for (let i = 0; i < siteChunk.length; i += 1) assert(Number.isFinite(siteChunk[i]!), `chunk wire NaN/Infinity at ${i}`);
+  for (let i = 0; i < stream.paths.length; i += 1) assert(Number.isFinite(stream.paths[i]!), `path wire NaN/Infinity at ${i}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

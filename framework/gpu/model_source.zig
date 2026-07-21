@@ -9,6 +9,10 @@ const model_paint = @import("model_paint.zig");
 const meshdoc_format = @import("meshdoc_format.zig");
 
 pub const partRangesValid = meshdoc_format.rangesValid;
+pub const MeshDocFaceBlock = meshdoc_format.FaceBlock;
+pub const MeshDocSnapshot = meshdoc_format.Snapshot;
+pub const composeMeshDocSnapshot = meshdoc_format.composeSnapshot;
+pub const meshDocRangesOwnEveryFace = meshdoc_format.rangesOwnEveryFace;
 
 const alloc = std.heap.c_allocator;
 
@@ -21,6 +25,10 @@ var g_face_to_source: ?[]u32 = null; // current displayed face -> source face
 // n-gon (studio EditMesh, via editMeshToGeometry). Absent for plain triangle imports.
 var g_source_face_group: ?[]u32 = null;
 pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
+// One stable texture-role index per SOURCE face. NO_FACE_MATERIAL means the face
+// keeps the model's painted atlas; a concrete index is substituted per placement.
+var g_source_face_material: ?[]u32 = null;
+pub const NO_FACE_MATERIAL: u32 = std.math.maxInt(u32);
 // Flattened [lo,hi) pairs of authored-group ids, sorted and non-overlapping — one pair
 // per outliner PART of a composed multi-part model. The mesh editor welds coincident
 // positions only WITHIN a part, so two stacked cubes stay independently editable.
@@ -58,12 +66,14 @@ pub fn clear() void {
     if (g_source_colors) |c| alloc.free(c);
     if (g_face_to_source) |m| alloc.free(m);
     if (g_source_face_group) |m| alloc.free(m);
+    if (g_source_face_material) |m| alloc.free(m);
     if (g_part_ranges) |m| alloc.free(m);
     g_source_verts = null;
     g_source_path = null;
     g_source_colors = null;
     g_face_to_source = null;
     g_source_face_group = null;
+    g_source_face_material = null;
     g_part_ranges = null;
     g_source_count = 0;
 }
@@ -102,6 +112,46 @@ pub fn setFaceGroups(m: []const u32) void {
 /// face selection instead of fan slivers (req_2753).
 pub fn faceGroups() ?[]const u32 {
     return g_source_face_group;
+}
+
+pub fn setFaceMaterials(m: []const u32) void {
+    if (g_source_face_material) |old| alloc.free(old);
+    g_source_face_material = if (m.len == g_source_count / 3)
+        alloc.dupe(u32, m) catch null
+    else
+        null;
+}
+
+pub fn faceMaterials() ?[]const u32 {
+    return g_source_face_material;
+}
+
+pub fn clearFaceMaterials() void {
+    if (g_source_face_material) |old| alloc.free(old);
+    g_source_face_material = null;
+}
+
+pub fn faceMaterialOf(displayed_face: u32) u32 {
+    const materials = g_source_face_material orelse return NO_FACE_MATERIAL;
+    var sf = displayed_face;
+    if (g_face_to_source) |map| {
+        if (displayed_face >= map.len) return NO_FACE_MATERIAL;
+        sf = map[displayed_face];
+    }
+    if (sf >= materials.len) return NO_FACE_MATERIAL;
+    return materials[sf];
+}
+
+test "absent face material table means every face keeps paint" {
+    const triangle_verts = [_]f32{0} ** 24;
+    retain("material-test", triangle_verts[0..], 3);
+    defer clear();
+    const assigned = [_]u32{4};
+    setFaceMaterials(assigned[0..]);
+    try std.testing.expectEqual(@as(u32, 4), faceMaterialOf(0));
+    clearFaceMaterials();
+    try std.testing.expect(faceMaterials() == null);
+    try std.testing.expectEqual(NO_FACE_MATERIAL, faceMaterialOf(0));
 }
 
 /// Adopt the per-part group ranges: flattened [lo,hi) pairs, sorted, non-overlapping.
@@ -203,5 +253,18 @@ pub fn updateGeometryFromDisplayed(displayed_positions: []const f32, first_face:
             src[dst + 2] = displayed_positions[src_pos + 2];
         }
     }
+    return true;
+}
+
+/// Replace the interleaved source rows when only the render triangulation changed.
+/// The triangle count and every face-slot owner stay identical, so groups, materials,
+/// part ranges, colours, and the displayed-to-source map remain valid. This narrow
+/// boundary is used by live mirror editing when it makes twin quad diagonals agree;
+/// running the generic retain path here would incorrectly erase all of that metadata.
+pub fn replaceGeometrySameTriangleCount(interleaved: []const f32, vertex_count: u32) bool {
+    const source = g_source_verts orelse return false;
+    const need = @as(usize, vertex_count) * 8;
+    if (vertex_count != g_source_count or interleaved.len < need or source.len < need) return false;
+    @memcpy(source[0..need], interleaved[0..need]);
     return true;
 }

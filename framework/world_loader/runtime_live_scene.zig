@@ -8,6 +8,7 @@ const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
 const live_mesh_doors = @import("../world/live_mesh_doors.zig");
+const mesh_prop_uv = @import("../world/mesh_prop_uv.zig");
 const log = std.debug;
 const m_config = @import("config.zig");
 const m_state = @import("state.zig");
@@ -70,18 +71,21 @@ pub fn appendMeshPropNode(
     const tex_key = try meshPropTexKey(self, material_ref);
     // tex_key_override (LIVESKIN req_1843): a live face-skin materialized into its own
     // "live-mat:<hash>" tile wins over the mesh's baked texture. It rides the mesh's OWN
-    // UVs with no per-frame flip-copy (the live path runs every frame — a copy would leak);
-    // the exact V-orientation lands on Compile.
+    // face-local MATERIAL UVs with no per-frame flip-copy (the live path runs
+    // every frame — a copy would leak). The base vertex view remains the paint
+    // atlas, so a zero slot hash still falls back to paint.
     const eff_tex_key = tex_key_override orelse tex_key;
-    const vertices = if (tex_key != null) blk: {
+    const resident_vertices = mesh_prop_uv.verticesForOverride(mesh.vertices, mesh.material_vertices, tex_key_override != null);
+    if (float_start + float_count > resident_vertices.len) return;
+    const vertices = if (tex_key_override == null and tex_key != null) blk: {
         const copy = try self.allocator.alloc(f32, float_count);
         errdefer self.allocator.free(copy);
-        @memcpy(copy, mesh.vertices[float_start .. float_start + float_count]);
+        @memcpy(copy, resident_vertices[float_start .. float_start + float_count]);
         var i: usize = 7;
         while (i < copy.len) : (i += 8) copy[i] = 1 - copy[i];
         try self.mesh_prop_vertex_buffers.append(self.allocator, copy);
         break :blk copy;
-    } else mesh.vertices[float_start .. float_start + float_count];
+    } else resident_vertices[float_start .. float_start + float_count];
     const material_index: usize = if (material_ref > 0) @intCast(material_ref - 1) else self.scene.materials.len;
     const opacity = if (material_index < self.scene.materials.len) self.scene.materials[material_index].opacity else 1;
     // alpha_override (LIVEMESH ghost req_1841): the hover preview forces a translucent
@@ -229,6 +233,9 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
         appendMeshPropNode(self, mesh, inst, key, 0, first_slot_start, 0, alpha, null) catch {};
     }
     for (mesh.slots, 0..) |slot, si| {
+        // Named Rig roles keep stable indices even before any face is assigned.
+        // A zero-length role carries a material-table position, not a draw node.
+        if (!liveSlotHasGeometry(slot.count)) continue;
         const key = liveSlotKey(self, mesh, r.hash, @as(u32, @intCast(si + 1))) orelse mesh.key;
         const mat_hash: u32 = if (si < r.mats.len) r.mats[si] else 0;
         const override: ?[]const u8 = if (mat_hash != 0) self.live_mat_keys.get(mat_hash) else null;
@@ -634,4 +641,12 @@ pub fn applyLiveMeshProps(self: anytype, io: std.Io, environ: *const std.process
     }
     appendLiveSkinBoxes(self);
     appendLiveLights(self);
+}
+fn liveSlotHasGeometry(count: u32) bool {
+    return count > 0;
+}
+
+test "empty authored texture role keeps its index without emitting geometry" {
+    try std.testing.expect(!liveSlotHasGeometry(0));
+    try std.testing.expect(liveSlotHasGeometry(3));
 }

@@ -1,11 +1,11 @@
 // Exact-value uniform scaling shared by the dialog and command boundary.
 
 export const SCALE_BY_TUNING = {
-  min: 0.02,
-  max: 50,
-  defaultFactor: 48,
+  minMagnitude: 0.02,
+  maxMagnitude: 50,
+  defaultFactor: 1.25,
   noOpEpsilon: 1e-5,
-  presets: [2, 16, 48] as const,
+  presets: [0.5, 1.25, 2, -1] as const,
 } as const;
 
 export type ScaleByParse =
@@ -19,8 +19,9 @@ export function parseScaleByFactor(text: string): ScaleByParse {
   if (!trimmed) return { ok: false, error: 'Enter a scale factor.' };
   const factor = Number(trimmed);
   if (!Number.isFinite(factor)) return { ok: false, error: 'Scale factor must be a finite number.' };
-  if (factor < SCALE_BY_TUNING.min || factor > SCALE_BY_TUNING.max) {
-    return { ok: false, error: `Use a factor from ${SCALE_BY_TUNING.min} to ${SCALE_BY_TUNING.max}.` };
+  const magnitude = Math.abs(factor);
+  if (magnitude < SCALE_BY_TUNING.minMagnitude || magnitude > SCALE_BY_TUNING.maxMagnitude) {
+    return { ok: false, error: `Use a magnitude from ${SCALE_BY_TUNING.minMagnitude} to ${SCALE_BY_TUNING.maxMagnitude}.` };
   }
   if (Math.abs(factor - 1) < SCALE_BY_TUNING.noOpEpsilon) {
     return { ok: false, error: '×1 leaves the selection unchanged.' };

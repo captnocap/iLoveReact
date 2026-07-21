@@ -6,6 +6,7 @@ zig-out/
 zig-out-win/
 dist/
 node_modules/
+zig-pkg/
 *.love
 bundle.js
 bundle-*.js
@@ -13,6 +14,7 @@ bundle-*.json
 *.metafile.json
 .cache/*
 pixel*.json
+cart/editor/data/models/props/Model_10_2/paints/paint_1.json
 # ── Vendored Zig toolchain ───────────────────────────────
 # Run scripts/fetch-zig.sh after clone to populate. End-user rjit
 # binaries from GitHub Releases already embed zig — only repo

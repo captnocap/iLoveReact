@@ -1,0 +1,30 @@
+{
+  "id": "req_3241",
+  "at": "2026-07-20T03:14:08.250Z",
+  "origin": "codex:019f7a9c",
+  "text": "The drag looks like it would resolve but then it doesnt change anything it doesnt re-order it doesnt go into a group, none of that. or if it is updating, then react is no rerendering it. everything else seems to be good",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:14:13.426Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:16:49.637Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the drop no-op at its real boundary: model.outliner.move was registered and previewed in React, but the native metadata-journal door rejected the unknown outliner.move action before AppFrame could commit state. Centralized metadata action labels in the testable journal module, admitted outliner.move, added a Zig regression covering the complete host whitelist, and rebuilt the ReleaseFast editor successfully.",
+  "shas": [
+    "7c6d430c2"
+  ],
+  "resolvedAt": "2026-07-20T03:16:49.637Z"
+}

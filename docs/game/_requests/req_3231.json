@@ -1,0 +1,30 @@
+{
+  "id": "req_3231",
+  "at": "2026-07-19T16:09:43.328Z",
+  "origin": "codex:019f7a9c",
+  "text": "hm. i think it took all the outlinders and merged them into one this whole face is now showing up as one cube post update [Image #1]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T16:09:55.723Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:20:52.275Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The model was not merged or deleted on disk: Heroin_Bob_head still has all 15 parts.json rows and its original geometry, but its RJMD range header stored zero ranges, so cold hydration manufactured one whole-model fallback row named Cube 1 and hot state preserved it. Added conservative recovery that accepts only an exact metadata-count match to contiguous authored-group/connectivity runs; the actual head resolves to exactly 15 ranges. Activation now replaces the collapsed hot row, reseeds the resident host range mirror, and selects the first recovered part. Save refuses to overwrite a zero-range multi-part document from a collapsed outliner; after the user sees all 15 rows, one deliberate Save persists the recovered table. No Heroin_Bob_head asset file was modified. Meshdoc tests are 8/8 and the ReleaseFast editor build passes.",
+  "shas": [
+    "bedcbeef6"
+  ],
+  "resolvedAt": "2026-07-19T16:20:52.275Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_3328",
+  "at": "2026-07-21T09:03:51.927Z",
+  "origin": "codex:019f83e9",
+  "text": "exported props in the editor inthe the game world hold a physics rect that is not exact to the prop, it takes the widest part and the tallest part and defines it as one whole block. this becomes highly problematic very quickly you could imagine. it should be exact to its outliner",
+  "status": "doing",
+  "sessionId": "019f83e9-2fdd-7a03-942f-ca45df4b0cb9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T09:04:00.603Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

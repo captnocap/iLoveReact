@@ -202,7 +202,7 @@ export function pickAuthoredPlacement(
     const yaw = (best.piece.yawDegrees * Math.PI) / 180;
     const cy = Math.cos(yaw);
     const sy = Math.sin(yaw);
-    normal = { x: ln.x * cy - ln.z * sy, y: ln.y, z: ln.x * sy + ln.z * cy };
+    normal = { x: ln.x * cy + ln.z * sy, y: ln.y, z: -ln.x * sy + ln.z * cy };
   }
   return { piece: best.piece, t: best.t, point, normal };
 }
@@ -295,6 +295,84 @@ function normalizeYawDegrees(yawDegrees: number): number {
   return normalized < 0 ? normalized + 360 : normalized;
 }
 
+/** One UI/native boundary query for the highest rendered terrain beneath a
+ * world-space footprint. Null means the door is unavailable or the bounded
+ * host query rejected the requested rectangle. */
+export type TerrainMaximum = (minX: number, minZ: number, maxX: number, maxZ: number) => number | null;
+
+type HorizontalFootprint = { minX: number; minZ: number; maxX: number; maxZ: number };
+
+/** Exact world AABB of a piece's horizontal footprint. Authored geometry keeps
+ * its asymmetric local origin; catalog geometry is centered on its semantic
+ * size. Four rotated corners use the loader's local→world yaw convention. Null
+ * is deliberate: guessing a size for unreachable authored geometry can still
+ * bury a large floor, so terrain-safe placement must wait for real bounds. */
+function pieceHorizontalFootprint(piece: PlacedPiece): HorizontalFootprint | null {
+  const authored = authoredPieceFor(piece.pieceId);
+  const bounds = authored ? authoredMeshBounds(authored.modelId, authored.pkgId) : null;
+  if (authored && !bounds) return null;
+  const look = bounds ? null : pieceLook(piece.pieceId);
+  if (!bounds && !look) return null;
+  const localMinX = bounds?.minX ?? -look!.w / 2;
+  const localMaxX = bounds?.maxX ?? look!.w / 2;
+  const localMinZ = bounds?.minZ ?? -look!.d / 2;
+  const localMaxZ = bounds?.maxZ ?? look!.d / 2;
+  const yaw = piece.yawDegrees * Math.PI / 180;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const localX of [localMinX, localMaxX]) {
+    for (const localZ of [localMinZ, localMaxZ]) {
+      const x = piece.x + localX * cos + localZ * sin;
+      const z = piece.z - localX * sin + localZ * cos;
+      minX = Math.min(minX, x);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxZ = Math.max(maxZ, z);
+    }
+  }
+  return { minX, minZ, maxX, maxZ };
+}
+
+const MISSING_TERRAIN_FOOTPRINT_WARNED = new Set<string>();
+
+/** Raise a newly resolved structural placement (or complete drag run) onto one
+ * level plane that clears its whole rendered-terrain footprint. The storey
+ * offset already carried by each piece is preserved by applying only the
+ * difference between the cursor terrain and the footprint maximum. */
+export function levelPieceGroupAboveTerrain(
+  pieces: PlacedPiece[],
+  terrainY: number,
+  terrainMaximum: TerrainMaximum | null,
+): PlacedPiece[] {
+  if (pieces.length === 0 || !terrainMaximum) return pieces;
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  let structuralPieces = 0;
+  for (const piece of pieces) {
+    // Free props ride the composition; they do not enlarge its ground-bearing
+    // foundation (and a file-backed decoration must not block a valid floor).
+    if (pieceKindOf(piece.pieceId) === 'prop') continue;
+    structuralPieces += 1;
+    const footprint = pieceHorizontalFootprint(piece);
+    if (!footprint) {
+      if (!MISSING_TERRAIN_FOOTPRINT_WARNED.has(piece.pieceId)) {
+        MISSING_TERRAIN_FOOTPRINT_WARNED.add(piece.pieceId);
+        console.warn(`[place] refused terrain placement for '${piece.pieceId}': authored mesh bounds are unavailable`);
+      }
+      return [];
+    }
+    minX = Math.min(minX, footprint.minX);
+    minZ = Math.min(minZ, footprint.minZ);
+    maxX = Math.max(maxX, footprint.maxX);
+    maxZ = Math.max(maxZ, footprint.maxZ);
+  }
+  if (structuralPieces === 0) return pieces;
+  const queried = terrainMaximum(minX, minZ, maxX, maxZ);
+  if (queried === null || !Number.isFinite(queried)) return pieces;
+  const lift = Math.max(terrainY, queried) - terrainY;
+  return lift > 0 ? pieces.map((piece) => ({ ...piece, y: piece.y + lift })) : pieces;
+}
+
 /** Resolve a click into a placement for the armed piece on the active storey.
  *  Honours the piece's snap mode: edge-snap kinds (walls, fences, …) land on the
  *  nearest CELL EDGE, oriented along it; plates centre-snap. Returns null when
@@ -319,6 +397,7 @@ export function resolvePlacement(
   terrainY = 0,
   lift = 0,
   yawTurnDegrees = 0,
+  terrainMaximum: TerrainMaximum | null = null,
 ): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
@@ -338,7 +417,11 @@ export function resolvePlacement(
     const v = validateBuildPlacement(catalogIndex, x, y, z, yaw);
     if (!v.valid) return null;
   }
-  return { id: '', pieceId, x, y, z, yawDegrees: yaw, floor };
+  return levelPieceGroupAboveTerrain(
+    [{ id: '', pieceId, x, y, z, yawDegrees: yaw, floor }],
+    terrainY,
+    terrainMaximum,
+  )[0] ?? null;
 }
 
 /** Resolve a horizontal move for one existing instance. The result keeps the
@@ -351,7 +434,13 @@ export function resolvePlacement(
  *  Edge pieces use their CURRENT yaw to choose the matching grid-line family.
  *  A north/south wall therefore stays on a north/south edge while it moves,
  *  rather than snapping to the nearest perpendicular edge under the cursor. */
-export function resolveMovedPlacement(piece: PlacedPiece, wx: number, wz: number, terrainY = 0): PlacedPiece | null {
+export function resolveMovedPlacement(
+  piece: PlacedPiece,
+  wx: number,
+  wz: number,
+  terrainY = 0,
+  terrainMaximum: TerrainMaximum | null = null,
+): PlacedPiece | null {
   const kind = pieceKindOf(piece.pieceId);
   const floor = piece.floor ?? Math.round(piece.y / METERS_PER_LEVEL);
   const yawDegrees = normalizeYawDegrees(piece.yawDegrees);
@@ -373,7 +462,11 @@ export function resolveMovedPlacement(piece: PlacedPiece, wx: number, wz: number
     const validation = validateBuildPlacement(catalogIndex, x, y, z, yawDegrees);
     if (!validation.valid) return null;
   }
-  return { ...piece, x, y, z, yawDegrees, floor };
+  return levelPieceGroupAboveTerrain(
+    [{ ...piece, x, y, z, yawDegrees, floor }],
+    terrainY,
+    terrainMaximum,
+  )[0] ?? null;
 }
 
 /** The biggest single drag-run (req_2747): 20×20 cells of floor. A drag past
@@ -405,9 +498,9 @@ export function supportsRunPlacement(pieceId: string): boolean {
  *  single-placement at the cursor because a bench is not a tiling. Every cell
  *  resolves through resolvePlacement, so the run gets the same snap, host
  *  validation, and storey/terrain basing as a single click; validator-rejected
- *  cells drop out of the run. The whole run is LEVEL at the ANCHOR's terrain
- *  height — a dragged wall or floor plate is flat by construction, it does not
- *  stairstep over terrain bumps mid-run. */
+ *  cells drop out of the run. The whole run stays LEVEL: when a rendered-
+ *  terrain maximum query is supplied, its plane clears the highest point under
+ *  the complete footprint; older/flat hosts fall back to the anchor height. */
 export function resolveRunPlacements(
   pieceId: string,
   ax: number,
@@ -417,6 +510,7 @@ export function resolveRunPlacements(
   floor: number,
   terrainY = 0,
   yawTurnDegrees = 0,
+  terrainMaximum: TerrainMaximum | null = null,
 ): PlacedPiece[] {
   const kind = pieceKindOf(pieceId);
   if (!supportsRunPlacement(pieceId)) {
@@ -457,7 +551,7 @@ export function resolveRunPlacements(
     const placed = resolvePlacement(pieceId, pt.x, pt.z, floor, terrainY, 0, yawTurnDegrees);
     if (placed) out.push(placed);
   }
-  return out;
+  return levelPieceGroupAboveTerrain(out, terrainY, terrainMaximum);
 }
 
 /** The placement SLOT a piece occupies — its footprint identity (req_2583). Two

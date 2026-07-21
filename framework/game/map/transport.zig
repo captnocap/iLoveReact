@@ -106,7 +106,7 @@ pub const Tuning = struct {
 };
 
 pub const TUNING = Tuning{
-    .max_paths = 128,
+    .max_paths = 384,
     .max_points_per_path = 128,
     .max_controls = 256,
     .point_snap_m = 0.25,
@@ -869,6 +869,10 @@ test "one anchor plus hover produces a live piece without accepting a second poi
     try std.testing.expectEqual(@as(usize, 2), preview.points.len);
     try std.testing.expectApproxEqAbs(@as(f32, 14.0), preview.points[1].gx, 0.001);
     try std.testing.expect(draftValidation().valid);
+}
+
+test "generated city transport capacity is explicit" {
+    try std.testing.expectEqual(@as(usize, 384), MAX_PATHS);
 }
 
 test "curve radius changes the shared preview and compiler curve" {

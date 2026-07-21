@@ -1,4 +1,5 @@
 import { classifier, classifiers as C, getColors, setStyleTokens, setTokens } from '../../runtime/classifier';
+import { setDefaultPressableHoverStyle } from '../../runtime/primitives';
 import { EDITOR_COLORS, EDITOR_STYLES } from './theme';
 // The fixed-region layout contract (req_2627): every region dimension below
 // (chrome/action bar/content browser/focus panel/status bar) comes from
@@ -7,12 +8,16 @@ import { REGIONS } from './shell/regions';
 
 setTokens(EDITOR_COLORS);
 setStyleTokens(EDITOR_STYLES);
+setDefaultPressableHoverStyle({ backgroundColor: 'theme:surfaceHover' });
 
 export function accentFor(token: string): string {
   return (getColors() as Record<string, string>)[token] ?? token;
 }
 
 const MONO = 'monospace';
+// Native text glyphs sit high within their measured line box. The dropdown's
+// fixed rows need this top inset so labels and icons paint on the row midline.
+const MENU_ROW_TOP_INSET = 8;
 
 classifier({
   HW_App: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: 'theme:bg', overflow: 'hidden' } },
@@ -86,6 +91,15 @@ classifier({
   HW_BuildDialog: { type: 'Box', style: { width: 900, height: 620, flexDirection: 'column', borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
   HW_DialogHead: { type: 'Box', style: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 12, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_DialogBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', padding: 12, gap: 10 } },
+  // A short operation must still visibly own the editor: conversion can take long
+  // enough that a status-bar-only update reads as a failed click.
+  HW_StlConversionDialog: { type: 'Box', style: { width: 460, flexDirection: 'column', borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
+  HW_StlConversionHead: { type: 'Box', style: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 12, paddingRight: 12, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_StlConversionBody: { type: 'Box', style: { flexDirection: 'column', gap: 10, padding: 14 } },
+  HW_StlConversionName: { type: 'Text', fontSize: 12, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_StlConversionTrack: { type: 'Box', style: { height: 6, borderRadius: 3, backgroundColor: 'theme:track', overflow: 'hidden' } },
+  HW_StlConversionActivity: { type: 'Box', style: { width: '62%', height: '100%', borderRadius: 3, backgroundColor: 'theme:primary' } },
+  HW_StlConversionHint: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, lineHeight: 15 } },
   HW_JournalIntro: { type: 'Box', style: { minHeight: 58, gap: 6, padding: 10, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_JournalLayout: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row', gap: 12 } },
   HW_JournalColumn: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 8, overflow: 'scroll' } },
@@ -201,7 +215,7 @@ classifier({
   // to the section's ONE right edge plus fixed-width secondary columns. Labels
   // are single-line by law (truncate loudly, never wrap, never squeeze).
   HW_VerbRow: { type: 'Box', style: { height: REGIONS.grid.verbRowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 } },
-  HW_VerbPrimary: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_VerbPrimary: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_VerbFixed: { type: 'Pressable', style: { width: REGIONS.grid.verbColWidth, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_VerbText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
   HW_MaterialGrid: { type: 'Box', style: { height: 284, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', justifyContent: 'space-between', gap: 4, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, overflow: 'hidden' } },
@@ -231,7 +245,7 @@ classifier({
   HW_IconMiniButton: { type: 'Pressable', style: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_ToolPanel: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 6, paddingBottom: 6 } },
   HW_RenameRow: { type: 'Box', style: { height: 27, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 12, marginBottom: 5 } },
-  HW_RenameInput: { type: 'TextInput', style: { flexGrow: 1, minWidth: 0, height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
+  HW_RenameInput: { type: 'TextInput', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
   // Inline model-rename bar (content browser): shown while a model is being renamed.
   HW_RenameBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4 } },
   HW_StatGrid: { type: 'Box', style: { flexDirection: 'row', gap: 7, paddingLeft: 12, paddingRight: 12, marginBottom: 5 } },
@@ -515,10 +529,15 @@ classifier({
   HW_FormLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: REGIONS.grid.labelWidth } },
   HW_FormValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_ReadValue: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // A named face-texture role gets its own two-row budget: the editable name
+  // never competes with verbs, and the verbs split the full inspector width.
+  HW_TextureRole: { type: 'Box', style: { flexDirection: 'column', gap: 3, paddingTop: 4, paddingBottom: 5, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft' } },
+  HW_TextureRoleNameRow: { type: 'Box', style: { height: 25, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12 } },
+  HW_TextureRoleActionRow: { type: 'Box', style: { height: REGIONS.grid.verbRowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12 } },
   // ── Per-instance override fields (req_2563 Phase 3): a num stepper / bool
   // toggle with a reset rider, folded from the last editor's tile-override panel.
   HW_OvBtn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn, height: REGIONS.grid.stepBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
-  HW_OvBtnText: { type: 'Text', fontSize: 12, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvBtnText: { type: 'Text', fontSize: 12, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
   HW_OvVal: { type: 'Text', fontSize: 10, color: 'theme:valNum', style: { fontFamily: MONO, fontWeight: 800, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
   HW_OvValIdle: { type: 'Text', fontSize: 10, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
   // Bool toggle spans the SAME fixed column block as the [−] value [+] stepper
@@ -526,8 +545,8 @@ classifier({
   // one control column and one right edge (req_2626 II).
   HW_OvToggle: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_OvToggleOn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
-  HW_OvToggleText: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 800 } },
-  HW_OvToggleTextOn: { type: 'Text', fontSize: 9, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvToggleText: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_OvToggleTextOn: { type: 'Text', fontSize: 9, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
   // The reset-rider END column: ALWAYS reserved (set or idle) so every row
   // shares the same right edge — no squeezing when an override appears.
   HW_OvReset: { type: 'Pressable', style: { width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'transparent' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
@@ -600,13 +619,16 @@ classifier({
   HW_FileHistoryCard: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 4, padding: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 
   HW_MenuDropdown: { type: 'Box', style: { position: 'absolute', left: 156, top: REGIONS.chrome.height, width: 420, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
+  // Sits below the chrome, behind an open dropdown. It closes the menu without
+  // intercepting another top-bar menu trigger (those remain above this plane).
+  HW_MenuDismiss: { type: 'Pressable', hoverStyle: {}, style: { position: 'absolute', left: 0, right: 0, top: REGIONS.chrome.height, bottom: 0, backgroundColor: 'transparent' } },
   HW_MenuDropHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 7, backgroundColor: 'theme:bgElevated', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
-  HW_MenuDropRow: { type: 'Pressable', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
+  HW_MenuDropRow: { type: 'Pressable', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, paddingTop: MENU_ROW_TOP_INSET, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_MenuDropText: { type: 'Text', fontSize: 11, color: 'theme:text' },
   HW_MenuDropSub: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO } },
   // Disabled command row — grayed, no hover affordance (inaccessible), with the reason in the
   // sub slot. Non-pressable at the callsite (rendered as a Box), so no press feedback either.
-  HW_MenuDropRowOff: { type: 'Box', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft', opacity: 0.4 } },
+  HW_MenuDropRowOff: { type: 'Box', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, paddingTop: MENU_ROW_TOP_INSET, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft', opacity: 0.4 } },
   HW_MenuDropTextOff: { type: 'Text', fontSize: 11, color: 'theme:textDim' },
   HW_MenuDropReason: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontStyle: 'italic' } },
   // Non-interactive section header inside a submenu flyout (Select / Transform / Topology / …).

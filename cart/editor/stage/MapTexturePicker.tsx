@@ -59,7 +59,7 @@ export default function MapTexturePicker(props: {
   return (
     // Click-away scrim over the editor; the panel rises from the bottom paint dock.
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
-      <Pressable onPress={() => props.onPatch({ texturePickerOpen: false })} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
+      <Pressable onPress={() => props.onPatch({ texturePickerOpen: false })} hoverStyle={{}} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
       <Col style={{ position: 'absolute', left: PICKER_LEFT, bottom: PICKER_BOTTOM, width: 320, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 8 }}>
         <Row style={{ alignItems: 'center', gap: 7 }}>
           <Icon name="SwatchBook" size={13} color={ACCENT} />

@@ -7,8 +7,8 @@
 // so this is a pure JS bridge — no framework rebuild.
 //
 // The lump byte format is the host decoder's contract verbatim
-// (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 8). We
-// write the mesh-only form (instanceCount 0) at version 7. A mesh with a painted
+// (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 9). We
+// write the mesh-only form (instanceCount 0) at version 9. A mesh with a painted
 // atlas embeds its PNG in the v4+ pngLen block — the loader decodes it with stbi
 // and the placement renders painted, exactly like a baked cooked prop (req_2832:
 // an exported model lost its paintings at placement). Door exports additionally
@@ -34,6 +34,9 @@ export type ResidentMesh = {
   key: string;
   /** interleaved package vertices, stride 8: pos3 + normal3 + uv2. */
   vertices: Float32Array;
+  /** Optional UV pair per vertex used only by assigned face-slot materials.
+   *  The interleaved UVs remain the painted-atlas mapping. */
+  materialUvs?: Float32Array;
   /** flat draw colour 0..1 (untextured meshes render with this). */
   color?: [number, number, number];
   /** the model's painted atlas as ENCODED PNG bytes — absent = untextured (flat colour). */
@@ -64,7 +67,7 @@ function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: n
   return { radius: Math.max(w, h, d) * 0.5 || 1, w: w || 1, d: d || 1, h: h || 1 };
 }
 
-const MESH_PROPS_VERSION = 7; // mesh-only form the host decoder accepts (<= 8)
+const MESH_PROPS_VERSION = 9;
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
  *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
@@ -78,8 +81,11 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     const boxes = m.collisionBoxes ?? [];
     const vertexCount = m.vertices.length / 8;
     if (!Number.isInteger(vertexCount)) throw new Error(`resident mesh '${m.key}' is not stride-8 geometry`);
+    if (m.materialUvs && m.materialUvs.length !== vertexCount * 2) {
+      throw new Error(`resident mesh '${m.key}' has ${m.materialUvs.length} material UV floats for ${vertexCount} vertices`);
+    }
     for (const slot of slots) {
-      if (!Number.isInteger(slot.start) || !Number.isInteger(slot.count) || slot.start < 0 || slot.count <= 0 || slot.start + slot.count > vertexCount) {
+      if (!Number.isInteger(slot.start) || !Number.isInteger(slot.count) || slot.start < 0 || slot.count < 0 || slot.start + slot.count > vertexCount) {
         throw new Error(`resident mesh '${m.key}' has a slot outside its ${vertexCount} vertices`);
       }
     }
@@ -100,6 +106,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     total += 4 + slots.length * 8; // slotCount + start/count rows
     total += 4 + (m.door ? 16 : 0); // doorFlag + optional door block
     total += 4 + boxes.length * 24; // boxCount + 6×f32 rows
+    total += 4 + (m.materialUvs?.length ?? 0) * 4; // v9 materialUvCount + uv pairs
   }
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
@@ -152,6 +159,14 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
       dv.setFloat32(o + 20, box.maxZ, true);
       o += 24;
     }
+    const materialUvs = m.materialUvs;
+    dv.setUint32(o, materialUvs ? vertexCount : 0, true); o += 4;
+    if (materialUvs) {
+      for (let i = 0; i < materialUvs.length; i += 1) {
+        dv.setFloat32(o, materialUvs[i]!, true);
+        o += 4;
+      }
+    }
   }
   return bytes;
 }
@@ -161,6 +176,8 @@ export type MeshRef = {
   /** SPINPROP req_3128: continuous visual spin, deg/s (absent or 0 = static).
    *  Rides the v2 wire only — the v1 fallback drops it (older host, no spin). */
   spin?: number;
+  /** Per-resident-slot live material hashes. Zero keeps the model's painted atlas. */
+  materials?: readonly number[];
 };
 const MESH_REF_HEADER_BYTES = 24; // v1: u32 hash, f32 x,y,z,yaw, u32 matCount
 const MESH_REF_HEADER_BYTES_V2 = 28; // v2: u32 hash, f32 x,y,z,yaw,spin, u32 matCount
@@ -181,7 +198,7 @@ export function encodeMeshGhost(ref: MeshRef): Uint8Array {
 /** Pack all placed mesh refs into one contiguous buffer (24 bytes each, no mats).
  *  The v1 wire for __compiled_world_set_live_mesh_props — spin does not ride it. */
 export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
-  const buf = new ArrayBuffer(refs.length * MESH_REF_HEADER_BYTES);
+  const buf = new ArrayBuffer(refs.reduce((bytes, ref) => bytes + MESH_REF_HEADER_BYTES + (ref.materials?.length ?? 0) * 4, 0));
   const dv = new DataView(buf);
   let o = 0;
   for (const r of refs) {
@@ -190,8 +207,10 @@ export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
     dv.setFloat32(o + 8, r.y, true);
     dv.setFloat32(o + 12, r.z, true);
     dv.setFloat32(o + 16, r.yaw, true);
-    dv.setUint32(o + 20, 0, true);
+    const materials = r.materials ?? [];
+    dv.setUint32(o + 20, materials.length, true);
     o += MESH_REF_HEADER_BYTES;
+    for (const material of materials) { dv.setUint32(o, material >>> 0, true); o += 4; }
   }
   return new Uint8Array(buf);
 }
@@ -200,7 +219,7 @@ export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
  *  28 bytes each — spin lands between yaw and matCount, matching the host's
  *  setLiveMeshProps2 decode verbatim. */
 export function encodeMeshRefsV2(refs: readonly MeshRef[]): Uint8Array {
-  const buf = new ArrayBuffer(refs.length * MESH_REF_HEADER_BYTES_V2);
+  const buf = new ArrayBuffer(refs.reduce((bytes, ref) => bytes + MESH_REF_HEADER_BYTES_V2 + (ref.materials?.length ?? 0) * 4, 0));
   const dv = new DataView(buf);
   let o = 0;
   for (const r of refs) {
@@ -210,8 +229,10 @@ export function encodeMeshRefsV2(refs: readonly MeshRef[]): Uint8Array {
     dv.setFloat32(o + 12, r.z, true);
     dv.setFloat32(o + 16, r.yaw, true);
     dv.setFloat32(o + 20, r.spin ?? 0, true);
-    dv.setUint32(o + 24, 0, true); // matCount
+    const materials = r.materials ?? [];
+    dv.setUint32(o + 24, materials.length, true);
     o += MESH_REF_HEADER_BYTES_V2;
+    for (const material of materials) { dv.setUint32(o, material >>> 0, true); o += 4; }
   }
   return new Uint8Array(buf);
 }

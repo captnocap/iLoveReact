@@ -1,0 +1,28 @@
+{
+  "id": "req_3303",
+  "at": "2026-07-20T17:32:16.831Z",
+  "origin": "codex:019f8078",
+  "text": "still not landing. look i drew on this for u so u know how big it is [Image #1] thats a 6px line so there is about 8 pix of space under each text and about 1px above it",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:32:24.950Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:33:44.150Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the dropdown row baseline: native glyphs painted high inside their centered flex line box, so the shared enabled and disabled menu rows now carry an 8px asymmetric top inset. This shifts icons and labels down ~4px while preserving each 27px hit row. ReleaseFast editor ship completed after the workspace build lock cleared; visual verification required.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:33:44.150Z"
+}

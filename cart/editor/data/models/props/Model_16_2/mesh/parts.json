@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Plane 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "plane",
+      "outlinerOrder": 0
+    },
+    {
+      "name": "Path Plane 1",
+      "color": "#ad77ff",
+      "visible": true,
+      "outlinerOrder": 1
+    }
+  ]
+}

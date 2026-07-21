@@ -10,7 +10,7 @@
 import { C, accentFor } from '../workspace.cls';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
 import { pieceFloorOf, type MaterialRef, type PlacedPiece } from '../world/pieces';
-import { pieceSlotRoles } from '../world/pieceSlots';
+import { pieceSlotEntries } from '../world/pieceSlots';
 import { authoredPieceFor } from '../world/authoredRegistry';
 import { authoredMeshBounds } from '../world/authoredMesh';
 import { modelPackageById } from '../data/content';
@@ -35,7 +35,8 @@ export default function PieceBody(props: {
   const row = pieceId ? catalogRowFor(pieceId) : null;
   const sel = props.selected;
   const isInstance = !!sel;
-  const roles = pieceId ? pieceSlotRoles(pieceId) : [];
+  const roleEntries = pieceId ? pieceSlotEntries(pieceId) : [];
+  const roles = roleEntries.map((role) => role.id);
 
   // AUTHORED placeable (req_2577 pieces / req_2712 props): a `model:`/`prop:` id
   // never has a catalog row — show the real exported model: its label, measured
@@ -158,25 +159,25 @@ export default function PieceBody(props: {
             <C.HW_Spacer />
             <C.HW_KeyText>{roles.length}</C.HW_KeyText>
           </C.HW_SectionHead>
-          {roles.map((role) => {
-            const ref = sel.slots?.[role];
+          {roleEntries.map((role) => {
+            const ref = sel.slots?.[role.id];
             const mat = ref ? props.resolveMaterial(ref) : null;
             return (
-              <C.HW_ReadRow key={role}>
-                <C.HW_FormLabel>{role}</C.HW_FormLabel>
-                <C.HW_SelectControl tooltip={`bind the selected material to the ${role} slot`} onPress={() => props.onAssignSlot(sel.id, role)}>
+              <C.HW_ReadRow key={role.id}>
+                <C.HW_FormLabel>{role.label}</C.HW_FormLabel>
+                <C.HW_SelectControl tooltip={`bind the selected material to the ${role.label} slot`} onPress={() => props.onAssignSlot(sel.id, role.id)}>
                   <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: mat ? mat.color : '#0a1118' }} />
                   <C.HW_ReadValue>{mat ? mat.label : `+ ${props.activeMaterialName}`}</C.HW_ReadValue>
                 </C.HW_SelectControl>
                 {ref
-                  ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(sel.id, role)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>
+                  ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(sel.id, role.id)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>
                   : <C.HW_OvResetIdle />}
               </C.HW_ReadRow>
             );
           })}
         </C.HW_Section>
       ) : (
-        <ReadOnlySection title="SLOT TEMPLATE" color="accent" rows={roles.map((r) => [r, 'material slot'])} />
+        <ReadOnlySection title="SLOT TEMPLATE" color="accent" rows={roleEntries.map((role) => [role.label, 'material slot'])} />
       )}
 
     </>

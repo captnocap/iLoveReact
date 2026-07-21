@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:torso",
+  "name": "Torso",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "model-import_torso",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#a3437e",
+  "rig": "source model file",
+  "data": "file torso.obj",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Torso/mesh/torso.obj"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:obj",
+    "imported-from:/home/siah/Downloads/femaletorso_v2_L1.123c585fd5cd-6e3f-4ae2-b4fa-96927d31dab2/torso.obj"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

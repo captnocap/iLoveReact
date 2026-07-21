@@ -1,0 +1,28 @@
+{
+  "id": "req_3225",
+  "at": "2026-07-19T15:40:45.262Z",
+  "origin": "session:5a3945f7",
+  "text": "ok cool and then so my idea was i wanted to make a few head shapes, and then see if we can take the uv topology and can generate some more heads from some means of doing so. that way we can get a lot of head types from a few samples, but how many samples would we want",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T15:40:51.796Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T15:41:16.779Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design question, no code: advised on the head-variation-from-samples idea. Same-topology heads are blendable (each head = same vert order, so new heads are weighted mixes); recommended a neutral base + 6-8 single-trait EXAGGERATED extremes rather than N whole heads, because trait deltas compose multiplicatively while whole-head blends average toward mush. Region masks (jaw/skull/nose/ears from different samples) multiply variety further. Flagged the topology-freeze rule: duplicates must be move-verts-only — loop cut/solidify/delete breaks correspondence. Fits V2 seeded-variety ruling and V29 bake-as-assets (no runtime dynamic shapes).",
+  "shas": [],
+  "resolvedAt": "2026-07-19T15:41:16.779Z"
+}

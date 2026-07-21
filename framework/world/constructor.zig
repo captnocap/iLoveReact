@@ -13,6 +13,7 @@ const std = @import("std");
 const gamefile = @import("gamefile.zig");
 const live_mesh_doors = @import("live_mesh_doors.zig");
 const terrain_grid = @import("../gpu/terrain_grid.zig");
+const mesh_prop_uv = @import("mesh_prop_uv.zig");
 const mapfile = gamefile.mapfile;
 // stb_image — decode the cooked-prop paint PNG at load (req_1544, MESH_PROPS v4),
 // the same decoder the decal raster uses (gpu/decal_raster.zig). The bake passes
@@ -47,7 +48,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 8;
+const MESH_PROPS_VERSION: u32 = 9;
 const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -149,6 +150,10 @@ pub const MeshPropMesh = struct {
     solid: bool,
     vertices: []f32,
     vertex_count: u32,
+    // FACE MATERIAL UV (MESH_PROPS v9) — a second resident vertex view whose
+    // UVs fill each authored face. Live slot textures use it; the base view
+    // keeps paint-atlas UVs so an unassigned slot still renders the painting.
+    material_vertices: ?[]f32 = null,
     // Painted-atlas texture (req_1496, MESH_PROPS v3) — the cooked prop's paint, the
     // same shape the player/NPC models carry. 0×0 / null = untextured (OBJ/GLB).
     tex_w: u32 = 0,
@@ -170,6 +175,7 @@ pub const MeshPropMesh = struct {
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
         allocator.free(self.vertices);
+        if (self.material_vertices) |vertices| allocator.free(vertices);
         if (self.tex_rgba) |rgba| allocator.free(rgba);
         if (self.slots.len > 0) allocator.free(self.slots);
         if (self.collision_boxes.len > 0) allocator.free(self.collision_boxes);
@@ -1186,6 +1192,33 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
                 at += 24;
             }
         }
+        // FACE MATERIAL UV (v9) — u32 vertex count followed by 2×f32 per
+        // vertex. Zero means no alternate mapping. Expand once at residency
+        // decode; the live renderer can then switch views without allocating
+        // on every frame.
+        var material_vertices: ?[]f32 = null;
+        errdefer if (material_vertices) |material| allocator.free(material);
+        if (version >= 9) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            const material_uv_count = std.mem.readInt(u32, data[at..][0..4], .little);
+            at += 4;
+            if (material_uv_count != 0) {
+                if (material_uv_count != vertex_count) return Error.BadMeshProps;
+                const material_uv_floats: usize = @as(usize, @intCast(material_uv_count)) * 2;
+                if (at + material_uv_floats * 4 > data.len) return Error.BadMeshProps;
+                const material = mesh_prop_uv.expand(
+                    allocator,
+                    vertices,
+                    material_uv_count,
+                    data[at .. at + material_uv_floats * 4],
+                ) catch |err| switch (err) {
+                    error.InvalidUvCount => return Error.BadMeshProps,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
+                at += material_uv_floats * 4;
+                material_vertices = material;
+            }
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -1196,6 +1229,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
             .solid = solid,
             .vertices = vertices,
             .vertex_count = vertex_count,
+            .material_vertices = material_vertices,
             .tex_w = tex_w,
             .tex_h = tex_h,
             .tex_rgba = tex_rgba,

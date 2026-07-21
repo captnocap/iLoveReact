@@ -12,7 +12,7 @@
 // The stroke functions here exist for chrome-driven strokes and verification;
 // the per-dab hot path is the loader's NATIVE input routing (zero JS per event).
 // Kind/zone/flora indices are opaque content indices — legends live cart-side.
-import { callHost, hasHost } from '../ffi';
+import { callHost, emit, hasHost, subscribe } from '../ffi';
 
 export type MapChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
 export type MapMode = 'paint' | 'erase';
@@ -32,6 +32,17 @@ const MODES: readonly MapMode[] = ['paint', 'erase'];
 const TERRAIN_TOOLS: readonly MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
 const SHAPES: readonly MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: readonly MapBrushProfile[] = ['cone', 'flat', 'dome'];
+
+const MAP_TERRAIN_CHANGED_CHANNEL = 'game-map:terrain-changed';
+
+/** Observe completed terrain-owner changes without polling the host. */
+export function subscribeMapTerrainChanges(listener: () => void): () => void {
+  return subscribe(MAP_TERRAIN_CHANGED_CHANNEL, listener);
+}
+
+function publishMapTerrainChanged(): void {
+  emit(MAP_TERRAIN_CHANGED_CHANNEL);
+}
 
 const GENERATED_SAMPLE_COUNT = 241 * 241;
 const GENERATED_TILE_COUNT = 120 * 120;
@@ -81,6 +92,10 @@ const NATIVE_GENERATED_INSTALL_ERRORS = [
   'chunkAllocation',
   'pathCommit',
   'roadPlanTruncated',
+  'generatedInactive',
+  'generatedActive',
+  'generatedUnexpectedChunk',
+  'generatedMissingChunks',
 ] as const;
 
 export type MapGeneratedInstallError =
@@ -96,6 +111,24 @@ export type MapGeneratedInstallResult = {
   roads: number;
   rails: number;
 };
+
+function generatedInstallResult(buffer: ArrayBuffer | null): MapGeneratedInstallResult {
+  const empty = { chunks: 0, paths: 0, roads: 0, rails: 0 };
+  if (!buffer) return { ok: false, error: 'hostFailure', ...empty };
+  const out = new Float32Array(buffer);
+  if (out.length < 6) return { ok: false, error: 'hostFailure', ...empty };
+  const errorCode = Math.trunc(out[1] ?? -1);
+  const error = NATIVE_GENERATED_INSTALL_ERRORS[errorCode] ?? 'hostFailure';
+  const ok = (out[0] ?? 0) >= 0.5 && error === 'none';
+  return {
+    ok,
+    error: ok ? 'none' : error,
+    chunks: Math.trunc(out[2] ?? 0),
+    paths: Math.trunc(out[3] ?? 0),
+    roads: Math.trunc(out[4] ?? 0),
+    rails: Math.trunc(out[5] ?? 0),
+  };
+}
 
 export interface MapTool {
   channel: MapChannel;
@@ -172,6 +205,7 @@ export function mapHostLive(): boolean {
  * caller must explicitly bind a new target after loading/seeding a document. */
 export function mapReset(): void {
   callHost('__map_reset', undefined);
+  publishMapTerrainChanged();
 }
 
 /** Replace the native painting from one fully compiled generated-map payload.
@@ -186,21 +220,47 @@ export function mapInstallGenerated(
   if (!hasHost('__map_install_generated')) {
     return { ok: false, error: 'hostUnavailable', ...empty };
   }
-  const buffer = callHost<ArrayBuffer | null>('__map_install_generated', null, chunkRows, pathRows);
-  if (!buffer) return { ok: false, error: 'hostFailure', ...empty };
-  const out = new Float32Array(buffer);
-  if (out.length < 6) return { ok: false, error: 'hostFailure', ...empty };
-  const errorCode = Math.trunc(out[1] ?? -1);
-  const error = NATIVE_GENERATED_INSTALL_ERRORS[errorCode] ?? 'hostFailure';
-  const ok = (out[0] ?? 0) >= 0.5 && error === 'none';
-  return {
-    ok,
-    error: ok ? 'none' : error,
-    chunks: Math.trunc(out[2] ?? 0),
-    paths: Math.trunc(out[3] ?? 0),
-    roads: Math.trunc(out[4] ?? 0),
-    rails: Math.trunc(out[5] ?? 0),
-  };
+  const result = generatedInstallResult(callHost<ArrayBuffer | null>('__map_install_generated', null, chunkRows, pathRows));
+  if (result.ok) publishMapTerrainChanged();
+  return result;
+}
+
+/** Begin a bounded generated-map replacement. The complete coordinate
+ * manifest and path wire validate before native owners reset; terrain then
+ * crosses the bridge one canonical chunk record at a time. */
+export function mapGeneratedBegin(manifest: Float32Array, pathRows: Float32Array): MapGeneratedInstallResult {
+  if (!hasHost('__map_generated_begin')) {
+    return { ok: false, error: 'hostUnavailable', chunks: 0, paths: 0, roads: 0, rails: 0 };
+  }
+  return generatedInstallResult(callHost<ArrayBuffer | null>('__map_generated_begin', null, manifest, pathRows));
+}
+
+/** Append one headerless canonical chunk record to the active transaction. */
+export function mapGeneratedChunk(chunkRow: Float32Array): MapGeneratedInstallResult {
+  if (!hasHost('__map_generated_chunk')) {
+    return { ok: false, error: 'hostUnavailable', chunks: 0, paths: 0, roads: 0, rails: 0 };
+  }
+  return generatedInstallResult(callHost<ArrayBuffer | null>('__map_generated_chunk', null, chunkRow));
+}
+
+/** Publish a complete streamed map and compile its global road plan. */
+export function mapGeneratedCommit(): MapGeneratedInstallResult {
+  if (!hasHost('__map_generated_commit')) {
+    return { ok: false, error: 'hostUnavailable', chunks: 0, paths: 0, roads: 0, rails: 0 };
+  }
+  const result = generatedInstallResult(callHost<ArrayBuffer | null>('__map_generated_commit', null));
+  if (result.ok) publishMapTerrainChanged();
+  return result;
+}
+
+/** Abandon an incomplete generated replacement, leaving one empty map. */
+export function mapGeneratedAbort(): MapGeneratedInstallResult {
+  if (!hasHost('__map_generated_abort')) {
+    return { ok: false, error: 'hostUnavailable', chunks: 0, paths: 0, roads: 0, rails: 0 };
+  }
+  const result = generatedInstallResult(callHost<ArrayBuffer | null>('__map_generated_abort', null));
+  if (result.ok) publishMapTerrainChanged();
+  return result;
 }
 
 /** Allocate the chunk at (cx,cz). Returns false out-of-window. */
@@ -431,7 +491,9 @@ export function mapInspectFile(path: string): { version: number; chunkCount: num
 /** Load a painting from a file; the host rebuilds every channel and re-derives
  *  the road stamps. False = missing or malformed file. */
 export function mapLoadFile(path: string): boolean {
-  return callHost<number>('__map_load_file', 0, path) === 1;
+  const loaded = callHost<number>('__map_load_file', 0, path) === 1;
+  if (loaded) publishMapTerrainChanged();
+  return loaded;
 }
 
 /** Register the painting's micro-save target (req_2765): from here on every
@@ -539,7 +601,7 @@ function mapHistoryMutation(name: '__map_undo' | '__map_redo'): MapHistoryResult
   if (!ab) return { ok: false, kind: 'paintStroke', undo: 0, redo: 0, bytes: 0, dropped: 0 };
   const out = new Float32Array(ab);
   const current = mapHistory();
-  return {
+  const result: MapHistoryResult = {
     ok: (out[0] ?? 0) >= 0.5,
     kind: MAP_HISTORY_KINDS[Math.max(0, Math.min(MAP_HISTORY_KINDS.length - 1, Math.trunc(out[1] ?? 0)))]!,
     undo: Math.trunc(out[2] ?? current.undo),
@@ -547,6 +609,10 @@ function mapHistoryMutation(name: '__map_undo' | '__map_redo'): MapHistoryResult
     bytes: current.bytes,
     dropped: Math.trunc(out[4] ?? current.dropped),
   };
+  // The native history kind intentionally groups every paint channel. Sampling
+  // is cheap and the camera cache suppresses a push for non-terrain strokes.
+  if (result.ok && result.kind === 'paintStroke') publishMapTerrainChanged();
+  return result;
 }
 
 export function mapUndo(): MapHistoryResult {
@@ -623,6 +689,9 @@ export function mapEventDrain(): MapAuthoringEvent[] {
       droppedBefore: intValue(raw[base + 32]),
     });
   }
+  if (events.some((event) => event.kind === 'stroke' && event.tool.channel === 'terrain')) {
+    publishMapTerrainChanged();
+  }
   return events;
 }
 
@@ -631,6 +700,21 @@ export function mapStats(): { chunkCount: number; dirtyChunks: number } {
   if (!ab) return { chunkCount: 0, dirtyChunks: 0 };
   const out = new Float32Array(ab);
   return { chunkCount: out[0]!, dirtyChunks: out[1]! };
+}
+
+/** Canonical painted-terrain height at one world-metre point. This scalar door
+ * is for UI-rate camera/controller decisions; render feeds stay native. */
+export function mapHeightAt(x: number, z: number): number {
+  const height = callHost<number>('__map_height_at', 0, x, z);
+  return Number.isFinite(height) ? height : 0;
+}
+
+/** Highest point on the terrain surface the loader actually renders beneath
+ * an axis-aligned rectangle. One bounded native scan keeps level foundation
+ * runs honest without issuing a host call for every 3 m piece. */
+export function mapRenderedHeightMax(minX: number, minZ: number, maxX: number, maxZ: number): number | null {
+  const height = callHost<number | null>('__map_render_height_max', null, minX, minZ, maxX, maxZ);
+  return typeof height === 'number' && Number.isFinite(height) ? height : null;
 }
 
 /** Copy of a chunk's terrain height samples (241×241, row-major). Readback for

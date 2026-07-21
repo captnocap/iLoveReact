@@ -1,0 +1,30 @@
+{
+  "id": "req_3246",
+  "at": "2026-07-20T03:28:06.250Z",
+  "origin": "session:5a3945f7",
+  "text": "i just realized it has my entire list here like duplicated and i scrolled some more and it even has this one lmao which is what is active with the he_ad ones also[Image #7] oh but a code update refreshed it. so its bad react",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:28:56.143Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:37:01.114Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the duplicated-whole-list / ghost-row Assets tree ('bad react' — correct call). Three fixes in ab03a73a5: (1) ContentTreeNode wraps its expanded children in a dedicated HW_TreeChildren container so the keyed row array never sits bare beside the Row (documented reconciler array-sibling hazard; also keeps big expanded trees under the per-container child cap); (2) AppFrame holds the last tree shape while modelRenamingId is active so name-sorting can't re-rank keyed rows per keystroke, rebuilding once on rename finish; (3) the rename-follow package-directory move (a full every-blob copy) no longer rides each keystroke — updateManifestIdentity defers it and finishRenameModel settles it once via settleRenamedPackageDir. esbuild-verified all four touched files; hot reload picks it up.",
+  "shas": [
+    "ab03a73a5"
+  ],
+  "resolvedAt": "2026-07-20T03:37:01.114Z"
+}

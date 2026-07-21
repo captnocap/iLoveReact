@@ -58,7 +58,9 @@ export default function ScaleByDialog({ onCancel, onApply }: {
 
         <Text style={{ color: parsed.ok ? DIM : '#d98d8d', fontSize: 10, lineHeight: 15 }}>
           {parsed.ok
-            ? 'Uniform around the current selection pivot · one Undo · camera reframes unless locked.'
+            ? (parsed.factor < 0
+              ? 'Negative scale mirrors through the selection pivot · one Undo · camera reframes unless locked.'
+              : 'Uniform around the current selection pivot · one Undo · camera reframes unless locked.')
             : parsed.error}
         </Text>
 

@@ -9,8 +9,8 @@ import {
   formatSignedMemory,
   memoryBaselineFor,
   memoryDelta,
+  memoryMappingBuckets,
   memoryNumber,
-  memoryOriginBuckets,
   memoryReconcile,
   memorySignature,
   memorySubsystems,
@@ -24,7 +24,7 @@ export default function MemoryPopover({ onClose }: { onClose: () => void }) {
   const [baseline, setBaseline] = useState<Record<string, number> | null>(null);
   const memoryKey = memorySignature(system);
 
-  const buckets = memoryOriginBuckets(system, baseline);
+  const buckets = memoryMappingBuckets(system, baseline);
   const subsystems = memorySubsystems(system, baseline);
   const reconcile = memoryReconcile(system);
   const bucketMax = Math.max(1, ...buckets.map((row) => row.score));
@@ -32,7 +32,8 @@ export default function MemoryPopover({ onClose }: { onClose: () => void }) {
 
   const rss = memoryNumber(system, 'process_rss_bytes');
   const rssDelta = memoryDelta(system, baseline, 'rss', 'process_rss_bytes');
-  const hot = subsystems[0]?.hot || reconcile.unattributed >= 512 * MiB;
+  const shaderRetained = memoryNumber(system, 'shader_compile_last_retained_growth_bytes');
+  const hot = subsystems[0]?.hot || buckets[0]?.hot || shaderRetained >= 256 * MiB;
   const bucketValue = (id: string) => buckets.find((row) => row.id === id)?.value ?? formatMemory(0);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export default function MemoryPopover({ onClose }: { onClose: () => void }) {
         <Icon name="MemoryStick" size={14} color={accentFor(hot ? 'warning' : 'primary')} />
         <C.HW_HeadTitle>Memory Accumulation</C.HW_HeadTitle>
         <C.HW_PillOn><C.HW_PillTextOn>rss {formatMemory(rss)}</C.HW_PillTextOn></C.HW_PillOn>
-        <C.HW_Pill><C.HW_PillText>vram {formatMemory(reconcile.gpuTracked)}</C.HW_PillText></C.HW_Pill>
+        <C.HW_Pill><C.HW_PillText>gpu alloc {formatMemory(reconcile.gpuTracked)}</C.HW_PillText></C.HW_Pill>
         <C.HW_Pill><C.HW_PillText>{formatSignedMemory(rssDelta)} since reset</C.HW_PillText></C.HW_Pill>
         <C.HW_Spacer />
         <C.HW_Pill onPress={() => setBaseline(system ? memoryBaselineFor(system) : null)}><C.HW_PillText>reset</C.HW_PillText></C.HW_Pill>
@@ -59,31 +60,31 @@ export default function MemoryPopover({ onClose }: { onClose: () => void }) {
             <C.HW_PerfLabel>process rss</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
-            <C.HW_PerfValue>{bucketValue('origin:World')}</C.HW_PerfValue>
-            <C.HW_PerfLabel>world / map</C.HW_PerfLabel>
+            <C.HW_PerfValue>{bucketValue('mapping:anonymous')}</C.HW_PerfValue>
+            <C.HW_PerfLabel>anonymous mappings</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
-            <C.HW_PerfValue>{bucketValue('origin:Shell')}</C.HW_PerfValue>
-            <C.HW_PerfLabel>shell / ui</C.HW_PerfLabel>
+            <C.HW_PerfValue>{bucketValue('mapping:heap')}</C.HW_PerfValue>
+            <C.HW_PerfLabel>main native heap</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
-            <C.HW_PerfValue>{bucketValue('origin:Runtime')}</C.HW_PerfValue>
-            <C.HW_PerfLabel>js runtime</C.HW_PerfLabel>
+            <C.HW_PerfValue>{bucketValue('mapping:file')}</C.HW_PerfValue>
+            <C.HW_PerfLabel>file mappings</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
             <C.HW_PerfValue>{formatMemory(reconcile.gpuTracked)}</C.HW_PerfValue>
-            <C.HW_PerfLabel>gpu vram</C.HW_PerfLabel>
+            <C.HW_PerfLabel>known gpu allocations</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
-            <C.HW_PerfValue>{formatMemory(reconcile.unattributed)}</C.HW_PerfValue>
-            <C.HW_PerfLabel>native / driver</C.HW_PerfLabel>
+            <C.HW_PerfValue>{formatMemory(shaderRetained)}</C.HW_PerfValue>
+            <C.HW_PerfLabel>shader retained</C.HW_PerfLabel>
           </C.HW_PerfTile>
         </C.HW_DockPerfGrid>
       </C.HW_PerfSummarySurface>
       <C.HW_ChurnSummarySurface staticKey="editor:memory:summary-row">
         <C.HW_ChurnSummary>
-          <Icon name={reconcile.unattributed >= 512 * MiB ? 'TriangleAlert' : 'CircleCheck'} size={13} color={accentFor(reconcile.unattributed >= 512 * MiB ? 'warning' : 'success')} />
-          <C.HW_FormValue numberOfLines={1} noWrap>host tracked {formatMemory(reconcile.hostTracked)} of {formatMemory(rss)} rss - {formatMemory(reconcile.unattributed)} native - {formatMemory(reconcile.gpuTracked)} gpu vram (separate pool)</C.HW_FormValue>
+          <Icon name={hot ? 'TriangleAlert' : 'CircleCheck'} size={13} color={accentFor(hot ? 'warning' : 'success')} />
+          <C.HW_FormValue numberOfLines={1} noWrap>kernel mapping partition {formatMemory(system?.process_map_total_rss_bytes)} across {formatCount(system?.process_map_count ?? 0)} VMAs - {formatMemory(reconcile.gpuTracked)} known gpu allocations shown separately because driver backing can overlap rss</C.HW_FormValue>
           <C.HW_Spacer />
           <C.HW_StatusText numberOfLines={1} noWrap>peak {formatMemory(system?.process_rss_peak_bytes)} - swap {formatMemory(system?.process_vm_swap_bytes)} - threads {formatCount(system?.process_threads ?? 0)}</C.HW_StatusText>
         </C.HW_ChurnSummary>
@@ -91,9 +92,9 @@ export default function MemoryPopover({ onClose }: { onClose: () => void }) {
       <C.HW_MemoryBreakdown>
         <C.HW_GroupTitle>
           <Icon name="Boxes" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>BY ORIGIN</C.HW_GroupText>
+          <C.HW_GroupText>BY KERNEL MAPPING</C.HW_GroupText>
           <C.HW_Spacer />
-          <C.HW_StatusText>{buckets[0] ? 'where it comes from' : 'waiting for system telemetry'}</C.HW_StatusText>
+          <C.HW_StatusText>{buckets[0] ? 'disjoint - rows sum to mapped rss' : 'waiting for system telemetry'}</C.HW_StatusText>
         </C.HW_GroupTitle>
         <C.HW_TopConsumerRows>
           {buckets.map((row, index) => (

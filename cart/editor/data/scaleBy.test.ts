@@ -11,9 +11,9 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-test('accepts the bridge authoring factor exactly', () => {
-  const parsed = parseScaleByFactor('48');
-  assert(parsed.ok && parsed.factor === 48, '×48 did not survive parsing exactly');
+test('defaults to an ordinary authoring multiplier', () => {
+  const parsed = parseScaleByFactor(String(SCALE_BY_TUNING.defaultFactor));
+  assert(parsed.ok && parsed.factor === 1.25, 'the default scale multiplier was not ×1.25');
 });
 
 test('accepts fractional down-scaling inside the engine contract', () => {
@@ -21,10 +21,16 @@ test('accepts fractional down-scaling inside the engine contract', () => {
   assert(parsed.ok && parsed.factor === 0.5, 'fractional scale was rejected');
 });
 
+test('accepts a negative multiplier for an exact mirror through the pivot', () => {
+  const parsed = parseScaleByFactor('-1');
+  assert(parsed.ok && parsed.factor === -1, 'negative scale was rejected');
+});
+
 test('rejects no-op, non-finite, and out-of-contract factors without clamping', () => {
   assert(!parseScaleByFactor('1').ok, '×1 became a phantom edit');
   assert(!parseScaleByFactor('Infinity').ok, 'infinite scale escaped validation');
-  assert(!parseScaleByFactor(String(SCALE_BY_TUNING.max + 1)).ok, 'oversize input was silently clamped');
+  assert(!parseScaleByFactor(String(SCALE_BY_TUNING.maxMagnitude + 1)).ok, 'oversize input was silently clamped');
+  assert(!parseScaleByFactor('0').ok, 'zero scale escaped validation');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

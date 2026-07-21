@@ -1,0 +1,28 @@
+{
+  "id": "req_3296",
+  "at": "2026-07-20T17:01:31.498Z",
+  "origin": "codex:019f8078",
+  "text": "inside of the cart/editor when navigating in any menu and there is anything that the user can click it needs to have a hover highlight not just blind so buttons menus uh yeah i guess thats it right",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:01:33.881Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:04:39.553Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Enabled an editor-scoped default hover highlight for every ordinary Pressable with onPress, while preserving component-specific hover styles. Excluded full-screen click-away scrims so dialogs/pickers do not flash on hover. Verified with a ReleaseFast editor ship build and diff check.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:04:39.553Z"
+}

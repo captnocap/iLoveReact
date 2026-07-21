@@ -1,0 +1,28 @@
+{
+  "id": "req_3209",
+  "at": "2026-07-19T01:56:52.983Z",
+  "origin": "codex:019f744e",
+  "text": "hm so make this memory read out tell me exactly what is giving us these numbers since Native / driver is vauge",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T01:57:02.248Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:22:05.953Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the vague Native / driver bucket with owner-side map, foliage, snapshot, paint, roads, history, GPU-pool, and honest remainder telemetry. Added used-versus-capacity semantics, focused UI tests, Zig ownership tests, a ReleaseFast editor build, and the full Zig 0.16 editor verification; no commit was created.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:22:05.952Z"
+}

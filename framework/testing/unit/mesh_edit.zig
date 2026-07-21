@@ -17,6 +17,59 @@ test "meshdoc range table must exactly match the declared Outliner count" {
     try testing.expect(!mesh_edit.partRangesValid(empty[0..], 1));
 }
 
+test "meshdoc snapshot keeps hidden part faces and rejects metadata-only ranges" {
+    var visible = [_]f32{0} ** 24;
+    var hidden = [_]f32{0} ** 24;
+    visible[0] = 10;
+    hidden[0] = 20;
+    const visible_groups = [_]u32{3};
+    const hidden_groups = [_]u32{9};
+    const visible_colors = [_]u8{ 80, 90, 100, 255 };
+    const hidden_colors = [_]u8{ 20, 30, 40, 87 };
+    const blocks = [_]mesh_edit.MeshDocFaceBlock{
+        .{ .verts = visible[0..], .groups = visible_groups[0..], .materials = null, .colors = visible_colors[0..] },
+        .{ .verts = hidden[0..], .groups = hidden_groups[0..], .materials = null, .colors = hidden_colors[0..] },
+    };
+    var snapshot = try mesh_edit.composeMeshDocSnapshot(testing.allocator, blocks[0..]);
+    defer snapshot.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 48), snapshot.verts.len);
+    try testing.expectEqualSlices(u32, &.{ 3, 9 }, snapshot.groups.?);
+    try testing.expect(snapshot.materials == null);
+    try testing.expectEqual(@as(u32, 3), snapshot.glass_first_vertex);
+    try testing.expectEqual(@as(f32, 10), snapshot.verts[0]);
+    try testing.expectEqual(@as(f32, 20), snapshot.verts[24]);
+
+    const ranges = [_]u32{ 3, 4, 9, 10 };
+    try testing.expect(mesh_edit.meshDocRangesOwnEveryFace(ranges[0..], snapshot.groups, 2));
+    try testing.expect(!mesh_edit.meshDocRangesOwnEveryFace(ranges[0..], visible_groups[0..], 2));
+}
+
+test "quality save snapshot uses the reduced resident topology" {
+    // The retained baseline may contain many more faces so the slider can be
+    // adjusted again, but Save passes only the chosen resident projection into the
+    // durable snapshot. Its mapped authored group remains owned by the same part.
+    var reduced = [_]f32{0} ** 24;
+    reduced[0] = 3315;
+    const mapped_group = [_]u32{7};
+    const mapped_material = [_]u32{3};
+    const mapped_color = [_]u8{ 42, 84, 126, 255 };
+    const chosen = [_]mesh_edit.MeshDocFaceBlock{.{
+        .verts = reduced[0..],
+        .groups = mapped_group[0..],
+        .materials = mapped_material[0..],
+        .colors = mapped_color[0..],
+    }};
+    var snapshot = try mesh_edit.composeMeshDocSnapshot(testing.allocator, chosen[0..]);
+    defer snapshot.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 24), snapshot.verts.len);
+    try testing.expectEqual(@as(f32, 3315), snapshot.verts[0]);
+    try testing.expectEqualSlices(u32, mapped_group[0..], snapshot.groups.?);
+    try testing.expectEqualSlices(u32, mapped_material[0..], snapshot.materials.?);
+    try testing.expect(mesh_edit.meshDocRangesOwnEveryFace(&.{ 7, 8 }, snapshot.groups, 1));
+}
+
 test "paint face hits cannot cross the active outliner scope" {
     var soup = [_]f32{0} ** (6 * 8);
     mesh_edit.test_support.loadGroupedSoup(3238, soup[0..], 6, &.{ 4, 9 });
@@ -125,6 +178,41 @@ test "created ungrouped quad focuses both appended triangles" {
     try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
 }
 
+test "detached seam create-face selection carries the detached part owner" {
+    // Two position-coincident quads model the exact detach seam: their render
+    // positions overlap, but each authored face belongs to an independent part.
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3314, soup[0..], 12, &.{ 0, 0, 1, 1 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.test_support.setPartRanges(&.{ 0, 1, 1, 2 });
+    mesh_edit.setMode(.edge);
+
+    // The focused detached range owns all selected edges even though the source
+    // face occupies the same coordinates. This is the owner Create Face must carry.
+    mesh_edit.setEditScope(1, 2);
+    try testing.expectEqual(@as(i32, 4), mesh_edit.selectAll());
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectedEdgesCommonPartPub().?);
+
+    // A selection spanning independent outliners has no legal single owner and is
+    // rejected instead of arbitrarily assigning the new face to the first triangle.
+    mesh_edit.setEditScope(0, 0);
+    try testing.expectEqual(@as(i32, 8), mesh_edit.selectAll());
+    try testing.expect(mesh_edit.selectedEdgesCommonPartPub() == null);
+}
+
 test "exact uniform scale multiplies the selection frame around a stable pivot" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,
@@ -145,6 +233,27 @@ test "exact uniform scale multiplies the selection frame around a stable pivot" 
 
     // A factor of one is an explicit no-op, not a phantom undo candidate.
     try testing.expect(!mesh_edit.scaleSelectionUniform(after.center, 1).changed);
+}
+
+test "exact uniform scale accepts a negative factor to mirror through its pivot" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        2, 0, 0, 0, 0, 1, 1, 0,
+        0, 2, 0, 0, 0, 1, 0, 1,
+    };
+    mesh_edit.test_support.loadGroupedSoup(2931, soup[0..], 3, &.{0});
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.face);
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+
+    const pivot = mesh_edit.selectionFrame().?.center;
+    const before = mesh_edit.vertPosPub(0);
+    try testing.expect(mesh_edit.scaleSelectionUniform(pivot, -1).changed);
+    const after = mesh_edit.vertPosPub(0);
+    inline for (0..3) |axis| try testing.expectApproxEqAbs(pivot[axis] * 2 - before[axis], after[axis], 0.0001);
+
+    try testing.expect(!mesh_edit.scaleSelectionUniform(pivot, 0).changed);
+    try testing.expect(!mesh_edit.scaleSelectionUniform(pivot, -51).changed);
 }
 
 test "merging authored faces dissolves their shared selectable edge (req_2871)" {
@@ -222,6 +331,37 @@ test "dissolving an irregular four-quad grid drops seam verts and rebuilds a cle
     try testing.expectEqual(@as(u32, 2), lowered.tri_count);
     try testing.expectEqualSlices(u32, &.{ 10, 10 }, lowered.groups);
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
+}
+
+test "same-face diagonal adoption keeps boundary edge selection" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    const groups = [_]u32{ 7, 7 };
+    mesh_edit.test_support.loadGroupedSoup(3312, soup[0..], 6, groups[0..]);
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expectEqual(@as(i32, 4), mesh_edit.selectAll());
+
+    // Re-triangulate the same authored quad across B-D. Copy complete rows so the
+    // atlas UV attached to every physical corner follows that corner exactly.
+    var alternate: [6 * 8]f32 = undefined;
+    const rows = [_]usize{ 1, 2, 5, 1, 5, 0 };
+    for (rows, 0..) |source_row, destination_row| {
+        @memcpy(
+            alternate[destination_row * 8 .. destination_row * 8 + 8],
+            soup[source_row * 8 .. source_row * 8 + 8],
+        );
+    }
+    try testing.expect(mesh_edit.test_support.replaceGroupedSoupSameFaceCount(3312, alternate[0..], 6, groups[0..]));
+    try testing.expect(mesh_edit.adoptSameFaceTriangulation());
+    try testing.expectEqual(@as(u32, 4), mesh_edit.selectedEdgeCountPub());
+    try testing.expectEqual(@as(u32, 4), mesh_edit.boundaryEdgeCount());
 }
 
 test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_2954)" {

@@ -1,0 +1,28 @@
+{
+  "id": "req_3313",
+  "at": "2026-07-21T03:00:09.541Z",
+  "origin": "codex:019f7a9c",
+  "text": "here is another bug. add N amount of outliners ->\n  create group -> toggle visiblity for group to off ->\n  save to disk -> restart -> all of the grouped items\n  will list, they do not exist though -> restart again\n  -> they no longer exist in the outliner list at all",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T03:00:22.432Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:24:49.167Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Hidden outliner geometry is no longer omitted from durable RJMD saves. The host now composes visible plus hidden face blocks (including source/display verts, groups, texture roles, colors/glass), validates that every serialized face belongs to exactly one declared part and every declared part owns faces, and refuses a metadata-only overwrite. Cold load installs the complete mesh then restores saved hidden ranges without journaling; starting another model clears the old hidden stash. Added Zig snapshot/range regressions and TS hidden-metadata coverage. Native mesh-edit tests, meshDoc 10/10, and the full ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:24:49.167Z"
+}

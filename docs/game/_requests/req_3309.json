@@ -1,0 +1,34 @@
+{
+  "id": "req_3309",
+  "at": "2026-07-20T18:18:42.221Z",
+  "origin": "codex:019f744e",
+  "text": "ok so one thing im finding with the map here that is a real problem is that when it comes to building on these pre-alocated places, there is a slope that is causing floor pieces to be swallowed and u cant see them[Image #1] see what i mean uh so idk what u want to do about that because it happens everywhere",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T18:19:02.744Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T18:59:02.255Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-20T19:04:08.829Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Follow-up closed the final quiet fallback: terrain-safe placement now refuses structural authored meshes whose real bounds are unavailable instead of assuming a 3 m footprint. Free props are excluded from foundation bounds. Placement tests are 10/10, prefab regression and independent review are green, and the ReleaseFast editor ship was rebuilt."
+    }
+  ],
+  "resolution": "Implemented exact rendered-terrain footprint leveling for click, move, drag-run, and prefab placement. The bounded native query checks both chunk-seam owners, respects asymmetric authored mesh bounds, and preserves storey offsets. Added Zig and TypeScript regressions; ReleaseFast editor build and the full Zig 0.16 editor gate are green, and the dev binary is rebuilt on disk.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T18:59:02.255Z"
+}

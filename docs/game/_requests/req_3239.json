@@ -1,0 +1,30 @@
+{
+  "id": "req_3239",
+  "at": "2026-07-20T02:53:24.284Z",
+  "origin": "codex:019f7a9c",
+  "text": "also there needs to be a way better way to copy and paste outliners. duplicate button works but its 300+ pixels away and that distance adds up",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T02:53:29.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:06:53.181Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added focused model-outliner keyboard duplication: Ctrl+C records the current part selection, Ctrl+V duplicates it through the existing host-resident paint-carrying duplicate path, and Ctrl+D duplicates immediately. The shortcuts are surfaced in the outliner header and do not shuttle geometry through the JS clipboard.",
+  "shas": [
+    "b4503427b"
+  ],
+  "resolvedAt": "2026-07-20T03:06:53.181Z"
+}

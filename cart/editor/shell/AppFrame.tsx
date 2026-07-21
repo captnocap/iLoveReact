@@ -30,6 +30,7 @@ import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import { FacadePaintLayersSection, ModelPaintLayersSection } from '../inspector/PaintLayerSections';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
+import StlConversionDialog from '../dialogs/StlConversionDialog';
 import AddChunkDialog from '../dialogs/AddChunkDialog';
 import MapDocumentsDialog from '../dialogs/MapDocumentsDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
@@ -125,7 +126,8 @@ import {
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
-import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
+import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
+import { convertStlToGlb, isStlFile } from '../data/stlImport';
 import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import {
@@ -337,6 +339,9 @@ export default function AppFrame() {
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
   // The Add From Library picker (append a saved model into the OPEN model as parts).
   const [importPartOpen, setImportPartOpen] = useState(false);
+  // STL conversion is intentionally a blocking operation: a local Blender job can
+  // run long enough that a status-bar update looks like a click that did nothing.
+  const [stlConversionName, setStlConversionName] = useState<string | null>(null);
   // Path Array's source is frozen when the dialog opens. Params remain dialog-local;
   // Apply revalidates these ids/ranges against the live outliner before touching mesh.
   const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
@@ -462,6 +467,7 @@ export default function AppFrame() {
     if (block) return block;
     if (importPlan) return { id: 'import-image', label: 'Import Image' };
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
+    if (stlConversionName) return { id: 'stl-conversion', label: 'STL Conversion' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
     if (prefabCaptureOpen) return { id: 'prefab-capture', label: 'Create Prefab' };
@@ -3051,11 +3057,11 @@ export default function AppFrame() {
   // is seeded as ONE outliner part in the SAME state update the doc opens in, so the
   // surface mounts straight into parts mode (outliner live, part ops working) — never as
   // a view-only model. Its [lo, hi) range is stamped after the host parses the file.
-  const openModelFileDocument = (path: string) => {
+  const openModelFileDocument = (path: string, importedOverride?: ModelPackage) => {
     // Import for keeps: copy the file into its own Model Package (content browser +
     // every future launch). A failed copy still opens the model, but session-only —
     // and the status says so LOUDLY instead of pretending it was saved.
-    const imported = importModelFilePackage(path);
+    const imported = importedOverride ?? importModelFilePackage(path);
     const pkg = imported ?? fileModelPackage(path);
     const doc = modelDocument(pkg);
     const partPath = pkg.viewerPath ?? path;
@@ -3112,7 +3118,7 @@ export default function AppFrame() {
     }
   };
 
-  // File → Import Model: the OS picker (zenity) for a .glb/.obj anywhere on disk,
+  // File → Import Model: the OS picker (zenity) for a .glb/.obj/.stl anywhere on disk,
   // routed through the same native import path as in-project explorer rows.
   // The ONE import door: models open as documents; images run the quantize
   // probe and land in the dual-preview decision dialog (pixel texture vs
@@ -3122,7 +3128,7 @@ export default function AppFrame() {
     const path = await pickFile({
       title: 'Import a model or image',
       filters: [
-        { name: '3D models', patterns: ['*.glb', '*.obj'] },
+        { name: '3D models', patterns: ['*.glb', '*.obj', '*.stl'] },
         { name: 'Images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp'] },
         { name: 'All files', patterns: ['*'] },
       ],
@@ -3132,8 +3138,23 @@ export default function AppFrame() {
       probeImageImport(path);
       return;
     }
+    if (isStlFile(path)) {
+      const name = path.split('/').pop() ?? path;
+      setStlConversionName(name);
+      setState((prev) => ({ ...prev, status: `converting ${name} from STL to GLB…` }));
+      const conversion = await convertStlToGlb(path);
+      setStlConversionName(null);
+      if (!conversion.ok) {
+        setState((prev) => ({ ...prev, status: `could not convert ${name}: ${conversion.error}` }));
+        return;
+      }
+      const imported = importStlModelFilePackage(path, conversion.outputPath);
+      openModelFileDocument(conversion.outputPath, imported ?? undefined);
+      if (imported) remove(conversion.outputPath);
+      return;
+    }
     if (!isViewerFile(path)) {
-      setState((prev) => ({ ...prev, status: `cannot import ${path.split('/').pop()} — pick a .glb/.obj model or a .png/.jpg/.webp image` }));
+      setState((prev) => ({ ...prev, status: `cannot import ${path.split('/').pop()} — pick a .glb/.obj/.stl model or a .png/.jpg/.webp image` }));
       return;
     }
     openModelFileDocument(path);
@@ -3673,6 +3694,19 @@ export default function AppFrame() {
   const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
   const selectedPartIdsRef = useRef<string[]>([]);
   selectedPartIdsRef.current = selectedPartIds;
+  // Focus is deliberately locked by default: stage clicks are often part of a
+  // risky edit gesture, while selecting from the outliner remains explicit.
+  const [stagePartFocusEnabled, setStagePartFocusEnabled] = useState(false);
+  const stagePartFocusEnabledRef = useRef(stagePartFocusEnabled);
+  stagePartFocusEnabledRef.current = stagePartFocusEnabled;
+  const toggleStagePartFocus = () => {
+    const next = !stagePartFocusEnabledRef.current;
+    stagePartFocusEnabledRef.current = next;
+    setStagePartFocusEnabled(next);
+    setState((prev) => ({ ...prev, status: next
+      ? 'stage selection on — viewport clicks can focus other parts'
+      : 'stage selection locked — viewport clicks keep the current outliner focus' }));
+  };
   /** The live selected set, pruned to parts that still exist; falls back to the active part. */
   const effectiveSelectedIds = (s: EditorState, parts: ModelPart[], sel: string[]): string[] => {
     const valid = sel.filter((sid) => parts.some((p) => p.id === sid));
@@ -3768,7 +3802,12 @@ export default function AppFrame() {
       const modelId = activePartsModelId(current);
       const ranked = modelId ? (current.modelParts[modelId] ?? []).slice().sort((a, b) => (a.lo ?? Infinity) - (b.lo ?? Infinity)) : [];
       const part = ranked[partIndex | 0];
-      if (part?.visible) selectPartRef.current(part.id);
+      if (!part?.visible) return;
+      if (!stagePartFocusEnabledRef.current) {
+        setState((prev) => ({ ...prev, status: 'stage selection locked — unlock it in the Outliner to focus another part from the viewport' }));
+        return;
+      }
+      selectPartRef.current(part.id);
     };
     return () => { delete (globalThis as any).__meshEditFocusPart; };
   }, []);
@@ -4384,7 +4423,6 @@ export default function AppFrame() {
   // preserving its authored part ranges. File-backed packages host-parse their
   // copied .glb/.obj. Pick the same model again to reuse it any number of times.
   const importModelAsParts = (pkg: ModelPackage, source = 'dock') => {
-    setImportPartOpen(false);
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
     if (!mid || !api) {
@@ -4400,7 +4438,7 @@ export default function AppFrame() {
     if (doc && doc.vertices.length >= 24) {
       for (let index = 0; index < doc.ranges.length; index += 1) {
         const geo = meshDocRangeGeometry(doc, index);
-        if (geo.vertices.length === 0) continue;
+        if (geo.positions.length === 0) continue;
         const row = meta[index];
         const color = row?.color ?? nextColor();
         const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color, existing.length + added.length));
@@ -4431,6 +4469,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `could not import ${pkg.name} — its package has no usable mesh document or .glb/.obj` }));
       return;
     }
+    setImportPartOpen(false);
     setState((prev) => ({
       ...prev,
       seq: prev.seq + 1,
@@ -4925,7 +4964,7 @@ export default function AppFrame() {
           id: `part:doc:${mid}:${i}`,
           name: meta[i]?.name ?? (meshDoc.ranges.length === 1 ? (pkg?.name ?? 'part 1') : `part ${i + 1}`),
           kind: meta[i]?.kind as PrimitiveKind | undefined,
-          visible: true, // the doc mounts every part; visibility is a live host op, not mount state
+          visible: meta[i]?.visible ?? true,
           color: meta[i]?.color ?? PART_TINTS[i % PART_TINTS.length],
           groupId: meta[i]?.groupId,
           groupName: meta[i]?.groupName,
@@ -5731,6 +5770,8 @@ export default function AppFrame() {
             onSetGlobal={guarded(setWorldGlobal)}
             onResetGlobal={guarded(resetWorldGlobal)}
             outlinerHandlers={outlinerHandlers}
+            stagePartFocusEnabled={stagePartFocusEnabled}
+            onToggleStagePartFocus={toggleStagePartFocus}
             // Multi-select set (req_2659): row highlights + the UV header's '+N'.
             selectedPartIds={selectedPartIds}
             colorSpine={{
@@ -5919,12 +5960,18 @@ export default function AppFrame() {
       ) : null}
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
+          <C.HW_MenuDismiss onPress={() => setState((prev) => ({ ...prev, openMenu: null }))} />
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
         </RenderProbe>
       ) : null}
       {importPlan ? (
         <RenderProbe id="Import Image Dialog">
           <ImportImageDialog plan={importPlan} onPick={commitImageImport} onCancel={() => setImportPlan(null)} />
+        </RenderProbe>
+      ) : null}
+      {stlConversionName ? (
+        <RenderProbe id="STL Conversion Dialog">
+          <StlConversionDialog filename={stlConversionName} />
         </RenderProbe>
       ) : null}
       {importPartOpen ? (

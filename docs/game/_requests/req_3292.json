@@ -1,0 +1,28 @@
+{
+  "id": "req_3292",
+  "at": "2026-07-20T11:07:41.707Z",
+  "origin": "codex:019f7a9c",
+  "text": "There is a bug here: using the path tool i made a quick car body [Image #1] and then i try to loop cut it, it doesnt show me any loop cuts nor can it cut it it seems. ok but then i loop cut a cube [Image #2] and it breaks the model [Image #3]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T11:07:54.411Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T11:19:15.825Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made Loop Cut obey the indexed Blockbench-style boundary for mixed path-plane and cube models. A concave Path Plane is one authored n-gon, so it now reports that no quad/triangle loop crosses it and offers Close instead of a misleading Apply. Failed/no-op previews can no longer journal, renumber part ranges, re-key an untouched mesh, or reselect another outliner; successful reselection is constrained to the seed part. Added a Zig regression proving a refused concave path cut is inert and a sibling cube loop cut leaves the path face and its four lowered triangles unchanged. ReleaseFast editor build, Zig mesh-edit tests, TypeScript check, and all 49 editor TS suites pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T11:19:15.825Z"
+}

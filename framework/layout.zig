@@ -587,6 +587,12 @@ pub const Node = struct {
     scene3d_instance_data: ?[]const f32 = null,
     scene3d_instance_count: u32 = 0,
     scene3d_instance_stride: u32 = 0,
+    // Optional populated prefix of scene3d_instance_data for a STATIC retained
+    // batch. 0 = the full source slice (the default required by streamed families
+    // whose nodes draw shared sub-ranges). A non-zero value uploads only that many
+    // rows while still reserving the full source-slice capacity at a stable offset.
+    // Bump scene3d_instance_version whenever the populated bytes/count change.
+    scene3d_instance_populated_count: u32 = 0,
     // STATIC instanced batch: upload its instance data to the retained instance
     // buffer ONCE (keyed by the data pointer) and redraw it every frame with no
     // restage/upload. For world geometry that never moves (the no-V8 loader's

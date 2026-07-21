@@ -1,0 +1,34 @@
+{
+  "id": "req_3214",
+  "at": "2026-07-19T02:22:04.919Z",
+  "origin": "codex:019f768a",
+  "text": "the REROLL document is the most interesting of the bunch",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:22:10.146Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:30:31.396Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Centered the synthesis on REROLL and distinguished its representation result from its prototype executor performance."
+    },
+    {
+      "at": "2026-07-19T02:30:31.422Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Evaluated REROLL as the central idea and separated its strong structural proof from the mixed results of its prototype executor. It is the right IR pattern—a small formula vocabulary plus dense instances—but should ship after algebraic simplification and fusion, dirty-range retention, branch guards, and size-aware CPU or GPU scheduling; no code was changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:30:31.422Z"
+}

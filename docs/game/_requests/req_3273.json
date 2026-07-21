@@ -1,0 +1,36 @@
+{
+  "id": "req_3273",
+  "at": "2026-07-20T07:50:48.461Z",
+  "origin": "codex:019f7e48",
+  "text": "also while your in there check in on all those brush tools. a number of these are full of shit. mainly like scatter slider doesnt seem to do anything. the blend modes do nothing at all and the brushes themselves are nothing representive of their brush icon other than the oval, the normal, the soft, and the spray.",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:50:58.346Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T08:07:20.121Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Audit found preset-dial leakage, no general scatter displacement, ignored model spacing, and blend never reaching either compositor. Fixed each path and added TS/Zig meaning tests for presets, scatter, blend, and all 11 footprints."
+    },
+    {
+      "at": "2026-07-20T08:09:10.518Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited the brush path end to end and fixed the false controls rather than only changing their presentation. Presets now start from canonical values instead of leaking prior settings, scatter displaces every dab deterministically, model spacing affects interpolation, blend modes composite in facade and GPU model painting, and serialized model paint programs preserve blend choices. TypeScript and Zig tests exercise preset isolation, scatter, every analytic footprint, blend math, replay, and erase behavior.",
+  "shas": [
+    "134e440a6"
+  ],
+  "resolvedAt": "2026-07-20T08:09:10.518Z"
+}

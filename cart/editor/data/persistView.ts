@@ -85,6 +85,7 @@ export function loadPersistedState(): EditorState {
     base.worldPieces = world.pieces;
     base.worldFlora = world.worldFlora;
     base.worldPrefabs = world.prefabs;
+    base.worldFacades = world.facades;
     base.objects = world.objects;
     base.selectedObjectId = world.objects.find((object) => !object.hidden)?.id ?? 'obj-tile';
     base.seq = Math.max(base.seq, world.seq);
@@ -132,6 +133,7 @@ export function loadPersistedState(): EditorState {
     worldPieces: base.worldPieces,
     worldFlora: base.worldFlora,
     worldPrefabs: base.worldPrefabs,
+    worldFacades: base.worldFacades,
     objects: base.objects,
     selectedObjectId: base.selectedObjectId,
     selectedPieceId: null,
@@ -201,6 +203,7 @@ export function persistState(state: EditorState): void {
     worldPieces: [],
     worldFlora: [],
     worldPrefabs: [],
+    worldFacades: [],
     objects: [],
     selectedObjectId: 'obj-tile',
     selectedPieceId: null,

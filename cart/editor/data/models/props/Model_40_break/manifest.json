@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "primitive:cube:40",
+  "name": "Model 40_break",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cube_40",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

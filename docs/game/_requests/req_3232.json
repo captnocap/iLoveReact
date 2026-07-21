@@ -1,0 +1,30 @@
+{
+  "id": "req_3232",
+  "at": "2026-07-19T16:24:31.849Z",
+  "origin": "codex:019f7a9c",
+  "text": "hm its still one mesh. but this thing auto saves so uh idk but there is probably a necessary un-fuck script needed for this very moment",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T16:25:03.278Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:40:10.100Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the live data incident and closed the destructive write path. Paint/atlas persistence was incorrectly routed through the full model-artifact writer without Outliner metadata, allowing doc.blob to be rewritten with rangeCount=0; the next load projected one fallback Cube 1 row and autosave then overwrote parts.json with that projection. The user chose to move on rather than repair this model. No Heroin_Bob_head asset file was modified; a read-only evidence copy remains under /tmp/heroin-bob-head-recovery.GtNKan.",
+  "shas": [
+    "9d584fd65"
+  ],
+  "resolvedAt": "2026-07-19T16:40:10.100Z"
+}

@@ -68,6 +68,11 @@ export type CoastalDistrict = {
   center: { x: number; z: number };
   radiusX: number;
   radiusZ: number;
+  angleRadians: number;
+  gridSpacingX: number;
+  gridSpacingZ: number;
+  gridWarpM: number;
+  gridPhase: number;
 };
 
 export type CoastalCrossing = {
@@ -135,6 +140,19 @@ export type CoastalCityPaintingLegend = {
 
 export type PackedCoastalCityPainting = { chunks: Float32Array; paths: Float32Array };
 
+export type CoastalCityPaintingStream = {
+  /** `[version, count, cx, cz, ...]`; small enough to cross the host door whole. */
+  manifest: Float32Array;
+  /** The existing semantic path wire; paths remain bounded and arrive once. */
+  paths: Float32Array;
+  chunkCount: number;
+  /**
+   * One headerless native CHUNK_STRIDE record, starting with `cx,cz`.
+   * The stream refills one owned buffer; consume/copy it before the next call.
+   */
+  packChunk(index: number): Float32Array;
+};
+
 /**
  * The one behavior table.  Numbers in the planner are either mathematical/wire
  * structure (zero, one, tuple offsets) or come from here, so the baseline can
@@ -145,9 +163,9 @@ export const COASTAL_CITY_TUNING = {
     version: 1,
     chunkHeaderFloats: 5,
     chunkCoordFloats: 2,
-    chunkCount: 81,
-    chunkColumns: 9,
-    chunkRows: 9,
+    chunkCount: 625,
+    chunkColumns: 25,
+    chunkRows: 25,
     chunkMeters: 120,
     sampleSpacingM: 0.5,
     sampleColumns: 241,
@@ -159,7 +177,7 @@ export const COASTAL_CITY_TUNING = {
     pathHeaderFloats: 2,
     pathRecordFloats: 8,
     pathPointFloats: 3,
-    maxPaths: 128,
+    maxPaths: 384,
     maxPointsPerPath: 128,
     emptyCell: -1,
     maxLegendIndex: 32_767,
@@ -168,13 +186,13 @@ export const COASTAL_CITY_TUNING = {
   world: {
     minX: -60,
     minZ: -60,
-    maxX: 1020,
-    maxZ: 1020,
+    maxX: 2940,
+    maxZ: 2940,
     buildModuleM: 3,
     moduleCenterM: 1.5,
     pathPointSnapM: 0.25,
     terrainHeightMinM: -14,
-    terrainHeightMaxM: 54,
+    terrainHeightMaxM: 64,
     dryTerrainMinM: 0.25,
   },
   random: {
@@ -190,53 +208,60 @@ export const COASTAL_CITY_TUNING = {
     cellMixLane: 83_492_791,
   },
   coast: {
-    baseX: 24,
-    primaryAmplitudeM: 18,
-    primaryPeriodM: 165,
-    secondaryAmplitudeM: 7,
-    secondaryPeriodM: 61,
-    beachWidthM: 34,
-    bedEdgeDepthM: 0.8,
-    bedSlope: 0.045,
+    baseX: 330,
+    primaryAmplitudeM: 92,
+    primaryPeriodM: 360,
+    secondaryAmplitudeM: 24,
+    secondaryPeriodM: 118,
+    longitudinalDrift: 0.035,
+    driftCenterZ: 1440,
+    beachWidthM: 58,
+    beachNorthEndZ: 1480,
+    beachSouthStartZ: 2180,
+    bedEdgeDepthM: 1,
+    bedSlope: 1 / 92,
     maxDepthM: 12,
     primaryPhaseSalt: 0x23a1,
     secondaryPhaseSalt: 0x71d3,
   },
   river: {
-    baseZ: 520,
-    bendAmplitudeM: 46,
-    bendPeriodM: 205,
-    secondaryAmplitudeM: 16,
-    secondaryPeriodM: 83,
-    downstreamBend: 0.035,
-    baseHalfWidthM: 11,
-    halfWidthAmplitudeM: 4,
-    estuaryExtraHalfWidthM: 17,
-    estuaryFadeM: 230,
-    bedDepthM: 3.2,
-    bedDepthAmplitudeM: 1.1,
-    wetlandMarginM: 34,
-    crossingApproachM: 46,
-    crossingAllowedRadiusM: 92,
+    startZ: 1970,
+    downstreamDropM: 1190,
+    mapSpanM: 3000,
+    logicalOriginOffsetM: 60,
+    bendAmplitudeM: 145,
+    bendCycles: 6.5,
+    secondaryAmplitudeM: 44,
+    secondaryCycles: 17,
+    waterStartX: 280,
+    waterEndX: 2850,
+    baseHalfWidthM: 54,
+    halfWidthAmplitudeM: 34,
+    halfWidthPeriodM: 610,
+    halfWidthPhase: 1,
+    bedDepthM: 6.5,
+    bedDepthAmplitudeM: 1.5,
+    wetlandMarginM: 30,
+    crossingApproachM: 110,
+    crossingAllowedRadiusM: 220,
     causewayHalfWidthM: 7,
     causewayShoulderM: 1.5,
     causewayBankExtensionM: 12,
     causewayHeightM: 0.35,
     bendPhaseSalt: 0x19b7,
     secondaryPhaseSalt: 0xa531,
-    widthPhaseSalt: 0x47c9,
   },
   terrain: {
     baseHeightM: 2.2,
-    eastRiseM: 13,
-    eastRiseStartX: 160,
-    eastRiseSpanM: 860,
-    waveXAmplitudeM: 1.35,
-    waveXPeriodM: 119,
-    waveZAmplitudeM: 1.05,
-    waveZPeriodM: 93,
-    mountainExtraHeightM: 30,
-    forestRidgeExtraHeightM: 8,
+    eastRiseM: 52,
+    eastRiseStartX: 1790,
+    eastRiseSpanM: 1050,
+    waveXAmplitudeM: 3,
+    waveXPeriodM: 250,
+    waveZAmplitudeM: 2,
+    waveZPeriodM: 170,
+    mountainExtraHeightM: 6,
+    forestRidgeExtraHeightM: 4,
     padElevationStepM: 0.5,
     padFeatherM: 2,
     padIndexCellM: 30,
@@ -244,51 +269,48 @@ export const COASTAL_CITY_TUNING = {
     waveZPhaseSalt: 0x36bd,
   },
   protectedLand: {
-    mountain: { centerX: 875, centerZ: 125, radiusX: 135, radiusZ: 175 },
-    forest: { centerX: 870, centerZ: 875, radiusX: 130, radiusZ: 170 },
-    reserve: { centerX: 555, centerZ: 165, radiusX: 105, radiusZ: 72 },
+    mountain: { centerX: 2520, centerZ: 360, radiusX: 590, radiusZ: 610 },
+    forest: { centerX: 2720, centerZ: 2420, radiusX: 330, radiusZ: 520 },
+    reserve: { centerX: 1870, centerZ: 410, radiusX: 310, radiusZ: 210 },
     corridorPointStepM: 30,
   },
   districts: [
-    { id: 'beachfront', name: 'West Beach', kind: 'beachfront', centerX: 170, centerZ: 250, radiusX: 78, radiusZ: 125, gridSpacingX: 48, gridSpacingZ: 54 },
-    { id: 'northside', name: 'Northside', kind: 'mixed', centerX: 360, centerZ: 275, radiusX: 155, radiusZ: 120, gridSpacingX: 58, gridSpacingZ: 62 },
-    { id: 'eastbank', name: 'Eastbank', kind: 'mixed', centerX: 725, centerZ: 300, radiusX: 125, radiusZ: 108, gridSpacingX: 62, gridSpacingZ: 66 },
-    { id: 'harbor', name: 'Working Harbor', kind: 'industrial', centerX: 185, centerZ: 745, radiusX: 105, radiusZ: 145, gridSpacingX: 78, gridSpacingZ: 82 },
-    { id: 'downtown', name: 'Downtown', kind: 'downtown', centerX: 455, centerZ: 755, radiusX: 155, radiusZ: 145, gridSpacingX: 52, gridSpacingZ: 58 },
-    { id: 'southside', name: 'South Neighborhoods', kind: 'residential', centerX: 695, centerZ: 775, radiusX: 150, radiusZ: 145, gridSpacingX: 54, gridSpacingZ: 60 },
+    { id: 'downtown', name: 'Downtown', kind: 'downtown', centerX: 1405, centerZ: 1710, jitterX: 75, jitterZ: 60, riverSide: 1, radiusX: 470, radiusZ: 430, gridSpacingX: 60, gridSpacingZ: 72, angleMin: -0.12, angleMax: 0.14, warpMin: 8, warpMax: 18 },
+    { id: 'harbor', name: 'Harbor / Rail Yards', kind: 'industrial', centerX: 680, centerZ: 1855, jitterX: 50, jitterZ: 75, riverSide: 1, radiusX: 360, radiusZ: 330, gridSpacingX: 96, gridSpacingZ: 90, angleMin: -0.28, angleMax: -0.12, warpMin: 4, warpMax: 10 },
+    { id: 'northside', name: 'Northside', kind: 'mixed', centerX: 1275, centerZ: 535, jitterX: 85, jitterZ: 75, radiusX: 520, radiusZ: 450, gridSpacingX: 72, gridSpacingZ: 84, angleMin: 0.17, angleMax: 0.32, warpMin: 14, warpMax: 27 },
+    { id: 'eastbank', name: 'Eastbank', kind: 'mixed', centerX: 2285, centerZ: 1195, jitterX: 75, jitterZ: 75, riverSide: 1, radiusX: 520, radiusZ: 440, gridSpacingX: 78, gridSpacingZ: 90, angleMin: -0.34, angleMax: -0.18, warpMin: 18, warpMax: 34 },
+    { id: 'southside', name: 'South Neighborhoods', kind: 'residential', centerX: 1440, centerZ: 2460, jitterX: 80, jitterZ: 70, radiusX: 620, radiusZ: 420, gridSpacingX: 54, gridSpacingZ: 66, angleMin: -0.08, angleMax: 0.08, warpMin: 8, warpMax: 18 },
+    { id: 'foothills', name: 'Foothills', kind: 'residential', centerX: 2320, centerZ: 2215, jitterX: 40, jitterZ: 55, radiusX: 460, radiusZ: 390, gridSpacingX: 66, gridSpacingZ: 84, angleMin: 0.32, angleMax: 0.52, warpMin: 28, warpMax: 48 },
+    { id: 'beachfront', name: 'West Beach', kind: 'beachfront', centerX: 0, centerZ: 760, coastOffsetM: 220, jitterX: 0, jitterZ: 0, radiusX: 260, radiusZ: 470, gridSpacingX: 54, gridSpacingZ: 72, angleMin: -0.06, angleMax: 0.06, warpMin: 18, warpMax: 32 },
   ],
-  districtJitterM: 12,
-  districtGridInsetM: 12,
-  districtRoadWarpM: 7,
+  districtGridSampleM: 24,
+  districtGridMinimumRunM: 28,
+  districtEllipseSlack: 1.04,
   districtPathProbeStepM: 6,
-  minDistrictGridLines: 2,
+  districtCenterRiverClearanceM: 24,
   roads: {
     highway: { lanesF: 2, lanesB: 2, sidewalks: false, tracks: 0, curveRadiusM: 12, speedLimitKph: 90 },
     arterial: { lanesF: 1, lanesB: 1, sidewalks: true, tracks: 0, curveRadiusM: 10, speedLimitKph: 50 },
     collector: { lanesF: 1, lanesB: 1, sidewalks: true, tracks: 0, curveRadiusM: 8, speedLimitKph: 40 },
     mainStreet: { lanesF: 1, lanesB: 1, sidewalks: true, tracks: 0, curveRadiusM: 8, speedLimitKph: 30 },
-    local: { lanesF: 1, lanesB: 1, sidewalks: true, tracks: 0, curveRadiusM: 6, speedLimitKph: 30 },
+    local: { lanesF: 1, lanesB: 1, sidewalks: false, tracks: 0, curveRadiusM: 6, speedLimitKph: 30 },
     laneWidthM: 3,
     opposingMedianM: 1,
     sidewalkWidthEachM: 2,
   },
   transportLayout: {
     crossings: {
-      harbor: { id: 'harbor-causeway', name: 'Harbor Lift Causeway', x: 170 },
-      central: { id: 'central-causeway', name: 'Central Transit Causeway', x: 460 },
-      east: { id: 'eastbank-causeway', name: 'Eastbank Causeway', x: 760 },
+      coastHighway: { id: 'coast-highway-causeway', name: 'Harbor Lift Causeway', x: 630 },
+      regionalRail: { id: 'regional-rail-causeway', name: 'Regional Rail Causeway', x: 810 },
+      centralAvenue: { id: 'central-avenue-causeway', name: 'Central Avenue Causeway', x: 1210 },
+      divisionWay: { id: 'division-way-causeway', name: 'Division Way Causeway', x: 1420 },
+      lightRail: { id: 'light-rail-causeway', name: 'Light Rail Causeway', x: 1630 },
+      stateRoute8: { id: 'state-route-8-causeway', name: 'Eastbank Highway Causeway', x: 1980 },
     },
-    coastHighway: { northZ: 30, northCoastOffsetM: 102, southZ: 990, southCoastOffsetM: 108 },
-    centralAvenue: { northX: 400, northZ: 35, southX: 465, southZ: 995 },
-    eastbankParkway: { northX: 680, northZ: 45, southX: 650, southZ: 990 },
-    stateRoute8: { northX: 260, northZ: 25, northViaX: 355, northViaZ: 305, southX: 690, southZ: 965 },
-    northArterial: [{ x: 90, z: 385 }, { x: 490, z: 365 }, { x: 840, z: 400 }],
-    southArterial: [{ x: 80, z: 690 }, { x: 505, z: 710 }, { x: 835, z: 685 }],
-    harborCollector: [{ x: 95, z: 845 }, { x: 285, z: 820 }, { x: 405, z: 760 }],
-    railway: { northX: 260, northZ: 50, southX: 665, southZ: 985 },
-    redLine: [{ x: 390, z: 85 }, { x: 460, z: 300 }, { x: 460, z: 930 }],
-    blueLine: [{ x: 135, z: 700 }, { x: 460, z: 710 }, { x: 830, z: 705 }],
-    goldLine: [{ x: 130, z: 310 }, { x: 460, z: 305 }, { x: 800, z: 315 }],
+    coastHighway: { northZ: 90, northCoastOffsetM: 150, southZ: 2780, southCoastOffsetM: 150 },
+    stateRoute8: { northX: 460, northZ: 160, northViaX: 1080, northViaZ: 760, southX: 2250, southZ: 2640 },
+    diagonalParkway: { northX: 2610, northZ: 360, southX: 700, southZ: 2670 },
+    railway: { northX: 1300, northZ: 140, southX: 600, southZ: 2100 },
   },
   rail: {
     railwayTracks: 2,
@@ -327,6 +349,7 @@ export const COASTAL_CITY_TUNING = {
     footprintProbeM: 3,
     boundsInsetM: 2,
     maxTerrainReliefM: 2.5,
+    spatialIndexCellM: 96,
     dimensions: {
       downtownCore: { widths: [9, 12, 15], depths: [12, 15, 18], floorsMin: 4, floorsMax: 14 },
       harborIndustrial: { widths: [12, 15, 18], depths: [15, 18, 21], floorsMin: 1, floorsMax: 5 },
@@ -418,38 +441,39 @@ export function coastXAt(z: number, seed: number): number {
   const c = COASTAL_CITY_TUNING.coast;
   return c.baseX
     + Math.sin(z / c.primaryPeriodM + seedPhase(s, c.primaryPhaseSalt)) * c.primaryAmplitudeM
-    + Math.sin(z / c.secondaryPeriodM + seedPhase(s, c.secondaryPhaseSalt)) * c.secondaryAmplitudeM;
+    + Math.sin(z / c.secondaryPeriodM + seedPhase(s, c.secondaryPhaseSalt)) * c.secondaryAmplitudeM
+    + (z - c.driftCenterZ) * c.longitudinalDrift;
 }
 
 export function riverZAt(x: number, seed: number): number {
   const s = normalizeCoastalCitySeed(seed);
   const r = COASTAL_CITY_TUNING.river;
-  const centeredX = x - (COASTAL_CITY_TUNING.world.minX + COASTAL_CITY_TUNING.world.maxX) / 2;
-  return r.baseZ
-    + Math.sin(x / r.bendPeriodM + seedPhase(s, r.bendPhaseSalt)) * r.bendAmplitudeM
-    + Math.sin(x / r.secondaryPeriodM + seedPhase(s, r.secondaryPhaseSalt)) * r.secondaryAmplitudeM
-    + centeredX * r.downstreamBend;
+  const progress = (x + r.logicalOriginOffsetM) / r.mapSpanM;
+  return r.startZ - r.downstreamDropM * progress
+    + Math.sin(progress * r.bendCycles + seedPhase(s, r.bendPhaseSalt)) * r.bendAmplitudeM
+    + Math.sin(progress * r.secondaryCycles + seedPhase(s, r.secondaryPhaseSalt)) * r.secondaryAmplitudeM;
 }
 
 export function riverHalfWidthAt(x: number, seed: number): number {
   const r = COASTAL_CITY_TUNING.river;
-  const coast = coastXAt(riverZAt(x, seed), seed);
-  const estuary = clamp(1 - (x - coast) / r.estuaryFadeM, 0, 1);
+  void seed;
   return r.baseHalfWidthM
-    + Math.sin(x / r.secondaryPeriodM + seedPhase(normalizeCoastalCitySeed(seed), r.widthPhaseSalt)) * r.halfWidthAmplitudeM
-    + estuary * r.estuaryExtraHalfWidthM;
+    + sq(Math.sin((x + r.logicalOriginOffsetM) / r.halfWidthPeriodM + r.halfWidthPhase)) * r.halfWidthAmplitudeM;
 }
 
 export function isWaterAt(x: number, z: number, seed: number): boolean {
   if (x < coastXAt(z, seed)) return true;
-  return x >= coastXAt(riverZAt(x, seed), seed) - COASTAL_CITY_TUNING.river.estuaryExtraHalfWidthM
+  const river = COASTAL_CITY_TUNING.river;
+  return x > river.waterStartX && x < river.waterEndX
     && Math.abs(z - riverZAt(x, seed)) <= riverHalfWidthAt(x, seed);
 }
 
 export function isBeachAt(x: number, z: number, seed: number): boolean {
   if (isWaterAt(x, z, seed)) return false;
   const shore = coastXAt(z, seed);
-  return x >= shore && x <= shore + COASTAL_CITY_TUNING.coast.beachWidthM;
+  const coast = COASTAL_CITY_TUNING.coast;
+  const beachableShore = z < coast.beachNorthEndZ || z > coast.beachSouthStartZ;
+  return beachableShore && x >= shore && x <= shore + coast.beachWidthM;
 }
 
 export function protectedLandKindAt(x: number, z: number, seed: number): CoastalProtectedKind | null {
@@ -494,7 +518,7 @@ export function terrainHeightAt(x: number, z: number, seed: number): number {
   const riverDistance = Math.abs(z - riverZAt(x, seed));
   if (riverDistance <= riverHalfWidthAt(x, seed)) {
     const r = COASTAL_CITY_TUNING.river;
-    const riverDepth = r.bedDepthM + Math.sin(x / r.bendPeriodM) * r.bedDepthAmplitudeM;
+    const riverDepth = r.bedDepthM + Math.sin((x + r.logicalOriginOffsetM) / r.halfWidthPeriodM) * r.bedDepthAmplitudeM;
     depth = Math.max(depth, riverDepth);
   }
   return depth > 0
@@ -583,7 +607,7 @@ function makeRail(
       curveRadiusM: kind === 'railway' ? rail.railwayCurveRadiusM : rail.lightRailCurveRadiusM,
       speedLimitKph: 0,
     },
-    points: normalizePathPoints(rawPoints),
+    points: normalizePathPoints(withoutShortInteriorLegs(rawPoints, kind === 'railway' ? 30 : 16)),
     formalFrontage: false,
     crossingId,
     generationStage: 'transport',
@@ -601,7 +625,7 @@ function roadWidthM(path: CoastalTransportPath): number {
     + (p.sidewalks ? roads.sidewalkWidthEachM * 2 : 0);
 }
 
-type TransportClearanceSegment = { a: CoastalPoint; b: CoastalPoint; radiusM: number };
+type TransportClearanceSegment = { pathId: string; a: CoastalPoint; b: CoastalPoint; radiusM: number };
 type TransportBucketIndex = { columns: number; rows: number; buckets: TransportClearanceSegment[][] };
 const CURVED_PATH_CACHE = new WeakMap<object, readonly CoastalPoint[]>();
 
@@ -610,7 +634,7 @@ function transportClearanceSegments(paths: readonly CoastalTransportPath[]): Tra
   for (const path of paths) {
     const radiusM = roadWidthM(path) / 2 + COASTAL_CITY_TUNING.flora.infrastructureClearanceM;
     const geometry = curvedPathPoints(path);
-    for (let i = 0; i + 1 < geometry.length; i += 1) segments.push({ a: geometry[i]!, b: geometry[i + 1]!, radiusM });
+    for (let i = 0; i + 1 < geometry.length; i += 1) segments.push({ pathId: path.id, a: geometry[i]!, b: geometry[i + 1]!, radiusM });
   }
   return segments;
 }
@@ -622,12 +646,47 @@ function crossingAt(id: string, name: string, x: number, seed: number): CoastalC
 function crossingRoute(crossing: CoastalCrossing, north: { x: number; z: number }, south: { x: number; z: number }, seed: number): CoastalPoint[] {
   const half = riverHalfWidthAt(crossing.x, seed);
   const approach = COASTAL_CITY_TUNING.river.crossingApproachM;
+  const northApproach = { x: crossing.x, z: crossing.z - half - approach };
+  const southApproach = { x: crossing.x, z: crossing.z + half + approach };
   return [
-    point(north.x, north.z),
-    point(crossing.x, crossing.z - half - approach),
-    point(crossing.x, crossing.z + half + approach),
-    point(south.x, south.z),
+    ...landRouteOnRiverSide(north, northApproach, -1, seed),
+    point(southApproach.x, southApproach.z),
+    ...landRouteOnRiverSide(southApproach, south, 1, seed).slice(1),
   ];
+}
+
+function riverSideAt(pointValue: { x: number; z: number }, seed: number): -1 | 1 {
+  return pointValue.z < riverZAt(pointValue.x, seed) ? -1 : 1;
+}
+
+/** A sampled dry-side route: enough controls to follow the bent tidal channel, still far below the native point cap. */
+function landRouteOnRiverSide(a: { x: number; z: number }, b: { x: number; z: number }, side: -1 | 1, seed: number): CoastalPoint[] {
+  const routeLength = Math.hypot(b.x - a.x, b.z - a.z);
+  const controls = Math.max(2, Math.ceil(routeLength / 120));
+  const clearance = COASTAL_CITY_TUNING.river.wetlandMarginM + 42;
+  const out: CoastalPoint[] = [];
+  for (let index = 0; index <= controls; index += 1) {
+    const t = index / controls;
+    const x = a.x + (b.x - a.x) * t;
+    let z = a.z + (b.z - a.z) * t;
+    const riverEdge = riverZAt(x, seed) + side * (riverHalfWidthAt(x, seed) + clearance);
+    z = side < 0 ? Math.min(z, riverEdge) : Math.max(z, riverEdge);
+    const shoreEdge = coastXAt(z, seed) + COASTAL_CITY_TUNING.coast.beachWidthM + 18;
+    out.push(point(Math.max(x, shoreEdge), z));
+  }
+  return out;
+}
+
+function withoutShortInteriorLegs(points: readonly CoastalPoint[], minimumM: number): CoastalPoint[] {
+  if (points.length <= 2) return [...points];
+  const out = [points[0]!];
+  for (const candidate of points.slice(1, -1)) {
+    if (distance(out[out.length - 1]!, candidate) >= minimumM) out.push(candidate);
+  }
+  const end = points[points.length - 1]!;
+  if (out.length > 1 && distance(out[out.length - 1]!, end) < minimumM) out.pop();
+  out.push(end);
+  return out;
 }
 
 function samplePath(path: CoastalTransportPath, atM: number): { point: { x: number; z: number }; tangent: { x: number; z: number } } | null {
@@ -675,106 +734,184 @@ function pathIsDryAndUnprotected(path: CoastalTransportPath, seed: number): bool
 function makeDistricts(seed: number): CoastalDistrict[] {
   return COASTAL_CITY_TUNING.districts.map((source) => {
     const rng = rngFor(seed, 'districts', source.id);
+    let centerZ = source.centerZ + rng.range(-source.jitterZ, source.jitterZ);
+    const sourceCenterX = 'coastOffsetM' in source
+      ? coastXAt(centerZ, seed) + source.coastOffsetM
+      : source.centerX;
+    const centerX = snap(sourceCenterX + rng.range(-source.jitterX, source.jitterX), COASTAL_CITY_TUNING.world.pathPointSnapM);
+    if ('riverSide' in source) {
+      const clearance = riverHalfWidthAt(centerX, seed)
+        + COASTAL_CITY_TUNING.river.wetlandMarginM
+        + COASTAL_CITY_TUNING.districtCenterRiverClearanceM;
+      const riverEdge = riverZAt(centerX, seed) + source.riverSide * clearance;
+      centerZ = source.riverSide < 0 ? Math.min(centerZ, riverEdge) : Math.max(centerZ, riverEdge);
+    }
     return {
       id: source.id,
       name: source.name,
       kind: source.kind,
       center: {
-        x: snap(source.centerX + rng.range(-COASTAL_CITY_TUNING.districtJitterM, COASTAL_CITY_TUNING.districtJitterM), COASTAL_CITY_TUNING.world.pathPointSnapM),
-        z: snap(source.centerZ + rng.range(-COASTAL_CITY_TUNING.districtJitterM, COASTAL_CITY_TUNING.districtJitterM), COASTAL_CITY_TUNING.world.pathPointSnapM),
+        x: centerX,
+        z: snap(centerZ, COASTAL_CITY_TUNING.world.pathPointSnapM),
       },
       radiusX: source.radiusX,
       radiusZ: source.radiusZ,
+      angleRadians: rng.range(source.angleMin, source.angleMax),
+      gridSpacingX: source.gridSpacingX,
+      gridSpacingZ: source.gridSpacingZ,
+      gridWarpM: rng.range(source.warpMin, source.warpMax),
+      gridPhase: rng.range(0, Math.PI * 2),
     } as CoastalDistrict;
   });
+}
+
+function districtPoint(district: CoastalDistrict, u: number, v: number): CoastalPoint {
+  const warpedU = u + Math.sin(v / 360 + district.gridPhase) * district.gridWarpM;
+  const warpedV = v + Math.sin(u / (360 * 0.82) + district.gridPhase * 0.7) * district.gridWarpM * 0.32;
+  const c = Math.cos(district.angleRadians), s = Math.sin(district.angleRadians);
+  return point(
+    district.center.x + warpedU * c - warpedV * s,
+    district.center.z + warpedU * s + warpedV * c,
+  );
+}
+
+function insideDistrictGrid(district: CoastalDistrict, u: number, v: number): boolean {
+  return sq(u / district.radiusX) + sq(v / district.radiusZ) <= COASTAL_CITY_TUNING.districtEllipseSlack;
 }
 
 function buildDistrictRoads(seed: number, districts: readonly CoastalDistrict[]): CoastalTransportPath[] {
   const roads: CoastalTransportPath[] = [];
   for (const district of districts) {
-    const config = COASTAL_CITY_TUNING.districts.find((row) => row.id === district.id)!;
-    const minX = district.center.x - district.radiusX + COASTAL_CITY_TUNING.districtGridInsetM;
-    const maxX = district.center.x + district.radiusX - COASTAL_CITY_TUNING.districtGridInsetM;
-    const minZ = district.center.z - district.radiusZ + COASTAL_CITY_TUNING.districtGridInsetM;
-    const maxZ = district.center.z + district.radiusZ - COASTAL_CITY_TUNING.districtGridInsetM;
-    const horizontalCount = Math.max(COASTAL_CITY_TUNING.minDistrictGridLines, Math.floor((maxZ - minZ) / config.gridSpacingZ));
-    const verticalCount = Math.max(COASTAL_CITY_TUNING.minDistrictGridLines, Math.floor((maxX - minX) / config.gridSpacingX));
-    for (let row = 0; row <= horizontalCount; row += 1) {
-      const z = minZ + (maxZ - minZ) * (row / horizontalCount);
-      const id = `road-${district.id}-east-west-${row + 1}`;
-      const rng = rngFor(seed, 'districtRoads', id);
-      const raw = [point(minX, z), point((minX + maxX) / 2, z + rng.range(-COASTAL_CITY_TUNING.districtRoadWarpM, COASTAL_CITY_TUNING.districtRoadWarpM)), point(maxX, z)];
-      const hierarchy: CoastalRoadHierarchy = row === Math.floor(horizontalCount / 2) ? 'mainStreet' : 'local';
-      const candidate = makeRoad(id, `${district.name} ${row === Math.floor(horizontalCount / 2) ? 'Main Street' : `Street ${row + 1}`}`, hierarchy, raw, { formalFrontage: true, districtId: district.id });
-      if (pathIsDryAndUnprotected(candidate, seed)) roads.push(candidate);
+    let serial = 0;
+    const addRuns = (axis: 'u' | 'v', line: number, hierarchy: CoastalRoadHierarchy, name: string): void => {
+      const extent = axis === 'u' ? district.radiusZ : district.radiusX;
+      const sampleM = COASTAL_CITY_TUNING.districtGridSampleM;
+      const samples: CoastalPoint[] = [];
+      for (let along = -extent; along <= extent + 1e-6; along += sampleM) {
+        const u = axis === 'u' ? line : along;
+        const v = axis === 'u' ? along : line;
+        if (insideDistrictGrid(district, u, v)) samples.push(districtPoint(district, u, v));
+      }
+      if (!samples.length || distance(samples[samples.length - 1]!, districtPoint(
+        district,
+        axis === 'u' ? line : extent,
+        axis === 'u' ? extent : line,
+      )) > 1) {
+        const u = axis === 'u' ? line : extent;
+        const v = axis === 'u' ? extent : line;
+        if (insideDistrictGrid(district, u, v)) samples.push(districtPoint(district, u, v));
+      }
+      let run: CoastalPoint[] = [];
+      const flush = (): void => {
+        if (run.length >= 2) {
+          const id = `road-${district.id}-${axis}-${serial + 1}`;
+          const candidate = makeRoad(id, name, hierarchy, run, { formalFrontage: true, districtId: district.id });
+          if (pathLength(candidate) >= COASTAL_CITY_TUNING.districtGridMinimumRunM && pathIsDryAndUnprotected(candidate, seed)) {
+            roads.push(candidate);
+            serial += 1;
+          }
+        }
+        run = [];
+      };
+      for (const sample of samples) {
+        if (isWaterAt(sample.x, sample.z, seed) || isProtectedAt(sample.x, sample.z, seed)) flush();
+        else run.push(sample);
+      }
+      flush();
+    };
+
+    for (let u = -district.radiusX; u <= district.radiusX + 1e-6; u += district.gridSpacingX) {
+      const hierarchy: CoastalRoadHierarchy = Math.abs(u) < district.gridSpacingX * 0.42 ? 'collector' : 'local';
+      addRuns('u', u, hierarchy, `${district.name} ${hierarchy === 'collector' ? 'Connector' : 'Avenue'}`);
     }
-    for (let col = 0; col <= verticalCount; col += 1) {
-      const x = minX + (maxX - minX) * (col / verticalCount);
-      const id = `road-${district.id}-north-south-${col + 1}`;
-      const rng = rngFor(seed, 'districtRoads', id);
-      const raw = [point(x, minZ), point(x + rng.range(-COASTAL_CITY_TUNING.districtRoadWarpM, COASTAL_CITY_TUNING.districtRoadWarpM), (minZ + maxZ) / 2), point(x, maxZ)];
-      const hierarchy: CoastalRoadHierarchy = col === Math.floor(verticalCount / 2) ? 'collector' : 'local';
-      const candidate = makeRoad(id, `${district.name} ${hierarchy === 'collector' ? 'Connector' : `Avenue ${col + 1}`}`, hierarchy, raw, { formalFrontage: true, districtId: district.id });
-      if (pathIsDryAndUnprotected(candidate, seed)) roads.push(candidate);
+    const ownsMainStreet = district.kind === 'residential' || district.kind === 'beachfront';
+    for (let v = -district.radiusZ; v <= district.radiusZ + 1e-6; v += district.gridSpacingZ) {
+      if (ownsMainStreet && Math.abs(v) < district.gridSpacingZ * 0.42) continue;
+      const hierarchy: CoastalRoadHierarchy = !ownsMainStreet && Math.abs(v) < district.gridSpacingZ * 0.42 ? 'mainStreet' : 'local';
+      addRuns('v', v, hierarchy, `${district.name} ${hierarchy === 'mainStreet' ? 'Main Street' : 'Street'}`);
     }
+    if (ownsMainStreet) addRuns('v', 0, 'mainStreet', `${district.name} Main Street`);
   }
   return roads;
 }
 
 function buildTransport(seed: number, districts: readonly CoastalDistrict[]): { paths: CoastalTransportPath[]; crossings: CoastalCrossing[] } {
   const layout = COASTAL_CITY_TUNING.transportLayout;
-  const harbor = crossingAt(layout.crossings.harbor.id, layout.crossings.harbor.name, layout.crossings.harbor.x, seed);
-  const central = crossingAt(layout.crossings.central.id, layout.crossings.central.name, layout.crossings.central.x, seed);
-  const east = crossingAt(layout.crossings.east.id, layout.crossings.east.name, layout.crossings.east.x, seed);
-  const crossings = [harbor, central, east];
+  const coastHighwayCrossing = crossingAt(layout.crossings.coastHighway.id, layout.crossings.coastHighway.name, layout.crossings.coastHighway.x, seed);
+  const regionalRailCrossing = crossingAt(layout.crossings.regionalRail.id, layout.crossings.regionalRail.name, layout.crossings.regionalRail.x, seed);
+  const centralAvenueCrossing = crossingAt(layout.crossings.centralAvenue.id, layout.crossings.centralAvenue.name, layout.crossings.centralAvenue.x, seed);
+  const divisionWayCrossing = crossingAt(layout.crossings.divisionWay.id, layout.crossings.divisionWay.name, layout.crossings.divisionWay.x, seed);
+  const lightRailCrossing = crossingAt(layout.crossings.lightRail.id, layout.crossings.lightRail.name, layout.crossings.lightRail.x, seed);
+  const stateRoute8Crossing = crossingAt(layout.crossings.stateRoute8.id, layout.crossings.stateRoute8.name, layout.crossings.stateRoute8.x, seed);
+  const crossings = [coastHighwayCrossing, regionalRailCrossing, centralAvenueCrossing, divisionWayCrossing, lightRailCrossing, stateRoute8Crossing];
   const paths: CoastalTransportPath[] = [];
+  const district = (id: string): CoastalDistrict => {
+    const found = districts.find((candidate) => candidate.id === id);
+    if (!found) throw new Error(`missing coastal district ${id}`);
+    return found;
+  };
+  const downtown = district('downtown').center;
+  const harborDistrict = district('harbor').center;
+  const northside = district('northside').center;
+  const eastbank = district('eastbank').center;
+  const southside = district('southside').center;
+  const foothills = district('foothills').center;
+  const beachfront = district('beachfront').center;
 
   paths.push(makeRoad('road-coast-highway', 'Coast Highway', 'arterial', crossingRoute(
-    harbor,
+    coastHighwayCrossing,
     { x: coastXAt(layout.coastHighway.northZ, seed) + layout.coastHighway.northCoastOffsetM, z: layout.coastHighway.northZ },
     { x: coastXAt(layout.coastHighway.southZ, seed) + layout.coastHighway.southCoastOffsetM, z: layout.coastHighway.southZ },
     seed,
-  ), { formalFrontage: true, crossingId: harbor.id }));
-  paths.push(makeRoad('road-central-avenue', 'Central Avenue', 'arterial', crossingRoute(
-    central,
-    { x: layout.centralAvenue.northX, z: layout.centralAvenue.northZ },
-    { x: layout.centralAvenue.southX, z: layout.centralAvenue.southZ },
-    seed,
-  ), { formalFrontage: true, crossingId: central.id }));
-  paths.push(makeRoad('road-eastbank-parkway', 'Eastbank Parkway', 'arterial', crossingRoute(
-    east,
-    { x: layout.eastbankParkway.northX, z: layout.eastbankParkway.northZ },
-    { x: layout.eastbankParkway.southX, z: layout.eastbankParkway.southZ },
-    seed,
-  ), { formalFrontage: true, crossingId: east.id }));
+  ), { formalFrontage: true, crossingId: coastHighwayCrossing.id }));
   const stateRoute8 = crossingRoute(
-    east,
+    stateRoute8Crossing,
     { x: layout.stateRoute8.northX, z: layout.stateRoute8.northZ },
     { x: layout.stateRoute8.southX, z: layout.stateRoute8.southZ },
     seed,
   );
   stateRoute8.splice(1, 0, point(layout.stateRoute8.northViaX, layout.stateRoute8.northViaZ));
-  paths.push(makeRoad('road-state-route-8', 'State Route 8', 'highway', stateRoute8, { crossingId: east.id }));
-  paths.push(makeRoad('road-north-arterial', 'Alder Boulevard', 'arterial', layout.northArterial.map((p) => point(p.x, p.z)), { formalFrontage: true }));
-  paths.push(makeRoad('road-south-arterial', 'Division Way', 'arterial', layout.southArterial.map((p) => point(p.x, p.z)), { formalFrontage: true }));
-  paths.push(makeRoad('road-harbor-collector', 'Harbor Freight Road', 'collector', layout.harborCollector.map((p) => point(p.x, p.z)), { formalFrontage: true, districtId: 'harbor' }));
+  paths.push(makeRoad('road-state-route-8', 'State Route 8', 'highway', stateRoute8, { crossingId: stateRoute8Crossing.id }));
+  paths.push(makeRoad('road-central-avenue', 'Central Avenue', 'arterial', crossingRoute(
+    centralAvenueCrossing, northside, southside, seed,
+  ), { formalFrontage: true, crossingId: centralAvenueCrossing.id }));
+  paths.push(makeRoad('road-division-way', 'Division Way', 'arterial', crossingRoute(
+    divisionWayCrossing, beachfront, foothills, seed,
+  ), { formalFrontage: true, crossingId: divisionWayCrossing.id }));
+  paths.push(makeRoad('road-burnside-boulevard', 'Burnside Boulevard', 'arterial', landRouteOnRiverSide(
+    harborDistrict, eastbank, 1, seed,
+  ), { formalFrontage: true }));
+  paths.push(makeRoad('road-diagonal-parkway', 'Diagonal Parkway', 'arterial', landRouteOnRiverSide(
+    { x: layout.diagonalParkway.southX, z: layout.diagonalParkway.southZ }, eastbank, 1, seed,
+  ), { formalFrontage: true }));
 
   paths.push(...buildDistrictRoads(seed, districts));
 
-  // Rail alignments are flat in terrain-relative elevation. Straight or broad
-  // bends keep them comfortably inside transport.zig's 6m/12m curve minima.
+  // One regional alignment plus a light-rail graph. An edge shared by several
+  // named services exists ONCE here; line/service metadata can reference these
+  // stable edge ids instead of drawing coincident rail paths.
   paths.push(makeRail('rail-coast-regional', 'Coast Freight & Regional', 'railway', [
-    point(layout.railway.northX, layout.railway.northZ),
-    point(layout.crossings.central.x, central.z),
-    point(layout.railway.southX, layout.railway.southZ),
-  ], central.id));
-  paths.push(makeRail('tram-red', 'Red Line', 'lightRail', [
-    ...layout.redLine.map((p) => point(p.x, p.z)),
-  ], central.id));
-  // The slight broad bends keep the shared Red-Line interchange as an authored
-  // anchor (an exactly collinear middle point would be validly simplified).
-  paths.push(makeRail('tram-blue', 'Blue Line', 'lightRail', layout.blueLine.map((p) => point(p.x, p.z))));
-  paths.push(makeRail('tram-gold', 'Gold Line', 'lightRail', layout.goldLine.map((p) => point(p.x, p.z))));
+    ...crossingRoute(
+      regionalRailCrossing,
+      { x: layout.railway.northX, z: layout.railway.northZ },
+      { x: layout.railway.southX, z: layout.railway.southZ },
+      seed,
+    ),
+  ], regionalRailCrossing.id));
+  const addTransitEdge = (id: string, name: string, a: { x: number; z: number }, b: { x: number; z: number }): void => {
+    const sideA = riverSideAt(a, seed), sideB = riverSideAt(b, seed);
+    if (sideA !== sideB) {
+      const north = sideA < 0 ? a : b, south = sideA < 0 ? b : a;
+      paths.push(makeRail(id, name, 'lightRail', crossingRoute(lightRailCrossing, north, south, seed), lightRailCrossing.id));
+      return;
+    }
+    paths.push(makeRail(id, name, 'lightRail', withoutShortInteriorLegs(landRouteOnRiverSide(a, b, sideA, seed), 20)));
+  };
+  addTransitEdge('tram-harbor-central', 'Harbor–Central Transit Edge', harborDistrict, downtown);
+  addTransitEdge('tram-central-north', 'Central–North Transit Edge', downtown, northside);
+  addTransitEdge('tram-south-central', 'South–Central Transit Edge', southside, downtown);
+  addTransitEdge('tram-central-east', 'Central–East Transit Edge', downtown, eastbank);
+  addTransitEdge('tram-east-foothills', 'East–Foothills Transit Edge', eastbank, foothills);
 
   const crossingPaths = new Map<string, string[]>();
   for (const path of paths) if (path.crossingId) {
@@ -856,7 +993,7 @@ function validateRailPath(path: CoastalTransportPath): void {
   }
   for (let i = 1; i + 1 < path.points.length; i += 1) {
     const reach = turnReach(path.points[i - 1]!, path.points[i]!, path.points[i + 1]!, path.profile.curveRadiusM);
-    if (reach !== null && reach < requiredCurve) throw new Error(`${path.id} is tighter than native rail curve minimum`);
+    if (reach !== null && reach < requiredCurve) throw new Error(`${path.id} turn ${i} reach ${reach.toFixed(2)}m is tighter than native rail curve minimum ${requiredCurve}m`);
   }
 }
 
@@ -991,22 +1128,69 @@ function footprintIsBuildable(candidate: CoastalBuildingSite, seed: number): { v
   return { valid: relief <= COASTAL_CITY_TUNING.sites.maxTerrainReliefM, relief };
 }
 
-function transportClearsSite(candidate: CoastalBuildingSite, frontage: CoastalTransportPath, paths: readonly CoastalTransportPath[]): boolean {
-  const bounds = buildingSiteBounds(candidate);
-  const tuning = COASTAL_CITY_TUNING.sites;
+type SiteSpatialIndex = {
+  cellM: number;
+  transport: Map<string, TransportClearanceSegment[]>;
+  sites: Map<string, CoastalBuildingSite[]>;
+};
+
+function spatialKeys(rect: { minX: number; minZ: number; maxX: number; maxZ: number }, cellM: number): string[] {
+  const keys: string[] = [];
+  for (let iz = Math.floor(rect.minZ / cellM); iz <= Math.floor(rect.maxZ / cellM); iz += 1) {
+    for (let ix = Math.floor(rect.minX / cellM); ix <= Math.floor(rect.maxX / cellM); ix += 1) keys.push(`${ix},${iz}`);
+  }
+  return keys;
+}
+
+function makeSiteSpatialIndex(paths: readonly CoastalTransportPath[]): SiteSpatialIndex {
+  const index: SiteSpatialIndex = {
+    cellM: COASTAL_CITY_TUNING.sites.spatialIndexCellM,
+    transport: new Map(),
+    sites: new Map(),
+  };
   for (const path of paths) {
     const halfWidth = roadWidthM(path) / 2;
-    const railExtra = path.kind === 'road' ? 0 : tuning.railExtraClearanceM;
-    const clearance = halfWidth + tuning.transportClearanceM + railExtra;
-    if (pathRectDistance(path, bounds) < clearance - 1e-6) return false;
+    const railExtra = path.kind === 'road' ? 0 : COASTAL_CITY_TUNING.sites.railExtraClearanceM;
+    const radiusM = halfWidth + COASTAL_CITY_TUNING.sites.transportClearanceM + railExtra;
+    const geometry = curvedPathPoints(path);
+    for (let segmentIndex = 0; segmentIndex + 1 < geometry.length; segmentIndex += 1) {
+      const a = geometry[segmentIndex]!, b = geometry[segmentIndex + 1]!;
+      const segment = { pathId: path.id, a, b, radiusM };
+      const bounds = {
+        minX: Math.min(a.x, b.x) - radiusM,
+        minZ: Math.min(a.z, b.z) - radiusM,
+        maxX: Math.max(a.x, b.x) + radiusM,
+        maxZ: Math.max(a.z, b.z) + radiusM,
+      };
+      for (const key of spatialKeys(bounds, index.cellM)) {
+        const bucket = index.transport.get(key) ?? [];
+        bucket.push(segment);
+        index.transport.set(key, bucket);
+      }
+    }
+  }
+  return index;
+}
+
+function indexedValues<T>(buckets: Map<string, T[]>, rect: { minX: number; minZ: number; maxX: number; maxZ: number }, cellM: number): Set<T> {
+  const found = new Set<T>();
+  for (const key of spatialKeys(rect, cellM)) for (const value of buckets.get(key) ?? []) found.add(value);
+  return found;
+}
+
+function transportClearsSite(candidate: CoastalBuildingSite, frontage: CoastalTransportPath, index: SiteSpatialIndex): boolean {
+  const bounds = buildingSiteBounds(candidate);
+  for (const segment of indexedValues(index.transport, bounds, index.cellM)) {
+    if (segmentRectDistance(segment.a, segment.b, bounds) < segment.radiusM - 1e-6) return false;
   }
   const frontageDistance = pathRectDistance(frontage, bounds);
-  return frontageDistance <= roadWidthM(frontage) / 2 + tuning.frontageMaxGapM;
+  return frontageDistance <= roadWidthM(frontage) / 2 + COASTAL_CITY_TUNING.sites.frontageMaxGapM;
 }
 
 function buildSites(seed: number, paths: readonly CoastalTransportPath[], districts: readonly CoastalDistrict[]): { sites: CoastalBuildingSite[]; rejected: number } {
   const sites: CoastalBuildingSite[] = [];
   let rejected = 0;
+  const spatial = makeSiteSpatialIndex(paths);
   const districtById = new Map(districts.map((district) => [district.id, district]));
   for (const frontage of paths.filter((path) => path.kind === 'road' && path.formalFrontage && path.hierarchy !== 'highway')) {
     const length = pathLength(frontage);
@@ -1047,10 +1231,15 @@ function buildSites(seed: number, paths: readonly CoastalTransportPath[], distri
           x, y, z, yawDegrees,
           generationStage: 'buildingSites',
         };
-        if (!footprintIsBuildable(candidate, seed).valid || !transportClearsSite(candidate, frontage, paths)) { rejected += 1; continue; }
+        if (!footprintIsBuildable(candidate, seed).valid || !transportClearsSite(candidate, frontage, spatial)) { rejected += 1; continue; }
         const padded = buildingSiteBounds(candidate, COASTAL_CITY_TUNING.sites.overlapGapM);
-        if (sites.some((other) => rectsOverlap(padded, buildingSiteBounds(other, COASTAL_CITY_TUNING.sites.overlapGapM)))) { rejected += 1; continue; }
+        if ([...indexedValues(spatial.sites, padded, spatial.cellM)].some((other) => rectsOverlap(padded, buildingSiteBounds(other, COASTAL_CITY_TUNING.sites.overlapGapM)))) { rejected += 1; continue; }
         sites.push(candidate);
+        for (const key of spatialKeys(padded, spatial.cellM)) {
+          const bucket = spatial.sites.get(key) ?? [];
+          bucket.push(candidate);
+          spatial.sites.set(key, bucket);
+        }
       }
       cursor += interval + rng.range(-COASTAL_CITY_TUNING.sites.intervalJitterM, COASTAL_CITY_TUNING.sites.intervalJitterM);
     }
@@ -1294,7 +1483,7 @@ function indexedFloraAllowedAt(plan: CoastalCityPlan, pads: PadBucketIndex, tran
 
 function validatePlanForPack(plan: CoastalCityPlan): void {
   if (plan.version !== 1) throw new Error(`unsupported coastal plan version ${plan.version}`);
-  if (plan.chunks.length !== COASTAL_CITY_TUNING.wire.chunkCount) throw new Error('coastal plan must contain exactly 81 native chunks');
+  if (plan.chunks.length !== COASTAL_CITY_TUNING.wire.chunkCount) throw new Error(`coastal plan must contain exactly ${COASTAL_CITY_TUNING.wire.chunkCount} native chunks`);
   validateTransport(plan.paths, plan.crossings, plan.seed);
   for (const site of plan.sites) {
     if (![site.x, site.y, site.z, site.widthM, site.depthM, site.suggestedMaxFloors].every(Number.isFinite)) throw new Error(`${site.id} contains a non-finite field`);
@@ -1308,80 +1497,14 @@ function packedPathLength(paths: readonly CoastalTransportPath[]): number {
   );
 }
 
-/** Pack the planner output into the native replacement door's exact wire. */
-export function packCoastalCityPainting(plan: CoastalCityPlan, legend: CoastalCityPaintingLegend): PackedCoastalCityPainting {
-  validatePlanForPack(plan);
-  validateLegend(legend);
+function coastalChunkStride(): number {
   const wire = COASTAL_CITY_TUNING.wire;
-  const chunkStride = wire.chunkCoordFloats + wire.sampleCells * 2 + wire.tileCells * wire.cellChannelCount;
-  const chunks = new Float32Array(wire.chunkHeaderFloats + plan.chunks.length * chunkStride);
-  chunks[0] = wire.version;
-  chunks[1] = plan.chunks.length;
-  chunks[2] = chunkStride;
-  chunks[3] = wire.sampleCells;
-  chunks[4] = wire.tileCells;
-  const padIndex = makePadBuckets(plan);
-  const transportIndex = makeTransportBuckets(plan);
-  let at = wire.chunkHeaderFloats;
-  for (const chunk of plan.chunks) {
-    chunks[at++] = chunk.cx;
-    chunks[at++] = chunk.cz;
-    const minX = chunk.cx * wire.chunkMeters - wire.chunkMeters / 2;
-    const minZ = chunk.cz * wire.chunkMeters - wire.chunkMeters / 2;
-    const heightStart = at;
-    const waterStart = heightStart + wire.sampleCells;
-    for (let sz = 0; sz < wire.sampleColumns; sz += 1) for (let sx = 0; sx < wire.sampleColumns; sx += 1) {
-      const sampleIndex = sz * wire.sampleColumns + sx;
-      const x = minX + sx * wire.sampleSpacingM, z = minZ + sz * wire.sampleSpacingM;
-      const base = terrainHeightAt(x, z, plan.seed);
-      // Dry terrain is always positive and every geographic bed is negative,
-      // so the already-computed base is also the cheapest exact wetness bit.
-      const causeway = base < 0 && coastalCityCausewayAt(plan, x, z) !== null;
-      const prepared = causeway ? Math.max(base, COASTAL_CITY_TUNING.river.causewayHeightM) : base;
-      const packedWater = base < 0 && !causeway;
-      chunks[heightStart + sampleIndex] = packedWater ? prepared : siteHeightAt(bucketSites(padIndex, plan, x, z), x, z, prepared);
-      chunks[waterStart + sampleIndex] = packedWater ? -base : 0;
-    }
-    at = waterStart + wire.sampleCells;
-    const tileStart = at;
-    const zoneStart = tileStart + wire.tileCells;
-    const grassStart = zoneStart + wire.tileCells;
-    const treeStart = grassStart + wire.tileCells;
-    const bushStart = treeStart + wire.tileCells;
-    chunks.fill(wire.emptyCell, tileStart, bushStart + wire.tileCells);
-    for (let tz = 0; tz < wire.tileColumns; tz += 1) for (let tx = 0; tx < wire.tileColumns; tx += 1) {
-      const index = tz * wire.tileColumns + tx;
-      const x = minX + tx + wire.tileCenterOffsetM, z = minZ + tz + wire.tileCenterOffsetM;
-      const water = isWaterForPlanAt(plan, x, z);
-      const protectedKind = protectedLandKindAt(x, z, plan.seed);
-      chunks[tileStart + index] = water || protectedKind === 'wetland' ? legend.tiles.mud
-        : protectedKind === 'beach' ? legend.tiles.sand : legend.tiles.grass;
-      chunks[zoneStart + index] = zoneIndexAt(plan, x, z);
-      if (water || !indexedFloraAllowedAt(plan, padIndex, transportIndex, x, z)) continue;
-      const grassNoise = cellNoise(plan.seed, x, z, 0);
-      const treeNoise = cellNoise(plan.seed, x, z, 1);
-      const bushNoise = cellNoise(plan.seed, x, z, 2);
-      if (protectedKind === 'wetland') {
-        if (grassNoise < COASTAL_CITY_TUNING.flora.wetlandReedChance) chunks[grassStart + index] = legend.flora.grassReeds;
-        if (bushNoise < COASTAL_CITY_TUNING.flora.wetlandBushChance) chunks[bushStart + index] = legend.flora.bushDense;
-      } else if (protectedKind === 'beach') {
-        if (grassNoise < COASTAL_CITY_TUNING.flora.beachGrassChance) chunks[grassStart + index] = legend.flora.grassSparse;
-      } else if (protectedKind === 'mountain') {
-        if (grassNoise < COASTAL_CITY_TUNING.flora.ordinaryGrassChance) chunks[grassStart + index] = legend.flora.grassSparse;
-        if (treeNoise < COASTAL_CITY_TUNING.flora.mountainPineChance) chunks[treeStart + index] = legend.flora.pine;
-      } else if (protectedKind === 'forest') {
-        if (grassNoise < COASTAL_CITY_TUNING.flora.lushGrassChance) chunks[grassStart + index] = legend.flora.grassLush;
-        if (treeNoise < COASTAL_CITY_TUNING.flora.forestCedarChance) chunks[treeStart + index] = legend.flora.cedar;
-        if (bushNoise < COASTAL_CITY_TUNING.flora.forestBushChance) chunks[bushStart + index] = legend.flora.bushDense;
-      } else {
-        if (grassNoise < COASTAL_CITY_TUNING.flora.ordinaryGrassChance) chunks[grassStart + index] = legend.flora.grassSparse;
-        if (treeNoise < COASTAL_CITY_TUNING.flora.ordinaryCedarChance) chunks[treeStart + index] = legend.flora.cedar;
-      }
-    }
-    at = bushStart + wire.tileCells;
-  }
-  if (at !== chunks.length) throw new Error(`coastal chunk pack wrote ${at} floats into ${chunks.length}`);
+  return wire.chunkCoordFloats + wire.sampleCells * 2 + wire.tileCells * wire.cellChannelCount;
+}
 
+export function packCoastalCityPaths(plan: CoastalCityPlan): Float32Array {
+  validatePlanForPack(plan);
+  const wire = COASTAL_CITY_TUNING.wire;
   const paths = new Float32Array(packedPathLength(plan.paths));
   let pathAt = 0;
   paths[pathAt++] = wire.version;
@@ -1403,5 +1526,119 @@ export function packCoastalCityPainting(plan: CoastalCityPlan, legend: CoastalCi
     }
   }
   if (pathAt !== paths.length) throw new Error(`coastal path pack wrote ${pathAt} floats into ${paths.length}`);
-  return { chunks, paths };
+  return paths;
+}
+
+function packCoastalCityChunkRecord(
+  plan: CoastalCityPlan,
+  chunk: { cx: number; cz: number },
+  legend: CoastalCityPaintingLegend,
+  padIndex: PadBucketIndex,
+  transportIndex: TransportBucketIndex,
+  packed: Float32Array,
+): Float32Array {
+  const wire = COASTAL_CITY_TUNING.wire;
+  if (packed.length !== coastalChunkStride()) throw new Error(`coastal chunk destination has ${packed.length} floats; expected ${coastalChunkStride()}`);
+  let at = 0;
+  packed[at++] = chunk.cx;
+  packed[at++] = chunk.cz;
+  const minX = chunk.cx * wire.chunkMeters - wire.chunkMeters / 2;
+  const minZ = chunk.cz * wire.chunkMeters - wire.chunkMeters / 2;
+  const heightStart = at;
+  const waterStart = heightStart + wire.sampleCells;
+  for (let sz = 0; sz < wire.sampleColumns; sz += 1) for (let sx = 0; sx < wire.sampleColumns; sx += 1) {
+    const sampleIndex = sz * wire.sampleColumns + sx;
+    const x = minX + sx * wire.sampleSpacingM, z = minZ + sz * wire.sampleSpacingM;
+    const base = terrainHeightAt(x, z, plan.seed);
+    const causeway = base < 0 && coastalCityCausewayAt(plan, x, z) !== null;
+    const prepared = causeway ? Math.max(base, COASTAL_CITY_TUNING.river.causewayHeightM) : base;
+    const packedWater = base < 0 && !causeway;
+    packed[heightStart + sampleIndex] = packedWater ? prepared : siteHeightAt(bucketSites(padIndex, plan, x, z), x, z, prepared);
+    packed[waterStart + sampleIndex] = packedWater ? -base : 0;
+  }
+  at = waterStart + wire.sampleCells;
+  const tileStart = at;
+  const zoneStart = tileStart + wire.tileCells;
+  const grassStart = zoneStart + wire.tileCells;
+  const treeStart = grassStart + wire.tileCells;
+  const bushStart = treeStart + wire.tileCells;
+  packed.fill(wire.emptyCell, tileStart, bushStart + wire.tileCells);
+  for (let tz = 0; tz < wire.tileColumns; tz += 1) for (let tx = 0; tx < wire.tileColumns; tx += 1) {
+    const index = tz * wire.tileColumns + tx;
+    const x = minX + tx + wire.tileCenterOffsetM, z = minZ + tz + wire.tileCenterOffsetM;
+    const water = isWaterForPlanAt(plan, x, z);
+    const protectedKind = protectedLandKindAt(x, z, plan.seed);
+    packed[tileStart + index] = water || protectedKind === 'wetland' ? legend.tiles.mud
+      : protectedKind === 'beach' ? legend.tiles.sand : legend.tiles.grass;
+    packed[zoneStart + index] = zoneIndexAt(plan, x, z);
+    if (water || !indexedFloraAllowedAt(plan, padIndex, transportIndex, x, z)) continue;
+    const grassNoise = cellNoise(plan.seed, x, z, 0);
+    const treeNoise = cellNoise(plan.seed, x, z, 1);
+    const bushNoise = cellNoise(plan.seed, x, z, 2);
+    if (protectedKind === 'wetland') {
+      if (grassNoise < COASTAL_CITY_TUNING.flora.wetlandReedChance) packed[grassStart + index] = legend.flora.grassReeds;
+      if (bushNoise < COASTAL_CITY_TUNING.flora.wetlandBushChance) packed[bushStart + index] = legend.flora.bushDense;
+    } else if (protectedKind === 'beach') {
+      if (grassNoise < COASTAL_CITY_TUNING.flora.beachGrassChance) packed[grassStart + index] = legend.flora.grassSparse;
+    } else if (protectedKind === 'mountain') {
+      if (grassNoise < COASTAL_CITY_TUNING.flora.ordinaryGrassChance) packed[grassStart + index] = legend.flora.grassSparse;
+      if (treeNoise < COASTAL_CITY_TUNING.flora.mountainPineChance) packed[treeStart + index] = legend.flora.pine;
+    } else if (protectedKind === 'forest') {
+      if (grassNoise < COASTAL_CITY_TUNING.flora.lushGrassChance) packed[grassStart + index] = legend.flora.grassLush;
+      if (treeNoise < COASTAL_CITY_TUNING.flora.forestCedarChance) packed[treeStart + index] = legend.flora.cedar;
+      if (bushNoise < COASTAL_CITY_TUNING.flora.forestBushChance) packed[bushStart + index] = legend.flora.bushDense;
+    } else {
+      if (grassNoise < COASTAL_CITY_TUNING.flora.ordinaryGrassChance) packed[grassStart + index] = legend.flora.grassSparse;
+      if (treeNoise < COASTAL_CITY_TUNING.flora.ordinaryCedarChance) packed[treeStart + index] = legend.flora.cedar;
+    }
+  }
+  at = bushStart + wire.tileCells;
+  if (at !== packed.length) throw new Error(`coastal chunk pack wrote ${at} floats into ${packed.length}`);
+  return packed;
+}
+
+/** The bounded streaming contract used by Compile: one tiny manifest, one path wire, one chunk at a time. */
+export function packCoastalCityPaintingStream(plan: CoastalCityPlan, legend: CoastalCityPaintingLegend): CoastalCityPaintingStream {
+  validatePlanForPack(plan);
+  validateLegend(legend);
+  const wire = COASTAL_CITY_TUNING.wire;
+  const manifest = new Float32Array(2 + plan.chunks.length * 2);
+  manifest[0] = wire.version;
+  manifest[1] = plan.chunks.length;
+  for (let index = 0; index < plan.chunks.length; index += 1) {
+    manifest[2 + index * 2] = plan.chunks[index]!.cx;
+    manifest[3 + index * 2] = plan.chunks[index]!.cz;
+  }
+  const padIndex = makePadBuckets(plan);
+  const transportIndex = makeTransportBuckets(plan);
+  const reusableChunk = new Float32Array(coastalChunkStride());
+  return {
+    manifest,
+    paths: packCoastalCityPaths(plan),
+    chunkCount: plan.chunks.length,
+    packChunk(index: number): Float32Array {
+      if (!Number.isInteger(index) || index < 0 || index >= plan.chunks.length) throw new Error(`coastal chunk index ${index} is out of range`);
+      return packCoastalCityChunkRecord(plan, plan.chunks[index]!, legend, padIndex, transportIndex, reusableChunk);
+    },
+  };
+}
+
+/** Convenience entry for tooling that needs one record without retaining a stream closure. */
+export function packCoastalCityChunk(plan: CoastalCityPlan, legend: CoastalCityPaintingLegend, index: number): Float32Array {
+  return packCoastalCityPaintingStream(plan, legend).packChunk(index);
+}
+
+/** Legacy whole-wire adapter. Prefer packCoastalCityPaintingStream for the 3 km city. */
+export function packCoastalCityPainting(plan: CoastalCityPlan, legend: CoastalCityPaintingLegend): PackedCoastalCityPainting {
+  const stream = packCoastalCityPaintingStream(plan, legend);
+  const wire = COASTAL_CITY_TUNING.wire;
+  const stride = coastalChunkStride();
+  const chunks = new Float32Array(wire.chunkHeaderFloats + stream.chunkCount * stride);
+  chunks[0] = wire.version;
+  chunks[1] = stream.chunkCount;
+  chunks[2] = stride;
+  chunks[3] = wire.sampleCells;
+  chunks[4] = wire.tileCells;
+  for (let index = 0; index < stream.chunkCount; index += 1) chunks.set(stream.packChunk(index), wire.chunkHeaderFloats + index * stride);
+  return { chunks, paths: stream.paths };
 }

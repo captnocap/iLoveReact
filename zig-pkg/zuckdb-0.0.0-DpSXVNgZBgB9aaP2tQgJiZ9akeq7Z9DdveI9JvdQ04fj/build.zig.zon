@@ -1,0 +1,20 @@
+.{
+    .name = .zuckdb,
+    .paths = .{
+        "LICENSE",
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+        "readme.md",
+        "src",
+    },
+    .version = "0.0.0",
+    .fingerprint = 0xe57532405497940e,
+    .dependencies = .{
+        .duckdb = .{
+            .lazy = true,
+            .url = "https://github.com/duckdb/duckdb/releases/download/v1.4.3/libduckdb-src.zip",
+            .hash = "N-V-__8AAJh4kQF-o4g0XwMx2k0wOVRw-Z5UA67dtOSElzFb",
+        },
+    },
+}

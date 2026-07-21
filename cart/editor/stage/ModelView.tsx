@@ -69,9 +69,14 @@ export type ModelViewInitialMesh = {
   // an id came from the same authored n-gon face, so the host mesh editor selects /
   // outlines whole faces instead of fan slivers. Absent for plain triangle imports.
   faceGroups?: Uint32Array | number[];
+  /** stable texture-role index per render triangle (RJMD v3) */
+  faceMaterials?: Uint32Array | number[];
   // Per-part colour ranges (multi-part models): paint each part its outliner colour on load,
   // so a bare studio mesh reads as coloured parts instead of blank white.
   partColors?: { lo: number; hi: number; color: string }[];
+  // Saved visibility is applied only AFTER the complete document is resident and its
+  // ownership ranges are installed. Hidden is presentation state, never missing seed data.
+  hiddenRanges?: { lo: number; hi: number }[];
 };
 // The live tool state, mirrored out so an embedding shell (the editor) can drive
 // the SAME host-native tools from its own toolbar / context menu instead of the
@@ -90,7 +95,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -290,6 +295,10 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
       ? mesh.faceGroups
       : mesh.faceGroups ? new Uint32Array(mesh.faceGroups) : null;
     if (groups && groups.length > 0) host.__mesh_set_face_groups?.(groups);
+    const materials = mesh.faceMaterials instanceof Uint32Array
+      ? mesh.faceMaterials
+      : mesh.faceMaterials ? new Uint32Array(mesh.faceMaterials) : null;
+    if (materials && materials.length > 0) host.__mesh_set_face_materials?.(materials);
     // Tint each part its outliner colour (multi-part models) so a bare studio mesh isn't a
     // blank white blob and the model matches the outliner swatches.
     for (const pc of mesh.partColors ?? []) {
@@ -444,12 +453,20 @@ const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.(
 // A part is metadata + a group range; its geometry lives in the host mesh. Adding APPENDS to
 // the live edit mesh (preserving prior edits — no JS recompose); hide/delete are host ops on
 // the range. Only the new part's geometry (append) or a range (hide/delete) crosses the bridge.
-const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array, expectedPartCount: number) =>
-  readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups, expectedPartCount));
+const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array, expectedPartCount: number) => {
+  const floatCount = positions?.length ?? 0;
+  const vertexCount = floatCount / 8;
+  const triangleCount = vertexCount / 3;
+  if (floatCount < 24 || !Number.isInteger(vertexCount) || !Number.isInteger(triangleCount) || faceGroups?.length !== triangleCount) {
+    console.error(`[model-parts] append rejected before host call — floats=${floatCount} groups=${faceGroups?.length ?? 0}`);
+    return null;
+  }
+  return readTopoResult(host.__mesh_append_group?.(positions, vertexCount, faceGroups, expectedPartCount));
+};
 const meshAppendPathPlane = (points: Float32Array, expectedPartCount: number) =>
   readTopoResult(host.__mesh_append_path_plane?.(points, expectedPartCount));
-const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
-  readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
+const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean, journal = true) =>
+  readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0, journal ? 1 : 0));
 // ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
 const meshDuplicateRange = (lo: number, hi: number, mirrorAxis: number) =>
   readTopoResult(host.__mesh_duplicate_range?.(lo, hi, mirrorAxis));
@@ -797,13 +814,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
 
   // Apply a new quality (slider 0..1): re-decimate in the host and swap the resident
-  // mesh. Repainting resets (the topology changed) — quality is a pre-paint step.
+  // mesh. The host keeps the baseline only so further slider changes remain reversible;
+  // Save persists this chosen resident topology and reopening adopts it as the new source.
+  // Therefore quality is a real document mutation, not a cosmetic viewport preference.
   const applyQuality = (q: number) => {
     setQuality(q);
     const r = setModelQuality(qualityToGrid(q));
     if (r) {
       setModel((m) => (m ? { ...m, key: r.key, count: r.count } : m));
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // host re-meshed → selection cleared
+      onDocumentMutated?.();
     }
   };
 
@@ -1702,7 +1722,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
   }, [selMode, gizmoTool, paintMode, pathPlaneMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
@@ -1816,7 +1836,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const applyMesh = (mesh: ModelViewInitialMesh) => {
     const loaded = loadModelVertices(mesh);
     if (loaded) {
-      setModel(loaded);
       setError(null);
       setQuality(1);
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
@@ -1829,6 +1848,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
       partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
       meshSetPartRanges(partRangesRef.current);
+      let current = loaded;
+      for (const range of mesh.hiddenRanges ?? []) {
+        const result = meshSetGroupHidden(range.lo, range.hi, true, false);
+        if (result?.ok && typeof result.key === 'string' && typeof result.count === 'number') {
+          current = { ...current, key: result.key, count: result.count };
+        } else {
+          console.error(`[model-parts] could not restore saved hidden range [${range.lo},${range.hi})`);
+        }
+      }
+      setModel(current);
     } else {
       setError(`Could not load ${mesh.name}`);
     }
@@ -1868,7 +1897,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (typeof r.key === 'string' && typeof r.count === 'number') current = { ...current, key: r.key, count: r.count };
     }
     meshSetPartRanges(partRangesRef.current);
-    if (spec.baseHidden) meshSetGroupHidden(0, tris, true);
+    if (spec.baseHidden) meshSetGroupHidden(0, tris, true, false);
     setModel(current);
     setError(null);
     setQuality(1);
@@ -2907,11 +2936,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               </Row>
             ))}
             <Pressable
-              onPress={() => closeLoopCut(true)}
-              tooltip="Commit the cut (one undo step); the clicked face's near side stays selected"
-              style={{ marginTop: 2, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}
+              onPress={() => closeLoopCut(!lc.fallbackReason)}
+              tooltip={lc.fallbackReason ? 'Close without changing the mesh' : "Commit the cut (one undo step); the clicked face's near side stays selected"}
+              style={{ marginTop: 2, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: lc.fallbackReason ? '#303747' : '#1c3a2a', borderWidth: 1, borderColor: lc.fallbackReason ? '#566176' : '#2f7a4f' }}
             >
-              <Text style={{ color: '#7fd6a0', fontSize: 12, fontWeight: 700 }}>Apply</Text>
+              <Text style={{ color: lc.fallbackReason ? '#c8d1df' : '#7fd6a0', fontSize: 12, fontWeight: 700 }}>{lc.fallbackReason ? 'Close' : 'Apply'}</Text>
             </Pressable>
           </Col>
         </Box>

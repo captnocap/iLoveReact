@@ -1,0 +1,58 @@
+metadata:
+  project_name: ''
+  entry_count: 2
+  created_at: '2026-07-19T02:32:52.645264+00:00'
+  updated_at: '2026-07-19T02:37:41.913926+00:00'
+entries:
+- id: plan_001
+  summary: 'Request ledger v3: session-threads with titled conversation logs, follow-up
+    folding in the capture hook, calm read-only states (only user-set flags read as
+    unresolved), and recency-decayed oracle ranking for the request tier, plus a one-shot
+    backfill organizer agent over the 3216 existing entries'
+  plan_type: feature
+  status: proposed
+  file_paths:
+  - docs/game/_index/requests.ts
+  - docs/game/_index/requestCli.ts
+  - docs/game/_index/oracle.ts
+  - docs/game/_index/requests.test.ts
+  - cart/hmsc-int/editors/workbench/requests/store.ts
+  - cart/hmsc-int/editors/workbench/requests/RequestList.tsx
+  - cart/hmsc-int/editors/workbench/requests/secretary.ts
+  - docs/game/REQUESTS.md
+  - tools/request
+  - tools/oracle
+  related_terms_used: []
+  parent_plan: null
+  child_plans: []
+  grilling_session_id: null
+  created_at: '2026-07-19T02:32:52.645264+00:00'
+  updated_at: '2026-07-19T02:32:52.645264+00:00'
+  completed_at: null
+- id: plan_002
+  summary: 'Build Journal v2 (supersedes plan_001): auto session-threads — every captured
+    sessionId becomes a titled conversation thread in the editor Build Journal, click
+    opens the verbatim conversation log; follow-up folding in the capture hook so
+    short mid-work prompts join the live thread instead of dropping or standing alone;
+    calm states (nothing renders as unresolved unless user-flagged); recency-decayed
+    oracle request tier; backfill organizer agent titles historical session threads'
+  plan_type: feature
+  status: proposed
+  file_paths:
+  - runtime/buildjournal/journal.ts
+  - runtime/buildjournal/types.ts
+  - cart/editor/data/journal.ts
+  - cart/editor/data/journalStore.ts
+  - cart/editor/shell/BuildJournalDialog.tsx
+  - docs/game/_index/requests.ts
+  - docs/game/_index/requestCli.ts
+  - docs/game/_index/oracle.ts
+  - docs/game/_index/requests.test.ts
+  - docs/game/REQUESTS.md
+  related_terms_used: []
+  parent_plan: null
+  child_plans: []
+  grilling_session_id: null
+  created_at: '2026-07-19T02:37:41.913165+00:00'
+  updated_at: '2026-07-19T02:37:41.913165+00:00'
+  completed_at: null

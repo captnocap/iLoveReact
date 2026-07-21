@@ -9,11 +9,17 @@ const std = @import("std");
 
 pub const NO_GROUP: u32 = std.math.maxInt(u32);
 pub const NO_PART: u32 = std.math.maxInt(u32);
+pub const NO_MATERIAL: u32 = std.math.maxInt(u32);
 const IMPORT_WELD_SCALE: f32 = 1024.0;
 const IMPORT_WELD_EPS: f32 = 1.0 / IMPORT_WELD_SCALE;
+const MIRROR_MATCH_SCALE: f32 = 1000.0;
 
 pub const Vec2 = [2]f32;
 pub const Vec3 = [3]f32;
+
+const MirrorPositionKey = struct { part: u32, x: i32, y: i32, z: i32 };
+const MirrorQuadKey = struct { part: u32, a: u32, b: u32, c: u32, d: u32 };
+const MirrorPartBounds = struct { min: Vec3, max: Vec3 };
 
 pub const CutOrigin = struct {
     edge: [2]u32,
@@ -37,6 +43,9 @@ pub const Face = struct {
     diagonal: ?[2]u32 = null,
     group: u32,
     part: u32,
+    /// Stable texture-role index authored in the Rig panel. Rendering remains
+    /// triangle soup, but splits/cuts inherit this identity from their source face.
+    material: u32 = NO_MATERIAL,
     alive: bool = true,
 
     fn deinit(face: *Face, allocator: std.mem.Allocator) void {
@@ -51,6 +60,7 @@ pub const Face = struct {
             .id = face.id,
             .group = face.group,
             .part = face.part,
+            .material = face.material,
             .alive = face.alive,
             .diagonal = face.diagonal,
         };
@@ -64,6 +74,7 @@ pub const Face = struct {
 
 pub const SeedInfo = struct {
     face_id: u32,
+    part: u32,
     center: Vec3,
     directions: [2]Vec3,
     sizes: [2]f32,
@@ -84,6 +95,7 @@ pub const Lowered = struct {
     source_triangles: []u32,
     face_ids: []u32,
     parts: []u32,
+    materials: []u32,
     tri_count: u32,
 
     pub fn deinit(lowered: *Lowered) void {
@@ -94,6 +106,7 @@ pub const Lowered = struct {
         lowered.allocator.free(lowered.source_triangles);
         lowered.allocator.free(lowered.face_ids);
         lowered.allocator.free(lowered.parts);
+        lowered.allocator.free(lowered.materials);
         lowered.* = undefined;
     }
 };
@@ -141,6 +154,7 @@ pub const Mesh = struct {
     const Bucket = struct {
         group: u32,
         part: u32,
+        material: u32,
         triangles: std.ArrayListUnmanaged(u32) = .empty,
     };
 
@@ -158,9 +172,21 @@ pub const Mesh = struct {
         groups: ?[]const u32,
         parts: ?[]const u32,
     ) !Mesh {
+        return fromSoupWithMaterials(allocator, interleaved, tri_count, groups, parts, null);
+    }
+
+    pub fn fromSoupWithMaterials(
+        allocator: std.mem.Allocator,
+        interleaved: []const f32,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+    ) !Mesh {
         if (interleaved.len < @as(usize, tri_count) * 24) return error.InvalidSoup;
         if (groups) |rows| if (rows.len < tri_count) return error.InvalidGroups;
         if (parts) |rows| if (rows.len < tri_count) return error.InvalidParts;
+        if (materials) |rows| if (rows.len < tri_count) return error.InvalidMaterials;
 
         var mesh = Mesh{ .allocator = allocator };
         errdefer mesh.deinit();
@@ -246,7 +272,12 @@ pub const Mesh = struct {
                 try buckets.append(allocator, .{
                     .group = group,
                     .part = if (parts) |rows| rows[triangle] else NO_PART,
+                    .material = if (materials) |rows| rows[triangle] else NO_MATERIAL,
                 });
+            } else if (materials != null and buckets.items[entry.value_ptr.*].material != materials.?[triangle]) {
+                // One authored face cannot wear two texture roles. Reject corrupt
+                // persistence at the import boundary instead of choosing a triangle.
+                return error.InconsistentFaceMaterial;
             }
             try buckets.items[entry.value_ptr.*].triangles.append(allocator, triangle);
             if (group != NO_GROUP and group >= mesh.next_group) mesh.next_group = group + 1;
@@ -277,7 +308,7 @@ pub const Mesh = struct {
         corner_vertex: []const u32,
         bucket: *const Bucket,
     ) !Face {
-        var face = Face{ .id = 0, .group = bucket.group, .part = bucket.part };
+        var face = Face{ .id = 0, .group = bucket.group, .part = bucket.part, .material = bucket.material };
         errdefer face.deinit(allocator);
         try face.source_triangles.appendSlice(allocator, bucket.triangles.items);
 
@@ -375,6 +406,19 @@ pub const Mesh = struct {
         return null;
     }
 
+    /// Assign one texture-role index to every fully selected authored face.
+    /// Face selection already expands across a triangulated n-gon, so a partial
+    /// render triangle can never acquire a different role from its siblings.
+    pub fn assignSelectedMaterial(mesh: *Mesh, selected_triangles: []const bool, material: u32) u32 {
+        var changed: u32 = 0;
+        for (mesh.faces.items) |*face| {
+            if (!faceFullySelected(face, selected_triangles) or face.material == material) continue;
+            face.material = material;
+            changed += 1;
+        }
+        return changed;
+    }
+
     pub fn seedInfo(mesh: *const Mesh, selected_triangles: []const bool) ?SeedInfo {
         const face_id = mesh.firstSelectedFace(selected_triangles) orelse return null;
         const face = &mesh.faces.items[face_id];
@@ -400,6 +444,7 @@ pub const Mesh = struct {
         }
         return .{
             .face_id = face_id,
+            .part = face.part,
             .center = center,
             .directions = directions,
             .sizes = sizes,
@@ -697,6 +742,144 @@ pub const Mesh = struct {
             }
             if (!any) continue;
             changed = (try mesh.symmetrizeForPart(axis, (lo + hi) * 0.5, keep_positive, part)) or changed;
+        }
+        return changed;
+    }
+
+    fn mirrorPositionKey(part: u32, position: Vec3) MirrorPositionKey {
+        return .{
+            .part = part,
+            .x = @round(position[0] * MIRROR_MATCH_SCALE),
+            .y = @round(position[1] * MIRROR_MATCH_SCALE),
+            .z = @round(position[2] * MIRROR_MATCH_SCALE),
+        };
+    }
+
+    fn reflectedPoint(position: Vec3, subset: u8, center: Vec3) Vec3 {
+        var reflected = position;
+        inline for (0..3) |axis| {
+            if (subset & (@as(u8, 1) << @intCast(axis)) != 0) {
+                reflected[axis] = center[axis] * 2.0 - reflected[axis];
+            }
+        }
+        return reflected;
+    }
+
+    fn sortedQuadKey(part: u32, vertices: [4]u32) MirrorQuadKey {
+        var sorted = vertices;
+        var index: usize = 1;
+        while (index < sorted.len) : (index += 1) {
+            const value = sorted[index];
+            var cursor = index;
+            while (cursor > 0 and sorted[cursor - 1] > value) : (cursor -= 1) {
+                sorted[cursor] = sorted[cursor - 1];
+            }
+            sorted[cursor] = value;
+        }
+        return .{ .part = part, .a = sorted[0], .b = sorted[1], .c = sorted[2], .d = sorted[3] };
+    }
+
+    fn sameUndirectedEdge(a: [2]u32, b: [2]u32) bool {
+        return (a[0] == b[0] and a[1] == b[1]) or (a[0] == b[1] and a[1] == b[0]);
+    }
+
+    /// Live mirror editing changes vertex positions through a separate welded-twin
+    /// table. The physical diagonal is topology too: if already-authored mirror quads
+    /// retain opposite imported diagonals, identical mirrored positions fold in
+    /// opposite directions as soon as the quads become non-planar. Resolve every
+    /// reflected quad pair inside the same outliner part and copy one canonical
+    /// physical edge across each enabled mirror subset. Position tolerance is used
+    /// only to identify the existing mirror relation; the stored result is stable ids.
+    pub fn synchronizeMirrorDiagonals(mesh: *Mesh, mirror_mask_raw: u8) !u32 {
+        const mirror_mask = mirror_mask_raw & 7;
+        if (mirror_mask == 0) return 0;
+
+        var bounds_by_part = std.AutoHashMapUnmanaged(u32, MirrorPartBounds).empty;
+        defer bounds_by_part.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.vertices.items) |vertex_id| {
+                const position = mesh.vertices.items[vertex_id].position;
+                const entry = try bounds_by_part.getOrPut(mesh.allocator, face.part);
+                if (!entry.found_existing) {
+                    entry.value_ptr.* = .{ .min = position, .max = position };
+                } else {
+                    inline for (0..3) |axis| {
+                        entry.value_ptr.min[axis] = @min(entry.value_ptr.min[axis], position[axis]);
+                        entry.value_ptr.max[axis] = @max(entry.value_ptr.max[axis], position[axis]);
+                    }
+                }
+            }
+        }
+
+        var vertices_by_position = std.AutoHashMapUnmanaged(MirrorPositionKey, u32).empty;
+        defer vertices_by_position.deinit(mesh.allocator);
+        var quads_by_vertices = std.AutoHashMapUnmanaged(MirrorQuadKey, u32).empty;
+        defer quads_by_vertices.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.vertices.items) |vertex_id| {
+                try vertices_by_position.put(
+                    mesh.allocator,
+                    mirrorPositionKey(face.part, mesh.vertices.items[vertex_id].position),
+                    vertex_id,
+                );
+            }
+            if (face.vertices.items.len != 4) continue;
+            try quads_by_vertices.put(mesh.allocator, sortedQuadKey(face.part, .{
+                face.vertices.items[0],
+                face.vertices.items[1],
+                face.vertices.items[2],
+                face.vertices.items[3],
+            }), face.id);
+        }
+
+        var changed: u32 = 0;
+        var source_id: u32 = 0;
+        while (source_id < mesh.faces.items.len) : (source_id += 1) {
+            const source = &mesh.faces.items[source_id];
+            if (!source.alive or source.vertices.items.len != 4) continue;
+            const bounds = bounds_by_part.get(source.part) orelse continue;
+            const center = Vec3{
+                (bounds.min[0] + bounds.max[0]) * 0.5,
+                (bounds.min[1] + bounds.max[1]) * 0.5,
+                (bounds.min[2] + bounds.max[2]) * 0.5,
+            };
+            var subset: u8 = 1;
+            while (subset <= 7) : (subset += 1) {
+                if ((subset & mirror_mask) != subset) continue;
+                var reflected_vertices: [4]u32 = undefined;
+                var corner: usize = 0;
+                while (corner < reflected_vertices.len) : (corner += 1) {
+                    const source_vertex = source.vertices.items[corner];
+                    const reflected = reflectedPoint(mesh.vertices.items[source_vertex].position, subset, center);
+                    reflected_vertices[corner] = vertices_by_position.get(mirrorPositionKey(source.part, reflected)) orelse break;
+                }
+                if (corner != reflected_vertices.len) continue;
+                const twin_id = quads_by_vertices.get(sortedQuadKey(source.part, reflected_vertices)) orelse continue;
+                // A pair is canonicalized once from the lower stable face id. A quad
+                // reflected onto itself cannot own a mirror-invariant single diagonal;
+                // changing it here would only oscillate between its two choices.
+                if (twin_id <= source_id or twin_id >= mesh.faces.items.len) continue;
+                const diagonal = source.diagonal orelse chosenQuadDiagonal(mesh, source);
+                const reflected_diagonal = [2]u32{
+                    vertices_by_position.get(mirrorPositionKey(
+                        source.part,
+                        reflectedPoint(mesh.vertices.items[diagonal[0]].position, subset, center),
+                    )) orelse continue,
+                    vertices_by_position.get(mirrorPositionKey(
+                        source.part,
+                        reflectedPoint(mesh.vertices.items[diagonal[1]].position, subset, center),
+                    )) orelse continue,
+                };
+                const twin = &mesh.faces.items[twin_id];
+                if (quadDiagonalKind(twin, reflected_diagonal) == null) continue;
+                if (twin.diagonal) |existing| {
+                    if (sameUndirectedEdge(existing, reflected_diagonal)) continue;
+                }
+                twin.diagonal = reflected_diagonal;
+                changed += 1;
+            }
         }
         return changed;
     }
@@ -1157,6 +1340,7 @@ pub const Mesh = struct {
             .id = @intCast(mesh.faces.items.len),
             .group = mesh.next_group,
             .part = source.part,
+            .material = source.material,
         };
         mesh.next_group += 1;
         errdefer out.deinit(mesh.allocator);
@@ -1219,17 +1403,19 @@ pub const Mesh = struct {
         defer face_ids.deinit(mesh.allocator);
         var parts = std.ArrayListUnmanaged(u32).empty;
         defer parts.deinit(mesh.allocator);
+        var materials = std.ArrayListUnmanaged(u32).empty;
+        defer materials.deinit(mesh.allocator);
 
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.vertices.items.len < 3) continue;
             if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
-                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
-                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
+                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
             } else {
                 var corner: usize = 1;
                 while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts);
+                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
                 }
             }
         }
@@ -1246,6 +1432,8 @@ pub const Mesh = struct {
         const face_id_owned = try face_ids.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(face_id_owned);
         const part_owned = try parts.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(part_owned);
+        const material_owned = try materials.toOwnedSlice(mesh.allocator);
         return .{
             .allocator = mesh.allocator,
             .positions = pos_owned,
@@ -1255,6 +1443,7 @@ pub const Mesh = struct {
             .source_triangles = source_owned,
             .face_ids = face_id_owned,
             .parts = part_owned,
+            .materials = material_owned,
             .tri_count = @intCast(group_owned.len),
         };
     }
@@ -1270,6 +1459,7 @@ pub const Mesh = struct {
         sources: *std.ArrayListUnmanaged(u32),
         face_ids: *std.ArrayListUnmanaged(u32),
         parts: *std.ArrayListUnmanaged(u32),
+        materials: *std.ArrayListUnmanaged(u32),
     ) !void {
         for (triangle) |corner| {
             const p = mesh.vertices.items[face.vertices.items[corner]].position;
@@ -1286,6 +1476,7 @@ pub const Mesh = struct {
         try sources.append(mesh.allocator, if (face.source_triangles.items.len > 0) face.source_triangles.items[0] else 0);
         try face_ids.append(mesh.allocator, face.id);
         try parts.append(mesh.allocator, face.part);
+        try materials.append(mesh.allocator, face.material);
     }
 
     /// Adopt metadata that was normalized after lowering, then make current render
@@ -1509,6 +1700,29 @@ test "lowered loop cut preserves and interpolates per-corner UVs" {
         if ((x > 0 and x < 1) or (y > 0 and y < 1)) saw_interpolated = true;
     }
     try std.testing.expect(saw_interpolated);
+}
+
+test "texture role follows authored face identity through loop cut" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    const imported_materials = [_]u32{ 3, 3 };
+    var mesh = try Mesh.fromSoupWithMaterials(allocator, fixture.verts, 2, fixture.groups, null, imported_materials[0..]);
+    defer mesh.deinit();
+    const selected = [_]bool{ true, true };
+    try std.testing.expect(try mesh.loopCut(selected[0..], 0, 1, 0.5));
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expectEqual(@as(u32, 4), lowered.tri_count);
+    for (lowered.materials) |material| try std.testing.expectEqual(@as(u32, 3), material);
+
+    const all_selected = [_]bool{ true, true, true, true };
+    try std.testing.expectEqual(@as(u32, 2), mesh.assignSelectedMaterial(all_selected[0..], 1));
+    var reassigned = try mesh.lower();
+    defer reassigned.deinit();
+    for (reassigned.materials) |material| try std.testing.expectEqual(@as(u32, 1), material);
 }
 
 test "loop cut keeps every panel of a closed cylinder belt ordered" {
@@ -1924,6 +2138,62 @@ test "equal-length non-planar mirror quads carry the same physical diagonal" {
     try std.testing.expectEqual(@as(u32, 4), lowered.tri_count);
 }
 
+test "live mirror synchronizes opposite imported quad diagonals by stable ids" {
+    const allocator = std.testing.allocator;
+    const right = [4]Vec3{
+        .{ 1, -1, -1 },
+        .{ 2, -1, 1 },
+        .{ 1, 1, 1 },
+        .{ 2, 1, -1 },
+    };
+    const left = [4]Vec3{
+        .{ -right[0][0], right[0][1], right[0][2] },
+        .{ -right[3][0], right[3][1], right[3][2] },
+        .{ -right[2][0], right[2][1], right[2][2] },
+        .{ -right[1][0], right[1][1], right[1][2] },
+    };
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    // Right uses physical diagonal 0-2.
+    try appendSoupTri(&soup, allocator, right[0], right[1], right[2]);
+    try appendSoupTri(&soup, allocator, right[0], right[2], right[3]);
+    // Its reverse-wound left twin deliberately imports the OTHER diagonal 1-3.
+    try appendSoupTri(&soup, allocator, left[1], left[2], left[3]);
+    try appendSoupTri(&soup, allocator, left[1], left[3], left[0]);
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const parts = [_]u32{ 0, 0, 0, 0 };
+    var mesh = try Mesh.fromSoup(allocator, soup.items, 4, groups[0..], parts[0..]);
+    defer mesh.deinit();
+    try std.testing.expectEqual(@as(usize, 2), mesh.faces.items.len);
+
+    const before_right = mesh.faces.items[0].diagonal.?;
+    const before_left = mesh.faces.items[1].diagonal.?;
+    var before_reflected = [2]Vec3{
+        mesh.vertices.items[before_right[0]].position,
+        mesh.vertices.items[before_right[1]].position,
+    };
+    before_reflected[0][0] = -before_reflected[0][0];
+    before_reflected[1][0] = -before_reflected[1][0];
+    const before_left_positions = [2]Vec3{
+        mesh.vertices.items[before_left[0]].position,
+        mesh.vertices.items[before_left[1]].position,
+    };
+    const before_direct = samePoint(before_reflected[0], before_left_positions[0]) and samePoint(before_reflected[1], before_left_positions[1]);
+    const before_swapped = samePoint(before_reflected[0], before_left_positions[1]) and samePoint(before_reflected[1], before_left_positions[0]);
+    try std.testing.expect(!before_direct and !before_swapped);
+
+    try std.testing.expectEqual(@as(u32, 1), try mesh.synchronizeMirrorDiagonals(1));
+    try std.testing.expectEqual(@as(u32, 0), try mesh.synchronizeMirrorDiagonals(1));
+    const after_left = mesh.faces.items[1].diagonal.?;
+    const after_left_positions = [2]Vec3{
+        mesh.vertices.items[after_left[0]].position,
+        mesh.vertices.items[after_left[1]].position,
+    };
+    const after_direct = samePoint(before_reflected[0], after_left_positions[0]) and samePoint(before_reflected[1], after_left_positions[1]);
+    const after_swapped = samePoint(before_reflected[0], after_left_positions[1]) and samePoint(before_reflected[1], after_left_positions[0]);
+    try std.testing.expect(after_direct or after_swapped);
+}
+
 test "edge loop cut cannot cross a coincident outliner part" {
     const allocator = std.testing.allocator;
     const quads = [_][4]Vec3{
@@ -1945,6 +2215,90 @@ test "edge loop cut cannot cross a coincident outliner part" {
         part_one_triangles += 1;
     };
     try std.testing.expectEqual(@as(u32, 2), part_one_triangles);
+}
+
+test "cube loop cut cannot mutate a sibling concave path face" {
+    const allocator = std.testing.allocator;
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    var groups = std.ArrayListUnmanaged(u32).empty;
+    defer groups.deinit(allocator);
+    var parts = std.ArrayListUnmanaged(u32).empty;
+    defer parts.deinit(allocator);
+
+    // The Path Plane primitive is one authored concave n-gon lowered to a fan of
+    // render triangles. It is deliberately not a quad ring and must stay inert
+    // when a different outliner part is loop-cut.
+    const path = [6]Vec3{
+        .{ 0, 0, 0 }, .{ 4, 0, 0 }, .{ 4, 1, 0 },
+        .{ 2, 1, 0 }, .{ 2, 3, 0 }, .{ 0, 3, 0 },
+    };
+    const path_tris = [_][3]u32{
+        .{ 0, 1, 2 }, .{ 0, 2, 3 }, .{ 0, 3, 4 }, .{ 0, 4, 5 },
+    };
+    for (path_tris) |triangle| {
+        try appendSoupTri(&soup, allocator, path[triangle[0]], path[triangle[1]], path[triangle[2]]);
+        try groups.append(allocator, 0);
+        try parts.append(allocator, 0);
+    }
+
+    const cube = [8]Vec3{
+        .{ 10, 0, 0 }, .{ 12, 0, 0 }, .{ 12, 2, 0 }, .{ 10, 2, 0 },
+        .{ 10, 0, 2 }, .{ 12, 0, 2 }, .{ 12, 2, 2 }, .{ 10, 2, 2 },
+    };
+    const cube_quads = [_][4]u32{
+        .{ 0, 1, 2, 3 }, .{ 5, 4, 7, 6 }, .{ 4, 0, 3, 7 },
+        .{ 1, 5, 6, 2 }, .{ 4, 5, 1, 0 }, .{ 3, 2, 6, 7 },
+    };
+    for (cube_quads, 0..) |quad, face_index| {
+        try appendSoupTri(&soup, allocator, cube[quad[0]], cube[quad[1]], cube[quad[2]]);
+        try appendSoupTri(&soup, allocator, cube[quad[0]], cube[quad[2]], cube[quad[3]]);
+        try groups.append(allocator, @intCast(face_index + 1));
+        try groups.append(allocator, @intCast(face_index + 1));
+        try parts.append(allocator, 1);
+        try parts.append(allocator, 1);
+    }
+
+    const triangle_count: u32 = @intCast(groups.items.len);
+    var mesh = try Mesh.fromSoup(allocator, soup.items, triangle_count, groups.items, parts.items);
+    defer mesh.deinit();
+    try std.testing.expectEqual(@as(usize, 7), mesh.faces.items.len);
+    try std.testing.expectEqual(@as(usize, 6), mesh.faces.items[0].vertices.items.len);
+
+    const path_vertex_ids = try allocator.dupe(u32, mesh.faces.items[0].vertices.items);
+    defer allocator.free(path_vertex_ids);
+    const path_positions = try allocator.alloc(Vec3, path_vertex_ids.len);
+    defer allocator.free(path_positions);
+    for (path_vertex_ids, 0..) |vertex_id, index| path_positions[index] = mesh.vertices.items[vertex_id].position;
+
+    const selected = try allocator.alloc(bool, triangle_count);
+    defer allocator.free(selected);
+    @memset(selected, false);
+    @memset(selected[0..path_tris.len], true);
+    try std.testing.expect(!(try mesh.loopCut(selected, 0, 1, 0.5)));
+    try std.testing.expectEqualSlices(u32, path_vertex_ids, mesh.faces.items[0].vertices.items);
+
+    @memset(selected, false);
+    selected[path_tris.len] = true;
+    selected[path_tris.len + 1] = true;
+    try std.testing.expect(try mesh.loopCut(selected, 0, 1, 0.5));
+
+    try std.testing.expect(mesh.faces.items[0].alive);
+    try std.testing.expectEqual(@as(u32, 0), mesh.faces.items[0].part);
+    try std.testing.expectEqualSlices(u32, path_vertex_ids, mesh.faces.items[0].vertices.items);
+    for (path_vertex_ids, 0..) |vertex_id, index| {
+        try std.testing.expectEqual(path_positions[index], mesh.vertices.items[vertex_id].position);
+    }
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    var path_triangles: u32 = 0;
+    for (lowered.parts, lowered.groups) |part, group| {
+        if (part == 0) {
+            path_triangles += 1;
+            try std.testing.expectEqual(@as(u32, 0), group);
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 4), path_triangles);
 }
 
 test "import weld joins real adjacency across a quantization cell boundary" {

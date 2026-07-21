@@ -1,0 +1,28 @@
+{
+  "id": "req_3220",
+  "at": "2026-07-19T03:25:33.744Z",
+  "origin": "codex:019f744e",
+  "text": "yeah nice so a huge portion of this map i cant even see becasue the camera in the editor doesnt follow the height of terrain so that needs a real fix, i can see it if i load the world tho and go no gravity lol [Image #1]",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T03:25:49.133Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:40:34.179Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the active editor camera to follow the canonical painted-terrain height at its world-space focus while retaining the shared Isometric camera rig and preserving the authored eye-to-target orbit. Added a scalar native height door, cached sampling at camera/event boundaries so overlay projection remains pure, separate terrain-aware placement and navigation planes, cold-load/map-switch re-aiming, and completed-stroke/history notifications with overlay reprojection. Added controller and Zig boundary regressions, regenerated binding catalogs, rebuilt both ReleaseFast editor binaries, and passed the full Zig 0.16 editor gate.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T03:40:34.179Z"
+}

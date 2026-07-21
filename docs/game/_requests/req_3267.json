@@ -1,0 +1,30 @@
+{
+  "id": "req_3267",
+  "at": "2026-07-20T07:01:13.510Z",
+  "origin": "codex:019f7a9c",
+  "text": "dude lol what is this ? i added a cube to it and its doing the same shit again [Image #1]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:01:23.920Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T07:11:05.935Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Add Cube/Add Part path so an existing paint atlas is preserved atomically. New part UVs sample a checked neutral gutter texel and paint remains stale/locked until explicit Remake Atlas. Added append-after-stale-topology regression.",
+  "shas": [
+    "779476aeb"
+  ],
+  "resolvedAt": "2026-07-20T07:11:05.935Z"
+}

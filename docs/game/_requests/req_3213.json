@@ -1,0 +1,34 @@
+{
+  "id": "req_3213",
+  "at": "2026-07-19T02:19:43.523Z",
+  "origin": "codex:019f768a",
+  "text": "read through this /home/siah/layout/approaches/compiled-layout and then look at the text related work in /home/siah/creative/tailwhip and then look at our apporach for these in the framework directory here inside of reactjit, and so tell me what you think but to get maximum performance to be able to pull off docs/game/CRIMINAL_CAREERS.md i think we can use both of these to really juice our performance, and these are also very in line with our engines approach already you will find",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:19:52.807Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:30:31.387Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Completed source review, local benchmark comparison, and architecture synthesis; no implementation requested or performed."
+    },
+    {
+      "at": "2026-07-19T02:30:31.406Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the requested read-only architecture review across compiled-layout, Tailwhip's text experiments, ReactJIT's framework layout/text/static-surface paths, and CRIMINAL_CAREERS. The recommendation is a compiled document/channel IR combining normalized REROLL formula dictionaries, retained dirty instances, correctly shaped and virtualized text runs, and the existing keyed StaticSurface texture path; no implementation files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:30:31.406Z"
+}

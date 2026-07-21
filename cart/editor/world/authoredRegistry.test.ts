@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-authored-registry.test.js
 
-import { authoredPaletteEntries, authoredResidentKeyOf, preferredAuthoredPaletteId, type AuthoredBuildPiece } from './authoredRegistry';
+import { authoredPaletteEntries, authoredPieceFrom, authoredResidentKeyOf, preferredAuthoredPaletteId, setAuthoredPieces, type AuthoredBuildPiece } from './authoredRegistry';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -56,6 +56,17 @@ test('resident identity preserves exported meaning and paint skin', () => {
   assert(authoredResidentKeyOf('model:shared') === 'model:shared', 'build meaning was stripped from resident key');
   assert(authoredResidentKeyOf('prop:shared') === 'prop:shared', 'prop meaning was stripped from resident key');
   assert(authoredResidentKeyOf('model:shared#p2') === 'model:shared#p2', 'paint skin was stripped from resident key');
+});
+
+test('cold hydration resolves slot metadata from the explicit authored snapshot', () => {
+  assert(authoredPieceFrom([exported], exported.id) === exported, 'base exported prop did not resolve');
+  assert(authoredPieceFrom([exported], `${exported.id}#p2`) === exported, 'painted variant did not resolve to its base export');
+});
+
+test('retained two-argument live callers fall back to the mirrored registry', () => {
+  setAuthoredPieces([exported]);
+  assert(authoredPieceFrom(undefined, exported.id) === exported, 'missing hot-reload snapshot crashed or lost the exported prop');
+  assert(authoredPieceFrom(undefined, `${exported.id}#p2`) === exported, 'missing hot-reload snapshot lost a paint variant');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

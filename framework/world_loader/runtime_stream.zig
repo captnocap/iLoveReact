@@ -89,7 +89,7 @@ pub fn setupStreaming(self: anytype) !void {
     // view distance — a dense field at full radius dominates per-frame instance
     // staging + the wind shader, so cutting its draw distance is the main fps
     // lever. Structure keeps the full bubble (draw_radius 0 = unlimited).
-    const flora_radius: f32 = self.stream_radius * 0.5;
+    const flora_radius = streaming.foliageDetailRadius(self.stream_radius);
 
     try fams.append(self.allocator, .{ .rows = self.shape_batches.boxes, .stride = @intCast(self.stride) });
     try self.stream_protos.append(self.allocator, .{ .geom_key = "box", .verts = self.cube[0..], .tex_key = null });

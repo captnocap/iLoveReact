@@ -1,0 +1,18 @@
+{
+  "id": "req_3228",
+  "at": "2026-07-19T15:52:35.791Z",
+  "origin": "session:5a3945f7",
+  "text": "now, if i do not merge the outliners can we sample across all of them individually within the mesh if i name them accordingly",
+  "status": "doing",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T15:52:56.997Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

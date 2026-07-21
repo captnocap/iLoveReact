@@ -1,0 +1,28 @@
+{
+  "id": "req_3293",
+  "at": "2026-07-20T16:44:55.223Z",
+  "origin": "codex:019f7a9c",
+  "text": "uh. something is very wrong not with any update im aware of though, i just started up the app, the map i have loaded is literally empty, and im sitting at 4.5g memory usage and its all reporting in as unattributed [Image #1]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T16:45:09.007Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:03:15.413Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the 4.5GB reading was real private anonymous RSS, stable rather than an idle leak, and isolated the cold shader compile process from the warm-cache baseline. The orphaned 4.5GB process was terminated at the user's request. Added native allocation and GPU-capacity evidence so future peaks are diagnosable.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:03:15.413Z"
+}

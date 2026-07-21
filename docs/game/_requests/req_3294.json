@@ -1,0 +1,28 @@
+{
+  "id": "req_3294",
+  "at": "2026-07-20T16:51:20.273Z",
+  "origin": "codex:019f7a9c",
+  "text": "oh you know what so when i started up i had to compile shaders, and i just killed the process so that i could see if it just self fixed, and it did. check the memory of the process again but something about shader compilation doesnt clear memory. also, im actually just sitting here watchijng the memory and not doing anything to it. trying to see if it is just a memory leak and it doesnt seem to be that case for now, that could change technically at any moment but it is stable at 0.82G, [Image #1] so i would spend your time looking at why shader compilation would now release the memory when it is done as im more than sure is the case. Also, it is still kinda fkn lame this thing is report 515M of unattributed anonymous like if we dont know what it is then we surely are kinda fkn retarded right because we should know ALL the memory because of zig am i wrong",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T16:51:27.487Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:03:15.422Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Instrumented cold shader compilation with before/peak/after RSS telemetry, releases and trims glibc after temporary shader resources unwind, and exposes last peak, retained growth, and bytes returned. Added a Zig unit test and passed the ReleaseFast editor build.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:03:15.422Z"
+}

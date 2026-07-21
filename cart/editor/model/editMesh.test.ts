@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
+import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorEditAxes, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -84,6 +84,32 @@ test('equal-length non-planar mirror quads carry the same physical diagonal', ()
   const reflectedKept = keptDiagonal.map(([x, y, z]) => [-x, y, z] as V3);
   assert(positionSetKey(twinDiagonal) === positionSetKey(reflectedKept),
     `symmetrize twin chose the other physical diagonal: ${positionSetKey(twinDiagonal)} != ${positionSetKey(reflectedKept)}`);
+});
+
+test('live mirror edit repairs opposite pre-existing quad diagonals', () => {
+  const base: EditMesh = {
+    verts: [
+      [1, -1, -1], [2, -1, 1], [1, 1, 1], [2, 1, -1],
+      [-1, -1, -1], [-2, 1, -1], [-1, 1, 1], [-2, -1, 1],
+    ],
+    faces: [
+      { loop: [0, 1, 2, 3], diagonal: [0, 2] },
+      { loop: [4, 5, 6, 7], diagonal: [5, 7] },
+    ],
+  };
+  const next: EditMesh = {
+    ...base,
+    verts: base.verts.map((vertex) => [...vertex] as V3),
+    faces: base.faces.map((face) => ({ ...face, loop: [...face.loop] })),
+  };
+  next.verts[0][1] += 0.25;
+  const mirrored = mirrorEditAxes(base, next, [0], [0]);
+  assert(mirrored.verts[4][1] === -0.75, `mirror target did not receive the edit: ${mirrored.verts[4][1]}`);
+  const rightDiagonal = renderedQuadDiagonal(mirrored, 0);
+  const leftDiagonal = renderedQuadDiagonal(mirrored, 1);
+  const reflectedRight = rightDiagonal.map(([x, y, z]) => [-x, y, z] as V3);
+  assert(positionSetKey(leftDiagonal) === positionSetKey(reflectedRight),
+    `live mirror retained the opposite fold: ${positionSetKey(leftDiagonal)} != ${positionSetKey(reflectedRight)}`);
 });
 
 function taperedRing(): EditMesh {

@@ -1,0 +1,30 @@
+{
+  "id": "req_3226",
+  "at": "2026-07-19T15:46:19.941Z",
+  "origin": "codex:019f7a9c",
+  "text": "should i assume anything made in here previously is going to be screwed or what ? also it seems that everything is firing off the safety guard to want to split the quads [Image #1] this is just me rotating a icosphere. also loop cut is wrong. heres how i can tell instantly: for one before i even do it the face completely broke away and is exposing a hole but secondly look [Image #2] this is not loop cutting through a cylinder which if it was  the block bench approach it would no problem. if this is still doing triangle soup then we arnt there yet",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T15:46:28.591Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:01:56.712Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The false concavity guard and broken cylinder loop cut were separate indexed-state defects, both fixed in f69c1010d. Imported soup now records the current resident triangle-corner to stable-vertex mapping, so the first rigid gizmo transform cannot remap an older quad diagonal onto the wrong ids. Loop-cut faces now retain ordered Blockbench-equivalent polygon loops, eliminating crossed X panels and exposed holes. A repository scan found 4 of 54 saved meshdocs with incomplete part ranges; saves now repair from complete validated live ranges or refuse without overwriting the prior document.",
+  "shas": [
+    "f69c1010d"
+  ],
+  "resolvedAt": "2026-07-19T16:01:56.712Z"
+}

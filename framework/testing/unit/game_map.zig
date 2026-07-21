@@ -19,6 +19,17 @@ fn oneChunkGeneratedWire(allocator: std.mem.Allocator) ![]f32 {
     return rows;
 }
 
+fn oneStreamChunkRecord(allocator: std.mem.Allocator, cx: i32, cz: i32) ![]f32 {
+    const wire = engine.generated;
+    const rows = try allocator.alloc(f32, wire.CHUNK_STRIDE);
+    @memset(rows, 0);
+    rows[0] = @floatFromInt(cx);
+    rows[1] = @floatFromInt(cz);
+    const cells_start = 2 + chunks.SAMPLE_CELLS * 2;
+    @memset(rows[cells_start..], @as(f32, @floatFromInt(chunks.EMPTY_CELL)));
+    return rows;
+}
+
 test "reset unbinds the outgoing document and clears map-scoped bindings" {
     engine.reset();
     engine.setTileBindings(std.testing.io, &.{ 11, 12, 13, 14, 21, 22, 23, 24 });
@@ -51,10 +62,14 @@ test "generated replacement aligns world paths with chunks and clears transactio
     const chunk_rows = try oneChunkGeneratedWire(std.testing.allocator);
     defer std.testing.allocator.free(chunk_rows);
     const path_rows = [_]f32{
-        1, 1,
-        0, 1, 1, 0, 0, 8, 40, 2,
-        0, 0, 0,
-        20, 0, 0,
+        1,  1,
+        0,  1,
+        1,  0,
+        0,  8,
+        40, 2,
+        0,  0,
+        0,  20,
+        0,  0,
     };
 
     // The outgoing binding must not survive the replacement transaction.
@@ -84,6 +99,81 @@ test "generated replacement aligns world paths with chunks and clears transactio
     const rejected = engine.installGeneratedMap(chunk_rows, &path_rows);
     try std.testing.expectEqual(engine.generated.Failure.chunk_version, rejected.failure);
     try std.testing.expect(chunks.chunkAt(0, 0).?.tiles[road_cell] != chunks.EMPTY_CELL);
+}
+
+test "streamed generated replacement is manifest-bounded and commits only when complete" {
+    engine.reset();
+    defer engine.reset();
+    const outgoing = chunks.growChunk(0, 0).?;
+    outgoing.tiles[0] = 12;
+
+    const no_paths = [_]f32{ engine.generated.WIRE_VERSION, 0 };
+    const invalid_manifest = [_]f32{ engine.generated.WIRE_VERSION, 1, 0, chunks.MAX_CHUNK_ROW + 1 };
+    const bad_coord = engine.generatedInstallBegin(&invalid_manifest, &no_paths);
+    try std.testing.expectEqual(engine.generated.Failure.chunk_bounds, bad_coord.failure);
+    try std.testing.expectEqual(@as(i16, 12), chunks.chunkAt(0, 0).?.tiles[0]);
+
+    const manifest = [_]f32{
+        engine.generated.WIRE_VERSION,
+        2,
+        0,
+        0,
+        0,
+        chunks.MAX_CHUNK_ROW,
+    };
+    const bad_paths = [_]f32{ 99, 0 };
+    const bad_path = engine.generatedInstallBegin(&manifest, &bad_paths);
+    try std.testing.expectEqual(engine.generated.Failure.path_version, bad_path.failure);
+    try std.testing.expectEqual(@as(i16, 12), chunks.chunkAt(0, 0).?.tiles[0]);
+
+    const began = engine.generatedInstallBegin(&manifest, &no_paths);
+    try std.testing.expect(began.ok);
+    try std.testing.expectEqual(@as(usize, 2), began.stats.chunks);
+    try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
+    try std.testing.expectEqual(engine.generated.Failure.stream_active, engine.generatedInstallBegin(&manifest, &no_paths).failure);
+
+    const record = try oneStreamChunkRecord(std.testing.allocator, 1, 0);
+    defer std.testing.allocator.free(record);
+    try std.testing.expectEqual(engine.generated.Failure.chunk_unexpected, engine.generatedInstallChunk(record).failure);
+    try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
+
+    record[0] = 0;
+    record[1] = 0;
+    record[2 + 42] = 3.25;
+    try std.testing.expect(engine.generatedInstallChunk(record).ok);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.25), chunks.chunkAt(0, 0).?.height[42], 0.0001);
+    try std.testing.expectEqual(engine.generated.Failure.chunk_duplicate, engine.generatedInstallChunk(record).failure);
+
+    const premature = engine.generatedInstallCommit();
+    try std.testing.expectEqual(engine.generated.Failure.chunk_missing, premature.failure);
+    try std.testing.expect(chunks.chunkAt(0, 0) != null);
+
+    record[1] = @floatFromInt(chunks.MAX_CHUNK_ROW);
+    record[2 + 42] = 7.5;
+    try std.testing.expect(engine.generatedInstallChunk(record).ok);
+    const committed = engine.generatedInstallCommit();
+    try std.testing.expect(committed.ok);
+    try std.testing.expectEqual(@as(usize, 2), committed.stats.chunks);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.5), chunks.chunkAt(0, chunks.MAX_CHUNK_ROW).?.height[42], 0.0001);
+    try std.testing.expectEqual(engine.generated.Failure.stream_inactive, engine.generatedInstallCommit().failure);
+}
+
+test "streamed generated replacement abort discards partial owners" {
+    engine.reset();
+    defer engine.reset();
+    const no_paths = [_]f32{ engine.generated.WIRE_VERSION, 0 };
+    const manifest = [_]f32{ engine.generated.WIRE_VERSION, 1, 0, 0 };
+    const record = try oneStreamChunkRecord(std.testing.allocator, 0, 0);
+    defer std.testing.allocator.free(record);
+
+    try std.testing.expect(engine.generatedInstallBegin(&manifest, &no_paths).ok);
+    try std.testing.expect(engine.generatedInstallChunk(record).ok);
+    try std.testing.expectEqual(@as(usize, 1), chunks.chunkCount());
+    const aborted = engine.generatedInstallAbort();
+    try std.testing.expect(aborted.ok);
+    try std.testing.expectEqual(@as(usize, 1), aborted.stats.chunks);
+    try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
+    try std.testing.expect(engine.generatedInstallAbort().ok);
 }
 
 test "transport pen previews after one anchor and keeps rail out of the road tile compiler" {
@@ -160,6 +250,63 @@ test "Map Paint undo and redo restore the native RMAP concern per gesture" {
     try std.testing.expectEqual(@as(usize, 1), redone.stats.undo);
 }
 
+test "editor camera terrain query samples canonical world-metre height" {
+    engine.reset();
+    defer engine.reset();
+    _ = chunks.growChunk(0, 0).?;
+    engine.setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 17, .profile = .flat });
+    engine.strokeBegin(std.testing.io, 15, -11);
+    _ = engine.strokeEnd(std.testing.io);
+
+    try std.testing.expectApproxEqAbs(@as(f32, 17), engine.heightAt(15, -11), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), engine.heightAt(500, 500), 0.001);
+}
+
+test "build-run terrain query follows the rendered floor mirror" {
+    engine.reset();
+    defer engine.reset();
+    const chunk = chunks.growChunk(0, 0).?;
+    chunk.height[121 * chunks.SAMPLE_COLS + 121] = 8;
+
+    try std.testing.expectApproxEqAbs(@as(f32, 0), engine.heightAt(0, 0), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), engine.renderedHeightAt(0, 0), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), engine.maxRenderedHeightInRect(-1.5, -1.5, 1.5, 1.5).?, 0.001);
+}
+
+test "build footprint terrain query includes the taller side of a chunk seam" {
+    engine.reset();
+    defer engine.reset();
+    const left = chunks.growChunk(0, 0).?;
+    _ = chunks.growChunk(1, 0).?;
+    left.height[120 * chunks.SAMPLE_COLS + 239] = 12;
+
+    // The point sampler has deterministic right-side ownership at x=60. The
+    // footprint query is closed and must include the independently mirrored
+    // border vertex from the left chunk as well.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), engine.renderedHeightAt(60, 0), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12), engine.maxRenderedHeightInRect(60, 0, 60, 0).?, 0.001);
+}
+
+test "map memory counters report allocator ownership and release history" {
+    engine.reset();
+    defer engine.reset();
+    try std.testing.expectEqual(@as(u64, 0), chunks.allocatedBytes());
+    try std.testing.expectEqual(@as(u64, 0), engine.mapHistoryAllocatedBytes());
+
+    _ = chunks.growChunk(0, 0).?;
+    _ = chunks.growChunk(1, 0).?;
+    const mapped_per_chunk = std.mem.alignForward(usize, @sizeOf(chunks.Chunk), std.heap.pageSize());
+    try std.testing.expectEqual(@as(u64, mapped_per_chunk * 2), chunks.allocatedBytes());
+
+    engine.beginMapHistory(.chunk_grow);
+    try std.testing.expect(engine.mapHistoryAllocatedBytes() >= engine.saveSize());
+    engine.commitMapHistory(false);
+    try std.testing.expectEqual(@as(u64, 0), engine.mapHistoryAllocatedBytes());
+
+    // Fixed road scratch is always owned; a live plan/hash can only add to it.
+    try std.testing.expect(engine.roadAllocatedBytes() > 0);
+}
+
 test "analytic road rows and visual undercoat ride the compact ground stream" {
     engine.reset();
     defer engine.reset();
@@ -227,4 +374,29 @@ test "analytic road rows and visual undercoat ride the compact ground stream" {
     try std.testing.expectEqual(ribbon_base + engine.GROUND_RIBBON_HEADER_FLOATS + ribbon_count * roads.RIBBON_SEGMENT_FLOATS, written);
     try std.testing.expectApproxEqAbs(@as(f32, 40), data[ribbon_base + 1], 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 80), data[ribbon_base + 3], 0.001);
+}
+
+test "crosswalk marking contract preserves the semantic leg axis for the ground shader" {
+    const east_west = [_]roads.RoadPoint{ .{ .gx = 0, .gz = 10 }, .{ .gx = 30, .gz = 10 } };
+    const north_south = [_]roads.RoadPoint{ .{ .gx = 15, .gz = 0 }, .{ .gx = 15, .gz = 25 } };
+    const strokes = [_]roads.RoadStroke{
+        .{ .id = 1, .points = &east_west, .profile = .{ .lanesF = 1, .lanesB = 1, .sidewalks = true } },
+        .{ .id = 2, .points = &north_south, .profile = .{ .lanesF = 1, .lanesB = 1, .sidewalks = true } },
+    };
+    const plan = try std.testing.allocator.alloc(roads.PlanCell, 16_384);
+    defer std.testing.allocator.free(plan);
+    const result = roads.planRoads(&strokes, plan);
+    try std.testing.expect(!result.truncated);
+
+    var horizontal: ?u8 = null;
+    var vertical: ?u8 = null;
+    for (plan[0..result.count]) |cell| {
+        if (cell.gx == 10 and cell.gz == 10) horizontal = cell.markings;
+        if (cell.gx == 15 and cell.gz == 5) vertical = cell.markings;
+    }
+    try std.testing.expect(horizontal != null and vertical != null);
+    try std.testing.expect((horizontal.? & roads.RoadMarking.crosswalk) != 0);
+    try std.testing.expect((horizontal.? & roads.RoadMarking.axis_x) != 0);
+    try std.testing.expect((vertical.? & roads.RoadMarking.crosswalk) != 0);
+    try std.testing.expect((vertical.? & roads.RoadMarking.axis_x) == 0);
 }

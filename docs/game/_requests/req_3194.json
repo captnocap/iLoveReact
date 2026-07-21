@@ -1,0 +1,28 @@
+{
+  "id": "req_3194",
+  "at": "2026-07-18T09:36:25.040Z",
+  "origin": "codex:019f744e",
+  "text": "thought so which regardless of if it was even 0 or 1000000 it wouldnnt change the fact that doing what was done is justifyable at all.  if a language like zig holds a stance of yeah we are going to break it every release and the code is so deeply engrained in zig such as this then its clearly problematic if a plan for a migration results in creating a shim for the exact same language it already is. like thats just actually silly either there is a more correct and non obvious way to do it that requires investigation or its get fucked but i would have good faith that a language removes a capability for good merit if it was fully removed which it wasnt its just the shape of how you think about it which is interesting to say the least, the leader of that pack of agents literally admitted it was them who wrote that bit and all the other work was shelled out to codex. Funnily enough it also did this [Image #1] talk about getting fucking nerfed to oblivion",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:36:41.614Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:38:04.888Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compared the migration's claimed raw-readiness ruling with the durable request record and the installed Zig 0.16 standard library. No oracle ruling requires the fork; req_3153 authorized doing the migration on a safe branch but did not prescribe preserving the 0.15 socket model. Zig 0.16 directly provides std.Io.net plus Evented backends (io_uring, kqueue, Dispatch), async/cancel, Stream Reader/Writer, and readiness/error semantics. Explained that sysx/netx are therefore a deliberate source-compatibility fork, defensible only as a temporary transition—not as a permanent migration result or a user ruling.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:38:04.888Z"
+}

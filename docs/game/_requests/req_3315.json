@@ -1,0 +1,28 @@
+{
+  "id": "req_3315",
+  "at": "2026-07-21T03:49:10.099Z",
+  "origin": "codex:019f7a9c",
+  "text": "importing a model like the 'torso.obj' that i imported and stored, it has 99k tris, when turning on face vert or edge mode none of them render because its way way over a cap, there is if you right click and in the bottom of the menu is a quality slider, its around roughly 16k tris when it renders. regardless of this, the quality slider does not store when you save the model after decimating it this way, therefore its effectively just cosmetic and needs to actually do something useful",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T03:49:17.585Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:55:17.208Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The quality slider now nominates the chosen host-resident decimated topology for durable model output instead of leaving Save pointed at the retained high-resolution baseline. Slider scrubbing remains reversible during the session, but doc.blob and base.blob save the current reduced mesh with mapped face groups, texture roles, colors/glass, part ownership, and hidden geometry; reopening adopts that reduced topology as the model's new editable source. A successful quality change now marks the model dirty so manual save/autosave sees it. Also corrected the displayed snapshot's material-row cardinality. Added a Zig reduced-snapshot/range regression; test-mesh-edit, test-mesh-import, meshDoc 10/10, diff checks, and the full ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:55:17.208Z"
+}

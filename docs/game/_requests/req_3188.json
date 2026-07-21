@@ -1,0 +1,17 @@
+{
+  "id": "req_3188",
+  "at": "2026-07-18T09:07:03.215Z",
+  "origin": "one-off",
+  "text": "Right. Im trying to figure out tho like was this the process of you sent out prompts that said to follow  the spec or not like is it your failure to instruct others or is it their ability to follow instruction well i dont even know if you even did that what time did the commits land at because freely you know how to get the system time you know what a sleep schedule would be and you hopefully have the capability to see how fast a response comes back from sending out an agent so like respectfully im not going to be surprised when it has this massive 23 hour gap of nothing at all until i came back and then it picked up the last of it even still which all in all im not really upset about any of it but it is a bit confusing to say the least",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:07:12.199Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

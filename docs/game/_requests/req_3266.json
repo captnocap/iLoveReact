@@ -1,0 +1,42 @@
+{
+  "id": "req_3266",
+  "at": "2026-07-20T06:52:14.337Z",
+  "origin": "codex:019f7e48",
+  "text": "ok so we have sat on these for a while leaving them doing nothing but there are these gutters in the editor app that have buttons that dont do anything. the actual usecase is now clear, they should directly control the panel to the left or right of them based on what is in view on the center stage and both should be able to collapse that panel for more stage space overall. im talking about these [Image #1] [Image #2] now what do we make them render for. IDK yet, but i do know that the current mesh editor in here is starting to get crowded on its panel and so im sure one of these can be better used for something like rigging for example is a strong one",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:52:22.276Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:54:46.025Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Oracle found no competing ruling. Source audit confirms activeDomain is presentation-only and rightPane only changes highlight/title. Proceeding with contextual rail contracts, repeat-click collapse, and a model split that reuses the existing Focus/Paint/Rig content instead of creating parallel editors."
+    },
+    {
+      "at": "2026-07-20T07:05:29.181Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented contextual source/focus rails. Model focus now renders Model, Paint, and Rig bodies from existing components; active-button repeat collapses either adjacent panel while rails persist. panelSystem tests pass 7/7, editor bundle passes, and ReleaseFast raw ship completed."
+    },
+    {
+      "at": "2026-07-20T07:06:30.745Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced both inert editor gutters with one contextual side-panel contract: rail choices now depend on the center document, pressing the active choice collapses or reopens its adjacent body, and the model focus stack is split into Model, Paint, and Rig panes by reusing the existing outliner, painting, UV/layer, and rigging components. Updated hot-state migration and the A–H region documentation, added seven behavior tests, and verified both the editor bundle and a ReleaseFast raw ship.",
+  "shas": [
+    "ed3342cc3"
+  ],
+  "resolvedAt": "2026-07-20T07:06:30.745Z"
+}

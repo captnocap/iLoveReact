@@ -1,0 +1,30 @@
+{
+  "id": "req_3234",
+  "at": "2026-07-19T16:27:24.686Z",
+  "origin": "codex:019f7a9c",
+  "text": "just tell me why it happened and guarantee me it can never happen again and we can move on",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T16:27:51.713Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:40:10.188Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the exact collapse class structurally impossible. Paint-only persistence no longer writes doc.blob or base.blob. Every editable save now requires an exact one-to-one host-range/Outliner-row count, including single-part models; a shrink is refused unless an actual Delete, Merge, or shrinking Undo minted a one-shot capability for that exact resulting count. The native RJMD writer independently validates sorted non-overlapping ranges plus the expected count, writes a complete fsynced temp file, and atomically renames it over doc.blob; metadata is then atomically written. Resident geometry never crosses the JS bridge. Regression coverage proves the old paint-only path performs zero editable-mesh writes and Zig range validation rejects missing, extra, overlapping, and empty tables. TS tests are 9/9, Zig mesh tests 29/29, codegen is clean, and the ReleaseFast editor build passes.",
+  "shas": [
+    "9d584fd65"
+  ],
+  "resolvedAt": "2026-07-19T16:40:10.188Z"
+}

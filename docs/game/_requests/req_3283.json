@@ -1,0 +1,30 @@
+{
+  "id": "req_3283",
+  "at": "2026-07-20T09:33:04.503Z",
+  "origin": "codex:019f768a",
+  "text": "Three flags while it's still a demo:\n\nFacts are positional. semanticChanges compares facts by index and the editor writes back by data-fact-index — insert a fact in the middle and the diff engine reports every subsequent row as changed, and merges get ugly. Key facts by name (they already have labels) before this touches real files. Same fencepost class as the group-id renormalization bug, cheaper to kill now.\nKind is encoded twice — in the ref prefix (biz., npc., place.) and in the kind field, and they can drift (the mock already does it: Site Manager's sidebar dot is data-kind=\"business\" while its kind is position). Pick one as authoritative — probably the field, with the prefix as convention-not-contract — or the first agent-authored batch will mint mismatches at scale.\nThe player-facing extension needs a knowledge boundary designed in early. The pages already interleave \"Designer notes\" with lore — fine for authoring, but the public-wiki compile step has to strip by section marker (or facts need a visibility flag) or your shipped wiki spoils the disposal-practices reveal in the CropDuster overview. Cheap now as a block-type distinction in the markdown; painful later as a per-page audit.",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:33:33.464Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T09:41:56.815Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected all three structural hazards in the World Bible mock and durable architecture. Facts now use stable semantic keys with labels/order as presentation, and diff/review logic is key-based; a focused check proves reorder is clean and middle insertion creates exactly one change. The kind field now drives generated navigation, styling, validation, and compilation, with ref prefixes advisory and mismatch-only warnings; the specialized source tag is defined as the one serialization of kind rather than a duplicate field. Player-facing knowledge now compiles fail-closed from explicit public prose blocks and public facts only, with notes, unwrapped author prose, and secret facts excluded; the CropDuster projection check proves the reveal bytes cannot leak.",
+  "shas": [
+    "48c067028"
+  ],
+  "resolvedAt": "2026-07-20T09:41:56.814Z"
+}

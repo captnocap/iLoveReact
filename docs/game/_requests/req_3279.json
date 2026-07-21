@@ -1,0 +1,28 @@
+{
+  "id": "req_3279",
+  "at": "2026-07-20T09:04:41.375Z",
+  "origin": "codex:019f7a9c",
+  "text": "ok. now inside of the rigging for the model we need to add in texture mapping. when placing build pieces or props in the world, you can right click them and it opens a menu to apply a texture to a face that was rigged. but we do not have the face rigging capability yet made from when it last existed before with cart/hmsc-int",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:04:54.449Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T09:39:39.609Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added model Rig face-texture roles with stable ids and editable labels, host-resident authored-face assignment/select/clear controls, RJMD v3 persistence, undo/redo and topology provenance, package manifest persistence, and export into placed authored prop/build-piece material slots. Right-click and Inspector surfaces now expose the authored labels while storing bindings by stable id.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T09:39:39.609Z"
+}

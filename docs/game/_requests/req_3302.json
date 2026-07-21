@@ -1,0 +1,28 @@
+{
+  "id": "req_3302",
+  "at": "2026-07-20T17:28:40.990Z",
+  "origin": "codex:019f7a9c",
+  "text": "wtf good does going from 'unannounced anonymous' to 'RSS not assigned to an owner' do thats the same thing ??? right?",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:29:09.018Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:34:01.523Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Agreed that renaming unattributed RSS was not attribution. Removed the remainder concept and tile entirely. The host now parses /proc/self/smaps into a disjoint kernel-VMA partition (anonymous, main heap, executable/file, thread stacks, kernel special) whose rows sum exactly to mapped RSS; semantic Zig/V8/wgpu/compiler counters remain an explicitly overlapping drill-down. Added Zig parser coverage and TS partition tests; ReleaseFast editor build passes.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:34:01.522Z"
+}

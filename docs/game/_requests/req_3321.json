@@ -1,0 +1,30 @@
+{
+  "id": "req_3321",
+  "at": "2026-07-21T04:48:53.714Z",
+  "origin": "codex:019f8088",
+  "text": "one problem with multi select is that rotate is rotating individual pieces and not the whole thing as one unit",
+  "status": "review",
+  "sessionId": "019f8088-6669-7a73-aaa5-bb10bf2e2d13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T04:49:02.135Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T04:53:31.412Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed world multi-selection rotation from per-piece yaw updates to one rigid group transform. The active selected piece is now the stable shared pivot, matching the old building-instance-origin behavior: every selected piece orbits that pivot while its own yaw advances by the same quarter turn, vertical and semantic metadata remain intact, and the whole operation remains one undo entry. Added a focused contract covering group layout, unselected isolation, metadata preservation, and exact four-turn reversibility.",
+  "shas": [
+    "bc18f3931"
+  ],
+  "resolvedAt": "2026-07-21T04:53:31.412Z"
+}

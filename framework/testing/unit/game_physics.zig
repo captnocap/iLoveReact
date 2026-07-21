@@ -565,6 +565,55 @@ test "head bonk: jumping into a ceiling caps the head and keeps horizontal speed
     try testing.expectEqual(@as(f32, 1), out[7]); // falls back and lands
 }
 
+test "head bonk: low-gravity jump cannot pass through a non-solid floor slab" {
+    physics.clearHeightfields();
+    const player_height: f32 = 1.65;
+    // Mirrors the live editor floor dialect: finite 20cm slab, but blocksPlayer
+    // is false so its sides remain walkable rather than acting like a wall.
+    const upper_floor = [physics.RECT_FLOATS]f32{ -5, -5, 5, 5, 3.2, 0, 0.55, 0, 3.0 };
+    var sim = Sim{
+        .dt = 0.016,
+        .jump = true,
+        .jump_speed = 5.65,
+        .gravity = 0.25,
+        .player_height = player_height,
+        .rects = &.{ GROUND, upper_floor },
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    sim.jump = false;
+    var bonked = false;
+    var frames: usize = 0;
+    while (frames < 120) : (frames += 1) {
+        try testing.expect(out[2] + player_height <= 3.0 + 0.001);
+        if (out[2] + player_height >= 3.0 - 0.02 and out[5] <= 0) bonked = true;
+        sim.py = out[2];
+        sim.pvy = out[5];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+    try testing.expect(bonked);
+}
+
+test "head bonk: rotated non-solid floor slab keeps its underside" {
+    physics.clearHeightfields();
+    const floor = [physics.ORIENTED_FLOATS]f32{
+        -3,  -3, 3,    3,
+        3.2, 0,  0.55, 0,
+        3.0, 0,  0,    std.math.pi / 4.0,
+    };
+    const sim = Sim{
+        .dt = 0.05,
+        .py = 1.2,
+        .pvy = 2.2,
+        .gravity = 0,
+        .player_height = 1.7,
+        .rects = &.{GROUND},
+        .oriented = &.{floor},
+    };
+    const out = physics.step(sim.pack(&g_buf)).?;
+    try testing.expectApproxEqAbs(@as(f32, 1.3), out[2], 0.0001);
+    try testing.expectEqual(@as(f32, 0), out[5]);
+}
+
 test "head bonk: a low floor above the ground never drops the feet through it" {
     // The head-bonk seats the head under an overhead slab — but a landing floor at
     // the TOP of a staircase has its underside ABOVE your head while you climb, so

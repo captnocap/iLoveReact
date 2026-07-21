@@ -33,8 +33,9 @@ export const METERS_PER_LEVEL = 3;
 export interface IsoPose {
   centerX: number; // world tile the view orbits over (pan), in tiles
   centerZ: number;
-  // Camera target height is independent of the active editing storey. Changing
-  // floors moves the placement/pick plane, not the user's view.
+  // Metres above the terrain beneath the focus point. Camera height remains
+  // independent of the active editing storey: changing floors moves the
+  // placement/pick surface, not the user's view.
   viewY: number;
   yaw: number;     // compass rotation in DEGREES — continuous (mouse-drag) + 90° buttons
   pitch: number;   // elevation above the horizon in DEGREES — tilt between near-level and near-plan
@@ -67,6 +68,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export class IsoStage {
   pose: IsoPose;
   private sampleHeight: HeightSampler;
+  private focusTerrainY = 0;
 
   constructor(initial?: Partial<IsoPose>, heightAt: HeightSampler = () => 0) {
     // Old hot-state twigs predate viewY and encoded the camera target in level.
@@ -82,6 +84,17 @@ export class IsoStage {
     this.sampleHeight = heightAt;
   }
 
+  // Sample exactly once at an interaction/update boundary. `solve()` is also
+  // used by every projected overlay corner, so doing capability I/O inside it
+  // would multiply host crossings by the number of visible guides.
+  refreshTerrainElevation(): boolean {
+    const sampled = this.sampleHeight(this.pose.centerX, this.pose.centerZ);
+    const next = Number.isFinite(sampled) ? sampled : 0;
+    if (next === this.focusTerrainY) return false;
+    this.focusTerrainY = next;
+    return true;
+  }
+
   yawDegrees(): number {
     return this.pose.yaw;
   }
@@ -90,12 +103,20 @@ export class IsoStage {
     return this.pose.level * METERS_PER_LEVEL;
   }
 
+  terrainElevation(): number {
+    return this.focusTerrainY;
+  }
+
+  focusElevation(): number {
+    return this.terrainElevation() + this.pose.viewY;
+  }
+
   // Semantic solve for boot-frame parity and picking. The rendered author viewport
   // is native-driven (the pose is pushed through __compiled_world_set_camera), not
   // per-frame JS camera props.
   solve(): Solved {
     const dist = BASE_DIST / clamp(this.pose.zoom, MIN_ZOOM, MAX_ZOOM);
-    const target: Vec3 = [this.pose.centerX, this.pose.viewY, this.pose.centerZ];
+    const target: Vec3 = [this.pose.centerX, this.focusElevation(), this.pose.centerZ];
     return solveCamera(Isometric, {
       target,
       yaw: this.yawDegrees(),
@@ -129,8 +150,9 @@ export class IsoStage {
     this.pose.zoom = clamp(this.pose.zoom * factor, MIN_ZOOM, MAX_ZOOM);
   }
 
-  // The cursor's world point on the active level's flat plane (analytic ray/plane
-  // intersection), in tiles. Distance-independent on purpose: the marching
+  // The cursor's world point on a local analytic plane through the terrain
+  // beneath the camera focus + the active storey. Distance-independent on
+  // purpose: the marching
   // unprojectGround caps its ray at MAX_T≈400m, but the iso eye sits BASE_DIST/zoom
   // (up to ~750m at MIN_ZOOM) from the target, so a zoomed-out cursor ray never
   // reaches the ground and the march bails to cam.target — which made zoom-to-cursor
@@ -138,13 +160,21 @@ export class IsoStage {
   // is exact for the "keep this point under the cursor" anchor (terrain height under
   // the pointer is irrelevant to a horizontal pan delta). Returns null only if the
   // ray is parallel to the plane or the plane sits behind the eye.
-  groundPoint(sx: number, sy: number, rect: Rect): { x: number; z: number } | null {
+  private pointOnPlane(sx: number, sy: number, rect: Rect, planeY: number): { x: number; z: number } | null {
     const r = screenRay(sx, sy, rect, this.solve());
     const dy = r.dir[1];
     if (Math.abs(dy) < 1e-6) return null;
-    const t = (this.levelElevation() - r.origin[1]) / dy;
+    const t = (planeY - r.origin[1]) / dy;
     if (t <= 0) return null;
     return { x: r.origin[0] + t * r.dir[0], z: r.origin[2] + t * r.dir[2] };
+  }
+
+  groundPoint(sx: number, sy: number, rect: Rect): { x: number; z: number } | null {
+    return this.pointOnPlane(sx, sy, rect, this.terrainElevation() + this.levelElevation());
+  }
+
+  private navigationPoint(sx: number, sy: number, rect: Rect): { x: number; z: number } | null {
+    return this.pointOnPlane(sx, sy, rect, this.focusElevation());
   }
 
   // Zoom toward the cursor (map/Sims behaviour): keep the ground point under the
@@ -153,9 +183,9 @@ export class IsoStage {
   // by the difference — so "point at a building and roll in" brings THAT building
   // closer. If either solve fails (degenerate ray), zoom in place rather than jump.
   zoomToCursor(sx: number, sy: number, factor: number, rect: Rect): void {
-    const before = this.groundPoint(sx, sy, rect);
+    const before = this.navigationPoint(sx, sy, rect);
     this.zoomBy(factor);
-    const after = this.groundPoint(sx, sy, rect);
+    const after = this.navigationPoint(sx, sy, rect);
     if (!before || !after) return;
     this.pose.centerX += before.x - after.x;
     this.pose.centerZ += before.z - after.z;
@@ -195,12 +225,12 @@ export class IsoStage {
 
   // "Grab the map" pan: solve the cursor's previous and current plane points and shift
   // the centre so the grabbed world point stays under the cursor. Rig-agnostic and
-  // trig-free — it rides the same analytic groundPoint as zoomToCursor, so it stays
+  // trig-free — it rides the same analytic focus plane as zoomToCursor, so it stays
   // exact through every rotation and zoom (no per-facing sign juggling) and never
   // suffers the marched-ray range cap. No-op if either solve is degenerate.
   dragPan(prevX: number, prevY: number, curX: number, curY: number, rect: Rect): void {
-    const a = this.groundPoint(prevX, prevY, rect);
-    const b = this.groundPoint(curX, curY, rect);
+    const a = this.navigationPoint(prevX, prevY, rect);
+    const b = this.navigationPoint(curX, curY, rect);
     if (!a || !b) return;
     this.pose.centerX += a.x - b.x;
     this.pose.centerZ += a.z - b.z;

@@ -1,0 +1,28 @@
+{
+  "id": "req_3211",
+  "at": "2026-07-19T02:14:09.190Z",
+  "origin": "codex:019f744e",
+  "text": "sorry didnt mean to stop you but i see now it says folage rows 1.84g, let me ask are we still packing 24 byte structs to paint ? and then slim foilage is 1.69g also why is it expanding the entire map when i can only see something like 1-1.5 chunk distance",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:14:17.900Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:22:05.967Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the foliage path end to end: host preview rows remain 12 f32 / 48 bytes, while the GPU packs 24-byte SlimInstance rows. Corrected the panel descriptions to reveal that the retained prefix can contain full-capacity uploads, both ping-pong pointers, and superseded regions; five focused diagnostics tests and the editor build pass, with no commit created.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:22:05.967Z"
+}

@@ -293,6 +293,41 @@ export function importModelFilePackage(sourcePath: string): ModelPackage | null 
   return pkg;
 }
 
+/**
+ * Store an STL-origin model as its converted GLB, while the manifest records
+ * the original STL path. The native viewer therefore only ever sees its two
+ * supported formats, and the package remains portable after the temp GLB dies.
+ */
+export function importStlModelFilePackage(sourcePath: string, convertedGlbPath: string): ModelPackage | null {
+  if (!sourcePath.toLowerCase().endsWith('.stl') || !convertedGlbPath.toLowerCase().endsWith('.glb')) return null;
+  const sourceFilename = sourcePath.split('/').pop() || sourcePath;
+  const convertedFilename = `${sourceFilename.replace(/\.stl$/i, '') || 'model'}.glb`;
+  const id = `import:${modelSlug(sourceFilename.replace(/\.[^.]+$/, '')).toLowerCase()}`;
+  const registered = EDITOR_ASSET_CATALOG.modelPackages.find((model) => model.id === id);
+  if (registered) return registered;
+  const probe = fileModelPackage(convertedGlbPath);
+  const base64 = readFileBase64(convertedGlbPath);
+  if (!base64) return null;
+  const pkg: ModelPackage = {
+    ...probe,
+    id,
+    name: titleFromFilename(sourceFilename),
+    source: sourcePath,
+    viewerPath: convertedGlbPath,
+    decompositions: [
+      ...probe.decompositions.filter((entry) => entry !== 'source:file-explorer'),
+      'source-format:stl',
+      'converted-to:glb',
+      `imported-from:${sourcePath}`,
+    ],
+  };
+  const result = materializePackageArtifacts(pkg, { meshFile: { name: convertedFilename, base64 } });
+  if (!result.ok) return null;
+  pkg.path = `/${result.dir}`;
+  EDITOR_ASSET_CATALOG.modelPackages.push(pkg);
+  return pkg;
+}
+
 function titleFromFilename(filename: string): string {
   const base = filename.replace(/\.[^.]+$/, '');
   return base

@@ -1,0 +1,30 @@
+{
+  "id": "req_3268",
+  "at": "2026-07-20T07:02:18.774Z",
+  "origin": "codex:019f7a9c",
+  "text": "how though how does that happen we keep saying we put checks and balances in so it cant happen so how is it happening its gotta be as frustrating for you as it is for me",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:02:28.953Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T07:11:05.942Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause confirmed: the stale-layout guard and legacy destructive append installer collided. Append no longer creates a blank atlas or depends on a forbidden refresh; the invariant is now enforced at the install boundary and covered by Zig regression.",
+  "shas": [
+    "779476aeb"
+  ],
+  "resolvedAt": "2026-07-20T07:11:05.942Z"
+}

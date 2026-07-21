@@ -1,0 +1,30 @@
+{
+  "id": "req_3265",
+  "at": "2026-07-20T06:46:49.263Z",
+  "origin": "codex:019f768a",
+  "text": "thats good i would not enforce that it has to be a automatic write to the file, and in fact i would make it clear that one has changes than the other,  ensuring the on-disk form is the source of truth, thus meaning a formal confirmation to update the on disk file when a change is made",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:46:57.251Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:51:08.099Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the World Knowledge authoring proposal around canonical Markdown block files and an explicitly divergent editor draft. The design now specifies visible DISK, DRAFT CHANGED, DISK CHANGED, and CONFLICT states; semantic and exact-text review; named target paths; formal Write to Disk confirmation; expected-hash conflict detection; atomic byte-preserving patches; noncanonical crash recovery; and disk-only normal compilation.",
+  "shas": [
+    "48bffd40e"
+  ],
+  "resolvedAt": "2026-07-20T06:51:08.099Z"
+}

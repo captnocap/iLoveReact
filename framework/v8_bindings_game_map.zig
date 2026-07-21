@@ -14,7 +14,10 @@
 //!   __map_open_neighbors(cx, cz) -> Float32 ArrayBuffer [count, x0,z0, …]
 //!   __map_install_generated(chunksF32, pathsF32)
 //!       -> Float32 ArrayBuffer [ok, error, chunks, paths, roads, rails]
-//!   __map_set_tool(f32[18])                    — arm channel/tool/brush params
+//!   __map_generated_begin(manifestF32, pathsF32) -> same result
+//!   __map_generated_chunk(chunkRecordF32)         -> same result
+//!   __map_generated_commit() / __map_generated_abort() -> same result
+//!   __map_set_tool(f32[19])                    — arm channel/tool/brush params
 //!   __map_set_brush_gizmo(index)               — in-world brush gizmo + dab style
 //!   __map_set_tile_bindings(f32 count×4 rows)  — the painted-material table (req_2693)
 //!   __map_get_tile_bindings() -> Float32 ArrayBuffer [count, rows…]
@@ -25,18 +28,22 @@
 //!   __map_inspect_file(path) -> Float32 ArrayBuffer [version, chunkCount]
 //!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
+//!   __map_height_at(worldX, worldZ) -> f64       — canonical terrain sample
+//!   __map_render_height_max(minX,minZ,maxX,maxZ) -> f64|null
+//!       — highest point on the loader's rendered/collider terrain mirror
 //!   __map_read_height(cx, cz) / __map_read_water(cx, cz)
 //!       -> Float32 ArrayBuffer of SAMPLE_CELLS (a copy; verification/readback)
 //!   __map_read_cells(cx, cz, channel) -> Float32 ArrayBuffer of TILE_CELLS
 //!       channel: 0 tiles · 1 zones · 2 flora grass · 3 flora tree · 4 flora bush
-//!       · 5 materials (per-cell binding index)
+//!       · 5 materials · 6/7/8 flora density for grass/tree/bush
 //!
-//! __map_set_tool packing (f32[18]):
+//! __map_set_tool packing (f32[19]):
 //!   [0] channel  [1] mode  [2] terrainTool  [3] shape  [4] profile
 //!   [5] radiusM  [6] centerZ
 //!   [7] rampMin  [8] rampMax  [9] rampWide  [10] rampLong  [11] rampAngleDeg
 //!   [12] smoothStrength  [13] kindIdx  [14] floraKindIdx  [15] floraLane
 //!   [16] zoneIdx  [17] bindIdx (armed material binding; -1 = kind default)
+//!   [18] floraDensity (0..1, quantized into each painted cell)
 //!
 //! __map_install_generated packing (version 1):
 //!   chunks [version, count, stride, 58081, 14400], then fixed records
@@ -45,6 +52,8 @@
 //!   paths [version, count], then variable records
 //!     [kind, lanesF, lanesB, sidewalks01, tracks, curveRadiusM, speedKph,
 //!      pointCount, centeredWorldX, centeredWorldZ, elevationM, ...]
+//!   streaming manifest [version, count, cx0, cz0, cx1, cz1, ...]
+//!   streaming chunk is one headerless fixed chunk record in the bulk order
 //!
 //! Gated ingredient (V18): registered only when the metafile gate flips
 //! -Dhas-game-map (see sdk/dependency-registry.json `game-map` and
@@ -210,9 +219,7 @@ fn hostOpenNeighbors(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 // rebinds the new named document explicitly after success.
 var generated_install_out: [6]f32 = undefined;
 
-fn hostInstallGenerated(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const result = engine.installGeneratedMap(argF32Slice(info, 0), argF32Slice(info, 1));
+fn setGeneratedInstallResult(info: v8.FunctionCallbackInfo, result: engine.generated.Result) void {
     generated_install_out[0] = if (result.ok) 1 else 0;
     generated_install_out[1] = @intFromEnum(result.failure);
     generated_install_out[2] = @floatFromInt(result.stats.chunks);
@@ -220,6 +227,31 @@ fn hostInstallGenerated(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     generated_install_out[4] = @floatFromInt(result.stats.roads);
     generated_install_out[5] = @floatFromInt(result.stats.rails);
     setReturnF32Buffer(info, generated_install_out[0..]);
+}
+
+fn hostInstallGenerated(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setGeneratedInstallResult(info, engine.installGeneratedMap(argF32Slice(info, 0), argF32Slice(info, 1)));
+}
+
+fn hostGeneratedBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setGeneratedInstallResult(info, engine.generatedInstallBegin(argF32Slice(info, 0), argF32Slice(info, 1)));
+}
+
+fn hostGeneratedChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setGeneratedInstallResult(info, engine.generatedInstallChunk(argF32Slice(info, 0)));
+}
+
+fn hostGeneratedCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setGeneratedInstallResult(info, engine.generatedInstallCommit());
+}
+
+fn hostGeneratedAbort(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setGeneratedInstallResult(info, engine.generatedInstallAbort());
 }
 
 // ── tool + stroke doors ───────────────────────────────────────────────────────
@@ -663,7 +695,7 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path);
-    const buf = alloc.alloc(u8, engine.saveSizeUpperBound()) catch {
+    const buf = alloc.alloc(u8, engine.saveSize()) catch {
         setReturnF64(info, 0);
         return;
     };
@@ -752,6 +784,45 @@ fn hostLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 // ── readback doors (verification / chrome, UI-rate only) ──────────────────────
 
+fn hostHeightAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argWorldPoint(info) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    setReturnF64(info, engine.heightAt(at[0], at[1]));
+}
+
+fn hostRenderHeightMax(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ax = argToF64(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const az = argToF64(info, 1) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const bx = argToF64(info, 2) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const bz = argToF64(info, 3) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const highest = engine.maxRenderedHeightInRect(
+        @floatCast(ax),
+        @floatCast(az),
+        @floatCast(bx),
+        @floatCast(bz),
+    ) orelse {
+        setReturnNull(info);
+        return;
+    };
+    setReturnF64(info, highest);
+}
+
 var sample_scratch: [chunks.SAMPLE_CELLS]f32 = undefined;
 var cell_scratch: [chunks.TILE_CELLS]f32 = undefined;
 
@@ -818,6 +889,10 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_chunk_list", hostChunkList);
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
     v8_runtime.registerHostFn("__map_install_generated", hostInstallGenerated);
+    v8_runtime.registerHostFn("__map_generated_begin", hostGeneratedBegin);
+    v8_runtime.registerHostFn("__map_generated_chunk", hostGeneratedChunk);
+    v8_runtime.registerHostFn("__map_generated_commit", hostGeneratedCommit);
+    v8_runtime.registerHostFn("__map_generated_abort", hostGeneratedAbort);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
     v8_runtime.registerHostFn("__map_set_brush_gizmo", hostSetBrushGizmo);
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
@@ -853,6 +928,8 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);
     v8_runtime.registerHostFn("__map_event_drain", hostEventDrain);
     v8_runtime.registerHostFn("__map_stats", hostStats);
+    v8_runtime.registerHostFn("__map_height_at", hostHeightAt);
+    v8_runtime.registerHostFn("__map_render_height_max", hostRenderHeightMax);
     v8_runtime.registerHostFn("__map_read_height", hostReadHeight);
     v8_runtime.registerHostFn("__map_read_water", hostReadWater);
     v8_runtime.registerHostFn("__map_read_cells", hostReadCells);

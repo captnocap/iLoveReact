@@ -1,0 +1,28 @@
+{
+  "id": "req_3260",
+  "at": "2026-07-20T06:19:32.957Z",
+  "origin": "session:5a3945f7",
+  "text": "so i have the eyes as icospheres so uh is that the same thing",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:19:52.791Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:19:52.800Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Follow-up design Q&A on req_3259: confirmed the icosphere eyes already satisfy the eyes-as-own-surface recommendation — a 3D eyeball part is the classic sibling of the eye-quad (same decoupling: eye texture separate from face paint, blink = frame swap on the part's own painted surface), and it upgrades look-at from a UV slide to true eyeball rotation. Advised renaming the parts to eye_l/eye_r per the role-naming contract so the generator and animation tracks key on them.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T06:19:52.800Z"
+}

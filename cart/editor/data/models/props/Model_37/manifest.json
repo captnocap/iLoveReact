@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "primitive:cube:37",
+  "name": "Model 37",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cube_37",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [
+    {
+      "id": "surface_1",
+      "label": "Surface 1"
+    },
+    {
+      "id": "surface_2",
+      "label": "Surface 2"
+    },
+    {
+      "id": "surface_3",
+      "label": "Surface 3"
+    },
+    {
+      "id": "surface_4",
+      "label": "Surface 4"
+    },
+    {
+      "id": "surface_5",
+      "label": "Surface 5"
+    },
+    {
+      "id": "surface_6",
+      "label": "Surface 6"
+    }
+  ]
+}

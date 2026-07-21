@@ -21,7 +21,7 @@ export const FACADE_LIFT_METERS = 0.012;
 /** Two piece faces this close (meters) count as one continuous surface. */
 const COPLANAR_EPS = 0.15;
 
-export type FacadePaintTool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse';
+export type FacadePaintTool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'pen';
 
 /** The universal Brush recipe expressed in facade-space units. `sizeMeters`
  *  makes a stroke resolution-independent; replay converts it to target texels. */
@@ -289,7 +289,7 @@ function validStroke(value: unknown): value is FacadeStroke {
   const stroke = value as FacadeStroke | null;
   const brush = stroke?.brush;
   if (!stroke || !validInk(stroke.ink) || !brush || !validStampSource(brush.stamp)) return false;
-  if (!['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(stroke.tool)) return false;
+  if (!['brush', 'eraser', 'line', 'rect', 'ellipse', 'pen'].includes(stroke.tool)) return false;
   if (!finite(brush.sizeMeters) || brush.sizeMeters <= 0
     || !finite(brush.hardness) || brush.hardness < 0 || brush.hardness > 1
     || !finite(brush.flow) || brush.flow < 0 || brush.flow > 1

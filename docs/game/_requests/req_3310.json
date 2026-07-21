@@ -1,0 +1,28 @@
+{
+  "id": "req_3310",
+  "at": "2026-07-21T02:39:52.474Z",
+  "origin": "codex:019f7a9c",
+  "text": "inside of the editor when you go to import a model already existing as an outliner, it lets you go through all the dialog to fail. [js.err] [dispatch] error id=6088 type=onClick: Cannot read properties of undefined (reading 'length') TypeError: Cannot read properties of undefined (reading 'length')\n    at meshAppendGroup (<anonymous>:73136:146)\n    at Object.appendPart (<anonymous>:73979:20)\n    at <anonymous>:89051:67\n    at withNativeMeshActionSource (<anonymous>:84534:14)\n    at importModelAsParts (<anonymous>:89051:22)\n    at onPress (<anonymous>:84674:24)\n    at dispatchAliases (<anonymous>:90629:9)\n    at globalThis.__dispatchEvent (<anonymous>:90676:7)\n    at <anonymous>:1:1",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T02:40:19.972Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T02:43:26.679Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Add From Library importing a saved model as Outliner parts. The extractor returned {vertices, faceGroups} while AppFrame passed geo.positions, causing meshAppendGroup to read undefined.length. Aligned the extraction contract to {positions, faceGroups}, updated its tests, added triangle/stride/group-count validation before the host append door, and only close the picker after at least one part imports successfully. All 10 mesh-document tests and the ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T02:43:26.679Z"
+}

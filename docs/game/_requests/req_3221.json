@@ -1,0 +1,30 @@
+{
+  "id": "req_3221",
+  "at": "2026-07-19T03:43:24.595Z",
+  "origin": "codex:019f768a",
+  "text": "[Image #1]phone is like all chopped and skewed but as for the other interface it is a strong start",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T03:43:39.846Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:48:17.791Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the clipped and skewed FlockBook phone without changing the accepted Gigwork wall. The phone StaticSurface is now axis-aligned so its offscreen capture and composite quad share bounds, its responsive footprint is larger, and fixed-height header, feed, message, market, paging, and navigation rows cannot flex-shrink into chopped text. All seven channel regressions, editor type checking, and the complete ReleaseFast editor build pass; the user's visual rerun and 60-second spikewatch remain the final gates.",
+  "shas": [
+    "094fb0e67"
+  ],
+  "resolvedAt": "2026-07-19T03:48:17.791Z"
+}

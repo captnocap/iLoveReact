@@ -15,6 +15,11 @@ declare global {
   function __mesh_preview_file(...args: unknown[]): unknown;
   function __mesh_load_vertices(...args: unknown[]): unknown;
   function __mesh_set_face_groups(...args: unknown[]): unknown;
+  function __mesh_set_face_materials(...args: unknown[]): unknown;
+  function __mesh_texture_slot_assign(...args: unknown[]): unknown;
+  function __mesh_texture_slot_clear(...args: unknown[]): unknown;
+  function __mesh_texture_slot_remove(...args: unknown[]): unknown;
+  function __mesh_texture_slot_select(...args: unknown[]): unknown;
   function __model_orbit_drag(...args: unknown[]): unknown;
   function __model_orbit_zoom(...args: unknown[]): unknown;
   function __model_orbit_pan(...args: unknown[]): unknown;
@@ -41,7 +46,7 @@ declare global {
   function __mesh_topo_create_face(...args: unknown[]): unknown;
   function __mesh_topo_flip_faces(...args: unknown[]): unknown;
   function __mesh_topo_loop_cut(...args: unknown[]): unknown;
-  function __mesh_lc_begin(basic?: number): unknown;
+  function __mesh_lc_begin(...args: unknown[]): unknown;
   function __mesh_lc_preview(...args: unknown[]): unknown;
   function __mesh_lc_end(...args: unknown[]): unknown;
   function __mesh_lc_state(...args: unknown[]): unknown;
@@ -49,6 +54,7 @@ declare global {
   function __mesh_delete_group_range(...args: unknown[]): unknown;
   function __mesh_group_face_count(...args: unknown[]): unknown;
   function __mesh_append_group(...args: unknown[]): unknown;
+  function __mesh_append_path_plane(...args: unknown[]): unknown;
   function __mesh_set_group_hidden(...args: unknown[]): unknown;
   function __mesh_undo(...args: unknown[]): unknown;
   function __mesh_redo(...args: unknown[]): unknown;
@@ -99,6 +105,7 @@ declare global {
   function __model_paint_mode(...args: unknown[]): unknown;
   function __model_paint_stroke_begin(...args: unknown[]): unknown;
   function __model_paint_stamp(...args: unknown[]): unknown;
+  function __model_paint_polygon(...args: unknown[]): unknown;
   function __model_paint_material(...args: unknown[]): unknown;
   function __model_paint_material_clear(...args: unknown[]): unknown;
   function __model_set_paint_detail(...args: unknown[]): unknown;
@@ -120,7 +127,9 @@ declare global {
   function __model_atlas_base(...args: unknown[]): unknown;
   function __model_atlas_apply(...args: unknown[]): unknown;
   function __model_paint_program_read(...args: unknown[]): unknown;
+  function __model_paint_baseline_read(...args: unknown[]): unknown;
   function __model_paint_program_apply(...args: unknown[]): unknown;
+  function __model_paint_program_apply_over_base(...args: unknown[]): unknown;
   function __model_face_count(...args: unknown[]): unknown;
   function __model_set_quality(...args: unknown[]): unknown;
   function __file_sha256(...args: unknown[]): unknown;
@@ -263,8 +272,6 @@ declare global {
   function __fs_write_bytes(...args: unknown[]): unknown;
   function __fs_write_bytes_atomic(...args: unknown[]): unknown;
   function __fs_write_bytes_atomic_if_unchanged(...args: unknown[]): unknown;
-  function __fs_remove_file_durable(...args: unknown[]): unknown;
-  function __fs_finalize_pending_recovery(...args: unknown[]): unknown;
   function __fs_write_base64_atomic(...args: unknown[]): unknown;
   function __fs_scandir(...args: unknown[]): unknown;
   function __fs_deletefile(...args: unknown[]): unknown;
@@ -274,6 +281,8 @@ declare global {
   function __fs_list_json(...args: unknown[]): unknown;
   function __fs_stat_json(...args: unknown[]): unknown;
   function __fs_mkdir(...args: unknown[]): unknown;
+  function __fs_remove_file_durable(...args: unknown[]): unknown;
+  function __fs_finalize_pending_recovery(...args: unknown[]): unknown;
   function __fs_remove(...args: unknown[]): unknown;
   function __fs_media_scan_json(...args: unknown[]): unknown;
   function __fs_media_stats_json(...args: unknown[]): unknown;
@@ -784,6 +793,11 @@ declare global {
   function __map_chunk_count(...args: unknown[]): unknown;
   function __map_chunk_list(...args: unknown[]): unknown;
   function __map_open_neighbors(...args: unknown[]): unknown;
+  function __map_install_generated(...args: unknown[]): unknown;
+  function __map_generated_begin(...args: unknown[]): unknown;
+  function __map_generated_chunk(...args: unknown[]): unknown;
+  function __map_generated_commit(...args: unknown[]): unknown;
+  function __map_generated_abort(...args: unknown[]): unknown;
   function __map_set_tool(...args: unknown[]): unknown;
   function __map_set_brush_gizmo(...args: unknown[]): unknown;
   function __map_set_ground_look(...args: unknown[]): unknown;
@@ -819,6 +833,8 @@ declare global {
   function __map_stroke_end(...args: unknown[]): unknown;
   function __map_event_drain(...args: unknown[]): unknown;
   function __map_stats(...args: unknown[]): unknown;
+  function __map_height_at(...args: unknown[]): unknown;
+  function __map_render_height_max(...args: unknown[]): unknown;
   function __map_read_height(...args: unknown[]): unknown;
   function __map_read_water(...args: unknown[]): unknown;
   function __map_read_cells(...args: unknown[]): unknown;
@@ -880,6 +896,7 @@ declare global {
   function __compiled_world_set_physics(...args: unknown[]): unknown;
   function __compiled_world_clear_physics(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_props(...args: unknown[]): unknown;
+  function __compiled_world_set_live_mesh_props2(...args: unknown[]): unknown;
   function __compiled_world_clear_live_mesh_props(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_ghost(...args: unknown[]): unknown;
   function __compiled_world_clear_live_mesh_ghost(...args: unknown[]): unknown;

@@ -25,7 +25,7 @@ import { Box, Pressable, TextInput } from '@reactjit/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { commandById } from '../data/commands';
-import { pieceSlotRoles } from '../world/pieceSlots';
+import { pieceSlotEntries } from '../world/pieceSlots';
 import { pieceLook, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { Asset } from '../data/types';
 import AssetPreview from '../library/AssetPreview';
@@ -101,7 +101,9 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
   const [targetRole, setTargetRole] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
-  const roles = pieceSlotRoles(piece.pieceId);
+  const roleEntries = pieceSlotEntries(piece.pieceId);
+  const roles = roleEntries.map((role) => role.id);
+  const roleLabel = (id: string | null) => roleEntries.find((role) => role.id === id)?.label ?? id ?? 'all';
   const label = pieceLook(piece.pieceId)?.label ?? piece.pieceId;
   // Spin (SPINPROP req_3128) is an authored-prop verb: only mesh placements render
   // through the live mesh-ref path that animates; catalog boxes would ignore it.
@@ -153,21 +155,21 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
         <>
           {/* FACES — the piece's real slots, each wearing its actual look (empty =
               default). Click to target one; click again to go back to all-faces. */}
-          <SectionHead>{targetRole ? `FACES · ${targetRole}` : 'FACES · all'}</SectionHead>
+          <SectionHead>{targetRole ? `FACES · ${roleLabel(targetRole)}` : 'FACES · all'}</SectionHead>
           <Box style={{ flexDirection: 'row', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, flexWrap: 'wrap' }}>
-            {roles.map((role) => {
-              const ref = piece.slots?.[role];
-              const active = targetRole === role;
+            {roleEntries.map((role) => {
+              const ref = piece.slots?.[role.id];
+              const active = targetRole === role.id;
               const wornAsset = ref && 'assetId' in ref ? materials.find((m) => m.id === ref.assetId) : undefined;
               const bound = ref ? resolveMaterial(ref) : null;
-              const tip = `${role} · now: ${bound ? bound.label : 'default'} · click to skin just this face`;
+              const tip = `${role.label} · now: ${bound ? bound.label : 'default'} · click to skin just this face`;
               return (
-                <Pressable key={role} tooltip={tip} onPress={() => setTargetRole((cur) => (cur === role ? null : role))}>
+                <Pressable key={role.id} tooltip={tip} onPress={() => setTargetRole((cur) => (cur === role.id ? null : role.id))}>
                   <Box style={{ width: TILE_W, gap: 2 }}>
                     <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : '#2a3442', backgroundColor: bound && !wornAsset ? bound.color : EMPTY_SLOT_BG, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
                       {wornAsset ? <AssetPreview asset={wornAsset} live /> : !bound ? <C.HW_KeyText>default</C.HW_KeyText> : null}
                     </Box>
-                    <C.HW_KeyText style={{ color: active ? accentFor('primary') : undefined }}>{role}</C.HW_KeyText>
+                    <C.HW_KeyText style={{ color: active ? accentFor('primary') : undefined }}>{role.label}</C.HW_KeyText>
                   </Box>
                 </Pressable>
               );

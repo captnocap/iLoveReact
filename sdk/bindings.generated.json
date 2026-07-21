@@ -57,6 +57,26 @@
           "zig": "hostMeshSetFaceGroups"
         },
         {
+          "js": "__mesh_set_face_materials",
+          "zig": "hostMeshSetFaceMaterials"
+        },
+        {
+          "js": "__mesh_texture_slot_assign",
+          "zig": "hostMeshTextureSlotAssign"
+        },
+        {
+          "js": "__mesh_texture_slot_clear",
+          "zig": "hostMeshTextureSlotClear"
+        },
+        {
+          "js": "__mesh_texture_slot_remove",
+          "zig": "hostMeshTextureSlotRemove"
+        },
+        {
+          "js": "__mesh_texture_slot_select",
+          "zig": "hostMeshTextureSlotSelect"
+        },
+        {
           "js": "__model_orbit_drag",
           "zig": "hostModelOrbitDrag"
         },
@@ -162,14 +182,7 @@
         },
         {
           "js": "__mesh_lc_begin",
-          "zig": "hostMeshLcBegin",
-          "args": [
-            {
-              "name": "basic",
-              "type": "number",
-              "optional": true
-            }
-          ]
+          "zig": "hostMeshLcBegin"
         },
         {
           "js": "__mesh_lc_preview",
@@ -198,6 +211,10 @@
         {
           "js": "__mesh_append_group",
           "zig": "hostMeshAppendGroup"
+        },
+        {
+          "js": "__mesh_append_path_plane",
+          "zig": "hostMeshAppendPathPlane"
         },
         {
           "js": "__mesh_set_group_hidden",
@@ -400,6 +417,10 @@
           "zig": "hostModelPaintStamp"
         },
         {
+          "js": "__model_paint_polygon",
+          "zig": "hostModelPaintPolygon"
+        },
+        {
           "js": "__model_paint_material",
           "zig": "hostModelPaintMaterial"
         },
@@ -484,8 +505,16 @@
           "zig": "hostModelPaintProgramRead"
         },
         {
+          "js": "__model_paint_baseline_read",
+          "zig": "hostModelPaintBaselineRead"
+        },
+        {
           "js": "__model_paint_program_apply",
           "zig": "hostModelPaintProgramApply"
+        },
+        {
+          "js": "__model_paint_program_apply_over_base",
+          "zig": "hostModelPaintProgramApplyOverBase"
         },
         {
           "js": "__model_face_count",
@@ -1064,14 +1093,6 @@
           "zig": "fsWriteBytesAtomicIfUnchanged"
         },
         {
-          "js": "__fs_remove_file_durable",
-          "zig": "fsRemoveFileDurable"
-        },
-        {
-          "js": "__fs_finalize_pending_recovery",
-          "zig": "fsFinalizePendingRecovery"
-        },
-        {
           "js": "__fs_write_base64_atomic",
           "zig": "fsWriteBase64Atomic"
         },
@@ -1106,6 +1127,14 @@
         {
           "js": "__fs_mkdir",
           "zig": "fsMkdir"
+        },
+        {
+          "js": "__fs_remove_file_durable",
+          "zig": "fsRemoveFileDurable"
+        },
+        {
+          "js": "__fs_finalize_pending_recovery",
+          "zig": "fsFinalizePendingRecovery"
         },
         {
           "js": "__fs_remove",
@@ -3178,6 +3207,26 @@
           "zig": "hostOpenNeighbors"
         },
         {
+          "js": "__map_install_generated",
+          "zig": "hostInstallGenerated"
+        },
+        {
+          "js": "__map_generated_begin",
+          "zig": "hostGeneratedBegin"
+        },
+        {
+          "js": "__map_generated_chunk",
+          "zig": "hostGeneratedChunk"
+        },
+        {
+          "js": "__map_generated_commit",
+          "zig": "hostGeneratedCommit"
+        },
+        {
+          "js": "__map_generated_abort",
+          "zig": "hostGeneratedAbort"
+        },
+        {
           "js": "__map_set_tool",
           "zig": "hostSetTool"
         },
@@ -3316,6 +3365,14 @@
         {
           "js": "__map_stats",
           "zig": "hostStats"
+        },
+        {
+          "js": "__map_height_at",
+          "zig": "hostHeightAt"
+        },
+        {
+          "js": "__map_render_height_max",
+          "zig": "hostRenderHeightMax"
         },
         {
           "js": "__map_read_height",
@@ -3563,6 +3620,10 @@
         {
           "js": "__compiled_world_set_live_mesh_props",
           "zig": "hostSetLiveMeshProps"
+        },
+        {
+          "js": "__compiled_world_set_live_mesh_props2",
+          "zig": "hostSetLiveMeshProps2"
         },
         {
           "js": "__compiled_world_clear_live_mesh_props",

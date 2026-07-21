@@ -1,0 +1,18 @@
+{
+  "id": "req_3306",
+  "at": "2026-07-20T17:48:55.388Z",
+  "origin": "codex:019f7a9c",
+  "text": "k so we have 800M of Anonymous RSS on 977 total not very satisfying that we seem to be completely blind to it but whatever. alright so i made a prop i slotted some faces for textures and then exported it, placed it, and then went to apply the textures. the texutres apply as a single base color not as the texture and then immediately they are gone when the memory is wiped so it seems",
+  "status": "doing",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:49:04.771Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

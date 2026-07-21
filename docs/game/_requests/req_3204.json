@@ -1,0 +1,28 @@
+{
+  "id": "req_3204",
+  "at": "2026-07-18T22:50:13.867Z",
+  "origin": "codex:019f744e",
+  "text": "yep very nice alright so tell me as that generation script stands what are all the things it does, and do your best to explain how it decides what goes where",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T22:50:22.236Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T22:54:45.130Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the current coastal-city generator end to end and documented its deterministic terrain, water, protected-land, district, transport, causeway, zoning, flora, building-site, packing, installation, and persistence rules. Also identified the exact default-seed output, sequential placement priorities, metadata-only fields, and the important things the baseline deliberately does not generate yet.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T22:54:45.129Z"
+}

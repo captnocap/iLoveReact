@@ -1,0 +1,28 @@
+{
+  "id": "req_3264",
+  "at": "2026-07-20T06:42:04.440Z",
+  "origin": "codex:019f768a",
+  "text": "yeah search thru here also there is a memory somewhere in here where i had brought up a <block> based approach so that it could be written in a text editor also and work end to end /home/siah/.claude/projects/-home-siah-creative-reactjit/memory",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:42:10.253Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:43:19.296Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Located and read the exact prior design in memory/project_mission_block_authoring.md, its full originating request req_2742, the original session response, and the related storyline/asset-cook notes. Recovered the intended contract: Markdown files containing declarative <npc>/<mission>/other typed blocks are the canonical human source; prose between blocks remains designer notes; stable <ref> plus @[ref] links survive renames; hand editing, the visual editor, and generation are three writers of the same round-trippable format; compile resolves refs and appends engine data into the closed runtime schema. Identified that this materially simplifies and supersedes the earlier suggestion of a database-first World Knowledge source—the wiki should be a visual projection/editor of the block files, with JSON/RLE/gamefile data derived from them.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T06:43:19.296Z"
+}

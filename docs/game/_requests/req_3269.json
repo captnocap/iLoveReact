@@ -1,0 +1,30 @@
+{
+  "id": "req_3269",
+  "at": "2026-07-20T07:14:43.083Z",
+  "origin": "codex:019f768a",
+  "text": "ok now for the gui where this can all be seen and edited in app, i would still treat it like any type of a wiki, since there is no necessary need to introduce a bunch of complexity yet, from here this will let us after having an entity established, be able to decide how any ingame platform for it needs to be made accordingly",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:14:51.835Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T07:17:31.740Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Simplified the durable World Bible plan into a conventional wiki-first GUI in cart/editor: index and search, readable pages, one editing view, simple facts/assets/relations, stable links and backlinks, plus the existing explicit draft-to-disk workflow. Removed specialized inspectors, graph canvases, schedule dashboards, site previews, feed composers, and gig wizards from the first slice. Established the entity-first rule so websites, accounts, listings, documents, missions, and their purpose-specific editors are added later as linked projections only when gameplay proves the need.",
+  "shas": [
+    "d062438ed"
+  ],
+  "resolvedAt": "2026-07-20T07:17:31.740Z"
+}

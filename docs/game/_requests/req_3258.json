@@ -1,0 +1,30 @@
+{
+  "id": "req_3258",
+  "at": "2026-07-20T06:12:49.133Z",
+  "origin": "codex:019f768a",
+  "text": "Great. Now two things here first is a lot more of planning to help construct the right approach the other is to look at my previous dead internet game to capture the deeper systems for these. so, we need to create a way to be able to author lore and help us lead into mission creation and the internet as a whole. my thoughts are to make like a wiki that we can use for seeding in the data for businesses, that can have gigs, etc. this also helps with npc creation. here is a bit of the list i have \nnpc\nname\nage\ngender\ndob\nsocial media handles\njob\nhome\n\nbusiness\nworkers [npc:job]\nshifts [time:days:hours]\nsocial media handles\nwebsite\nbusiness locations\nlogo\n\ntime\nweeks\ndays\nhours\n\n\nand thenn also, there is this /home/siah/creative/engaige which you will find a strong set of fake internet game mechanics",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:13:04.695Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:29:20.592Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Authored a source-surveyed World Knowledge architecture for the active cart/editor surface after auditing Engaige's live lore, site, NPC, time, social/news, and event data plus the existing V20/V21/V22 mission contracts and REROLL/Tailwhip work. The plan makes the wiki a World Bible lens over typed people, organizations, positions, occupancies, places, accounts, sites, facts, claims, documents, shifts, and gigs; specifies causal media projection, compact game-logic compile products, editor UX, validation/tests, performance gates, an initial vertical slice, and seven delivery phases. Added a candidate oracle record so future game work finds the plan without mistaking it for a user ruling or building in the previous hmsc-int surface.",
+  "shas": [
+    "73c4d42bc"
+  ],
+  "resolvedAt": "2026-07-20T06:29:20.592Z"
+}

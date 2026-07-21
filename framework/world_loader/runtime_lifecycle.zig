@@ -189,8 +189,10 @@ pub fn deinit(self: anytype, io: std.Io) void {
     for (&self.foliage_sets) |*set| {
         for (&set.rows) |*maybe_rows| {
             if (maybe_rows.*) |buf| std.heap.c_allocator.free(buf);
+            maybe_rows.* = null;
         }
         for (&set.segs) |*segs| segs.deinit(std.heap.c_allocator);
+        set.clearMemory();
     }
     if (self.foliage_snap.chunks.len > 0) std.heap.c_allocator.free(self.foliage_snap.chunks);
     {

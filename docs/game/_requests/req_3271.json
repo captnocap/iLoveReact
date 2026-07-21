@@ -1,0 +1,36 @@
+{
+  "id": "req_3271",
+  "at": "2026-07-20T07:42:00.711Z",
+  "origin": "codex:019f7e48",
+  "text": "Better but i would give it different treatment. first of all the blend buttons is horrible ux right now its all fighting to be in one row secondly though the brush fill buttons are up top and not over here and then why split up the paint and brushes into their own, put them together, and ideally what you want to do is not have this overwrite the content browser, because now there is no obvious way to get to it, you want ito to be its own panel where i can reopen the content browser in its place and it wouldnt matter also when painting one thing is that you cant just freely paint across one outliner to another but with the layers living on another tab than the outliner is then problematic. but putting them together is also problematic. so then you need to probably split it across the app, put layers with the paint brush and the paint colors all in the same panel so it can b e active at the same time that the outliners are on the other side",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:43:02.065Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T08:07:20.122Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Unified the left Paint workspace as a peer of Models/Materials; tools and model/facade layers are pinned there, brush plus Ink share one scroll, and entering model paint opens the right Model/Outliner pane."
+    },
+    {
+      "at": "2026-07-20T08:09:10.433Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt painting as a first-class left-side peer panel instead of replacing the content browser. The panel now keeps tools and paint layers visible above a combined brush, color, and shader workspace while the right Model outliner remains usable; Models and Materials can still reopen in the same left slot, both gutters retain collapse behavior, and blend choices use a compact dropdown instead of fighting for one row.",
+  "shas": [
+    "134e440a6"
+  ],
+  "resolvedAt": "2026-07-20T08:09:10.433Z"
+}

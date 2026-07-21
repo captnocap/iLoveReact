@@ -1,0 +1,42 @@
+{
+  "id": "req_3322",
+  "at": "2026-07-21T07:48:05.420Z",
+  "origin": "codex:019f83a4",
+  "text": "a bug: [Image #1] floor pieces are not pushing the camera back at the player when under them (this is the 3rd floor in the screenshot)[Image #2]",
+  "status": "review",
+  "sessionId": "019f83a4-3a28-7472-b237-304fc90066ef",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T07:48:10.381Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T07:50:51.514Z",
+      "actor": "Codex",
+      "kind": "note",
+      "text": "Root cause isolated in the active editor playtest's native WorldLoader: the blank editor gamefile falls back to the live physics collider set, where thin floor rows are correctly non-solid for player stepping, but cameraOcclusionStepColliders filters every non-solid band before the spring-arm sweep. Upper-storey floor slabs therefore render and support walking yet never obstruct the camera."
+    },
+    {
+      "at": "2026-07-21T07:53:40.405Z",
+      "actor": "Codex",
+      "kind": "note",
+      "text": "Verification: the focused camera subset is 10/10 green and the three new spring-arm floor cases are 3/3 green. SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor completed successfully. The whole game-physics suite is 50/51 due to the pre-existing unrelated hollow-ramp ascent test failing at frame 0. Visual and 60s spikewatch confirmation remain for the user's playtest per repository policy."
+    },
+    {
+      "at": "2026-07-21T07:53:40.414Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the editor playtest camera clipping through upper-storey floor pieces. Live floor slabs remain non-solid for correct player platform physics, but finite-height bands now participate in the native WorldLoader spring-arm sweep; unbounded terrain/ground rows remain excluded. Added axis-aligned, rotated, and ground-sentinel Zig regressions, updated the camera contract comments, and rebuilt the ReleaseFast editor successfully.",
+  "shas": [
+    "8376900b6"
+  ],
+  "resolvedAt": "2026-07-21T07:53:40.413Z"
+}

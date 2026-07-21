@@ -1,0 +1,28 @@
+{
+  "id": "req_3319",
+  "at": "2026-07-21T04:11:40.175Z",
+  "origin": "codex:019f8078",
+  "text": "the scale is massive and my scaling ability seems to only be positive scaling not negative can you fix that [Image #1]",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T04:11:43.799Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T04:14:53.715Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked Scale By around usable authoring values: default is ×1.25 with presets ×0.5, ×1.25, ×2, and ×−1. The UI now explains negative scale as mirroring through the selection pivot. Updated the native mesh-edit exact-value path to accept signed factors (while drag scaling remains positive), with unit coverage for negative mirroring and invalid zero/out-of-range values. Verified TS tests, pinned Zig mesh-edit tests, editor bundle, and ReleaseFast native editor build.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T04:14:53.715Z"
+}

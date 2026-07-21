@@ -4,7 +4,8 @@
     {
       "name": "Nude Girl",
       "color": "#c9b48f",
-      "visible": true
+      "visible": true,
+      "outlinerOrder": 0
     }
   ]
 }

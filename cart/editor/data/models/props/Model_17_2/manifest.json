@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "primitive:cylinder:17",
+  "name": "uv_test",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cylinder_17",
+  "semanticKind": "cylinder",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

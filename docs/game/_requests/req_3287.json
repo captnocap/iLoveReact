@@ -1,0 +1,28 @@
+{
+  "id": "req_3287",
+  "at": "2026-07-20T10:00:22.584Z",
+  "origin": "codex:019f7a9c",
+  "text": "sorry what is the styling you used that made it so bad the real problem here is that the layout math in our flex is doing dogshit for what its worth. notice surface has another word cut off, pick wraps and set is begging for breathing room in its own container unless you specifically chose to do those things by default they shouldnt happen ideally thats just stupid [Image #1]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T10:00:39.926Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T10:05:36.406Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the overconstrained one-line role row with a full-width name row and a separate two-button action row. Corrected shared grow-only flex items to shrinkable zero-basis flex, and made compact labels non-wrapping.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T10:05:36.406Z"
+}

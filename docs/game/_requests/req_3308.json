@@ -1,0 +1,28 @@
+{
+  "id": "req_3308",
+  "at": "2026-07-20T18:08:20.952Z",
+  "origin": "codex:019f7a9c",
+  "text": "still broken ake to place)\n[js.warn] [map-seed] ground seeded — 1 chunk(s) live\n[js.warn] [authored] resident catalog: 36 mesh(es) — 18 painted, 10 paint skin(s) -> loader node 2703\n[apptick-split] total=61.5ms | jsTick(+microtasks)=60.4 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.2 dirty(snap=0.1+rebuild=0.7)\n[js.err] The above error occurred in the <WorldViewport> component:\n\n    at WorldViewport (<anonymous>:69919:49)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_WorldEditorSurface:5244:55)\n    at WorldEditorSurface (<anonymous>:70531:24)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_StageViewport:5247:38)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_StagePanel:5247:38)\n    at Stage (<anonymous>:76313:34)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_Workspace:5247:38)\n    at Workspace\n    at RenderProbe (<anonymous>:78885:26)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_Body:5244:55)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_App:5247:38)\n    at AppFrame (<anonymous>:84994:22)\n    at Router (<anonymous>:8055:5)\n    at ThemeProvider (<anonymous>:5050:28)\n    at App\n    at GlobalErrorBoundary (<anonymous>:90087:29)\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, GlobalErrorBoundary.\n[js.err] [react-uncaught] TypeError: Cannot read properties of undefined (reading 'find')\n    at <anonymous>:70142:41\n    at <anonymous>:70158:17\n    at wrappedCreate (<anonymous>:26143:34)\n    at wrappedCreate (<anonymous>:26143:34)\n    at commitHookEffectListMount (<anonymous>:21350:36)\n    at commitPassiveMountOnFiber (<anonymous>:22636:21)\n    at commitPassiveMountEffects_complete (<anonymous>:22609:19)\n    at commitPassiveMountEffects_begin (<anonymous>:22599:17)\n    at commitPassiveMountEffects (<anonymous>:22589:13)\n    at flushPassiveEffectsImpl (<anonymous>:24334:13)\ncomponent-stack:\n    at WorldViewport (<anonymous>:69919:49)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_WorldEditorSurface:5244:55)\n    at WorldEditorSurface (<anonymous>:70531:24)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_StageViewport:5247:38)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_StagePanel:5247:38)\n    at Stage (<anonymous>:76313:34)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_Workspace:5247:38)\n    at Workspace\n    at RenderProbe (<anonymous>:78885:26)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_Body:5244:55)\n    at View\n    at Box (<anonymous>:7277:48)\n    at C (HW_App:5247:38)\n    at AppFrame (<anonymous>:84994:22)\n    at Router (<anonymous>:8055:5)\n    at ThemeProvider (<anonymous>:5050:28)\n    at App\n    at GlobalErrorBoundary (<anonymous>:90087:29)",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T18:08:29.864Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T18:10:36.358Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the actual WorldViewport crash. Generated-stack mapping showed the failing call was prefabsRef.current.find during the armed-piece snap mount effect, not authored hydration. Stage omitted worldPrefabs when constructing WorldEditorSurface. Stage now passes the prefab list, viewport lookup goes through a null-safe worldPrefabById boundary, and a regression test proves an omitted list returns no prefab instead of throwing. Verified the generated bundle has no direct crashing lookup and completed a ReleaseFast editor build.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T18:10:36.358Z"
+}

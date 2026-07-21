@@ -1,0 +1,48 @@
+{
+  "id": "req_3222",
+  "at": "2026-07-19T14:15:36.473Z",
+  "origin": "codex-handoff",
+  "text": "look at the loopcut logic and like REALLY look at it — loop cut in the reactjit editor has been like SEVERAL times tried to be fixed and there is some edge case in every weird way; look at my normal cut also, sometimes it randomly does a loop cut and i cant figure that shit out to save my life.",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-19T14:15:42.433Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T14:21:15.215Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Triage implemented and engine-tested: Basic Cut plane fallback now uses the selected-face mask, chained boundaries drop collinear T-junction vertices before quad checks, and __mesh_lc_preview/__mesh_lc_state expose fallbackReason shown in the live popup. Added adjacent-cut regression; test-mesh-edit and ReleaseFast editor ship pass."
+    },
+    {
+      "at": "2026-07-19T15:21:28.082Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented in fb19a52fa + aacd06bda. Basic Cut is now indexed and selection-local, so it cannot fall through to a part-wide plane/loop cut; adjacent-face-after-cut regression is pinned. Loop Cut now uses stable vertex ids and ordered faces, with old soup reconstruction, de-T-junction, plane fallback, and full-slice coverage machinery deleted. Gates: test-mesh-edit 25/25, TS parity 6/6, mesh import/model paint/journal 31/31, bindings clean, ReleaseFast editor ship passed. Awaiting the required user visual repro + 60s spikewatch."
+    },
+    {
+      "at": "2026-07-19T15:21:28.099Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-19T16:01:56.630Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Live repro found and fixed two indexed-model regressions in f69c1010d: imported resident triangles now retain an explicit stable vertex-id corner map across the first gizmo transform, so rigid icosphere rotation cannot manufacture concavity; loop-cut split faces now store Blockbench's getSortedVertices order directly, eliminating bow-tie quads/holes. Focused host suite 27/27, TS parity 6/6, adjacent host suites 31/31, bindings clean, ReleaseFast editor ship passed."
+    }
+  ],
+  "resolution": "Basic Cut no longer expands beyond its selected authored faces, including after an adjacent prior cut. Loop Cut editing now runs on stable indexed vertices and ordered faces; rendering soup is derived output, and the positional ring reconstruction/fallback stack was removed. Exact reference partial-ring semantics replace infinite-plane recovery. Automated engine, TypeScript, binding, and full ReleaseFast editor build gates pass; live visual and frame-time confirmation remain the review gate.",
+  "shas": [
+    "fb19a52fa",
+    "aacd06bda"
+  ],
+  "resolvedAt": "2026-07-19T15:21:28.099Z"
+}

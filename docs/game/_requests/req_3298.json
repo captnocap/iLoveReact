@@ -1,0 +1,28 @@
+{
+  "id": "req_3298",
+  "at": "2026-07-20T17:12:00.803Z",
+  "origin": "codex:019f8078",
+  "text": "uh yeah literally none of them are highlighting lol nothing at all lmao",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:12:04.140Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:12:48.180Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the actual hover path: Pressable now marks visible hover treatments as hoverable, which enables the native renderer's hover paint. The editor supplies a default treatment for ordinary buttons; controls with custom hover treatments retain them, while empty hover styles keep click-away scrims inert. User visually confirmed it is working. ReleaseFast rebuild was started but interrupted after confirmation.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:12:48.180Z"
+}

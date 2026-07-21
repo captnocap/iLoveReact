@@ -1,11 +1,11 @@
-// cart/editor/data/meshDoc.test.ts — RJMD v1/v2 compatibility at the pure wire boundary.
+// cart/editor/data/meshDoc.test.ts — RJMD v1/v2/v3 compatibility at the pure wire boundary.
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/data/meshDoc.test.ts --bundle \
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { inferMeshDocPartRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { inferMeshDocPartRanges, meshDocHiddenRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 import { writeModelArtifacts } from './modelPackageStore';
 
 let passed = 0, failed = 0;
@@ -16,9 +16,9 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-function docBlob(version: 1 | 2, glassFirstVertex = 3): Uint8Array {
-  const headerBytes = version === 2 ? 28 : 24;
-  const bytes = new Uint8Array(headerBytes + 3 * 8 * 4 + 4 + 8);
+function docBlob(version: 1 | 2 | 3, glassFirstVertex = 3, material = 0xffffffff): Uint8Array {
+  const headerBytes = version === 3 ? 32 : version === 2 ? 28 : 24;
+  const bytes = new Uint8Array(headerBytes + 3 * 8 * 4 + 4 + (version === 3 ? 4 : 0) + 8);
   const dv = new DataView(bytes.buffer);
   dv.setUint32(0, 0x444d4a52, true);
   dv.setUint32(4, version, true);
@@ -26,10 +26,12 @@ function docBlob(version: 1 | 2, glassFirstVertex = 3): Uint8Array {
   dv.setUint32(12, 1, true); // faces
   dv.setUint32(16, 1, true); // groups present
   dv.setUint32(20, 1, true); // one part range
-  if (version === 2) dv.setUint32(24, glassFirstVertex, true);
+  if (version >= 2) dv.setUint32(24, glassFirstVertex, true);
+  if (version === 3) dv.setUint32(28, 1, true);
   let at = headerBytes;
   for (let i = 0; i < 24; i += 1) { dv.setFloat32(at, i / 10, true); at += 4; }
   dv.setUint32(at, 7, true); at += 4;
+  if (version === 3) { dv.setUint32(at, material, true); at += 4; }
   dv.setUint32(at, 7, true); dv.setUint32(at + 4, 8, true);
   return bytes;
 }
@@ -51,14 +53,24 @@ test('RJMD v2 rejects a non-triangle-aligned glass boundary', () => {
   assert(parseMeshDocBytes(docBlob(2, 2)) === null, 'misaligned glass boundary passed');
 });
 
+test('RJMD v3 preserves stable per-face texture-role indices', () => {
+  const doc = parseMeshDocBytes(docBlob(3, 3, 2));
+  assert(!!doc, 'v3 document was rejected');
+  assert(doc!.faceMaterials?.[0] === 2, 'v3 texture-role row shifted');
+  assert(doc!.faceGroups?.[0] === 7 && doc!.ranges[0]?.lo === 7, 'v3 groups/ranges shifted around materials');
+});
+
 test('parts metadata preserves organizational groups while ranking by host range', () => {
   const rows = partsMetaFromRows([
-    { name: 'divider', color: '#bbb', visible: true, lo: 8, groupId: 'rails', groupName: 'Rails', groupPath: [{ id: 'bridge', name: 'Bridge' }, { id: 'rails', name: 'Rails' }], outlinerOrder: 0 },
+    { name: 'divider', color: '#bbb', visible: false, lo: 8, groupId: 'rails', groupName: 'Rails', groupPath: [{ id: 'bridge', name: 'Bridge' }, { id: 'rails', name: 'Rails' }], outlinerOrder: 0 },
     { name: 'deck', color: '#aaa', visible: true, lo: 2, groupId: 'bridge', groupName: 'Bridge', groupPath: [{ id: 'bridge', name: 'Bridge' }], outlinerOrder: 1 },
   ]);
   assert(rows[0]?.name === 'deck' && rows[1]?.name === 'divider', 'host-range ranking changed');
   assert(rows[1]?.groupPath?.map((group) => group.id).join('/') === 'bridge/rails', 'nested group metadata was stripped from parts.json rows');
   assert(rows[0]?.outlinerOrder === 1 && rows[1]?.outlinerOrder === 0, 'display order was rewritten to host range rank');
+  assert(rows[1]?.visible === false, 'hidden visibility was rewritten during rank ordering');
+  const hidden = meshDocHiddenRanges([{ lo: 2, hi: 8 }, { lo: 8, hi: 12 }], rows);
+  assert(JSON.stringify(hidden) === JSON.stringify([{ lo: 8, hi: 12 }]), `cold hydration hid the wrong range: ${JSON.stringify(hidden)}`);
 });
 
 test('a degraded host cannot overwrite a multi-part mesh document', () => {
@@ -108,8 +120,8 @@ test('package part extraction keeps only its range and normalizes face groups', 
     faceGroups: new Uint32Array([2, 7, 8, 12]),
     ranges: [{ lo: 2, hi: 3 }, { lo: 7, hi: 10 }, { lo: 12, hi: 13 }],
   }, 1);
-  assert(part.vertices.length === 48, `expected two triangles, got ${part.vertices.length / 24}`);
-  assert(part.vertices[0] === 24 && part.vertices[24] === 48, 'wrong source triangles copied');
+  assert(part.positions.length === 48, `expected two triangles, got ${part.positions.length / 24}`);
+  assert(part.positions[0] === 24 && part.positions[24] === 48, 'wrong source triangles copied');
   assert(part.faceGroups[0] === 0 && part.faceGroups[1] === 1, 'source group ids were not normalized');
 });
 

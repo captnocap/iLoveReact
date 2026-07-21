@@ -1,0 +1,30 @@
+{
+  "id": "req_3263",
+  "at": "2026-07-20T06:40:11.230Z",
+  "origin": "session:5a3945f7",
+  "text": "yeah so for the contracts for naming shit we will need to do better and have some formal lazy approach that asks me to just select the outliner that needs to take a name and rename them for me this helps both just speed that up but also with remembering every part necessary for such",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:40:53.177Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:49:34.174Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the guided role-naming pass (3836fe6af). New wand button in the OUTLINER header opens a contract picker (head / body / car); the role lists are derived live from runtime/skeleton's bodyRigBones()/carRigBones() — the exact part-name→bone contract the character export already binds against, so nothing is invented and nothing can drift. A session shows an ask strip ('click the part that is eye_left · 3/8'); clicking an outliner row assigns the role as that part's name via the normal rename command (undo/journal/save all behave), skip passes roles the model lacks, and roles already claimed by matching part names are satisfied before the first ask (normalizeBoneName handles Eye.L / eye_l spellings). Head contract is the head-subtree only, so a bust never gets asked for toes. Sessions pin to their model and all handlers read through refs per the Pressable stale-closure contract. Pure plan logic in cart/editor/data/roleNamer.ts with a passing v8cli test suite (4/4).",
+  "shas": [
+    "3836fe6af"
+  ],
+  "resolvedAt": "2026-07-20T06:49:34.174Z"
+}

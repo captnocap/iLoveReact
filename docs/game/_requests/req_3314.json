@@ -1,0 +1,28 @@
+{
+  "id": "req_3314",
+  "at": "2026-07-21T03:17:08.124Z",
+  "origin": "codex:019f7a9c",
+  "text": "here is yet another bug. have an outliner -> select faces of it -> detach -> on the detachment, select 2 edges -> create face between two edges -> detached outliner exists, has no geometry, it is now all owned again by the outliner that it detached from",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T03:17:18.187Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T03:24:49.175Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Create Face and edge extrusion now carry the selected welded edges' explicit outliner-part owner instead of rescanning coincident seam triangles and guessing from the first match. The pre-operation face-to-part table is carried through regrouping, cross-part edge selections are rejected, and a postcondition verifies every old and appended face still resolves to its intended owner; failure restores the pre-op journal snapshot rather than committing corruption. Added a coincident detached-seam Zig regression. Native mesh-edit tests and the full ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T03:24:49.175Z"
+}

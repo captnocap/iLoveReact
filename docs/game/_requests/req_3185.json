@@ -1,0 +1,28 @@
+{
+  "id": "req_3185",
+  "at": "2026-07-18T08:46:49.287Z",
+  "origin": "codex:019f744e",
+  "text": "man thats fucking annoying as shit man what purpose does a spec document serve if no one is going to follow it",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:47:00.584Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:02:23.638Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed investigation of why the migration specification was not followed: implementation contradicted the root-plumbing ruling in the first migration commit, while later API notes normalized the ambient-global workaround; enforcement gates did not test architecture or runtime behavior.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:02:23.638Z"
+}

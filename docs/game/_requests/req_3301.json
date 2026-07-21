@@ -1,0 +1,17 @@
+{
+  "id": "req_3301",
+  "at": "2026-07-20T17:18:10.507Z",
+  "origin": "one-off",
+  "text": "hey before you get going lets get on the same page about a few things so u can take them all in one sweep for me",
+  "status": "new",
+  "sessionId": "019f8088-6669-7a73-aaa5-bb10bf2e2d13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:18:16.786Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

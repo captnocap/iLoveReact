@@ -1,0 +1,28 @@
+{
+  "id": "req_3210",
+  "at": "2026-07-19T01:58:57.755Z",
+  "origin": "codex:019f744e",
+  "text": "personally i dont think it has anything to do with flora or any of that. its got to be the chunk system entirely because ive painted 150M tris and it was under 300MB  this is doing 1.8m and eats a dick load of memory",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T01:59:21.585Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T02:22:05.960Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Measured the live process and gave the chunk system its own page-rounded counter: 625 canonical chunks are exactly 399,360,000 bytes (380.86 MiB). Kept foliage independent so the panel proves rather than assumes which owner dominates; targeted Zig tests and ReleaseFast editor shipping passed, with no commit created.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T02:22:05.960Z"
+}

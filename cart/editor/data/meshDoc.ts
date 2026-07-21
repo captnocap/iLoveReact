@@ -6,8 +6,9 @@
 // doc switch rebuilt the seed (edits gone from view) and a restart re-armed the
 // primitive generator (cube, no outliner). The meshdoc is the durable, READABLE form:
 //
-//   mesh/doc.blob    RJMD v2 — verts + authored face groups + per-part group ranges
-//                    + the trailing glass vertex boundary (v1 remains readable),
+//   mesh/doc.blob    RJMD v3 — verts + authored face groups + stable per-face texture
+//                    role indices + per-part group ranges + trailing glass boundary
+//                    (v1/v2 remain readable),
 //                    written by the host door __model_meshdoc_write (the format's twin
 //                    lives in framework/v8_bindings_core.zig hostModelMeshdocWrite).
 //   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind/group), matching
@@ -30,6 +31,8 @@ export type PackageMeshDoc = {
   vertices: Float32Array;
   /** one authored-group id per triangle, or null (plain soup — identity granularity) */
   faceGroups: Uint32Array | null;
+  /** one texture-slot index per triangle; 0xffffffff keeps the painted atlas */
+  faceMaterials?: Uint32Array | null;
   /** per-part [lo,hi) authored-group ranges, ascending lo; always ≥1 entry */
   ranges: { lo: number; hi: number }[];
   /** Number physically stored in RJMD. Zero means `ranges` is only the decoder's
@@ -227,12 +230,14 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const head = new Uint32Array(buf, 0, 6);
   const [magic, version, vertCount, faceCount, hasGroups, rangeCount] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, head[5]!];
-  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2) || vertCount === 0) return null;
-  const headerBytes = version >= 2 ? 28 : 24;
+  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3) || vertCount === 0) return null;
+  const headerBytes = version >= 3 ? 32 : version >= 2 ? 28 : 24;
   if (bytes.length < headerBytes) return null;
   const glassFirstVertex = version >= 2 ? new Uint32Array(buf, 24, 1)[0]! : null;
+  const hasMaterials = version >= 3 ? new Uint32Array(buf, 28, 1)[0]! : 0;
+  if (hasMaterials !== 0 && hasMaterials !== 1) return null;
   if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) return null;
-  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + rangeCount * 8;
+  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + rangeCount * 8;
   if (bytes.length < need) return null;
   let at = headerBytes;
   const vertices = new Float32Array(buf, at, vertCount * 8);
@@ -242,13 +247,18 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
     faceGroups = new Uint32Array(buf, at, faceCount);
     at += faceCount * 4;
   }
+  let faceMaterials: Uint32Array | null = null;
+  if (hasMaterials) {
+    faceMaterials = new Uint32Array(buf, at, faceCount);
+    at += faceCount * 4;
+  }
   const ranges: { lo: number; hi: number }[] = [];
   if (rangeCount > 0) {
     const pairs = new Uint32Array(buf, at, rangeCount * 2);
     for (let i = 0; i < rangeCount; i += 1) ranges.push({ lo: pairs[i * 2]!, hi: pairs[i * 2 + 1]! });
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
-  return { vertices, faceGroups, ranges, glassFirstVertex, storedRangeCount: rangeCount };
+  return { vertices, faceGroups, faceMaterials, ranges, glassFirstVertex, storedRangeCount: rangeCount };
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering
@@ -267,7 +277,7 @@ function parseLegacyBlob(dir: string): PackageMeshDoc | null {
   const faceCount = Math.floor(vertCount / 3);
   const faceGroups = new Uint32Array(faceCount);
   for (let i = 0; i < faceCount; i += 1) faceGroups[i] = i;
-  return { vertices, faceGroups, ranges: [{ lo: 0, hi: faceCount }] };
+  return { vertices, faceGroups, faceMaterials: null, ranges: [{ lo: 0, hi: faceCount }] };
 }
 
 // The [lo,hi) span end when no ranges were stored: past the highest group id, or the
@@ -361,6 +371,15 @@ export function partsMetaFromRows(rows: readonly { name: string; color: string; 
     }));
 }
 
+/** Pair rank-ordered saved visibility with the host's rank-ordered range table.
+ * The caller loads the complete geometry first, then applies only these hide ops. */
+export function meshDocHiddenRanges(
+  ranges: readonly { lo: number; hi: number }[],
+  rankedRows: readonly { visible: boolean }[],
+): { lo: number; hi: number }[] {
+  return ranges.filter((_, rank) => rankedRows[rank]?.visible === false);
+}
+
 /** Per-range bounds centers, rank-ordered to match `doc.ranges` — the MEASURED
  *  part centers the character rig compiler stamps rest transforms from
  *  (req_2777: measured at export, never a stored table). A range with no
@@ -396,9 +415,9 @@ export function meshDocRangeCenters(doc: PackageMeshDoc): ([number, number, numb
 export function meshDocRangeGeometry(
   doc: PackageMeshDoc,
   rangeIndex: number,
-): { vertices: Float32Array; faceGroups: Uint32Array } {
+): { positions: Float32Array; faceGroups: Uint32Array } {
   const range = doc.ranges[rangeIndex];
-  if (!range) return { vertices: new Float32Array(0), faceGroups: new Uint32Array(0) };
+  if (!range) return { positions: new Float32Array(0), faceGroups: new Uint32Array(0) };
   const vertices: number[] = [];
   const faceGroups: number[] = [];
   const normalized = new Map<number, number>();
@@ -415,5 +434,5 @@ export function meshDocRangeGeometry(
     for (let i = 0; i < 24; i += 1) vertices.push(doc.vertices[start + i]!);
     faceGroups.push(targetGroup);
   }
-  return { vertices: new Float32Array(vertices), faceGroups: new Uint32Array(faceGroups) };
+  return { positions: new Float32Array(vertices), faceGroups: new Uint32Array(faceGroups) };
 }

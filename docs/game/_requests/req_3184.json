@@ -3,7 +3,7 @@
   "at": "2026-07-18T08:42:17.166Z",
   "origin": "codex:019f744e",
   "text": "great use this to have some agents seek out all of them for us, and were going to compile an enshitification list from it. all the code updates come from the branch that merged on git so they can scope searching specific to there",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,16 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:02:23.630Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Completed branch-scoped Zig 0.16 migration audit: exact commit range, host_io/compatibility census, semantic regressions, gate analysis, and native std.Io remediation shape documented in handoff.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:02:23.630Z"
 }

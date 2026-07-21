@@ -1,0 +1,28 @@
+{
+  "id": "req_3224",
+  "at": "2026-07-19T15:37:49.695Z",
+  "origin": "session:5a3945f7",
+  "text": "hey if i have a mesh like this here [Image #1] and then i save it such as heroin_bob_head can i then make more edits to this, and save as something else and it will keep both or no?",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T15:38:01.919Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T15:38:42.878Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question, not a code change: answered how model save identity works. Save is keyed by the model's internal id (modelPackageStore.claimPackageDir resolves the existing home dir first), so renaming a saved model and saving again writes the SAME package dir — it renames, it does not fork. To keep both, the fork move is the Duplicate action (AppFrame duplicateModel → copyModelPackage), which copies the whole package directory on disk with its own manifest/name per req_2620/req_2168; edit the copy afterward and both survive.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T15:38:42.878Z"
+}

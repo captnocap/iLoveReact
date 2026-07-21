@@ -236,6 +236,7 @@ pub fn reset() void {
     // that happened to be open before it. The caller must explicitly bind the
     // new document after seeding/loading it.
     g_autosave_len = 0;
+    clearGeneratedInstallSession();
     clearMapHistory();
     chunks.clearAll();
     transport.clearAll();
@@ -1001,6 +1002,16 @@ pub fn groundHit(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist:
 pub const FLOOR_RES: usize = @as(usize, @intCast(chunks.CHUNK_TILES)) + 1; // 121
 pub const FLOOR_CELLS: usize = FLOOR_RES * FLOOR_RES;
 
+/// A UI rectangle query must stay bounded even when called through an untrusted
+/// host argument list. The largest authored drag currently contains 400 3 m
+/// modules (roughly four thousand one-metre floor vertices); this leaves ample
+/// room for future wider pieces without allowing one call to walk a whole map.
+pub const MAX_RENDER_HEIGHT_QUERY_SAMPLES: usize = 65_536;
+const RENDER_HEIGHT_QUERY_ADDRESS_MARGIN_CHUNKS: i32 = 2;
+pub const MAX_RENDER_HEIGHT_QUERY_ABS_COORDINATE_M: f32 =
+    (@as(f32, @floatFromInt(@max(chunks.MAX_CHUNK_COL, chunks.MAX_CHUNK_ROW))) +
+        @as(f32, @floatFromInt(RENDER_HEIGHT_QUERY_ADDRESS_MARGIN_CHUNKS))) * chunks.CHUNK_METERS;
+
 /// Source sample selected for one 121-grid floor vertex. Terrain owns this
 /// decision: every dependent field must use the same index or independently
 /// downsampled water depth can be added to a neighbouring dry/high bed.
@@ -1030,6 +1041,119 @@ fn floorSourceIndex(src: *const [chunks.SAMPLE_CELLS]f32, i: usize, j: usize) us
         }
     }
     return best_idx;
+}
+
+fn renderedFloorVertex(chunk: *const chunks.Chunk, i: usize, j: usize) f32 {
+    return chunk.height[floorSourceIndex(&chunk.height, i, j)];
+}
+
+/// Sample one PARTICULAR chunk's closed 121x121 floor mirror. Neighbouring
+/// chunks both own their shared border; callers that need a conservative
+/// footprint maximum must inspect both owners rather than choosing one side.
+fn renderedHeightInChunk(chunk: *const chunks.Chunk, x: f32, z: f32) f32 {
+    const max_index: f32 = @floatFromInt(FLOOR_RES - 1);
+    const gx = std.math.clamp(x - chunk.minX(), 0, max_index);
+    const gz = std.math.clamp(z - chunk.minZ(), 0, max_index);
+    const x0: usize = @floor(gx);
+    const z0: usize = @floor(gz);
+    const x1 = @min(x0 + 1, FLOOR_RES - 1);
+    const z1 = @min(z0 + 1, FLOOR_RES - 1);
+    const tx = gx - @floor(gx);
+    const tz = gz - @floor(gz);
+    const h00 = renderedFloorVertex(chunk, x0, z0);
+    if (tx == 0 and tz == 0) return h00;
+    const h10 = renderedFloorVertex(chunk, x1, z0);
+    const h01 = renderedFloorVertex(chunk, x0, z1);
+    const h11 = renderedFloorVertex(chunk, x1, z1);
+    const top = h00 + (h10 - h00) * tx;
+    const bottom = h01 + (h11 - h01) * tx;
+    return top + (bottom - top) * tz;
+}
+
+/// Height of the terrain surface the loader actually draws and collides with.
+/// Unlike heightAt(), this samples the 121x121 ABS-MAX floor mirror, so a build
+/// placement query cannot miss a ridge that survives the render downsample.
+pub fn renderedHeightAt(x: f32, z: f32) f32 {
+    if (!std.math.isFinite(x) or !std.math.isFinite(z)) return 0;
+    const cx = chunks.chunkOfGlobalTile(chunks.globalTile(x));
+    const cz = chunks.chunkOfGlobalTile(chunks.globalTile(z));
+    const chunk = chunks.chunkAt(cx, cz) orelse return 0;
+    return renderedHeightInChunk(chunk, x, z);
+}
+
+/// Highest visible/collidable terrain point beneath a world-space rectangle.
+/// The rendered floor is bilinear between one-metre vertices, so its extrema
+/// over an axis-aligned rectangle occur at the rectangle edges or an enclosed
+/// integer vertex. Sampling that clipped lattice is exact, not an estimate.
+pub fn maxRenderedHeightInRect(ax: f32, az: f32, bx: f32, bz: f32) ?f32 {
+    if (!std.math.isFinite(ax) or !std.math.isFinite(az) or
+        !std.math.isFinite(bx) or !std.math.isFinite(bz)) return null;
+    if (@abs(ax) > MAX_RENDER_HEIGHT_QUERY_ABS_COORDINATE_M or
+        @abs(az) > MAX_RENDER_HEIGHT_QUERY_ABS_COORDINATE_M or
+        @abs(bx) > MAX_RENDER_HEIGHT_QUERY_ABS_COORDINATE_M or
+        @abs(bz) > MAX_RENDER_HEIGHT_QUERY_ABS_COORDINATE_M) return null;
+    const min_x = @min(ax, bx);
+    const max_x = @max(ax, bx);
+    const min_z = @min(az, bz);
+    const max_z = @max(az, bz);
+    const half_chunk = chunks.CHUNK_METERS / 2;
+    // A chunk owns the CLOSED interval [center-half, center+half]. Using ceil
+    // for the first owner and floor for the last deliberately includes BOTH
+    // chunks at an exact shared boundary such as x=60.
+    const address_first_cx: i32 = @ceil((min_x - half_chunk) / chunks.CHUNK_METERS);
+    const address_last_cx: i32 = @floor((max_x + half_chunk) / chunks.CHUNK_METERS);
+    const address_first_cz: i32 = @ceil((min_z - half_chunk) / chunks.CHUNK_METERS);
+    const address_last_cz: i32 = @floor((max_z + half_chunk) / chunks.CHUNK_METERS);
+    if (address_last_cx < 0 or address_last_cz < 0 or
+        address_first_cx > chunks.MAX_CHUNK_COL or address_first_cz > chunks.MAX_CHUNK_ROW) return 0;
+    const first_cx = @max(@as(i32, 0), address_first_cx);
+    const last_cx = @min(chunks.MAX_CHUNK_COL, address_last_cx);
+    const first_cz = @max(@as(i32, 0), address_first_cz);
+    const last_cz = @min(chunks.MAX_CHUNK_ROW, address_last_cz);
+
+    var sample_count: usize = 0;
+    var highest = -std.math.inf(f32);
+    var cz = first_cz;
+    while (cz <= last_cz) : (cz += 1) {
+        const chunk_min_z = @as(f32, @floatFromInt(cz)) * chunks.CHUNK_METERS - half_chunk;
+        const chunk_max_z = chunk_min_z + chunks.CHUNK_METERS;
+        const clipped_min_z = @max(min_z, chunk_min_z);
+        const clipped_max_z = @min(max_z, chunk_max_z);
+        const first_z: i32 = @floor(clipped_min_z);
+        const last_z: i32 = @ceil(clipped_max_z);
+        const rows: usize = @intCast(@as(i64, last_z) - first_z + 1);
+
+        var cx = first_cx;
+        while (cx <= last_cx) : (cx += 1) {
+            const chunk_min_x = @as(f32, @floatFromInt(cx)) * chunks.CHUNK_METERS - half_chunk;
+            const chunk_max_x = chunk_min_x + chunks.CHUNK_METERS;
+            const clipped_min_x = @max(min_x, chunk_min_x);
+            const clipped_max_x = @min(max_x, chunk_max_x);
+            const first_x: i32 = @floor(clipped_min_x);
+            const last_x: i32 = @ceil(clipped_max_x);
+            const columns: usize = @intCast(@as(i64, last_x) - first_x + 1);
+            const cell_count = columns * rows;
+            if (cell_count > MAX_RENDER_HEIGHT_QUERY_SAMPLES - sample_count) return null;
+            sample_count += cell_count;
+
+            const chunk = chunks.chunkAt(cx, cz) orelse {
+                // renderedHeightAt's sparse-map contract is a zero plane for a
+                // missing chunk. Preserve it without walking every zero sample.
+                highest = @max(highest, 0);
+                continue;
+            };
+            var iz = first_z;
+            while (iz <= last_z) : (iz += 1) {
+                const z = std.math.clamp(@as(f32, @floatFromInt(iz)), clipped_min_z, clipped_max_z);
+                var ix = first_x;
+                while (ix <= last_x) : (ix += 1) {
+                    const x = std.math.clamp(@as(f32, @floatFromInt(ix)), clipped_min_x, clipped_max_x);
+                    highest = @max(highest, renderedHeightInChunk(chunk, x, z));
+                }
+            }
+        }
+    }
+    return if (highest == -std.math.inf(f32)) 0 else highest;
 }
 
 /// Downsample a chunk's 241×241 sample grid into a 121×121 mirror, taking the
@@ -1327,10 +1451,14 @@ pub const MapTuning = struct {
 };
 
 pub const MAP_TUNING = MapTuning{
-    .max_road_plan_cells = 262_144,
+    .max_road_plan_cells = 1_048_576,
 };
 
 var g_plan_cells: [MAP_TUNING.max_road_plan_cells]roads.PlanCell = undefined;
+/// High-water prefix written in the fixed road-plan BSS. Clearing a plan does
+/// not make its dirty anonymous pages leave RSS, so current count would
+/// under-report the resident owner after a larger city was planned once.
+var g_plan_cells_resident_high_water: usize = 0;
 /// cell → the (tile, material) pair beneath the road stamp.
 var g_road_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
 /// cell → render-only lane paint flags, re-derived on every global restamp.
@@ -1339,6 +1467,20 @@ var g_road_strokes_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
 /// LOUD truncation flag from the last restamp (surface it in chrome, never drop silently).
 pub var road_plan_truncated: bool = false;
 pub var road_ribbon_truncated: bool = false;
+
+const GeneratedInstallSession = struct {
+    active: bool = false,
+    expected: [chunks.SLOT_COUNT]bool = @splat(false),
+    seen: [chunks.SLOT_COUNT]bool = @splat(false),
+    received: usize = 0,
+    stats: generated.Stats = .{},
+};
+
+var g_generated_install: GeneratedInstallSession = .{};
+
+fn clearGeneratedInstallSession() void {
+    g_generated_install = .{};
+}
 
 fn roadCellKey(gx: i32, gz: i32) u64 {
     return (@as(u64, @as(u32, @bitCast(gx))) << 32) | @as(u64, @as(u32, @bitCast(gz)));
@@ -1374,6 +1516,7 @@ pub fn roadsRestamp() void {
     // 2. replan every stroke
     const count = roads.collectStrokes(g_road_strokes_buf[0..]);
     const plan = roads.planRoads(g_road_strokes_buf[0..count], g_plan_cells[0..]);
+    g_plan_cells_resident_high_water = @max(g_plan_cells_resident_high_water, plan.count);
     road_plan_truncated = plan.truncated;
     road_ribbon_truncated = false;
 
@@ -1393,6 +1536,39 @@ pub fn roadsRestamp() void {
             };
         }
     }
+}
+
+fn hashMapPageMappedBytes(comptime K: type, comptime V: type, map: anytype) u64 {
+    const cap: usize = map.capacity();
+    if (cap == 0) return 0;
+
+    // std.HashMapUnmanaged owns one allocation laid out as Header, one byte of
+    // metadata per slot, keys, then values (std/hash_map.zig allocate()). Keep
+    // this mirror local and pinned by tests so telemetry reports the allocator
+    // request/capacity, not count * entry-size guesswork.
+    const Header = struct {
+        values: [*]V,
+        keys: [*]K,
+        capacity: u32,
+    };
+    const meta_end = @sizeOf(Header) + cap;
+    const keys_start = std.mem.alignForward(usize, meta_end, @alignOf(K));
+    const keys_end = keys_start + cap * @sizeOf(K);
+    const values_start = std.mem.alignForward(usize, keys_end, @alignOf(V));
+    const values_end = values_start + cap * @sizeOf(V);
+    const max_align = @max(@alignOf(Header), @alignOf(K), @alignOf(V));
+    return pageMappedBytes(std.mem.alignForward(usize, values_end, max_align));
+}
+
+/// Resident road-raster ownership: the high-water written prefix of the fixed
+/// plan, exact page-allocator mappings retained by the undercoat and marking
+/// hash tables, and the small fixed stroke-view scratch. Hash maps deliberately
+/// clearRetainingCapacity, so their capacity remains part of RSS after reset.
+pub fn roadAllocatedBytes() u64 {
+    return pageMappedBytes(g_plan_cells_resident_high_water * @sizeOf(roads.PlanCell)) +
+        hashMapPageMappedBytes(u64, [2]i16, g_road_under) +
+        hashMapPageMappedBytes(u64, u8, g_road_markings) +
+        @sizeOf(@TypeOf(g_road_strokes_buf));
 }
 
 /// Atomically replace the native map owners from the generated-map wire.
@@ -1417,6 +1593,86 @@ pub fn installGeneratedMap(chunk_rows: []const f32, path_rows: []const f32) gene
     clearMapHistory();
     bumpMapRevision();
     return installed;
+}
+
+/// Begin a bounded generated-map replacement. The complete sparse coordinate
+/// manifest and complete semantic path wire are validated before reset, then
+/// paths are copied immediately so no borrowed V8 memory survives this call.
+/// Chunks arrive separately through generatedInstallChunk.
+pub fn generatedInstallBegin(manifest_rows: []const f32, path_rows: []const f32) generated.Result {
+    if (g_generated_install.active) {
+        return generated.failed(.stream_active, g_generated_install.stats);
+    }
+    const checked = generated.validateManifest(manifest_rows, path_rows);
+    if (!checked.ok) return checked;
+
+    reset();
+    const paths_installed = generated.installValidatedPaths(path_rows, checked.stats);
+    if (!paths_installed.ok) {
+        reset();
+        return paths_installed;
+    }
+
+    g_generated_install.active = true;
+    g_generated_install.stats = checked.stats;
+    var chunk_index: usize = 0;
+    while (chunk_index < checked.stats.chunks) : (chunk_index += 1) {
+        const coord = generated.manifestCoord(manifest_rows, chunk_index);
+        g_generated_install.expected[coord.slot] = true;
+    }
+    return checked;
+}
+
+/// Validate and copy exactly one headerless CHUNK_STRIDE record. A coordinate
+/// can be accepted only once and only when it was declared by begin.
+pub fn generatedInstallChunk(chunk_rows: []const f32) generated.Result {
+    if (!g_generated_install.active) return generated.failed(.stream_inactive, .{});
+    const stats = g_generated_install.stats;
+    const checked = generated.validateChunkRecord(chunk_rows, stats);
+    if (!checked.ok) return checked;
+
+    const coord = generated.chunkRecordCoord(chunk_rows);
+    if (!g_generated_install.expected[coord.slot]) return generated.failed(.chunk_unexpected, stats);
+    if (g_generated_install.seen[coord.slot]) return generated.failed(.chunk_duplicate, stats);
+
+    const installed = generated.installValidatedChunkRecord(chunk_rows, stats);
+    if (!installed.ok) {
+        // Allocation failure can leave a partially installed document, so end
+        // the transaction at the same empty/unbound failure boundary as bulk.
+        reset();
+        return installed;
+    }
+    g_generated_install.seen[coord.slot] = true;
+    g_generated_install.received += 1;
+    return installed;
+}
+
+/// Publish the streamed replacement only after every declared chunk arrived.
+/// A premature commit keeps the transaction open so the caller can send the
+/// missing records; road-plan failure is terminal and resets to an empty map.
+pub fn generatedInstallCommit() generated.Result {
+    if (!g_generated_install.active) return generated.failed(.stream_inactive, .{});
+    const stats = g_generated_install.stats;
+    if (g_generated_install.received != stats.chunks) return generated.failed(.chunk_missing, stats);
+
+    roadsRestamp();
+    if (road_plan_truncated) {
+        reset();
+        return generated.failed(.road_plan_truncated, stats);
+    }
+    clearMapHistory();
+    bumpMapRevision();
+    clearGeneratedInstallSession();
+    return generated.succeeded(stats);
+}
+
+/// Explicitly discard a partial replacement. Abort is idempotent so a caller
+/// can put it in its error cleanup without first querying transaction state.
+pub fn generatedInstallAbort() generated.Result {
+    if (!g_generated_install.active) return generated.succeeded(.{});
+    const stats = g_generated_install.stats;
+    reset();
+    return generated.succeeded(stats);
 }
 
 /// Commit the live-previewed transport draft. Roads recompile the lane grid;
@@ -1660,7 +1916,14 @@ fn popMapSnapshot(stack: []MapSnapshot, count: *usize) ?MapSnapshot {
 
 fn captureMapSnapshot(kind: MapHistoryKind) ?MapSnapshot {
     const alloc = std.heap.page_allocator;
-    const capacity = saveSizeUpperBound();
+    const capacity = saveSize();
+    // A citywide painting can legitimately exceed the whole concern-owned
+    // journal budget. Refuse it before allocation instead of reserving the
+    // pathological RLE upper bound and discarding the snapshot afterwards.
+    if (capacity == 0 or capacity > MAP_HISTORY_TUNING.max_bytes_per_stack) {
+        g_map_history_dropped +%= 1;
+        return null;
+    }
     var storage = alloc.alloc(u8, capacity) catch return null;
     const used = saveMap(storage);
     if (used == 0) {
@@ -1696,6 +1959,26 @@ pub fn mapHistoryStats() MapHistoryStats {
         .bytes = stackBytes(g_map_undo[0..], g_map_undo_count) + stackBytes(g_map_redo[0..], g_map_redo_count),
         .dropped = g_map_history_dropped,
     };
+}
+
+fn pageMappedBytes(logical_bytes: usize) u64 {
+    if (logical_bytes == 0) return 0;
+    return @intCast(std.mem.alignForward(usize, logical_bytes, std.heap.pageSize()));
+}
+
+fn snapshotMappedBytes(snapshot: MapSnapshot) u64 {
+    return if (snapshot.storage) |storage| pageMappedBytes(storage.len) else 0;
+}
+
+/// Page-mapped storage retained by undo, redo, and the pending pre-mutation
+/// snapshot. MapHistoryStats.bytes intentionally remains the encoded logical
+/// size used for journal budgeting; telemetry needs the allocator footprint.
+pub fn mapHistoryAllocatedBytes() u64 {
+    var bytes: u64 = 0;
+    for (g_map_undo[0..g_map_undo_count]) |snapshot| bytes += snapshotMappedBytes(snapshot);
+    for (g_map_redo[0..g_map_redo_count]) |snapshot| bytes += snapshotMappedBytes(snapshot);
+    if (g_map_history_pending) |pending| bytes += snapshotMappedBytes(pending);
+    return bytes;
 }
 
 fn restoreMapSnapshot(snapshot: MapSnapshot) bool {
@@ -1757,6 +2040,13 @@ pub fn saveSizeUpperBound() usize {
     return store.saveSizeUpperBound();
 }
 
+/// Exact RLE size of the current canonical painting. Large generated maps use
+/// this for persistence allocations; the theoretical every-cell-is-a-run
+/// bound is several hundred MiB larger than their real encoded document.
+pub fn saveSize() usize {
+    return store.saveSize(&g_road_under, tileBindings());
+}
+
 /// Serialize the painting (roads resolved back to their undercoat base).
 pub fn saveMap(dst: []u8) usize {
     return store.save(dst, &g_road_under, tileBindings());
@@ -1805,7 +2095,7 @@ pub fn autosaveNow(io: std.Io) bool {
     if (g_autosave_len == 0) return false;
     const path = g_autosave_path_buf[0..g_autosave_len];
     const alloc = std.heap.page_allocator;
-    const buf = alloc.alloc(u8, saveSizeUpperBound()) catch return false;
+    const buf = alloc.alloc(u8, saveSize()) catch return false;
     defer alloc.free(buf);
     const n = saveMap(buf);
     if (n == 0) return false;
@@ -1838,8 +2128,8 @@ pub fn clearDirty() void {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test "road planner budget is an explicit generated-city tuning value" {
-    try std.testing.expectEqual(@as(usize, 262_144), MAP_TUNING.max_road_plan_cells);
-    try std.testing.expect(MAP_TUNING.max_road_plan_cells > 65_536);
+    try std.testing.expectEqual(@as(usize, 1_048_576), MAP_TUNING.max_road_plan_cells);
+    try std.testing.expect(MAP_TUNING.max_road_plan_cells > 262_144);
 }
 
 test "heightAt bilinear-samples painted terrain, 0 off-chunk" {
@@ -1899,6 +2189,32 @@ test "downsampleFloorHeights keeps ridge peaks through the resample" {
     var peak: f32 = 0;
     for (floor) |v| peak = @max(peak, v);
     try std.testing.expectApproxEqAbs(@as(f32, 9), peak, 0.0001);
+}
+
+test "rendered-height rectangle query catches ridges beneath a level foundation" {
+    reset();
+    defer reset();
+    const ch = chunks.growChunk(0, 0).?;
+    // World (0.5, 0.5): adjacent to the raw sample heightAt(0,0) reads, but
+    // inside the ABS-MAX window feeding the rendered vertex at (0,0).
+    ch.height[121 * chunks.SAMPLE_COLS + 121] = 9;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(0, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 9), renderedHeightAt(0, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 9), maxRenderedHeightInRect(-1, -1, 1, 1).?, 0.0001);
+    try std.testing.expect(maxRenderedHeightInRect(-200, -200, 200, 200) == null);
+}
+
+test "rendered-height rectangle query checks both owners of a chunk seam" {
+    reset();
+    defer reset();
+    const left = chunks.growChunk(0, 0).?;
+    _ = chunks.growChunk(1, 0).?;
+    // The x=60 border is left local vertex 120 and right local vertex 0.
+    // Deliberately make only the left owner's ABS-MAX window tall: the scalar
+    // lookup chooses the right chunk, while a closed footprint must see both.
+    left.height[120 * chunks.SAMPLE_COLS + 239] = 11;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), renderedHeightAt(60, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 11), maxRenderedHeightInRect(60, 0, 60, 0).?, 0.0001);
 }
 
 test "floor water downsample keeps depth paired with its terrain bed" {

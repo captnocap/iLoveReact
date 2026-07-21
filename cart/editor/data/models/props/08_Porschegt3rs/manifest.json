@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "import:08_porschegt3rs",
+  "name": "08 Porschegt3rs",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "model-import_08_porschegt3rs",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#43a35f",
+  "rig": "source model file",
+  "data": "file reactjit-stl-1784609765684-08_porschegt3rs.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/08_Porschegt3rs/mesh/08_porschegt3rs.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "source-format:stl",
+    "converted-to:glb",
+    "imported-from:/home/siah/Downloads/08_porschegt3rs.stl"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

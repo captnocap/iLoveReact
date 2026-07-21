@@ -372,10 +372,18 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
         ${roadSurface.materialId}, ${roadSurface.boardIndex.toFixed(1)},
         roadUv, roadMeters * 64.0, 2.0, seed
       );
+      // A crosswalk is owned by the semantic raster leg, not by whichever
+      // analytic ribbon is nearest at this fragment. At an intersection the
+      // nearest ribbon switches across diagonal Voronoi boundaries; using its
+      // arc phase sheared one zebra into the white wedges seen across junctions.
+      // The marking byte's axis bit is the planner's exact leg direction and
+      // matches the raster fallback's world-metre phase.
+      let crosswalkAlongM = select(p.y, p.x, (roadMark & 1) != 0);
+      let markingAlongM = select(bestRoadAlong, crosswalkAlongM, semanticKind == ${roadKinds.crosswalk});
       roadRgb = road_apply_ribbon_markings(
         roadRgb,
         bestRoadSigned,
-        bestRoadAlong,
+        markingAlongM,
         bestRoadRight,
         bestRoadLeft,
         bestRoadTwoWay,

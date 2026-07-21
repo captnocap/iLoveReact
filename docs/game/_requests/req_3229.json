@@ -1,0 +1,18 @@
+{
+  "id": "req_3229",
+  "at": "2026-07-19T15:58:35.666Z",
+  "origin": "session:5a3945f7",
+  "text": "also, so i found that, if i take a cube, loop cut it with 7 cuts and then use that to make a lip shape, then do some loops to get a center part and from there extrude into it and then pull the whole cube shape into the mouth/jaw, and then so my thoughts were to be able to rig the edges of the lips for the mouth to talk. The one thing we would need to sort out though is currently everything saves in one state but that requires me to actually move those edges apart from eachother like when the mouth is open [Image #2] see what i mean [Image #3] but the nice thing is it gives you a closed inner mouth easy as hell and then u can just put in two planes for teeth lines on top and bottom",
+  "status": "doing",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T15:59:13.945Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -39,12 +39,15 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel, roleNamer, onStartRoleNamer, onSkipRole, onCancelRoleNamer }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, stageFocusEnabled, onToggleStageFocus, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel, roleNamer, onStartRoleNamer, onSkipRole, onCancelRoleNamer }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
   // (activeId) keeps the strong row. Optional — absent reads as single-select.
   selectedIds?: string[];
+  /** When off, only this outliner's rows can change its active part. */
+  stageFocusEnabled: boolean;
+  onToggleStageFocus: () => void;
   // Guided role naming (req_3263): while a session is live, row clicks assign the
   // shown role (AppFrame owns that swap); this panel renders the ask strip.
   roleNamer?: { role: string; done: number; total: number; contract: string } | null;
@@ -287,6 +290,13 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: '#536174', fontSize: 9, fontFamily: 'monospace' }}>Ctrl C/V/D</Text>
         <Text style={{ color: '#5d6878', fontSize: 11, fontFamily: 'monospace' }}>{`${parts.length}`}</Text>
+        <Pressable
+          style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }}
+          onPress={onToggleStageFocus}
+          tooltip={stageFocusEnabled ? 'Stage selection on — clicking another part in the viewport changes focus' : 'Stage selection locked — only outliner rows can change focus'}
+        >
+          <Icon name={stageFocusEnabled ? 'LockOpen' : 'Lock'} size={12} color={stageFocusEnabled ? '#79b8d8' : '#d5aa69'} />
+        </Pressable>
         <Pressable style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }} onPress={onGroupSelected} tooltip="Group selected parts — Shift-click rows to build the set">
           <Icon name="FolderPlus" size={13} color="#90b7a0" />
         </Pressable>

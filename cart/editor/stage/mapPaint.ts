@@ -6,7 +6,8 @@
 // AppFrame owns the state and calls applyMapPaintEffects on every patch so the
 // host tool tracks chrome.
 import {
-  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapInstallGenerated, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
+  mapChunkCount, mapGeneratedAbort, mapGeneratedBegin, mapGeneratedChunk, mapGeneratedCommit,
+  mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
   mapPathSetProfile, mapSetBrushGizmo,
   mapPathSetLevel, mapPathSetTool,
@@ -156,6 +157,13 @@ export type GeneratedMapPaintingInstallation =
   | { ok: true; bindings: TileMaterialBinding[]; chunks: number; paths: number; roads: number; rails: number }
   | { ok: false; error: string };
 
+export type GeneratedMapPaintingStream = {
+  manifest: Float32Array;
+  paths: Float32Array;
+  chunkCount: number;
+  packChunk(index: number): Float32Array;
+};
+
 function configureMapContent(zones: readonly MapZoneDef[]): void {
   mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
   mapRoadSetKinds(ROAD_KIND_INDICES);
@@ -198,14 +206,14 @@ export function activateMapDocumentPainting(stem: string, zones: readonly MapZon
 }
 
 /** Replace the already-activated target document with a complete generated
- * painting. The bulk host door validates both wires before mutation; this
- * boundary then restores the cart-owned palettes, durably saves the canonical
- * RMAP, and only after that re-enables autosave for the named target. */
+ * painting. Native validates the full coordinate manifest and transport wire
+ * before mutation, then accepts one bounded chunk record at a time. This
+ * boundary restores cart-owned palettes, durably saves the canonical RMAP,
+ * and only after that re-enables autosave for the named target. */
 export function installGeneratedMapDocumentPainting(
   stem: string,
   zones: readonly MapZoneDef[],
-  chunkRows: Float32Array,
-  pathRows: Float32Array,
+  source: GeneratedMapPaintingStream,
 ): GeneratedMapPaintingInstallation {
   const targetStem = mapDocumentPaths(stem).stem;
   if (!mapHostLive()) return { ok: false, error: 'map host is not live in this binary' };
@@ -216,8 +224,31 @@ export function installGeneratedMapDocumentPainting(
     return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
   }
 
-  const installed = mapInstallGenerated(chunkRows, pathRows);
-  if (!installed.ok) return { ok: false, error: `generated map rejected (${installed.error})` };
+  const begun = mapGeneratedBegin(source.manifest, source.paths);
+  if (!begun.ok) return { ok: false, error: `generated map rejected before install (${begun.error})` };
+  if (begun.chunks !== source.chunkCount) {
+    mapGeneratedAbort();
+    return { ok: false, error: `generated map manifest expected ${begun.chunks} chunks but compiler offered ${source.chunkCount}` };
+  }
+  for (let index = 0; index < source.chunkCount; index += 1) {
+    let chunk: Float32Array;
+    try {
+      chunk = source.packChunk(index);
+    } catch (error) {
+      mapGeneratedAbort();
+      return { ok: false, error: `generated chunk ${index + 1}/${source.chunkCount} failed to compile (${(error as Error).message})` };
+    }
+    const appended = mapGeneratedChunk(chunk);
+    if (!appended.ok) {
+      mapGeneratedAbort();
+      return { ok: false, error: `generated chunk ${index + 1}/${source.chunkCount} was rejected (${appended.error})` };
+    }
+  }
+  const installed = mapGeneratedCommit();
+  if (!installed.ok) {
+    mapGeneratedAbort();
+    return { ok: false, error: `generated map commit failed (${installed.error})` };
+  }
 
   configureMapContent(zones);
   const path = editorMapFile(targetStem);

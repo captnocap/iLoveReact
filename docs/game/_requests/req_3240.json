@@ -1,0 +1,28 @@
+{
+  "id": "req_3240",
+  "at": "2026-07-20T03:08:28.710Z",
+  "origin": "session:5a3945f7",
+  "text": "hm. so i fucked up and clicked paint before clicking save, and it saved it all as one cube. we since fixed the problem to make sure it cant happen again but uh anyway u can see if u could look at the blob for heroin bob and surgically seperate it back out lol -_- fml",
+  "status": "review",
+  "sessionId": "5a3945f7-9e96-42ae-a4fe-4be037027236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T03:08:47.648Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:12:07.473Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Surgically recovered Heroin_Bob_head's 15-part outliner from the flattened save. The bad paint-before-save wrote doc.blob with rangeCount=0 and collapsed parts.json to one 'Cube 1' row, but the per-triangle authored face groups (690 ids) survived intact. Recomputed part boundaries offline using the exact inferMeshDocPartRanges algorithm (union by group id + shared exact-position edges) — got exactly 15 contiguous connectivity runs whose geometry matches the original ranks (skull cube, ear cylinders at ±x, eye icospheres, mouth cube, 6 mohawk cones, ground plane). Patched the 15-range table back into doc.blob (header rangeCount + appended pairs, verified against the RJMD v2 decoder's need formula) and rebuilt parts.json with the original 15 names captured earlier this session, default clay #c9b48f colors. Flattened originals backed up in session scratchpad heroin_bob_recovery/. No code changed; model files only (untracked).",
+  "shas": [],
+  "resolvedAt": "2026-07-20T03:12:07.472Z"
+}

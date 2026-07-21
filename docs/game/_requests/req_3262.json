@@ -1,0 +1,28 @@
+{
+  "id": "req_3262",
+  "at": "2026-07-20T06:34:54.948Z",
+  "origin": "codex:019f768a",
+  "text": "I dont know that i had gottenn that far as you had with it is the thing. by a typed world knowledge graph what do you mean exactly because i was only so far as thinking of a way to even be able to get in the names of businesses, and their logos and be able to declare their building spaces in the world and same for npcs, though a number of them will be generated while a number will be made by hand for that cause. also the thing about a wiki is that i can write in literal text about game mechanics that then need to be made from that rather than adhoc",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:35:11.436Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:35:54.421Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified that 'typed world knowledge graph' was an over-grand name for a lightweight wiki foundation at the user's current stage: pages have a kind, stable hidden ID, structured fields where tooling needs them, freeform prose, and typed links/backlinks. Reframed the immediate scope around Business, NPC, World Space, and Mechanic pages; asset and world-selection bindings; handmade-versus-generated NPC policies; and implementation-status/evidence on literal mechanics specifications. Explicitly separated this MVP from the downstream mission, claims, causality, and compiled-internet architecture, which is only a possible growth path rather than the proposed first build.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T06:35:54.421Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3191",
+  "at": "2026-07-18T09:18:04.137Z",
+  "origin": "codex:019f744e",
+  "text": "why are we making compatability forks tho like am i crazy what is the fuckign point of that literally what is the point all its doing is creating a massive amount of technical debt. why not just follow the damn api from the compiler and make it happy like it sounds like a lot more work to try and think of any way to make old broken shit work than just doinng what it says to do instead",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:18:31.925Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:19:18.852Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and verified the rationale for the Zig compatibility forks. The narrow legitimate requirement was preserving a hand-rolled nonblocking readiness loop and exact WouldBlock behavior during migration. The written spec authorized raw std.os.linux syscall substitutions in ten named files, but implementation instead copied 2,487 lines of Zig 0.15 std.posix/std.net into sysx/netx and expanded to 25/11 importers. Bundled Zig 0.16 already provides Io.net IpAddress, resolve, connect/listen, Stream reader/writer, and Server.accept. Recommended native Io.net for ordinary/blocking callers and a small allowlisted raw readiness adapter only for actual frame-loop polling.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:19:18.852Z"
+}

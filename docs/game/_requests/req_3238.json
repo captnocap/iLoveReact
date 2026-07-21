@@ -1,0 +1,30 @@
+{
+  "id": "req_3238",
+  "at": "2026-07-20T02:49:58.424Z",
+  "origin": "codex:019f7a9c",
+  "text": "ok here is more to do: the outliners, need to be able to drag around outliners and place into groups this way, its extremely static as it stands. We also need nested groups. With that, and speaking of outliners. when i am in editing modes, like vertex or whatever it may be. if i click on another outliner, it should bring it to my focus, not force me to go and click the outliner specifically inside of the list of outliners, this becomes impossible the moment u have many of them. also, the current approach has absolute 0 safeguards for when painting and not crossing from one outliner to another, for example, regardless of if you have an outliner visible or not, it will always get hit with paint if the mouse travels over its physical location.",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T02:50:11.378Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T03:06:53.134Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented real nested/reorderable model outliner behavior using persisted root-to-leaf group paths and independent display order, with drag handles for parts/folders, nesting, root drops, cycle rejection, recursive selection/visibility/duplicate/dissolve semantics, and native-journal undo metadata. Added viewport geometry-click focus switching in vertex/edge/face modes. Paint is now strictly scoped to the primary outliner across fill, clip/lock brush, mirrored dabs, and eyedropper; non-focused or hidden parts cannot receive a stroke.",
+  "shas": [
+    "b4503427b"
+  ],
+  "resolvedAt": "2026-07-20T03:06:53.134Z"
+}

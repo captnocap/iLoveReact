@@ -1,0 +1,42 @@
+{
+  "id": "req_3223",
+  "at": "2026-07-19T14:30:34.445Z",
+  "origin": "codex:019f7a9c",
+  "text": "Loopcut should behave 100% like this /home/siah/testing/js-bench-editor has loopcut behavior",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T14:30:40.894Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T15:21:28.090Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "User decision resolved to exact js-bench-editor semantics. Ported its edge-id center dedupe, selected shared-edge override, opposite-edge quad walk, forward/back traversal, processed-face closure, boundary/non-quad partial termination, terminal triangle rules, direction>2 triangle split, recursive multi-cut spacing, and offset amend behavior into Zig plus the TS twin. Offset-only previews reuse topology and recompute cut-vertex positions. Commit aacd06bda; automated gates green. Awaiting user visual verification + 60s spikewatch."
+    },
+    {
+      "at": "2026-07-19T15:21:28.185Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-19T16:01:56.670Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Exact reference parity correction in f69c1010d: the initial port copied Blockbench's literal MeshFace vertex arrays, but omitted MeshFace.getSortedVertices(), which made retained quads cross their center edges. The Zig face table and TS twin now emit that sorted polygon order directly; closed cylinder belt and perpendicular-boundary regressions cover both directions."
+    }
+  ],
+  "resolution": "Loop Cut now follows the js-bench-editor topological walk: stable edge identity, selected shared-edge alignment, opposite-edge quad traversal in both directions, processed-face closure, boundary/non-quad termination, both triangle terminal modes, recursive multi-cut spacing, and amendable offsets. The host and TypeScript twin share these semantics, and offset drags reuse topology. Automated parity and integration gates pass; user live verification remains.",
+  "shas": [
+    "aacd06bda"
+  ],
+  "resolvedAt": "2026-07-19T15:21:28.185Z"
+}

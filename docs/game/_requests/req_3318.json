@@ -1,0 +1,28 @@
+{
+  "id": "req_3318",
+  "at": "2026-07-21T04:03:51.476Z",
+  "origin": "codex:019f8078",
+  "text": "works, you should add some ux though to show that it is converting because for a moment i was wondering if it was doing anything or not",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T04:03:54.587Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T04:06:19.024Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a blocking STL conversion overlay that appears immediately after selecting an STL, showing its filename, local Blender conversion status, activity bar, and an explicit wait/open-when-ready message. Conversion now gates editor input until it resolves. Verified editor bundle and ReleaseFast native editor build.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T04:06:19.024Z"
+}

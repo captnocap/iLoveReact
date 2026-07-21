@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Torso",
+      "color": "#c9b48f",
+      "visible": true,
+      "outlinerOrder": 0
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3192",
+  "at": "2026-07-18T09:19:40.486Z",
+  "origin": "codex:019f744e",
+  "text": "well what is the reason they made it blocking surely the people at the zig foundation arnt fucking stupid and know that people need a non blocking call so what do they do",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:19:52.661Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T09:21:31.906Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected the bundled Zig 0.16 Io implementation to explain nonblocking behavior. Zig moved from caller-managed EAGAIN polling to an injected structured-concurrency interface: Io.concurrent returns a Future while guaranteeing a unit of concurrency, with Group/Select, await/cancel, cancellation points, and timeouts. std.process.Init.io is a properly initialized Threaded backend using a worker pool; the repo's global_single_threaded shortcut disables that concurrency. Also confirmed the 0.16 Linux Uring/Evented backend still marks TCP listen/connect/accept/read/write unavailable, making a narrow raw readiness adapter defensible for an existing frame loop, but not a copied std.net compatibility layer.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T09:21:31.906Z"
+}

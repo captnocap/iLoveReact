@@ -1,0 +1,36 @@
+{
+  "id": "req_3237",
+  "at": "2026-07-19T19:18:16.108Z",
+  "origin": "codex:019f7a9c",
+  "text": ";_; ok that probably worked man how many times are we gonna end up going back and forth tho on features that are fairly simple and for whatever reason its like a foreign concept. we have had mirror edits previously and the concept isnt hard. sorry its not your fault but look at how mirroring works even in cart/hmsc-int and this isnt even the first time ive said mirroring is wrong ofc it doesnt resurface til it is actually necessary either, also its actually just broken now im see it look how do i go from these verts here [Image #1] to these verts in a mirror function [Image #2]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T19:18:29.171Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T19:26:32.986Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-19T19:28:38.952Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Follow-up c945661df restores the original Studio interaction contract too: symmetrize no longer inherits loop cut's forced face mode; it returns to the user's vertex/edge/face tool and clears selection, preventing 28 selected vertices from being presented as the rebuilt part's 32 selected faces. Full ReleaseFast editor build passed again."
+    }
+  ],
+  "resolution": "Restored the original Studio active-part boundary to host symmetrize. The host now derives an explicit target mask from the current outliner scope, repairs each targeted part around its own live-mirror bounds center, leaves every other part untouched, clears selection after topology replacement, and computes the symmetry badge with the same scoped part identities instead of one whole-soup plane. Added focused Zig regressions and verified the mesh-edit unit target plus the full ReleaseFast editor build.",
+  "shas": [
+    "2b374a58d"
+  ],
+  "resolvedAt": "2026-07-19T19:26:32.986Z"
+}

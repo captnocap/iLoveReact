@@ -1,0 +1,30 @@
+{
+  "id": "req_3305",
+  "at": "2026-07-20T17:36:45.850Z",
+  "origin": "codex:019f8088",
+  "text": "yes well i believe screen delivery is already possbile just not rigging it was in some props or something made before i know that for sure. but been a while.  \n\n2) yes so it should be that i can ctrl select to add pieces together one by one as selected before storing as prefab, but a shift click selects anything that is touching the piece clicked  but yes two thigns here one is i need the multi select in general but the second is prefabing and its no different than how it already existed once before in cart/hmsc-int",
+  "status": "review",
+  "sessionId": "019f8088-6669-7a73-aaa5-bb10bf2e2d13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:36:52.919Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T20:01:10.854Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the clarified interaction contract: in world Select mode Ctrl-click toggles pieces individually and Shift-click expands from the clicked piece through the full transitive touching component. Multi-selection is independently usable for batch edit actions, while prefab capture stores a named composition and stamps ordinary editable semantic pieces. Screen work reuses the existing delivery path and adds the missing face-rig designation instead of creating a parallel screen system.",
+  "shas": [
+    "74b3fba8e"
+  ],
+  "resolvedAt": "2026-07-20T20:01:10.854Z"
+}

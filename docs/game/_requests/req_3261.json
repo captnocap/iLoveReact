@@ -1,0 +1,30 @@
+{
+  "id": "req_3261",
+  "at": "2026-07-20T06:23:58.851Z",
+  "origin": "codex:019f7a9c",
+  "text": "ok undo didnt break it but this time loop cut did it [Image #1]",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T06:24:05.121Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T06:41:08.109Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Loop-cut lowering now carries indexed per-corner UVs into the derived render soup, preview offset changes recompute seam-scoped UVs, topology adoption preserves the live atlas byte-for-byte, and structural undo/redo uses saved UVs instead of repacking. Automatic group refresh is blocked while stale; only explicit Remake Paint Atlas repacks/resets.",
+  "shas": [
+    "549a8434b"
+  ],
+  "resolvedAt": "2026-07-20T06:41:08.109Z"
+}

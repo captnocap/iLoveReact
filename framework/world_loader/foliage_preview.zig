@@ -29,9 +29,9 @@ const PALM_TRUNK_COLOR = config.PALM_TRUNK_COLOR;
 // ── the live-foliage preview (req_2497) ───────────────────────────────────────
 // Painting flora grows LITERAL foliage: the SAME foliage.zig generators the
 // baked FLORA recipe expands through, driven straight off the painted lanes.
-// Regenerated whole (all painted chunks) on any flora/height change —
-// authoring-rate work; the nodes are static instance batches re-uploaded once
-// per regen via the version bump, zero per-frame cost.
+// Only chunks selected by world/streaming.zig's foliage bubble are expanded;
+// the authored lanes outside it stay compact and frozen. The nodes are static
+// instance batches re-uploaded once per regen, with zero per-frame restaging.
 
 pub fn lerpF64(a: f64, b: f64, t: f64) f64 {
     return a + (b - a) * t;
@@ -181,6 +181,39 @@ pub const FoliageSnapSlot = struct {
 pub const FoliageRowSet = struct {
     rows: [PAINT_FOLIAGE_FAMILY_COUNT]?[]f32 = @splat(null),
     segs: [PAINT_FOLIAGE_FAMILY_COUNT]std.ArrayListUnmanaged(layout.InstanceSegment) = @splat(.empty),
+    /// Published by the worker only after it finishes with this ping-pong set.
+    /// Telemetry must never inspect the mutable row slices while realloc() may
+    /// replace them, so it reads these atomics instead.
+    used_bytes: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    capacity_bytes: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    fn publishMemory(self: *FoliageRowSet, counts: [PAINT_FOLIAGE_FAMILY_COUNT]u32) void {
+        var used: u64 = 0;
+        var capacity: u64 = 0;
+        for (self.rows, counts) |maybe_rows, count| {
+            if (maybe_rows) |rows| capacity += @as(u64, @intCast(rows.len)) * @sizeOf(f32);
+            used += @as(u64, count) * foliage.STRIDE * @sizeOf(f32);
+        }
+        self.capacity_bytes.store(capacity, .release);
+        self.used_bytes.store(used, .release);
+    }
+
+    pub fn memory(self: *const FoliageRowSet) FoliageRowMemory {
+        return .{
+            .used_bytes = self.used_bytes.load(.acquire),
+            .capacity_bytes = self.capacity_bytes.load(.acquire),
+        };
+    }
+
+    pub fn clearMemory(self: *FoliageRowSet) void {
+        self.capacity_bytes.store(0, .release);
+        self.used_bytes.store(0, .release);
+    }
+};
+
+pub const FoliageRowMemory = struct {
+    used_bytes: u64,
+    capacity_bytes: u64,
 };
 
 pub const FoliageJob = struct {
@@ -197,7 +230,6 @@ pub const FoliageResult = struct {
     counts: [PAINT_FOLIAGE_FAMILY_COUNT]u32,
     fulls: [PAINT_FOLIAGE_FAMILY_COUNT]bool,
     segs_ok: [PAINT_FOLIAGE_FAMILY_COUNT]bool,
-    anchor: [2]f32,
     log_full: bool,
 };
 
@@ -288,14 +320,15 @@ pub fn snapGroundY(floor: *const [map_paint.FLOOR_CELLS]f32, min_x: f32, min_z: 
     return a + (b - a) * tz;
 }
 
-/// MAIN THREAD: copy every painted chunk's flora lanes + render floor into
-/// the snapshot slot (~150KB memcpy per chunk). Chunks without a paint slot
-/// get their floor sampled from heightAt at the same 121 dots here, so the
-/// worker never calls into live engine state.
+/// MAIN THREAD: copy each streaming-resident painted chunk's compact flora
+/// lanes + render floor into the snapshot slot (~150KB memcpy per chunk).
+/// Chunks outside the active bubble remain canonical compact map data only.
+/// Chunks without a paint slot get their floor sampled from heightAt at the
+/// same 121 dots here, so the worker never calls into live engine state.
 pub fn snapshotPaintedChunks(runtime: anytype) bool {
     var count: u32 = 0;
-    for (map_chunks.slots()) |maybe| {
-        if (maybe != null) count += 1;
+    for (map_chunks.slots(), 0..) |maybe, document_slot| {
+        if (maybe != null and runtime.paint_foliage_resident[document_slot]) count += 1;
     }
     const snap = &runtime.foliage_snap;
     if (count == 0) {
@@ -306,8 +339,9 @@ pub fn snapshotPaintedChunks(runtime: anytype) bool {
         snap.chunks = std.heap.c_allocator.realloc(snap.chunks, count) catch return false;
     }
     var i: u32 = 0;
-    for (map_chunks.slots()) |maybe| {
+    for (map_chunks.slots(), 0..) |maybe, document_slot| {
         const chunk = maybe orelse continue;
+        if (!runtime.paint_foliage_resident[document_slot]) continue;
         const dst = &snap.chunks[i];
         dst.cx = chunk.cx;
         dst.cz = chunk.cz;
@@ -390,8 +424,6 @@ pub fn applyFoliageResult(runtime: anytype, result: FoliageResult) void {
     // machine's wall, not a budget's (req_2843: the caps are starting sizes).
     var any_full = false;
     for (result.fulls) |family_full| any_full = any_full or family_full;
-    runtime.paint_foliage_clipped = any_full;
-    runtime.paint_foliage_anchor = result.anchor;
     if (result.log_full and any_full) {
         const cap = struct {
             fn rows(maybe: ?[]f32) usize {
@@ -417,13 +449,13 @@ pub fn applyFoliageResult(runtime: anytype, result: FoliageResult) void {
             node.scene3d_mesh = false;
             continue;
         };
-        // the FULL family slice every time: the static instance region is
-        // reserved at first upload and re-uploaded in place on version bumps.
-        // The slice only changes when the family GROWS (req_2843) — the
-        // renderer then retains a fresh region and the old one ages out of
-        // the cache (gpu/3d.zig staticCacheSlot).
+        // Keep the stable full allocation as the retained-cache identity, but
+        // explicitly publish the populated prefix. gpu/3d.zig reserves that
+        // stable capacity and packs/uploads only these initialized rows; baked
+        // streaming families keep the field at 0 and retain whole-array semantics.
         node.scene3d_instance_data = buf;
         node.scene3d_instance_count = result.counts[fi];
+        node.scene3d_instance_populated_count = result.counts[fi];
         node.scene3d_instance_version = runtime.paint_foliage_ver;
         node.scene3d_mesh = result.counts[fi] > 0;
         // req_2859: this family's per-chunk ranges, for frustum culling. A
@@ -448,13 +480,16 @@ pub fn foliageWorkerMain(runtime: anytype, io: std.Io) std.Io.Cancelable!void {
 pub fn buildFoliageRows(runtime: anytype, job: FoliageJob) FoliageResult {
     const alloc = std.heap.c_allocator;
     const set = &runtime.foliage_sets[job.set];
+    var counts: [PAINT_FOLIAGE_FAMILY_COUNT]u32 = @splat(0);
+    // Covers successful completion, early allocator refusal, and every buffer
+    // growth. Readers see the prior complete publication until this one store.
+    defer set.publishMemory(counts);
     var result = FoliageResult{
         .set = job.set,
         .map_revision = job.map_revision,
         .counts = @splat(0),
         .fulls = @splat(false),
         .segs_ok = @splat(true),
-        .anchor = job.anchor,
         .log_full = job.log_full,
     };
     for (0..PAINT_FOLIAGE_FAMILY_COUNT) |fi| {
@@ -462,7 +497,6 @@ pub fn buildFoliageRows(runtime: anytype, job: FoliageJob) FoliageResult {
         set.segs[fi].clearRetainingCapacity();
     }
 
-    var counts: [PAINT_FOLIAGE_FAMILY_COUNT]u32 = @splat(0);
     var fulls: [PAINT_FOLIAGE_FAMILY_COUNT]bool = @splat(false);
 
     // req_2838: the budget spends NEAREST-FIRST from the author's anchor, so a

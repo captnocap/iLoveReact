@@ -1,0 +1,28 @@
+{
+  "id": "req_3300",
+  "at": "2026-07-20T17:16:26.624Z",
+  "origin": "codex:019f8078",
+  "text": "that didnt really change anything at all with them. still vertically displaced on the horizontal axis also those file menus do not close when u click anywhere that isnt them u have to click like File again to close it, bad behavior",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:16:31.519Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:17:37.316Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a transparent, non-hovering dismissal plane below the chrome and behind the dropdown, so clicking anywhere in the editor body closes an open File/Edit/etc. menu without intercepting other menu-bar triggers. Shipped the editor after the prior anchor correction; the bundle/native ReleaseFast compilation completed. Existing focused command geometry test remains green (14/14). Visual verification needed for the on-screen dropdown position and click-away behavior.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:17:37.315Z"
+}

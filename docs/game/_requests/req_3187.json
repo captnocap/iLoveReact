@@ -1,0 +1,17 @@
+{
+  "id": "req_3187",
+  "at": "2026-07-18T09:00:16.852Z",
+  "origin": "one-off",
+  "text": "no in @docs/ZIG_016_MIGRATION.md you wrote this file and then no one followed it or what  am i misunderstanding there is no function signatures of io its all just one firehose  and more importantly its wrapping up a bunch of old dead api than just using the new one. arguably creating more work than necessary and creating debt that no one needs. its debt for me that the moment you go away it still continues to just exist and more importantly its all manufactured like i dont see any reasonble reason to try and fight the system yes zig is going to break shit all the time and change shit but we dont even have 0.16 or 0.15.2 we have a shim for the same language ???? thats kinda insane dont you agree",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T09:01:49.274Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

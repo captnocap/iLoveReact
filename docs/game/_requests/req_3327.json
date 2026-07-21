@@ -1,0 +1,24 @@
+{
+  "id": "req_3327",
+  "at": "2026-07-21T09:01:11.066Z",
+  "origin": "codex:019f83a4",
+  "text": "good that worked. now if i go low gravity and then jump under a floor, i end up glitching through it, which shouldnt happen",
+  "status": "doing",
+  "sessionId": "019f83a4-3a28-7472-b237-304fc90066ef",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T09:01:18.167Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T09:02:14.966Z",
+      "actor": "Codex",
+      "kind": "note",
+      "text": "Root cause: the native physics engine already has a vertical head-bonk resolver, but ceilingUndersideAt rejects rows whose blocksPlayer flag is false. Live editor floor slabs intentionally use blocksPlayer=false so they are walkable platforms without side-push; low gravity merely lets the jump reach an upper floor, where the ceiling resolver then ignores its finite underside and the capsule passes through."
+    }
+  ]
+}

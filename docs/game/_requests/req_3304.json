@@ -1,0 +1,30 @@
+{
+  "id": "req_3304",
+  "at": "2026-07-20T17:33:40.214Z",
+  "origin": "codex:019f8088",
+  "text": "ok so\n1) there is cart/light_demo.tsx that demonstrates some lighting and in the previous cart/hmsc-int we started to explore light rigging but this didnt get far before we ended up refactoring. Well, its time to now bring this into the studio and world editors, this means we need to add it to our rigging tools properly. \n2) other things to add to rigging: rig face for screen, rig face for flora to be able to paint flora on top of a mesh in the world\n3) multi-build piece select in the world + prefab creation for clone/duplicate entire buildings/scenes\n4) export mesh as flora \n5) change the flora painting tools, they currently are approached from a early stange pre-defined density control, and that shit sucks ass. lets make it so there is one type of flora brush, so palm tree, bush, etc etc, and a density slider that applys the density for the stroke.",
+  "status": "review",
+  "sessionId": "019f8088-6669-7a73-aaa5-bb10bf2e2d13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:33:46.194Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T20:01:10.861Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the complete editor authoring sweep: package-backed point and spot light rigs render through the live world stream; model faces can be designated material, screen, or flora; exact rigged-surface flora painting and mesh-to-flora export are available; world multi-selection, named prefab capture, editable semantic stamping, and batch actions are wired; and flora painting now uses species brushes with per-stroke density, including native map persistence and preview support. Added focused TypeScript and Zig contracts, ReleaseFast build verification, and the required frame-time A/B gate.",
+  "shas": [
+    "74b3fba8e"
+  ],
+  "resolvedAt": "2026-07-20T20:01:10.861Z"
+}

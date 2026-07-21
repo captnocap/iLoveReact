@@ -113,7 +113,9 @@ const EXPORT_CHARACTER_COMMAND: Command = {
 
 // Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The dropdown is mounted
 // at the app root, so these are window-relative pixels: the first menu item begins after the chrome
-// padding + brand block + chrome gap.
+// padding + brand block + chrome gap. Panels center on their trigger — a wide
+// menu that begins at File's left edge makes every choice land unexpectedly far
+// to the right of the cursor.
 const MENU_BAR_LEFT = 156;     // HW_Chrome paddingLeft(10) + HW_Brand(136) + HW_Chrome gap(10)
 const MENU_ITEM_PAD = 18;      // HW_MenuItem paddingLeft(9) + paddingRight(9)
 const MENU_ITEM_GAP = 2;       // HW_MenuBar gap between items
@@ -614,7 +616,8 @@ export function menuDropdownLeft(menu: Menu | null): number {
     if (candidate === menu) break;
     left += menuItemWidth(candidate) + MENU_ITEM_GAP;
   }
-  return Math.max(MENU_DROPDOWN_GUTTER, left);
+  const triggerCenter = left + menuItemWidth(menu) / 2;
+  return Math.max(MENU_DROPDOWN_GUTTER, triggerCenter - MENU_DROPDOWN_WIDTH / 2);
 }
 
 export function activeMenuFor(state: EditorState): Menu {

@@ -34,7 +34,7 @@ function fnv1a(s: string): number {
 
 /** Resolve a slot material ref to a live WGSL material, or null if it isn't a
  *  procedural shader (image/decal/color skins stay flat here — a later slice). */
-function shaderMaterialFor(ref: MaterialRef): LiveMaterial | null {
+export function liveMaterialFor(ref: MaterialRef): LiveMaterial | null {
   if (!('assetId' in ref)) return null;
   const asset = assetById(ref.assetId);
   const preview = asset.preview;
@@ -197,7 +197,7 @@ export function pieceSkinBoxes(pieces: readonly PlacedPiece[]): SkinPush {
         if (b.door) continue; // the door leaf keeps its dark panel, never a material
         const ref = slotRefForBox(piece, b.slot);
         if (!ref) continue;
-        const mat = shaderMaterialFor(ref);
+        const mat = liveMaterialFor(ref);
         if (!mat) continue;
         if (!materials.has(mat.hash)) materials.set(mat.hash, mat);
         out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash: mat.hash });

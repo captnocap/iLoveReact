@@ -1,0 +1,28 @@
+{
+  "id": "req_3280",
+  "at": "2026-07-20T09:05:38.779Z",
+  "origin": "codex:019f7a9c",
+  "text": "and the texture always overrides paint, i dont think that existed before but it should, for the face it applys to it should override paint onn that face but none of the others that dont have it slotted",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T09:05:44.103Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T09:39:39.618Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled authored face roles into deterministic resident mesh ranges: the unrigged prefix always uses the painted atlas, each assigned role may substitute its placement material, and a zero/unassigned role falls back to paint. Live and baked loaders preserve empty role indices without drawing zero-length geometry. Added wire, compiler, and host tests for the per-slot zero fallback.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T09:39:39.618Z"
+}

@@ -2,10 +2,7 @@
 //! LOD shell, height-boosted residency hysteresis, and draw assembly with
 //! contiguous-only merging (the req_0537 face-eater regression).
 //!
-//! Run directly (build.zig registration pending — the named module matches the
-//! world_mapfile/world_gamefile test wiring for when it lands):
-//!   zig test --dep world_streaming -Mroot=framework/testing/unit/world_streaming.zig \
-//!     -Mworld_streaming=framework/world/streaming.zig
+//! Run: tools/zig/zig build test-world-streaming
 
 const std = @import("std");
 const streaming = @import("world_streaming");
@@ -38,6 +35,69 @@ const WIDE_VIEW = streaming.Camera{
     .aspect = 1.5,
     .far = 0,
 };
+
+test "shared cell residency law promotes instantly and demotes hysteretically" {
+    const cell = streaming.CellFootprint{ .min_x = 0, .min_z = 0, .size = 120 };
+
+    // The anchor is exactly one foliage radius from the cell edge: promotion
+    // is inclusive and immediate.
+    var resident = streaming.updateCellResidency(false, cell, -120, 60, streaming.foliageDetailRadius(240));
+    try std.testing.expect(resident);
+
+    // 132m lies outside promotion but inside the 138m demotion edge.
+    resident = streaming.updateCellResidency(resident, cell, -132, 60, streaming.foliageDetailRadius(240));
+    try std.testing.expect(resident);
+
+    // Crossing the demotion edge freezes the cell.
+    resident = streaming.updateCellResidency(resident, cell, -139, 60, streaming.foliageDetailRadius(240));
+    try std.testing.expect(!resident);
+    try std.testing.expectApproxEqAbs(@as(f32, 120), streaming.foliageDetailRadius(240), 0.001);
+}
+
+test "120 meter authored chunks keep foliage to a nine-chunk active bubble" {
+    const anchor = [2]f32{ 1_440, 1_440 };
+    var detail_count: usize = 0;
+    var foliage_count: usize = 0;
+    for (0..25) |cz| {
+        for (0..25) |cx| {
+            const center_x = @as(f32, @floatFromInt(cx)) * 120;
+            const center_z = @as(f32, @floatFromInt(cz)) * 120;
+            const cell = streaming.CellFootprint{
+                .min_x = center_x - 60,
+                .min_z = center_z - 60,
+                .size = 120,
+            };
+            if (streaming.updateCellResidency(false, cell, anchor[0], anchor[1], 240)) detail_count += 1;
+            if (streaming.updateCellResidency(false, cell, anchor[0], anchor[1], streaming.foliageDetailRadius(240))) foliage_count += 1;
+        }
+    }
+
+    try std.testing.expectEqual(@as(usize, 21), detail_count);
+    try std.testing.expectEqual(@as(usize, 9), foliage_count);
+}
+
+test "fixed slot arbitration keeps nearest active cells independent of document order" {
+    var slots: [2]streaming.NearestCandidate = undefined;
+    var count: usize = 0;
+    const anchor = [2]f32{ 950, 99 };
+
+    try std.testing.expectEqual(@as(?usize, 0), streaming.offerNearest(slots[0..], &count, streaming.nearestCandidate(.{ 0, 0 }, .{ 0, 0 }, anchor)));
+    try std.testing.expectEqual(@as(?usize, 1), streaming.offerNearest(slots[0..], &count, streaming.nearestCandidate(.{ 5, 3 }, .{ 600, 360 }, anchor)));
+    try std.testing.expect(streaming.offerNearest(slots[0..], &count, streaming.nearestCandidate(.{ 8, 1 }, .{ 960, 120 }, anchor)) != null);
+
+    try std.testing.expectEqual(@as(usize, 2), count);
+    try std.testing.expect(streaming.nearestSetContains(slots[0..count], .{ 8, 1 }));
+    try std.testing.expect(streaming.nearestSetContains(slots[0..count], .{ 5, 3 }));
+    try std.testing.expect(!streaming.nearestSetContains(slots[0..count], .{ 0, 0 }));
+}
+
+test "equal-distance slot arbitration has a stable coordinate tie break" {
+    var slots: [1]streaming.NearestCandidate = undefined;
+    var count: usize = 0;
+    _ = streaming.offerNearest(slots[0..], &count, .{ .coord = .{ 2, 2 }, .distance_sq = 4 });
+    try std.testing.expect(streaming.offerNearest(slots[0..], &count, .{ .coord = .{ 1, 2 }, .distance_sq = 4 }) != null);
+    try std.testing.expectEqualSlices(i32, &[_]i32{ 1, 2 }, slots[0].coord[0..]);
+}
 
 test "partition: spanning prefix, chunk ranges, row content preserved" {
     const allocator = std.testing.allocator;

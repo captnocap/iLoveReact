@@ -32,10 +32,11 @@ pub const CHUNK_METERS: f32 = @floatFromInt(CHUNK_TILES);
 /// |Z| clamp (meters) — the single knob for terrain height range (heightData.ts:25).
 pub const HEIGHT_LIMIT: f32 = 64;
 
-/// World extent in CHUNK units, from the a-zzz / 0-999 cell address window
-/// (chunks.ts:26-27: columnIndex('zzz') = 18277 → 152; floor(999/120) → 8).
+/// World extent in CHUNK units. Columns preserve the complete legacy a-zzz
+/// address window; rows include the 25×25 generated-city working square while
+/// remaining backward-compatible with every previously valid chunk coordinate.
 pub const MAX_CHUNK_COL: i32 = 152;
-pub const MAX_CHUNK_ROW: i32 = 8;
+pub const MAX_CHUNK_ROW: i32 = 24;
 
 pub const TILE_COLS: usize = @intCast(CHUNK_TILES); // per-chunk cells per axis
 pub const TILE_CELLS: usize = TILE_COLS * TILE_COLS; // 14_400
@@ -115,14 +116,15 @@ pub const Chunk = struct {
 
 pub const SLOT_COLS: usize = @intCast(MAX_CHUNK_COL + 1);
 pub const SLOT_ROWS: usize = @intCast(MAX_CHUNK_ROW + 1);
-pub const SLOT_COUNT: usize = SLOT_COLS * SLOT_ROWS; // 1_377
+pub const SLOT_COUNT: usize = SLOT_COLS * SLOT_ROWS; // 3_825
 
 var g_slots: [SLOT_COUNT]?*Chunk = @splat(null);
 var g_count: usize = 0;
 
 const chunk_alloc = std.heap.page_allocator;
 
-/// A slot is addressable iff it is inside the a-zzz / 0-999 window (chunks.ts:61).
+/// A slot is addressable iff it is inside the preserved column address window
+/// and the generated-city row window.
 pub fn inBounds(cx: i32, cz: i32) bool {
     return cx >= 0 and cz >= 0 and cx <= MAX_CHUNK_COL and cz <= MAX_CHUNK_ROW;
 }
@@ -161,6 +163,15 @@ pub fn clearAll() void {
 
 pub fn chunkCount() usize {
     return g_count;
+}
+
+/// Bytes mapped by the page allocator for the canonical chunk payloads.
+/// `Chunk` is larger than a page, and page_allocator maps each growChunk()
+/// allocation independently, so page-rounding each object matches the owned
+/// mapping rather than reporting only the smaller struct payload.
+pub fn allocatedBytes() u64 {
+    const mapped_per_chunk = std.mem.alignForward(usize, @sizeOf(Chunk), std.heap.pageSize());
+    return @as(u64, @intCast(g_count)) * @as(u64, @intCast(mapped_per_chunk));
 }
 
 /// The raw slot table for allocated-chunk iteration (the TS focusedChunks loop):
@@ -252,6 +263,8 @@ test "grow, bounds, and neighbor openings" {
     try std.testing.expect(growChunk(-1, 0) == null);
     try std.testing.expect(growChunk(0, -1) == null);
     try std.testing.expect(growChunk(MAX_CHUNK_COL + 1, 0) == null);
+    try std.testing.expect(growChunk(0, MAX_CHUNK_ROW) != null);
+    try std.testing.expect(growChunk(0, MAX_CHUNK_ROW + 1) == null);
 
     var open: [4][2]i32 = undefined;
     // the seed opens only right + bottom (chunks.ts header)

@@ -1,0 +1,34 @@
+{
+  "id": "req_3208",
+  "at": "2026-07-18T23:50:31.595Z",
+  "origin": "codex:019f744e",
+  "text": "[Image #1] that is a fuck load of memory [Image #2] whats causing it ?",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T23:50:41.750Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T23:57:43.451Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Read-only diagnosis against live reactjit-dev PID 3393746: RSS is real (3,249,660 KiB anonymous), but the panel mislabels all untracked host RSS as Native / driver and does not count native map or foliage buffers under World / Map. The dominant owner is whole-document live foliage expansion: roughly 17.0-17.24M grass rows plus 3.37-3.41M bush rows, 48 bytes each, retained in two ping-pong sets. Power-of-two growth leaves two 1.5GiB-capacity grass mappings and two 192MiB-capacity bush mappings, with about 1.83-1.89GiB resident. Add about 380.86MiB for 625 canonical chunks and 86.41MiB for the all-chunk foliage snapshot. No code changed."
+    },
+    {
+      "at": "2026-07-18T23:57:48.833Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 3.27 GiB editor RSS without modifying code. The expanded map itself accounts for roughly 381 MiB; the dominant cost is the live foliage preview expanding every planted cell in all 625 chunks into millions of literal 48-byte instance rows and retaining two elastic ping-pong copies. Linux smaps confirms the resulting paired 1.5 GiB grass-capacity and 192 MiB bush-capacity mappings. The memory UI currently omits map chunks, foliage rows, and foliage snapshots from World / Map, then labels the entire unexplained remainder Native / driver, so its 21.4K attribution is misleading even though total RSS is accurate.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T23:57:48.833Z"
+}

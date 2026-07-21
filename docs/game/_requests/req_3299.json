@@ -1,0 +1,28 @@
+{
+  "id": "req_3299",
+  "at": "2026-07-20T17:14:08.799Z",
+  "origin": "codex:019f8078",
+  "text": "oknow i see why i was always clicking the wrong thing look here at how bad these are not on the center axis horizontally [Image #1] all the file menus are like this",
+  "status": "review",
+  "sessionId": "019f8078-509a-7670-b5a0-d09df4e7cd8e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T17:14:15.506Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T17:15:18.550Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Centered wide dropdown panels on their chrome-menu trigger instead of left-edge anchoring them; File and early menus clamp to the window gutter only when their centered position would fall off-screen. Added geometry coverage to commands.test.ts; focused suite passes 14/14. Visual verification still needed in the running editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-20T17:15:18.550Z"
+}

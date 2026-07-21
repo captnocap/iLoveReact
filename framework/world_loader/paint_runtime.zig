@@ -9,11 +9,11 @@ const game_physics = @import("../game/physics.zig");
 const map_paint = @import("../game/map/engine.zig");
 const map_chunks = @import("../game/map/chunks.zig");
 const map_transport = @import("../game/map/transport.zig");
+const streaming = @import("../world/streaming.zig");
 const terrain_grid = @import("../gpu/terrain_grid.zig");
 const config = @import("config.zig");
 const paint_surface = @import("paint_surface.zig");
 const paint_revision = @import("paint_revision.zig");
-const paint_residency = @import("paint_residency.zig");
 const transport_render = @import("transport_render.zig");
 const foliage_preview = @import("foliage_preview.zig");
 const Node = layout.Node;
@@ -49,6 +49,8 @@ fn reconcileMapRevision(runtime: anytype) bool {
         if (water_first) |first| runtime.kid_list.items[first + i].scene3d_mesh = false;
         game_physics.unregisterHeightfield(PAINT_COLLIDER_BASE + i);
     }
+    @memset(runtime.paint_detail_resident[0..], false);
+    @memset(runtime.paint_foliage_resident[0..], false);
     if (runtime.paint_foliage_kids_first) |first| {
         for (0..config.PAINT_FOLIAGE_FAMILY_COUNT) |i| {
             const node = &runtime.kid_list.items[first + i];
@@ -60,7 +62,6 @@ fn reconcileMapRevision(runtime: anytype) bool {
     runtime.paint_drop_warned = false;
     runtime.paint_hover = null;
     runtime.paint_stroking = false;
-    runtime.paint_foliage_clipped = false;
     runtime.foliage_want = true;
     runtime.foliage_want_log = false;
     return true;
@@ -236,32 +237,64 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
     } else {
         map_paint.clearPathHover();
     }
-    // Select the bounded live working set by author attention, never document
-    // order. Capture consumer dirtiness for the WHOLE document first: chunks
-    // outside the current render/collider set still feed transport and foliage.
+    // Select the live working set through world/streaming's active bubble.
+    // Physical terrain slots are only a capacity backstop; document order never
+    // decides what exists. Capture whole-document dirtiness first so transport
+    // and the streamed foliage projection observe edits before flags are drained.
     var path_terrain_dirty = map_replaced;
     var foliage_stale = map_replaced;
     const residency_anchor = paintPreviewAnchor(runtime);
-    var resident_meta: [MAX_PAINT_SLOTS]paint_residency.Candidate = undefined;
+    const foliage_radius = streaming.foliageDetailRadius(runtime.stream_radius);
+    var resident_meta: [MAX_PAINT_SLOTS]streaming.NearestCandidate = undefined;
     var resident_chunks: [MAX_PAINT_SLOTS]*map_chunks.Chunk = undefined;
     var resident_mask: [map_chunks.SLOT_COUNT]bool = @splat(false);
     var resident_count: usize = 0;
-    for (map_chunks.slots()) |maybe| {
+    var detail_active_count: usize = 0;
+    var foliage_residency_changed = false;
+    for (map_chunks.slots(), 0..) |maybe, document_slot| {
         const chunk = maybe orelse continue;
         path_terrain_dirty = path_terrain_dirty or chunk.dirty.height;
         foliage_stale = foliage_stale or chunk.dirty.flora or chunk.dirty.height;
+
+        const footprint = streaming.CellFootprint{
+            .min_x = chunk.minX(),
+            .min_z = chunk.minZ(),
+            .size = map_chunks.CHUNK_METERS,
+        };
+        const detail_resident = streaming.updateCellResidency(
+            runtime.paint_detail_resident[document_slot],
+            footprint,
+            residency_anchor[0],
+            residency_anchor[1],
+            runtime.stream_radius,
+        );
+        runtime.paint_detail_resident[document_slot] = detail_resident;
+
+        const foliage_resident = streaming.updateCellResidency(
+            runtime.paint_foliage_resident[document_slot],
+            footprint,
+            residency_anchor[0],
+            residency_anchor[1],
+            foliage_radius,
+        );
+        foliage_residency_changed = foliage_residency_changed or
+            foliage_resident != runtime.paint_foliage_resident[document_slot];
+        runtime.paint_foliage_resident[document_slot] = foliage_resident;
+
+        if (!detail_resident) continue;
+        detail_active_count += 1;
         const center_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS;
         const center_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS;
-        const proposed = paint_residency.candidate(chunk.cx, chunk.cz, center_x, center_z, residency_anchor);
-        if (paint_residency.offer(resident_meta[0..], &resident_count, proposed)) |at| {
+        const proposed = streaming.nearestCandidate(.{ chunk.cx, chunk.cz }, .{ center_x, center_z }, residency_anchor);
+        if (streaming.offerNearest(resident_meta[0..], &resident_count, proposed)) |at| {
             resident_chunks[at] = chunk;
         }
     }
     for (resident_meta[0..resident_count]) |entry| resident_mask[documentSlotIndex(entry.coord)] = true;
-    if (map_chunks.chunkCount() > MAX_PAINT_SLOTS) {
+    if (detail_active_count > MAX_PAINT_SLOTS) {
         if (!runtime.paint_drop_warned) {
             runtime.paint_drop_warned = true;
-            log.print("[paint] {d} document chunks use a {d}-slot nearest-attention residency window; slots recycle as the camera/brush moves\n", .{ map_chunks.chunkCount(), MAX_PAINT_SLOTS });
+            log.print("[paint] streaming bubble has {d} active chunks but only {d} terrain slots; nearest active chunks remain projected\n", .{ detail_active_count, MAX_PAINT_SLOTS });
         }
     } else {
         runtime.paint_drop_warned = false;
@@ -501,19 +534,10 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
     rebuildCommittedTransport(runtime, path_terrain_dirty);
     rebuildTransportPreview(runtime, path_active, path_terrain_dirty);
 
-    // req_2838: when the last regen CLIPPED a family, the preview follows the
-    // author's attention — once the anchor (brush, else camera look) drifts
-    // half a chunk from where the budget was last spent, regrow around the new
-    // spot. Quiet regen (no saturation log) so panning doesn't spam it.
-    var foliage_follow = false;
-    if (!foliage_stale and runtime.paint_foliage_clipped) {
-        const anchor = paintPreviewAnchor(runtime);
-        const dx = anchor[0] - runtime.paint_foliage_anchor[0];
-        const dz = anchor[1] - runtime.paint_foliage_anchor[1];
-        const step = map_chunks.CHUNK_METERS * 0.5;
-        foliage_follow = dx * dx + dz * dz > step * step;
-    }
-    if (foliage_stale or foliage_follow) requestFoliageRegen(runtime, foliage_stale);
+    // Regenerate when authored data changes OR the shared streaming bubble
+    // promotes/demotes a foliage chunk. Hysteresis in world/streaming keeps
+    // camera movement near a boundary from thrashing the worker.
+    if (foliage_stale or foliage_residency_changed) requestFoliageRegen(runtime, foliage_stale);
     // req_2864: apply finished worker regens + feed the worker its next job.
     // The regen itself runs OFF this thread — a paint frame spends microseconds
     // here no matter how much of the world is planted.

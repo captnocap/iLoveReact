@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "primitive:cylinder:14",
+  "name": "Model 14",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cylinder_14",
+  "semanticKind": "cylinder",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": []
+}

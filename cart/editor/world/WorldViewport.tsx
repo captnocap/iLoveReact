@@ -33,6 +33,7 @@ import { faceRoleForHit } from './pieceSlots';
 import { stickerLocalFrom } from './pieceSkins';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import type { MapZoneDef } from '../stage/mapPaint';
+import { mapHeightAt, mapRenderedHeightMax, subscribeMapTerrainChanges } from '../../../runtime/game/map';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
@@ -164,7 +165,10 @@ export default function WorldViewport(props: {
   // The iso pose survives hot reloads through its hot twig (req_2898): every camera
   // push mirrors the pose into hotstate, and a remount seeds the stage from it — a
   // code save no longer yanks the view back to the origin. Cold start = defaults.
-  if (!stageRef.current) stageRef.current = new IsoStage(getHotState(ISO_POSE_TWIG_KEY, { centerX: 0, centerZ: 0 }));
+  if (!stageRef.current) stageRef.current = new IsoStage(
+    getHotState(ISO_POSE_TWIG_KEY, { centerX: 0, centerZ: 0 }),
+    mapHeightAt,
+  );
   const stage = stageRef.current;
   const [snap, setSnap] = useState<Snap | null>(null);
   // The click→drag RUN (req_2747 — drag-place is back): mousedown anchors, the
@@ -294,9 +298,10 @@ export default function WorldViewport(props: {
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
   // Returns whether it landed (the node exists + the door is live).
-  const pushCamera = useCallback((): boolean => {
+  const pushCamera = useCallback((refreshTerrain = true): boolean => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return false;
+    if (refreshTerrain) stage.refreshTerrainElevation();
     const s: any = stage.solve();
     g.__compiled_world_set_camera(nodeId, s.pos[0], s.pos[1], s.pos[2], s.target[0], s.target[1], s.target[2], s.fov);
     setHotState(ISO_POSE_TWIG_KEY, stage.pose); // req_2898: the view survives the next hot reload
@@ -325,14 +330,30 @@ export default function WorldViewport(props: {
   // mount gives boot-time ground + orientation for free. Same retry pattern as
   // the camera boot push above — the doors land a few frames after mount.
   useEffect(() => {
-    if (ensureMapSeeded(props.mapZones, props.mapStem)) return;
+    const seedAndAim = (): boolean => {
+      if (!ensureMapSeeded(props.mapZones, props.mapStem)) return false;
+      // Camera boot runs before map activation on a cold host. Re-solve after
+      // activation so a saved mountain map never keeps the sea-level boot pose.
+      pushCamera();
+      return true;
+    };
+    if (seedAndAim()) return;
     let tries = 0;
     const t = setInterval(() => {
       tries += 1;
-      if (ensureMapSeeded(props.mapZones, props.mapStem) || tries > 120) clearInterval(t);
+      if (seedAndAim() || tries > 120) clearInterval(t);
     }, 32);
     return () => clearInterval(t);
-  }, [props.mapStem, props.mapZones]);
+  }, [props.mapStem, props.mapZones, pushCamera]);
+
+  // Native terrain strokes, history restores, and generated-map installs do
+  // not need React state just to re-aim the camera. The map door publishes one
+  // completion edge; refresh once, then keep solve/project pure and cached.
+  useEffect(() => subscribeMapTerrainChanges(() => {
+    if (!stage.refreshTerrainElevation()) return;
+    pushCamera(false);
+    reprojectOverlays();
+  }), [pushCamera, reprojectOverlays, stage]);
 
   // The active floor moves only the semantic placement/pick plane. Camera pose
   // is independent: choosing a storey must never move the user's view or cross
@@ -483,7 +504,7 @@ export default function WorldViewport(props: {
     if (!gp) return null;
     const prefab = worldPrefabById(prefabsRef.current, armed.pieceId);
     if (prefab) {
-      const pieces = resolvePrefabPlacement(prefab, gp, props.floor, armed.yawDegrees);
+      const pieces = resolvePrefabPlacement(prefab, gp, props.floor, armed.yawDegrees, mapRenderedHeightMax);
       if (pieces.length === 0) return null;
       const anchor = pieces[0]!;
       return { x: anchor.x, y: anchor.y, z: anchor.z, pieceId: prefab.id, yaw: armed.yawDegrees, floor: props.floor, pieces };
@@ -491,7 +512,16 @@ export default function WorldViewport(props: {
     // The floor INDEX threads through whole (req_2676): resolvePlacement records
     // it on the piece so the storey cutaway never re-derives storey from a y that
     // now carries the terrain base too (a mesa-top Ground piece is storey 0).
-    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY, propLiftRef.current, armed.yawDegrees);
+    const placed = resolvePlacement(
+      armed.pieceId,
+      gp.x,
+      gp.z,
+      props.floor,
+      gp.terrainY,
+      propLiftRef.current,
+      armed.yawDegrees,
+      mapRenderedHeightMax,
+    );
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
   }, [groundUnder, props.floor]);
 
@@ -777,6 +807,7 @@ export default function WorldViewport(props: {
             d.move.piece.x + (gp.x - d.move.anchorX),
             d.move.piece.z + (gp.z - d.move.anchorZ),
             gp.terrainY,
+            mapRenderedHeightMax,
           );
           if (!samePieceTransform(d.move.target, target)) {
             d.move.target = target;
@@ -796,9 +827,9 @@ export default function WorldViewport(props: {
           const cellZ = Math.floor(gp.z / PIECE_MODULE_METERS);
           if (runRef.current && d.runCell && d.runCell.x === cellX && d.runCell.z === cellZ) return;
           d.runCell = { x: cellX, z: cellZ };
-          // The run stays LEVEL at the anchor's terrain height (resolveRunPlacements)
-          // — only the anchor ever sampled the ground, so a run across a slope is
-          // one flat wall/plate, not a stairstep.
+          // One native rectangle query chooses the highest RENDERED terrain
+          // point under the complete run. The run stays one level foundation
+          // plane without letting an uphill patch swallow its 5 cm floor slabs.
           const pieces = resolveRunPlacements(
             armed.pieceId,
             d.runAnchor.x,
@@ -808,6 +839,7 @@ export default function WorldViewport(props: {
             props.floor,
             d.runAnchor.terrainY,
             armed.yawDegrees,
+            mapRenderedHeightMax,
           );
           runRef.current = pieces;
           setRun(pieces);
@@ -835,6 +867,7 @@ export default function WorldViewport(props: {
         d.move.piece.x + (moveGround.x - d.move.anchorX),
         d.move.piece.z + (moveGround.z - d.move.anchorZ),
         moveGround.terrainY,
+        mapRenderedHeightMax,
       )
       : null;
     setMovePreview(null);

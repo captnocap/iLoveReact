@@ -1,0 +1,28 @@
+{
+  "id": "req_3215",
+  "at": "2026-07-19T02:35:36.731Z",
+  "origin": "codex:019f744e",
+  "text": "Uh so is the dev binary updated ? i restarted it and it didnt run any rebuild but im still getting blasted for memory 4gb for the world map total, technically empty if you want me to be honest so thats not a good sign, still i am getting all the foilage to unload at once its taking looks like just under 3gb total alone when i can again only see like this [Image #1]",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:36:47.431Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:08:13.405Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the actual ReleaseFast reactjit-dev artifact and corrected the memory path: live foliage now expands only the streaming-resident chunk bubble, retained GPU uploads stage populated prefixes instead of uninitialized capacity rows, and the diagnostics no longer add RSS and GPU pools into one misleading World total.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T03:08:13.404Z"
+}

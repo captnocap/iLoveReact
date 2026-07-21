@@ -1,0 +1,30 @@
+{
+  "id": "req_3235",
+  "at": "2026-07-19T16:43:31.910Z",
+  "origin": "codex:019f7a9c",
+  "text": "right but how did it happen. paint 'technnically' cant open without saving a mesh first, so how does it end up saving to no parts after the fact",
+  "status": "review",
+  "sessionId": "019f7a9c-0444-77f1-8183-d5976df0d39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T16:43:51.339Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T16:46:34.735Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the incident diagnosis: the first-save Paint gate was not a durability guarantee because editable geometry/ranges and Outliner names were stored separately. A later metadata-less artifact write could replace doc.blob with zero ranges while leaving the 15-row parts.json intact; cold reload then synthesized one whole-mesh range and paired it with Cube 1, and autosave persisted that collapsed one-row projection. Confirmed against Heroin_Bob_head's pre-collapse 15-row metadata, zero-range RJMD header, same-timestamp atlas/painted artifacts, and the old writeModelArtifacts/writeMeshDoc call graph. The already-landed 9d584fd65 prevention separates paint-only persistence from meshdoc writes, requires exact range/row equality at both TS and native boundaries, and forbids part-count shrink without an explicit structural edit capability.",
+  "shas": [
+    "9d584fd65"
+  ],
+  "resolvedAt": "2026-07-19T16:46:34.735Z"
+}

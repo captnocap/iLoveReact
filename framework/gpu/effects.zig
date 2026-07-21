@@ -750,6 +750,7 @@ fn getOrCreatePipeline(io: std.Io, environ: *const std.process.Environ.Map, devi
 
     var progress = CompileProgress{};
     progress.start(io, environ, wgsl.len);
+    defer progress.finishMemory();
     defer progress.stop();
 
     const module_desc = wgpu.shaderModuleWGSLDescriptor(.{

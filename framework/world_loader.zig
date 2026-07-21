@@ -60,7 +60,8 @@ pub fn setPlayerLivePose(node_id: u32, bytes: []const u8) void {
 pub fn clearPlayerLivePose(node_id: u32) void {
     player_assets.clearPlayerLivePose(node_id);
 }
-pub const Runtime = @import("world_loader/runtime.zig").Runtime;
+const runtime_mod = @import("world_loader/runtime.zig");
+pub const Runtime = runtime_mod.Runtime;
 const runtime_lifecycle = @import("world_loader/runtime_lifecycle.zig");
 const runtime_live_scene = @import("world_loader/runtime_live_scene.zig");
 const runtime_stream = @import("world_loader/runtime_stream.zig");
@@ -72,6 +73,21 @@ const MountedLoader = struct {
 };
 
 var g_mounted_loaders: [MAX_EMBEDDED_LOADERS]MountedLoader = [_]MountedLoader{.{}} ** MAX_EMBEDDED_LOADERS;
+
+pub const MapMemoryStats = runtime_mod.MapMemoryStats;
+
+/// Aggregate every mounted loader's Map Paint projection without allocating.
+/// Called by the telemetry door on the same frame thread that mounts/unmounts
+/// runtimes; the foliage worker contributes only through per-set atomics.
+pub fn mapMemoryStats() MapMemoryStats {
+    var stats: MapMemoryStats = .{};
+    for (&g_mounted_loaders) |*entry| {
+        if (!entry.active) continue;
+        const runtime = entry.runtime orelse continue;
+        stats.add(runtime.mapMemoryStats());
+    }
+    return stats;
+}
 
 const live_inputs = @import("world_loader/live_inputs.zig");
 pub const PHYSICS_CONFIG_FLOATS = live_inputs.PHYSICS_CONFIG_FLOATS;

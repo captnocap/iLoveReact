@@ -1,0 +1,28 @@
+{
+  "id": "req_3217",
+  "at": "2026-07-19T02:51:32.713Z",
+  "origin": "codex:019f744e",
+  "text": "my machine panicked from a faulty usb drive and this got cut off",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:51:42.057Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:08:13.409Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recovered the interrupted workspace after the machine panic, audited which GPU-prefix edits had landed, completed the streaming integration without restarting the investigation, reran the full Zig 0.16 editor gate, and rebuilt both editor and reactjit-dev ReleaseFast binaries.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T03:08:13.409Z"
+}

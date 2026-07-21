@@ -9,6 +9,7 @@
 //   tools/v8cli /tmp/editor-pieces.test.js
 
 import { setAuthoredPieces } from './authoredRegistry';
+import { cacheAuthoredMesh } from './authoredMesh';
 import { resolveMovedPlacement, resolvePlacement, resolveRunPlacements, retainPieceSequence, supportsRunPlacement, visibleStoreyPieces, type PlacedPiece } from './pieces';
 
 let passed = 0, failed = 0;
@@ -22,8 +23,28 @@ function assert(c: boolean, m: string) { if (!c) throw new Error(m); }
 setAuthoredPieces([
   { id: 'model:exported-wall', modelId: 'exported-wall', pkgId: 'studio:wall', label: 'Exported Wall', kind: 'wall', hex: '#888888' },
   { id: 'model:exported-floor', modelId: 'exported-floor', pkgId: 'studio:floor', label: 'Exported Floor', kind: 'floor', hex: '#777777' },
+  { id: 'model:offset-floor', modelId: 'offset-floor', pkgId: 'studio:offset-floor', label: 'Offset Floor', kind: 'floor', hex: '#777777' },
+  { id: 'model:missing-floor', modelId: 'missing-floor', pkgId: 'studio:missing-floor', label: 'Missing Floor', kind: 'floor', hex: '#777777' },
   { id: 'prop:exported-chair', modelId: 'exported-chair', pkgId: 'studio:chair', label: 'Exported Chair', kind: 'prop', hex: '#666666' },
 ]);
+cacheAuthoredMesh('exported-floor', new Float32Array([
+  -1.5, 0, -1.5, 0, 0, 0, 0, 0,
+  1.5, 0, -1.5, 0, 0, 0, 0, 0,
+  -1.5, 0, 1.5, 0, 0, 0, 0, 0,
+  1.5, 0, 1.5, 0, 0, 0, 0, 0,
+]));
+cacheAuthoredMesh('exported-wall', new Float32Array([
+  -1.5, 0, -0.01, 0, 0, 0, 0, 0,
+  1.5, 0, -0.01, 0, 0, 0, 0, 0,
+  -1.5, 3, 0.01, 0, 0, 0, 0, 0,
+  1.5, 3, 0.01, 0, 0, 0, 0, 0,
+]));
+cacheAuthoredMesh('offset-floor', new Float32Array([
+  0, 0, 0, 0, 0, 0, 0, 0,
+  6, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 3, 0, 0, 0, 0, 0,
+  6, 0, 3, 0, 0, 0, 0, 0,
+]));
 
 test('exported wall inherits wall drag-run placement', () => {
   assert(supportsRunPlacement('model:exported-wall'), 'exported wall is runnable');
@@ -38,6 +59,78 @@ test('exported floor inherits rectangular area placement', () => {
   const run = resolveRunPlacements('model:exported-floor', 1.5, 1.5, 7.5, 4.5, 0);
   assert(run.length === 6, `3×2 floor area placed, got ${run.length}`);
   assert(run.every((piece) => piece.pieceId === 'model:exported-floor'), 'every cell keeps the exported piece id');
+});
+
+test('floor run clears the highest rendered terrain under its complete footprint', () => {
+  let queried: readonly number[] | null = null;
+  let calls = 0;
+  const run = resolveRunPlacements(
+    'model:exported-floor',
+    1.5,
+    1.5,
+    7.5,
+    4.5,
+    0,
+    1.25,
+    0,
+    (minX, minZ, maxX, maxZ) => {
+      calls += 1;
+      queried = [minX, minZ, maxX, maxZ];
+      return 2.75;
+    },
+  );
+  assert(calls === 1, `terrain maximum crossed the boundary ${calls} times instead of once`);
+  assert(JSON.stringify(queried) === JSON.stringify([0, 0, 9, 6]), `wrong foundation footprint ${JSON.stringify(queried)}`);
+  assert(run.every((piece) => piece.y === 2.75), 'level run did not clear its highest rendered ground point');
+});
+
+test('single floor click clears its snapped footprint and preserves its storey', () => {
+  let queried: readonly number[] | null = null;
+  const placed = resolvePlacement(
+    'model:exported-floor',
+    1.2,
+    1.4,
+    2,
+    1.25,
+    0,
+    0,
+    (minX, minZ, maxX, maxZ) => {
+      queried = [minX, minZ, maxX, maxZ];
+      return 2.75;
+    },
+  );
+  assert(JSON.stringify(queried) === JSON.stringify([0, 0, 3, 3]), `wrong click footprint ${JSON.stringify(queried)}`);
+  assert(placed?.y === 8.75, `footprint terrain did not retain the 6m storey offset, got ${placed?.y}`);
+});
+
+test('rotated authored floor queries its asymmetric mesh-space footprint', () => {
+  let queried: readonly number[] | null = null;
+  const placed = resolvePlacement(
+    'model:offset-floor',
+    1.5,
+    1.5,
+    0,
+    0,
+    0,
+    90,
+    (minX, minZ, maxX, maxZ) => {
+      queried = [minX, minZ, maxX, maxZ];
+      return 4;
+    },
+  );
+  const expected = [1.5, -4.5, 4.5, 1.5];
+  assert(!!queried && queried.every((value, index) => Math.abs(value - expected[index]!) < 1e-9), `wrong asymmetric footprint ${JSON.stringify(queried)}`);
+  assert(placed?.y === 4, `asymmetric floor did not clear its footprint, got ${placed?.y}`);
+});
+
+test('authored floor without real bounds is refused instead of guessed at 3m', () => {
+  let terrainQueries = 0;
+  const placed = resolvePlacement('model:missing-floor', 1.5, 1.5, 0, 0, 0, 0, () => {
+    terrainQueries += 1;
+    return 4;
+  });
+  assert(placed === null, 'unbounded authored floor was allowed to bypass terrain-safe placement');
+  assert(terrainQueries === 0, 'unbounded authored floor issued a knowingly incomplete terrain query');
 });
 
 test('exported prop remains a single free placement', () => {
@@ -75,6 +168,14 @@ test('move preserves instance identity and authored data while snapping its tran
   assert(moved!.x === 6 && moved!.z === 7.5, `yaw-90 wall stays on its vertical edge family, got (${moved!.x},${moved!.z})`);
   assert(moved!.yawDegrees === 90, 'move preserves yaw');
   assert(moved!.slots === source.slots && moved!.overrides === source.overrides, 'move preserves instance slots and overrides');
+
+  let terrainQueries = 0;
+  const lifted = resolveMovedPlacement(source, 7.2, 8.2, 2, () => {
+    terrainQueries += 1;
+    return 4.5;
+  });
+  assert(terrainQueries === 1, `move queried terrain ${terrainQueries} times`);
+  assert(lifted?.y === 7.5, `move did not preserve storey above footprint maximum, got ${lifted?.y}`);
 });
 
 test('an unchanged storey cutaway preserves the live-world list identity', () => {

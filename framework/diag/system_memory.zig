@@ -7,6 +7,61 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// glibc's allocator-wide counters. These include allocations made through
+/// libc by Zig, V8, wgpu, Mesa, and any other linked native library; they are
+/// therefore an overlapping process view, not a subsystem total that may be
+/// blindly added to the owner counters below. Linux/glibc is the editor's
+/// current host target. Other targets return zeroes without referencing the
+/// glibc-only symbols.
+pub const AllocatorSnapshot = struct {
+    arena_bytes: u64 = 0,
+    mmap_bytes: u64 = 0,
+    in_use_bytes: u64 = 0,
+    free_bytes: u64 = 0,
+    releasable_bytes: u64 = 0,
+};
+
+const MallInfo2 = extern struct {
+    arena: usize,
+    ordblks: usize,
+    smblks: usize,
+    hblks: usize,
+    hblkhd: usize,
+    usmblks: usize,
+    fsmblks: usize,
+    uordblks: usize,
+    fordblks: usize,
+    keepcost: usize,
+};
+
+extern fn mallinfo2() callconv(.c) MallInfo2;
+extern fn malloc_trim(pad: usize) callconv(.c) c_int;
+
+fn hasGlibcAllocatorApi() bool {
+    return builtin.os.tag == .linux and builtin.target.abi.isGnu();
+}
+
+pub fn readAllocatorSnapshot() AllocatorSnapshot {
+    if (comptime !hasGlibcAllocatorApi()) return .{};
+    const m = mallinfo2();
+    return .{
+        .arena_bytes = m.arena,
+        .mmap_bytes = m.hblkhd,
+        .in_use_bytes = @as(u64, m.uordblks) + m.hblkhd,
+        .free_bytes = m.fordblks,
+        .releasable_bytes = m.keepcost,
+    };
+}
+
+/// Ask glibc to return every currently-free top page to the OS. This is kept at
+/// the narrow platform boundary because Zig's allocator interface has no
+/// process-wide equivalent. Shader compilation calls it only after releasing
+/// temporary shader modules/layouts; it never runs on the frame hot path.
+pub fn trimAllocator() bool {
+    if (comptime !hasGlibcAllocatorApi()) return false;
+    return malloc_trim(0) != 0;
+}
+
 pub const ProcStatus = struct {
     rss_bytes: u64 = 0,
     rss_peak_bytes: u64 = 0,
@@ -27,6 +82,63 @@ pub const MemInfo = struct {
     total_bytes: u64 = 0,
     available_bytes: u64 = 0,
 };
+
+/// A disjoint kernel-VMA partition. Every mapping's `Rss:` value lands in
+/// exactly one bucket, so `total_bytes` is an actual sum rather than a set of
+/// overlapping allocator estimates.
+pub const MappingRss = struct {
+    heap_bytes: u64 = 0,
+    anonymous_bytes: u64 = 0,
+    file_bytes: u64 = 0,
+    stack_bytes: u64 = 0,
+    special_bytes: u64 = 0,
+    total_bytes: u64 = 0,
+    mapping_count: u32 = 0,
+    complete: bool = false,
+};
+
+const MappingKind = enum { heap, anonymous, file, stack, special };
+
+fn smapsHeaderKind(line: []const u8) ?MappingKind {
+    var fields = std.mem.tokenizeScalar(u8, line, ' ');
+    const address = fields.next() orelse return null;
+    if (std.mem.indexOfScalar(u8, address, '-') == null) return null;
+    _ = fields.next() orelse return null; // permissions
+    _ = fields.next() orelse return null; // offset
+    _ = fields.next() orelse return null; // device
+    _ = fields.next() orelse return null; // inode
+    const name = fields.next() orelse return .anonymous;
+    if (std.mem.eql(u8, name, "[heap]")) return .heap;
+    if (std.mem.startsWith(u8, name, "[stack")) return .stack;
+    if (std.mem.startsWith(u8, name, "[anon:")) return .anonymous;
+    if (name[0] == '[') return .special;
+    return .file;
+}
+
+pub fn parseSmaps(text: []const u8) MappingRss {
+    var out = MappingRss{ .complete = true };
+    var current: ?MappingKind = null;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (smapsHeaderKind(line)) |kind| {
+            current = kind;
+            out.mapping_count += 1;
+            continue;
+        }
+        if (!std.mem.startsWith(u8, line, "Rss:")) continue;
+        const bytes = parseFirstU64(line) * 1024;
+        switch (current orelse continue) {
+            .heap => out.heap_bytes += bytes,
+            .anonymous => out.anonymous_bytes += bytes,
+            .file => out.file_bytes += bytes,
+            .stack => out.stack_bytes += bytes,
+            .special => out.special_bytes += bytes,
+        }
+        out.total_bytes += bytes;
+    }
+    if (out.mapping_count == 0) out.complete = false;
+    return out;
+}
 
 pub const Snapshot = struct {
     process_rss_bytes: u64 = 0,
@@ -143,4 +255,18 @@ pub fn readSnapshot(io: std.Io) Snapshot {
         .total_bytes = meminfo.total_bytes,
         .available_bytes = meminfo.available_bytes,
     };
+}
+
+/// Detailed `/proc/self/smaps` ownership is intentionally separate from
+/// readSnapshot: shader compilation samples the lightweight status file every
+/// 200 ms, while this larger mapping walk is only requested by the ~1 Hz memory
+/// diagnostics door.
+pub fn readMappingRss(io: std.Io) MappingRss {
+    if (comptime builtin.os.tag != .linux) return .{};
+    var file = std.Io.Dir.openFileAbsolute(io, "/proc/self/smaps", .{}) catch return .{};
+    defer file.close(io);
+    var buf: [512 * 1024]u8 = undefined;
+    const n = file.readPositionalAll(io, &buf, 0) catch return .{};
+    if (n == buf.len) return .{}; // never present a truncated partition as exact
+    return parseSmaps(buf[0..n]);
 }

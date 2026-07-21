@@ -305,14 +305,20 @@ fn bandFloor(raw: f32) f32 {
     return if (std.math.isFinite(raw)) raw else -1000000;
 }
 
+/// Whether a collider has a real underside. Thin walkable floors carry a finite
+/// band even when their `solid` flag is false (that flag controls player SIDE
+/// push); unbounded ground/walls use the wire sentinel instead.
+fn hasFiniteUnderside(raw_floor: f32) bool {
+    return std.math.isFinite(raw_floor) and raw_floor > SOLID_TO_GROUND_FLOOR_METERS;
+}
+
 /// Player collision and camera occlusion have different meanings for the rect
 /// `solid` flag. A thin floor is non-solid so its sides do not push the player,
 /// but its finite vertical band must still stop a camera passing through it.
 /// Unbounded non-solid ground rows stay out of the spring-arm query; terrain has
 /// its own heightfield occlusion path.
 fn blocksCamera(blocks_player: f32, raw_floor: f32) bool {
-    return blocks_player > 0.5 or
-        (std.math.isFinite(raw_floor) and raw_floor > SOLID_TO_GROUND_FLOOR_METERS);
+    return blocks_player > 0.5 or hasFiniteUnderside(raw_floor);
 }
 
 /// Upload/replace a terrain grid by id. Called once when a landform loads
@@ -1476,11 +1482,13 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
     }
 }
 
-/// The lowest solid-rect underside the player's head would punch through this
+/// The lowest collider underside the player's head would punch through this
 /// frame: a finite-floor band whose underside (rect_floor) sits ABOVE the feet
 /// but BELOW the head, with the body column inside the footprint. Returns a huge
 /// sentinel when the head is clear. Walls (floor = −∞) have no underside and are
 /// skipped — they belong to the horizontal side-push, not the vertical bonk.
+/// A floor's `solid` flag is deliberately irrelevant here: live walkable slabs
+/// disable side-push but remain real ceilings when approached from below.
 /// Used for the ceiling head-bonk: a ceiling is just a surface whose normal
 /// points down, so the response removes only the INTO-surface (upward) velocity
 /// and leaves horizontal momentum intact (Source-style — skim a low hallway at
@@ -1489,9 +1497,8 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     var lowest: f32 = 1e30;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
-        if (rects[at + 5] <= 0.5) continue; // solid only
         const rf = rects[at + 8];
-        if (rf <= -100000) continue; // wall: no underside
+        if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue; // underside not between feet and head
         if (x + radius < rects[at] or x - radius > rects[at + 2]) continue;
         if (z + radius < rects[at + 1] or z - radius > rects[at + 3]) continue;
@@ -1499,9 +1506,8 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     }
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
-        if (oriented[o + 5] <= 0.5) continue;
         const rf = oriented[o + 8];
-        if (rf <= -100000) continue;
+        if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue;
         const cs = @cos(oriented[o + 11]);
         const sn = @sin(oriented[o + 11]);

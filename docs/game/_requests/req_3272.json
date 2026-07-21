@@ -1,0 +1,36 @@
+{
+  "id": "req_3272",
+  "at": "2026-07-20T07:45:16.889Z",
+  "origin": "codex:019f7e48",
+  "text": "also when it comes to updating values like brush size, i dont want to have to even think about doing a select all to clear out the current value, i just wanto to click into it and immediately type a number and press enter and it updates for me properly",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T07:45:23.022Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T08:07:20.126Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "BrushScalar now arms replacement on every click, isolates the first inserted text regardless of cursor position, and commits/clamps the submitted value on Enter through a pure tested boundary."
+    },
+    {
+      "at": "2026-07-20T08:09:10.474Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed brush numeric fields to replacement-first editing: one click arms the visible value, the first typed character replaces the complete value even when a unit suffix or middle cursor position is present, and Enter parses and clamps the result. Pure boundary tests cover replacement, invalid input, negative values, and range limits.",
+  "shas": [
+    "134e440a6"
+  ],
+  "resolvedAt": "2026-07-20T08:09:10.474Z"
+}

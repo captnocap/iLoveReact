@@ -1,0 +1,30 @@
+{
+  "id": "req_3277",
+  "at": "2026-07-20T08:34:08.756Z",
+  "origin": "codex:019f768a",
+  "text": "nice can u throw together a quick html file to show what you plan to do for a wiki layout so we are on the same page before we go in",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-20T08:34:18.384Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-20T08:41:20.026Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Created a self-contained interactive HTML layout mock for the wiki-first World Bible inside the current Shitty Games editor chrome. It demonstrates two-pane wiki navigation, search and linked entity pages; standard page infoboxes and backlinks; partial entities and intentional absence of automatic platform presences; Read/Edit modes; visible disk-versus-draft ownership; semantic and exact-text review; and a simulated formal Write to Disk confirmation. The file uses no external assets or dependencies and can be opened directly in a browser.",
+  "shas": [
+    "8b30d0764"
+  ],
+  "resolvedAt": "2026-07-20T08:41:20.026Z"
+}

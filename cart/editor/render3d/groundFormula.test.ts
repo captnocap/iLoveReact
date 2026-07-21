@@ -43,6 +43,8 @@ test('committed roads render as continuous curve ribbons over the gameplay raste
   assert(EDITOR_GROUND_FORMULA.includes('max(fullMask - roadMask, 0.0)'), 'sidewalk/road union priority is missing');
   assert(EDITOR_GROUND_FORMULA.includes('road_apply_ribbon_markings('), 'analytic Road catalog markings are not applied');
   assert(EDITOR_GROUND_FORMULA.includes('semanticKind =='), 'junction/crosswalk raster policy was discarded');
+  assert(EDITOR_GROUND_FORMULA.includes('let crosswalkAlongM = select(p.y, p.x, (roadMark & 1) != 0)'), 'crosswalk phase no longer follows its semantic leg axis');
+  assert(EDITOR_GROUND_FORMULA.includes('bestRoadAlong, crosswalkAlongM'), 'crosswalk phase can switch to the nearest crossing ribbon');
 });
 
 test('Road catalog variants name the yellow, white, and plain authored takes', () => {

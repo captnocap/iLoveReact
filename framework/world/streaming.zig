@@ -23,6 +23,108 @@ const std = @import("std");
 /// A contiguous run of instance rows within one family's sorted row array.
 pub const Range = struct { first: u32 = 0, count: u32 = 0 };
 
+/// The one residency tuning table shared by baked-world streaming and live
+/// Map Paint projections. A family may use a smaller promotion radius, but it
+/// must still use the same cell-footprint test and demotion hysteresis.
+pub const ResidencyTuning = struct {
+    demote_radius_factor: f32,
+    content_height_radius_per_meter: f32,
+    foliage_radius_factor: f32,
+};
+
+pub const RESIDENCY_TUNING = ResidencyTuning{
+    .demote_radius_factor = 1.15,
+    .content_height_radius_per_meter = 6.0,
+    .foliage_radius_factor = 0.5,
+};
+
+/// One square world cell expressed by its minimum XZ corner and side length.
+/// This is deliberately independent of `World`: sparse authoring projections
+/// can consume the same residency law without first expanding rows or building
+/// a second streaming world.
+pub const CellFootprint = struct {
+    min_x: f32,
+    min_z: f32,
+    size: f32,
+};
+
+/// Squared XZ distance from a point to a cell's footprint. A point inside or
+/// on the edge has distance zero, so adjacent cells promote before a visible
+/// seam crosses the anchor.
+pub fn cellFootprintDistanceSquared(cell: CellFootprint, x: f32, z: f32) f32 {
+    const max_x = cell.min_x + cell.size;
+    const max_z = cell.min_z + cell.size;
+    const dx = @max(0, @max(cell.min_x - x, x - max_x));
+    const dz = @max(0, @max(cell.min_z - z, z - max_z));
+    return dx * dx + dz * dz;
+}
+
+/// Apply the streaming promotion/demotion law to one cell. Promotion is
+/// immediate inside `promote_radius`; an already-resident cell stays resident
+/// until it passes the hysteretic demotion radius.
+pub fn updateCellResidency(was_resident: bool, cell: CellFootprint, x: f32, z: f32, promote_radius: f32) bool {
+    const promote = @max(0, promote_radius);
+    const distance_sq = cellFootprintDistanceSquared(cell, x, z);
+    if (distance_sq <= promote * promote) return true;
+    const demote = promote * RESIDENCY_TUNING.demote_radius_factor;
+    if (distance_sq > demote * demote) return false;
+    return was_resident;
+}
+
+/// Foliage is the short-detail family of the shared stream, not a separate
+/// residency system. It uses the same law with the tuned smaller radius.
+pub fn foliageDetailRadius(detail_radius: f32) f32 {
+    return @max(0, detail_radius) * RESIDENCY_TUNING.foliage_radius_factor;
+}
+
+/// Capacity arbitration for a fixed physical-slot pool after the active bubble
+/// has been selected. This is not a second residency policy: it deterministically
+/// keeps the nearest active cells only if a caller's physical pool is exhausted.
+pub const NearestCandidate = struct {
+    coord: [2]i32,
+    distance_sq: f32,
+};
+
+fn candidateNearer(a: NearestCandidate, b: NearestCandidate) bool {
+    if (a.distance_sq != b.distance_sq) return a.distance_sq < b.distance_sq;
+    if (a.coord[1] != b.coord[1]) return a.coord[1] < b.coord[1];
+    return a.coord[0] < b.coord[0];
+}
+
+pub fn nearestCandidate(coord: [2]i32, center: [2]f32, anchor: [2]f32) NearestCandidate {
+    const dx = center[0] - anchor[0];
+    const dz = center[1] - anchor[1];
+    return .{ .coord = coord, .distance_sq = dx * dx + dz * dz };
+}
+
+/// Offer one active cell to a bounded nearest set. Returns the parallel-slot
+/// index the caller should write, or null when the incoming cell lies outside
+/// the fixed-capacity fallback set.
+pub fn offerNearest(slots: []NearestCandidate, count: *usize, incoming: NearestCandidate) ?usize {
+    if (slots.len == 0) return null;
+    if (count.* < slots.len) {
+        const at = count.*;
+        slots[at] = incoming;
+        count.* += 1;
+        return at;
+    }
+
+    var farthest: usize = 0;
+    for (slots[1..], 1..) |entry, i| {
+        if (candidateNearer(slots[farthest], entry)) farthest = i;
+    }
+    if (!candidateNearer(incoming, slots[farthest])) return null;
+    slots[farthest] = incoming;
+    return farthest;
+}
+
+pub fn nearestSetContains(slots: []const NearestCandidate, coord: [2]i32) bool {
+    for (slots) |entry| {
+        if (entry.coord[0] == coord[0] and entry.coord[1] == coord[1]) return true;
+    }
+    return false;
+}
+
 /// One packed instance-row batch as the loader draws it. Stride ≥ 9:
 /// pos3 [+rot3 when stride ≥ 12] scale3 color3 [+shape id at 12].
 /// `draw_radius` (meters, 0 = unlimited) is a per-family view-distance: short
@@ -75,15 +177,11 @@ pub const BuildStats = struct {
     lod_truncated_chunks: u32 = 0,
 };
 
-// Demotion radius = promotion radius × this (V30: promotion instant, demotion
-// hysteretic) so a player skirting the boundary doesn't thrash chunk residency.
-const DEMOTE_FACTOR: f32 = 1.15;
 // Per-model draw distance, the era's actual rule: a chunk holding H meters of
 // content promotes at max(detail_radius, H × this) — an 80m tower wears its
 // materials from ~480m out, while props keep the base bubble. The user-caught
 // failure (req_0537): a huge textured face going flat at a distance where you
 // can still read every brick.
-pub const PROMOTE_PER_HEIGHT_METER: f32 = 6.0;
 // Minimum row heights the far shell may keep, smallest rung first. The shell
 // copies REAL rows verbatim (no merging — merged union boxes invented phantom
 // buildings in gaps and swallowed recessed faces, req_0537), so the only
@@ -163,7 +261,8 @@ pub const World = struct {
     }
 
     /// Detail residency around the player: promote any occupied chunk whose
-    /// footprint touches its effective radius, demote only past × DEMOTE_FACTOR.
+    /// footprint touches its effective radius, demote only past the tuning
+    /// table's hysteretic radius.
     /// The effective radius grows with the chunk's content height (per-model
     /// draw distance): tall textured buildings promote from far away, props
     /// keep the base bubble.
@@ -175,27 +274,25 @@ pub const World = struct {
         while (i < n) : (i += 1) {
             if (!self.occupied[i]) continue;
             const content_height = self.bounds_max[i][1] - self.bounds_min[i][1];
-            const promote = @max(radius, content_height * PROMOTE_PER_HEIGHT_METER);
-            const demote = promote * DEMOTE_FACTOR;
-            const d2 = self.chunkDist2(i, player_x, player_z);
-            if (d2 <= promote * promote) {
-                self.resident[i] = true;
-            } else if (d2 > demote * demote) {
-                self.resident[i] = false;
-            }
+            const promote = @max(radius, content_height * RESIDENCY_TUNING.content_height_radius_per_meter);
+            self.resident[i] = updateCellResidency(self.resident[i], self.chunkFootprint(i), player_x, player_z, promote);
         }
+    }
+
+    fn chunkFootprint(self: *const World, chunk: usize) CellFootprint {
+        const cx = chunk % @as(usize, self.cols);
+        const cz = chunk / @as(usize, self.cols);
+        return .{
+            .min_x = self.min_x + @as(f32, @floatFromInt(cx)) * self.cell,
+            .min_z = self.min_z + @as(f32, @floatFromInt(cz)) * self.cell,
+            .size = self.cell,
+        };
     }
 
     /// Squared XZ distance from a point to the chunk's CELL footprint (cheap,
     /// stable — residency shouldn't depend on how tall a chunk's contents are).
     fn chunkDist2(self: *const World, chunk: usize, x: f32, z: f32) f32 {
-        const cx = chunk % @as(usize, self.cols);
-        const cz = chunk / @as(usize, self.cols);
-        const lo_x = self.min_x + @as(f32, @floatFromInt(cx)) * self.cell;
-        const lo_z = self.min_z + @as(f32, @floatFromInt(cz)) * self.cell;
-        const dx = @max(0, @max(lo_x - x, x - (lo_x + self.cell)));
-        const dz = @max(0, @max(lo_z - z, z - (lo_z + self.cell)));
-        return dx * dx + dz * dz;
+        return cellFootprintDistanceSquared(self.chunkFootprint(chunk), x, z);
     }
 
     /// Assemble this frame's draw list: every family's always-prefix, detail

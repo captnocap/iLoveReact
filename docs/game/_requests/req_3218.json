@@ -1,0 +1,28 @@
+{
+  "id": "req_3218",
+  "at": "2026-07-19T03:10:51.554Z",
+  "origin": "codex:019f768a",
+  "text": "we want it to behave something to this effect [Image #1]",
+  "status": "review",
+  "sessionId": "019f768a-b35b-7c81-820d-0a5e0d039102",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T03:11:05.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:11:31.490Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Refined the compiled-layout and prepared-text proposal around the supplied behavioral target: a continuously rendered game world with simultaneous wall-terminal, personal-phone, and optional status-HUD surfaces. Each surface is a subscriber to a retained document channel with independent dirty cadence, shared compiled dictionaries, UV-to-document input routing, and record/event-driven cross-surface updates. No implementation files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T03:11:31.490Z"
+}

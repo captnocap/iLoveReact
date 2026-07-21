@@ -1,0 +1,28 @@
+{
+  "id": "req_3216",
+  "at": "2026-07-19T02:38:35.627Z",
+  "origin": "codex:019f744e",
+  "text": "yes that is in part why we have framework/world/streaming.zig should handle all of that",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-19T02:39:06.550Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-19T03:08:13.415Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made framework/world/streaming.zig the direct residency authority for both baked and live-painted worlds. Painted terrain and foliage use its footprint radius and demotion hysteresis, the duplicate paint_residency module was removed, and registered unit coverage proves 21 terrain chunks versus 9 foliage chunks at default tuning.",
+  "shas": [],
+  "resolvedAt": "2026-07-19T03:08:13.415Z"
+}

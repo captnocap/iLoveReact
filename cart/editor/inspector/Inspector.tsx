@@ -234,6 +234,8 @@ export default function Inspector(props: {
   onResetGlobal: (field: string) => void;
   colorSpine: ColorSpineHandlers;
   outlinerHandlers: OutlinerHandlers;
+  stagePartFocusEnabled: boolean;
+  onToggleStagePartFocus: () => void;
   // The outliner multi-select set (req_2659) — row highlights + the UV '+N' header.
   // AppFrame owns it (shell-local, not EditorState); primary stays modelActivePartId.
   selectedPartIds: string[];
@@ -397,6 +399,8 @@ export default function Inspector(props: {
                     parts={modelParts}
                     activeId={props.state.modelActivePartId}
                     selectedIds={selectedSet}
+                    stageFocusEnabled={props.stagePartFocusEnabled}
+                    onToggleStageFocus={props.onToggleStagePartFocus}
                     onSelect={props.outlinerHandlers.onSelectPart}
                     onRename={props.outlinerHandlers.onRenamePart}
                     onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
