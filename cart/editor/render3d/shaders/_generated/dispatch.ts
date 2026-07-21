@@ -287,11 +287,13 @@ fn surface_blend(kind: i32, base: vec3f, over: vec3f, f: f32) -> vec3f {
   return blend_over(base, over, f);
 }
 
+var<private> mat_data_base: u32 = 0u;
+
 fn mat_pal(i: i32, baked: vec3f) -> vec3f {
-  if (arrayLength(&D) < 7u) { return baked; }
-  let n = i32(D[5] + 0.5);
+  if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
+  let n = i32(D[mat_data_base + 5u] + 0.5);
   if (i >= n) { return baked; }
-  let base = u32(6 + i * 3);
+  let base = mat_data_base + u32(6 + i * 3);
   if (arrayLength(&D) < base + 3u) { return baked; }
   return vec3f(D[base], D[base + 1u], D[base + 2u]);
 }

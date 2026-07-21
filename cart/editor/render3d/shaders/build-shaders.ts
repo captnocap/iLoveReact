@@ -259,12 +259,19 @@ function extractSlots(raw) {
 // D[5] = provided slot count; D[6 + i*3 ..] = slot i RGB. With no palette
 // (5-float data, count 0, or i beyond count) the baked constant returns —
 // pixel-identical to pre-slot output.
+//
+// A private base keeps the same material functions reusable inside a packed
+// grid Effect. Ordinary single-material fills leave it at zero; the grid entry
+// selects one row before calling fill_pick(). Private storage is per fragment
+// invocation, so neighboring thumbnail pixels cannot leak row selection.
 const MAT_PAL_WGSL = `
+var<private> mat_data_base: u32 = 0u;
+
 fn mat_pal(i: i32, baked: vec3f) -> vec3f {
-  if (arrayLength(&D) < 7u) { return baked; }
-  let n = i32(D[5] + 0.5);
+  if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
+  let n = i32(D[mat_data_base + 5u] + 0.5);
   if (i >= n) { return baked; }
-  let base = u32(6 + i * 3);
+  let base = mat_data_base + u32(6 + i * 3);
   if (arrayLength(&D) < base + 3u) { return baked; }
   return vec3f(D[base], D[base + 1u], D[base + 2u]);
 }

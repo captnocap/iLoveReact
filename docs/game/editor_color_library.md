@@ -40,6 +40,14 @@ un-friendly color picking component" — six named defects, each now a mechanism
    render-to-texture passes collapse to one cached image quad. Pressables remain
    in the layout/hit-test tree, and `ShaderThumb` compares shader-data values so
    fresh-but-equal arrays from unrelated parent renders do not force re-capture.
+   The cold capture/page path is batched too (`req_3333`): all generated fill
+   cells pack their variable-length material rows behind an offset table and one
+   grid-routed Effect renders them. Its data envelope is handled by the canonical
+   `FILL_SHADER`, so an active single-material preview and the grid reuse one
+   compiled 409-material pipeline. Slot-keyed transparent Pressables preserve all
+   48 independent targets instead of remounting them on every page. Only recipes
+   with genuinely different WGSL use the per-cell fallback (built-in pages 2–8:
+   one Effect total; page 1: batch + Road; last page: batch + two special recipes).
 
 ## Mechanism map
 
@@ -59,7 +67,13 @@ un-friendly color picking component" — six named defects, each now a mechanism
 - `cart/editor/stage/ColorLibraryPanel.tsx` — two-row CURRENT header, RECENT +
   SAVED rows, SCENE hidden when empty (host read memoized per mount).
 - `cart/editor/shell/PaintSidePanel.tsx` — shader search + 48-cell cached grid +
-  remembered position.
+  remembered position; slot-stable Pressable overlay for page changes.
+- `cart/editor/shell/ShaderGridBatch.tsx` — validates/packs standard material
+  rows, renders one canonical fill Effect, and value-compares packed buffers so
+  unrelated parent renders do not dirty the cache.
+- `cart/editor/render3d/shaders/index.ts` — one `FILL_SHADER` entry for ordinary
+  material rows and the negative-id grid envelope, keeping both views on the
+  same compiled pipeline.
 - `cart/editor/shell/ShaderThumb.tsx` — value-stable memo boundary for live
   shader previews; real shader/data/size changes still invalidate captures.
 

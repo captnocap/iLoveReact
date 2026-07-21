@@ -6,7 +6,7 @@ export const editor_color_library: DocIndex = {
   cart: 'cart/editor/shell/PaintSidePanel.tsx',
   purpose: ['ui', 'persistence', 'host_bridge', 'color'],
   summary:
-    'req_3097 + req_3332: the ink surface uses real mechanisms — SAVED + raw RECENT persistence, live-atlas SCENE colors, a host eyedropper, and a searchable 48-material shader browser whose full interactive grid caches into one StaticSurface while preserving tab/page/search memory.',
+    'req_3097 + req_3332 + req_3333: the ink surface uses real mechanisms — SAVED + raw RECENT persistence, live-atlas SCENE colors, a host eyedropper, and a searchable 48-material shader browser whose standard previews batch through one canonical fill Effect before the full interactive grid caches into one StaticSurface.',
   interfaces: [
     {
       name: '__model_paint_sample',
@@ -49,13 +49,23 @@ export const editor_color_library: DocIndex = {
       status: 'live',
     },
     {
-      name: 'shader browser search + cached grid + position memory',
+      name: 'shader browser search + batched cached grid + position memory',
       purpose: ['ui'],
       kind: 'component',
       sourceFile: 'cart/editor/shell/PaintSidePanel.tsx',
       description:
-        'Substring search over label/group/id of the full spec catalog, a FIXED 8-wide x 6-row grid (48 visible materials, no per-group wrap restarts), groups-on-page caption line, and module-scope memos so tab/page/search survive panel close/reopen. req_3332 wraps the complete grid in one StaticSurface and value-memoizes ShaderThumb data, eliminating 48 steady-state Effect render passes without removing children from layout, hit testing, tooltips, or clicks.',
+        'Substring search over label/group/id of the full spec catalog, a FIXED 8-wide x 6-row grid (48 visible materials, no per-group wrap restarts), groups-on-page caption line, and module-scope memos so tab/page/search survive panel close/reopen. req_3332 wraps the complete grid in one StaticSurface. req_3333 packs generated material rows into one grid-routed Effect using the canonical FILL_SHADER pipeline and slot-stable transparent Pressables; only different-WGSL recipes fall back per cell. Density, layout, hit testing, tooltips, clicks, and cache invalidation on real data changes remain intact.',
       consumers: ['cart/editor/shell/AppFrame.tsx'],
+      status: 'live',
+    },
+    {
+      name: 'canonical fill grid envelope',
+      purpose: ['ui'],
+      kind: 'module',
+      sourceFile: 'cart/editor/render3d/shaders/index.ts',
+      description:
+        'FILL_SHADER accepts either the ordinary [material, variant, seed, quality, board, palette...] row or a negative-material-id grid envelope containing geometry, cell offsets, and variable-length rows. Both paths call the same generated fill_pick and quality pass, so the browser does not compile a second 409-material shader. ShaderGridBatch validates rows, inserts explicit zero palette counts, and memoizes packed data by value.',
+      consumers: ['cart/editor/shell/ShaderGridBatch.tsx'],
       status: 'live',
     },
   ],

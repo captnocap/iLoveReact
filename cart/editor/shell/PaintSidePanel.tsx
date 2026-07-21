@@ -23,8 +23,15 @@ import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import { BrushDials, type ColorSpineHandlers } from '../inspector/ModelBrushDock';
 import { shaderGroups, shaderSpec, type ShaderSpec } from '../textures/shaders';
 import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
+import { FILL_SHADER } from '../render3d/shaders/index';
 import type { Rgb } from '../data/types';
 import ShaderThumb from './ShaderThumb';
+import ShaderGridBatch, {
+  SHADER_GRID_TUNING,
+  isBatchableFillData,
+  packFillShaderGridData,
+  shaderGridDimensions,
+} from './ShaderGridBatch';
 
 const LINE = '#242a33';
 const TEXT = '#e8edf6';
@@ -34,9 +41,9 @@ const ACCENT = '#6ea8fe';
 // Content-browser density: eight columns × six rows exposes 48 materials at
 // once (3.2× the old popover-shaped 5×3 catalog) without shrinking hit targets
 // below a dependable 36px cell.
-const SHADER_PAGE_SIZE = 48;
-const SHADER_GRID_COLS = 8;
-const SHADER_THUMB_SIZE = 32;
+const SHADER_PAGE_SIZE = SHADER_GRID_TUNING.maxCells;
+const SHADER_GRID_COLS = SHADER_GRID_TUNING.columns;
+const SHADER_THUMB_SIZE = SHADER_GRID_TUNING.thumbnailSize;
 
 type ShaderInk = Extract<Brush['ink'], { kind: 'shader' }>;
 
@@ -265,12 +272,22 @@ function ShaderLibrary(props: {
     .map((item) => item.group)
     .filter((group, index, all) => all.indexOf(group) === index)
     .join(' · ');
-  const gridRows: Array<typeof pageItems> = [];
-  for (let index = 0; index < pageItems.length; index += SHADER_GRID_COLS) {
-    gridRows.push(pageItems.slice(index, index + SHADER_GRID_COLS));
-  }
   const activeSpec = props.shaderInk ? shaderSpec(props.shaderInk.surface) : null;
   const activeVariant = activeSpec ? shaderVariantIndex(activeSpec, props.shaderInk?.data) : 0;
+  const gridCells = pageItems.map((item) => {
+    const active = item.spec.id === props.shaderInk?.surface;
+    const variantIndex = active ? activeVariant : 0;
+    const data = shaderVariantData(item.spec, variantIndex, props.paletteFor);
+    const batched = item.spec.shader === FILL_SHADER && isBatchableFillData(data);
+    return { ...item, active, variantIndex, data, batched };
+  });
+  const gridRows: Array<typeof gridCells> = [];
+  for (let index = 0; index < gridCells.length; index += SHADER_GRID_COLS) {
+    gridRows.push(gridCells.slice(index, index + SHADER_GRID_COLS));
+  }
+  const gridSize = shaderGridDimensions(gridCells.length);
+  const packedGridData = packFillShaderGridData(gridCells.map((cell) => cell.batched ? cell.data : null));
+  const hasBatchedCells = gridCells.some((cell) => cell.batched);
 
   return (
     <Col style={{ gap: 8 }}>
@@ -326,32 +343,35 @@ function ShaderLibrary(props: {
         </Pressable>
       </Row>
 
-      {/* The 48 previews are immutable until page/search/selection/palette data
-          changes. Cache their paint as one quad; StaticSurface deliberately
-          keeps every Pressable in layout + hit testing, so density and input
-          stay identical without 48 live shader render passes every frame. */}
+      {/* Standard generated materials route through one grid Effect; only
+          special/imported shaders retain a per-cell Effect fallback. The
+          StaticSurface then caches that first paint while every slot-stable
+          Pressable remains in layout + hit testing. */}
       <StaticSurface style={{ flexDirection: 'column', gap: 4, minHeight: 224 }}>
         {groupsOnPage ? (
           <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{groupsOnPage.toUpperCase()}</Text>
         ) : null}
-        {gridRows.map((row, rowIndex) => (
-          <Row key={`${page}-${rowIndex}`} style={{ gap: 4 }}>
-            {row.map((item) => {
-              const active = item.spec.id === props.shaderInk?.surface;
-              const variantIndex = active ? activeVariant : 0;
-              return (
-                <Pressable
-                  key={item.spec.id}
-                  tooltip={`${item.spec.label} — ${item.group}`}
-                  onPress={() => props.onPick(item.spec, variantIndex)}
-                  style={{ width: 36, height: 36, padding: 1, borderRadius: 6, borderWidth: 2, borderColor: active ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <ShaderThumb shader={item.spec.shader} data={shaderVariantData(item.spec, variantIndex, props.paletteFor)} size={SHADER_THUMB_SIZE} />
-                </Pressable>
-              );
-            })}
-          </Row>
-        ))}
+        {gridCells.length > 0 ? (
+          <Box style={{ position: 'relative', width: gridSize.width, height: gridSize.height }}>
+            {hasBatchedCells ? <ShaderGridBatch data={packedGridData} width={gridSize.width} height={gridSize.height} /> : null}
+            <Col style={{ position: 'absolute', left: 0, top: 0, gap: SHADER_GRID_TUNING.gap }}>
+              {gridRows.map((row, rowIndex) => (
+                <Row key={rowIndex} style={{ gap: SHADER_GRID_TUNING.gap }}>
+                  {row.map((item, columnIndex) => (
+                    <Pressable
+                      key={columnIndex}
+                      tooltip={`${item.spec.label} — ${item.group}`}
+                      onPress={() => props.onPick(item.spec, item.variantIndex)}
+                      style={{ width: SHADER_GRID_TUNING.cellSize, height: SHADER_GRID_TUNING.cellSize, padding: 1, borderRadius: SHADER_GRID_TUNING.cornerRadius, borderWidth: 2, borderColor: item.active ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      {item.batched ? null : <ShaderThumb shader={item.spec.shader} data={item.data} size={SHADER_THUMB_SIZE} />}
+                    </Pressable>
+                  ))}
+                </Row>
+              ))}
+            </Col>
+          </Box>
+        ) : null}
         {hits.length === 0 ? <Text style={{ color: DIM, fontSize: 11 }}>{`no shader matches "${props.query}"`}</Text> : null}
       </StaticSurface>
 
