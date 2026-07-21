@@ -6,13 +6,16 @@ import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../ru
 import { accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
 import {
+  chainUvIslands,
   flattenUvFaceCorners,
   flipUvSelection,
   hitUvFace,
   hitUvIsland,
   isUvDoubleClick,
+  matchUvIslandSize,
   moveUvFace,
   moveUvIsland,
+  moveUvIslands,
   moveUvSelectionVertex,
   NO_UV_GROUP,
   rotateUvSelection,
@@ -22,16 +25,19 @@ import {
   uniformUvPack,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
+  uvIslandSetBounds,
   uvSelectionBounds,
   uvSelectionVertices,
   uvTranslationSnapStep,
   UV_LAYOUT_TUNING,
+  UV_SNAP_STEPS,
   type UvAxisGuide,
   type UvCanvasTool,
   type UvFaceTarget,
   type UvFlipAxis,
   type UvIslandRect,
   type UvSelectionBounds,
+  type UvSizeMatch,
 } from '../model/uvLayout';
 
 const ATLAS_SHADER = `
@@ -55,28 +61,42 @@ type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeo
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
-  | { kind: 'move'; index: number; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect }
+  | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
   | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
   | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; seed: UvIslandRect };
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
-function atlasGridSegments(atlasWidth: number, atlasHeight: number, viewScale: number): number[] {
-  let step = UV_LAYOUT_TUNING.vertexSnapTexels;
-  while (step * viewScale < UV_LAYOUT_TUNING.minimumGridSpacingPx) step *= 2;
-  const segments: number[] = [];
+function atlasGridSegments(atlasWidth: number, atlasHeight: number, step: number): { minor: number[]; major: number[] } {
+  const minor: number[] = [];
+  const major: number[] = [];
   for (let x = step; x < atlasWidth; x += step) {
+    const segments = Math.round(x / step) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
     segments.push(x, 0, x, atlasHeight);
   }
   for (let y = step; y < atlasHeight; y += step) {
+    const segments = Math.round(y / step) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
     segments.push(0, y, atlasWidth, y);
   }
-  return segments;
+  return { minor, major };
 }
 
 function sameRectReferences(a: readonly UvIslandRect[], b: readonly UvIslandRect[]): boolean {
   return a.length === b.length && a.every((rect, index) => rect === b[index]);
+}
+
+function sameRectValues(a: readonly UvIslandRect[], b: readonly UvIslandRect[]): boolean {
+  return a.length === b.length && a.every((rect, index) => {
+    const other = b[index];
+    return Boolean(other
+      && rect.x === other.x
+      && rect.y === other.y
+      && rect.w === other.w
+      && rect.h === other.h
+      && rect.group === other.group
+      && rect.triangles === other.triangles);
+  });
 }
 
 /** Build native atlas-space geometry once. Pan, zoom, and whole-island motion
@@ -172,17 +192,33 @@ function toolButton(icon: string, active: boolean, tooltip: string, onPress: () 
   );
 }
 
+function selectionActionButton(label: string, enabled: boolean, tooltip: string, onPress: () => void) {
+  return (
+    <Pressable
+      tooltip={tooltip}
+      onPress={enabled ? onPress : undefined}
+      style={{ height: 23, minWidth: 34, paddingLeft: 7, paddingRight: 7, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: enabled ? accentFor('surfaceRaised') : accentFor('controlBg'), borderWidth: 1, borderColor: enabled ? accentFor('border') : accentFor('borderSoft') }}
+    >
+      <Text style={{ color: enabled ? accentFor('textDim') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; focused?: boolean }) {
   const { uv, bridge } = props;
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
   const [rects, setRects] = useState<UvIslandRect[]>(initialRects);
   const rectsRef = useRef(rects);
-  const [selected, setSelected] = useState(-1);
+  const initialSelectedIslands = () => uv.selectedIslands.filter((index) => index >= 0 && index < uv.islands.length);
+  const [selectedIndices, setSelectedIndices] = useState<number[]>(initialSelectedIslands);
+  const selectedIndicesRef = useRef(selectedIndices);
+  const [selected, setSelected] = useState(initialSelectedIslands()[0] ?? -1);
   const [selectedFace, setSelectedFace] = useState<UvFaceTarget | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [tool, setTool] = useState<UvCanvasTool>('select');
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('island');
+  const [snapBaseStep, setSnapBaseStep] = useState<number>(UV_SNAP_STEPS[0]);
   const [aspectLocked, setAspectLocked] = useState(false);
   const [axisGuide, setAxisGuide] = useState<UvAxisGuide | null>(null);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
@@ -252,18 +288,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   // Mouse hardware can report much faster than the display can present. Keep the
   // exact newest UV synchronously for commit, but reconcile at most one preview per
   // host frame so raw pointer frequency cannot dictate React/render work.
-  const queueUvPreview = (index: number, changed: UvIslandRect, guide: UvAxisGuide | null) => {
-    const current = rectsRef.current[index];
+  const queueUvRectsPreview = (next: UvIslandRect[], guide: UvAxisGuide | null) => {
     const currentGuide = pendingPreviewRef.current?.guide ?? axisGuide;
-    if (current
-      && current.x === changed.x
-      && current.y === changed.y
-      && current.w === changed.w
-      && current.h === changed.h
-      && current.group === changed.group
-      && current.triangles === changed.triangles
-      && sameAxisGuide(currentGuide, guide)) return;
-    const next = rectsRef.current.map((rect, rectIndex) => rectIndex === index ? changed : rect);
+    if (sameRectValues(rectsRef.current, next) && sameAxisGuide(currentGuide, guide)) return;
     rectsRef.current = next;
     const generation = previewGenerationRef.current;
     pendingPreviewRef.current = { generation, rects: next, guide };
@@ -282,6 +309,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setRects(pending.rects);
       setAxisGuide(pending.guide);
     });
+  };
+  const queueUvPreview = (index: number, changed: UvIslandRect, guide: UvAxisGuide | null) => {
+    const next = rectsRef.current.map((rect, rectIndex) => rectIndex === index ? changed : rect);
+    queueUvRectsPreview(next, guide);
   };
 
   const settleUvPreview = () => {
@@ -308,16 +339,41 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     const next = initialRects();
     setRects(next);
     rectsRef.current = next;
+    const validSelection = selectedIndicesRef.current.filter((index) => index >= 0 && index < next.length);
+    selectedIndicesRef.current = validSelection;
+    setSelectedIndices(validSelection);
     setAxisGuide(null);
-    setSelected((index) => Math.min(index, uv.islands.length - 1));
+    setSelected((index) => validSelection.includes(index) ? index : validSelection[0] ?? Math.min(index, uv.islands.length - 1));
     setSelectedFace((target) => target && next.some((rect) => rect.triangles?.some((triangle) => triangle.face === target.face)) ? target : null);
     if (uv.rgba) texture.paint.upload(uv.rgba);
   }, [uv.key, uv.revision]);
 
   const synchronizedSelectionKey = uv.selectedIslands.join(',');
   useEffect(() => {
-    setSelected(uv.selectedIslands[0] ?? -1);
+    const next = uv.selectedIslands.filter((index) => index >= 0 && index < rectsRef.current.length);
+    selectedIndicesRef.current = next;
+    setSelectedIndices(next);
+    setSelected(next[0] ?? -1);
   }, [synchronizedSelectionKey]);
+
+  const publishIslandSelection = (indices: number[], primary: number) => {
+    selectedIndicesRef.current = indices;
+    setSelectedIndices(indices);
+    setSelected(primary);
+    setSelectedFace(null);
+  };
+  const selectIslandAt = (index: number, additive: boolean): number[] => {
+    const current = selectedIndicesRef.current;
+    let next: number[];
+    if (index < 0) next = additive ? current : [];
+    else if (additive) next = current.includes(index)
+      ? current.filter((selectedIndex) => selectedIndex !== index)
+      : [...current, index];
+    else next = current.includes(index) && current.length > 1 ? current : [index];
+    const primary = index >= 0 && next.includes(index) ? index : next[next.length - 1] ?? -1;
+    publishIslandSelection(next, primary);
+    return next;
+  };
 
   useEffect(() => {
     if (surfaceSize.width <= 1 || surfaceSize.height <= 1) return;
@@ -370,8 +426,42 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   };
 
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
+  const selectedIndicesKey = selectedIndices.join(',');
+  const selectedIndexSet = useMemo(() => new Set(selectedIndices), [selectedIndicesKey]);
+  const multiIslandSelection = selectionMode === 'island' && selectedIndices.length > 1;
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const selectedTarget = selectionMode === 'face' ? selectedFace ?? undefined : undefined;
+  const translationSnapStep = uvTranslationSnapStep(view.scale, snapBaseStep);
+  const applyIslandSetEdit = (next: UvIslandRect[], label: string) => {
+    if (sameRectReferences(rectsRef.current, next)) {
+      setNote(`${label} — selection was already there`);
+      return;
+    }
+    rectsRef.current = next;
+    setRects(next);
+    commit(next, label);
+  };
+  const matchSelectedSize = (mode: UvSizeMatch) => {
+    if (!multiIslandSelection) {
+      setNote('Shift-click two or more UV islands first.');
+      return;
+    }
+    const next = matchUvIslandSize(rectsRef.current, selectedIndicesRef.current, selected, mode, uv.w, uv.h);
+    const dimension = mode === 'both' ? 'size' : mode;
+    applyIslandSetEdit(next, `matched ${selectedIndices.length} islands to the active island's ${dimension}`);
+  };
+  const chainSelected = (axis: 'horizontal' | 'vertical') => {
+    if (!multiIslandSelection) {
+      setNote('Shift-click two or more UV islands first.');
+      return;
+    }
+    const result = chainUvIslands(rectsRef.current, selectedIndicesRef.current, axis, uv.w, uv.h, translationSnapStep);
+    if (!result.fits) {
+      setNote(`selected islands need more atlas space for a ${axis} chain`);
+      return;
+    }
+    applyIslandSetEdit(result.rects, `chained ${selectedIndices.length} islands ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}`);
+  };
   // A translated island keeps identical local geometry. Cache that geometry in
   // island-local atlas units and move it by changing only the Graph view origin.
   // Dense head UVs therefore do not resend thousands of points per mouse sample.
@@ -384,13 +474,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     () => selectedLocalRect ? uvSelectionBounds(selectedLocalRect, selectedTarget) : null,
     [selectedLocalRect, selectedTarget?.face, selectedTarget?.group],
   );
-  const selectionBounds = selectedRect && selectedLocalBounds ? {
+  const primarySelectionBounds = selectedRect && selectedLocalBounds ? {
     ...selectedLocalBounds,
     x: selectedRect.x + selectedLocalBounds.x,
     y: selectedRect.y + selectedLocalBounds.y,
     cx: selectedRect.x + selectedLocalBounds.cx,
     cy: selectedRect.y + selectedLocalBounds.cy,
   } : null;
+  const selectedGroupBounds = multiIslandSelection ? uvIslandSetBounds(rects, selectedIndices) : null;
+  const selectionBounds = selectedGroupBounds ?? primarySelectionBounds;
   const selectedOutlineLocalRect = useMemo(() => selectedLocalRect && selectedTarget
     ? { ...selectedLocalRect, triangles: selectedLocalRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
     : selectedLocalRect, [selectedLocalRect, selectedTarget?.face, selectedTarget?.group]);
@@ -402,8 +494,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     cacheRef.current = { rects: [...items], geometry };
     return geometry;
   };
-  const fixedRects = rects.filter((_rect, index) => index !== selected);
+  const fixedRects = rects.filter((_rect, index) => !selectedIndexSet.has(index));
   const fixedLines = cachedLineGeometry(fixedLineCacheRef, fixedRects);
+  const secondarySelectedRects = rects.filter((_rect, index) => selectedIndexSet.has(index) && index !== selected);
+  const secondarySelectedLines = useMemo(
+    () => secondarySelectedRects.length ? uvLineGeometry(secondarySelectedRects) : { faces: [], boundary: [] },
+    [rects, selected, selectedIndicesKey],
+  );
   const selectedIslandLines = useMemo(
     () => selectedLocalRect ? uvLineGeometry([selectedLocalRect]) : { faces: [], boundary: [] },
     [selectedLocalRect],
@@ -418,17 +515,17 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     ? selectedIslandLines.boundary
     : [];
   const localHandlePoints = useMemo(
-    () => selectedLocalRect ? uvSelectionVertices(selectedLocalRect, selectedTarget) : [],
-    [selectedLocalRect, selectedTarget?.face, selectedTarget?.group],
+    () => selectedLocalRect && !multiIslandSelection ? uvSelectionVertices(selectedLocalRect, selectedTarget) : [],
+    [selectedLocalRect, selectedTarget?.face, selectedTarget?.group, multiIslandSelection],
   );
   const handleSegments = useMemo(() => repeatedPointSegments(localHandlePoints), [localHandlePoints]);
-  const rotationHandle = selectionBounds ? {
-    x: view.x + selectionBounds.cx * view.scale,
-    y: view.y + selectionBounds.y * view.scale - UV_LAYOUT_TUNING.rotationHandleOffsetPx,
+  const rotationHandle = primarySelectionBounds && !multiIslandSelection ? {
+    x: view.x + primarySelectionBounds.cx * view.scale,
+    y: view.y + primarySelectionBounds.y * view.scale - UV_LAYOUT_TUNING.rotationHandleOffsetPx,
   } : null;
-  const scaleHandle = selectionBounds ? {
-    x: view.x + (selectionBounds.x + selectionBounds.w) * view.scale + UV_LAYOUT_TUNING.scaleHandleOffsetPx,
-    y: view.y + (selectionBounds.y + selectionBounds.h) * view.scale + UV_LAYOUT_TUNING.scaleHandleOffsetPx,
+  const scaleHandle = primarySelectionBounds && !multiIslandSelection ? {
+    x: view.x + (primarySelectionBounds.x + primarySelectionBounds.w) * view.scale + UV_LAYOUT_TUNING.scaleHandleOffsetPx,
+    y: view.y + (primarySelectionBounds.y + primarySelectionBounds.h) * view.scale + UV_LAYOUT_TUNING.scaleHandleOffsetPx,
   } : null;
   const hitHandle = (point: ScreenPoint): number => {
     if (!selectedRect) return -1;
@@ -457,6 +554,17 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     const rect = selectedRect;
     const bounds = selectionBounds;
     if (!rect || !bounds) return;
+    if (multiIslandSelection) {
+      if (field === 'w' || field === 'h') {
+        setNote('Use W =, H =, or W×H to normalize a multi-island set.');
+        return;
+      }
+      const dx = field === 'x' ? value - bounds.x : 0;
+      const dy = field === 'y' ? value - bounds.y : 0;
+      const next = moveUvIslands(rectsRef.current, selectedIndicesRef.current, dx, dy, uv.w, uv.h, UV_LAYOUT_TUNING.vertexSnapTexels, true);
+      applyIslandSetEdit(next, `set UV group ${field.toUpperCase()} to ${value}`);
+      return;
+    }
     let changed = rect;
     if (field === 'x' || field === 'y') {
       const dx = field === 'x' ? value - bounds.x : 0;
@@ -479,15 +587,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   const atlasW = uv.w * view.scale;
   const atlasH = uv.h * view.scale;
-  const translationSnapStep = uvTranslationSnapStep(view.scale);
   const atlasEffectData = useMemo(() => [atlasW, atlasH, UV_LAYOUT_TUNING.checkerPx, 0], [atlasW, atlasH]);
   const thumbnailEffectData = useMemo(() => [32, 32, UV_LAYOUT_TUNING.checkerPx, 0], []);
   const gridSegments = useMemo(
-    () => atlasGridSegments(uv.w, uv.h, view.scale),
-    [uv.w, uv.h, view.scale],
+    () => atlasGridSegments(uv.w, uv.h, translationSnapStep),
+    [uv.w, uv.h, translationSnapStep],
   );
   const inverseViewScale = 1 / Math.max(UV_LAYOUT_TUNING.minimumZoom, view.scale);
-  const selectionFrameSegments = selectedLocalBounds
+  const selectionFrameSegments = selectedLocalBounds && !multiIslandSelection
     ? (() => {
       const x0 = selectedLocalBounds.x;
       const y0 = selectedLocalBounds.y;
@@ -496,8 +603,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       return [x0, y0, x1, y0, x1, y0, x1, y1, x1, y1, x0, y1, x0, y1, x0, y0];
     })()
     : [];
-  const rotationStemSegments = selectedLocalBounds
+  const rotationStemSegments = selectedLocalBounds && !multiIslandSelection
     ? [selectedLocalBounds.cx, selectedLocalBounds.y - UV_LAYOUT_TUNING.rotationHandleOffsetPx * inverseViewScale, selectedLocalBounds.cx, selectedLocalBounds.y]
+    : [];
+  const groupFrameSegments = selectedGroupBounds
+    ? [
+      selectedGroupBounds.x, selectedGroupBounds.y, selectedGroupBounds.x + selectedGroupBounds.w, selectedGroupBounds.y,
+      selectedGroupBounds.x + selectedGroupBounds.w, selectedGroupBounds.y, selectedGroupBounds.x + selectedGroupBounds.w, selectedGroupBounds.y + selectedGroupBounds.h,
+      selectedGroupBounds.x + selectedGroupBounds.w, selectedGroupBounds.y + selectedGroupBounds.h, selectedGroupBounds.x, selectedGroupBounds.y + selectedGroupBounds.h,
+      selectedGroupBounds.x, selectedGroupBounds.y + selectedGroupBounds.h, selectedGroupBounds.x, selectedGroupBounds.y,
+    ]
     : [];
   const guideSegments = axisGuide
     ? axisGuide.axis === 'horizontal'
@@ -518,8 +633,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       const click = Boolean(end && Math.hypot(end.x - gesture.screenStart.x, end.y - gesture.screenStart.y) <= UV_LAYOUT_TUNING.dragActivationPx);
       if (click && !gesture.doubleClick) lastClickRef.current = { at: Date.now(), x: gesture.screenStart.x, y: gesture.screenStart.y };
       else lastClickRef.current = null;
-      if (rectsRef.current[gesture.index] !== gesture.seed) {
-        commit(rectsRef.current, gesture.target ? 'detached and moved UV face' : 'moved UV island over the fixed texture');
+      const moved = gesture.indices.some((index) => rectsRef.current[index] !== gesture.seedRects[index]);
+      if (moved) {
+        const label = gesture.target
+          ? 'detached and moved UV face'
+          : gesture.indices.length > 1
+            ? `moved ${gesture.indices.length} UV islands as one group`
+            : 'moved UV island over the fixed texture';
+        commit(rectsRef.current, label);
       }
     }
     if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture');
@@ -531,7 +652,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     <Box style={{ flexGrow: 1, minHeight: 0, gap: 6 }}>
       <Row style={{ height: 27, alignItems: 'center', gap: 5 }}>
         {toolButton('MousePointer2', tool === 'select' && selectionMode === 'island', 'Island mode — transform one connected UV piece; double-click a face to isolate it', () => { setTool('select'); setSelectionMode('island'); setSelectedFace(null); })}
-        {toolButton('Triangle', tool === 'select' && selectionMode === 'face', 'Face mode — drag one authored face to break it out of its island', () => { setTool('select'); setSelectionMode('face'); })}
+        {toolButton('Triangle', tool === 'select' && selectionMode === 'face', 'Face mode — drag one authored face to break it out of its island', () => {
+          setTool('select');
+          setSelectionMode('face');
+          if (selected >= 0) {
+            selectedIndicesRef.current = [selected];
+            setSelectedIndices([selected]);
+          }
+        })}
         {toolButton('Hand', tool === 'pan', 'Pan the UV canvas', () => setTool('pan'))}
         {toolButton('Maximize2', false, 'Fit the complete atlas in the canvas', () => setView(fittedView(false)))}
         {toolButton('FlipHorizontal2', false, 'Flip selected UV horizontally (U) — fixes mirrored text', () => flipSelected('u'))}
@@ -545,6 +673,40 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         </Pressable>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>{`${rects.length} islands`}</Text>
+      </Row>
+
+      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
+        <Text style={{ minWidth: 39, color: multiIslandSelection ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`SET ${selectedIndices.length}`}</Text>
+        {selectionActionButton('W =', multiIslandSelection, 'Match every selected island to the active white island width', () => matchSelectedSize('width'))}
+        {selectionActionButton('H =', multiIslandSelection, 'Match every selected island to the active white island height', () => matchSelectedSize('height'))}
+        {selectionActionButton('W×H', multiIslandSelection, 'Match every selected island to the active white island size', () => matchSelectedSize('both'))}
+        {selectionActionButton('X CHAIN', multiIslandSelection, 'Arrange selected islands left-to-right on the active snap grid', () => chainSelected('horizontal'))}
+        {selectionActionButton('Y CHAIN', multiIslandSelection, 'Arrange selected islands top-to-bottom on the active snap grid', () => chainSelected('vertical'))}
+        <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>SHIFT+CLICK</Text>
+      </Row>
+
+      <Row style={{ height: 23, alignItems: 'center', gap: 4 }}>
+        <Text style={{ minWidth: 39, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>GRID</Text>
+        {UV_SNAP_STEPS.map((step) => {
+          const active = snapBaseStep === step;
+          return (
+            <Pressable
+              key={`uv-snap-${step}`}
+              tooltip={`Use at least a ${step}-texel UV grid`}
+              onPress={() => {
+                setSnapBaseStep(step);
+                setNote(`grid set to ${uvTranslationSnapStep(view.scale, step)} texels at this zoom`);
+              }}
+              style={{ width: 27, height: 21, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: active ? accentFor('segActiveBg') : accentFor('controlBg'), borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('borderSoft') }}
+            >
+              <Text style={{ color: active ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{step}</Text>
+            </Pressable>
+          );
+        })}
+        <Text style={{ marginLeft: 3, color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`ACTIVE ${translationSnapStep}px`}</Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>ALT = FREE</Text>
       </Row>
 
       <Paintable id={texture.id} w={uv.w} h={uv.h} rgba />
@@ -598,30 +760,38 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             if (faceHit) {
               setTool('select');
               setSelectionMode('face');
+              selectedIndicesRef.current = [faceHit.island];
+              setSelectedIndices([faceHit.island]);
               setSelected(faceHit.island);
               setSelectedFace(faceHit.target);
               bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]! };
+              gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
               setNote('isolated one authored UV face');
               return;
             }
           }
           if (selectionMode === 'face') {
             const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+            const faceSelection = faceHit ? [faceHit.island] : [];
+            selectedIndicesRef.current = faceSelection;
+            setSelectedIndices(faceSelection);
             setSelected(faceHit?.island ?? -1);
             setSelectedFace(faceHit?.target ?? null);
             if (faceHit) {
               bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[faceHit.island]! };
+              gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
             }
             return;
           }
           const index = hitUvIsland(rectsRef.current, point.x, point.y);
-          setSelected(index);
-          setSelectedFace(null);
+          const additive = Boolean(event?.shiftKey);
+          const nextSelection = selectIslandAt(index, additive);
           if (index >= 0) {
-            bridge.selectUvIsland(index, Boolean(event?.shiftKey));
-            gestureRef.current = { kind: 'move', index, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[index]! };
+            bridge.selectUvIsland(index, additive);
+            if (nextSelection.includes(index)) {
+              gestureRef.current = { kind: 'move', index, indices: [...nextSelection], start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[index]!, seedRects: rectsRef.current };
+              if (nextSelection.length > 1) setNote(`${nextSelection.length} UV islands selected · drag any member to move the set`);
+            }
           }
         }}
         onMouseMove={(event: any) => {
@@ -643,6 +813,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             const dx = point.x - gesture.start.x;
             const dy = point.y - gesture.start.y;
             const freeMove = Boolean(event?.altKey);
+            if (gesture.kind === 'move' && !gesture.target && gesture.indices.length > 1) {
+              const next = moveUvIslands(gesture.seedRects, gesture.indices, dx, dy, uv.w, uv.h, translationSnapStep, freeMove);
+              queueUvRectsPreview(next, null);
+              return;
+            }
             changed = gesture.kind === 'vertex'
               ? moveUvSelectionVertex(gesture.seed, gesture.target, gesture.vertex, dx, dy, uv.w, uv.h, freeMove, translationSnapStep)
               : gesture.target
@@ -682,12 +857,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           viewZoom={view.scale}
           originTopLeft
         >
-          {gridSegments.length ? <Graph.Polyline segments points={gridSegments} stroke="#4d596b" strokeWidth={0.8 * inverseViewScale} /> : null}
+          {gridSegments.minor.length ? <Graph.Polyline segments points={gridSegments.minor} stroke="#536176" strokeWidth={0.8 * inverseViewScale} /> : null}
+          {gridSegments.major.length ? <Graph.Polyline segments points={gridSegments.major} stroke="#8291a8" strokeWidth={1.2 * inverseViewScale} /> : null}
           {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#080b10" strokeWidth={2.4 * inverseViewScale} /> : null}
           {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#8591a3" strokeWidth={0.9 * inverseViewScale} /> : null}
           {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#080b10" strokeWidth={3.2 * inverseViewScale} /> : null}
           {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#c7d0df" strokeWidth={1.15 * inverseViewScale} /> : null}
           {activeFixedLines.boundary.length ? <Graph.Polyline segments points={activeFixedLines.boundary} stroke="#42d9e8" strokeWidth={1.65 * inverseViewScale} /> : null}
+          {secondarySelectedLines.faces.length ? <Graph.Polyline segments points={secondarySelectedLines.faces} stroke="#b5c3d8" strokeWidth={1.05 * inverseViewScale} /> : null}
+          {secondarySelectedLines.boundary.length ? <Graph.Polyline segments points={secondarySelectedLines.boundary} stroke="#42d9e8" strokeWidth={2.1 * inverseViewScale} /> : null}
+          {groupFrameSegments.length ? <Graph.Polyline segments points={groupFrameSegments} stroke="#42d9e8" strokeWidth={1.35 * inverseViewScale} /> : null}
         </Graph>
         {selectedRect ? (
           <Graph
@@ -730,7 +909,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       </Pressable>
 
       <Row style={{ height: 14, alignItems: 'center' }}>
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`SNAP ${translationSnapStep}px · hold ALT for free move`}</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID GROUP SNAP ${translationSnapStep}px` : `VISIBLE GRID = SNAP ${translationSnapStep}px`}</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`ATLAS ${uv.w}×${uv.h}`}</Text>
       </Row>
@@ -738,8 +917,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       <Row style={{ alignItems: 'center', gap: 4 }}>
         <UvNumberField label="X" value={selectionBounds ? Math.round(selectionBounds.x) : null} min={0} max={selectionBounds ? Math.floor(uv.w - selectionBounds.w) : uv.w} onCommit={(value) => changeCoordinate('x', value)} />
         <UvNumberField label="Y" value={selectionBounds ? Math.round(selectionBounds.y) : null} min={0} max={selectionBounds ? Math.floor(uv.h - selectionBounds.h) : uv.h} onCommit={(value) => changeCoordinate('y', value)} />
-        <UvNumberField label="W" value={selectionBounds ? Math.max(1, Math.round(selectionBounds.w)) : null} min={1} max={selectionBounds ? Math.floor(uv.w - selectionBounds.x) : uv.w} onCommit={(value) => changeCoordinate('w', value)} />
-        <UvNumberField label="H" value={selectionBounds ? Math.max(1, Math.round(selectionBounds.h)) : null} min={1} max={selectionBounds ? Math.floor(uv.h - selectionBounds.y) : uv.h} onCommit={(value) => changeCoordinate('h', value)} />
+        <UvNumberField label="W" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.w)) : null} min={1} max={selectionBounds ? Math.floor(uv.w - selectionBounds.x) : uv.w} onCommit={(value) => changeCoordinate('w', value)} />
+        <UvNumberField label="H" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.h)) : null} min={1} max={selectionBounds ? Math.floor(uv.h - selectionBounds.y) : uv.h} onCommit={(value) => changeCoordinate('h', value)} />
         <Pressable tooltip={aspectLocked ? 'Unlock width and height' : 'Lock width/height aspect'} onPress={() => setAspectLocked((value) => !value)} style={{ width: 29, height: 29, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: aspectLocked ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: aspectLocked ? accentFor('primary') : accentFor('border') }}>
           <Icon name={aspectLocked ? 'Link2' : 'Link2Off'} size={13} color={aspectLocked ? accentFor('primary') : accentFor('textDim')} />
         </Pressable>

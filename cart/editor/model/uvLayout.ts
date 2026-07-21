@@ -21,7 +21,8 @@ export const UV_LAYOUT_TUNING = {
   dragActivationPx: 4,
   /** Coalesce high-rate pointer samples without limiting a 240 Hz display to 60 Hz. */
   dragPreviewIntervalMs: 4,
-  minimumGridSpacingPx: 18,
+  /** Every fourth snap line is a stronger visual ruler. */
+  majorGridEvery: 4,
   rotationHandleOffsetPx: 21,
   rotationHandleHitPx: 11,
   scaleHandleOffsetPx: 7,
@@ -30,6 +31,11 @@ export const UV_LAYOUT_TUNING = {
   axisSnapToleranceDegrees: 1,
   minimumSelectionScale: 0.05,
 } as const;
+
+/** Explicit authoring precision. Zoom may raise the effective step so a snap
+ * cell never becomes smaller than the pointer can visibly distinguish. */
+export const UV_SNAP_STEPS = [1, 2, 4, 8, 16] as const;
+export type UvSnapStep = typeof UV_SNAP_STEPS[number];
 
 export const NO_UV_GROUP = 0xffffffff;
 
@@ -95,9 +101,9 @@ export function shouldActivateUvDrag(dxPx: number, dyPx: number): boolean {
 
 /** Power-of-two texture steps keep snapping physically legible at every zoom:
  * 1 texel when it is visible, progressively coarser while zoomed out. */
-export function uvTranslationSnapStep(viewScale: number): number {
+export function uvTranslationSnapStep(viewScale: number, minimumStep = UV_LAYOUT_TUNING.vertexSnapTexels): number {
   const scale = Math.max(UV_LAYOUT_TUNING.minimumZoom, Number.isFinite(viewScale) ? viewScale : 1);
-  let step = UV_LAYOUT_TUNING.vertexSnapTexels;
+  let step = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(minimumStep));
   while (step * scale < UV_LAYOUT_TUNING.minimumTranslationSnapPx) step *= 2;
   return step;
 }
@@ -205,6 +211,131 @@ export function moveUvIsland(
     ...rect,
     x,
     y,
+  };
+}
+
+function uniqueUvIslandIndices(rects: readonly UvIslandRect[], indices: readonly number[]): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const index of indices) {
+    if (!Number.isInteger(index) || index < 0 || index >= rects.length || seen.has(index)) continue;
+    seen.add(index);
+    out.push(index);
+  }
+  return out;
+}
+
+/** Aggregate transform frame for a temporary multi-island selection. Rect
+ * bounds are intentional here: whole-island transforms translate that frame
+ * without rewriting the exact triangle-local UV geometry inside it. */
+export function uvIslandSetBounds(rects: readonly UvIslandRect[], indices: readonly number[]): UvSelectionBounds | null {
+  const selected = uniqueUvIslandIndices(rects, indices);
+  if (!selected.length) return null;
+  let x = Number.POSITIVE_INFINITY;
+  let y = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const index of selected) {
+    const rect = rects[index]!;
+    x = Math.min(x, rect.x);
+    y = Math.min(y, rect.y);
+    right = Math.max(right, rect.x + rect.w);
+    bottom = Math.max(bottom, rect.y + rect.h);
+  }
+  return { x, y, w: right - x, h: bottom - y, cx: (x + right) * 0.5, cy: (y + bottom) * 0.5 };
+}
+
+/** Translate a selected set as one rigid UV group. The aggregate frame is
+ * clamped once, so members cannot compress or drift against one another at an
+ * atlas edge. */
+export function moveUvIslands(
+  rects: readonly UvIslandRect[],
+  indices: readonly number[],
+  dx: number,
+  dy: number,
+  atlasW: number,
+  atlasH: number,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
+  freeMove = false,
+): UvIslandRect[] {
+  const selected = uniqueUvIslandIndices(rects, indices);
+  const bounds = uvIslandSetBounds(rects, selected);
+  if (!bounds) return [...rects];
+  const requestedX = bounds.x + dx;
+  const requestedY = bounds.y + dy;
+  const targetX = freeMove ? requestedX : snapUvVertex(requestedX, snapStep);
+  const targetY = freeMove ? requestedY : snapUvVertex(requestedY, snapStep);
+  const safeDx = clamp(targetX - bounds.x, -bounds.x, atlasW - bounds.x - bounds.w);
+  const safeDy = clamp(targetY - bounds.y, -bounds.y, atlasH - bounds.y - bounds.h);
+  if (Math.abs(safeDx) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(safeDy) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return [...rects];
+  const selectedSet = new Set(selected);
+  return rects.map((rect, index) => selectedSet.has(index)
+    ? { ...rect, x: rect.x + safeDx, y: rect.y + safeDy }
+    : rect);
+}
+
+export type UvChainAxis = 'horizontal' | 'vertical';
+export type UvChainResult = Readonly<{ rects: UvIslandRect[]; fits: boolean }>;
+
+/** Place selected islands into a deterministic grid-aligned chain. Horizontal
+ * chains sort left-to-right and share a top edge; vertical chains sort top-to-
+ * bottom and share a left edge. Exact face UVs remain inside each moved frame. */
+export function chainUvIslands(
+  rects: readonly UvIslandRect[],
+  indices: readonly number[],
+  axis: UvChainAxis,
+  atlasW: number,
+  atlasH: number,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
+  gap = snapStep,
+): UvChainResult {
+  const selected = uniqueUvIslandIndices(rects, indices);
+  const bounds = uvIslandSetBounds(rects, selected);
+  if (!bounds || selected.length < 2) return { rects: [...rects], fits: false };
+  const step = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(snapStep));
+  const safeGap = Math.max(0, integer(gap));
+  const ordered = [...selected].sort((a, b) => {
+    const left = rects[a]!;
+    const right = rects[b]!;
+    return axis === 'horizontal'
+      ? left.x - right.x || left.y - right.y || a - b
+      : left.y - right.y || left.x - right.x || a - b;
+  });
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (let at = 0; at < ordered.length; at += 1) {
+    const rect = rects[ordered[at]!]!;
+    offsets.push(cursor);
+    if (at < ordered.length - 1) {
+      const extent = axis === 'horizontal' ? rect.w : rect.h;
+      cursor = Math.ceil((cursor + extent + safeGap) / step) * step;
+    }
+  }
+  const last = rects[ordered[ordered.length - 1]!]!;
+  const chainExtent = cursor + (axis === 'horizontal' ? last.w : last.h);
+  const available = axis === 'horizontal' ? atlasW : atlasH;
+  if (chainExtent > available) return { rects: [...rects], fits: false };
+
+  const maxStart = available - chainExtent;
+  const requestedStart = axis === 'horizontal' ? bounds.x : bounds.y;
+  const start = clamp(snapUvVertex(requestedStart, step), 0, Math.floor(maxStart / step) * step);
+  const crossExtent = Math.max(...ordered.map((index) => axis === 'horizontal' ? rects[index]!.h : rects[index]!.w));
+  const crossAvailable = axis === 'horizontal' ? atlasH : atlasW;
+  if (crossExtent > crossAvailable) return { rects: [...rects], fits: false };
+  const requestedCross = axis === 'horizontal' ? bounds.y : bounds.x;
+  const maxCross = crossAvailable - crossExtent;
+  const cross = clamp(snapUvVertex(requestedCross, step), 0, Math.floor(maxCross / step) * step);
+  const placements = new Map<number, { x: number; y: number }>();
+  ordered.forEach((index, at) => placements.set(index, axis === 'horizontal'
+    ? { x: start + offsets[at]!, y: cross }
+    : { x: cross, y: start + offsets[at]! }));
+  return {
+    fits: true,
+    rects: rects.map((rect, index) => {
+      const placement = placements.get(index);
+      if (!placement || (placement.x === rect.x && placement.y === rect.y)) return rect;
+      return { ...rect, ...placement };
+    }),
   };
 }
 
@@ -400,6 +531,55 @@ export function scaleUvSelection(
     translateAbsoluteSelection(triangles, target, dx, dy);
   }
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
+}
+
+export type UvSizeMatch = 'width' | 'height' | 'both';
+
+function wholeIslandBounds(rect: UvIslandRect): UvSelectionBounds {
+  return uvSelectionBounds(rect) ?? {
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+    cx: rect.x + rect.w * 0.5,
+    cy: rect.y + rect.h * 0.5,
+  };
+}
+
+/** Match every selected island to the active island's authored width, height,
+ * or complete size. Each silhouette scales inside its own transform frame; the
+ * atlas bitmap remains fixed. */
+export function matchUvIslandSize(
+  rects: readonly UvIslandRect[],
+  indices: readonly number[],
+  activeIndex: number,
+  mode: UvSizeMatch,
+  atlasW: number,
+  atlasH: number,
+): UvIslandRect[] {
+  const selected = uniqueUvIslandIndices(rects, indices);
+  if (selected.length < 2 || !selected.includes(activeIndex)) return [...rects];
+  const active = rects[activeIndex];
+  if (!active) return [...rects];
+  const target = wholeIslandBounds(active);
+  const selectedSet = new Set(selected);
+  return rects.map((rect, index) => {
+    if (!selectedSet.has(index) || index === activeIndex) return rect;
+    const bounds = wholeIslandBounds(rect);
+    const scaleX = mode === 'height' ? 1 : target.w / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.w);
+    const scaleY = mode === 'width' ? 1 : target.h / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.h);
+    if (Math.abs(scaleX - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(scaleY - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
+    if (rect.triangles?.length) return scaleUvSelection(rect, undefined, scaleX, scaleY, atlasW, atlasH);
+    const width = clamp(rect.w * scaleX, UV_LAYOUT_TUNING.minimumIslandTexels, atlasW);
+    const height = clamp(rect.h * scaleY, UV_LAYOUT_TUNING.minimumIslandTexels, atlasH);
+    return {
+      ...rect,
+      x: clamp(rect.x, 0, atlasW - width),
+      y: clamp(rect.y, 0, atlasH - height),
+      w: width,
+      h: height,
+    };
+  });
 }
 
 /** Reflect a complete island or one authored face through its own transform

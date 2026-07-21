@@ -11,14 +11,41 @@ export type UvWorkspaceLayout = Readonly<{
   showScope: boolean;
 }>;
 
+const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
+
+/** Resolve the right-panel width from a left-edge drag. Moving left grows the
+ * panel; moving right shrinks it. The live viewport bound always preserves a
+ * useful amount of stage and rail space beside the UV workspace. */
+export function uvPanelWidthFromDrag(
+  startWidth: number,
+  startPointerX: number,
+  pointerX: number,
+  viewportWidth: number,
+): number {
+  const policy = REGIONS.focusPanel;
+  const liveMaximum = Math.max(
+    policy.resizeMinWidth,
+    Math.min(policy.resizeMaxWidth, Math.floor(viewportWidth) - policy.minimumOutsideWidth),
+  );
+  const requested = startWidth + startPointerX - pointerX;
+  const stepped = Math.round(requested / policy.resizeStep) * policy.resizeStep;
+  return clamp(stepped, policy.resizeMinWidth, liveMaximum);
+}
+
 /** One strict policy for the paint panel's two shapes. Focus mode spends its
  * entire body budget on UV authoring; leaving it restores every paint-panel
  * section without remounting the active model, atlas, or variant state. */
-export function uvWorkspaceLayout(focused: boolean): UvWorkspaceLayout {
+export function uvWorkspaceLayout(focused: boolean, authoredWidth?: number): UvWorkspaceLayout {
+  const fallbackWidth = focused ? REGIONS.focusPanel.atlasFocusWidth : REGIONS.focusPanel.atlasWidth;
+  const panelWidth = clamp(
+    Number.isFinite(authoredWidth) ? Math.round(authoredWidth!) : fallbackWidth,
+    REGIONS.focusPanel.resizeMinWidth,
+    REGIONS.focusPanel.resizeMaxWidth,
+  );
   return focused
     ? {
       focused: true,
-      panelWidth: REGIONS.focusPanel.atlasFocusWidth,
+      panelWidth,
       panelTitle: 'UV WORKSPACE',
       toggleLabel: 'RETURN',
       toggleTooltip: 'Return to the complete model paint panel',
@@ -28,7 +55,7 @@ export function uvWorkspaceLayout(focused: boolean): UvWorkspaceLayout {
     }
     : {
       focused: false,
-      panelWidth: REGIONS.focusPanel.atlasWidth,
+      panelWidth,
       panelTitle: 'MODEL · PAINT',
       toggleLabel: 'FOCUS',
       toggleTooltip: 'Open a large UV workspace for dense meshes',

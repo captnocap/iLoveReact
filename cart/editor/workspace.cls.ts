@@ -502,6 +502,10 @@ classifier({
   // FOCUS PANEL region (req_2627/req_3266): open body + persistent pane rail.
   // Collapsed Inspector renders HW_RightRail alone, returning body width to Stage.
   HW_RightPanel: { type: 'Box', style: { width: REGIONS.focusPanel.width, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
+  // UV authoring is the one bounded user-resizable focus-panel shape. This
+  // full-height strip captures the pointer, so the drag continues over Stage.
+  HW_RightResizeGrip: { type: 'Pressable', style: { width: REGIONS.focusPanel.resizeHandleWidth, height: '100%', flexShrink: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'theme:bgAlt' }, hoverStyle: { backgroundColor: 'theme:segActiveBg' } },
+  HW_RightResizeLine: { type: 'Box', style: { width: 2, height: 42, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:primary' } },
   HW_Inspector: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column' } },
   HW_InspectorBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'scroll' } },
   // The no-whole-panel-scroll body (req_2627): sections inside are budgeted

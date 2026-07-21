@@ -1,6 +1,6 @@
 // SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the contextual focus
 // body + its persistent pane rail. The active rail button folds the body away.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, Row } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
@@ -29,7 +29,7 @@ import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
-import { uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
+import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
@@ -263,7 +263,87 @@ export default function Inspector(props: {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
   const [uvWorkspaceFocused, setUvWorkspaceFocused] = useState(false);
-  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused);
+  const [uvPanelWidths, setUvPanelWidths] = useState({
+    panel: REGIONS.focusPanel.atlasWidth,
+    focus: REGIONS.focusPanel.atlasFocusWidth,
+  });
+  const [uvPanelResizing, setUvPanelResizing] = useState(false);
+  const uvResizeGestureRef = useRef<null | { mode: 'panel' | 'focus'; startX: number; startWidth: number; viewportWidth: number }>(null);
+  const pendingUvWidthRef = useRef<null | { mode: 'panel' | 'focus'; width: number }>(null);
+  const uvResizeFramePendingRef = useRef(false);
+  const uvResizeGenerationRef = useRef(0);
+  const uvWidthMode = uvWorkspaceFocused ? 'focus' : 'panel';
+  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused, uvPanelWidths[uvWidthMode]);
+  const host = globalThis as any;
+  const pointerX = (event: any): number => {
+    const eventX = Number(event?.x);
+    if (Number.isFinite(eventX)) return eventX;
+    const hostX = Number(host.getMouseX?.());
+    return Number.isFinite(hostX) ? hostX : 0;
+  };
+  const applyUvPanelWidth = (mode: 'panel' | 'focus', width: number) => {
+    setUvPanelWidths((current) => current[mode] === width ? current : { ...current, [mode]: width });
+  };
+  const queueUvPanelWidth = (mode: 'panel' | 'focus', width: number) => {
+    pendingUvWidthRef.current = { mode, width };
+    if (uvResizeFramePendingRef.current) return;
+    uvResizeFramePendingRef.current = true;
+    const generation = uvResizeGenerationRef.current;
+    const schedule: (callback: () => void) => unknown = typeof host.requestAnimationFrame === 'function'
+      ? host.requestAnimationFrame.bind(host)
+      : (callback) => setTimeout(callback, REGIONS.focusPanel.resizePreviewIntervalMs);
+    schedule(() => {
+      if (generation !== uvResizeGenerationRef.current) return;
+      uvResizeFramePendingRef.current = false;
+      const pending = pendingUvWidthRef.current;
+      pendingUvWidthRef.current = null;
+      if (pending) applyUvPanelWidth(pending.mode, pending.width);
+    });
+  };
+  const beginUvPanelResize = (event: any) => {
+    const reportedViewportWidth = Number(host.__viewport_width?.());
+    const viewportWidth = Number.isFinite(reportedViewportWidth) && reportedViewportWidth > 0
+      ? reportedViewportWidth
+      : REGIONS.focusPanel.resizeMaxWidth + REGIONS.focusPanel.minimumOutsideWidth;
+    uvResizeGestureRef.current = {
+      mode: uvWidthMode,
+      startX: pointerX(event),
+      startWidth: uvWorkspace.panelWidth,
+      viewportWidth,
+    };
+    setUvPanelResizing(true);
+  };
+  const moveUvPanelResize = (event: any) => {
+    const gesture = uvResizeGestureRef.current;
+    if (!gesture) return;
+    queueUvPanelWidth(gesture.mode, uvPanelWidthFromDrag(
+      gesture.startWidth,
+      gesture.startX,
+      pointerX(event),
+      gesture.viewportWidth,
+    ));
+  };
+  const finishUvPanelResize = (event: any) => {
+    const gesture = uvResizeGestureRef.current;
+    uvResizeGestureRef.current = null;
+    uvResizeGenerationRef.current += 1;
+    uvResizeFramePendingRef.current = false;
+    pendingUvWidthRef.current = null;
+    if (gesture) {
+      applyUvPanelWidth(gesture.mode, uvPanelWidthFromDrag(
+        gesture.startWidth,
+        gesture.startX,
+        pointerX(event),
+        gesture.viewportWidth,
+      ));
+    }
+    setUvPanelResizing(false);
+  };
+  useEffect(() => () => {
+    uvResizeGenerationRef.current += 1;
+    uvResizeGestureRef.current = null;
+    pendingUvWidthRef.current = null;
+  }, []);
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
   // card shows the name the next save writes — never a stale synthesized one.
@@ -391,6 +471,17 @@ export default function Inspector(props: {
       <C.HW_RightPanel style={{ width: activePane === 'paint'
         ? uvWorkspace.panelWidth
         : REGIONS.focusPanel.width }}>
+        {activePane === 'paint' ? (
+          <C.HW_RightResizeGrip
+            tooltip="Drag to resize the UV workspace"
+            onMouseDown={beginUvPanelResize}
+            onMouseMove={moveUvPanelResize}
+            onMouseUp={finishUvPanelResize}
+            style={uvPanelResizing ? { backgroundColor: accentFor('segActiveBg') } : undefined}
+          >
+            <C.HW_RightResizeLine />
+          </C.HW_RightResizeGrip>
+        ) : null}
         <C.HW_Inspector>
           <C.HW_PanelHead>
             <C.HW_Kicker>{paneTitle}</C.HW_Kicker>

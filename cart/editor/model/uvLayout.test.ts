@@ -1,4 +1,5 @@
 import {
+  chainUvIslands,
   flattenUvFaceCorners,
   flattenUvIslandRects,
   flipUvSelection,
@@ -7,12 +8,14 @@ import {
   isUvDoubleClick,
   moveUvFace,
   moveUvIsland,
+  moveUvIslands,
   moveUvSelectionVertex,
   moveUvIslandVertex,
   parseUvIslandRects,
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
+  matchUvIslandSize,
   shouldActivateUvDrag,
   shouldPanUvCanvas,
   uniformUvPack,
@@ -21,6 +24,7 @@ import {
   uvIslandBoundarySegments,
   uvIslandBoundaryPath,
   uvIslandVertices,
+  uvIslandSetBounds,
   uvSelectionBounds,
   uvTranslationSnapStep,
 } from './uvLayout';
@@ -118,6 +122,8 @@ test('zoomed-out translation uses a perceptible grid and Alt bypasses it everywh
   assert(uvTranslationSnapStep(4) === 1, 'visible texels did not retain one-pixel precision');
   assert(uvTranslationSnapStep(1) === 4, 'one-to-one zoom did not strengthen the translation latch');
   assert(uvTranslationSnapStep(0.25) === 16, 'zoomed-out movement fell back to sub-pixel screen steps');
+  assert(uvTranslationSnapStep(4, 8) === 8, 'explicit grid precision was weakened while zoomed in');
+  assert(uvTranslationSnapStep(0.25, 8) === 16, 'explicit grid precision did not remain a minimum while zoomed out');
 
   const rect = parseUvIslandRects([3, 3, 8, 8], [1], [0, 3, 3, 11, 3, 3, 11])[0]!;
   const snappedIsland = moveUvIsland(rect, 2.1, 2.1, 32, 32, 4);
@@ -135,6 +141,47 @@ test('zoomed-out translation uses a perceptible grid and Alt bypasses it everywh
   assert(moveUvIsland(aligned, 0.4, 0.4, 32, 32, 4) === aligned, 'motion inside one snap cell still churned the preview');
   assert(moveUvFace(aligned, { face: 0, group: 1 }, 0.4, 0.4, 32, 32, 4) === aligned, 'isolated face churned inside one snap cell');
   assert(moveUvSelectionVertex(aligned, undefined, 0, 0.4, 0.4, 32, 32, false, 4) === aligned, 'vertex churned inside one snap cell');
+});
+
+test('multi-island movement is rigid, grid-snapped, and clamped once as a group', () => {
+  const rects = parseUvIslandRects([1, 2, 4, 5, 8, 7, 3, 2, 20, 20, 2, 2], [1, 2, 3]);
+  const bounds = uvIslandSetBounds(rects, [0, 1]);
+  assert(bounds?.x === 1 && bounds.y === 2 && bounds.w === 10 && bounds.h === 7, 'multi-selection frame missed a member');
+  const moved = moveUvIslands(rects, [0, 1], 100, 100, 16, 16, 4);
+  assert(moved[0]!.x === 6 && moved[0]!.y === 9, 'group did not clamp against its aggregate bounds');
+  assert(moved[1]!.x === 13 && moved[1]!.y === 14, 'second island drifted inside the group');
+  assert(moved[1]!.x - moved[0]!.x === 7 && moved[1]!.y - moved[0]!.y === 5, 'group offsets changed at the atlas edge');
+  assert(moved[2] === rects[2], 'group movement rewrote an unselected island');
+});
+
+test('selected islands match the active size without changing unselected UVs', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 8, 6, 16, 4, 4, 3, 30, 30, 2, 2],
+    [1, 2, 3],
+    [
+      0, 0, 0, 8, 0, 0, 6,
+      1, 16, 4, 20, 4, 16, 7,
+      2, 30, 30, 32, 30, 30, 32,
+    ],
+  );
+  const matched = matchUvIslandSize(rects, [0, 1], 0, 'both', 64, 64);
+  const activeBounds = uvSelectionBounds(matched[0]!)!;
+  const matchedBounds = uvSelectionBounds(matched[1]!)!;
+  assert(Math.abs(activeBounds.w - matchedBounds.w) < 0.0001, 'matched island width missed the active island');
+  assert(Math.abs(activeBounds.h - matchedBounds.h) < 0.0001, 'matched island height missed the active island');
+  assert(matched[2] === rects[2], 'size matching rewrote an unselected island');
+});
+
+test('horizontal and vertical chains follow the snap grid and report atlas overflow', () => {
+  const rects = parseUvIslandRects([11, 9, 3, 4, 1, 1, 5, 2, 20, 20, 2, 2], [1, 2, 3]);
+  const horizontal = chainUvIslands(rects, [0, 1], 'horizontal', 32, 32, 4, 4);
+  assert(horizontal.fits, 'valid horizontal chain was refused');
+  assert(horizontal.rects[1]!.x === 0 && horizontal.rects[0]!.x === 12, 'horizontal chain ignored spatial order or grid gap');
+  assert(horizontal.rects[0]!.y === horizontal.rects[1]!.y && horizontal.rects[0]!.y % 4 === 0, 'horizontal chain did not share a snapped top edge');
+  const vertical = chainUvIslands(rects, [0, 1], 'vertical', 32, 32, 4, 4);
+  assert(vertical.fits && vertical.rects[1]!.y === 0 && vertical.rects[0]!.y === 8, 'vertical chain missed its snapped sequence');
+  const overflow = chainUvIslands(parseUvIslandRects([0, 0, 20, 2, 0, 4, 20, 2], [1, 2]), [0, 1], 'horizontal', 32, 32, 4, 4);
+  assert(!overflow.fits, 'chain larger than the atlas did not report overflow');
 });
 
 test('selection clicks cannot nudge UVs before the drag latch opens', () => {

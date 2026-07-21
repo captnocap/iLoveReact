@@ -1,10 +1,10 @@
 // cart/editor/shell/regions.ts — the FIXED-REGION LAYOUT CONTRACT (req_2627).
 //
-// The editor window breaks into primitively-named regions. Every OPEN region's
-// dimensions are CONSTANTS; the center viewport is the sole flexing region.
-// Sections C and G may remove their panel BODY while their adjacent fixed rail
-// remains, giving that width back to the viewport (req_3266). Content still lays
-// out against constants imported from HERE, never window measurements.
+// The editor window breaks into primitively-named regions. Ordinary open-region
+// dimensions are constants and the center viewport takes the remainder. The UV
+// authoring shape of section G is the deliberate exception: its left edge may be
+// dragged between bounds declared here, while its rail remains fixed. Sections C
+// and G may still remove their panel BODY and return that width to the viewport.
 //
 // Region map (the user's vocabulary), top to bottom / left to right:
 //
@@ -61,6 +61,12 @@ const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
 const FOCUS_PANEL_ATLAS_WIDTH = 480; // Blockbench-scale UV workspace + rail
 const FOCUS_PANEL_ATLAS_FOCUS_WIDTH = 960; // dedicated dense-mesh UV workspace + rail
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
+const FOCUS_PANEL_RESIZE_MIN_WIDTH = 420; // smallest usable atlas authoring body + rail
+const FOCUS_PANEL_RESIZE_MAX_WIDTH = 1600; // prevents the panel from consuming ultra-wide windows
+const FOCUS_PANEL_MIN_OUTSIDE_WIDTH = 560; // stage + surrounding rails retained while dragging
+const FOCUS_PANEL_RESIZE_HANDLE_WIDTH = 9; // full-height pointer-capture strip on the panel's left edge
+const FOCUS_PANEL_RESIZE_STEP = 4; // layout updates in stable, visible increments
+const FOCUS_PANEL_RESIZE_PREVIEW_INTERVAL_MS = 4; // fallback when the host has no animation-frame scheduler
 const STATUS_BAR_HEIGHT = 31; // status bar: the bottom build dock (HW_BuildDock)
 
 export const REGIONS = {
@@ -103,6 +109,12 @@ export const REGIONS = {
     atlasWidth: FOCUS_PANEL_ATLAS_WIDTH,
     atlasFocusWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH,
     railWidth: FOCUS_RAIL_WIDTH,
+    resizeMinWidth: FOCUS_PANEL_RESIZE_MIN_WIDTH,
+    resizeMaxWidth: FOCUS_PANEL_RESIZE_MAX_WIDTH,
+    minimumOutsideWidth: FOCUS_PANEL_MIN_OUTSIDE_WIDTH,
+    resizeHandleWidth: FOCUS_PANEL_RESIZE_HANDLE_WIDTH,
+    resizeStep: FOCUS_PANEL_RESIZE_STEP,
+    resizePreviewIntervalMs: FOCUS_PANEL_RESIZE_PREVIEW_INTERVAL_MS,
     bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 285
     atlasBodyWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     atlasFocusBodyWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
