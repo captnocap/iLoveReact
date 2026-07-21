@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:45:07.951Z",
   "origin": "codex:019f840f",
   "text": "here is a performance opportunity to find where the only constraint is you cant reduce from the amount on display, but when this is open [Image #1] fps goes from 240 -> 80 fps",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,18 @@
       "actor": "codex",
       "kind": "note",
       "text": "Surveyed the active PaintSidePanel successor: the shader page keeps all 48 visible cells, but each ShaderThumb is a live Effect. effects.paintCustomEffect renders each one into its own GPU target every paint frame. The planned fix uses the existing StaticSurface paint cache around the complete interactive grid plus value-stable thumbnail memoization; layout, hit testing, tooltips, paging, and visible count remain unchanged."
+    },
+    {
+      "at": "2026-07-21T09:52:38.365Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Optimized the active Paint shader browser without reducing its fixed 8x6, 48-material display. The interactive grid now captures once through StaticSurface and composites as one quad instead of repainting 48 live Effects every frame; ShaderThumb value memoization prevents fresh-but-equal data arrays from invalidating the cache, while search, paging, selection, variants, and palette changes still recapture. Added focused tests and updated the game knowledge record; the ReleaseFast editor ship passes. User review should hold this panel open for 60 seconds and confirm FPS plus spikewatch behavior.",
+  "shas": [
+    "45087d217"
+  ],
+  "resolvedAt": "2026-07-21T09:52:38.365Z"
 }
