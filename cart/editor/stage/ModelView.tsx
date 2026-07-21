@@ -146,6 +146,7 @@ export type ModelFocusBridge = {
   refreshUv: () => void;
   applyUvLayout: (rects: Uint32Array) => boolean;
   applyUvGeometry: (corners: Float32Array, action: UvHistoryAction) => boolean;
+  restoreUvShapes: (islandIndices: Uint32Array) => boolean;
   undoUvHistory: () => string;
   redoUvHistory: () => string;
   selectUvIsland: (index: number, additive: boolean) => boolean;
@@ -1224,6 +1225,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return true;
   };
+  const restoreUvShapes = (islandIndices: Uint32Array): boolean => {
+    if (islandIndices.length === 0) return false;
+    const ok = host.__model_uv_restore_shape?.(islandIndices) === 1;
+    if (!ok) return false;
+    onDocumentMutated?.();
+    buildUvPanel();
+    return true;
+  };
   const selectUvIsland = (index: number, additive: boolean): boolean => {
     if (!Number.isInteger(index) || index < 0) return false;
     // Paint owns the 3D surface and deliberately has no edit-selection tint. Keep
@@ -1325,7 +1334,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     const name = path.replace(/\\/g, '/').split('/').pop() || 'texture';
     return persisted.ok
-      ? `Imported ${name} · ${decoded.width}×${decoded.height} — remap the UVs over it.`
+      ? `Imported ${name} · ${decoded.width}×${decoded.height} — UV geometry fitted without stretching; remap it over the image.`
       : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
   };
 
@@ -1848,6 +1857,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       refreshUv: buildUvPanel,
       applyUvLayout,
       applyUvGeometry,
+      restoreUvShapes,
       undoUvHistory: () => stepUvHistory(false),
       redoUvHistory: () => stepUvHistory(true),
       selectUvIsland,

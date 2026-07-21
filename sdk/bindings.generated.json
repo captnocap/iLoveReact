@@ -457,6 +457,10 @@
           "zig": "hostModelUvGeometryApply"
         },
         {
+          "js": "__model_uv_restore_shape",
+          "zig": "hostModelUvRestoreShape"
+        },
+        {
           "js": "__model_uv_selection_read",
           "zig": "hostModelUvSelectionRead"
         },

@@ -504,6 +504,19 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     applyIslandSetEdit(result.rects, `chained ${selectedIndices.length} islands ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}`, axis === 'horizontal' ? 'chain-horizontal' : 'chain-vertical');
   };
+  const restoreSelectedShapes = () => {
+    const indices = selectedIndicesRef.current;
+    if (selectionMode !== 'island' || indices.length === 0) {
+      setNote('Select one or more complete UV islands first.');
+      return;
+    }
+    if (!bridge.restoreUvShapes(new Uint32Array(indices))) {
+      setNote('Restore Shape refused — the live mesh or UV selection changed.');
+      bridge.refreshUv();
+      return;
+    }
+    setNote(`restored ${indices.length} UV ${indices.length === 1 ? 'island' : 'islands'} from the 3D mesh`);
+  };
   // A translated island keeps identical local geometry. Cache that geometry in
   // island-local atlas units and move it by changing only the Graph view origin.
   // Dense head UVs therefore do not resend thousands of points per mouse sample.
@@ -759,6 +772,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>SHIFT+CLICK</Text>
       </Row>
 
+      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
+        <Text style={{ minWidth: 39, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>SHAPE</Text>
+        {selectionActionButton('RESTORE', selectionMode === 'island' && selectedIndices.length > 0, 'Reproject selected islands from the 3D mesh — restores circles, rectangles, orientation, and square-texel aspect while keeping the current UV centre', restoreSelectedShapes)}
+        <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>FROM 3D · KEEPS CENTRE</Text>
+      </Row>
+
       <Row style={{ height: 23, alignItems: 'center', gap: 4 }}>
         <Text style={{ minWidth: 39, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>GRID</Text>
         {UV_SNAP_STEPS.map((step) => {
@@ -1011,7 +1031,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
             <Icon name="Grid3x3" size={11} color={accentFor('textDim')} />
           </Pressable>
-          <Pressable tooltip="Import an image at its native size, then remap the UVs over it" onPress={() => {
+          <Pressable tooltip="Import an image at its native size; UV geometry uniformly fits without turning circles into ovals" onPress={() => {
             setNote('choosing a texture…');
             void bridge.importUvAtlas().then(setNote);
           }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>

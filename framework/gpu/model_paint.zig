@@ -851,12 +851,13 @@ fn indexIslandTriangles(layout: *const paint_islands.Layout, face_count: u32) ?I
     return .{ .starts = starts, .triangles = triangles };
 }
 
-/// Adopt an external raster at its native dimensions while retaining the current
-/// normalized UV map. This is the texture-import boundary: the image is never
-/// stretched to the old atlas, and every current UV point lands at the same relative
-/// position until the author deliberately remaps it. All allocations and topology
-/// reconstruction complete before any live state changes.
-pub fn importAtlasPreservingUvs(rgba: []const u8, width: u32, height: u32, verts: []f32, vert_count: u32) bool {
+/// Adopt an external raster at its native dimensions while retaining the current UV
+/// geometry in square-texel space. Scaling normalized U and V independently turns a
+/// circle into an oval whenever the new image aspect differs, so the complete old
+/// atlas is uniformly fitted and centered inside the new one instead. The image is
+/// never resampled. All allocations and topology reconstruction complete before any
+/// live state changes.
+pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32, verts: []f32, vert_count: u32) bool {
     const old_layout = g_layout orelse return false;
     const live_positions = g_positions orelse return false;
     if (g_rgba == null or vert_count != g_facecount * 3) return false;
@@ -870,10 +871,15 @@ pub fn importAtlasPreservingUvs(rgba: []const u8, width: u32, height: u32, verts
     defer alloc.free(normalized);
     const old_width: f32 = @floatFromInt(g_atlas_w);
     const old_height: f32 = @floatFromInt(g_atlas_h);
+    const new_width: f32 = @floatFromInt(width);
+    const new_height: f32 = @floatFromInt(height);
+    const uniform_scale = @min(new_width / old_width, new_height / old_height);
+    const offset_x = (new_width - old_width * uniform_scale) * 0.5;
+    const offset_y = (new_height - old_height * uniform_scale) * 0.5;
     var coordinate: usize = 0;
     while (coordinate < normalized.len) : (coordinate += 2) {
-        normalized[coordinate + 0] = old_layout.corner_uv[coordinate + 0] / old_width;
-        normalized[coordinate + 1] = old_layout.corner_uv[coordinate + 1] / old_height;
+        normalized[coordinate + 0] = (offset_x + old_layout.corner_uv[coordinate + 0] * uniform_scale) / new_width;
+        normalized[coordinate + 1] = (offset_y + old_layout.corner_uv[coordinate + 1] * uniform_scale) / new_height;
     }
 
     const groups = collectFaceGroups(g_facecount) orelse return false;
@@ -921,6 +927,132 @@ pub fn importAtlasPreservingUvs(rgba: []const u8, width: u32, height: u32, verts
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1);
     return true;
+}
+
+/// Write a candidate corner table whose selected UV islands are reprojected from the
+/// resident 3D mesh. Each canonical island keeps the centre of its current UV footprint
+/// and uniformly fits inside that footprint, restoring its silhouette, orientation, and
+/// square-texel aspect without moving or rewriting the texture raster. Selected pieces
+/// that belong to the same canonical 3D island are rebuilt together, so a complete
+/// detached fan can become one circle again.
+const CanonicalUvFrame = struct {
+    live_low_x: f32 = std.math.floatMax(f32),
+    live_low_y: f32 = std.math.floatMax(f32),
+    live_high_x: f32 = -std.math.floatMax(f32),
+    live_high_y: f32 = -std.math.floatMax(f32),
+    canonical_low_x: f32 = std.math.floatMax(f32),
+    canonical_low_y: f32 = std.math.floatMax(f32),
+    canonical_high_x: f32 = -std.math.floatMax(f32),
+    canonical_high_y: f32 = -std.math.floatMax(f32),
+    face_count: u32 = 0,
+    scale: f32 = 0,
+    live_center_x: f32 = 0,
+    live_center_y: f32 = 0,
+    canonical_center_x: f32 = 0,
+    canonical_center_y: f32 = 0,
+    valid: bool = false,
+};
+
+pub fn writeCanonicalIslandCorners(island_indices: []const u32, out: []f32) bool {
+    const live = &(g_layout orelse return false);
+    const live_positions = g_positions orelse return false;
+    if (island_indices.len == 0 or out.len != live.corner_uv.len or g_facecount == 0) return false;
+
+    const selected_islands = alloc.alloc(bool, live.islands.len) catch return false;
+    defer alloc.free(selected_islands);
+    @memset(selected_islands, false);
+    for (island_indices) |island_index| {
+        const index: usize = @intCast(island_index);
+        if (index >= live.islands.len) return false;
+        selected_islands[index] = true;
+    }
+
+    const selected_faces = alloc.alloc(bool, g_facecount) catch return false;
+    defer alloc.free(selected_faces);
+    var selected_face_count: u32 = 0;
+    var face: u32 = 0;
+    while (face < g_facecount) : (face += 1) {
+        const selected = selected_islands[live.tri_island[face]];
+        selected_faces[face] = selected;
+        if (selected) selected_face_count += 1;
+    }
+    if (selected_face_count == 0) return false;
+
+    const groups = collectFaceGroups(g_facecount) orelse return false;
+    defer alloc.free(groups);
+    var canonical = paint_islands.build(
+        alloc,
+        live_positions,
+        groups,
+        live.density,
+        MAX_ATLAS_DIM,
+        ATLAS_BUDGET,
+    ) orelse return false;
+    defer canonical.deinit(alloc);
+    if (canonical.corner_uv.len != live.corner_uv.len or canonical.tri_island.len != g_facecount) return false;
+    @memcpy(out, live.corner_uv);
+
+    const frames = alloc.alloc(CanonicalUvFrame, canonical.islands.len) catch return false;
+    defer alloc.free(frames);
+    @memset(frames, .{});
+    face = 0;
+    while (face < g_facecount) : (face += 1) {
+        if (!selected_faces[face]) continue;
+        const frame = &frames[canonical.tri_island[face]];
+        frame.face_count += 1;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const coordinate = (@as(usize, face) * 3 + corner) * 2;
+            const live_x = live.corner_uv[coordinate + 0];
+            const live_y = live.corner_uv[coordinate + 1];
+            const canonical_x = canonical.corner_uv[coordinate + 0];
+            const canonical_y = canonical.corner_uv[coordinate + 1];
+            frame.live_low_x = @min(frame.live_low_x, live_x);
+            frame.live_low_y = @min(frame.live_low_y, live_y);
+            frame.live_high_x = @max(frame.live_high_x, live_x);
+            frame.live_high_y = @max(frame.live_high_y, live_y);
+            frame.canonical_low_x = @min(frame.canonical_low_x, canonical_x);
+            frame.canonical_low_y = @min(frame.canonical_low_y, canonical_y);
+            frame.canonical_high_x = @max(frame.canonical_high_x, canonical_x);
+            frame.canonical_high_y = @max(frame.canonical_high_y, canonical_y);
+        }
+    }
+
+    var restored_any = false;
+    for (frames) |*frame| {
+        if (frame.face_count == 0) continue;
+        const live_width = frame.live_high_x - frame.live_low_x;
+        const live_height = frame.live_high_y - frame.live_low_y;
+        const canonical_width = frame.canonical_high_x - frame.canonical_low_x;
+        const canonical_height = frame.canonical_high_y - frame.canonical_low_y;
+        if (live_width <= paint_islands.UV_EDGE_MATCH_EPSILON or
+            live_height <= paint_islands.UV_EDGE_MATCH_EPSILON or
+            canonical_width <= paint_islands.UV_EDGE_MATCH_EPSILON or
+            canonical_height <= paint_islands.UV_EDGE_MATCH_EPSILON) continue;
+        frame.scale = @min(live_width / canonical_width, live_height / canonical_height);
+        if (!std.math.isFinite(frame.scale) or frame.scale <= 0) continue;
+        frame.live_center_x = (frame.live_low_x + frame.live_high_x) * 0.5;
+        frame.live_center_y = (frame.live_low_y + frame.live_high_y) * 0.5;
+        frame.canonical_center_x = (frame.canonical_low_x + frame.canonical_high_x) * 0.5;
+        frame.canonical_center_y = (frame.canonical_low_y + frame.canonical_high_y) * 0.5;
+        frame.valid = true;
+        restored_any = true;
+    }
+    if (!restored_any) return false;
+
+    face = 0;
+    while (face < g_facecount) : (face += 1) {
+        if (!selected_faces[face]) continue;
+        const frame = frames[canonical.tri_island[face]];
+        if (!frame.valid) continue;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const coordinate = (@as(usize, face) * 3 + corner) * 2;
+            out[coordinate + 0] = frame.live_center_x + (canonical.corner_uv[coordinate + 0] - frame.canonical_center_x) * frame.scale;
+            out[coordinate + 1] = frame.live_center_y + (canonical.corner_uv[coordinate + 1] - frame.canonical_center_y) * frame.scale;
+        }
+    }
+    return restored_any;
 }
 
 /// A face's representative colour — the texel at its island-space triangle centroid.

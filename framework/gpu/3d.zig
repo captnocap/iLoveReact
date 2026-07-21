@@ -7043,6 +7043,17 @@ pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) b
     return true;
 }
 
+/// Reproject selected UV islands from the resident 3D mesh, then commit the complete
+/// corner table through the same one-step journal boundary as every direct UV edit.
+/// The atlas raster remains fixed; only the mesh's sampling coordinates change.
+pub fn restoreUvIslandShapesJournaled(island_indices: []const u32) bool {
+    if (g_edit_count == 0) return false;
+    const corners = std.heap.c_allocator.alloc(f32, @as(usize, g_edit_count) * 2) catch return false;
+    defer std.heap.c_allocator.free(corners);
+    if (!model_paint.writeCanonicalIslandCorners(island_indices, corners)) return false;
+    return applyUvCornerGeometryJournaled(corners, mesh_journal_log.UV_RESTORE_SHAPE_LABEL);
+}
+
 /// Replace the current atlas with an equal-sized externally edited raster. This
 /// is an explicit bake boundary: the imported PNG becomes the new undo baseline
 /// and subsequent strokes continue on the existing layer table.
@@ -7077,7 +7088,7 @@ pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
     const verts = g_edit_verts orelse return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    if (!model_paint.importAtlasPreservingUvs(rgba, width, height, verts, g_edit_count)) return false;
+    if (!model_paint.importAtlasPreservingUvGeometry(rgba, width, height, verts, g_edit_count)) return false;
     paint_program.adoptCurrentAtlasAsBaseline();
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);

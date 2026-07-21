@@ -115,6 +115,7 @@ declare global {
   function __model_atlas_read(...args: unknown[]): unknown;
   function __model_uv_layout_apply(...args: unknown[]): unknown;
   function __model_uv_geometry_apply(...args: unknown[]): unknown;
+  function __model_uv_restore_shape(...args: unknown[]): unknown;
   function __model_uv_selection_read(...args: unknown[]): unknown;
   function __model_uv_island_select(...args: unknown[]): unknown;
   function __model_atlas_replace(...args: unknown[]): unknown;

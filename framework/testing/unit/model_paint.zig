@@ -21,6 +21,25 @@ fn atlasHash(bytes: []const u8) u64 {
     return hash;
 }
 
+const CornerBounds = struct { low_x: f32, low_y: f32, high_x: f32, high_y: f32 };
+
+fn cornerBounds(corners: []const f32) CornerBounds {
+    var bounds = CornerBounds{
+        .low_x = std.math.floatMax(f32),
+        .low_y = std.math.floatMax(f32),
+        .high_x = -std.math.floatMax(f32),
+        .high_y = -std.math.floatMax(f32),
+    };
+    var coordinate: usize = 0;
+    while (coordinate + 1 < corners.len) : (coordinate += 2) {
+        bounds.low_x = @min(bounds.low_x, corners[coordinate + 0]);
+        bounds.low_y = @min(bounds.low_y, corners[coordinate + 1]);
+        bounds.high_x = @max(bounds.high_x, corners[coordinate + 0]);
+        bounds.high_y = @max(bounds.high_y, corners[coordinate + 1]);
+    }
+    return bounds;
+}
+
 test "unused atlas space stays transparent while real faces retain their alpha" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(907, &quad, 6);
@@ -80,7 +99,7 @@ test "moving one coplanar face breaks its UV edge without moving atlas pixels" {
     try testing.expectEqual(fixed_atlas, atlasHash(model_paint.atlas().?.rgba));
 }
 
-test "texture import adopts native dimensions without moving normalized UVs" {
+test "texture import adopts native dimensions without stretching UV geometry" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(909, &quad, 6);
     model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
@@ -90,29 +109,90 @@ test "texture import adopts native dimensions without moving normalized UVs" {
         model_paint.test_support.clearTargetAndSource();
     }
 
-    var normalized_before: [12]f32 = undefined;
-    for (0..6) |vertex| {
-        normalized_before[vertex * 2 + 0] = quad[vertex * 8 + 6];
-        normalized_before[vertex * 2 + 1] = quad[vertex * 8 + 7];
+    var corners_before: [12]f32 = undefined;
+    for (0..2) |face| {
+        const triangle = model_paint.uvTriangle(@intCast(face)) orelse return error.TestUnexpectedResult;
+        @memcpy(corners_before[face * 6 ..][0..6], triangle.corners[0..]);
     }
+    const atlas_before = model_paint.atlas().?;
+    const old_width: f32 = @floatFromInt(atlas_before.w);
+    const old_height: f32 = @floatFromInt(atlas_before.h);
     const width: u32 = 37;
     const height: u32 = 19;
     var imported: [width * height * 4]u8 = undefined;
     for (&imported, 0..) |*byte, index| byte.* = @intCast(index % 251);
 
-    try testing.expect(model_paint.importAtlasPreservingUvs(&imported, width, height, &quad, 6));
+    try testing.expect(model_paint.importAtlasPreservingUvGeometry(&imported, width, height, &quad, 6));
     const atlas = model_paint.atlas().?;
     try testing.expectEqual(width, atlas.w);
     try testing.expectEqual(height, atlas.h);
     try testing.expectEqualSlices(u8, &imported, atlas.rgba);
+    const new_width: f32 = @floatFromInt(width);
+    const new_height: f32 = @floatFromInt(height);
+    const scale = @min(new_width / old_width, new_height / old_height);
+    const offset_x = (new_width - old_width * scale) * 0.5;
+    const offset_y = (new_height - old_height * scale) * 0.5;
     for (0..6) |vertex| {
-        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 0], quad[vertex * 8 + 6], 0.00001);
-        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 1], quad[vertex * 8 + 7], 0.00001);
+        const actual_x = quad[vertex * 8 + 6] * new_width;
+        const actual_y = quad[vertex * 8 + 7] * new_height;
+        try testing.expectApproxEqAbs(offset_x + corners_before[vertex * 2 + 0] * scale, actual_x, 0.0001);
+        try testing.expectApproxEqAbs(offset_y + corners_before[vertex * 2 + 1] * scale, actual_y, 0.0001);
     }
 
     const fixed_hash = atlasHash(atlas.rgba);
-    try testing.expect(!model_paint.importAtlasPreservingUvs(imported[0 .. imported.len - 1], width, height, &quad, 6));
+    try testing.expect(!model_paint.importAtlasPreservingUvGeometry(imported[0 .. imported.len - 1], width, height, &quad, 6));
     try testing.expectEqual(fixed_hash, atlasHash(model_paint.atlas().?.rgba));
+}
+
+test "restore shape reprojects a distorted island with square texel aspect in place" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(910, &quad, 6);
+    // Distinct authored triangles exercise the same coplanar joining used by a
+    // cylinder cap fan rather than relying on one pre-grouped face.
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 1 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    var original: [12]f32 = undefined;
+    for (0..2) |face| {
+        const triangle = model_paint.uvTriangle(@intCast(face)) orelse return error.TestUnexpectedResult;
+        @memcpy(original[face * 6 ..][0..6], triangle.corners[0..]);
+    }
+    const original_bounds = cornerBounds(&original);
+    const center_y = (original_bounds.low_y + original_bounds.high_y) * 0.5;
+    var distorted = original;
+    var coordinate: usize = 1;
+    while (coordinate < distorted.len) : (coordinate += 2) {
+        distorted[coordinate] = center_y + (distorted[coordinate] - center_y) * 0.5;
+    }
+    try testing.expect(model_paint.applyCornerUvs(&distorted, &quad, 6));
+    try testing.expectEqual(@as(usize, 1), model_paint.layoutIslands().?.len);
+
+    var restored: [12]f32 = undefined;
+    try testing.expect(model_paint.writeCanonicalIslandCorners(&.{0}, &restored));
+    const distorted_bounds = cornerBounds(&distorted);
+    const restored_bounds = cornerBounds(&restored);
+    const restored_width = restored_bounds.high_x - restored_bounds.low_x;
+    const restored_height = restored_bounds.high_y - restored_bounds.low_y;
+    try testing.expectApproxEqAbs(restored_width, restored_height, 0.0001);
+    try testing.expectApproxEqAbs((distorted_bounds.low_x + distorted_bounds.high_x) * 0.5, (restored_bounds.low_x + restored_bounds.high_x) * 0.5, 0.0001);
+    try testing.expectApproxEqAbs((distorted_bounds.low_y + distorted_bounds.high_y) * 0.5, (restored_bounds.low_y + restored_bounds.high_y) * 0.5, 0.0001);
+    try testing.expect(model_paint.applyCornerUvs(&restored, &quad, 6));
+
+    // If the fan was broken into pieces, restoring all selected pieces uses their
+    // shared canonical frame and welds coincident UV edges back into one island.
+    var detached = restored;
+    coordinate = 6;
+    while (coordinate < detached.len) : (coordinate += 2) detached[coordinate] += 1;
+    try testing.expect(model_paint.applyCornerUvs(&detached, &quad, 6));
+    try testing.expectEqual(@as(usize, 2), model_paint.layoutIslands().?.len);
+    var rejoined: [12]f32 = undefined;
+    try testing.expect(model_paint.writeCanonicalIslandCorners(&.{ 0, 1 }, &rejoined));
+    try testing.expect(model_paint.applyCornerUvs(&rejoined, &quad, 6));
+    try testing.expectEqual(@as(usize, 1), model_paint.layoutIslands().?.len);
 }
 
 test "appending an authored group carries exact paint texels and the atlas base" {

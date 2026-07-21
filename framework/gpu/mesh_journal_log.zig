@@ -59,10 +59,12 @@ pub const UvAction = enum(u8) {
     chain_horizontal,
     chain_vertical,
     pack,
+    restore_shape,
 };
 
 pub const UV_TEXTURE_IMPORT_LABEL = "import UV texture";
 pub const UV_TEXTURE_RELOAD_LABEL = "reload UV texture";
+pub const UV_RESTORE_SHAPE_LABEL = "restore UV shape";
 pub const UV_EQUIVALENCE_EPSILON: f32 = 0.0001;
 
 pub fn uvActionLabel(raw: i32) ?[]const u8 {
@@ -81,6 +83,7 @@ pub fn uvActionLabel(raw: i32) ?[]const u8 {
         .chain_horizontal => "chain UV horizontally",
         .chain_vertical => "chain UV vertically",
         .pack => "pack UV islands",
+        .restore_shape => UV_RESTORE_SHAPE_LABEL,
     };
 }
 
@@ -152,6 +155,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "chain UV horizontally", .uv_edit },
         .{ "chain UV vertically", .uv_edit },
         .{ "pack UV islands", .uv_edit },
+        .{ UV_RESTORE_SHAPE_LABEL, .uv_edit },
         .{ UV_TEXTURE_IMPORT_LABEL, .uv_texture_import },
         .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
     };

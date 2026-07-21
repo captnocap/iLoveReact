@@ -15,6 +15,7 @@ export const UV_HISTORY_ACTIONS = [
   { id: 'chain-horizontal', label: 'chain UV horizontally' },
   { id: 'chain-vertical', label: 'chain UV vertically' },
   { id: 'pack', label: 'pack UV islands' },
+  { id: 'restore-shape', label: 'restore UV shape' },
 ] as const;
 
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';

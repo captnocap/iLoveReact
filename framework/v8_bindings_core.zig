@@ -2359,6 +2359,25 @@ fn hostModelUvGeometryApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_uv_restore_shape(Uint32Array[island,...]) → 1. Reproject the selected
+/// islands from the resident 3D mesh, keeping their current UV centres and committing
+/// the result as one journaled UV action.
+fn hostModelUvRestoreShape(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const island_indices: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ok = scene3d.restoreUvIslandShapesJournaled(island_indices);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_uv_selection_read() → JSON [islandIndex,...]. The UV panel polls this
 /// only when the native model selection commits, avoiding an expensive atlas-byte
 /// read merely to synchronize selection chrome.
@@ -2413,7 +2432,8 @@ fn hostModelAtlasReplace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 }
 
 /// __model_atlas_import(Uint8Array rgba, width, height, journal=0) → 1. Adopt an imported
-/// image at its native dimensions while preserving the current normalized UV map.
+/// image at its native dimensions while uniformly fitting the current UV geometry so
+/// non-square atlases cannot stretch circles into ovals.
 fn hostModelAtlasImport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const rgba = argBytes(info, 0) orelse {
@@ -3509,6 +3529,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
     v8_runtime.registerHostFn("__model_uv_geometry_apply", hostModelUvGeometryApply);
+    v8_runtime.registerHostFn("__model_uv_restore_shape", hostModelUvRestoreShape);
     v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
     v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
