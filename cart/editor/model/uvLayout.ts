@@ -17,6 +17,8 @@ export const UV_LAYOUT_TUNING = {
   doubleClickMs: 350,
   doubleClickDistancePx: 6,
   dragActivationPx: 4,
+  /** Coalesce high-rate pointer samples without limiting a 240 Hz display to 60 Hz. */
+  dragPreviewIntervalMs: 4,
   minimumGridSpacingPx: 18,
   rotationHandleOffsetPx: 21,
   rotationHandleHitPx: 11,
@@ -639,6 +641,32 @@ export function uvRectPath(rects: readonly UvIslandRect[], scaleX: number, scale
   }).join(' ');
 }
 
+function uvRectSegments(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX: number, offsetY: number): number[] {
+  const segments: number[] = [];
+  for (const rect of rects) {
+    const x0 = offsetX + rect.x * scaleX;
+    const y0 = offsetY + rect.y * scaleY;
+    const x1 = offsetX + (rect.x + rect.w) * scaleX;
+    const y1 = offsetY + (rect.y + rect.h) * scaleY;
+    segments.push(x0, y0, x1, y0, x1, y0, x1, y1, x1, y1, x0, y1, x0, y1, x0, y0);
+  }
+  return segments;
+}
+
+function segmentPath(segments: readonly number[]): string {
+  let path = '';
+  for (let index = 0; index + 3 < segments.length; index += 4) {
+    path += `M ${segments[index]},${segments[index + 1]} L ${segments[index + 2]},${segments[index + 3]} `;
+  }
+  return path;
+}
+
+const normalizedEdgeKey = (a: readonly [number, number], b: readonly [number, number]): string => {
+  const ak = `${a[0].toFixed(5)},${a[1].toFixed(5)}`;
+  const bk = `${b[0].toFixed(5)},${b[1].toFixed(5)}`;
+  return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
+};
+
 function trianglePoint(rect: UvIslandRect, triangle: UvTrianglePoints, corner: number, scaleX: number, scaleY: number, offsetX: number, offsetY: number): [number, number] {
   return [
     offsetX + (rect.x + triangle[corner * 2]! * rect.w) * scaleX,
@@ -660,15 +688,14 @@ export function uvTrianglePath(rects: readonly UvIslandRect[], scaleX: number, s
 }
 
 /** Authored-island perimeter with shared triangulation edges removed. */
-export function uvIslandBoundaryPath(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): string {
-  return rects.map((rect) => {
-    if (!rect.triangles?.length) return uvRectPath([rect], scaleX, scaleY, offsetX, offsetY);
+export function uvIslandBoundarySegments(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): number[] {
+  const segments: number[] = [];
+  for (const rect of rects) {
+    if (!rect.triangles?.length) {
+      segments.push(...uvRectSegments([rect], scaleX, scaleY, offsetX, offsetY));
+      continue;
+    }
     const edges = new Map<string, { count: number; a: [number, number]; b: [number, number] }>();
-    const keyFor = (a: [number, number], b: [number, number]) => {
-      const ak = `${a[0].toFixed(5)},${a[1].toFixed(5)}`;
-      const bk = `${b[0].toFixed(5)},${b[1].toFixed(5)}`;
-      return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
-    };
     rect.triangles.forEach((triangle) => {
       const trianglePoints = triangle.points;
       const points: [number, number][] = [
@@ -679,37 +706,39 @@ export function uvIslandBoundaryPath(rects: readonly UvIslandRect[], scaleX: num
       for (let edge = 0; edge < 3; edge += 1) {
         const a = points[edge]!;
         const b = points[(edge + 1) % 3]!;
-        const key = keyFor(a, b);
+        const key = normalizedEdgeKey(a, b);
         const existing = edges.get(key);
         if (existing) existing.count += 1;
         else edges.set(key, { count: 1, a, b });
       }
     });
-    let path = '';
     edges.forEach((edge) => {
       if (edge.count !== 1) return;
       const ax = offsetX + (rect.x + edge.a[0] * rect.w) * scaleX;
       const ay = offsetY + (rect.y + edge.a[1] * rect.h) * scaleY;
       const bx = offsetX + (rect.x + edge.b[0] * rect.w) * scaleX;
       const by = offsetY + (rect.y + edge.b[1] * rect.h) * scaleY;
-      path += `M ${ax},${ay} L ${bx},${by} `;
+      segments.push(ax, ay, bx, by);
     });
-    return path;
-  }).join(' ');
+  }
+  return segments;
+}
+
+export function uvIslandBoundaryPath(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): string {
+  return segmentPath(uvIslandBoundarySegments(rects, scaleX, scaleY, offsetX, offsetY));
 }
 
 /** Every authored face edge, while hiding only the render-triangle diagonal inside
  * one authored quad. Connected fan wedges therefore remain individually legible even
  * though their shared UV edges correctly make the cap one transformable island. */
-export function uvFaceEdgePath(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): string {
-  return rects.map((rect) => {
-    if (!rect.triangles?.length) return uvRectPath([rect], scaleX, scaleY, offsetX, offsetY);
+export function uvFaceEdgeSegments(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): number[] {
+  const segments: number[] = [];
+  for (const rect of rects) {
+    if (!rect.triangles?.length) {
+      segments.push(...uvRectSegments([rect], scaleX, scaleY, offsetX, offsetY));
+      continue;
+    }
     const edges = new Map<string, { a: [number, number]; b: [number, number]; faces: Set<string>; count: number }>();
-    const keyFor = (a: [number, number], b: [number, number]) => {
-      const ak = `${a[0].toFixed(5)},${a[1].toFixed(5)}`;
-      const bk = `${b[0].toFixed(5)},${b[1].toFixed(5)}`;
-      return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
-    };
     rect.triangles.forEach((triangle) => {
       const points: [number, number][] = [
         [triangle.points[0], triangle.points[1]],
@@ -720,7 +749,7 @@ export function uvFaceEdgePath(rects: readonly UvIslandRect[], scaleX: number, s
       for (let edge = 0; edge < 3; edge += 1) {
         const a = points[edge]!;
         const b = points[(edge + 1) % 3]!;
-        const key = keyFor(a, b);
+        const key = normalizedEdgeKey(a, b);
         const existing = edges.get(key);
         if (existing) {
           existing.count += 1;
@@ -730,7 +759,6 @@ export function uvFaceEdgePath(rects: readonly UvIslandRect[], scaleX: number, s
         }
       }
     });
-    let path = '';
     edges.forEach((edge) => {
       // Two render triangles in one authored quad share a diagonal. That is the only
       // edge hidden here; a shared edge between two authored fan wedges stays visible.
@@ -739,8 +767,12 @@ export function uvFaceEdgePath(rects: readonly UvIslandRect[], scaleX: number, s
       const ay = offsetY + (rect.y + edge.a[1] * rect.h) * scaleY;
       const bx = offsetX + (rect.x + edge.b[0] * rect.w) * scaleX;
       const by = offsetY + (rect.y + edge.b[1] * rect.h) * scaleY;
-      path += `M ${ax},${ay} L ${bx},${by} `;
+      segments.push(ax, ay, bx, by);
     });
-    return path;
-  }).join(' ');
+  }
+  return segments;
+}
+
+export function uvFaceEdgePath(rects: readonly UvIslandRect[], scaleX: number, scaleY: number, offsetX = 0, offsetY = 0): string {
+  return segmentPath(uvFaceEdgeSegments(rects, scaleX, scaleY, offsetX, offsetY));
 }

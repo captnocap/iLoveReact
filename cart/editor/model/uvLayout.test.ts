@@ -14,7 +14,9 @@ import {
   rotateUvSelection,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvFaceEdgeSegments,
   uvFaceEdgePath,
+  uvIslandBoundarySegments,
   uvIslandBoundaryPath,
   uvIslandVertices,
 } from './uvLayout';
@@ -141,6 +143,7 @@ test('island boundary removes an authored quad triangulation diagonal', () => {
   );
   const path = uvIslandBoundaryPath(rects, 1, 1);
   assert((path.match(/ L /g) ?? []).length === 4, 'shared triangle edge leaked into the authored-face outline');
+  assert(uvIslandBoundarySegments(rects, 1, 1).length === 16, 'native boundary segments diverged from the authored-face outline');
 });
 
 test('face-edge overlay hides quad diagonals but retains connected fan spokes', () => {
@@ -162,6 +165,8 @@ test('face-edge overlay hides quad diagonals but retains connected fan spokes', 
   );
   assert((uvFaceEdgePath(quad, 1, 1).match(/ L /g) ?? []).length === 4, 'render-only quad diagonal became an authored edge');
   assert((uvFaceEdgePath(fan, 1, 1).match(/ L /g) ?? []).length === 5, 'connected fan spoke disappeared with the island boundary');
+  assert(uvFaceEdgeSegments(quad, 1, 1).length === 16, 'native quad segments reintroduced the render diagonal');
+  assert(uvFaceEdgeSegments(fan, 1, 1).length === 20, 'native fan segments dropped an authored spoke');
 });
 
 test('double-click isolation uses the editor timing and travel thresholds', () => {

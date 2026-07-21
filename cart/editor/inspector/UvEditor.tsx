@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Graph, Paintable, Pressable, Row, Text, TextInput } from '../../../runtime/primitives';
 import { usePaintable } from '../../../runtime/hooks/usePaintable';
 import { Icon } from '../../../runtime/icons/Icon';
@@ -18,8 +18,8 @@ import {
   scaleUvSelection,
   shouldPanUvCanvas,
   uniformUvPack,
-  uvFaceEdgePath,
-  uvIslandBoundaryPath,
+  uvFaceEdgeSegments,
+  uvIslandBoundarySegments,
   uvSelectionBounds,
   uvSelectionVertices,
   UV_LAYOUT_TUNING,
@@ -31,15 +31,24 @@ import {
 } from '../model/uvLayout';
 
 const ATLAS_SHADER = `
+@group(0) @binding(1) var<storage, read> P: array<f32>;
 @group(0) @binding(2) var tex: texture_2d<f32>;
 @group(0) @binding(3) var smp: sampler;
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  return textureSampleLevel(tex, smp, in.uv, 0.0);
+  let sheet = textureSampleLevel(tex, smp, in.uv, 0.0);
+  let cell = max(P[2], 1.0);
+  let checkerCell = floor(in.uv * vec2f(P[0], P[1]) / cell);
+  let checkerParity = fract((checkerCell.x + checkerCell.y) * 0.5) * 2.0;
+  let checker = mix(vec3f(0.05098, 0.06667, 0.09412), vec3f(0.09020, 0.11373, 0.15294), checkerParity);
+  return vec4f(mix(checker, sheet.rgb, sheet.a), 1.0);
 }`;
 
 type View = { x: number; y: number; scale: number };
 type ScreenPoint = { x: number; y: number };
 type SelectionMode = 'island' | 'face';
+type UvLineGeometry = { faces: number[]; boundary: number[] };
+type UvLineGeometryCache = { rects: readonly UvIslandRect[]; view: View; geometry: UvLineGeometry };
+type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
   | { kind: 'move'; index: number; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; doubleClick: boolean; seed: UvIslandRect }
@@ -49,27 +58,7 @@ type Gesture =
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
-function atlasCheckerPath(atlasWidthPx: number, atlasHeightPx: number, view: View, surfaceWidth: number, surfaceHeight: number): string {
-  const cell = UV_LAYOUT_TUNING.checkerPx;
-  const firstColumn = Math.max(0, Math.floor((Math.max(0, -view.x)) / cell));
-  const lastColumn = Math.min(Math.ceil(atlasWidthPx / cell), Math.ceil((surfaceWidth - view.x) / cell));
-  const firstRow = Math.max(0, Math.floor((Math.max(0, -view.y)) / cell));
-  const lastRow = Math.min(Math.ceil(atlasHeightPx / cell), Math.ceil((surfaceHeight - view.y) / cell));
-  let path = '';
-  for (let row = firstRow; row < lastRow; row += 1) {
-    const y0 = clamp(view.y + row * cell, view.y, view.y + atlasHeightPx);
-    const y1 = clamp(view.y + (row + 1) * cell, view.y, view.y + atlasHeightPx);
-    for (let column = firstColumn; column < lastColumn; column += 1) {
-      if ((row + column) % 2 === 0) continue;
-      const x0 = clamp(view.x + column * cell, view.x, view.x + atlasWidthPx);
-      const x1 = clamp(view.x + (column + 1) * cell, view.x, view.x + atlasWidthPx);
-      path += `M ${x0},${y0} L ${x1},${y0} L ${x1},${y1} L ${x0},${y1} Z `;
-    }
-  }
-  return path;
-}
-
-function atlasGridPath(atlasWidth: number, atlasHeight: number, view: View, surfaceWidth: number, surfaceHeight: number): string {
+function atlasGridSegments(atlasWidth: number, atlasHeight: number, view: View, surfaceWidth: number, surfaceHeight: number): number[] {
   let step = UV_LAYOUT_TUNING.vertexSnapTexels;
   while (step * view.scale < UV_LAYOUT_TUNING.minimumGridSpacingPx) step *= 2;
   const firstX = Math.max(step, Math.ceil(Math.max(0, -view.x / view.scale) / step) * step);
@@ -80,17 +69,21 @@ function atlasGridPath(atlasWidth: number, atlasHeight: number, view: View, surf
   const screenBottom = Math.min(surfaceHeight, view.y + atlasHeight * view.scale);
   const screenLeft = Math.max(0, view.x);
   const screenRight = Math.min(surfaceWidth, view.x + atlasWidth * view.scale);
-  if (screenRight <= screenLeft || screenBottom <= screenTop) return '';
-  let path = '';
+  if (screenRight <= screenLeft || screenBottom <= screenTop) return [];
+  const segments: number[] = [];
   for (let x = firstX; x < lastX; x += step) {
     const sx = view.x + x * view.scale;
-    path += `M ${sx},${screenTop} L ${sx},${screenBottom} `;
+    segments.push(sx, screenTop, sx, screenBottom);
   }
   for (let y = firstY; y < lastY; y += step) {
     const sy = view.y + y * view.scale;
-    path += `M ${screenLeft},${sy} L ${screenRight},${sy} `;
+    segments.push(screenLeft, sy, screenRight, sy);
   }
-  return path;
+  return segments;
+}
+
+function sameRectReferences(a: readonly UvIslandRect[], b: readonly UvIslandRect[]): boolean {
+  return a.length === b.length && a.every((rect, index) => rect === b[index]);
 }
 
 function UvNumberField(props: {
@@ -167,7 +160,6 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
   const [rects, setRects] = useState<UvIslandRect[]>(initialRects);
   const rectsRef = useRef(rects);
-  rectsRef.current = rects;
   const [selected, setSelected] = useState(-1);
   const [selectedFace, setSelectedFace] = useState<UvFaceTarget | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -178,10 +170,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const surfaceRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const gestureRef = useRef<Gesture | null>(null);
+  const pendingPreviewRef = useRef<PendingUvPreview | null>(null);
+  const previewFramePendingRef = useRef(false);
+  const previewGenerationRef = useRef(0);
   const lastClickRef = useRef<{ at: number; x: number; y: number } | null>(null);
   const [view, setViewState] = useState<View>({ x: UV_LAYOUT_TUNING.canvasPaddingPx, y: UV_LAYOUT_TUNING.canvasPaddingPx, scale: 1 });
   const viewRef = useRef(view);
   const viewKeyRef = useRef('');
+  const fixedLineCacheRef = useRef<UvLineGeometryCache | null>(null);
+  const activeLineCacheRef = useRef<UvLineGeometryCache | null>(null);
 
   const setView = (next: View) => {
     viewRef.current = next;
@@ -201,10 +198,53 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     };
   };
 
+  // Mouse hardware can report much faster than the display can present. Keep the
+  // exact newest UV synchronously for commit, but reconcile at most one preview per
+  // host frame so raw pointer frequency cannot dictate React/render work.
+  const queueUvPreview = (index: number, changed: UvIslandRect, guide: UvAxisGuide | null) => {
+    const next = rectsRef.current.map((rect, rectIndex) => rectIndex === index ? changed : rect);
+    rectsRef.current = next;
+    const generation = previewGenerationRef.current;
+    pendingPreviewRef.current = { generation, rects: next, guide };
+    if (previewFramePendingRef.current) return;
+    previewFramePendingRef.current = true;
+    const hostGlobal = globalThis as any;
+    const schedule: (callback: () => void) => unknown = typeof hostGlobal.requestAnimationFrame === 'function'
+      ? hostGlobal.requestAnimationFrame.bind(hostGlobal)
+      : (callback) => setTimeout(callback, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
+    schedule(() => {
+      if (generation !== previewGenerationRef.current) return;
+      previewFramePendingRef.current = false;
+      const pending = pendingPreviewRef.current;
+      pendingPreviewRef.current = null;
+      if (!pending || pending.generation !== generation) return;
+      setRects(pending.rects);
+      setAxisGuide(pending.guide);
+    });
+  };
+
+  const settleUvPreview = () => {
+    previewGenerationRef.current += 1;
+    pendingPreviewRef.current = null;
+    previewFramePendingRef.current = false;
+    setRects(rectsRef.current);
+    setAxisGuide(null);
+  };
+
+  useEffect(() => () => {
+    previewGenerationRef.current += 1;
+    pendingPreviewRef.current = null;
+    previewFramePendingRef.current = false;
+  }, []);
+
   useEffect(() => {
+    previewGenerationRef.current += 1;
+    pendingPreviewRef.current = null;
+    previewFramePendingRef.current = false;
     const next = initialRects();
     setRects(next);
     rectsRef.current = next;
+    setAxisGuide(null);
     setSelected((index) => Math.min(index, uv.islands.length - 1));
     setSelectedFace((target) => target && next.some((rect) => rect.triangles?.some((triangle) => triangle.face === target.face)) ? target : null);
     if (uv.rgba) texture.paint.upload(uv.rgba);
@@ -256,15 +296,38 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   };
 
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
-  const active = activeRange ? rects.filter((rect) => rect.group >= activeRange.lo && rect.group < activeRange.hi) : [];
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const selectedTarget = selectionMode === 'face' ? selectedFace ?? undefined : undefined;
   const selectionBounds = selectedRect ? uvSelectionBounds(selectedRect, selectedTarget) : null;
   const selectedOutlineRect = selectedRect && selectedTarget
     ? { ...selectedRect, triangles: selectedRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
     : selectedRect;
-  const shapeScreenPath = (items: readonly UvIslandRect[]) => uvIslandBoundaryPath(items, view.scale, view.scale, view.x, view.y);
-  const faceScreenPath = (items: readonly UvIslandRect[]) => uvFaceEdgePath(items, view.scale, view.scale, view.x, view.y);
+  const lineGeometry = (items: readonly UvIslandRect[]): UvLineGeometry => ({
+    faces: uvFaceEdgeSegments(items, view.scale, view.scale, view.x, view.y),
+    boundary: uvIslandBoundarySegments(items, view.scale, view.scale, view.x, view.y),
+  });
+  const cachedLineGeometry = (cacheRef: { current: UvLineGeometryCache | null }, items: readonly UvIslandRect[]): UvLineGeometry => {
+    const cached = cacheRef.current;
+    if (cached
+      && cached.view.x === view.x
+      && cached.view.y === view.y
+      && cached.view.scale === view.scale
+      && sameRectReferences(cached.rects, items)) return cached.geometry;
+    const geometry = lineGeometry(items);
+    cacheRef.current = { rects: [...items], view: { ...view }, geometry };
+    return geometry;
+  };
+  const fixedRects = rects.filter((_rect, index) => index !== selected);
+  const fixedLines = cachedLineGeometry(fixedLineCacheRef, fixedRects);
+  const selectedIslandLines = selectedRect ? lineGeometry([selectedRect]) : { faces: [], boundary: [] };
+  const selectedOutlineLines = selectedOutlineRect === selectedRect
+    ? selectedIslandLines
+    : selectedOutlineRect ? lineGeometry([selectedOutlineRect]) : { faces: [], boundary: [] };
+  const activeFixedRects = activeRange ? fixedRects.filter((rect) => rect.group >= activeRange.lo && rect.group < activeRange.hi) : [];
+  const activeFixedLines = activeFixedRects.length ? cachedLineGeometry(activeLineCacheRef, activeFixedRects) : { faces: [], boundary: [] };
+  const selectedActiveBoundary = selectedRect && activeRange && selectedRect.group >= activeRange.lo && selectedRect.group < activeRange.hi
+    ? selectedIslandLines.boundary
+    : [];
   const handlePoints = selectedRect ? uvSelectionVertices(selectedRect, selectedTarget).map((vertex, index) => ({
     index,
     x: view.x + vertex.x * view.scale,
@@ -322,24 +385,35 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   const atlasW = uv.w * view.scale;
   const atlasH = uv.h * view.scale;
-  const checkerScreenPath = atlasCheckerPath(atlasW, atlasH, view, surfaceSize.width, surfaceSize.height);
-  const gridScreenPath = atlasGridPath(uv.w, uv.h, view, surfaceSize.width, surfaceSize.height);
-  const selectionFramePath = selectionBounds
-    ? `M ${view.x + selectionBounds.x * view.scale},${view.y + selectionBounds.y * view.scale} L ${view.x + (selectionBounds.x + selectionBounds.w) * view.scale},${view.y + selectionBounds.y * view.scale} L ${view.x + (selectionBounds.x + selectionBounds.w) * view.scale},${view.y + (selectionBounds.y + selectionBounds.h) * view.scale} L ${view.x + selectionBounds.x * view.scale},${view.y + (selectionBounds.y + selectionBounds.h) * view.scale} Z`
-    : '';
-  const rotationStemPath = selectionBounds && rotationHandle
-    ? `M ${rotationHandle.x},${rotationHandle.y} L ${rotationHandle.x},${view.y + selectionBounds.y * view.scale}`
-    : '';
-  const guidePath = axisGuide
+  const atlasEffectData = useMemo(() => [atlasW, atlasH, UV_LAYOUT_TUNING.checkerPx, 0], [atlasW, atlasH]);
+  const thumbnailEffectData = useMemo(() => [32, 32, UV_LAYOUT_TUNING.checkerPx, 0], []);
+  const gridSegments = useMemo(
+    () => atlasGridSegments(uv.w, uv.h, view, surfaceSize.width, surfaceSize.height),
+    [uv.w, uv.h, view.x, view.y, view.scale, surfaceSize.width, surfaceSize.height],
+  );
+  const selectionFrameSegments = selectionBounds
+    ? (() => {
+      const x0 = view.x + selectionBounds.x * view.scale;
+      const y0 = view.y + selectionBounds.y * view.scale;
+      const x1 = view.x + (selectionBounds.x + selectionBounds.w) * view.scale;
+      const y1 = view.y + (selectionBounds.y + selectionBounds.h) * view.scale;
+      return [x0, y0, x1, y0, x1, y0, x1, y1, x1, y1, x0, y1, x0, y1, x0, y0];
+    })()
+    : [];
+  const rotationStemSegments = selectionBounds && rotationHandle
+    ? [rotationHandle.x, rotationHandle.y, rotationHandle.x, view.y + selectionBounds.y * view.scale]
+    : [];
+  const guideSegments = axisGuide
     ? axisGuide.axis === 'horizontal'
-      ? `M ${view.x},${view.y + axisGuide.coordinate * view.scale} L ${view.x + atlasW},${view.y + axisGuide.coordinate * view.scale}`
-      : `M ${view.x + axisGuide.coordinate * view.scale},${view.y} L ${view.x + axisGuide.coordinate * view.scale},${view.y + atlasH}`
-    : '';
+      ? [view.x, view.y + axisGuide.coordinate * view.scale, view.x + atlasW, view.y + axisGuide.coordinate * view.scale]
+      : [view.x + axisGuide.coordinate * view.scale, view.y, view.x + axisGuide.coordinate * view.scale, view.y + atlasH]
+    : [];
   const host = globalThis as any;
   const finishGesture = (event?: any) => {
     const gesture = gestureRef.current;
     gestureRef.current = null;
-    setAxisGuide(null);
+    if (gesture && gesture.kind !== 'pan') settleUvPreview();
+    else setAxisGuide(null);
     if (gesture?.kind === 'move') {
       const end = event ? localScreenPoint(event) : null;
       const click = Boolean(end && Math.hypot(end.x - gesture.screenStart.x, end.y - gesture.screenStart.y) <= UV_LAYOUT_TUNING.dragActivationPx);
@@ -459,6 +533,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           }
           const point = atlasPoint(screen);
           let changed = gesture.seed;
+          let guide: UvAxisGuide | null = null;
           if (gesture.kind === 'move' || gesture.kind === 'vertex') {
             const dx = point.x - gesture.start.x;
             const dy = point.y - gesture.start.y;
@@ -471,7 +546,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             const angle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) - gesture.startAngle;
             const rotated = rotateUvSelection(gesture.seed, gesture.target, angle * 180 / Math.PI, uv.w, uv.h);
             changed = rotated.rect;
-            setAxisGuide(rotated.guide);
+            guide = rotated.guide;
           } else if (gesture.kind === 'scale') {
             let scaleX = (point.x - gesture.bounds.x) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.w);
             let scaleY = (point.y - gesture.bounds.y) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.h);
@@ -482,34 +557,32 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             }
             changed = scaleUvSelection(gesture.seed, gesture.target, scaleX, scaleY, uv.w, uv.h);
           }
-          setRects((current) => {
-            const next = current.map((rect, index) => index === gesture.index ? changed : rect);
-            rectsRef.current = next;
-            return next;
-          });
+          queueUvPreview(gesture.index, changed, guide);
         }}
         onMouseUp={finishGesture}
         onMouseLeave={finishGesture}
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#07090d' }}
       >
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, backgroundColor: '#0d1118', pointerEvents: 'none' }} />
-        <Graph style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          <Graph.Path d={checkerScreenPath} fill="#171d27" stroke="none" />
-        </Graph>
-        <Effect shader={ATLAS_SHADER} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
+        <Effect shader={ATLAS_SHADER} data={atlasEffectData} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, borderWidth: 2, borderColor: '#71839a', pointerEvents: 'none' }} />
         <Graph style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          <Graph.Path d={gridScreenPath} fill="none" stroke="#4d596b" strokeWidth={0.8} />
-          <Graph.Path d={faceScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={2.4} />
-          <Graph.Path d={faceScreenPath(rects)} fill="none" stroke="#8591a3" strokeWidth={0.9} />
-          <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#080b10" strokeWidth={3.2} />
-          <Graph.Path d={shapeScreenPath(rects)} fill="none" stroke="#c7d0df" strokeWidth={1.15} />
-          {active.length ? <Graph.Path d={shapeScreenPath(active)} fill="none" stroke="#42d9e8" strokeWidth={1.65} /> : null}
-          {selectedOutlineRect ? <Graph.Path d={faceScreenPath([selectedOutlineRect])} fill="none" stroke="#ffffff" strokeWidth={1.35} /> : null}
-          {selectedOutlineRect ? <Graph.Path d={shapeScreenPath([selectedOutlineRect])} fill="none" stroke="#ffffff" strokeWidth={2.2} /> : null}
-          {selectionFramePath ? <Graph.Path d={selectionFramePath} fill="none" stroke="#9ba8bc" strokeWidth={1} /> : null}
-          {rotationStemPath ? <Graph.Path d={rotationStemPath} fill="none" stroke="#dce5f2" strokeWidth={1} /> : null}
-          {guidePath ? <Graph.Path d={guidePath} fill="none" stroke="#4c9dff" strokeWidth={1.5} /> : null}
+          {gridSegments.length ? <Graph.Polyline segments points={gridSegments} stroke="#4d596b" strokeWidth={0.8} /> : null}
+          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#080b10" strokeWidth={2.4} /> : null}
+          {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#080b10" strokeWidth={2.4} /> : null}
+          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#8591a3" strokeWidth={0.9} /> : null}
+          {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#8591a3" strokeWidth={0.9} /> : null}
+          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#080b10" strokeWidth={3.2} /> : null}
+          {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#080b10" strokeWidth={3.2} /> : null}
+          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#c7d0df" strokeWidth={1.15} /> : null}
+          {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#c7d0df" strokeWidth={1.15} /> : null}
+          {activeFixedLines.boundary.length ? <Graph.Polyline segments points={activeFixedLines.boundary} stroke="#42d9e8" strokeWidth={1.65} /> : null}
+          {selectedActiveBoundary.length ? <Graph.Polyline segments points={selectedActiveBoundary} stroke="#42d9e8" strokeWidth={1.65} /> : null}
+          {selectedOutlineLines.faces.length ? <Graph.Polyline segments points={selectedOutlineLines.faces} stroke="#ffffff" strokeWidth={1.35} /> : null}
+          {selectedOutlineLines.boundary.length ? <Graph.Polyline segments points={selectedOutlineLines.boundary} stroke="#ffffff" strokeWidth={2.2} /> : null}
+          {selectionFrameSegments.length ? <Graph.Polyline segments points={selectionFrameSegments} stroke="#9ba8bc" strokeWidth={1} /> : null}
+          {rotationStemSegments.length ? <Graph.Polyline segments points={rotationStemSegments} stroke="#dce5f2" strokeWidth={1} /> : null}
+          {guideSegments.length ? <Graph.Polyline segments points={guideSegments} stroke="#4c9dff" strokeWidth={1.5} /> : null}
         </Graph>
         {handlePoints.map((handle) => (
           <Box key={handle.index} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />
@@ -563,7 +636,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         </Row>
         <Box style={{ height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 7, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}>
           <Box style={{ width: 32, height: 32, position: 'relative', overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
-            <Effect shader={ATLAS_SHADER} textures={[texture.id]} style={{ position: 'absolute', left: 0, top: 0, width: 32, height: 32 }} />
+            <Effect shader={ATLAS_SHADER} data={thumbnailEffectData} textures={[texture.id]} style={{ position: 'absolute', left: 0, top: 0, width: 32, height: 32 }} />
           </Box>
           <Box style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
             <Text style={{ color: accentFor('text'), fontSize: 10, fontWeight: '800' }}>base.png</Text>
