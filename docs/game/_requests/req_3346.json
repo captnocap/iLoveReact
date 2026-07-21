@@ -1,0 +1,30 @@
+{
+  "id": "req_3346",
+  "at": "2026-07-21T14:05:18.489Z",
+  "origin": "codex:019f83e9",
+  "text": "in the editor here is a bug: new mesh -> cube -> add from library -> pick anything -> it adds and is visible ->  delete cube -> 'no visible parts' -> add cube -> only cube exists, so 2 bugs in that",
+  "status": "review",
+  "sessionId": "019f83e9-2fdd-7a03-942f-ca45df4b0cb9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T14:05:32.339Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T14:14:20.207Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both failures at their shared model-lifecycle boundary. A multipart ModelView now remains mounted after the cart-side primitive seed disappears, so one or many metadata-only library outliner rows keep their resident native geometry when Cube is deleted. Add Part now appends through that resident host even for an honestly empty mesh, while refusing to overwrite existing rows if no live mesh is available. Added focused regression coverage for multi-outliner imports, document switches, empty native meshes, and safe append routing; the ReleaseFast editor build succeeds.",
+  "shas": [
+    "8a3ba3060"
+  ],
+  "resolvedAt": "2026-07-21T14:14:20.206Z"
+}
