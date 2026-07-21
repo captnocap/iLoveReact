@@ -59,6 +59,7 @@ const CONTENT_BROWSER_WIDTH_EXPANDED = 680; // content browser, expanded (HW_Sid
 const CONTENT_BROWSER_TREE_WIDTH = 218; // expanded mode: the fixed tree column (HW_LibTreeCol)
 const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
 const FOCUS_PANEL_ATLAS_WIDTH = 480; // Blockbench-scale UV workspace + rail
+const FOCUS_PANEL_ATLAS_EXPANDED_WIDTH = 760; // dense-mesh UV workspace; stage remains visible beside it
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
 const STATUS_BAR_HEIGHT = 31; // status bar: the bottom build dock (HW_BuildDock)
 
@@ -100,12 +101,15 @@ export const REGIONS = {
   focusPanel: {
     width: FOCUS_PANEL_WIDTH,
     atlasWidth: FOCUS_PANEL_ATLAS_WIDTH,
+    atlasExpandedWidth: FOCUS_PANEL_ATLAS_EXPANDED_WIDTH,
     railWidth: FOCUS_RAIL_WIDTH,
     bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 285
     atlasBodyWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
+    atlasExpandedBodyWidth: FOCUS_PANEL_ATLAS_EXPANDED_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     gutter: PANEL_GUTTER,
     innerWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 265
     atlasInnerWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
+    atlasExpandedInnerWidth: FOCUS_PANEL_ATLAS_EXPANDED_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
   },
 
   /** STATUS BAR — the bottom strip (the build dock: undo/redo, coords, perf). */

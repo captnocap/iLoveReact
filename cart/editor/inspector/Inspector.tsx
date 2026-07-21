@@ -100,7 +100,19 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 // density readout on one line. Atlas pixels are a raw Paintable substrate; every
 // island remains live selectable geometry above it, including off-part islands.
 // extraCount is the multi-select overflow (req_2659d): 'CUBE 1 +2' = primary + 2 more.
-function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge | null; partName: string; extraCount: number }) {
+function UvSection({
+  bridge,
+  partName,
+  extraCount,
+  expanded,
+  onToggleExpanded,
+}: {
+  bridge: ModelFocusBridge | null;
+  partName: string;
+  extraCount: number;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
   const uv = bridge?.uv ?? null;
   return (
     <C.HW_Section style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
@@ -109,12 +121,15 @@ function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge 
         <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
         <C.HW_Spacer />
         <C.HW_ReadValue>{uv ? `${uv.w}×${uv.h} · ${uv.detail} x/m` : '—'}</C.HW_ReadValue>
+        <C.HW_MiniVerb onPress={onToggleExpanded} tooltip={expanded ? 'Return the UV workspace to panel size' : 'Expand the UV workspace for dense meshes'}>
+          <Icon name={expanded ? 'Minimize2' : 'Maximize2'} size={10} color={accentFor(expanded ? 'primary' : 'textDim')} />
+        </C.HW_MiniVerb>
         <C.HW_MiniVerb onPress={() => bridge?.refreshUv()} tooltip="Re-read the live paint atlas">
           <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
       {uv && uv.rgba && bridge ? (
-        <UvEditor uv={uv} bridge={bridge} />
+        <UvEditor uv={uv} bridge={bridge} expanded={expanded} />
       ) : uv ? (
         <C.HW_ReadRow>
           <C.HW_UvNote>{uv.note ?? 'no atlas'}</C.HW_UvNote>
@@ -242,6 +257,7 @@ export default function Inspector(props: {
 }) {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
+  const [uvWorkspaceExpanded, setUvWorkspaceExpanded] = useState(false);
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
   // card shows the name the next save writes — never a stale synthesized one.
@@ -360,7 +376,9 @@ export default function Inspector(props: {
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
     const paneTitle = activePane === 'paint' ? 'MODEL · PAINT' : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
     return (
-      <C.HW_RightPanel style={{ width: activePane === 'paint' ? REGIONS.focusPanel.atlasWidth : REGIONS.focusPanel.width }}>
+      <C.HW_RightPanel style={{ width: activePane === 'paint'
+        ? (uvWorkspaceExpanded ? REGIONS.focusPanel.atlasExpandedWidth : REGIONS.focusPanel.atlasWidth)
+        : REGIONS.focusPanel.width }}>
         <C.HW_Inspector>
           <C.HW_PanelHead>
             <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
@@ -426,7 +444,13 @@ export default function Inspector(props: {
               </>
             ) : activePane === 'paint' ? (
               <>
-                <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
+                <UvSection
+                  bridge={focusBridge}
+                  partName={uvPartName}
+                  extraCount={uvExtraCount}
+                  expanded={uvWorkspaceExpanded}
+                  onToggleExpanded={() => setUvWorkspaceExpanded((value) => !value)}
+                />
                 <ModelPaintVariants key={activeModel.id} model={activeModel} />
               </>
             ) : (
