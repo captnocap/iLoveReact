@@ -80,6 +80,41 @@ test "moving one coplanar face breaks its UV edge without moving atlas pixels" {
     try testing.expectEqual(fixed_atlas, atlasHash(model_paint.atlas().?.rgba));
 }
 
+test "texture import adopts native dimensions without moving normalized UVs" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(909, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    var normalized_before: [12]f32 = undefined;
+    for (0..6) |vertex| {
+        normalized_before[vertex * 2 + 0] = quad[vertex * 8 + 6];
+        normalized_before[vertex * 2 + 1] = quad[vertex * 8 + 7];
+    }
+    const width: u32 = 37;
+    const height: u32 = 19;
+    var imported: [width * height * 4]u8 = undefined;
+    for (&imported, 0..) |*byte, index| byte.* = @intCast(index % 251);
+
+    try testing.expect(model_paint.importAtlasPreservingUvs(&imported, width, height, &quad, 6));
+    const atlas = model_paint.atlas().?;
+    try testing.expectEqual(width, atlas.w);
+    try testing.expectEqual(height, atlas.h);
+    try testing.expectEqualSlices(u8, &imported, atlas.rgba);
+    for (0..6) |vertex| {
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 0], quad[vertex * 8 + 6], 0.00001);
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 1], quad[vertex * 8 + 7], 0.00001);
+    }
+
+    const fixed_hash = atlasHash(atlas.rgba);
+    try testing.expect(!model_paint.importAtlasPreservingUvs(imported[0 .. imported.len - 1], width, height, &quad, 6));
+    try testing.expectEqual(fixed_hash, atlasHash(model_paint.atlas().?.rgba));
+}
+
 test "appending an authored group carries exact paint texels and the atlas base" {
     var initial = QUAD_VERTS;
     model_paint.setTarget(77, &initial, 6);

@@ -813,6 +813,116 @@ pub fn setAtlas(rgba: []const u8) bool {
     return true;
 }
 
+const IslandTriangleIndex = struct {
+    starts: []u32,
+    triangles: []u32,
+
+    fn deinit(self: IslandTriangleIndex) void {
+        alloc.free(self.starts);
+        alloc.free(self.triangles);
+    }
+};
+
+fn indexIslandTriangles(layout: *const paint_islands.Layout, face_count: u32) ?IslandTriangleIndex {
+    const island_count = layout.islands.len;
+    const starts = alloc.alloc(u32, island_count + 1) catch return null;
+    @memset(starts, 0);
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) starts[layout.tri_island[face] + 1] += 1;
+    var index: usize = 1;
+    while (index <= island_count) : (index += 1) starts[index] += starts[index - 1];
+
+    const triangles = alloc.alloc(u32, face_count) catch {
+        alloc.free(starts);
+        return null;
+    };
+    const cursor = alloc.dupe(u32, starts[0..island_count]) catch {
+        alloc.free(starts);
+        alloc.free(triangles);
+        return null;
+    };
+    defer alloc.free(cursor);
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        const island = layout.tri_island[face];
+        triangles[cursor[island]] = face;
+        cursor[island] += 1;
+    }
+    return .{ .starts = starts, .triangles = triangles };
+}
+
+/// Adopt an external raster at its native dimensions while retaining the current
+/// normalized UV map. This is the texture-import boundary: the image is never
+/// stretched to the old atlas, and every current UV point lands at the same relative
+/// position until the author deliberately remaps it. All allocations and topology
+/// reconstruction complete before any live state changes.
+pub fn importAtlasPreservingUvs(rgba: []const u8, width: u32, height: u32, verts: []f32, vert_count: u32) bool {
+    const old_layout = g_layout orelse return false;
+    const live_positions = g_positions orelse return false;
+    if (g_rgba == null or vert_count != g_facecount * 3) return false;
+    if (verts.len < @as(usize, vert_count) * 8) return false;
+    if (width == 0 or height == 0 or width > MAX_ATLAS_DIM or height > MAX_ATLAS_DIM) return false;
+    const byte_count = @as(usize, width) * @as(usize, height) * 4;
+    if (byte_count > ATLAS_BUDGET or rgba.len != byte_count) return false;
+    if (old_layout.corner_uv.len != @as(usize, vert_count) * 2 or g_atlas_w == 0 or g_atlas_h == 0) return false;
+
+    const normalized = alloc.alloc(f32, old_layout.corner_uv.len) catch return false;
+    defer alloc.free(normalized);
+    const old_width: f32 = @floatFromInt(g_atlas_w);
+    const old_height: f32 = @floatFromInt(g_atlas_h);
+    var coordinate: usize = 0;
+    while (coordinate < normalized.len) : (coordinate += 2) {
+        normalized[coordinate + 0] = old_layout.corner_uv[coordinate + 0] / old_width;
+        normalized[coordinate + 1] = old_layout.corner_uv[coordinate + 1] / old_height;
+    }
+
+    const groups = collectFaceGroups(g_facecount) orelse return false;
+    defer alloc.free(groups);
+    var layout_new = paint_islands.buildFromNormalizedUv(
+        alloc,
+        live_positions,
+        normalized,
+        groups,
+        width,
+        height,
+        old_layout.density,
+    ) orelse return false;
+    var keep_layout_new = false;
+    defer if (!keep_layout_new) layout_new.deinit(alloc);
+    const triangle_index = indexIslandTriangles(&layout_new, g_facecount) orelse return false;
+    var keep_triangle_index = false;
+    defer if (!keep_triangle_index) triangle_index.deinit();
+    const pixels_new = alloc.dupe(u8, rgba) catch return false;
+    var keep_pixels_new = false;
+    defer if (!keep_pixels_new) alloc.free(pixels_new);
+
+    // Commit only after the raster, rebuilt layout, and clipping index all exist.
+    var layout_retired = old_layout;
+    const pixels_retired = g_rgba.?;
+    if (g_isl_start) |starts| alloc.free(starts);
+    if (g_isl_tris) |triangles| alloc.free(triangles);
+    g_layout = layout_new;
+    g_isl_start = triangle_index.starts;
+    g_isl_tris = triangle_index.triangles;
+    g_rgba = pixels_new;
+    g_atlas_w = width;
+    g_atlas_h = height;
+    keep_layout_new = true;
+    keep_triangle_index = true;
+    keep_pixels_new = true;
+    layout_retired.deinit(alloc);
+    alloc.free(pixels_retired);
+
+    var vertex: u32 = 0;
+    while (vertex < vert_count) : (vertex += 1) {
+        verts[vertex * 8 + 6] = normalized[@as(usize, vertex) * 2 + 0];
+        verts[vertex * 8 + 7] = normalized[@as(usize, vertex) * 2 + 1];
+    }
+    g_has_dirty = false;
+    markRows(0, g_atlas_h - 1);
+    return true;
+}
+
 /// A face's representative colour — the texel at its island-space triangle centroid.
 /// Lets callers read a face's base tone (quality carry-over, the layout-rebuild carry,
 /// the headless proof). Selection uses the rect save/restore below so it never

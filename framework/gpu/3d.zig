@@ -6935,6 +6935,20 @@ pub fn replacePaintAtlas(rgba: []const u8) bool {
     return true;
 }
 
+/// Import a texture at its native dimensions. The current UVs are preserved in
+/// normalized space, then their absolute atlas geometry is rebuilt against the new
+/// raster so the UV editor can remap directly over the imported artwork.
+pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+    const verts = g_edit_verts orelse return false;
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.importAtlasPreservingUvs(rgba, width, height, verts, g_edit_count)) return false;
+    paint_program.adoptCurrentAtlasAsBaseline();
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
 // ── Paint variants (save / load a whole painting) ───────────────────────────────────
 // A saved variant is the model's entire paint atlas at a moment in time (DESIGN_INTAKE: a
 // model painted a million ways, each stored in its folder). Read gives the raw atlas + its

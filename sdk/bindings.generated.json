@@ -469,6 +469,10 @@
           "zig": "hostModelAtlasReplace"
         },
         {
+          "js": "__model_atlas_import",
+          "zig": "hostModelAtlasImport"
+        },
+        {
           "js": "__model_paint_sample",
           "zig": "hostModelPaintSample"
         },
