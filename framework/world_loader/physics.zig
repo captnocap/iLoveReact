@@ -98,14 +98,14 @@ pub fn meshVertexBoundsIsland(mesh: constructor.MeshPropMesh) MeshIsland {
 /// The 12 oriented-collider floats for one island of one placed mesh-prop instance —
 /// the island's local AABB offset to the anchor and banded by its OWN Y range (an
 /// overhead board bands high → walk-under), then yawed about the anchor like the mesh.
-pub fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland) [game_physics.ORIENTED_FLOATS]f32 {
+pub fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland, exact_player_narrowphase: bool) [game_physics.ORIENTED_FLOATS]f32 {
     return .{
         inst.x + isl.lo[0],
         inst.z + isl.lo[2],
         inst.x + isl.hi[0],
         inst.z + isl.hi[2],
         inst.y + isl.hi[1], // top — the island's own ceiling
-        1,
+        if (exact_player_narrowphase) game_physics.CAMERA_ONLY_SOLID_FLAG else 1,
         PLAYER_SURFACE_FRICTION,
         PLAYER_SURFACE_RESTITUTION,
         inst.y + isl.lo[1], // floor — the island's own base (banded: walk under a high one)
@@ -113,6 +113,94 @@ pub fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland)
         inst.z,
         inst.yaw_degrees * std.math.pi / 180.0,
     };
+}
+
+fn circleOverlapsBox(x: f32, z: f32, radius: f32, box: constructor.MeshPropBox) bool {
+    const closest_x = std.math.clamp(x, box.min_x, box.max_x);
+    const closest_z = std.math.clamp(z, box.min_z, box.max_z);
+    const dx = x - closest_x;
+    const dz = z - closest_z;
+    return dx * dx + dz * dz <= radius * radius;
+}
+
+fn exactMeshBroadphase(
+    mesh: constructor.MeshPropMesh,
+    inst: constructor.MeshPropInstance,
+    player: PlayerState,
+    radius: f32,
+    height: f32,
+    step_height: f32,
+) bool {
+    if (mesh.collision_boxes.len == 0) return true;
+    const yaw = inst.yaw_degrees * std.math.pi / 180.0;
+    const cs = @cos(yaw);
+    const sn = @sin(yaw);
+    const dx = player.x - inst.x;
+    const dz = player.z - inst.z;
+    const local_x = cs * dx - sn * dz;
+    const local_z = sn * dx + cs * dz;
+    const feet_y = player.y - inst.y;
+    const head_y = feet_y + height;
+    for (mesh.collision_boxes) |box| {
+        if (!circleOverlapsBox(local_x, local_z, radius, box)) continue;
+        const body_overlap = feet_y < box.max_y and head_y > box.min_y;
+        const step_reach = box.max_y >= feet_y - game_physics.mesh_collision.DEFAULT_TUNING.ground_snap_meters and box.max_y <= feet_y + step_height;
+        if (body_overlap or step_reach) return true;
+    }
+    return false;
+}
+
+/// Exact player contact for one placed v10 mesh prop. Its coarse boxes remain in
+/// the ordinary oriented lane as CAMERA-ONLY rows; this static triangle payload
+/// owns player side, top, and ceiling response.
+pub fn resolveMeshPropPlayer(
+    player: *PlayerState,
+    mesh: constructor.MeshPropMesh,
+    inst: constructor.MeshPropInstance,
+    cfg: ?constructor.PhysicsConfig,
+) void {
+    if (!mesh.solid or mesh.collision_triangles.len == 0) return;
+    const radius = if (cfg) |value| value.player_radius else PLAYER_RADIUS_METERS;
+    const height = if (cfg) |value| value.player_height else PLAYER_HEIGHT_METERS;
+    const step_height = if (cfg) |value| value.step_height else PLAYER_STEP_HEIGHT_METERS;
+    if (!exactMeshBroadphase(mesh, inst, player.*, radius, height, step_height)) return;
+
+    var body: game_physics.mesh_collision.Body = .{
+        .x = player.x,
+        .y = player.y,
+        .z = player.z,
+        .vx = player.vx,
+        .vy = player.vy,
+        .vz = player.vz,
+        .radius = radius,
+        .height = height,
+        .step_height = step_height,
+        .restitution = @max(
+            if (cfg) |value| value.wall_restitution else PLAYER_WALL_RESTITUTION,
+            (if (cfg) |value| value.surface_restitution else PLAYER_SURFACE_RESTITUTION) * 0.15,
+        ),
+        .grounded = player.grounded,
+    };
+    var tuning = game_physics.mesh_collision.DEFAULT_TUNING;
+    tuning.walkable_normal_y = RAMP_WALKABLE_SLOPE_COS;
+    _ = game_physics.mesh_collision.resolve(
+        &body,
+        mesh.collision_triangles,
+        .{
+            .x = inst.x,
+            .y = inst.y,
+            .z = inst.z,
+            .yaw_radians = inst.yaw_degrees * std.math.pi / 180.0,
+        },
+        tuning,
+    );
+    player.x = body.x;
+    player.y = body.y;
+    player.z = body.z;
+    player.vx = body.vx;
+    player.vy = body.vy;
+    player.vz = body.vz;
+    player.grounded = body.grounded;
 }
 
 /// Split a cooked/imported mesh prop into connected vertex ISLANDS (weld coincident
@@ -382,7 +470,7 @@ pub fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Sc
                         clipped_rows += mp.instances.len - imported_index;
                         break :outer;
                     }
-                    try oriented.appendSlice(allocator, &islandOrientedFloats(inst, isl));
+                    try oriented.appendSlice(allocator, &islandOrientedFloats(inst, isl, mp.meshes[mi].collision_triangles.len > 0));
                     oriented_count += 1;
                 }
             }

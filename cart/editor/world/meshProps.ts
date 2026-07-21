@@ -7,15 +7,16 @@
 // so this is a pure JS bridge — no framework rebuild.
 //
 // The lump byte format is the host decoder's contract verbatim
-// (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 9). We
-// write the mesh-only form (instanceCount 0) at version 9. A mesh with a painted
+// (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 10). We
+// write the mesh-only form (instanceCount 0) at version 10. A mesh with a painted
 // atlas embeds its PNG in the v4+ pngLen block — the loader decodes it with stbi
 // and the placement renders painted, exactly like a baked cooked prop (req_2832:
 // an exported model lost its paintings at placement). Door exports additionally
 // carry one named leaf slot + the v6 door block and portal-preserving authored
 // frame boxes in the v7 collision block. Ordinary editor models use that same
-// v7 block for Outliner-part collision bands, so a rising bridge is not reduced
-// to one floor-to-peak AABB.
+// v7 block for broadphase/camera bands. Ordinary exported props additionally
+// carry their visible saved-Outliner triangles in v10: player contact follows a
+// sloped face itself instead of the empty corner of its enclosing AABB.
 // The ref hash is FNV-1a over the mesh key, the SAME hash the loader
 // keys residency on (world_loader.zig liveMeshHash).
 
@@ -47,6 +48,8 @@ export type ResidentMesh = {
   door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
   /** Local-frame authored colliders: Outliner bands, or door jamb/header bands. */
   collisionBoxes?: ResidentCollisionBox[];
+  /** Exact local-frame player narrowphase: xyz triples, three vertices/triangle. */
+  collisionTriangles?: Float32Array;
 };
 
 export type ResidentCollisionBox = {
@@ -67,7 +70,7 @@ function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: n
   return { radius: Math.max(w, h, d) * 0.5 || 1, w: w || 1, d: d || 1, h: h || 1 };
 }
 
-const MESH_PROPS_VERSION = 9;
+const MESH_PROPS_VERSION = 10;
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
  *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
@@ -79,6 +82,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
   for (const m of meshes) {
     const slots = m.slots ?? [];
     const boxes = m.collisionBoxes ?? [];
+    const collisionTriangles = m.collisionTriangles;
     const vertexCount = m.vertices.length / 8;
     if (!Number.isInteger(vertexCount)) throw new Error(`resident mesh '${m.key}' is not stride-8 geometry`);
     if (m.materialUvs && m.materialUvs.length !== vertexCount * 2) {
@@ -98,6 +102,14 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
         throw new Error(`resident mesh '${m.key}' has an invalid authored collision box`);
       }
     }
+    if (collisionTriangles) {
+      if (collisionTriangles.length % 9 !== 0) {
+        throw new Error(`resident mesh '${m.key}' collision triangles are not xyz × 3 corners`);
+      }
+      for (const value of collisionTriangles) {
+        if (!Number.isFinite(value)) throw new Error(`resident mesh '${m.key}' has a non-finite collision triangle`);
+      }
+    }
     const keyBytes = m.key.length; // keys are ASCII ids
     total += 4 + keyBytes;         // keyLen + key
     total += 36;                   // meta
@@ -107,6 +119,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     total += 4 + (m.door ? 16 : 0); // doorFlag + optional door block
     total += 4 + boxes.length * 24; // boxCount + 6×f32 rows
     total += 4 + (m.materialUvs?.length ?? 0) * 4; // v9 materialUvCount + uv pairs
+    total += 4 + (collisionTriangles?.length ?? 0) * 4; // v10 triangleCount + xyz corners
   }
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
@@ -164,6 +177,14 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     if (materialUvs) {
       for (let i = 0; i < materialUvs.length; i += 1) {
         dv.setFloat32(o, materialUvs[i]!, true);
+        o += 4;
+      }
+    }
+    const collisionTriangles = m.collisionTriangles;
+    dv.setUint32(o, collisionTriangles ? collisionTriangles.length / 9 : 0, true); o += 4;
+    if (collisionTriangles) {
+      for (let i = 0; i < collisionTriangles.length; i += 1) {
+        dv.setFloat32(o, collisionTriangles[i]!, true);
         o += 4;
       }
     }

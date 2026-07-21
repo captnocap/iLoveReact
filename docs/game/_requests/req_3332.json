@@ -1,0 +1,18 @@
+{
+  "id": "req_3332",
+  "at": "2026-07-21T09:45:07.951Z",
+  "origin": "codex:019f840f",
+  "text": "here is a performance opportunity to find where the only constraint is you cant reduce from the amount on display, but when this is open [Image #1] fps goes from 240 -> 80 fps",
+  "status": "doing",
+  "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T09:45:16.761Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

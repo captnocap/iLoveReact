@@ -5,6 +5,7 @@
 const std = @import("std");
 const c = @import("../c.zig").imports;
 const scene3d = @import("../gpu/3d.zig");
+const constructor = @import("../world/constructor.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const foliage = @import("../world/foliage.zig");
@@ -24,6 +25,7 @@ const m_streaming_support = @import("streaming_support.zig");
 const runtime_live_scene = @import("runtime_live_scene.zig");
 const runtime_dynamics = @import("runtime_dynamics.zig");
 const runtime_interaction = @import("runtime_interaction.zig");
+const live_inputs = @import("live_inputs.zig");
 
 const SCAN_A = m_config.SCAN_A;
 const SCAN_D = m_config.SCAN_D;
@@ -60,6 +62,7 @@ const buildPhysicsColliders = m_physics.buildPhysicsColliders;
 const COLLIDER_WINDOW_CELLS = m_physics.COLLIDER_WINDOW_CELLS;
 const SpatialGrid = m_physics.SpatialGrid;
 const runPlayerPhysics = m_physics.runPlayerPhysics;
+const resolveMeshPropPlayer = m_physics.resolveMeshPropPlayer;
 const PitchLimits = m_camera.PitchLimits;
 const updateCameraNode = m_camera.updateCameraNode;
 const aimPitchLimitsInOrbitSpace = m_camera.aimPitchLimitsInOrbitSpace;
@@ -73,6 +76,8 @@ const StreamProto = m_streaming_support.StreamProto;
 const applyDirtyErase = runtime_live_scene.applyDirtyErase;
 const applyLiveMeshProps = runtime_live_scene.applyLiveMeshProps;
 const applyWallHide = runtime_live_scene.applyWallHide;
+const meshForHash = runtime_live_scene.meshForHash;
+const pendingLiveMeshFor = live_inputs.pendingLiveMeshFor;
 const stepCookedDoors = runtime_dynamics.stepCookedDoors;
 const stepElevators = runtime_dynamics.stepElevators;
 const stepTickers = runtime_dynamics.stepTickers;
@@ -353,10 +358,35 @@ pub fn emitMeshPropColliders(self: anytype, oriented_tmp: []f32, oc: *usize, cli
                 clipped.* += 1;
                 continue;
             }
-            const collider = islandOrientedFloats(inst, isl);
+            const collider = islandOrientedFloats(inst, isl, mp.meshes[mi].collision_triangles.len > 0);
             @memcpy(oriented_tmp[oc.* * game_physics.ORIENTED_FLOATS ..][0..game_physics.ORIENTED_FLOATS], &collider);
             oc.* += 1;
         }
+    }
+}
+
+/// Narrow the player against exact saved-Outliner triangles after the ordinary
+/// rect/heightfield step. Baked and editor-live placements share the same mesh
+/// function; the ghost preview is deliberately absent.
+pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) void {
+    if (self.scene.mesh_props) |mp| {
+        for (mp.instances) |inst| {
+            const mesh_index: usize = @intCast(inst.mesh);
+            if (mesh_index >= mp.meshes.len) continue;
+            resolveMeshPropPlayer(&self.player, mp.meshes[mesh_index], inst, cfg);
+        }
+    }
+    const pending = pendingLiveMeshFor(self.node_id) orelse return;
+    for (pending.refs) |ref| {
+        const mesh = meshForHash(self, ref.hash) orelse continue;
+        const inst: constructor.MeshPropInstance = .{
+            .mesh = 0,
+            .x = ref.x,
+            .y = ref.y,
+            .z = ref.z,
+            .yaw_degrees = ref.yaw,
+        };
+        resolveMeshPropPlayer(&self.player, mesh, inst, cfg);
     }
 }
 
@@ -470,6 +500,7 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         // Cheap — it touches only the spanning list + the cells around the player.
         if (self.windowed) rebuildWindow(self, self.player.x, self.player.z);
         runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE) and !self.camera.external, cfg, self.bodies);
+        resolveExactMeshProps(self, cfg);
     } else if (self.bodies.len > 0) {
         // Seated: the world keeps stepping — an intent-less step whose
         // player result is discarded, so kicked balls roll past you

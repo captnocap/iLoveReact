@@ -14,6 +14,7 @@ const gamefile = @import("gamefile.zig");
 const live_mesh_doors = @import("live_mesh_doors.zig");
 const terrain_grid = @import("../gpu/terrain_grid.zig");
 const mesh_prop_uv = @import("mesh_prop_uv.zig");
+const mesh_prop_collision_wire = @import("mesh_prop_collision_wire.zig");
 const mapfile = gamefile.mapfile;
 // stb_image — decode the cooked-prop paint PNG at load (req_1544, MESH_PROPS v4),
 // the same decoder the decal raster uses (gpu/decal_raster.zig). The bake passes
@@ -48,7 +49,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 9;
+const MESH_PROPS_VERSION: u32 = 10;
 const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -171,6 +172,10 @@ pub const MeshPropMesh = struct {
     // component boxes (leaf excluded for doors). When present the loader collides
     // the prop with these (real doorway/arch gap) instead of welding it solid.
     collision_boxes: []MeshPropBox = &.{},
+    // EXACT COLLISION (req_3329, MESH_PROPS v10) — visible saved-Outliner
+    // triangles packed xyz×3 in the mesh's local frame. Boxes remain the cheap
+    // broadphase/camera shape; player contact narrows against these planes.
+    collision_triangles: []f32 = &.{},
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
@@ -179,6 +184,7 @@ pub const MeshPropMesh = struct {
         if (self.tex_rgba) |rgba| allocator.free(rgba);
         if (self.slots.len > 0) allocator.free(self.slots);
         if (self.collision_boxes.len > 0) allocator.free(self.collision_boxes);
+        if (self.collision_triangles.len > 0) allocator.free(self.collision_triangles);
     }
 };
 
@@ -1219,6 +1225,16 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
                 material_vertices = material;
             }
         }
+        // EXACT COLLISION (v10) — u32 triangle count followed by xyz×3 f32.
+        // A dedicated decoder owns overflow/truncation/finite validation.
+        var collision_triangles: []f32 = &.{};
+        errdefer if (collision_triangles.len > 0) allocator.free(collision_triangles);
+        if (version >= 10) {
+            collision_triangles = mesh_prop_collision_wire.decode(allocator, data, &at) catch |err| switch (err) {
+                error.InvalidCollisionTriangles => return Error.BadMeshProps,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -1237,6 +1253,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
             .slots = slots,
             .door = door,
             .collision_boxes = collision_boxes,
+            .collision_triangles = collision_triangles,
         };
         initialized_meshes += 1;
     }

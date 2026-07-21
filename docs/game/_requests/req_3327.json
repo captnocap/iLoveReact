@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:01:11.066Z",
   "origin": "codex:019f83a4",
   "text": "good that worked. now if i go low gravity and then jump under a floor, i end up glitching through it, which shouldnt happen",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f83a4-3a28-7472-b237-304fc90066ef",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,24 @@
       "actor": "Codex",
       "kind": "note",
       "text": "Root cause: the native physics engine already has a vertical head-bonk resolver, but ceilingUndersideAt rejects rows whose blocksPlayer flag is false. Live editor floor slabs intentionally use blocksPlayer=false so they are walkable platforms without side-push; low gravity merely lets the jump reach an upper floor, where the ceiling resolver then ignores its finite underside and the capsule passes through."
+    },
+    {
+      "at": "2026-07-21T09:05:45.594Z",
+      "actor": "Codex",
+      "kind": "note",
+      "text": "Verification: all four head-bonk tests pass, including the exact low-gravity/non-solid live-floor reproduction and a rotated-floor case; all ten camera tests remain green; ReleaseFast editor build succeeds. Full game-physics suite is 52/53 with the same unrelated hollow-ramp ascent failure seen before this task. The 02:00 repository checkpoint committed these two files as 9dc325627 while verification was running."
+    },
+    {
+      "at": "2026-07-21T09:05:45.603Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Fixed low-gravity jumping through upper-storey floors in the native Zig physics system. The ceiling resolver now treats every finite collider underside as physical even when a walkable slab disables horizontal side-push; unbounded ground and wall sentinels remain excluded. Added exact low-gravity and rotated-floor regression tests, retained the previous camera behavior, and rebuilt the ReleaseFast editor successfully.",
+  "shas": [
+    "9dc325627"
+  ],
+  "resolvedAt": "2026-07-21T09:05:45.603Z"
 }

@@ -1,5 +1,5 @@
 // cart/editor/world/meshProps.test.ts — resident door metadata matches the
-// framework/world/constructor.zig MESH_PROPS v9 decoder byte-for-byte.
+// framework/world/constructor.zig MESH_PROPS v10 decoder byte-for-byte.
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/meshProps.test.ts --bundle \
@@ -30,7 +30,7 @@ test('door resident row carries opaque/glass leaf slots, interaction metadata, a
     ],
   }]);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  assert(dv.getUint32(0, true) === 9, 'not MESH_PROPS v9');
+  assert(dv.getUint32(0, true) === 10, 'not MESH_PROPS v10');
   assert(dv.getUint32(4, true) === 1 && dv.getUint32(8, true) === 0, 'catalog header changed');
   const keyLength = dv.getUint32(12, true);
   let at = 16 + keyLength + 36 + vertices.length * 4;
@@ -49,10 +49,11 @@ test('door resident row carries opaque/glass leaf slots, interaction metadata, a
   assert(Math.abs(dv.getFloat32(at + 12, true) - (-0.5)) < 1e-5, 'left jamb maxX changed');
   at += 3 * 24;
   assert(dv.getUint32(at, true) === 0, 'door unexpectedly carries face-material UVs'); at += 4;
+  assert(dv.getUint32(at, true) === 0, 'door unexpectedly carries exact collision triangles'); at += 4;
   assert(at === bytes.byteLength, `encoder size drift: parsed ${at}, wrote ${bytes.byteLength}`);
 });
 
-test('v9 carries a separate material UV pair per resident vertex', () => {
+test('v10 retains the v9 separate material UV pair per resident vertex', () => {
   const triangle = new Float32Array([
     0, 0, 0, 0, 0, 1, 0.2, 0.3,
     1, 0, 0, 0, 0, 1, 0.2, 0.3,
@@ -72,7 +73,32 @@ test('v9 carries a separate material UV pair per resident vertex', () => {
     assert(Math.abs(dv.getFloat32(at + i * 4, true) - materialUvs[i]!) < 1e-6, `material UV ${i} changed`);
   }
   at += materialUvs.length * 4;
+  assert(dv.getUint32(at, true) === 0, 'textured face unexpectedly carries collision triangles'); at += 4;
   assert(at === bytes.byteLength, 'material UV payload size drifted');
+});
+
+test('v10 carries exact saved-Outliner collision triangles after material UVs', () => {
+  const triangle = new Float32Array([
+    0, 0, 0, 0, 0, 1, 0, 0,
+    1, 0, 0, 0, 0, 1, 1, 0,
+    0, 2, 1, 0, 0, 1, 0, 1,
+  ]);
+  const collisionTriangles = new Float32Array([0, 0, 0, 1, 0, 0, 0, 2, 1]);
+  const bytes = encodeResidentMeshes([{ key: 'prop:sloped-wall', vertices: triangle, collisionTriangles }]);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const keyLength = dv.getUint32(12, true);
+  let at = 16 + keyLength + 36 + triangle.length * 4;
+  at += 4; // pngLen=0
+  at += 4; // slotCount=0
+  at += 4; // hasDoor=0
+  at += 4; // collisionBoxCount=0
+  at += 4; // materialUvCount=0
+  assert(dv.getUint32(at, true) === 1, 'exact collision triangle count missing'); at += 4;
+  for (let i = 0; i < collisionTriangles.length; i += 1) {
+    assert(Math.abs(dv.getFloat32(at + i * 4, true) - collisionTriangles[i]!) < 1e-6, `collision coordinate ${i} changed`);
+  }
+  at += collisionTriangles.length * 4;
+  assert(at === bytes.byteLength, 'exact collision payload size drifted');
 });
 
 test('encoder rejects a partial material UV channel', () => {
@@ -81,6 +107,14 @@ test('encoder rejects a partial material UV channel', () => {
     encodeResidentMeshes([{ key: 'prop:bad-uv', vertices, materialUvs: new Float32Array(2) }]);
   } catch { threw = true; }
   assert(threw, 'partial material UV channel reached the host decoder');
+});
+
+test('encoder rejects a partial exact collision triangle', () => {
+  let threw = false;
+  try {
+    encodeResidentMeshes([{ key: 'prop:bad-collision', vertices, collisionTriangles: new Float32Array(8) }]);
+  } catch { threw = true; }
+  assert(threw, 'partial collision triangle reached the host decoder');
 });
 
 test('encoder rejects a door whose leaf slot does not exist', () => {

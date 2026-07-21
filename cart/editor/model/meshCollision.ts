@@ -10,6 +10,13 @@ export type MeshCollisionBox = {
   maxX: number; maxY: number; maxZ: number;
 };
 
+export type MeshCollisionBake = {
+  /** Cheap host broadphase and camera bands. Exact player contact uses triangles. */
+  boxes: MeshCollisionBox[];
+  /** Visible saved-Outliner triangles, packed local-frame xyz × 3 corners. */
+  triangles: Float32Array;
+};
+
 export const MESH_COLLISION_TUNING = {
   // world_loader's per-mesh island budget. Reduction happens here so the tail
   // of a long bridge is merged locally instead of being truncated.
@@ -240,21 +247,31 @@ function reduceToHostBudget(input: Candidate[]): Candidate[] {
 /** Compile bounded local-frame collision bands from every visible Outliner
  * range. One-row Outliners are decomposed too: the old opt-out made the host
  * replace most props with one whole-mesh widest×tallest AABB. */
-export function compileOutlinerCollisionBoxes(
+export function compileOutlinerCollision(
   vertices: Float32Array,
   doc: PackageMeshDoc | null,
   parts: readonly MeshDocPartMeta[] | null,
-): MeshCollisionBox[] {
-  if (!doc || doc.ranges.length === 0 || vertices.length === 0 || vertices.length % 24 !== 0) return [];
+): MeshCollisionBake {
+  const empty = (): MeshCollisionBake => ({ boxes: [], triangles: new Float32Array() });
+  if (!doc || doc.ranges.length === 0 || vertices.length === 0 || vertices.length % 24 !== 0) return empty();
   const triangles = vertices.length / 24;
-  if (doc.faceGroups && doc.faceGroups.length !== triangles) return [];
+  if (doc.faceGroups && doc.faceGroups.length !== triangles) return empty();
   const atomsByRange = doc.ranges.map((): TriangleAtom[] => []);
+  const collisionTriangles = new Float32Array(triangles * 9);
+  let collisionAt = 0;
   for (let triangle = 0; triangle < triangles; triangle += 1) {
     const group = doc.faceGroups?.[triangle] ?? triangle;
     const rangeIndex = rangeIndexForGroup(doc.ranges, group);
     if (rangeIndex < 0 || parts?.[rangeIndex]?.visible === false) continue;
     const atom = triangleAtom(vertices, triangle);
-    if (atom) atomsByRange[rangeIndex]!.push(atom);
+    if (!atom) continue;
+    atomsByRange[rangeIndex]!.push(atom);
+    for (let corner = 0; corner < 3; corner += 1) {
+      const source = (triangle * 3 + corner) * 8;
+      collisionTriangles[collisionAt++] = vertices[source]!;
+      collisionTriangles[collisionAt++] = vertices[source + 1]!;
+      collisionTriangles[collisionAt++] = vertices[source + 2]!;
+    }
   }
   const roots: CollisionCluster[] = [];
   for (let index = 0; index < atomsByRange.length; index += 1) {
@@ -262,9 +279,21 @@ export function compileOutlinerCollisionBoxes(
     if (atoms.length === 0) continue;
     roots.push(clusterOf(atoms, candidateFamily(parts?.[index], index), index));
   }
-  if (roots.length === 0) return [];
+  if (roots.length === 0) return empty();
   const candidates: Candidate[] = roots.length > MESH_COLLISION_TUNING.hostBoxBudget
     ? reduceToHostBudget(roots)
     : refineToHostBudget(roots);
-  return candidates.map((candidate) => thicken(candidate.box));
+  return {
+    boxes: candidates.map((candidate) => thicken(candidate.box)),
+    triangles: collisionTriangles.slice(0, collisionAt),
+  };
+}
+
+/** Compatibility view for callers/tests interested only in the broadphase. */
+export function compileOutlinerCollisionBoxes(
+  vertices: Float32Array,
+  doc: PackageMeshDoc | null,
+  parts: readonly MeshDocPartMeta[] | null,
+): MeshCollisionBox[] {
+  return compileOutlinerCollision(vertices, doc, parts).boxes;
 }

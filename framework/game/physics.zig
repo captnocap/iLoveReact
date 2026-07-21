@@ -40,6 +40,7 @@
 
 const std = @import("std");
 pub const movement = @import("movement.zig");
+pub const mesh_collision = @import("mesh_collision.zig");
 
 pub const MAX_ENTITIES: usize = 128;
 // 16384: a built-out city (hand-placed walls + floor plates) overran the old
@@ -89,6 +90,10 @@ pub const CAMERA_OCCLUSION_OUTPUT_FLOATS: usize = 4 + MAX_CAMERA_OCCLUSION_HITS;
 // Wire sentinel for a collider band that extends down without a finite underside.
 // A non-solid row carrying this value is terrain/ground, not overhead geometry.
 pub const SOLID_TO_GROUND_FLOOR_METERS: f32 = -1e9;
+// Exact mesh props retain their coarse boxes for camera/broadphase use. This
+// sentinel keeps those boxes out of player ground/side/ceiling response while
+// `blocksCamera` still admits their finite bands.
+pub const CAMERA_ONLY_SOLID_FLAG: f32 = -1;
 // req_0938: a heightfield whose surface sits more than this ABOVE the camera
 // pivot is a CEILING/ROOF the player is under — it must not cap the spring-arm
 // eye (the rek when you walk under a roof a storey-plus overhead). Heightfields
@@ -1316,6 +1321,7 @@ fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y
     var ground_y: f32 = -1000000;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
+        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         // Solid rects (walls, props) ARE standable tops, not just side blockers.
         // The step-height gate below keeps a tall wall from counting as ground at
         // its base (its top is far above current_y + step), so it only becomes
@@ -1330,6 +1336,7 @@ fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y
     // Oriented walls: rotate the foot point into each rect's frame, same test.
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const yaw = oriented[o + 11];
         var lx: f32 = undefined;
         var lz: f32 = undefined;
@@ -1347,6 +1354,7 @@ fn surfaceValueAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, cur
     var value = fallback;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
+        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         // Mirror groundAt: solids are standable, so when you rest on a prop's
         // top its friction/restitution (rect[6]/rect[7]) is the surface you read,
         // not the fallback. Same step-height gate keeps wall bases out.
@@ -1360,6 +1368,7 @@ fn surfaceValueAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, cur
     }
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const yaw = oriented[o + 11];
         var lx: f32 = undefined;
         var lz: f32 = undefined;
@@ -1420,6 +1429,7 @@ fn bodyOverlapsColliderBand(feet_y: f32, height: f32, floor_y: f32, top_y: f32) 
 fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32, walkable_side_push_grace: f32) void {
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
+        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const solid = rects[at + 5] > 0.5;
         const rect_height = rects[at + 4];
         const rect_floor = rects[at + 8];
@@ -1447,6 +1457,7 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
     // world. The first 9 floats are the AABB the push reads; [9..12] are pivot+yaw.
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const solid = oriented[o + 5] > 0.5;
         const rect_height = oriented[o + 4];
         const rect_floor = oriented[o + 8];
@@ -1497,6 +1508,7 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     var lowest: f32 = 1e30;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
+        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const rf = rects[at + 8];
         if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue; // underside not between feet and head
@@ -1506,6 +1518,7 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     }
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
+        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const rf = oriented[o + 8];
         if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue;

@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/model/meshCollision.test.ts --bundle --outfile=/tmp/editor-mesh-collision.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-mesh-collision.test.js
-import { compileOutlinerCollisionBoxes, MESH_COLLISION_TUNING } from './meshCollision';
+import { compileOutlinerCollision, compileOutlinerCollisionBoxes, MESH_COLLISION_TUNING } from './meshCollision';
 import type { MeshDocPartMeta, PackageMeshDoc } from '../data/meshDoc';
 
 let passed = 0, failed = 0;
@@ -68,8 +68,10 @@ test('one welded Outliner member keeps its doorway instead of becoming one whole
     faceGroups: new Uint32Array(6),
     ranges: [{ lo: 0, hi: 1 }],
   };
-  const boxes = compileOutlinerCollisionBoxes(vertices, doc, [{ name: 'Arch', color: '#888888', visible: true }]);
+  const collision = compileOutlinerCollision(vertices, doc, [{ name: 'Arch', color: '#888888', visible: true }]);
+  const boxes = collision.boxes;
   assert(boxes.length > 1, `single-member arch should decompose, got ${boxes.length} box(es)`);
+  assert(collision.triangles.length === 6 * 9, 'the exact welded-arch triangles were not preserved for host narrowphase');
   assert(!boxes.some((box) => box.minX <= 2 && box.maxX >= 2 && box.minY <= 1.5 && box.maxY >= 1.5), 'the empty doorway is still blocked');
   assert(boxes.some((box) => box.minX <= 2 && box.maxX >= 2 && box.minY <= 3.5 && box.maxY >= 3.5), 'the visible header stopped colliding');
 });
@@ -86,8 +88,9 @@ test('long paths reduce locally to the host budget without losing either endpoin
 test('hidden Outliner members do not produce invisible collision', () => {
   const f = fixture(3);
   f.parts[1] = { ...f.parts[1]!, visible: false };
-  const boxes = compileOutlinerCollisionBoxes(f.vertices, f.doc, f.parts);
-  assert(boxes.length === 2, 'hidden member still blocks the player');
+  const collision = compileOutlinerCollision(f.vertices, f.doc, f.parts);
+  assert(collision.boxes.length === 2, 'hidden member still blocks the player');
+  assert(collision.triangles.length === 2 * 9, 'hidden member reached the exact narrowphase payload');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -835,7 +835,7 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
                     clipped += 1;
                     continue;
                 }
-                live_oriented.appendSlice(alloc, &islandOrientedFloats(inst, isl)) catch {
+                live_oriented.appendSlice(alloc, &islandOrientedFloats(inst, isl, mesh.collision_triangles.len > 0)) catch {
                     clipped += 1;
                     continue;
                 };

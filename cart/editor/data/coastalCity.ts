@@ -110,6 +110,17 @@ export type CoastalCityStats = {
   infrastructureCompleteBeforeSites: true;
 };
 
+export type CoastalRoadTopology = {
+  crossingCount: number;
+  junctionCount: number;
+  minimumAngleDegrees: number | null;
+  minimumJunctionSpacingM: number | null;
+  maximumJunctionDegree: number;
+  selfIntersectionPathIds: readonly string[];
+  repeatedIntersectionPairs: readonly string[];
+  overlappingCorridorPairs: readonly string[];
+};
+
 export type CoastalCityPlan = {
   version: 1;
   seed: number;
@@ -298,6 +309,15 @@ export const COASTAL_CITY_TUNING = {
     opposingMedianM: 1,
     sidewalkWidthEachM: 2,
   },
+  roadTopology: {
+    minimumIntersectionAngleDegrees: 30,
+    minimumJunctionSpacingM: 24,
+    junctionMergeRadiusM: 1,
+    corridorGapM: 2,
+    maximumJunctionDegree: 4,
+    districtOwnershipTieEpsilon: 0.0001,
+    intersectionParameterEpsilon: 0.000001,
+  },
   transportLayout: {
     crossings: {
       coastHighway: { id: 'coast-highway-causeway', name: 'Harbor Lift Causeway', x: 630 },
@@ -309,7 +329,7 @@ export const COASTAL_CITY_TUNING = {
     },
     coastHighway: { northZ: 90, northCoastOffsetM: 150, southZ: 2780, southCoastOffsetM: 150 },
     stateRoute8: { northX: 460, northZ: 160, northViaX: 1080, northViaZ: 760, southX: 2250, southZ: 2640 },
-    diagonalParkway: { northX: 2610, northZ: 360, southX: 700, southZ: 2670 },
+    diagonalParkway: { northX: 2610, northZ: 360, southX: 700, southZ: 2670, burnsideMergeBackM: 350 },
     railway: { northX: 1300, northZ: 140, southX: 600, southZ: 2100 },
   },
   rail: {

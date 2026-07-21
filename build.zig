@@ -1695,6 +1695,25 @@ pub fn build(b: *std.Build) void {
     const world_mesh_prop_uv_test_step = b.step("test-world-mesh-prop-uv", "Run resident face-material UV tests");
     world_mesh_prop_uv_test_step.dependOn(&run_world_mesh_prop_uv_test.step);
 
+    const world_mesh_prop_collision_wire_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/mesh_prop_collision_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_mesh_prop_collision_wire_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_mesh_prop_collision_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_mesh_prop_collision_wire_test_mod.addImport("world_mesh_prop_collision_wire", world_mesh_prop_collision_wire_mod_for_tests);
+    const world_mesh_prop_collision_wire_test = b.addTest(.{
+        .name = "world-mesh-prop-collision-wire-test",
+        .root_module = world_mesh_prop_collision_wire_test_mod,
+    });
+    const run_world_mesh_prop_collision_wire_test = b.addRunArtifact(world_mesh_prop_collision_wire_test);
+    const world_mesh_prop_collision_wire_test_step = b.step("test-world-mesh-prop-collision-wire", "Run resident exact-collision wire tests");
+    world_mesh_prop_collision_wire_test_step.dependOn(&run_world_mesh_prop_collision_wire_test.step);
+
     // ── Platform game-file behavior tests (PLATMOD spine step 2, P4) ──────
     // Exercises framework/world/gamefile.zig: the three-stream game-file reader,
     // sha256 content-store install (atomic temp->fsync->rename), and the

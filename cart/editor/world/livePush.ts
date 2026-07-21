@@ -20,7 +20,7 @@ import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PA
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
-import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
+import { compileOutlinerCollision } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 import { compileTextureSlotMesh } from '../model/modelTextureSlots';
 import { encodeLiveLights, normalizeModelLights, placeModelLight, type WorldLight } from '../model/modelLights';
@@ -96,7 +96,7 @@ function residentMeshFor(
   if (ap.edit !== 'door' && ap.edit !== 'garageDoor') {
     const doc = pkg ? packageMeshDoc(pkg) : null;
     const parts = pkg ? packageMeshDocParts(pkg) : null;
-    const collisionBoxes = compileOutlinerCollisionBoxes(collisionVertices ?? vertices, doc, parts);
+    const collision = compileOutlinerCollision(collisionVertices ?? vertices, doc, parts);
     const textureSlots = pkg?.textureSlots ?? ap.textureSlots ?? [];
     if (textureSlots.length > 0) {
       try {
@@ -107,14 +107,21 @@ function residentMeshFor(
           ...(compiled.materialUvs ? { materialUvs: compiled.materialUvs } : {}),
           png,
           slots: compiled.slots,
-          ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}),
+          ...(collision.boxes.length > 0 ? { collisionBoxes: collision.boxes } : {}),
+          ...(collision.triangles.length > 0 ? { collisionTriangles: collision.triangles } : {}),
         };
       } catch (error) {
         console.warn(`[authored-slots] '${ap.label}' rejected: ${error instanceof Error ? error.message : String(error)}`);
         return null;
       }
     }
-    return { key, vertices, png, ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}) };
+    return {
+      key,
+      vertices,
+      png,
+      ...(collision.boxes.length > 0 ? { collisionBoxes: collision.boxes } : {}),
+      ...(collision.triangles.length > 0 ? { collisionTriangles: collision.triangles } : {}),
+    };
   }
   if (!pkg) {
     console.warn(`[authored-door] '${ap.label}' has no model package; resident door skipped`);
