@@ -131,6 +131,9 @@ import { convertStlToGlb, isStlFile } from '../data/stlImport';
 import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import {
+  choosePartAppendRoute,
+} from '../model/partResidency';
+import {
   groupPathById,
   nextDuplicateGroupName,
   nextDuplicatePartName,
@@ -3391,11 +3394,13 @@ export default function AppFrame() {
     }
     const parts = live.modelParts[activeModel] ?? [];
     const part = makePart(kind, parts, live.seq, params);
-    // An EMPTIED model has no live viewer to append into (the workspace shows NO
-    // VISIBLE PARTS and ModelView is unmounted, host mesh gone with it) — seed the
-    // part as the new base instead; the viewer remounts composing it, the same way
-    // a fresh document mounts (req_2560).
-    if (composeModelParts(parts).positions.length === 0) {
+    const api = modelToolApiRef.current;
+    const appendRoute = choosePartAppendRoute(Boolean(api), parts.length);
+    // A document that has never established ModelView may seed its first row. Once
+    // rows exist, however, their live native mesh is the only authority: library
+    // imports deliberately have no cart-side primitive mesh to recompose, so treating
+    // them as empty would overwrite them with this one new cube.
+    if (appendRoute === 'seed-empty') {
       const seedRange = composeModelParts([{ ...part, visible: true }]).ranges[0];
       const placed: ModelPart = { ...part, lo: seedRange?.lo ?? 0, hi: seedRange?.hi ?? 0 };
       // There is no resident host mesh to scope until ModelView remounts, but the
@@ -3405,9 +3410,12 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name} to the empty model` }));
       return;
     }
-    const api = modelToolApiRef.current;
-    if (!api) {
-      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
+    if (appendRoute === 'refuse' || !api) {
+      setState((prev) => ({
+        ...prev,
+        newMeshPrompt: null,
+        status: `Add Part stopped — ${parts.length} existing part(s) were kept, but their live mesh is unavailable. Reopen the model and try again.`,
+      }));
       return;
     }
     const geo = composeModelParts([{ ...part, visible: true }]);

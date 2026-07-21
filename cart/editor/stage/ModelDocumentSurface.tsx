@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
@@ -6,6 +7,10 @@ import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/as
 import { meshDocHiddenRanges } from '../data/meshDoc';
 import type { ModelOutlinerDragItem, ModelOutlinerDropTarget } from '../data/modelOutliner';
 import type { LightRig } from '../model/editMesh';
+import {
+  EMPTY_MODEL_VIEW_RESIDENCY,
+  advanceModelViewResidency,
+} from '../model/partResidency';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -72,6 +77,18 @@ export default function ModelDocumentSurface({ model, lights, triggerProps, onTo
   onRequireFirstSave: () => boolean;
   onDocumentMutated: () => void;
 }) {
+  const residencyRef = useRef(EMPTY_MODEL_VIEW_RESIDENCY);
+  // Leaving this model's multipart surface destroys its ModelView, so do not let a
+  // later seedless document borrow the old native session merely because the shell
+  // component itself stayed mounted.
+  if (!model || !outliner) {
+    residencyRef.current = advanceModelViewResidency(
+      residencyRef.current,
+      model?.id ?? null,
+      false,
+      false,
+    );
+  }
   // The model surface stays bland — its tools live in the editor toolbar and in
   // the app-root context menu (opened by right-click here), both mirroring the one
   // command registry. The viewer runs hostChrome (no floating buttons) and reports
@@ -155,11 +172,21 @@ export default function ModelDocumentSurface({ model, lights, triggerProps, onTo
       : composed.positions.length > 0
         ? { key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }
         : null;
-    const modelView = seed ? (
+    // `seed` is a BOOT input, not a liveness signal. Add From Library rows are
+    // metadata + native group ranges, so deleting the original primitive can make
+    // `composed` empty while the imported native geometry is still fully resident.
+    // Keep the same keyed ModelView mounted for this continuous document lifetime.
+    residencyRef.current = advanceModelViewResidency(
+      residencyRef.current,
+      model.id,
+      true,
+      Boolean(seed),
+    );
+    const modelView = residencyRef.current.established ? (
       <ModelView
         key={model.id}
         initialTitle={model.name}
-        initialMesh={seed}
+        initialMesh={seed ?? undefined}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
         authoredLights={lights}
         onPathPlaneCreated={outliner!.onPathPlaneCreated}
