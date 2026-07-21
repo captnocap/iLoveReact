@@ -105,6 +105,10 @@ test('zoomed-out translation uses a perceptible grid and Alt bypasses it everywh
   const freeFace = flattenUvFaceCorners([moveUvFace(rect, { face: 0, group: 1 }, 2.1, 2.1, 32, 32, 4, true)])!;
   assert(snappedFace[0] === 4 && snappedFace[1] === 4, 'isolated face did not share the adaptive translation grid');
   assert(Math.abs(freeFace[0]! - 5.1) < 0.0001 && Math.abs(freeFace[1]! - 5.1) < 0.0001, 'Alt-style face movement still snapped');
+  const aligned = parseUvIslandRects([4, 4, 8, 8], [1], [0, 4, 4, 12, 4, 4, 12])[0]!;
+  assert(moveUvIsland(aligned, 0.4, 0.4, 32, 32, 4) === aligned, 'motion inside one snap cell still churned the preview');
+  assert(moveUvFace(aligned, { face: 0, group: 1 }, 0.4, 0.4, 32, 32, 4) === aligned, 'isolated face churned inside one snap cell');
+  assert(moveUvSelectionVertex(aligned, undefined, 0, 0.4, 0.4, 32, 32, false, 4) === aligned, 'vertex churned inside one snap cell');
 });
 
 test('selection clicks cannot nudge UVs before the drag latch opens', () => {

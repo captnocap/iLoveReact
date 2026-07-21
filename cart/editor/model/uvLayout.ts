@@ -197,10 +197,13 @@ export function moveUvIsland(
 ): UvIslandRect {
   const requestedX = rect.x + dx;
   const requestedY = rect.y + dy;
+  const x = clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), 0, Math.max(0, atlasW - rect.w));
+  const y = clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), 0, Math.max(0, atlasH - rect.h));
+  if (x === rect.x && y === rect.y) return rect;
   return {
     ...rect,
-    x: clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), 0, Math.max(0, atlasW - rect.w)),
-    y: clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), 0, Math.max(0, atlasH - rect.h)),
+    x,
+    y,
   };
 }
 
@@ -362,6 +365,7 @@ export function moveUvFace(
   const snappedDx = freeMove ? dx : snapUvVertex(bounds.x + dx, snapStep) - bounds.x;
   const snappedDy = freeMove ? dy : snapUvVertex(bounds.y + dy, snapStep) - bounds.y;
   const [safeDx, safeDy] = clampSelectionTranslation(bounds, snappedDx, snappedDy, atlasW, atlasH);
+  if (Math.abs(safeDx) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(safeDy) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
   const triangles = absoluteTriangles(rect);
   translateAbsoluteSelection(triangles, target, safeDx, safeDy);
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
@@ -530,6 +534,7 @@ export function moveUvSelectionVertex(
   const requestedY = selected.y + dy;
   const targetX = clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), minX, atlasW - minX);
   const targetY = clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), minY, atlasH - minY);
+  if (sameUvPoint(targetX, targetY, selected.x, selected.y)) return rect;
 
   const absolute = rect.triangles.map((triangle) => {
     const points = [...absoluteTrianglePoints(rect, triangle)] as [number, number, number, number, number, number];
