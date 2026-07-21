@@ -1,0 +1,30 @@
+{
+  "id": "req_3344",
+  "at": "2026-07-21T13:28:20.021Z",
+  "origin": "codex:019f7e48",
+  "text": "give the uv mapping a very definite grid for snapping or i know what it might be, it might be the fact that there is absolute 0 ability to group parts together in a chain or get them all the same size or any of that which is a pain in the ass. also, you gonna want to make it so this whole side panel can drag to resize this is still just insanely small area to work in",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T13:28:25.739Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T13:44:42.821Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The UV workspace now exposes a strong minor/major grid whose visible interval is the exact effective translation snap, with explicit 1/2/4/8/16-texel precision controls and Alt free movement. Shift-click builds a temporary multi-island set that drags rigidly, preserves member offsets at atlas bounds, can match the active island's width/height/full size, and can form horizontal or vertical grid-aligned chains. The Paint/UV focus panel now has a full-height pointer-captured left-edge resize grip with separate remembered normal/focus widths, frame-coalesced updates, and bounded stage retention. Verified by 24 UV layout tests, UV workspace policy tests, editor TypeScript check, and a ReleaseFast editor ship build.",
+  "shas": [
+    "d44aede7a"
+  ],
+  "resolvedAt": "2026-07-21T13:44:42.821Z"
+}
