@@ -20,6 +20,18 @@ function triangleAt(x: number, y: number): number[] {
   ];
 }
 
+type Point = readonly [number, number, number];
+function triangle(a: Point, b: Point, c: Point): number[] {
+  return [
+    ...a, 0, 0, 1, 0, 0,
+    ...b, 0, 0, 1, 0, 0,
+    ...c, 0, 0, 1, 0, 0,
+  ];
+}
+function quad(a: Point, b: Point, c: Point, d: Point): number[] {
+  return [...triangle(a, b, c), ...triangle(a, c, d)];
+}
+
 function fixture(count: number, rise = 0.25): { vertices: Float32Array; doc: PackageMeshDoc; parts: MeshDocPartMeta[] } {
   const values: number[] = [];
   for (let i = 0; i < count; i += 1) values.push(...triangleAt(i * 1.25, i * rise));
@@ -41,6 +53,25 @@ test('rising Outliner members keep separate local height bands', () => {
   assert(boxes.length === 3, `expected three part bands, got ${boxes.length}`);
   assert(boxes[0]!.maxY === 0 && boxes[1]!.maxY === 2 && boxes[2]!.maxY === 4, 'walkable tops no longer follow the visible rise');
   assert(boxes.every((box) => Math.abs((box.maxY - box.minY) - MESH_COLLISION_TUNING.minimumThicknessMeters) < 1e-9), 'flat decks did not receive a downward-only skin');
+});
+
+test('one welded Outliner member keeps its doorway instead of becoming one whole-mesh block', () => {
+  // Each jamb shares a vertex with the header, so the host fallback sees one
+  // connected island whose AABB seals the empty 2m-wide doorway.
+  const vertices = new Float32Array([
+    ...quad([0, 0, 0], [1, 0, 0], [1, 4, 0], [0, 4, 0]),
+    ...quad([3, 0, 0], [4, 0, 0], [4, 4, 0], [3, 4, 0]),
+    ...quad([0, 3, 0], [4, 3, 0], [4, 4, 0], [0, 4, 0]),
+  ]);
+  const doc: PackageMeshDoc = {
+    vertices,
+    faceGroups: new Uint32Array(6),
+    ranges: [{ lo: 0, hi: 1 }],
+  };
+  const boxes = compileOutlinerCollisionBoxes(vertices, doc, [{ name: 'Arch', color: '#888888', visible: true }]);
+  assert(boxes.length > 1, `single-member arch should decompose, got ${boxes.length} box(es)`);
+  assert(!boxes.some((box) => box.minX <= 2 && box.maxX >= 2 && box.minY <= 1.5 && box.maxY >= 1.5), 'the empty doorway is still blocked');
+  assert(boxes.some((box) => box.minX <= 2 && box.maxX >= 2 && box.minY <= 3.5 && box.maxY >= 3.5), 'the visible header stopped colliding');
 });
 
 test('long paths reduce locally to the host budget without losing either endpoint', () => {

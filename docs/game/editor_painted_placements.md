@@ -1,7 +1,8 @@
 # Painted placements: which mesh a placed model renders
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
-Last verified: 2026-07-15. USER ASK req_2832 / req_2833 / req_3133.
+Last verified: 2026-07-21. USER ASK req_2832 / req_2833 / req_2930 /
+req_3133 / req_3328.
 
 ## In one sentence
 
@@ -40,6 +41,30 @@ compares the stamp against the doc on disk:
 - **mismatch + stamp absent/stale** → req_2832 rule: painting drops, doc
   renders flat. Packages saved before the stamp existed take this path until
   their next save.
+
+## Collision follows the saved Outliner shape (req_2930 / req_3328)
+
+`residentMeshFor` gives the full-resolution collision vertex form plus the
+saved RJMD range table and `parts.json` rows to
+`model/meshCollision.ts compileOutlinerCollisionBoxes`. Visible Outliner ranges
+are hard boundaries. Inside each range, a bounded top-down spatial split spends
+spare collider rows only where two child hulls materially fit the triangles
+better (curves, arches, figures, rising surfaces). The result is baked into the
+resident MESH_PROPS collision-box block; the host consumes those static boxes
+verbatim. No geometry is generated in the frame loop.
+
+This closes the single-row failure behind req_3328: the old compiler opted out
+when `doc.ranges.length < 2`, so most props shipped zero authored boxes and the
+host correctly fell back to one connected-island AABB — the prop's widest and
+tallest points became one invisible block. A one-row Outliner now receives the
+same geometry-derived decomposition as a multi-row model. Flat faces receive a
+4 cm downward skin so their visible top remains the walkable height.
+
+The per-mesh ceiling remains 24 boxes. Models with more than 24 Outliner ranges
+coarsen nearby members of the same duplicate/group family locally; models below
+the ceiling spend the remaining rows refining complex ranges. This is a bounded
+box decomposition, not per-triangle mesh collision, but it removes the whole-
+model rectangle while retaining the established fixed-cost physics contract.
 
 ## Not yet covered
 
