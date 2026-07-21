@@ -88,14 +88,21 @@ fn projectAxis(nx: f32, ny: f32, nz: f32) u8 {
     return 2;
 }
 
-/// Reference projectVert: drop the dominant coordinate, keep the other two in a fixed
-/// (u,v) order so faces of the same axis align (editMesh.ts:1059).
-fn projectVert(axis: u8, p: [3]f32) [2]f32 {
-    return switch (axis) {
+/// Drop the dominant coordinate, then orient U so the projected triangle keeps
+/// the same handedness when viewed from the OUTSIDE of either axis side. A fixed
+/// basis alone mirrors one side of every axis pair, making text backwards on
+/// half of a box/cylinder even though no amount of UV rotation can correct it.
+fn projectVert(axis: u8, sign: i8, p: [3]f32) [2]f32 {
+    var projected: [2]f32 = switch (axis) {
         0 => .{ p[2], p[1] }, // looking down ±X → (z, y)
         1 => .{ p[0], p[2] }, // looking down ±Y → (x, z)
         else => .{ p[0], p[1] }, // looking down ±Z → (x, y)
     };
+    // U×V points -X, -Y, +Z for the three bases above. The opposite-facing
+    // side reflects U so every emitted triangle has one consistent UV winding.
+    const basis_sign: i8 = if (axis == 2) 1 else -1;
+    if (sign != basis_sign) projected[0] = -projected[0];
+    return projected;
 }
 
 const RawIsland = struct {
@@ -537,7 +544,7 @@ fn buildImpl(
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const base = f * 9 + k * 3;
-            const uv = projectVert(r.axis, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
+            const uv = projectVert(r.axis, r.sign, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
             if (uv[0] < r.min_u) r.min_u = uv[0];
             if (uv[1] < r.min_v) r.min_v = uv[1];
             if (uv[0] > r.w_m) r.w_m = uv[0];
@@ -639,7 +646,7 @@ fn buildImpl(
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const base = f * 9 + k * 3;
-            const uv = projectVert(isl.axis, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
+            const uv = projectVert(isl.axis, isl.sign, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
             // Meters → island texel, inset half a texel so edge samples stay inside
             // the island under linear filtering (the pad gutter handles the rest).
             const tw: f32 = @floatFromInt(isl.w);
@@ -714,6 +721,27 @@ test "cube at 16 texels/m: 6 face islands, ~16x16 each, corners inside their isl
     // Both triangles of a quad share ONE island — the continuity the grid never had.
     try testing.expectEqual(l.tri_island[0], l.tri_island[1]);
     try testing.expect(l.atlas_w <= 8192 and l.atlas_h <= 8192);
+}
+
+test "generated UVs keep one outward handedness on both sides of every axis" {
+    var soup: [12 * 9]f32 = undefined;
+    cubeSoup(&soup);
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    var layout = build(testing.allocator, soup[0..], groups[0..], 16, 8192, 256 << 20).?;
+    defer layout.deinit(testing.allocator);
+
+    var face: usize = 0;
+    while (face < 12) : (face += 1) {
+        const at = face * 6;
+        const ax = layout.corner_uv[at + 0];
+        const ay = layout.corner_uv[at + 1];
+        const bx = layout.corner_uv[at + 2];
+        const by = layout.corner_uv[at + 3];
+        const cx = layout.corner_uv[at + 4];
+        const cy = layout.corner_uv[at + 5];
+        const signed_area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        try testing.expect(signed_area > 0);
+    }
 }
 
 test "a big face gets proportionally more texels than a small one (density model)" {

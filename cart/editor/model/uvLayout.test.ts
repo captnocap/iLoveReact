@@ -1,6 +1,7 @@
 import {
   flattenUvFaceCorners,
   flattenUvIslandRects,
+  flipUvSelection,
   hitUvFace,
   hitUvIsland,
   isUvDoubleClick,
@@ -155,6 +156,28 @@ test('moving one authored fan face leaves the rest of its connected island fixed
   const moved = flattenUvFaceCorners([moveUvFace(rect, { face: 1, group: 701 }, 2, 1, 32, 32)])!;
   assert([...moved.slice(0, 6)].join(',') === [...before.slice(0, 6)].join(','), 'neighbour face followed the detached face');
   assert(moved[6] === before[6]! + 2 && moved[7] === before[7]! + 1, 'target face did not detach by the requested texel delta');
+});
+
+test('UV flips reverse handedness for an island or one isolated authored face', () => {
+  const rect = parseUvIslandRects(
+    [0, 0, 12, 12],
+    [100],
+    [
+      0, 700, 2, 2, 10, 2, 8, 9,
+      0, 701, 1, 10, 4, 6, 7, 10,
+    ],
+  )[0]!;
+  const before = flattenUvFaceCorners([rect])!;
+  const faceTarget = { face: 0, group: 700 };
+  const faceFlipped = flattenUvFaceCorners([flipUvSelection(rect, faceTarget, 'u', 32, 32)])!;
+  assert([...faceFlipped.slice(6)].join(',') === [...before.slice(6)].join(','), 'face flip changed its neighbour');
+  assert([...faceFlipped.slice(0, 6)].join(',') === '10,2,2,2,4,9', 'horizontal face flip did not reverse U around its own center');
+
+  const islandFlipped = flipUvSelection(rect, undefined, 'v', 32, 32);
+  const islandCorners = flattenUvFaceCorners([islandFlipped])!;
+  assert([...islandCorners].join(',') === '2,10,10,10,8,3,1,2,4,6,7,2', 'vertical island flip did not reverse V around the island center');
+  const restored = flattenUvFaceCorners([flipUvSelection(islandFlipped, undefined, 'v', 32, 32)])!;
+  assert([...restored].join(',') === [...before].join(','), 'double UV flip failed to restore the exact mapping');
 });
 
 test('whole-island movement changes sampling coordinates, not triangle-local geometry', () => {

@@ -7,6 +7,7 @@ import { accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
 import {
   flattenUvFaceCorners,
+  flipUvSelection,
   hitUvFace,
   hitUvIsland,
   isUvDoubleClick,
@@ -28,6 +29,7 @@ import {
   type UvAxisGuide,
   type UvCanvasTool,
   type UvFaceTarget,
+  type UvFlipAxis,
   type UvIslandRect,
   type UvSelectionBounds,
 } from '../model/uvLayout';
@@ -356,6 +358,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setRects(next);
     commit(next, label);
   };
+  const flipSelected = (axis: UvFlipAxis) => {
+    const rect = rectsRef.current[selected];
+    if (!rect) {
+      setNote('Select a UV island or face before flipping it.');
+      return;
+    }
+    const changed = flipUvSelection(rect, selectedTarget, axis, uv.w, uv.h);
+    const subject = selectedTarget ? 'UV face' : 'UV island';
+    replaceSelected(changed, `flipped ${subject} ${axis === 'u' ? 'horizontally (U)' : 'vertically (V)'}`);
+  };
 
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
@@ -522,6 +534,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         {toolButton('Triangle', tool === 'select' && selectionMode === 'face', 'Face mode — drag one authored face to break it out of its island', () => { setTool('select'); setSelectionMode('face'); })}
         {toolButton('Hand', tool === 'pan', 'Pan the UV canvas', () => setTool('pan'))}
         {toolButton('Maximize2', false, 'Fit the complete atlas in the canvas', () => setView(fittedView(false)))}
+        {toolButton('FlipHorizontal2', false, 'Flip selected UV horizontally (U) — fixes mirrored text', () => flipSelected('u'))}
+        {toolButton('FlipVertical2', false, 'Flip selected UV vertically (V)', () => flipSelected('v'))}
         <Pressable tooltip="Zoom out" onPress={() => zoomAt({ x: surfaceSize.width * 0.5, y: surfaceSize.height * 0.5 }, 0.8)} style={{ width: 25, height: 25, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 14, fontWeight: '900' }}>−</Text>
         </Pressable>

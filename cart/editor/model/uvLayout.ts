@@ -49,6 +49,7 @@ export type UvIslandTriangle = {
 export type UvIslandVertex = { x: number; y: number };
 
 export type UvFaceTarget = { face: number; group: number };
+export type UvFlipAxis = 'u' | 'v';
 export type UvSelectionBounds = { x: number; y: number; w: number; h: number; cx: number; cy: number };
 export type UvAxisGuide = { axis: 'horizontal' | 'vertical'; coordinate: number };
 export type UvRotationResult = { rect: UvIslandRect; angleDegrees: number; guide: UvAxisGuide | null };
@@ -397,6 +398,30 @@ export function scaleUvSelection(
   if (transformedBounds) {
     const [dx, dy] = clampSelectionTranslation(transformedBounds, 0, 0, atlasW, atlasH);
     translateAbsoluteSelection(triangles, target, dx, dy);
+  }
+  return rebuildUvRect(rect, triangles, atlasW, atlasH);
+}
+
+/** Reflect a complete island or one authored face through its own transform
+ * center. Rotation cannot change UV handedness; this is the operation that
+ * makes mirrored text and logos read forward without moving texture pixels. */
+export function flipUvSelection(
+  rect: UvIslandRect,
+  target: UvFaceTarget | undefined,
+  axis: UvFlipAxis,
+  atlasW: number,
+  atlasH: number,
+): UvIslandRect {
+  const bounds = uvSelectionBounds(rect, target);
+  if (!bounds) return rect;
+  const triangles = absoluteTriangles(rect);
+  for (const triangle of triangles) {
+    if (!triangleMatchesTarget(triangle, target)) continue;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const at = corner * 2;
+      if (axis === 'u') triangle.points[at] = bounds.cx * 2 - triangle.points[at]!;
+      else triangle.points[at + 1] = bounds.cy * 2 - triangle.points[at + 1]!;
+    }
   }
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
 }
