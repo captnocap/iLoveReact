@@ -12,6 +12,7 @@ import {
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
+  shouldActivateUvDrag,
   shouldPanUvCanvas,
   uniformUvPack,
   uvFaceEdgeSegments,
@@ -19,6 +20,7 @@ import {
   uvIslandBoundarySegments,
   uvIslandBoundaryPath,
   uvIslandVertices,
+  uvTranslationSnapStep,
 } from './uvLayout';
 
 let passed = 0, failed = 0;
@@ -84,6 +86,31 @@ test('UV vertices snap to whole texels by default and Alt-style free movement by
   const free = flattenUvFaceCorners([moveUvSelectionVertex(rect, undefined, 0, 0.6, 0.6, 32, 32, true)])!;
   assert(snapped[0] === 3 && snapped[1] === 3, `vertex missed the texel grid: ${snapped[0]},${snapped[1]}`);
   assert(Math.abs(free[0]! - 2.6) < 0.0001 && Math.abs(free[1]! - 2.6) < 0.0001, 'free modifier still snapped the vertex');
+});
+
+test('zoomed-out translation uses a perceptible grid and Alt bypasses it everywhere', () => {
+  assert(uvTranslationSnapStep(4) === 1, 'visible texels did not retain one-pixel precision');
+  assert(uvTranslationSnapStep(1) === 4, 'one-to-one zoom did not strengthen the translation latch');
+  assert(uvTranslationSnapStep(0.25) === 16, 'zoomed-out movement fell back to sub-pixel screen steps');
+
+  const rect = parseUvIslandRects([3, 3, 8, 8], [1], [0, 3, 3, 11, 3, 3, 11])[0]!;
+  const snappedIsland = moveUvIsland(rect, 2.1, 2.1, 32, 32, 4);
+  const freeIsland = moveUvIsland(rect, 2.1, 2.1, 32, 32, 4, true);
+  assert(snappedIsland.x === 4 && snappedIsland.y === 4, `island missed its absolute snap anchor: ${snappedIsland.x},${snappedIsland.y}`);
+  assert(Math.abs(freeIsland.x - 5.1) < 0.0001 && Math.abs(freeIsland.y - 5.1) < 0.0001, 'Alt-style island movement still snapped');
+
+  const snappedVertex = flattenUvFaceCorners([moveUvSelectionVertex(rect, undefined, 0, 2.1, 2.1, 32, 32, false, 4)])!;
+  assert(snappedVertex[0] === 4 && snappedVertex[1] === 4, 'vertex did not share the adaptive translation grid');
+  const snappedFace = flattenUvFaceCorners([moveUvFace(rect, { face: 0, group: 1 }, 2.1, 2.1, 32, 32, 4)])!;
+  const freeFace = flattenUvFaceCorners([moveUvFace(rect, { face: 0, group: 1 }, 2.1, 2.1, 32, 32, 4, true)])!;
+  assert(snappedFace[0] === 4 && snappedFace[1] === 4, 'isolated face did not share the adaptive translation grid');
+  assert(Math.abs(freeFace[0]! - 5.1) < 0.0001 && Math.abs(freeFace[1]! - 5.1) < 0.0001, 'Alt-style face movement still snapped');
+});
+
+test('selection clicks cannot nudge UVs before the drag latch opens', () => {
+  assert(!shouldActivateUvDrag(4, 0), 'activation radius itself started a drag');
+  assert(!shouldActivateUvDrag(2, 2), 'pointer jitter started a drag');
+  assert(shouldActivateUvDrag(4.01, 0), 'intentional movement did not open the drag latch');
 });
 
 test('moving one authored fan face leaves the rest of its connected island fixed', () => {

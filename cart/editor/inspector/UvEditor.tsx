@@ -16,12 +16,14 @@ import {
   NO_UV_GROUP,
   rotateUvSelection,
   scaleUvSelection,
+  shouldActivateUvDrag,
   shouldPanUvCanvas,
   uniformUvPack,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
   uvSelectionBounds,
   uvSelectionVertices,
+  uvTranslationSnapStep,
   UV_LAYOUT_TUNING,
   type UvAxisGuide,
   type UvCanvasTool,
@@ -51,8 +53,8 @@ type UvLineGeometryCache = { rects: readonly UvIslandRect[]; view: View; geometr
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
-  | { kind: 'move'; index: number; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; doubleClick: boolean; seed: UvIslandRect }
-  | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; start: ScreenPoint; seed: UvIslandRect }
+  | { kind: 'move'; index: number; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect }
+  | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
   | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; seed: UvIslandRect };
 
@@ -385,6 +387,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   const atlasW = uv.w * view.scale;
   const atlasH = uv.h * view.scale;
+  const translationSnapStep = uvTranslationSnapStep(view.scale);
   const atlasEffectData = useMemo(() => [atlasW, atlasH, UV_LAYOUT_TUNING.checkerPx, 0], [atlasW, atlasH]);
   const thumbnailEffectData = useMemo(() => [32, 32, UV_LAYOUT_TUNING.checkerPx, 0], []);
   const gridSegments = useMemo(
@@ -423,7 +426,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         commit(rectsRef.current, gesture.target ? 'detached and moved UV face' : 'moved UV island over the fixed texture');
       }
     }
-    if (gesture?.kind === 'vertex') commit(rectsRef.current, 'moved UV vertex over the fixed texture');
+    if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture');
     if (gesture?.kind === 'rotate') commit(rectsRef.current, gesture.target ? 'rotated detached UV face' : 'rotated UV island');
     if (gesture?.kind === 'scale') commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island');
   };
@@ -485,7 +488,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const vertex = hitHandle(screen);
           if (vertex >= 0 && selectedRect) {
             lastClickRef.current = null;
-            gestureRef.current = { kind: 'vertex', index: selected, target: selectedTarget, vertex, start: atlasPoint(screen), seed: selectedRect };
+            gestureRef.current = { kind: 'vertex', index: selected, target: selectedTarget, vertex, start: atlasPoint(screen), screenStart: screen, activated: false, seed: selectedRect };
             return;
           }
           const point = atlasPoint(screen);
@@ -500,7 +503,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               setSelected(faceHit.island);
               setSelectedFace(faceHit.target);
               bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, doubleClick: true, seed: rectsRef.current[faceHit.island]! };
+              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]! };
               setNote('isolated one authored UV face');
               return;
             }
@@ -511,7 +514,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             setSelectedFace(faceHit?.target ?? null);
             if (faceHit) {
               bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, doubleClick: false, seed: rectsRef.current[faceHit.island]! };
+              gestureRef.current = { kind: 'move', index: faceHit.island, target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[faceHit.island]! };
             }
             return;
           }
@@ -520,7 +523,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           setSelectedFace(null);
           if (index >= 0) {
             bridge.selectUvIsland(index, Boolean(event?.shiftKey));
-            gestureRef.current = { kind: 'move', index, start: point, screenStart: screen, doubleClick: false, seed: rectsRef.current[index]! };
+            gestureRef.current = { kind: 'move', index, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[index]! };
           }
         }}
         onMouseMove={(event: any) => {
@@ -535,13 +538,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           let changed = gesture.seed;
           let guide: UvAxisGuide | null = null;
           if (gesture.kind === 'move' || gesture.kind === 'vertex') {
+            if (!gesture.activated) {
+              if (!shouldActivateUvDrag(screen.x - gesture.screenStart.x, screen.y - gesture.screenStart.y)) return;
+              gesture.activated = true;
+            }
             const dx = point.x - gesture.start.x;
             const dy = point.y - gesture.start.y;
+            const freeMove = Boolean(event?.altKey);
             changed = gesture.kind === 'vertex'
-              ? moveUvSelectionVertex(gesture.seed, gesture.target, gesture.vertex, dx, dy, uv.w, uv.h, Boolean(event?.altKey))
+              ? moveUvSelectionVertex(gesture.seed, gesture.target, gesture.vertex, dx, dy, uv.w, uv.h, freeMove, translationSnapStep)
               : gesture.target
-                ? moveUvFace(gesture.seed, gesture.target, dx, dy, uv.w, uv.h)
-                : moveUvIsland(gesture.seed, dx, dy, uv.w, uv.h);
+                ? moveUvFace(gesture.seed, gesture.target, dx, dy, uv.w, uv.h, translationSnapStep, freeMove)
+                : moveUvIsland(gesture.seed, dx, dy, uv.w, uv.h, translationSnapStep, freeMove);
           } else if (gesture.kind === 'rotate') {
             const angle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) - gesture.startAngle;
             const rotated = rotateUvSelection(gesture.seed, gesture.target, angle * 180 / Math.PI, uv.w, uv.h);
@@ -596,7 +604,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       </Pressable>
 
       <Row style={{ height: 14, alignItems: 'center' }}>
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>VERTEX GRID 1px · hold ALT for free pull</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`SNAP ${translationSnapStep}px · hold ALT for free move`}</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`ATLAS ${uv.w}×${uv.h}`}</Text>
       </Row>

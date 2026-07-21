@@ -1,0 +1,36 @@
+{
+  "id": "req_3333",
+  "at": "2026-07-21T09:58:19.434Z",
+  "origin": "codex:019f840f",
+  "text": "much better its got some delay/lag when opening up / paging through them though",
+  "status": "review",
+  "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T09:58:37.920Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:08:15.702Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Cold-path implementation: generated fill thumbnails now use one packed grid Effect on the exact canonical FILL_SHADER pipeline; page slots retain Pressable identity, while Road/Cutout/Mission/imported WGSL keep per-cell fallbacks. Fixed 8x6/48 display contract unchanged. Focused pack/cache tests and standalone naga WGSL validation are green; full ReleaseFast gate pending."
+    },
+    {
+      "at": "2026-07-21T10:10:52.225Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the shader browser's remaining cold-open/page burst without reducing its fixed 8x6/48-cell display. Generated fill recipes now pack variable material rows into one grid-routed Effect; the grid and ordinary selected-material preview use the exact same canonical FILL_SHADER source, so there is one 409-material pipeline compile rather than a second grid compile. Page slots retain Pressable identity, preserving independent tooltips/clicks while avoiding 48-node teardown/recreation; different-WGSL recipes remain correct through a sparse per-cell fallback (page 1 is batch + Road, pages 2-8 are one Effect, the last built-in page is batch + Cutout/Mission). Packed rows validate at the boundary, explicitly terminate empty palettes, and compare by value so unrelated parent renders do not dirty the StaticSurface. Verified with 5/5 focused tests, existing ShaderThumb cache tests, naga validation of the fully assembled WGSL, docs-index bundle, and a full ReleaseFast editor build. User visual/paging and 60s spikewatch confirmation requested in review.",
+  "shas": [
+    "3f3c1fae4"
+  ],
+  "resolvedAt": "2026-07-21T10:10:52.225Z"
+}

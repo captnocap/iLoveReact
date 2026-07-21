@@ -13,6 +13,8 @@ export const UV_LAYOUT_TUNING = {
   maximumZoom: 32,
   /** UV vertices land on whole texture pixels unless Alt temporarily disables snapping. */
   vertexSnapTexels: 1,
+  /** Keep translation latches perceptible even when a large atlas is zoomed far out. */
+  minimumTranslationSnapPx: 4,
   pointMatchEpsilon: 0.0001,
   doubleClickMs: 350,
   doubleClickDistancePx: 6,
@@ -81,6 +83,22 @@ export function isUvDoubleClick(previous: UvClickStamp | null, current: UvClickS
     && current.at - previous.at <= UV_LAYOUT_TUNING.doubleClickMs
     && Math.hypot(current.x - previous.x, current.y - previous.y) <= UV_LAYOUT_TUNING.doubleClickDistancePx,
   );
+}
+
+/** A click may select without nudging UVs. Translation begins only after the
+ * pointer has deliberately crossed the same activation radius used to classify
+ * click versus drag on release. */
+export function shouldActivateUvDrag(dxPx: number, dyPx: number): boolean {
+  return Math.hypot(dxPx, dyPx) > UV_LAYOUT_TUNING.dragActivationPx;
+}
+
+/** Power-of-two texture steps keep snapping physically legible at every zoom:
+ * 1 texel when it is visible, progressively coarser while zoomed out. */
+export function uvTranslationSnapStep(viewScale: number): number {
+  const scale = Math.max(UV_LAYOUT_TUNING.minimumZoom, Number.isFinite(viewScale) ? viewScale : 1);
+  let step = UV_LAYOUT_TUNING.vertexSnapTexels;
+  while (step * scale < UV_LAYOUT_TUNING.minimumTranslationSnapPx) step *= 2;
+  return step;
 }
 
 export function parseUvIslandRects(
@@ -168,11 +186,21 @@ export function flattenUvFaceCorners(rects: readonly UvIslandRect[]): Float32Arr
   return out;
 }
 
-export function moveUvIsland(rect: UvIslandRect, dx: number, dy: number, atlasW: number, atlasH: number): UvIslandRect {
+export function moveUvIsland(
+  rect: UvIslandRect,
+  dx: number,
+  dy: number,
+  atlasW: number,
+  atlasH: number,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
+  freeMove = false,
+): UvIslandRect {
+  const requestedX = rect.x + dx;
+  const requestedY = rect.y + dy;
   return {
     ...rect,
-    x: clamp(integer(rect.x + dx), 0, Math.max(0, atlasW - rect.w)),
-    y: clamp(integer(rect.y + dy), 0, Math.max(0, atlasH - rect.h)),
+    x: clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), 0, Math.max(0, atlasW - rect.w)),
+    y: clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), 0, Math.max(0, atlasH - rect.h)),
   };
 }
 
@@ -326,11 +354,13 @@ export function moveUvFace(
   dy: number,
   atlasW: number,
   atlasH: number,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
+  freeMove = false,
 ): UvIslandRect {
   const bounds = uvSelectionBounds(rect, target);
   if (!bounds) return rect;
-  const snappedDx = snapUvVertex(dx);
-  const snappedDy = snapUvVertex(dy);
+  const snappedDx = freeMove ? dx : snapUvVertex(bounds.x + dx, snapStep) - bounds.x;
+  const snappedDy = freeMove ? dy : snapUvVertex(bounds.y + dy, snapStep) - bounds.y;
   const [safeDx, safeDy] = clampSelectionTranslation(bounds, snappedDx, snappedDy, atlasW, atlasH);
   const triangles = absoluteTriangles(rect);
   translateAbsoluteSelection(triangles, target, safeDx, safeDy);
@@ -469,8 +499,9 @@ export function uvIslandVertices(rect: UvIslandRect): UvIslandVertex[] {
   return uvSelectionVertices(rect);
 }
 
-const snapUvVertex = (value: number): number => (
-  Math.round(value / UV_LAYOUT_TUNING.vertexSnapTexels) * UV_LAYOUT_TUNING.vertexSnapTexels
+const snapUvVertex = (value: number, step = UV_LAYOUT_TUNING.vertexSnapTexels): number => (
+  Math.round(value / Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, step))
+  * Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, step)
 );
 
 /**
@@ -487,6 +518,7 @@ export function moveUvSelectionVertex(
   atlasW: number,
   atlasH: number,
   freeMove = false,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
 ): UvIslandRect {
   if (atlasW < 1 || atlasH < 1 || !rect.triangles?.length) return rect;
   const vertices = uvSelectionVertices(rect, target);
@@ -496,8 +528,8 @@ export function moveUvSelectionVertex(
   const minY = Math.min(0.5, atlasH * 0.5);
   const requestedX = selected.x + dx;
   const requestedY = selected.y + dy;
-  const targetX = clamp(freeMove ? requestedX : snapUvVertex(requestedX), minX, atlasW - minX);
-  const targetY = clamp(freeMove ? requestedY : snapUvVertex(requestedY), minY, atlasH - minY);
+  const targetX = clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), minX, atlasW - minX);
+  const targetY = clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), minY, atlasH - minY);
 
   const absolute = rect.triangles.map((triangle) => {
     const points = [...absoluteTrianglePoints(rect, triangle)] as [number, number, number, number, number, number];
@@ -554,8 +586,10 @@ export function moveUvIslandVertex(
   dy: number,
   atlasW: number,
   atlasH: number,
+  freeMove = false,
+  snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
 ): UvIslandRect {
-  return moveUvSelectionVertex(rect, undefined, vertexIndex, dx, dy, atlasW, atlasH);
+  return moveUvSelectionVertex(rect, undefined, vertexIndex, dx, dy, atlasW, atlasH, freeMove, snapStep);
 }
 
 function pointInTriangle(triangle: UvTrianglePoints, u: number, v: number): boolean {
