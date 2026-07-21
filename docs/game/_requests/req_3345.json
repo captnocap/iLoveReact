@@ -1,0 +1,30 @@
+{
+  "id": "req_3345",
+  "at": "2026-07-21T13:50:35.291Z",
+  "origin": "codex:019f7e48",
+  "text": "ok now go through every single part and add in undo and redo capabilities",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T13:50:43.567Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T14:20:08.980Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added one chronological native undo/redo transaction boundary for every UV-authoring mutation: island/group/face and vertex moves, rotation, scaling, flips, numeric edits, size matching, chains, packing, texture import, and texture reload. Restores exact UVs, atlas pixels and dimensions, package artifacts, layers, editable stroke/shader recipes, raster baseline, and paint history; view-only selection, pan, zoom, grid choice, and aspect lock intentionally remain outside document history. Added scoped panel controls, action labels/events, no-op rejection, branch-safe paint interaction, native/TypeScript regressions, and a green ReleaseFast editor build.",
+  "shas": [
+    "89f7859d0"
+  ],
+  "resolvedAt": "2026-07-21T14:20:08.979Z"
+}
