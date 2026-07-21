@@ -3,10 +3,10 @@ import type { DocIndex } from '../types';
 export const editor_color_library: DocIndex = {
   name: 'editor_color_library',
   file: 'editor_color_library.md',
-  cart: 'cart/editor/shell/PaintToolbar.tsx',
+  cart: 'cart/editor/shell/PaintSidePanel.tsx',
   purpose: ['ui', 'persistence', 'host_bridge', 'color'],
   summary:
-    'req_3097: the ink popover rebuilt around real mechanisms — SAVED + a raw RECENT use-history persist to zig-out/game/editor/color-library.json, SCENE reads the live paint atlas via __model_atlas_palette, the eyedropper samples through __model_paint_sample, the hex field no longer overlaps the name, and the shader browser gained search, a fixed 5-wide grid, and remembered tab/page/search across close/reopen.',
+    'req_3097 + req_3332: the ink surface uses real mechanisms — SAVED + raw RECENT persistence, live-atlas SCENE colors, a host eyedropper, and a searchable 48-material shader browser whose full interactive grid caches into one StaticSurface while preserving tab/page/search memory.',
   interfaces: [
     {
       name: '__model_paint_sample',
@@ -49,12 +49,12 @@ export const editor_color_library: DocIndex = {
       status: 'live',
     },
     {
-      name: 'shader browser search + position memory',
+      name: 'shader browser search + cached grid + position memory',
       purpose: ['ui'],
       kind: 'component',
-      sourceFile: 'cart/editor/shell/PaintToolbar.tsx',
+      sourceFile: 'cart/editor/shell/PaintSidePanel.tsx',
       description:
-        'Substring search over label/group/id of the full spec catalog, a FIXED 5-wide thumb grid (no per-group wrap restarts), groups-on-page caption line, and module-scope memos so tab/page/search survive popover close/reopen; opening with a shader dipped lands on its page until the user pages by hand.',
+        'Substring search over label/group/id of the full spec catalog, a FIXED 8-wide x 6-row grid (48 visible materials, no per-group wrap restarts), groups-on-page caption line, and module-scope memos so tab/page/search survive panel close/reopen. req_3332 wraps the complete grid in one StaticSurface and value-memoizes ShaderThumb data, eliminating 48 steady-state Effect render passes without removing children from layout, hit testing, tooltips, or clicks.',
       consumers: ['cart/editor/shell/AppFrame.tsx'],
       status: 'live',
     },

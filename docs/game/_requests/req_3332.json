@@ -13,6 +13,12 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-21T09:48:20.038Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Surveyed the active PaintSidePanel successor: the shader page keeps all 48 visible cells, but each ShaderThumb is a live Effect. effects.paintCustomEffect renders each one into its own GPU target every paint frame. The planned fix uses the existing StaticSurface paint cache around the complete interactive grid plus value-stable thumbnail memoization; layout, hit testing, tooltips, paging, and visible count remain unchanged."
     }
   ]
 }

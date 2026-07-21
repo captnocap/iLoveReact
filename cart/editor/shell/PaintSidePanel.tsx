@@ -6,7 +6,7 @@
 // outliner. Everything projects the painter's existing state; this file owns no
 // second brush, layer program, palette, or paint engine.
 import { useState, type ReactNode } from 'react';
-import { Box, Row, Col, Text, TextInput, Pressable, ScrollView } from '../../../runtime/primitives';
+import { Box, Row, Col, Text, TextInput, Pressable, ScrollView, StaticSurface } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import {
   BLEND_MODES,
@@ -326,7 +326,11 @@ function ShaderLibrary(props: {
         </Pressable>
       </Row>
 
-      <Col style={{ gap: 4, minHeight: 224 }}>
+      {/* The 48 previews are immutable until page/search/selection/palette data
+          changes. Cache their paint as one quad; StaticSurface deliberately
+          keeps every Pressable in layout + hit testing, so density and input
+          stay identical without 48 live shader render passes every frame. */}
+      <StaticSurface style={{ flexDirection: 'column', gap: 4, minHeight: 224 }}>
         {groupsOnPage ? (
           <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{groupsOnPage.toUpperCase()}</Text>
         ) : null}
@@ -349,7 +353,7 @@ function ShaderLibrary(props: {
           </Row>
         ))}
         {hits.length === 0 ? <Text style={{ color: DIM, fontSize: 11 }}>{`no shader matches "${props.query}"`}</Text> : null}
-      </Col>
+      </StaticSurface>
 
       {props.shaderInk && props.onEditMaterial ? (
         <Pressable

@@ -1,6 +1,6 @@
 # Editor Color Library + shader browser
 
-Active surface: `cart/editor/`. Last verified: 2026-07-15.
+Active surface: `cart/editor/`. Last verified: 2026-07-21.
 
 ## User contract — req_3097
 
@@ -31,11 +31,15 @@ un-friendly color picking component" — six named defects, each now a mechanism
    `__modelColorSampled` global → spine color-select → RECENT + ink sync. The
    facade painter's readback eyedropper announces through the same global.
 6. **Shader browser** — searchable (label/group/id substring over all specs),
-   a FIXED 5-wide grid (group shelving used to restart the wrap per group, so
-   pages ran 4–8 ragged rows), group names in one caption line + per-thumb
-   tooltips, and the popover REMEMBERS tab/page/search across close/reopen
-   (module-scope memos in `PaintToolbar.tsx`); opening with a shader dipped
-   lands on that shader's page until you page by hand.
+   a FIXED 8-wide × 6-row grid (48 visible materials; group shelving used to
+   restart the wrap per group), group names in one caption line + per-thumb
+   tooltips, and the Paint panel REMEMBERS tab/page/search across close/reopen
+   (module-scope memos in `PaintSidePanel.tsx`); opening with a shader dipped
+   lands on that shader's page until you page by hand. The complete interactive
+   grid is one `StaticSurface`: after its first capture, 48 live Effect
+   render-to-texture passes collapse to one cached image quad. Pressables remain
+   in the layout/hit-test tree, and `ShaderThumb` compares shader-data values so
+   fresh-but-equal arrays from unrelated parent renders do not force re-capture.
 
 ## Mechanism map
 
@@ -54,7 +58,9 @@ un-friendly color picking component" — six named defects, each now a mechanism
   commit, color-library micro-save effect, `__modelColorSampled` installer.
 - `cart/editor/stage/ColorLibraryPanel.tsx` — two-row CURRENT header, RECENT +
   SAVED rows, SCENE hidden when empty (host read memoized per mount).
-- `cart/editor/shell/PaintToolbar.tsx` — shader search + uniform grid +
+- `cart/editor/shell/PaintSidePanel.tsx` — shader search + 48-cell cached grid +
   remembered position.
+- `cart/editor/shell/ShaderThumb.tsx` — value-stable memo boundary for live
+  shader previews; real shader/data/size changes still invalidate captures.
 
 Rebuild required for the two new host doors; everything else hot-reloads.
