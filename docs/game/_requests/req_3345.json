@@ -20,6 +20,29 @@
       "kind": "state",
       "from": "doing",
       "to": "review"
+    },
+    {
+      "at": "2026-07-21T14:22:04.740Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Post-commit chronology audit found UV panel history must arbitrate against newer paint steps before review. Reopening briefly for the ordering guard."
+    },
+    {
+      "at": "2026-07-21T14:22:04.749Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T14:36:36.698Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Added one chronological native undo/redo transaction boundary for every UV-authoring mutation: island/group/face and vertex moves, rotation, scaling, flips, numeric edits, size matching, chains, packing, texture import, and texture reload. Restores exact UVs, atlas pixels and dimensions, package artifacts, layers, editable stroke and shader recipes, raster baseline, and paint history; view-only selection, pan, zoom, grid choice, and aspect lock intentionally remain outside document history. Added scoped controls, action labels and events, no-op rejection, native and TypeScript regressions, and paint-history arbitration so newer paint steps must undo first, adjacent paint redo remains replayable in order, and a fresh branch cannot resurrect abandoned work. ReleaseFast editor build and focused checks are green."
     }
   ],
   "resolution": "Added one chronological native undo/redo transaction boundary for every UV-authoring mutation: island/group/face and vertex moves, rotation, scaling, flips, numeric edits, size matching, chains, packing, texture import, and texture reload. Restores exact UVs, atlas pixels and dimensions, package artifacts, layers, editable stroke/shader recipes, raster baseline, and paint history; view-only selection, pan, zoom, grid choice, and aspect lock intentionally remain outside document history. Added scoped panel controls, action labels/events, no-op rejection, branch-safe paint interaction, native/TypeScript regressions, and a green ReleaseFast editor build.",
