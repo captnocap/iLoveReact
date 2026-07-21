@@ -21,6 +21,65 @@ fn atlasHash(bytes: []const u8) u64 {
     return hash;
 }
 
+test "unused atlas space stays transparent while real faces retain their alpha" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(907, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    model_paint.setBase(.solid, .{ 41, 67, 89, 255 });
+    model_paint.paintFaceAlpha(0, 87);
+    model_paint.clearAtlas();
+    try testing.expectEqual(@as(u8, 87), model_paint.faceColor(0).?[3]);
+
+    const atlas = model_paint.atlas().?;
+    var transparent = false;
+    var pixel: usize = 0;
+    while (pixel < atlas.rgba.len) : (pixel += 4) {
+        if (atlas.rgba[pixel + 3] != 0) continue;
+        try testing.expectEqualSlices(u8, &model_paint.EMPTY_ATLAS_TEXEL, atlas.rgba[pixel .. pixel + 4]);
+        transparent = true;
+        break;
+    }
+    try testing.expect(transparent);
+}
+
+test "moving one coplanar face breaks its UV edge without moving atlas pixels" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(908, &quad, 6);
+    // Distinct authored faces share one continuous UV island through their common
+    // mesh edge. This is the same topology as adjacent wedges in a cylinder cap.
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 1 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    try testing.expectEqual(@as(usize, 1), model_paint.layoutIslands().?.len);
+    var original: [12]f32 = undefined;
+    for (0..2) |face| {
+        const triangle = model_paint.uvTriangle(@intCast(face)) orelse return error.TestUnexpectedResult;
+        @memcpy(original[face * 6 ..][0..6], triangle.corners[0..]);
+    }
+    const fixed_atlas = atlasHash(model_paint.atlas().?.rgba);
+
+    var detached = original;
+    var coordinate: usize = 6;
+    while (coordinate < detached.len) : (coordinate += 2) detached[coordinate] += 1;
+    try testing.expect(model_paint.applyCornerUvs(&detached, &quad, 6));
+    try testing.expectEqual(@as(usize, 2), model_paint.layoutIslands().?.len);
+    try testing.expectEqual(fixed_atlas, atlasHash(model_paint.atlas().?.rgba));
+
+    try testing.expect(model_paint.applyCornerUvs(&original, &quad, 6));
+    try testing.expectEqual(@as(usize, 1), model_paint.layoutIslands().?.len);
+    try testing.expectEqual(fixed_atlas, atlasHash(model_paint.atlas().?.rgba));
+}
+
 test "appending an authored group carries exact paint texels and the atlas base" {
     var initial = QUAD_VERTS;
     model_paint.setTarget(77, &initial, 6);
@@ -84,9 +143,9 @@ test "append after stale topology preserves the raster and isolates the fresh pa
     model_paint.paintStamp(0, 0.15, 0.35, 3.0, .{ 255, 7, 11, 255 }, 1.0);
 
     const before_atlas = model_paint.atlas().?;
+    const placeholder = model_paint.reserveNeutralPlaceholderUv() orelse return error.TestUnexpectedResult;
     const before = try testing.allocator.dupe(u8, before_atlas.rgba);
     defer testing.allocator.free(before);
-    const placeholder = model_paint.reserveNeutralPlaceholderUv() orelse return error.TestUnexpectedResult;
 
     var grown: [12 * 8]f32 = undefined;
     @memcpy(grown[0 .. 6 * 8], &initial);

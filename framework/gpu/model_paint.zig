@@ -67,6 +67,7 @@ var g_has_dirty: bool = false;
 /// Unpainted faces read as this neutral light grey, so a freshly-loaded model looks
 /// the same as the plain shaded viewer until you paint it.
 pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
+pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ 0, 0, 0, 0 };
 
 fn markRows(lo: u32, hi: u32) void {
     if (!g_has_dirty) {
@@ -88,17 +89,20 @@ pub fn consumeDirtyRows() ?[2]u32 {
     return r;
 }
 
-/// Wipe the atlas back to the default face colour on every texel (all rows dirty) — the
-/// blank canvas a paint-program replay paints onto. No-op if there's no atlas. COLOUR
-/// only: the alpha channel is the per-face glass state and survives the wipe (req_2928 —
-/// Create Paint Atlas was un-glassing every glass face).
+/// Wipe the atlas back to transparent space plus the default substrate INSIDE each
+/// real UV face. This keeps unowned packing space visibly transparent while preserving
+/// per-face glass alpha (req_2928) across paint-program replay.
 pub fn clearAtlas() void {
     const buf = g_rgba orelse return;
-    var i: usize = 0;
-    while (i < buf.len) : (i += 4) {
-        buf[i + 0] = DEFAULT_FACE[0];
-        buf[i + 1] = DEFAULT_FACE[1];
-        buf[i + 2] = DEFAULT_FACE[2];
+    if (g_layout == null or g_facecount == 0) return;
+    const face_alpha = alloc.alloc(u8, g_facecount) catch return;
+    defer alloc.free(face_alpha);
+    var face: u32 = 0;
+    while (face < g_facecount) : (face += 1) face_alpha[face] = (faceColor(face) orelse DEFAULT_FACE)[3];
+    @memset(buf, 0);
+    face = 0;
+    while (face < g_facecount) : (face += 1) {
+        paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, face_alpha[face]);
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
@@ -289,6 +293,7 @@ fn setTargetPreservingAtlasInner(key_hash: u64, verts: []const f32, vert_count: 
     const carried_density = g_layout.?.density;
     var layout_new = paint_islands.buildFromNormalizedUv(
         alloc,
+        positions_new,
         normalized_uvs,
         groups,
         g_atlas_w,
@@ -530,7 +535,8 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     g_isl_start = starts;
     g_isl_tris = tris;
 
-    // Atlas: every texel starts at the default grey (this also covers pad gutters).
+    // Atlas: unowned packing space is transparent. Only real triangle silhouettes
+    // receive the neutral substrate; pad gutters and shelf voids stay checkerboard.
     const need = @as(usize, g_atlas_w) * @as(usize, g_atlas_h) * 4;
     const rgba = alloc.alloc(u8, need) catch {
         alloc.free(starts);
@@ -540,14 +546,12 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
         freeLayoutState();
         return;
     };
-    var b: usize = 0;
-    while (b < need) : (b += 4) {
-        rgba[b + 0] = DEFAULT_FACE[0];
-        rgba[b + 1] = DEFAULT_FACE[1];
-        rgba[b + 2] = DEFAULT_FACE[2];
-        rgba[b + 3] = DEFAULT_FACE[3];
-    }
+    @memset(rgba, 0);
     g_rgba = rgba;
+    f = 0;
+    while (f < fc) : (f += 1) {
+        paintFaceTexels(f, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, DEFAULT_FACE[3]);
+    }
     applyBase(); // lay the chosen base (template/solid/blank) before any carried paint lands (req_2537/req_2546)
 
     // Overwrite the mesh's UVs — each vertex to its island-texel corner, normalized.
@@ -2052,58 +2056,75 @@ fn validCornerUvTable(corners: []const f32, face_count: u32, atlas_w: u32, atlas
 /// its three real points, while island rectangles are re-derived metadata used
 /// for hit testing and paint clipping. The atlas raster is never written here.
 pub fn applyCornerUvs(new_corners: []const f32, verts: []f32, vert_count: u32) bool {
-    const lay = &(g_layout orelse return false);
+    const old_layout = g_layout orelse return false;
+    const live_positions = g_positions orelse return false;
     if (g_rgba == null or vert_count != g_facecount * 3) return false;
     if (verts.len < @as(usize, vert_count) * 8) return false;
     if (!validCornerUvTable(new_corners, g_facecount, g_atlas_w, g_atlas_h)) return false;
 
-    // Derive every island bound before mutating live state. A malformed layout
-    // therefore cannot leave half the islands on old geometry and half on new.
-    const derived = alloc.alloc(u32, lay.islands.len * 4) catch return false;
-    defer alloc.free(derived);
+    // Reconstruct connected UV topology before mutating live state. Shared 3D edges
+    // whose two UV copies still coincide remain one island; moving one wedge breaks
+    // that edge and gives it an independent island on this same atomic commit.
     const atlas_w_f: f32 = @floatFromInt(g_atlas_w);
     const atlas_h_f: f32 = @floatFromInt(g_atlas_h);
-    for (lay.islands, 0..) |_, island_index| {
-        var min_x = atlas_w_f;
-        var min_y = atlas_h_f;
-        var max_x: f32 = 0.0;
-        var max_y: f32 = 0.0;
-        var found = false;
-        var face: u32 = 0;
-        while (face < g_facecount) : (face += 1) {
-            if (lay.tri_island[face] != @as(u32, @intCast(island_index))) continue;
-            found = true;
-            var corner: usize = 0;
-            while (corner < 3) : (corner += 1) {
-                const uv = @as(usize, face) * 6 + corner * 2;
-                min_x = @min(min_x, new_corners[uv + 0]);
-                min_y = @min(min_y, new_corners[uv + 1]);
-                max_x = @max(max_x, new_corners[uv + 0]);
-                max_y = @max(max_y, new_corners[uv + 1]);
-            }
-        }
-        if (!found) return false;
-        const left: u32 = @min(g_atlas_w - 1, @as(u32, @intFromFloat(@floor(min_x))));
-        const top: u32 = @min(g_atlas_h - 1, @as(u32, @intFromFloat(@floor(min_y))));
-        const right: u32 = std.math.clamp(@as(u32, @intFromFloat(@ceil(max_x))), left + 1, g_atlas_w);
-        const bottom: u32 = std.math.clamp(@as(u32, @intFromFloat(@ceil(max_y))), top + 1, g_atlas_h);
-        derived[island_index * 4 + 0] = left;
-        derived[island_index * 4 + 1] = top;
-        derived[island_index * 4 + 2] = right - left;
-        derived[island_index * 4 + 3] = bottom - top;
+    const normalized = alloc.alloc(f32, new_corners.len) catch return false;
+    defer alloc.free(normalized);
+    var coordinate: usize = 0;
+    while (coordinate < new_corners.len) : (coordinate += 2) {
+        normalized[coordinate + 0] = new_corners[coordinate + 0] / atlas_w_f;
+        normalized[coordinate + 1] = new_corners[coordinate + 1] / atlas_h_f;
+    }
+    const groups = collectFaceGroups(g_facecount) orelse return false;
+    defer alloc.free(groups);
+    var layout_new = paint_islands.buildFromNormalizedUv(
+        alloc,
+        live_positions,
+        normalized,
+        groups,
+        g_atlas_w,
+        g_atlas_h,
+        old_layout.density,
+    ) orelse return false;
+    var keep_layout_new = false;
+    defer if (!keep_layout_new) layout_new.deinit(alloc);
+
+    const island_count = layout_new.islands.len;
+    const starts_new = alloc.alloc(u32, island_count + 1) catch return false;
+    var keep_starts_new = false;
+    defer if (!keep_starts_new) alloc.free(starts_new);
+    @memset(starts_new, 0);
+    var face: u32 = 0;
+    while (face < g_facecount) : (face += 1) starts_new[layout_new.tri_island[face] + 1] += 1;
+    var index: usize = 1;
+    while (index <= island_count) : (index += 1) starts_new[index] += starts_new[index - 1];
+    const triangles_new = alloc.alloc(u32, g_facecount) catch return false;
+    var keep_triangles_new = false;
+    defer if (!keep_triangles_new) alloc.free(triangles_new);
+    const cursor = alloc.dupe(u32, starts_new[0..island_count]) catch return false;
+    defer alloc.free(cursor);
+    face = 0;
+    while (face < g_facecount) : (face += 1) {
+        const island = layout_new.tri_island[face];
+        triangles_new[cursor[island]] = face;
+        cursor[island] += 1;
     }
 
-    @memcpy(lay.corner_uv, new_corners);
-    for (lay.islands, 0..) |*island, island_index| {
-        island.x = derived[island_index * 4 + 0];
-        island.y = derived[island_index * 4 + 1];
-        island.w = derived[island_index * 4 + 2];
-        island.h = derived[island_index * 4 + 3];
-    }
+    // Every allocation and topology check succeeded. Swap the metadata while the
+    // fixed atlas bytes remain untouched, then rewrite the resident sampling UVs.
+    var retired_layout = old_layout;
+    if (g_isl_start) |starts| alloc.free(starts);
+    if (g_isl_tris) |triangles| alloc.free(triangles);
+    g_layout = layout_new;
+    g_isl_start = starts_new;
+    g_isl_tris = triangles_new;
+    keep_layout_new = true;
+    keep_starts_new = true;
+    keep_triangles_new = true;
+    retired_layout.deinit(alloc);
     var vertex: u32 = 0;
     while (vertex < vert_count) : (vertex += 1) {
-        verts[vertex * 8 + 6] = lay.corner_uv[@as(usize, vertex) * 2 + 0] / atlas_w_f;
-        verts[vertex * 8 + 7] = lay.corner_uv[@as(usize, vertex) * 2 + 1] / atlas_h_f;
+        verts[vertex * 8 + 6] = new_corners[@as(usize, vertex) * 2 + 0] / atlas_w_f;
+        verts[vertex * 8 + 7] = new_corners[@as(usize, vertex) * 2 + 1] / atlas_h_f;
     }
     return true;
 }

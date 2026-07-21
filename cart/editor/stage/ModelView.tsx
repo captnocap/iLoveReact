@@ -131,6 +131,7 @@ export type ModelFocusBridge = {
   applyUvLayout: (rects: Uint32Array) => boolean;
   applyUvGeometry: (corners: Float32Array) => boolean;
   selectUvIsland: (index: number, additive: boolean) => boolean;
+  selectUvFace: (face: number, additive: boolean) => boolean;
   reloadUvAtlas: () => string;
   shape: ModelFocusShape | null;
   camMarks: { name: string; active: boolean }[];
@@ -1208,6 +1209,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     syncUvSelection();
     return true;
   };
+  const selectUvFace = (face: number, additive: boolean): boolean => {
+    if (!Number.isInteger(face) || face < 0) return false;
+    if (paintMode) return true;
+    host.__mesh_paint_session?.(0);
+    setPaintMode(false);
+    setPathPlaneMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    const ok = host.__mesh_edit_select_face?.(face, additive ? 1 : 0) === 1;
+    if (!ok) return false;
+    setSelMode(3);
+    adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: 1 });
+    syncUvSelection();
+    return true;
+  };
   const reloadUvAtlas = (): string => {
     if (!paintTarget) return 'Reload refused — this viewer has no package-backed paint target.';
     const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
@@ -1705,6 +1721,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       applyUvLayout,
       applyUvGeometry,
       selectUvIsland,
+      selectUvFace,
       reloadUvAtlas,
       shape: model
         ? {

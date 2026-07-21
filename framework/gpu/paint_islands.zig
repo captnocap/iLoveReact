@@ -30,6 +30,18 @@ pub const NO_GROUP: u32 = std.math.maxInt(u32);
 /// neighbour island across the boundary (the reference used padded gutters + bleed).
 pub const PAD_TEXELS: u32 = 2;
 
+/// Two authored faces become one UV island only when they share a real mesh edge and
+/// are effectively coplanar. This preserves editable triangle fans (a cylinder cap)
+/// in the 3D topology while presenting their continuous projection as one UV piece.
+/// Curved side walls deliberately stay separate until a developable-surface unwrap
+/// explicitly joins them; an angle threshold here would silently distort them.
+pub const COPLANAR_NORMAL_DOT: f32 = 0.9999;
+
+/// Reconstructed layouts additionally require the two copies of a shared UV edge to
+/// coincide. Moving one fan wedge breaks that equality and therefore detaches it into
+/// its own island without changing the model's authored face groups.
+pub const UV_EDGE_MATCH_EPSILON: f32 = 0.0001;
+
 pub const Island = struct {
     /// The authored group this island carries (or NO_GROUP for a loose triangle's own island).
     group: u32,
@@ -101,6 +113,167 @@ const RawIsland = struct {
     first_tri: u32, // for deterministic ordering
 };
 
+const PointBits = struct { x: u32, y: u32, z: u32 };
+const EdgeKey = struct { a: PointBits, b: PointBits };
+const EdgeOwner = struct {
+    raw: u32,
+    normal: [3]f32,
+    uv_a: [2]f32,
+    uv_b: [2]f32,
+};
+const RawPair = struct { a: u32, b: u32 };
+const ComponentMap = struct { raw_to_component: []u32, count: u32 };
+
+fn canonicalFloatBits(value: f32) u32 {
+    // Shared edit-mesh vertices lower to bit-identical soup positions. Canonicalize
+    // signed zero so a harmless -0 does not invent a seam.
+    return if (value == 0) 0 else @bitCast(value);
+}
+
+fn pointBits(positions: []const f32, face: u32, corner: u32) PointBits {
+    const base = @as(usize, face) * 9 + @as(usize, corner) * 3;
+    return .{
+        .x = canonicalFloatBits(positions[base + 0]),
+        .y = canonicalFloatBits(positions[base + 1]),
+        .z = canonicalFloatBits(positions[base + 2]),
+    };
+}
+
+fn pointBefore(a: PointBits, b: PointBits) bool {
+    if (a.x != b.x) return a.x < b.x;
+    if (a.y != b.y) return a.y < b.y;
+    return a.z < b.z;
+}
+
+fn faceUnitNormal(positions: []const f32, face: u32) ?[3]f32 {
+    const base = @as(usize, face) * 9;
+    const ax = positions[base + 0];
+    const ay = positions[base + 1];
+    const az = positions[base + 2];
+    const e1x = positions[base + 3] - ax;
+    const e1y = positions[base + 4] - ay;
+    const e1z = positions[base + 5] - az;
+    const e2x = positions[base + 6] - ax;
+    const e2y = positions[base + 7] - ay;
+    const e2z = positions[base + 8] - az;
+    const nx = e1y * e2z - e1z * e2y;
+    const ny = e1z * e2x - e1x * e2z;
+    const nz = e1x * e2y - e1y * e2x;
+    const length = @sqrt(nx * nx + ny * ny + nz * nz);
+    if (!std.math.isFinite(length) or length <= 1e-8) return null;
+    return .{ nx / length, ny / length, nz / length };
+}
+
+fn findRoot(parents: []u32, index: u32) u32 {
+    var root = index;
+    while (parents[root] != root) root = parents[root];
+    var cursor = index;
+    while (parents[cursor] != cursor) {
+        const next = parents[cursor];
+        parents[cursor] = root;
+        cursor = next;
+    }
+    return root;
+}
+
+fn joinRoots(parents: []u32, a: u32, b: u32) void {
+    const ra = findRoot(parents, a);
+    const rb = findRoot(parents, b);
+    if (ra == rb) return;
+    // Stable representative: the first-authored raw island wins.
+    if (ra < rb) parents[rb] = ra else parents[ra] = rb;
+}
+
+fn uvPoint(normalized_uvs: []const f32, face: u32, corner: u32) [2]f32 {
+    const base = @as(usize, face) * 6 + @as(usize, corner) * 2;
+    return .{ normalized_uvs[base + 0], normalized_uvs[base + 1] };
+}
+
+fn uvEdgeMatches(owner: EdgeOwner, a: [2]f32, b: [2]f32) bool {
+    return @abs(owner.uv_a[0] - a[0]) <= UV_EDGE_MATCH_EPSILON
+        and @abs(owner.uv_a[1] - a[1]) <= UV_EDGE_MATCH_EPSILON
+        and @abs(owner.uv_b[0] - b[0]) <= UV_EDGE_MATCH_EPSILON
+        and @abs(owner.uv_b[1] - b[1]) <= UV_EDGE_MATCH_EPSILON;
+}
+
+/// Coalesce initial authored-face buckets through real shared edges. When `uvs` is
+/// present this is also the Blockbench-style UV-island rule: the shared 3D edge must
+/// still be shared in UV space. The returned ids are compact and first-face stable.
+fn connectedComponents(
+    alloc: std.mem.Allocator,
+    positions: []const f32,
+    normalized_uvs: ?[]const f32,
+    raw_of_face: []const u32,
+    raw_count: u32,
+) ?ComponentMap {
+    if (raw_count == 0) return null;
+    const face_count: u32 = @intCast(raw_of_face.len);
+    if (positions.len < @as(usize, face_count) * 9) return null;
+    if (normalized_uvs) |uvs| if (uvs.len < @as(usize, face_count) * 6) return null;
+
+    const parents = alloc.alloc(u32, raw_count) catch return null;
+    defer alloc.free(parents);
+    for (parents, 0..) |*parent, index| parent.* = @intCast(index);
+
+    var edges = std.AutoHashMapUnmanaged(EdgeKey, EdgeOwner).empty;
+    defer edges.deinit(alloc);
+    var joins = std.AutoHashMapUnmanaged(RawPair, u8).empty;
+    defer joins.deinit(alloc);
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const normal = faceUnitNormal(positions, face) orelse continue;
+        var edge: u32 = 0;
+        while (edge < 3) : (edge += 1) {
+            const ca = edge;
+            const cb = (edge + 1) % 3;
+            const pa = pointBits(positions, face, ca);
+            const pb = pointBits(positions, face, cb);
+            if (std.meta.eql(pa, pb)) continue;
+            const forward = pointBefore(pa, pb);
+            const key: EdgeKey = if (forward) .{ .a = pa, .b = pb } else .{ .a = pb, .b = pa };
+            const uva = if (normalized_uvs) |uvs| uvPoint(uvs, face, if (forward) ca else cb) else .{ 0, 0 };
+            const uvb = if (normalized_uvs) |uvs| uvPoint(uvs, face, if (forward) cb else ca) else .{ 0, 0 };
+            const owner = edges.get(key) orelse {
+                edges.put(alloc, key, .{ .raw = raw_of_face[face], .normal = normal, .uv_a = uva, .uv_b = uvb }) catch return null;
+                continue;
+            };
+            if (owner.raw == raw_of_face[face]) continue;
+            const dot = owner.normal[0] * normal[0] + owner.normal[1] * normal[1] + owner.normal[2] * normal[2];
+            if (dot < COPLANAR_NORMAL_DOT) continue;
+            if (normalized_uvs != null and !uvEdgeMatches(owner, uva, uvb)) continue;
+            const other = raw_of_face[face];
+            const pair: RawPair = if (owner.raw < other) .{ .a = owner.raw, .b = other } else .{ .a = other, .b = owner.raw };
+            const entry = joins.getOrPut(alloc, pair) catch return null;
+            if (!entry.found_existing) entry.value_ptr.* = 1 else entry.value_ptr.* +|= 1;
+        }
+    }
+    // Proper manifold neighbours share one boundary edge. Coincident duplicate
+    // faces share several edges; merging those would turn stacked parts into one
+    // UV island merely because their geometry overlaps exactly.
+    var join_it = joins.iterator();
+    while (join_it.next()) |entry| {
+        if (entry.value_ptr.* != 1) continue;
+        joinRoots(parents, entry.key_ptr.a, entry.key_ptr.b);
+    }
+
+    const mapping = alloc.alloc(u32, raw_count) catch return null;
+    errdefer alloc.free(mapping);
+    var root_to_component = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer root_to_component.deinit(alloc);
+    var count: u32 = 0;
+    var raw: u32 = 0;
+    while (raw < raw_count) : (raw += 1) {
+        const root = findRoot(parents, raw);
+        const entry = root_to_component.getOrPut(alloc, root) catch return null;
+        if (!entry.found_existing) {
+            entry.value_ptr.* = count;
+            count += 1;
+        }
+        mapping[raw] = entry.value_ptr.*;
+    }
+    return .{ .raw_to_component = mapping, .count = count };
+}
+
 /// Build the island layout. `positions` is fc*9 floats (3 corners × xyz per displayed
 /// triangle); `groups` is one authored id per triangle or null (every triangle loose).
 /// `density` is requested texels/meter; it HALVES until the atlas fits max_dim on both
@@ -140,6 +313,7 @@ pub fn buildFit(
 /// `normalized_uvs` is two floats per rendered corner (six per triangle).
 pub fn buildFromNormalizedUv(
     alloc: std.mem.Allocator,
+    positions: ?[]const f32,
     normalized_uvs: []const f32,
     groups: ?[]const u32,
     atlas_w: u32,
@@ -149,54 +323,75 @@ pub fn buildFromNormalizedUv(
     if (atlas_w == 0 or atlas_h == 0 or normalized_uvs.len == 0 or normalized_uvs.len % 6 != 0) return null;
     const fc: u32 = @intCast(normalized_uvs.len / 6);
     if (groups) |rows| if (rows.len < @as(usize, fc)) return null;
+    if (positions) |rows| if (rows.len < @as(usize, fc) * 9) return null;
 
-    var island_of_group = std.AutoHashMapUnmanaged(u32, u32).empty;
-    defer island_of_group.deinit(alloc);
-    var islands = std.ArrayListUnmanaged(Island).empty;
-    defer islands.deinit(alloc);
-    const tri_island = alloc.alloc(u32, fc) catch return null;
-    var keep_tri_island = false;
-    defer if (!keep_tri_island) alloc.free(tri_island);
-    const corner_uv = alloc.alloc(f32, normalized_uvs.len) catch return null;
-    var keep_corner_uv = false;
-    defer if (!keep_corner_uv) alloc.free(corner_uv);
-
+    // Start with authored-face buckets, then join neighbouring buckets only when
+    // their 3D edge and UV edge are both continuous. That makes a cap fan one island
+    // while preserving an intentionally detached wedge after a UV edit/reopen.
+    var raw_of_group = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer raw_of_group.deinit(alloc);
+    var raw_groups = std.ArrayListUnmanaged(u32).empty;
+    defer raw_groups.deinit(alloc);
+    const tri_raw = alloc.alloc(u32, fc) catch return null;
+    defer alloc.free(tri_raw);
     var face: u32 = 0;
     while (face < fc) : (face += 1) {
         const group = if (groups) |rows| rows[face] else NO_GROUP;
-        var island_index: u32 = undefined;
         if (group == NO_GROUP) {
-            island_index = @intCast(islands.items.len);
-            islands.append(alloc, .{
-                .group = NO_GROUP,
-                .x = atlas_w - 1,
-                .y = atlas_h - 1,
-                .w = 0,
-                .h = 0,
-                .axis = 0,
-                .sign = 1,
-                .min_u = 0,
-                .min_v = 0,
-            }) catch return null;
+            tri_raw[face] = @intCast(raw_groups.items.len);
+            raw_groups.append(alloc, NO_GROUP) catch return null;
         } else {
-            const entry = island_of_group.getOrPut(alloc, group) catch return null;
+            const entry = raw_of_group.getOrPut(alloc, group) catch return null;
             if (!entry.found_existing) {
-                entry.value_ptr.* = @intCast(islands.items.len);
-                islands.append(alloc, .{
-                    .group = group,
-                    .x = atlas_w - 1,
-                    .y = atlas_h - 1,
-                    .w = 0,
-                    .h = 0,
-                    .axis = 0,
-                    .sign = 1,
-                    .min_u = 0,
-                    .min_v = 0,
-                }) catch return null;
+                entry.value_ptr.* = @intCast(raw_groups.items.len);
+                raw_groups.append(alloc, group) catch return null;
             }
-            island_index = entry.value_ptr.*;
+            tri_raw[face] = entry.value_ptr.*;
         }
-        tri_island[face] = island_index;
+    }
+
+    const components: ComponentMap = if (positions) |pos|
+        connectedComponents(alloc, pos, normalized_uvs, tri_raw, @intCast(raw_groups.items.len)) orelse return null
+    else blk: {
+        const identity = alloc.alloc(u32, raw_groups.items.len) catch return null;
+        for (identity, 0..) |*value, index| value.* = @intCast(index);
+        break :blk .{ .raw_to_component = identity, .count = @intCast(identity.len) };
+    };
+    defer alloc.free(components.raw_to_component);
+
+    const tri_island = alloc.alloc(u32, fc) catch return null;
+    errdefer alloc.free(tri_island);
+    face = 0;
+    while (face < fc) : (face += 1) tri_island[face] = components.raw_to_component[tri_raw[face]];
+
+    const islands = alloc.alloc(Island, components.count) catch return null;
+    errdefer alloc.free(islands);
+    const group_seen = alloc.alloc(bool, components.count) catch return null;
+    defer alloc.free(group_seen);
+    @memset(group_seen, false);
+    for (islands) |*island| island.* = .{
+        .group = NO_GROUP,
+        .x = atlas_w - 1,
+        .y = atlas_h - 1,
+        .w = 0,
+        .h = 0,
+        .axis = 0,
+        .sign = 1,
+        .min_u = 0,
+        .min_v = 0,
+    };
+    for (raw_groups.items, 0..) |group, raw| {
+        const component = components.raw_to_component[raw];
+        if (group_seen[component]) continue;
+        group_seen[component] = true;
+        islands[component].group = group;
+    }
+
+    const corner_uv = alloc.alloc(f32, normalized_uvs.len) catch return null;
+    errdefer alloc.free(corner_uv);
+    face = 0;
+    while (face < fc) : (face += 1) {
+        const island_index = tri_island[face];
 
         var corner: u32 = 0;
         while (corner < 3) : (corner += 1) {
@@ -211,7 +406,7 @@ pub fn buildFromNormalizedUv(
 
             const tx: u32 = @intFromFloat(std.math.clamp(@floor(px), 0, @as(f32, @floatFromInt(atlas_w - 1))));
             const ty: u32 = @intFromFloat(std.math.clamp(@floor(py), 0, @as(f32, @floatFromInt(atlas_h - 1))));
-            const island = &islands.items[island_index];
+            const island = &islands[island_index];
             if (island.w == 0) {
                 island.x = tx;
                 island.y = ty;
@@ -228,14 +423,11 @@ pub fn buildFromNormalizedUv(
         }
     }
 
-    const island_owned = islands.toOwnedSlice(alloc) catch return null;
-    keep_tri_island = true;
-    keep_corner_uv = true;
     return .{
         .atlas_w = atlas_w,
         .atlas_h = atlas_h,
         .density = density,
-        .islands = island_owned,
+        .islands = islands,
         .tri_island = tri_island,
         .corner_uv = corner_uv,
     };
@@ -275,6 +467,32 @@ fn buildImpl(
             tri_island[f] = @intCast(raws.items.len);
             raws.append(alloc, .{ .group = NO_GROUP, .axis = 0, .sign = 1, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = f }) catch return null;
         }
+    }
+
+    // Authored edit faces are not automatically UV islands. A cylinder deliberately
+    // keeps each cap wedge as a selectable topology face, but those coplanar wedges
+    // share edges and project to one circular UV piece. Coalesce those connected
+    // buckets before measuring or packing them.
+    const components = connectedComponents(alloc, positions, null, tri_island, @intCast(raws.items.len)) orelse return null;
+    defer alloc.free(components.raw_to_component);
+    if (@as(usize, components.count) != raws.items.len) {
+        var merged = std.ArrayListUnmanaged(RawIsland).empty;
+        defer merged.deinit(alloc);
+        var component: u32 = 0;
+        while (component < components.count) : (component += 1) {
+            merged.append(alloc, .{ .group = NO_GROUP, .axis = 0, .sign = 1, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = std.math.maxInt(u32) }) catch return null;
+        }
+        for (raws.items, 0..) |raw, raw_index| {
+            const target = &merged.items[components.raw_to_component[raw_index]];
+            if (raw.first_tri >= target.first_tri) continue;
+            target.group = raw.group;
+            target.first_tri = raw.first_tri;
+        }
+        f = 0;
+        while (f < fc) : (f += 1) tri_island[f] = components.raw_to_component[tri_island[f]];
+        raws.deinit(alloc);
+        raws = merged;
+        merged = .empty;
     }
 
     // ── Per island: dominant axis from the area vector (sum of tri cross products),
@@ -542,13 +760,56 @@ test "density halves until the atlas fits the dimension limit" {
     try testing.expect(l.density >= 32); // 100m × 64/m = 6400 fits; one or two halvings at most
 }
 
-test "ungrouped triangles each get their own area-proportional island" {
+test "ungrouped triangle soup coalesces connected coplanar faces" {
     var soup: [12 * 9]f32 = undefined;
     cubeSoup(&soup);
     var l = build(testing.allocator, soup[0..], null, 16, 8192, 256 << 20).?;
     defer l.deinit(testing.allocator);
-    try testing.expectEqual(@as(usize, 12), l.islands.len);
+    try testing.expectEqual(@as(usize, 6), l.islands.len);
     for (l.islands) |isl| try testing.expectEqual(NO_GROUP, isl.group);
+}
+
+test "triangle-fan caps become coherent radial islands without merging side walls" {
+    const segments = 4;
+    var soup: [segments * 4 * 9]f32 = undefined;
+    var groups: [segments * 4]u32 = undefined;
+    const ring = [segments][2]f32{ .{ -1, -1 }, .{ 1, -1 }, .{ 1, 1 }, .{ -1, 1 } };
+    var write: usize = 0;
+    var face: usize = 0;
+    var segment: usize = 0;
+    while (segment < segments) : (segment += 1) {
+        const next = (segment + 1) % segments;
+        const bottom_a = [3]f32{ ring[segment][0], -0.5, ring[segment][1] };
+        const top_a = [3]f32{ ring[segment][0], 0.5, ring[segment][1] };
+        const bottom_b = [3]f32{ ring[next][0], -0.5, ring[next][1] };
+        const top_b = [3]f32{ ring[next][0], 0.5, ring[next][1] };
+        const triangles = [4][3][3]f32{
+            .{ bottom_a, top_a, top_b },
+            .{ bottom_a, top_b, bottom_b },
+            .{ top_a, .{ 0, 0.5, 0 }, top_b },
+            .{ bottom_a, bottom_b, .{ 0, -0.5, 0 } },
+        };
+        for (triangles, 0..) |triangle, local| {
+            for (triangle) |point| for (point) |coordinate| {
+                soup[write] = coordinate;
+                write += 1;
+            };
+            groups[face] = if (local < 2) @intCast(segment) else @intCast(segments + segment * 2 + local - 2);
+            face += 1;
+        }
+    }
+    var layout = build(testing.allocator, &soup, &groups, 16, 8192, 256 << 20).?;
+    defer layout.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, segments + 2), layout.islands.len);
+    const top_island = layout.tri_island[2];
+    const bottom_island = layout.tri_island[3];
+    try testing.expect(top_island != bottom_island);
+    segment = 1;
+    while (segment < segments) : (segment += 1) {
+        try testing.expectEqual(top_island, layout.tri_island[segment * 4 + 2]);
+        try testing.expectEqual(bottom_island, layout.tri_island[segment * 4 + 3]);
+    }
 }
 
 test "existing normalized UVs rebuild metadata without repacking" {
@@ -558,7 +819,11 @@ test "existing normalized UVs rebuild metadata without repacking" {
         0.125, 0.25, 0.5, 0.75, 0.125, 0.75,
     };
     const groups = [_]u32{ 7, 7 };
-    var layout = buildFromNormalizedUv(allocator, &uvs, &groups, 128, 64, 16) orelse return error.OutOfMemory;
+    const positions = [_]f32{
+        0, 0, 0, 1, 0, 0, 1, 1, 0,
+        0, 0, 0, 1, 1, 0, 0, 1, 0,
+    };
+    var layout = buildFromNormalizedUv(allocator, &positions, &uvs, &groups, 128, 64, 16) orelse return error.OutOfMemory;
     defer layout.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 1), layout.islands.len);

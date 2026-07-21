@@ -2151,7 +2151,7 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 }
 
 /// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
-/// "groups":[g,...],"triangles":[island,x0,y0,x1,y1,x2,y2,...],
+/// "groups":[g,...],"triangles":[island,faceGroup,x0,y0,x1,y1,x2,y2,...],
 /// "data":"<base64 rgba>"} for the current painting, or "" if there's
 /// no paint target. `detail` is the applied density (texels/meter); `islands` is the
 /// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
@@ -2201,9 +2201,10 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         var emitted: usize = 0;
         while (face < face_count) : (face += 1) {
             const triangle = scene3d.paintUvTriangle(face) orelse continue;
-            w.print("{s}{d},{d},{d},{d},{d},{d},{d}", .{
+            w.print("{s}{d},{d},{d},{d},{d},{d},{d},{d}", .{
                 if (emitted == 0) "" else ",",
                 triangle.island,
+                scene3d.paintFaceGroup(face),
                 triangle.corners[0],
                 triangle.corners[1],
                 triangle.corners[2],

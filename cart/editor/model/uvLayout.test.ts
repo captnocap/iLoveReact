@@ -1,14 +1,20 @@
 import {
   flattenUvFaceCorners,
   flattenUvIslandRects,
+  hitUvFace,
   hitUvIsland,
+  isUvDoubleClick,
+  moveUvFace,
   moveUvIsland,
+  moveUvSelectionVertex,
   moveUvIslandVertex,
   parseUvIslandRects,
   resizeUvIsland,
   resizeUvIslandFromCorner,
+  rotateUvSelection,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvFaceEdgePath,
   uvIslandBoundaryPath,
   uvIslandVertices,
 } from './uvLayout';
@@ -31,6 +37,21 @@ test('UV rect parsing and flattening preserve every island and group', () => {
   assert([...flattenUvFaceCorners(parsed)!].join(',') === '1,2,4,2,1,6,8,9,13,9,8,15', 'exact face-corner serialization drifted');
 });
 
+test('new atlas rows preserve each authored face group inside one connected island', () => {
+  const parsed = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [100],
+    [
+      0, 700, 1, 1, 9, 1, 9, 9,
+      0, 701, 1, 1, 9, 9, 1, 9,
+    ],
+  );
+  assert(parsed[0]!.triangles?.[0]?.group === 700, 'first authored face group was lost');
+  assert(parsed[0]!.triangles?.[1]?.group === 701, 'second authored face group was lost');
+  const hit = hitUvFace(parsed, 2, 8);
+  assert(hit?.island === 0 && hit.target.group === 701, 'exact face hit collapsed back to the connected island');
+});
+
 test('real UV handles sit on triangle vertices and collapse shared fan corners', () => {
   const rect = parseUvIslandRects(
     [0, 0, 10, 10],
@@ -50,9 +71,32 @@ test('moving a UV vertex rewrites coincident face corners without moving the res
   )[0]!;
   const changed = moveUvIslandVertex(rect, 0, 2, 3, 32, 32);
   const corners = flattenUvFaceCorners([changed])!;
-  assert(corners[0] === 2.5 && corners[1] === 3.5, 'first triangle did not follow its real vertex');
-  assert(corners[6] === 2.5 && corners[7] === 3.5, 'shared triangle corner tore at the fan seam');
+  assert(corners[0] === 3 && corners[1] === 4, 'first triangle did not follow its snapped real vertex');
+  assert(corners[6] === 3 && corners[7] === 4, 'shared triangle corner tore at the fan seam');
   assert(corners[2] === 9.5 && corners[3] === 0.5 && corners[10] === 0.5 && corners[11] === 9.5, 'unselected UV vertices moved');
+});
+
+test('UV vertices snap to whole texels by default and Alt-style free movement bypasses it', () => {
+  const rect = parseUvIslandRects([0, 0, 10, 10], [1], [0, 0, 2, 2, 8, 2, 2, 8])[0]!;
+  const snapped = flattenUvFaceCorners([moveUvSelectionVertex(rect, undefined, 0, 0.6, 0.6, 32, 32)])!;
+  const free = flattenUvFaceCorners([moveUvSelectionVertex(rect, undefined, 0, 0.6, 0.6, 32, 32, true)])!;
+  assert(snapped[0] === 3 && snapped[1] === 3, `vertex missed the texel grid: ${snapped[0]},${snapped[1]}`);
+  assert(Math.abs(free[0]! - 2.6) < 0.0001 && Math.abs(free[1]! - 2.6) < 0.0001, 'free modifier still snapped the vertex');
+});
+
+test('moving one authored fan face leaves the rest of its connected island fixed', () => {
+  const rect = parseUvIslandRects(
+    [0, 0, 12, 12],
+    [100],
+    [
+      0, 700, 2, 2, 10, 2, 10, 10,
+      0, 701, 2, 2, 10, 10, 2, 10,
+    ],
+  )[0]!;
+  const before = flattenUvFaceCorners([rect])!;
+  const moved = flattenUvFaceCorners([moveUvFace(rect, { face: 1, group: 701 }, 2, 1, 32, 32)])!;
+  assert([...moved.slice(0, 6)].join(',') === [...before.slice(0, 6)].join(','), 'neighbour face followed the detached face');
+  assert(moved[6] === before[6]! + 2 && moved[7] === before[7]! + 1, 'target face did not detach by the requested texel delta');
 });
 
 test('whole-island movement changes sampling coordinates, not triangle-local geometry', () => {
@@ -97,6 +141,43 @@ test('island boundary removes an authored quad triangulation diagonal', () => {
   );
   const path = uvIslandBoundaryPath(rects, 1, 1);
   assert((path.match(/ L /g) ?? []).length === 4, 'shared triangle edge leaked into the authored-face outline');
+});
+
+test('face-edge overlay hides quad diagonals but retains connected fan spokes', () => {
+  const quad = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [
+      0, 44, 0, 0, 10, 0, 10, 10,
+      0, 44, 0, 0, 10, 10, 0, 10,
+    ],
+  );
+  const fan = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [
+      0, 44, 0, 0, 10, 0, 10, 10,
+      0, 45, 0, 0, 10, 10, 0, 10,
+    ],
+  );
+  assert((uvFaceEdgePath(quad, 1, 1).match(/ L /g) ?? []).length === 4, 'render-only quad diagonal became an authored edge');
+  assert((uvFaceEdgePath(fan, 1, 1).match(/ L /g) ?? []).length === 5, 'connected fan spoke disappeared with the island boundary');
+});
+
+test('double-click isolation uses the editor timing and travel thresholds', () => {
+  const first = { at: 1000, x: 40, y: 50 };
+  assert(isUvDoubleClick(first, { at: 1250, x: 44, y: 52 }), 'nearby second click did not isolate a face');
+  assert(!isUvDoubleClick(first, { at: 1500, x: 44, y: 52 }), 'stale click isolated a face');
+  assert(!isUvDoubleClick(first, { at: 1250, x: 60, y: 52 }), 'distant click isolated a face');
+});
+
+test('rotation magnetically levels a near-axis edge and reports the blue guide', () => {
+  const rect = parseUvIslandRects([0, 0, 12, 12], [1], [0, 0, 2, 2, 10, 2, 2, 10])[0]!;
+  const levelled = rotateUvSelection(rect, undefined, 0.6, 32, 32);
+  assert(Math.abs(levelled.angleDegrees) < 0.0001, `near-horizontal edge stopped at ${levelled.angleDegrees}°`);
+  assert(levelled.guide?.axis === 'horizontal', 'level rotation omitted its horizontal guide');
+  const free = rotateUvSelection(rect, undefined, 15, 32, 32);
+  assert(free.angleDegrees === 15 && free.guide === null, 'ordinary rotation incorrectly magnetized to an axis');
 });
 
 test('primary drag selects one face while hand tool or middle drag pans', () => {

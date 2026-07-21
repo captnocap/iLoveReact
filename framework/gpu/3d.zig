@@ -6255,6 +6255,13 @@ pub fn paintUvTriangle(face: u32) ?PaintUvTriangle {
     return model_paint.uvTriangle(face);
 }
 
+/// Authored-face identity for one rendered triangle. The UV editor uses this to
+/// move both halves of a quad together while still allowing a cylinder-cap wedge
+/// (its own authored triangle) to break away from the connected cap island.
+pub fn paintFaceGroup(face: u32) u32 {
+    return model_source.faceGroupOf(face);
+}
+
 /// True when the active 3D authored-face selection contains this UV island.
 /// An authored n-gon may contain several render triangles; any selected member
 /// identifies the shared island because normal face picking selects the group.
@@ -6272,8 +6279,19 @@ pub fn paintIslandSelected(island_index: u32) bool {
 /// inverse of paintIslandSelected and keeps the viewport overlay, HUD count, and
 /// UV transform handles on one authoritative selection.
 pub fn meshEditSelectPaintIsland(island_index: u32, additive: bool) bool {
-    const face = model_paint.firstFaceForIsland(island_index) orelse return false;
-    return meshEditSelectFace(face, additive);
+    const face_count = model_paint.faceCount();
+    if (face_count == 0) return false;
+    const mask = std.heap.c_allocator.alloc(bool, face_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    var found = false;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const in_island = model_paint.islandIndexForFace(face) == island_index;
+        mask[face] = in_island or (additive and mesh_edit.faceSelectedPub(face));
+        found = found or in_island;
+    }
+    if (!found) return false;
+    return mesh_edit.selectFacesByTriangleMask(mask) > 0;
 }
 
 /// Apply one complete UV-island rectangle table to the live model. The atlas is
