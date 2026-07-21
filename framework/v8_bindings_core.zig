@@ -21,6 +21,7 @@ const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
+const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
 const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
 const meshdoc_format = @import("gpu/meshdoc_format.zig");
@@ -1118,12 +1119,18 @@ fn hostMeshRedo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     hostMeshUndoRedo(v8.FunctionCallbackInfo.initFromV8(info_c), true);
 }
 
-/// __mesh_history() → JSON {"undo":n,"redo":n} — the journal depths (menu enable state).
+/// __mesh_history() → JSON {"undo":n,"redo":n,"undoLabel","redoLabel"} —
+/// cheap journal state for menu enablement and the UV panel's scoped controls.
 fn hostMeshHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const depths = scene3d.meshJournalCounts();
-    var buf: [64]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"undo\":{d},\"redo\":{d}}}", .{ depths[0], depths[1] }) catch "{\"undo\":0,\"redo\":0}";
+    var buf: [256]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"undo\":{d},\"redo\":{d},\"undoLabel\":\"{s}\",\"redoLabel\":\"{s}\"}}", .{
+        depths[0],
+        depths[1],
+        scene3d.meshUndoLabel(),
+        scene3d.meshRedoLabel(),
+    }) catch "{\"undo\":0,\"redo\":0,\"undoLabel\":\"\",\"redoLabel\":\"\"}";
     setReturnString(info, json);
 }
 
@@ -2324,9 +2331,11 @@ fn hostModelUvLayoutApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __model_uv_geometry_apply(Float32Array[x0,y0,x1,y1,x2,y2,...]) → 1.
+/// __model_uv_geometry_apply(Float32Array[x0,y0,x1,y1,x2,y2,...], action?) → 1.
 /// One six-float row is required for every current render face. The scene boundary
 /// validates the complete table before rewriting any resident UV or island bound.
+/// Supplying a valid UV-action ordinal journals the completed edit as one unit;
+/// omission is reserved for document hydration/back-compat callers.
 fn hostModelUvGeometryApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const bytes = argBytes(info, 0) orelse {
@@ -2338,7 +2347,14 @@ fn hostModelUvGeometryApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
         return;
     }
     const corners: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
-    const ok = scene3d.applyUvCornerGeometry(corners);
+    const action = argToI32(info, 1);
+    const ok = if (action) |raw|
+        if (mesh_journal_log.uvActionLabel(raw)) |label|
+            scene3d.applyUvCornerGeometryJournaled(corners, label)
+        else
+            false
+    else
+        scene3d.applyUvCornerGeometry(corners);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -2381,7 +2397,7 @@ fn hostModelUvIslandSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __model_atlas_replace(Uint8Array rgba) → 1. External texture editors write
+/// __model_atlas_replace(Uint8Array rgba, journal=0) → 1. External texture editors write
 /// atlases/base.png; this door reloads its decoded, equal-sized RGBA into the
 /// current atlas without repacking the authored UV rectangles.
 fn hostModelAtlasReplace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2390,12 +2406,13 @@ fn hostModelAtlasReplace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnNumber(info, 0);
         return;
     };
-    const ok = scene3d.replacePaintAtlas(rgba);
+    const journal = (argToI32(info, 1) orelse 0) != 0;
+    const ok = if (journal) scene3d.replacePaintAtlasJournaled(rgba) else scene3d.replacePaintAtlas(rgba);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __model_atlas_import(Uint8Array rgba, width, height) → 1. Adopt an imported
+/// __model_atlas_import(Uint8Array rgba, width, height, journal=0) → 1. Adopt an imported
 /// image at its native dimensions while preserving the current normalized UV map.
 fn hostModelAtlasImport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2409,7 +2426,11 @@ fn hostModelAtlasImport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         setReturnNumber(info, 0);
         return;
     }
-    const ok = scene3d.importPaintAtlas(rgba, @intCast(width_raw), @intCast(height_raw));
+    const journal = (argToI32(info, 3) orelse 0) != 0;
+    const ok = if (journal)
+        scene3d.importPaintAtlasJournaled(rgba, @intCast(width_raw), @intCast(height_raw))
+    else
+        scene3d.importPaintAtlas(rgba, @intCast(width_raw), @intCast(height_raw));
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }

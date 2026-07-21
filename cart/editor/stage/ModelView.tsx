@@ -47,6 +47,16 @@ import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resol
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import {
+  JOURNAL_UV_ATLAS_MUTATION,
+  UV_ATLAS_IMPORT_LABEL,
+  UV_ATLAS_RELOAD_LABEL,
+  isUvDocumentHistoryLabel,
+  parseModelHistory,
+  uvHistoryActionOrdinal,
+  type ModelHistoryDepths,
+  type UvHistoryAction,
+} from '../model/uvHistory';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
@@ -131,9 +141,12 @@ export type ModelFocusShape = {
 export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   paintLive: boolean;
+  uvHistory: ModelHistoryDepths;
   refreshUv: () => void;
   applyUvLayout: (rects: Uint32Array) => boolean;
-  applyUvGeometry: (corners: Float32Array) => boolean;
+  applyUvGeometry: (corners: Float32Array, action: UvHistoryAction) => boolean;
+  undoUvHistory: () => string;
+  redoUvHistory: () => string;
   selectUvIsland: (index: number, additive: boolean) => boolean;
   selectUvFace: (face: number, additive: boolean) => boolean;
   saveUvAtlas: () => { path: string | null; note: string };
@@ -508,6 +521,7 @@ const meshSolidify = () => readTopoResult(host.__mesh_topo_solidify?.(0));
 const meshAppendFile = (path: string, expectedPartCount: number) => readTopoResult(host.__mesh_append_file?.(path, expectedPartCount));
 const meshUndoDoor = () => readTopoResult(host.__mesh_undo?.());
 const meshRedoDoor = () => readTopoResult(host.__mesh_redo?.());
+const readMeshHistory = (): ModelHistoryDepths => parseModelHistory(host.__mesh_history?.());
 // The parts-metadata note the restored snapshot carried (the shell sets it after every
 // part-structure change; read back after an undo/redo to resync the outliner).
 const meshJournalNote = (): string | null => {
@@ -1201,8 +1215,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return true;
   };
-  const applyUvGeometry = (corners: Float32Array): boolean => {
-    const ok = host.__model_uv_geometry_apply?.(corners) === 1;
+  const applyUvGeometry = (corners: Float32Array, action: UvHistoryAction): boolean => {
+    const ok = host.__model_uv_geometry_apply?.(corners, uvHistoryActionOrdinal(action)) === 1;
     if (!ok) return false;
     onDocumentMutated?.();
     buildUvPanel();
@@ -1257,7 +1271,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (decoded.width !== atlas.w || decoded.height !== atlas.h) {
       return `Reload refused — PNG is ${decoded.width}×${decoded.height}; the live atlas is ${atlas.w}×${atlas.h}.`;
     }
-    if (host.__model_atlas_replace?.(decoded.rgba) !== 1) return 'Reload refused by the live paint target.';
+    if (host.__model_atlas_replace?.(decoded.rgba, JOURNAL_UV_ATLAS_MUTATION) !== 1) return 'Reload refused by the live paint target or its undo snapshot.';
     // Persist the imported raster as the program's true baseline immediately;
     // this is texture data, not a screenshot or a transient preview artifact.
     writeModelArtifacts(paintTarget);
@@ -1299,8 +1313,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!decoded || decoded.width !== metadata.width || decoded.height !== metadata.height) {
       return 'Import refused — the selected image could not be decoded to RGBA.';
     }
-    if (host.__model_atlas_import?.(decoded.rgba, decoded.width, decoded.height) !== 1) {
-      return 'Import refused by the live paint target.';
+    if (host.__model_atlas_import?.(decoded.rgba, decoded.width, decoded.height, JOURNAL_UV_ATLAS_MUTATION) !== 1) {
+      return 'Import refused by the live paint target or its undo snapshot.';
     }
     atlasReadyRef.current = true;
     writeModelArtifacts(paintTarget);
@@ -1311,6 +1325,35 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     return persisted.ok
       ? `Imported ${name} · ${decoded.width}×${decoded.height} — remap the UVs over it.`
       : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
+  };
+
+  const adoptMeshHistoryResult = (result: TopoResult | null): boolean => {
+    if (!result?.ok || !adoptMesh(result)) return false;
+    const label = result.label ?? '';
+    // adoptMesh already refreshes a live Paint panel. This extra branch covers app-wide
+    // UV undo outside Paint without doing a second expensive atlas read in Paint.
+    if (isUvDocumentHistoryLabel(label) && !paintMode) buildUvPanel();
+    if ((label === UV_ATLAS_IMPORT_LABEL || label === UV_ATLAS_RELOAD_LABEL) && paintTarget) {
+      // Import/reload writes the package immediately, so its inverse must keep
+      // atlases/base.png in lockstep with the restored live raster as well.
+      writeModelArtifacts(paintTarget);
+      writeLiveModelAtlas(paintTarget);
+    }
+    return true;
+  };
+  const stepUvHistory = (redo: boolean): string => {
+    const history = readMeshHistory();
+    const label = redo ? history.redoLabel : history.undoLabel;
+    const depth = redo ? history.redo : history.undo;
+    const verb = redo ? 'redo' : 'undo';
+    if (depth <= 0) return `Nothing to ${verb} in UV history.`;
+    if (!isUvDocumentHistoryLabel(label)) {
+      return `${verb === 'undo' ? 'Undo' : 'Redo'} is currently owned by “${label || 'another model edit'}”; use the app-wide history control.`;
+    }
+    const result = redo ? meshRedoDoor() : meshUndoDoor();
+    if (!adoptMeshHistoryResult(result)) return `${verb === 'undo' ? 'Undo' : 'Redo'} ${label} failed; the live model was left unchanged.`;
+    onDocumentMutated?.();
+    return `${redo ? 'Redid' : 'Undid'} ${label}.`;
   };
   // Refresh the UV/atlas panel when it is LIVE (paint mode) — invoked off every mesh
   // adopt / topo op and at stroke end, so the panel tracks the real atlas without the
@@ -1696,14 +1739,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     },
     undoMesh: () => {
       const r = meshUndoDoor();
-      if (!r?.ok) return { ok: false, label: '', note: null };
-      adoptMesh(r);
+      if (!r?.ok || !adoptMeshHistoryResult(r)) return { ok: false, label: '', note: null };
       return { ok: true, label: r.label ?? 'mesh edit', note: meshJournalNote() };
     },
     redoMesh: () => {
       const r = meshRedoDoor();
-      if (!r?.ok) return { ok: false, label: '', note: null };
-      adoptMesh(r);
+      if (!r?.ok || !adoptMeshHistoryResult(r)) return { ok: false, label: '', note: null };
       return { ok: true, label: r.label ?? 'mesh edit', note: meshJournalNote() };
     },
     setPartRangesMirror: (ranges) => {
@@ -1793,9 +1834,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       paintLive: paintMode,
+      uvHistory: readMeshHistory(),
       refreshUv: buildUvPanel,
       applyUvLayout,
       applyUvGeometry,
+      undoUvHistory: () => stepUvHistory(false),
+      redoUvHistory: () => stepUvHistory(true),
       selectUvIsland,
       selectUvFace,
       saveUvAtlas,

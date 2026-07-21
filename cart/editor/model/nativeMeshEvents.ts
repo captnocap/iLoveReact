@@ -28,6 +28,9 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'transform', label: 'transform', commandId: 'model.mesh.transform' },
   { kind: 'nudge', label: 'nudge', commandId: 'model.mesh.nudge' },
   { kind: 'scale-by-value', label: 'scale by value', commandId: 'model.mesh.scale-by' },
+  { kind: 'uv-edit', label: 'edit UV', commandId: 'model.uv.edit' },
+  { kind: 'uv-texture-import', label: 'import UV texture', commandId: 'model.uv.import-texture' },
+  { kind: 'uv-texture-reload', label: 'reload UV texture', commandId: 'model.uv.reload-texture' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

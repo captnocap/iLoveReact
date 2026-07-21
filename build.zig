@@ -1215,6 +1215,29 @@ pub fn build(b: *std.Build) void {
     model_paint_test_step.dependOn(&run_model_paint_test.step);
     model_paint_test_step.dependOn(&run_model_paint_carry_test.step);
 
+    // ── paint program journal (UV/texture transaction carry) ────────────────
+    const paint_program_journal_impl_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_paint_program_journal_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    paint_program_journal_impl_mod.addImport("wgpu", wgpu_mod);
+    const paint_program_journal_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/paint_program_journal.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    paint_program_journal_test_mod.addImport("paint_program_root", paint_program_journal_impl_mod);
+    const paint_program_journal_test = b.addTest(.{
+        .name = "paint-program-journal-test",
+        .root_module = paint_program_journal_test_mod,
+    });
+    const run_paint_program_journal_test = b.addRunArtifact(paint_program_journal_test);
+    const paint_program_journal_test_step = b.step("test-paint-program-journal", "Run exact paint-program transaction state tests");
+    paint_program_journal_test_step.dependOn(&run_paint_program_journal_test.step);
+
     // ── pen path → concave camera-facing plane — headless, no GPU ──────────
     const path_plane_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/path_plane.zig"),

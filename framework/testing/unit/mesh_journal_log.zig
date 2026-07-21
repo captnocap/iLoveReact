@@ -55,6 +55,9 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ "transform", .transform, "model.mesh.transform" },
         .{ "nudge", .nudge, "model.mesh.nudge" },
         .{ "scale by value", .scale_by_value, "model.mesh.scale-by" },
+        .{ "move UV islands", .uv_edit, "model.uv.edit" },
+        .{ journal_log.UV_TEXTURE_IMPORT_LABEL, .uv_texture_import, "model.uv.import-texture" },
+        .{ journal_log.UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload, "model.uv.reload-texture" },
     };
     try testing.expectEqual(@typeInfo(journal_log.ActionKind).@"enum".fields.len, cases.len);
     for (cases) |case| {
@@ -76,6 +79,57 @@ test "only UV-structural mesh actions invalidate an authored paint layout" {
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.nudge));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.hide_part));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.glass_faces));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_edit));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_texture_import));
+}
+
+test "UV action ordinals labels and restore domains stay bridge exact" {
+    const expected = [_][]const u8{
+        "move UV islands",
+        "move UV vertex",
+        "rotate UV",
+        "scale UV",
+        "flip UV U",
+        "flip UV V",
+        "edit UV values",
+        "match UV width",
+        "match UV height",
+        "match UV size",
+        "chain UV horizontally",
+        "chain UV vertically",
+        "pack UV islands",
+    };
+    try testing.expectEqual(@typeInfo(journal_log.UvAction).@"enum".fields.len, expected.len);
+    for (expected, 0..) |label, ordinal| {
+        try testing.expectEqualStrings(label, journal_log.uvActionLabel(@intCast(ordinal)).?);
+        try testing.expectEqual(journal_log.ActionKind.uv_edit, journal_log.actionKindForLabel(label).?);
+        try testing.expectEqual(journal_log.RestoreDomain.uv, journal_log.restoreDomainForLabel(label));
+    }
+    try testing.expect(journal_log.uvActionLabel(-1) == null);
+    try testing.expect(journal_log.uvActionLabel(expected.len) == null);
+    try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_IMPORT_LABEL));
+    try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_RELOAD_LABEL));
+    try testing.expectEqual(journal_log.RestoreDomain.mesh, journal_log.restoreDomainForLabel("transform"));
+}
+
+test "UV journal snapshots round-trip normalized mesh coordinates to atlas corners" {
+    var verts = [_]f32{0} ** 24;
+    verts[6] = 0.25;
+    verts[7] = 0.5;
+    verts[14] = 1.0;
+    verts[15] = 0.0;
+    verts[22] = 0.125;
+    verts[23] = 0.75;
+    var corners: [6]f32 = undefined;
+    try testing.expect(journal_log.writeAtlasCornersFromInterleavedUv(&verts, 3, 200, 100, &corners));
+    try testing.expectEqualSlices(f32, &.{ 50, 50, 200, 0, 25, 75 }, &corners);
+    try testing.expect(journal_log.atlasCornersMatchInterleavedUv(&verts, 3, 200, 100, &corners));
+    corners[4] += journal_log.UV_EQUIVALENCE_EPSILON * 2;
+    try testing.expect(!journal_log.atlasCornersMatchInterleavedUv(&verts, 3, 200, 100, &corners));
+    corners[4] = std.math.nan(f32);
+    try testing.expect(!journal_log.atlasCornersMatchInterleavedUv(&verts, 3, 200, 100, &corners));
+    try testing.expect(!journal_log.writeAtlasCornersFromInterleavedUv(&verts, 3, 0, 100, &corners));
+    try testing.expect(!journal_log.writeAtlasCornersFromInterleavedUv(verts[0..16], 3, 200, 100, &corners));
 }
 
 test "part boundary accepts a complete live range and rejects a stale subrange" {

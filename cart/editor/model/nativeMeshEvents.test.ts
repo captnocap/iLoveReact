@@ -18,11 +18,13 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 test('semantic ordinals preserve the native journal contract', () => {
-  assert(NATIVE_MESH_ACTIONS.length === 23, `expected all 23 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
+  assert(NATIVE_MESH_ACTIONS.length === 26, `expected all 26 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
   assert(NATIVE_MESH_ACTIONS[0]?.commandId === 'model.mesh.extrude-face', 'first ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[14]?.commandId === 'model.mesh.merge-parts', 'merge ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[20]?.commandId === 'model.mesh.transform', 'transform ordinal drifted');
-  assert(NATIVE_MESH_ACTIONS[22]?.commandId === 'model.mesh.scale-by', 'last ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[22]?.commandId === 'model.mesh.scale-by', 'scale-by ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[23]?.commandId === 'model.uv.edit', 'UV edit ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[25]?.commandId === 'model.uv.reload-texture', 'last ordinal drifted');
 });
 
 test('document tokens are stable, distinct, nonzero, and bridge-exact', () => {

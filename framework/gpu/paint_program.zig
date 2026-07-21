@@ -238,13 +238,17 @@ fn resolveFace(res: *const Resolver, group: u32, ord: u32) ?u32 {
 }
 
 // ── Memory helpers ──────────────────────────────────────────────────────────────────
-fn freeMats() void {
-    for (g_mats.items) |m| {
+fn freeMatList(list: *std.ArrayList(MatRecipe)) void {
+    for (list.items) |m| {
         alloc.free(m.key);
         alloc.free(m.wgsl);
         alloc.free(m.data);
     }
-    g_mats.clearRetainingCapacity();
+    list.clearRetainingCapacity();
+}
+
+fn freeMats() void {
+    freeMatList(&g_mats);
 }
 
 fn freeLayerList(list: *std.ArrayList(Layer)) void {
@@ -352,6 +356,44 @@ const Snapshot = struct {
     strokes: []Stroke,
 };
 
+/// Opaque, exact paint-authoring state carried by the model journal across UV and
+/// texture transactions. The raster lives in the model journal separately; this
+/// snapshot owns everything that makes that raster editable again: layers, strokes,
+/// shader recipes, the raster baseline, and both sides of the stroke undo journal.
+/// Callers can clone, byte-count, adopt, or free it but cannot couple themselves to
+/// the paint program's internal representation.
+pub const JournalState = opaque {};
+
+const JournalStateData = struct {
+    layers: std.ArrayList(Layer) = .empty,
+    active: u32 = 0,
+    next_id: u32 = 1,
+    strokes: std.ArrayList(Stroke) = .empty,
+    mats: std.ArrayList(MatRecipe) = .empty,
+    undo: std.ArrayList(Snapshot) = .empty,
+    redo: std.ArrayList(Snapshot) = .empty,
+    baseline: ?[]u8 = null,
+    have_active: bool = false,
+    active_is_mat: bool = false,
+    active_mat: u16 = 0,
+    active_rgb: [3]u8 = .{ 0, 0, 0 },
+
+    fn deinit(self: *JournalStateData) void {
+        freeLayerList(&self.layers);
+        self.layers.deinit(alloc);
+        freeStrokeList(&self.strokes);
+        self.strokes.deinit(alloc);
+        freeMatList(&self.mats);
+        self.mats.deinit(alloc);
+        freeSnapshotStack(&self.undo);
+        self.undo.deinit(alloc);
+        freeSnapshotStack(&self.redo);
+        self.redo.deinit(alloc);
+        if (self.baseline) |pixels| alloc.free(pixels);
+        self.baseline = null;
+    }
+};
+
 const JOURNAL_CAP = 64;
 const JOURNAL_BYTE_BUDGET: usize = 32 * 1024 * 1024;
 
@@ -377,38 +419,294 @@ fn freeSnapshotStack(stack: *std.ArrayList(Snapshot)) void {
     stack.clearRetainingCapacity();
 }
 
-fn snapshotCurrent(label: []const u8) ?Snapshot {
-    const layers = alloc.alloc(Layer, g_layers.items.len) catch return null;
-    var ln: usize = 0;
-    for (g_layers.items) |l| {
-        const nm = alloc.dupe(u8, l.name) catch break;
-        layers[ln] = .{ .id = l.id, .name = nm, .visible = l.visible };
-        ln += 1;
+fn cloneLayers(source: []const Layer) ?std.ArrayList(Layer) {
+    var copy: std.ArrayList(Layer) = .empty;
+    for (source) |layer| {
+        const name = alloc.dupe(u8, layer.name) catch {
+            freeLayerList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        copy.append(alloc, .{ .id = layer.id, .name = name, .visible = layer.visible }) catch {
+            alloc.free(name);
+            freeLayerList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
     }
-    if (ln != layers.len) {
-        for (layers[0..ln]) |l| alloc.free(l.name);
-        alloc.free(layers);
-        return null;
+    return copy;
+}
+
+fn cloneStrokes(source: []const Stroke) ?std.ArrayList(Stroke) {
+    var copy: std.ArrayList(Stroke) = .empty;
+    for (source) |stroke| {
+        const ops = alloc.dupe(u8, stroke.ops) catch {
+            freeStrokeList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        copy.append(alloc, .{ .layer = stroke.layer, .ops = ops }) catch {
+            alloc.free(ops);
+            freeStrokeList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
     }
-    const strokes = alloc.alloc(Stroke, g_strokes.items.len) catch {
-        for (layers) |l| alloc.free(l.name);
-        alloc.free(layers);
+    return copy;
+}
+
+fn cloneMats(source: []const MatRecipe) ?std.ArrayList(MatRecipe) {
+    var copy: std.ArrayList(MatRecipe) = .empty;
+    for (source) |recipe| {
+        const key = alloc.dupe(u8, recipe.key) catch {
+            freeMatList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        const wgsl = alloc.dupe(u8, recipe.wgsl) catch {
+            alloc.free(key);
+            freeMatList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        const data = alloc.dupe(f32, recipe.data) catch {
+            alloc.free(key);
+            alloc.free(wgsl);
+            freeMatList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        copy.append(alloc, .{ .key = key, .wgsl = wgsl, .data = data, .tiles = recipe.tiles }) catch {
+            alloc.free(key);
+            alloc.free(wgsl);
+            alloc.free(data);
+            freeMatList(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+    }
+    return copy;
+}
+
+fn snapshotFrom(
+    layers_source: []const Layer,
+    active: u32,
+    next_id: u32,
+    strokes_source: []const Stroke,
+    label: []const u8,
+) ?Snapshot {
+    var layers = cloneLayers(layers_source) orelse return null;
+    var strokes = cloneStrokes(strokes_source) orelse {
+        freeLayerList(&layers);
+        layers.deinit(alloc);
         return null;
     };
-    var sn: usize = 0;
-    for (g_strokes.items) |st| {
-        const ops = alloc.dupe(u8, st.ops) catch break;
-        strokes[sn] = .{ .layer = st.layer, .ops = ops };
-        sn += 1;
-    }
-    if (sn != strokes.len) {
-        for (strokes[0..sn]) |st| alloc.free(st.ops);
-        alloc.free(strokes);
-        for (layers) |l| alloc.free(l.name);
-        alloc.free(layers);
+    const layer_slice = layers.toOwnedSlice(alloc) catch {
+        freeLayerList(&layers);
+        layers.deinit(alloc);
+        freeStrokeList(&strokes);
+        strokes.deinit(alloc);
         return null;
+    };
+    const stroke_slice = strokes.toOwnedSlice(alloc) catch {
+        for (layer_slice) |layer| alloc.free(layer.name);
+        alloc.free(layer_slice);
+        freeStrokeList(&strokes);
+        strokes.deinit(alloc);
+        return null;
+    };
+    return .{ .label = label, .layers = layer_slice, .active = active, .next_id = next_id, .strokes = stroke_slice };
+}
+
+fn cloneSnapshot(source: *const Snapshot) ?Snapshot {
+    return snapshotFrom(source.layers, source.active, source.next_id, source.strokes, source.label);
+}
+
+fn cloneSnapshotStack(source: []const Snapshot) ?std.ArrayList(Snapshot) {
+    var copy: std.ArrayList(Snapshot) = .empty;
+    for (source) |*snapshot| {
+        const cloned = cloneSnapshot(snapshot) orelse {
+            freeSnapshotStack(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
+        copy.append(alloc, cloned) catch {
+            var owned = cloned;
+            freeSnapshot(&owned);
+            freeSnapshotStack(&copy);
+            copy.deinit(alloc);
+            return null;
+        };
     }
-    return .{ .label = label, .layers = layers, .active = g_active_layer, .next_id = g_next_layer_id, .strokes = strokes };
+    return copy;
+}
+
+fn cloneJournalStateData(source: *const JournalStateData) ?JournalStateData {
+    var copy = JournalStateData{
+        .active = source.active,
+        .next_id = source.next_id,
+        .have_active = source.have_active,
+        .active_is_mat = source.active_is_mat,
+        .active_mat = source.active_mat,
+        .active_rgb = source.active_rgb,
+    };
+    var complete = false;
+    defer if (!complete) copy.deinit();
+    copy.layers = cloneLayers(source.layers.items) orelse return null;
+    copy.strokes = cloneStrokes(source.strokes.items) orelse return null;
+    copy.mats = cloneMats(source.mats.items) orelse return null;
+    copy.undo = cloneSnapshotStack(source.undo.items) orelse return null;
+    copy.redo = cloneSnapshotStack(source.redo.items) orelse return null;
+    if (source.baseline) |pixels| copy.baseline = alloc.dupe(u8, pixels) catch return null;
+    complete = true;
+    return copy;
+}
+
+fn snapshotsContainStrokes(snapshots: []const Snapshot) bool {
+    for (snapshots) |snapshot| {
+        if (snapshot.strokes.len > 0) return true;
+    }
+    return false;
+}
+
+fn captureJournalStateData() ?JournalStateData {
+    // A flattened/imported atlas commonly has an empty program but a full-size
+    // baseline equal to the live raster. Do not copy those megabytes into every UV
+    // gesture: with no current or historical strokes, the next stroke can recapture
+    // the unchanged live atlas losslessly. A non-empty current/undo/redo recipe still
+    // carries the exact baseline it needs for later replay.
+    const needs_baseline = g_strokes.items.len > 0 or
+        snapshotsContainStrokes(g_undo_snaps.items) or
+        snapshotsContainStrokes(g_redo_snaps.items);
+    var source = JournalStateData{
+        .layers = g_layers,
+        .active = g_active_layer,
+        .next_id = g_next_layer_id,
+        .strokes = g_strokes,
+        .mats = g_mats,
+        .undo = g_undo_snaps,
+        .redo = g_redo_snaps,
+        .baseline = if (needs_baseline) g_baseline else null,
+        .have_active = g_have_active,
+        .active_is_mat = g_active_is_mat,
+        .active_mat = g_active_mat,
+        .active_rgb = g_active_rgb,
+    };
+    return cloneJournalStateData(&source);
+}
+
+fn journalStateData(state: *const JournalState) *const JournalStateData {
+    return @ptrCast(@alignCast(state));
+}
+
+fn journalStateDataMut(state: *JournalState) *JournalStateData {
+    return @ptrCast(@alignCast(state));
+}
+
+fn ownJournalState(data: JournalStateData) ?*JournalState {
+    const owned = alloc.create(JournalStateData) catch {
+        var discarded = data;
+        discarded.deinit();
+        return null;
+    };
+    owned.* = data;
+    return @ptrCast(owned);
+}
+
+/// Capture the exact editable paint state. Any half-open stroke is first committed,
+/// matching the existing save/undo boundary: a UV or texture command can never strand
+/// a partial gesture outside both journals.
+pub fn journalStateCapture() ?*JournalState {
+    _ = endStrokeUnit();
+    const data = captureJournalStateData() orelse return null;
+    return ownJournalState(data);
+}
+
+/// Deep-clone a retained state before a journal install. This makes restore allocation
+/// transactional: all fallible work completes before UVs or atlas pixels are mutated.
+pub fn journalStateClone(state: *const JournalState) ?*JournalState {
+    const data = cloneJournalStateData(journalStateData(state)) orelse return null;
+    return ownJournalState(data);
+}
+
+pub fn journalStateBytes(state: *const JournalState) usize {
+    const data = journalStateData(state);
+    var total: usize = @sizeOf(JournalStateData);
+    for (data.layers.items) |layer| total += @sizeOf(Layer) + layer.name.len;
+    for (data.strokes.items) |stroke| total += @sizeOf(Stroke) + stroke.ops.len;
+    for (data.mats.items) |recipe| {
+        total += @sizeOf(MatRecipe) + recipe.key.len + recipe.wgsl.len + recipe.data.len * @sizeOf(f32);
+    }
+    for (data.undo.items) |*snapshot| total += snapshotBytes(snapshot);
+    for (data.redo.items) |*snapshot| total += snapshotBytes(snapshot);
+    if (data.baseline) |pixels| total += pixels.len;
+    return total;
+}
+
+pub fn journalStateFree(state: *JournalState) void {
+    const data = journalStateDataMut(state);
+    data.deinit();
+    alloc.destroy(data);
+}
+
+/// Install a state previously cloned for restore. This consumes `state` and performs
+/// no allocation, so once the raster/UV half of a journal restore succeeds the program
+/// half cannot fail and leave a split document.
+pub fn journalStateAdopt(state: *JournalState) void {
+    const data = journalStateDataMut(state);
+
+    // Layer visibility is view state (req_2752), not document history. Carry the live
+    // eye toggles for ids that exist on both sides, exactly like stroke undo/redo.
+    for (data.layers.items) |*layer| {
+        if (layerIndexOf(layer.id)) |current| layer.visible = g_layers.items[current].visible;
+    }
+
+    g_open.clearRetainingCapacity();
+    g_open_fill_seen.clearRetainingCapacity();
+    g_open_live = false;
+    g_open_label = "stroke";
+    g_recording = true;
+
+    freeLayerList(&g_layers);
+    g_layers.deinit(alloc);
+    g_layers = data.layers;
+    data.layers = .empty;
+    freeStrokeList(&g_strokes);
+    g_strokes.deinit(alloc);
+    g_strokes = data.strokes;
+    data.strokes = .empty;
+    freeMats();
+    g_mats.deinit(alloc);
+    g_mats = data.mats;
+    data.mats = .empty;
+    freeSnapshotStack(&g_undo_snaps);
+    g_undo_snaps.deinit(alloc);
+    g_undo_snaps = data.undo;
+    data.undo = .empty;
+    freeSnapshotStack(&g_redo_snaps);
+    g_redo_snaps.deinit(alloc);
+    g_redo_snaps = data.redo;
+    data.redo = .empty;
+    dropBaseline();
+    g_baseline = data.baseline;
+    data.baseline = null;
+
+    g_active_layer = data.active;
+    g_next_layer_id = data.next_id;
+    g_have_active = data.have_active;
+    g_active_is_mat = data.active_is_mat;
+    g_active_mat = data.active_mat;
+    g_active_rgb = data.active_rgb;
+    dropLayerCarry();
+    g_carry_program_once = false;
+    invalidateFaceKeys();
+
+    data.deinit();
+    alloc.destroy(data);
+}
+
+fn snapshotCurrent(label: []const u8) ?Snapshot {
+    return snapshotFrom(g_layers.items, g_active_layer, g_next_layer_id, g_strokes.items, label);
 }
 
 /// Push the CURRENT state as the pre-state of the unit about to apply. New units clear

@@ -2974,14 +2974,15 @@ pub fn meshSurvivingGroups(lo: u32, hi: u32, out: []u32) u32 {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Mesh-edit journal (undo/redo) + the part-level ops that ride it
+// Model-document journal (undo/redo) + the mesh/UV ops that ride it
 // ══════════════════════════════════════════════════════════════════════════
-// Every committed mutation of the resident edit mesh (gizmo release, topology op,
-// delete, part append/duplicate/detach/merge, hide/show, glass, solidify) snapshots
-// the FULL pre-op state: verts, authored face groups, part ranges, per-face colours,
-// the hidden-part stash, and an opaque JS note (the cart's parts metadata, set via
-// __mesh_journal_note) so the outliner resyncs after a restore. Undo/redo swap the
-// live state with the top snapshot. Bounded by count AND bytes, oldest-first.
+// Every committed mutation of the resident model (gizmo release, topology/part op,
+// UV transform, texture import/reload) snapshots the exact pre-op domain. All entries
+// carry mesh UVs and ownership; texture entries additionally carry atlas pixels; UV
+// and texture entries carry the editable paint program + its stroke journal. An opaque
+// JS note holds the cart's part metadata so the outliner resyncs after mesh restores.
+// Undo/redo swap the live state with the top snapshot. Bounded by count AND bytes,
+// oldest-first.
 
 const jalloc = std.heap.c_allocator;
 
@@ -2994,6 +2995,11 @@ const JournalHidden = struct {
     materials: []u32,
     colors: []u8,
 };
+const JournalAtlas = struct {
+    rgba: []u8,
+    w: u32,
+    h: u32,
+};
 const JournalEntry = struct {
     verts: []f32,
     count: u32,
@@ -3002,6 +3008,8 @@ const JournalEntry = struct {
     part_ranges: ?[]u32,
     colors: ?[]u8,
     hidden: []JournalHidden,
+    atlas: ?JournalAtlas,
+    paint_state: ?*paint_program.JournalState,
     paint_layout_stale: bool,
     note: ?[]u8,
     label: []const u8, // static string — the op that FOLLOWED this snapshot
@@ -3010,6 +3018,10 @@ const JournalEntry = struct {
 };
 const JOURNAL_CAP = 32;
 const JOURNAL_BYTE_BUDGET: usize = 192 * 1024 * 1024;
+// UV inspection/import is cart-capped at 32 MiB; leave headroom for native
+// callers while refusing a single texture snapshot that could consume the
+// entire resident journal budget by itself.
+const JOURNAL_ATLAS_BYTE_CAP: usize = 64 * 1024 * 1024;
 pub const MESH_ACTION_CAP: usize = 128;
 pub const MeshActionEvent = mesh_journal_log.ActionEvent;
 var g_journal_undo: std.ArrayListUnmanaged(JournalEntry) = .empty;
@@ -3091,6 +3103,8 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
         n += (h.verts.len + h.source_verts.len) * @sizeOf(f32);
         n += h.groups.len * @sizeOf(u32) + h.materials.len * @sizeOf(u32) + h.colors.len;
     }
+    if (e.atlas) |atlas| n += atlas.rgba.len;
+    if (e.paint_state) |paint_state| n += paint_program.journalStateBytes(paint_state);
     if (e.note) |note| n += note.len;
     return n;
 }
@@ -3109,6 +3123,8 @@ fn journalFreeEntry(e: *JournalEntry) void {
         jalloc.free(h.colors);
     }
     if (e.hidden.len > 0) jalloc.free(e.hidden);
+    if (e.atlas) |atlas| jalloc.free(atlas.rgba);
+    if (e.paint_state) |paint_state| paint_program.journalStateFree(paint_state);
     if (e.note) |n| jalloc.free(n);
 }
 
@@ -3132,12 +3148,36 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         .part_ranges = null,
         .colors = null,
         .hidden = &.{},
+        .atlas = null,
+        .paint_state = null,
         .paint_layout_stale = g_paint_layout_stale,
         .note = null,
         .label = label,
         .action_id = 0,
         .action_kind = null,
     };
+    const restore_domain = mesh_journal_log.restoreDomainForLabel(label);
+    if (restore_domain == .atlas) {
+        const atlas = model_paint.atlas() orelse {
+            journalFreeEntry(&entry);
+            return null;
+        };
+        if (atlas.rgba.len > JOURNAL_ATLAS_BYTE_CAP) {
+            journalFreeEntry(&entry);
+            return null;
+        }
+        const rgba = jalloc.dupe(u8, atlas.rgba) catch {
+            journalFreeEntry(&entry);
+            return null;
+        };
+        entry.atlas = .{ .rgba = rgba, .w = atlas.w, .h = atlas.h };
+    }
+    if (restore_domain == .uv or restore_domain == .atlas) {
+        entry.paint_state = paint_program.journalStateCapture() orelse {
+            journalFreeEntry(&entry);
+            return null;
+        };
+    }
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
     if (model_source.faceMaterials()) |rows| entry.materials = jalloc.dupe(u32, rows) catch null;
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
@@ -3419,9 +3459,45 @@ pub fn meshRedoLabel() []const u8 {
     return g_journal_redo.items[g_journal_redo.items.len - 1].label;
 }
 
+fn journalInstallUv(e: *const JournalEntry) bool {
+    if (e.count != g_edit_count) return false;
+    const retained_state = e.paint_state orelse return false;
+    const atlas = model_paint.atlas() orelse return false;
+    const corners = jalloc.alloc(f32, @as(usize, e.count) * 2) catch return false;
+    defer jalloc.free(corners);
+    if (!mesh_journal_log.writeAtlasCornersFromInterleavedUv(e.verts, e.count, atlas.w, atlas.h, corners)) return false;
+    const paint_state = paint_program.journalStateClone(retained_state) orelse return false;
+    if (!applyUvCornerGeometry(corners)) {
+        paint_program.journalStateFree(paint_state);
+        return false;
+    }
+    paint_program.journalStateAdopt(paint_state);
+    g_paint_layout_stale = e.paint_layout_stale;
+    return true;
+}
+
+fn journalInstallAtlas(e: *const JournalEntry) bool {
+    const atlas = e.atlas orelse return false;
+    if (e.count != g_edit_count) return false;
+    const retained_state = e.paint_state orelse return false;
+    const paint_state = paint_program.journalStateClone(retained_state) orelse return false;
+    if (!importPaintAtlas(atlas.rgba, atlas.w, atlas.h)) {
+        paint_program.journalStateFree(paint_state);
+        return false;
+    }
+    paint_program.journalStateAdopt(paint_state);
+    g_paint_layout_stale = e.paint_layout_stale;
+    return true;
+}
+
 /// Install a snapshot as the live mesh (the undo/redo restore path). The entry's
 /// buffers stay owned by the caller — every adopt below copies.
 fn journalInstall(e: *const JournalEntry) bool {
+    switch (mesh_journal_log.restoreDomainForLabel(e.label)) {
+        .uv => return journalInstallUv(e),
+        .atlas => return journalInstallAtlas(e),
+        .mesh => {},
+    }
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
     const invalidates_layout = if (mesh_journal_log.actionKindForLabel(e.label)) |kind|
@@ -6482,6 +6558,10 @@ pub fn paintStrokeEnd(io: std.Io, environ: *const std.process.Environ.Map) bool 
         defer mesh_edit.resumeFaceTint();
         paint_program.replayAll(io, environ);
     }
+    // Paint and mesh/UV share one document even though their resident journals have
+    // different replay engines. A fresh paint commit after undo starts a new branch;
+    // retaining a UV redo here could later overwrite that newer stroke wholesale.
+    journalFreeStack(&g_journal_redo);
     return true;
 }
 
@@ -6523,19 +6603,25 @@ pub fn paintActiveLayer() u32 {
 }
 pub fn paintLayerAdd() u32 {
     if (g_paint_layout_stale) return 0;
-    return paint_program.layerAdd();
+    const id = paint_program.layerAdd();
+    if (id != 0) journalFreeStack(&g_journal_redo);
+    return id;
 }
 pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerDelete(io, environ, id);
+    const changed = paint_program.layerDelete(io, environ, id);
+    if (changed) journalFreeStack(&g_journal_redo);
+    return changed;
 }
 pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerMove(io, environ, id, up);
+    const changed = paint_program.layerMove(io, environ, id, up);
+    if (changed) journalFreeStack(&g_journal_redo);
+    return changed;
 }
 pub fn paintLayerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
     if (g_paint_layout_stale) return false;
@@ -6549,13 +6635,17 @@ pub fn paintLayerSetActive(id: u32) bool {
 }
 pub fn paintLayerRename(id: u32, name: []const u8) bool {
     if (g_paint_layout_stale) return false;
-    return paint_program.layerRename(id, name);
+    const changed = paint_program.layerRename(id, name);
+    if (changed) journalFreeStack(&g_journal_redo);
+    return changed;
 }
 pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    return paint_program.layerMergeDown(io, environ, id);
+    const changed = paint_program.layerMergeDown(io, environ, id);
+    if (changed) journalFreeStack(&g_journal_redo);
+    return changed;
 }
 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
@@ -6924,6 +7014,24 @@ pub fn applyUvCornerGeometry(corners: []const f32) bool {
     return true;
 }
 
+/// Journal one completed UV gesture/discrete command. React previews stay local;
+/// only pointer-up or an explicit button/value commit reaches this boundary, so
+/// even a dense drag is exactly one undo unit.
+pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) bool {
+    if (mesh_journal_log.restoreDomainForLabel(label) != .uv) return false;
+    const verts = g_edit_verts orelse return false;
+    const atlas = model_paint.atlas() orelse return false;
+    if (mesh_journal_log.atlasCornersMatchInterleavedUv(verts, g_edit_count, atlas.w, atlas.h, corners)) return true;
+    var snap = journalSnapshotCurrent(label);
+    if (snap == null) return false;
+    if (!applyUvCornerGeometry(corners)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
+    return true;
+}
+
 /// Replace the current atlas with an equal-sized externally edited raster. This
 /// is an explicit bake boundary: the imported PNG becomes the new undo baseline
 /// and subsequent strokes continue on the existing layer table.
@@ -6932,6 +7040,22 @@ pub fn replacePaintAtlas(rgba: []const u8) bool {
     defer mesh_edit.resumeFaceTint();
     if (!model_paint.setAtlas(rgba)) return false;
     paint_program.adoptCurrentAtlasAsBaseline();
+    return true;
+}
+
+pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
+    const atlas = model_paint.atlas() orelse return false;
+    if (std.mem.eql(u8, atlas.rgba, rgba)) return true;
+    var snap = journalSnapshotCurrent(mesh_journal_log.UV_TEXTURE_RELOAD_LABEL);
+    if (snap == null or snap.?.atlas == null) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (!replacePaintAtlas(rgba)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
     return true;
 }
 
@@ -6946,6 +7070,23 @@ pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
     paint_program.adoptCurrentAtlasAsBaseline();
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
+pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+    if (model_paint.atlas()) |atlas| {
+        if (atlas.w == width and atlas.h == height and std.mem.eql(u8, atlas.rgba, rgba)) return true;
+    } else return false;
+    var snap = journalSnapshotCurrent(mesh_journal_log.UV_TEXTURE_IMPORT_LABEL);
+    if (snap == null or snap.?.atlas == null) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (!importPaintAtlas(rgba, width, height)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
     return true;
 }
 

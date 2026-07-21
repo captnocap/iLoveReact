@@ -1,10 +1,10 @@
-//! Read-only diagnostics for the resident mesh-edit journal.
+//! Pure vocabulary, restore policy, and diagnostics for the resident model journal.
 //!
 //! The journal itself lives in 3d.zig because it owns GPU/editor state. This
-//! module deliberately sees only borrowed slices, turning them into a compact
-//! ownership summary and JSON. Keeping the analysis pure gives the right-click
-//! history viewer a strict boundary and makes corrupt group/range metadata
-//! testable without booting the renderer.
+//! module deliberately sees only borrowed slices: it maps semantic actions, converts
+//! UV coordinates, and turns history into a compact ownership summary/JSON. Keeping
+//! that analysis pure gives every caller a strict boundary and makes restore policy
+//! plus corrupt group/range metadata testable without booting the renderer.
 
 const std = @import("std");
 
@@ -38,7 +38,51 @@ pub const ActionKind = enum(u8) {
     transform,
     nudge,
     scale_by_value,
+    uv_edit,
+    uv_texture_import,
+    uv_texture_reload,
 };
+
+/// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
+/// Append new actions; never reorder an existing one.
+pub const UvAction = enum(u8) {
+    move,
+    vertex,
+    rotate,
+    scale,
+    flip_u,
+    flip_v,
+    numeric,
+    match_width,
+    match_height,
+    match_size,
+    chain_horizontal,
+    chain_vertical,
+    pack,
+};
+
+pub const UV_TEXTURE_IMPORT_LABEL = "import UV texture";
+pub const UV_TEXTURE_RELOAD_LABEL = "reload UV texture";
+pub const UV_EQUIVALENCE_EPSILON: f32 = 0.0001;
+
+pub fn uvActionLabel(raw: i32) ?[]const u8 {
+    const action = std.enums.fromInt(UvAction, raw) orelse return null;
+    return switch (action) {
+        .move => "move UV islands",
+        .vertex => "move UV vertex",
+        .rotate => "rotate UV",
+        .scale => "scale UV",
+        .flip_u => "flip UV U",
+        .flip_v => "flip UV V",
+        .numeric => "edit UV values",
+        .match_width => "match UV width",
+        .match_height => "match UV height",
+        .match_size => "match UV size",
+        .chain_horizontal => "chain UV horizontally",
+        .chain_vertical => "chain UV vertically",
+        .pack => "pack UV islands",
+    };
+}
 
 pub const ActionPhase = enum(u8) { applied, undone, redone };
 
@@ -95,6 +139,21 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "transform", .transform },
         .{ "nudge", .nudge },
         .{ "scale by value", .scale_by_value },
+        .{ "move UV islands", .uv_edit },
+        .{ "move UV vertex", .uv_edit },
+        .{ "rotate UV", .uv_edit },
+        .{ "scale UV", .uv_edit },
+        .{ "flip UV U", .uv_edit },
+        .{ "flip UV V", .uv_edit },
+        .{ "edit UV values", .uv_edit },
+        .{ "match UV width", .uv_edit },
+        .{ "match UV height", .uv_edit },
+        .{ "match UV size", .uv_edit },
+        .{ "chain UV horizontally", .uv_edit },
+        .{ "chain UV vertically", .uv_edit },
+        .{ "pack UV islands", .uv_edit },
+        .{ UV_TEXTURE_IMPORT_LABEL, .uv_texture_import },
+        .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
     };
     for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
     return null;
@@ -125,6 +184,9 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .transform => "model.mesh.transform",
         .nudge => "model.mesh.nudge",
         .scale_by_value => "model.mesh.scale-by",
+        .uv_edit => "model.uv.edit",
+        .uv_texture_import => "model.uv.import-texture",
+        .uv_texture_reload => "model.uv.reload-texture",
     };
 }
 
@@ -158,8 +220,74 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .transform,
         .nudge,
         .scale_by_value,
+        .uv_edit,
+        .uv_texture_import,
+        .uv_texture_reload,
         => false,
     };
+}
+
+pub const RestoreDomain = enum { mesh, uv, atlas };
+
+/// The resident journal is chronological across mesh and UV authoring, but each
+/// state kind has a different exact restore boundary.
+pub fn restoreDomainForLabel(label: []const u8) RestoreDomain {
+    const kind = actionKindForLabel(label) orelse return .mesh;
+    return switch (kind) {
+        .uv_edit => .uv,
+        .uv_texture_import, .uv_texture_reload => .atlas,
+        else => .mesh,
+    };
+}
+
+/// Convert an interleaved mesh snapshot's normalized UV columns into the exact
+/// absolute corner table consumed by model_paint.applyCornerUvs.
+pub fn writeAtlasCornersFromInterleavedUv(
+    verts: []const f32,
+    vertex_count: u32,
+    atlas_width: u32,
+    atlas_height: u32,
+    out: []f32,
+) bool {
+    if (atlas_width == 0 or atlas_height == 0) return false;
+    const vertices: usize = @intCast(vertex_count);
+    if (verts.len < vertices * 8 or out.len != vertices * 2) return false;
+    const width: f32 = @floatFromInt(atlas_width);
+    const height: f32 = @floatFromInt(atlas_height);
+    for (0..vertices) |vertex| {
+        const u = verts[vertex * 8 + 6];
+        const v = verts[vertex * 8 + 7];
+        if (!std.math.isFinite(u) or !std.math.isFinite(v)) return false;
+        out[vertex * 2 + 0] = u * width;
+        out[vertex * 2 + 1] = v * height;
+    }
+    return true;
+}
+
+/// Cheap no-op gate used before allocating a full journal snapshot.
+pub fn atlasCornersMatchInterleavedUv(
+    verts: []const f32,
+    vertex_count: u32,
+    atlas_width: u32,
+    atlas_height: u32,
+    corners: []const f32,
+) bool {
+    if (atlas_width == 0 or atlas_height == 0) return false;
+    const vertices: usize = @intCast(vertex_count);
+    if (verts.len < vertices * 8 or corners.len != vertices * 2) return false;
+    const width: f32 = @floatFromInt(atlas_width);
+    const height: f32 = @floatFromInt(atlas_height);
+    for (0..vertices) |vertex| {
+        const expected_x = verts[vertex * 8 + 6] * width;
+        const expected_y = verts[vertex * 8 + 7] * height;
+        const actual_x = corners[vertex * 2 + 0];
+        const actual_y = corners[vertex * 2 + 1];
+        if (!std.math.isFinite(expected_x) or !std.math.isFinite(expected_y) or
+            !std.math.isFinite(actual_x) or !std.math.isFinite(actual_y)) return false;
+        if (@abs(expected_x - actual_x) > UV_EQUIVALENCE_EPSILON or
+            @abs(expected_y - actual_y) > UV_EQUIVALENCE_EPSILON) return false;
+    }
+    return true;
 }
 
 /// Metadata-only model actions share the resident mesh journal so Ctrl-Z keeps

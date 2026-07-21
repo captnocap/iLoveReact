@@ -5,6 +5,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
 import { accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
+import { isUvDocumentHistoryLabel, type UvHistoryAction } from '../model/uvHistory';
 import {
   chainUvIslands,
   flattenUvFaceCorners,
@@ -204,6 +205,19 @@ function selectionActionButton(label: string, enabled: boolean, tooltip: string,
   );
 }
 
+function historyActionButton(icon: string, label: string, enabled: boolean, tooltip: string, onPress: () => void) {
+  return (
+    <Pressable
+      tooltip={tooltip}
+      onPress={enabled ? onPress : undefined}
+      style={{ height: 23, minWidth: 76, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 4, backgroundColor: enabled ? accentFor('surfaceRaised') : accentFor('controlBg'), borderWidth: 1, borderColor: enabled ? accentFor('border') : accentFor('borderSoft') }}
+    >
+      <Icon name={icon} size={11} color={enabled ? accentFor('textDim') : accentFor('textFaint')} />
+      <Text style={{ color: enabled ? accentFor('textDim') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; focused?: boolean }) {
   const { uv, bridge } = props;
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
@@ -395,9 +409,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     x: (screen.x - viewRef.current.x) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
     y: (screen.y - viewRef.current.y) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
   });
-  const commit = (next: UvIslandRect[], label: string) => {
+  const commit = (next: UvIslandRect[], label: string, action: UvHistoryAction) => {
     const corners = flattenUvFaceCorners(next);
-    if (!corners || !bridge.applyUvGeometry(corners)) {
+    if (!corners || !bridge.applyUvGeometry(corners, action)) {
       const restored = initialRects();
       rectsRef.current = restored;
       setRects(restored);
@@ -407,12 +421,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     setNote(label);
   };
-  const replaceSelected = (changed: UvIslandRect, label: string) => {
+  const replaceSelected = (changed: UvIslandRect, label: string, action: UvHistoryAction) => {
     if (selected < 0) return;
     const next = rectsRef.current.map((rect, index) => index === selected ? changed : rect);
     rectsRef.current = next;
     setRects(next);
-    commit(next, label);
+    commit(next, label, action);
   };
   const flipSelected = (axis: UvFlipAxis) => {
     const rect = rectsRef.current[selected];
@@ -422,7 +436,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     const changed = flipUvSelection(rect, selectedTarget, axis, uv.w, uv.h);
     const subject = selectedTarget ? 'UV face' : 'UV island';
-    replaceSelected(changed, `flipped ${subject} ${axis === 'u' ? 'horizontally (U)' : 'vertically (V)'}`);
+    replaceSelected(changed, `flipped ${subject} ${axis === 'u' ? 'horizontally (U)' : 'vertically (V)'}`, axis === 'u' ? 'flip-u' : 'flip-v');
   };
 
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
@@ -432,14 +446,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const selectedTarget = selectionMode === 'face' ? selectedFace ?? undefined : undefined;
   const translationSnapStep = uvTranslationSnapStep(view.scale, snapBaseStep);
-  const applyIslandSetEdit = (next: UvIslandRect[], label: string) => {
+  const applyIslandSetEdit = (next: UvIslandRect[], label: string, action: UvHistoryAction) => {
     if (sameRectReferences(rectsRef.current, next)) {
       setNote(`${label} — selection was already there`);
       return;
     }
     rectsRef.current = next;
     setRects(next);
-    commit(next, label);
+    commit(next, label, action);
   };
   const matchSelectedSize = (mode: UvSizeMatch) => {
     if (!multiIslandSelection) {
@@ -448,7 +462,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     const next = matchUvIslandSize(rectsRef.current, selectedIndicesRef.current, selected, mode, uv.w, uv.h);
     const dimension = mode === 'both' ? 'size' : mode;
-    applyIslandSetEdit(next, `matched ${selectedIndices.length} islands to the active island's ${dimension}`);
+    const action: UvHistoryAction = mode === 'both' ? 'match-size' : mode === 'width' ? 'match-width' : 'match-height';
+    applyIslandSetEdit(next, `matched ${selectedIndices.length} islands to the active island's ${dimension}`, action);
   };
   const chainSelected = (axis: 'horizontal' | 'vertical') => {
     if (!multiIslandSelection) {
@@ -460,7 +475,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setNote(`selected islands need more atlas space for a ${axis} chain`);
       return;
     }
-    applyIslandSetEdit(result.rects, `chained ${selectedIndices.length} islands ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}`);
+    applyIslandSetEdit(result.rects, `chained ${selectedIndices.length} islands ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}`, axis === 'horizontal' ? 'chain-horizontal' : 'chain-vertical');
   };
   // A translated island keeps identical local geometry. Cache that geometry in
   // island-local atlas units and move it by changing only the Graph view origin.
@@ -562,7 +577,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       const dx = field === 'x' ? value - bounds.x : 0;
       const dy = field === 'y' ? value - bounds.y : 0;
       const next = moveUvIslands(rectsRef.current, selectedIndicesRef.current, dx, dy, uv.w, uv.h, UV_LAYOUT_TUNING.vertexSnapTexels, true);
-      applyIslandSetEdit(next, `set UV group ${field.toUpperCase()} to ${value}`);
+      applyIslandSetEdit(next, `set UV group ${field.toUpperCase()} to ${value}`, 'numeric');
       return;
     }
     let changed = rect;
@@ -582,7 +597,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       }
       changed = scaleUvSelection(rect, selectedTarget, scaleX, scaleY, uv.w, uv.h);
     }
-    replaceSelected(changed, `set UV ${field.toUpperCase()} to ${value}`);
+    replaceSelected(changed, `set UV ${field.toUpperCase()} to ${value}`, 'numeric');
   };
 
   const atlasW = uv.w * view.scale;
@@ -640,12 +655,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           : gesture.indices.length > 1
             ? `moved ${gesture.indices.length} UV islands as one group`
             : 'moved UV island over the fixed texture';
-        commit(rectsRef.current, label);
+        commit(rectsRef.current, label, 'move');
       }
     }
-    if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture');
-    if (gesture?.kind === 'rotate') commit(rectsRef.current, gesture.target ? 'rotated detached UV face' : 'rotated UV island');
-    if (gesture?.kind === 'scale') commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island');
+    if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture', 'vertex');
+    if (gesture?.kind === 'rotate') commit(rectsRef.current, gesture.target ? 'rotated detached UV face' : 'rotated UV island', 'rotate');
+    if (gesture?.kind === 'scale') commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island', 'scale');
+  };
+  const history = bridge.uvHistory;
+  const canUndoUv = history.undo > 0 && isUvDocumentHistoryLabel(history.undoLabel);
+  const canRedoUv = history.redo > 0 && isUvDocumentHistoryLabel(history.redoLabel);
+  const stepHistory = (redo: boolean) => setNote(redo ? bridge.redoUvHistory() : bridge.undoUvHistory());
+  const historyTooltip = (redo: boolean): string => {
+    const depth = redo ? history.redo : history.undo;
+    const label = redo ? history.redoLabel : history.undoLabel;
+    const verb = redo ? 'Redo' : 'Undo';
+    if (depth <= 0) return `${verb} — UV history is empty`;
+    if (!isUvDocumentHistoryLabel(label)) return `${verb} “${label || 'model edit'}” from the app-wide history control`;
+    return `${verb} ${label}`;
   };
 
   return (
@@ -673,6 +700,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         </Pressable>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>{`${rects.length} islands`}</Text>
+      </Row>
+
+      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
+        <Text style={{ minWidth: 48, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>HISTORY</Text>
+        {historyActionButton('Undo2', `UNDO ${history.undo}`, canUndoUv, historyTooltip(false), () => stepHistory(false))}
+        {historyActionButton('Redo2', `REDO ${history.redo}`, canRedoUv, historyTooltip(true), () => stepHistory(true))}
+        <Box style={{ flexGrow: 1 }} />
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>ONE GESTURE = ONE STEP</Text>
       </Row>
 
       <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
@@ -934,7 +969,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             const next = uniformUvPack(rectsRef.current, uv.w, uv.h);
             rectsRef.current = next;
             setRects(next);
-            commit(next, `packed ${next.length} islands into uniform cells`);
+            commit(next, `packed ${next.length} islands into uniform cells`, 'pack');
           }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
             <Icon name="Grid3x3" size={11} color={accentFor('textDim')} />
           </Pressable>
