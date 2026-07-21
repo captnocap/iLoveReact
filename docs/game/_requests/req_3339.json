@@ -1,0 +1,30 @@
+{
+  "id": "req_3339",
+  "at": "2026-07-21T10:47:14.129Z",
+  "origin": "codex:019f840f",
+  "text": "watch] build finished, watching for changes...\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] Error: [groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output\n[err/default] [v8 run source-line]       throw new Error(\"[groundFormula] dispatch drift: mat_pal count line not found \\u2014 re-check build-shaders.ts output\");\n[err/default] [v8 run location] line=61956 col=6\n[err/default] [v8 run stack-string] Error: [groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output\n    at composedFillFuncs (<anonymous>:61956:13)\n    at editorGroundFormula (<anonymous>:61990:3)\n    at <anonymous>:62227:31\n    at <anonymous>:92822:3\n[err/default] [v8 run] no StackTrace object on exception\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] Error: [groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output\n[err/default] [v8 run source-line]       throw new Error(\"[groundFormula] dispatch drift: mat_pal count line not found \\u2014 re-check build-shaders.ts output\");\n[err/default] [v8 run location] line=61956 col=6\n[err/default] [v8 run stack-string] Error: [groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output\n    at composedFillFuncs (<anonymous>:61956:13)\n    at editorGroundFormula (<anonymous>:61990:3)\n    at <anonymous>:62227:31\n    at <anonymous>:92822:3\n[err/default] [v8 run] no StackTrace object on exception\n[warn/default] [dev] bundle failed — no last good to restore\n[dev 3:46:10 AM] rebuilt - pushed 'editor'",
+  "status": "review",
+  "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:47:22.046Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:49:49.957Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the startup regression introduced by req_3333's row-relative fill palette base. The ground shader composes the generated fill catalog into a different D-buffer contract and intentionally neutralizes mat_pal; its loud drift guard still searched for the former D[5] count line, so module initialization threw before the dev host could establish a last-good bundle. The guard now targets D[mat_data_base + 5u], preserving baked ground colors while packed Paint thumbnails retain row-relative palettes. Added explicit regression coverage proving the composed ground formula contains the neutralized count and no live row-relative palette read. The groundFormula suite passes 6/6, the editor bundle succeeds, and the full ReleaseFast editor build completes. Cart-side hot reload only; no native restart required.",
+  "shas": [
+    "ee7f62152"
+  ],
+  "resolvedAt": "2026-07-21T10:49:49.957Z"
+}
