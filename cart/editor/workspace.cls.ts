@@ -646,6 +646,11 @@ classifier({
   HW_UvFrame: { type: 'Box', style: { alignSelf: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_UvImage: { type: 'Image', style: { width: '100%', height: '100%' } },
   HW_UvNote: { type: 'Text', fontSize: 9, color: 'theme:warning', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // UV focus is a workspace transition, not an optional micro-action. Its
+  // labeled affordance remains obvious in both the compact and focused shapes.
+  HW_UvFocusVerb: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_UvFocusVerbOn: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_UvFocusVerbText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.8 } },
   // A section header's tiny inline verb (e.g. UV refresh) — present but never REQUIRED.
   HW_MiniVerb: { type: 'Pressable', style: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 });

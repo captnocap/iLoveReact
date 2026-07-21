@@ -29,6 +29,7 @@ import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
+import { uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
@@ -104,16 +105,17 @@ function UvSection({
   bridge,
   partName,
   extraCount,
-  expanded,
-  onToggleExpanded,
+  workspace,
+  onToggleFocus,
 }: {
   bridge: ModelFocusBridge | null;
   partName: string;
   extraCount: number;
-  expanded: boolean;
-  onToggleExpanded: () => void;
+  workspace: UvWorkspaceLayout;
+  onToggleFocus: () => void;
 }) {
   const uv = bridge?.uv ?? null;
+  const FocusVerb = workspace.focused ? C.HW_UvFocusVerbOn : C.HW_UvFocusVerb;
   return (
     <C.HW_Section style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
       <C.HW_SectionHead>
@@ -121,15 +123,16 @@ function UvSection({
         <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
         <C.HW_Spacer />
         <C.HW_ReadValue>{uv ? `${uv.w}×${uv.h} · ${uv.detail} x/m` : '—'}</C.HW_ReadValue>
-        <C.HW_MiniVerb onPress={onToggleExpanded} tooltip={expanded ? 'Return the UV workspace to panel size' : 'Expand the UV workspace for dense meshes'}>
-          <Icon name={expanded ? 'Minimize2' : 'Maximize2'} size={10} color={accentFor(expanded ? 'primary' : 'textDim')} />
-        </C.HW_MiniVerb>
+        <FocusVerb onPress={onToggleFocus} tooltip={workspace.toggleTooltip}>
+          <Icon name={workspace.focused ? 'Minimize2' : 'Maximize2'} size={10} color={accentFor(workspace.focused ? 'primary' : 'textDim')} />
+          <C.HW_UvFocusVerbText>{workspace.toggleLabel}</C.HW_UvFocusVerbText>
+        </FocusVerb>
         <C.HW_MiniVerb onPress={() => bridge?.refreshUv()} tooltip="Re-read the live paint atlas">
           <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
       {uv && uv.rgba && bridge ? (
-        <UvEditor uv={uv} bridge={bridge} expanded={expanded} />
+        <UvEditor uv={uv} bridge={bridge} focused={workspace.focused} />
       ) : uv ? (
         <C.HW_ReadRow>
           <C.HW_UvNote>{uv.note ?? 'no atlas'}</C.HW_UvNote>
@@ -140,10 +143,12 @@ function UvSection({
           <C.HW_ReadValue>none — created on first Paint</C.HW_ReadValue>
         </C.HW_ReadRow>
       )}
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>scope</C.HW_FormLabel>
-        <C.HW_ReadValue>{uv?.scope ?? 'whole model'}</C.HW_ReadValue>
-      </C.HW_ReadRow>
+      {workspace.showScope ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>scope</C.HW_FormLabel>
+          <C.HW_ReadValue>{uv?.scope ?? 'whole model'}</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : null}
     </C.HW_Section>
   );
 }
@@ -257,7 +262,8 @@ export default function Inspector(props: {
 }) {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
-  const [uvWorkspaceExpanded, setUvWorkspaceExpanded] = useState(false);
+  const [uvWorkspaceFocused, setUvWorkspaceFocused] = useState(false);
+  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused);
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
   // card shows the name the next save writes — never a stale synthesized one.
@@ -267,6 +273,12 @@ export default function Inspector(props: {
   const activeCommand = commandById(props.state.activeCommandId);
   const documentKind = activeDocument?.kind ?? 'world';
   const activePane = resolvedPanelId(rightPanelsFor(documentKind), props.state.rightPane);
+  // Focus belongs to one model's Paint pane. Leaving that context makes the
+  // next Paint visit predictable instead of reviving a workspace from another
+  // document or panel.
+  useEffect(() => {
+    setUvWorkspaceFocused(false);
+  }, [activeDocument?.id, activePane]);
   // Collapse removes only the body. The rail remains at the stage edge so the
   // same active button can restore it without a separate hidden affordance.
   if (props.state.rightPanelCollapsed) {
@@ -374,15 +386,20 @@ export default function Inspector(props: {
     // (REGIONS.grid.labelWidth label + REGIONS.grid.verbColWidth verb).
     const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
-    const paneTitle = activePane === 'paint' ? 'MODEL · PAINT' : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
+    const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
     return (
       <C.HW_RightPanel style={{ width: activePane === 'paint'
-        ? (uvWorkspaceExpanded ? REGIONS.focusPanel.atlasExpandedWidth : REGIONS.focusPanel.atlasWidth)
+        ? uvWorkspace.panelWidth
         : REGIONS.focusPanel.width }}>
         <C.HW_Inspector>
           <C.HW_PanelHead>
             <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
             <C.HW_Spacer />
+            {activePane === 'paint' && uvWorkspace.focused ? (
+              <C.HW_PanelHeadButton tooltip={`Save ${activeModel.name}`} onPress={props.onSaveModel}>
+                <Icon name="Save" size={12} color={accentFor(modelDirty ? 'warning' : 'textFaint')} />
+              </C.HW_PanelHeadButton>
+            ) : null}
             <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
               <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
             </C.HW_PanelHeadButton>
@@ -391,22 +408,26 @@ export default function Inspector(props: {
               Lists carry their own bounded scrolling; switching panes replaces the
               body instead of stacking every authoring concern into one column. */}
           <C.HW_InspectorBodyFixed>
-            {/* Identity + save state stay present across Model/Paint/Rig so an edit
-                never loses its durable commit verb when the focus body switches. */}
-            <C.HW_RenameBar>
-              <C.HW_FormLabel>name</C.HW_FormLabel>
-              <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
-            </C.HW_RenameBar>
-            <C.HW_RenameBar>
-              <C.HW_Tag style={{ backgroundColor: accentFor(saveChipTone) }}>
-                <C.HW_TagText>{saveChip}</C.HW_TagText>
-              </C.HW_Tag>
-              <C.HW_Spacer />
-              <C.HW_VerbFixed onPress={props.onSaveModel}>
-                <Icon name="Save" size={12} color={accentFor('textDim')} />
-                <C.HW_VerbText>Save</C.HW_VerbText>
-              </C.HW_VerbFixed>
-            </C.HW_RenameBar>
+            {/* Identity + save state stay present across Model/Paint/Rig. UV Focus
+                replaces the tall rows with the compact header save verb above. */}
+            {uvWorkspace.showIdentity || activePane !== 'paint' ? (
+              <>
+                <C.HW_RenameBar>
+                  <C.HW_FormLabel>name</C.HW_FormLabel>
+                  <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
+                </C.HW_RenameBar>
+                <C.HW_RenameBar>
+                  <C.HW_Tag style={{ backgroundColor: accentFor(saveChipTone) }}>
+                    <C.HW_TagText>{saveChip}</C.HW_TagText>
+                  </C.HW_Tag>
+                  <C.HW_Spacer />
+                  <C.HW_VerbFixed onPress={props.onSaveModel}>
+                    <Icon name="Save" size={12} color={accentFor('textDim')} />
+                    <C.HW_VerbText>Save</C.HW_VerbText>
+                  </C.HW_VerbFixed>
+                </C.HW_RenameBar>
+              </>
+            ) : null}
             {activePane === 'inspector' ? (
               <>
                 <ModelDetailBody model={activeModel} />
@@ -448,10 +469,10 @@ export default function Inspector(props: {
                   bridge={focusBridge}
                   partName={uvPartName}
                   extraCount={uvExtraCount}
-                  expanded={uvWorkspaceExpanded}
-                  onToggleExpanded={() => setUvWorkspaceExpanded((value) => !value)}
+                  workspace={uvWorkspace}
+                  onToggleFocus={() => setUvWorkspaceFocused((value) => !value)}
                 />
-                <ModelPaintVariants key={activeModel.id} model={activeModel} />
+                <ModelPaintVariants key={activeModel.id} model={activeModel} hidden={!uvWorkspace.showPaintVariants} />
               </>
             ) : (
               <RigSection

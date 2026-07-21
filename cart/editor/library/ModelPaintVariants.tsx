@@ -28,7 +28,7 @@ function variantListHeight(count: number): number {
   return rows * VARIANT_ROW_HEIGHT + Math.max(0, rows - 1) * VARIANT_ROW_GAP;
 }
 
-export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
+export default function ModelPaintVariants({ model, hidden = false }: { model: ModelPackage; hidden?: boolean }) {
   const [rev, setRev] = useState(0);
   const [note, setNote] = useState<string | null>(null);
   // The variant Save writes back to. null = nothing loaded, so Save forks a NEW painting and
@@ -104,7 +104,7 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
   // one right edge plus a fixed "New" column. Button labels are single-line by
   // law; a long variant name truncates loudly (the tooltip carries it in full).
   return (
-    <C.HW_ModelSection>
+    <C.HW_ModelSection style={hidden ? { display: 'none' } : undefined}>
       <C.HW_ModelSectionHead>
         <Icon name="Brush" size={12} color={accentFor('primary')} />
         <C.HW_GroupText>PAINT VARIANTS</C.HW_GroupText>

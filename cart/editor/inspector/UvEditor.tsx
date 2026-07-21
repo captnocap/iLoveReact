@@ -170,7 +170,7 @@ function toolButton(icon: string, active: boolean, tooltip: string, onPress: () 
   );
 }
 
-export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; expanded?: boolean }) {
+export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; focused?: boolean }) {
   const { uv, bridge } = props;
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
@@ -319,11 +319,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   useEffect(() => {
     if (surfaceSize.width <= 1 || surfaceSize.height <= 1) return;
-    const key = `${uv.key}:${uv.w}x${uv.h}:${props.expanded ? 'expanded' : 'compact'}:${surfaceSize.width}x${surfaceSize.height}`;
+    const key = `${uv.key}:${uv.w}x${uv.h}:${props.focused ? 'focus' : 'panel'}:${surfaceSize.width}x${surfaceSize.height}`;
     if (viewKeyRef.current === key) return;
     viewKeyRef.current = key;
     setView(fittedView(true));
-  }, [uv.key, uv.w, uv.h, props.expanded, surfaceSize.width, surfaceSize.height]);
+  }, [uv.key, uv.w, uv.h, props.focused, surfaceSize.width, surfaceSize.height]);
 
   const localScreenPoint = (event: any): ScreenPoint => {
     const eventX = Number(event?.x);
