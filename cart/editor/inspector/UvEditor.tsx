@@ -625,11 +625,25 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
             <Icon name="Grid3x3" size={11} color={accentFor('textDim')} />
           </Pressable>
+          <Pressable tooltip="Import an image at its native size, then remap the UVs over it" onPress={() => {
+            setNote('choosing a texture…');
+            void bridge.importUvAtlas().then(setNote);
+          }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
+            <Icon name="ImagePlus" size={11} color={accentFor('textDim')} />
+          </Pressable>
           <Pressable tooltip="Reload atlases/base.png after editing it externally" onPress={() => setNote(bridge.reloadUvAtlas())} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
             <Icon name="RefreshCw" size={11} color={accentFor('textDim')} />
           </Pressable>
           {uv.diskPath ? (
-            <Pressable tooltip="Copy the editable PNG path" onPress={() => { host.__clipboard_set?.(uv.diskPath); setNote('copied base.png path'); }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
+            <Pressable tooltip="Write the current base.png, verify it exists, then copy its path" onPress={() => {
+              const saved = bridge.saveUvAtlas();
+              if (saved.path) {
+                host.__clipboard_set?.(saved.path);
+                setNote(`${saved.note} · path copied`);
+              } else {
+                setNote(saved.note);
+              }
+            }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
               <Icon name="Copy" size={11} color={accentFor('textDim')} />
             </Pressable>
           ) : null}

@@ -463,6 +463,41 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
     .map((name) => ({ name, path: `${dir}/${name}`, sub }));
 }
 
+export type LiveAtlasWriteResult =
+  | { ok: true; path: string; width: number; height: number }
+  | { ok: false; error: string };
+
+function absoluteDiskPath(path: string): string {
+  if (path.startsWith('/')) return path;
+  const cwd = host.__cwd?.();
+  return typeof cwd === 'string' && cwd.length > 0 ? `${cwd.replace(/\/$/, '')}/${path}` : path;
+}
+
+/** Write the resident atlas now and return only a path proven to exist. The UV
+ *  panel uses this for its copy-path verb, so it can never advertise the package
+ *  destination before base.png has actually landed there. */
+export function writeLiveModelAtlas(pkg: Pick<ModelPackage, 'kind' | 'id'>): LiveAtlasWriteResult {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return { ok: false, error: 'Save the model package before exporting its texture.' };
+  const atlasDir = `${dir}/atlases`;
+  if (!mkdir(atlasDir)) return { ok: false, error: 'Could not create the model atlas folder.' };
+  let atlas: { data?: unknown; w?: unknown; h?: unknown };
+  try {
+    atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
+  } catch {
+    return { ok: false, error: 'The live paint atlas could not be read.' };
+  }
+  if (typeof atlas.data !== 'string' || !Number.isInteger(atlas.w) || !Number.isInteger(atlas.h)
+    || (atlas.w as number) <= 0 || (atlas.h as number) <= 0) {
+    return { ok: false, error: 'There is no live texture atlas to export.' };
+  }
+  const path = `${atlasDir}/base.png`;
+  if (host.__image_write_png?.(path, atlas.data, atlas.w, atlas.h) !== 1 || !exists(path)) {
+    return { ok: false, error: 'base.png could not be written to the model package.' };
+  }
+  return { ok: true, path: absoluteDiskPath(path), width: atlas.w as number, height: atlas.h as number };
+}
+
 // Write the ACTIVE model's own geometry + atlas into its package, so the folders that back
 // its paintings aren't empty: a painting implies a mesh + an atlas, so mesh/ and atlases/
 // must populate too (req_2533). mesh/base.blob = durable interleaved verts (the current

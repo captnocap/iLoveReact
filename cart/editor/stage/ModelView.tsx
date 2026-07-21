@@ -43,8 +43,7 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, writeModelArtifacts } from '../data/modelPackageStore';
-import { resolvePackageDir } from '../data/modelPackageStore';
+import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
@@ -137,6 +136,8 @@ export type ModelFocusBridge = {
   applyUvGeometry: (corners: Float32Array) => boolean;
   selectUvIsland: (index: number, additive: boolean) => boolean;
   selectUvFace: (face: number, additive: boolean) => boolean;
+  saveUvAtlas: () => { path: string | null; note: string };
+  importUvAtlas: () => Promise<string>;
   reloadUvAtlas: () => string;
   shape: ModelFocusShape | null;
   camMarks: { name: string; active: boolean }[];
@@ -1264,6 +1265,53 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return 'Reloaded atlases/base.png into the live model.';
   };
+  const saveUvAtlas = (): { path: string | null; note: string } => {
+    if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
+    const result = writeLiveModelAtlas(paintTarget);
+    return result.ok
+      ? { path: result.path, note: `saved base.png · ${result.width}×${result.height}` }
+      : { path: null, note: result.error };
+  };
+  const importUvAtlas = async (): Promise<string> => {
+    if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
+      return 'Import refused — save the model package first.';
+    }
+    const path = await pickFile({
+      title: 'Import a texture for UV mapping',
+      filters: [
+        { name: 'Texture images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp'] },
+        { name: 'All files', patterns: ['*'] },
+      ],
+    });
+    if (!path) return 'Texture import canceled.';
+    const encoded = readFileBase64(path);
+    if (!encoded) return 'Import refused — the selected image could not be read.';
+    const pipeline = imageOps(encoded);
+    const metadata = pipeline.metadata();
+    if (!metadata || metadata.width < 1 || metadata.height < 1) {
+      return 'Import refused — the selected file is not a decodable image.';
+    }
+    const decodedBytes = metadata.width * metadata.height * 4;
+    if (!Number.isSafeInteger(decodedBytes) || decodedBytes > UV_PREVIEW_BYTE_CAP) {
+      return `Import refused — ${metadata.width}×${metadata.height} is too large for the live UV editor.`;
+    }
+    const decoded = pipeline.raw();
+    if (!decoded || decoded.width !== metadata.width || decoded.height !== metadata.height) {
+      return 'Import refused — the selected image could not be decoded to RGBA.';
+    }
+    if (host.__model_atlas_import?.(decoded.rgba, decoded.width, decoded.height) !== 1) {
+      return 'Import refused by the live paint target.';
+    }
+    atlasReadyRef.current = true;
+    writeModelArtifacts(paintTarget);
+    const persisted = writeLiveModelAtlas(paintTarget);
+    onDocumentMutated?.();
+    buildUvPanel();
+    const name = path.replace(/\\/g, '/').split('/').pop() || 'texture';
+    return persisted.ok
+      ? `Imported ${name} · ${decoded.width}×${decoded.height} — remap the UVs over it.`
+      : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
+  };
   // Refresh the UV/atlas panel when it is LIVE (paint mode) — invoked off every mesh
   // adopt / topo op and at stroke end, so the panel tracks the real atlas without the
   // manual refresh click (req_2625 GG). The Inspector's refresh verb stays a fallback.
@@ -1305,16 +1353,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
         if (basePaint) {
           changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
-          const layoutOk = !basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1;
           let restored = false;
-          if (layoutOk && basePaint.version === 3) {
+          if (basePaint.version === 3) {
             const encoded = readModelRasterBase(paintTarget!);
             const decoded = encoded ? imageOps(encoded).raw() : null;
-            if (decoded && host.__model_atlas_replace?.(decoded.rgba) === 1) {
+            // Raster-backed atlases retain the imported image's native dimensions.
+            // Adopt those pixels first, then restore the authored absolute UV layout
+            // over them; applying layout before sizing would validate against the
+            // temporary density-derived atlas and reject legitimate coordinates.
+            const imported = !!decoded && host.__model_atlas_import?.(decoded.rgba, decoded.width, decoded.height) === 1;
+            const layoutOk = imported && (!basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1);
+            if (layoutOk) {
               restored = !basePaint.program || host.__model_paint_program_apply_over_base?.(basePaint.program) === 1;
             }
-          } else if (layoutOk) {
-            restored = host.__model_paint_program_apply?.(basePaint.program) === 1;
+          } else {
+            const layoutOk = !basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1;
+            if (layoutOk) {
+              restored = host.__model_paint_program_apply?.(basePaint.program) === 1;
+            }
           }
           if (restored) {
             atlasReadyRef.current = true;
@@ -1742,6 +1798,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       applyUvGeometry,
       selectUvIsland,
       selectUvFace,
+      saveUvAtlas,
+      importUvAtlas,
       reloadUvAtlas,
       shape: model
         ? {
