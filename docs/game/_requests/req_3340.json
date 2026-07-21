@@ -1,0 +1,28 @@
+{
+  "id": "req_3340",
+  "at": "2026-07-21T10:50:06.973Z",
+  "origin": "codex:019f840f",
+  "text": "why is this going back and forth? [loader] resident catalog: 57 cooked mesh(es) ready (no rebake to place)\n[shaders] compiling shader (746 KB WGSL) — ~12% (12s)\n[shaders] compiling shader (746 KB WGSL) — ~2% (2s)\n[shaders] compiling shader (746 KB WGSL) — ~14% (14s)\n[shaders] compiling shader (746 KB WGSL) — ~4% (4s)\n[shaders] compiling shader (746 KB WGSL) — ~16% (16s)\n[shaders] compiling shader (746 KB WGSL) — ~6% (6s)\n[shaders] compiling shader (746 KB WGSL) — ~18% (18s)\n[shaders] compiling shader (746 KB WGSL) — ~8% (8s)\n[shaders] compiling shader (746 KB WGSL) — ~20% (20s)\n[shaders] compiling shader (746 KB WGSL) — ~10% (10s)\n[shaders] compiling shader (746 KB WGSL) — ~22% (22s)",
+  "status": "review",
+  "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:50:13.188Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:51:47.918Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the apparent shader-progress reversal as two separate editor hosts interleaving output, not one compiler losing progress. Process evidence: older reactjit-dev PID 2383706 started 03:46:08, is orphaned under PID 1, and writes stderr to /dev/pts/16; current reactjit-dev PID 2387306 started 03:49:41 under the active tools/rjit dev editor wrapper and writes to the same /dev/pts/16. Both compile the same 746 KB ground megashader about ten seconds apart, producing the alternating 12s/2s, 14s/4s sequence and consuming duplicate CPU. No repository change or process termination was made because the user asked why rather than authorizing a kill; the stale orphan is the exact stop target.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T10:51:47.918Z"
+}
