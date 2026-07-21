@@ -1,0 +1,30 @@
+{
+  "id": "req_3347",
+  "at": "2026-07-21T14:49:45.321Z",
+  "origin": "codex:019f7e48",
+  "text": "need a better way to restore back to a shape in the uv also i have a cylinder that is like perfectly round but i add texture and the thing comes in as an oval so whats the deal there",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T14:49:55.381Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T15:04:18.701Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed non-square texture imports by uniformly fitting existing UV geometry in square-texel space, preventing circular cylinder caps from becoming ovals. Added an undoable Restore Shape action that reprojects selected UV islands from the resident 3D mesh, keeps their current centre, and rejoins selected detached pieces from the same canonical island.",
+  "shas": [
+    "0bbbd2562"
+  ],
+  "resolvedAt": "2026-07-21T15:04:18.701Z"
+}
