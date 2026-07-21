@@ -1,0 +1,30 @@
+{
+  "id": "req_3337",
+  "at": "2026-07-21T10:33:51.336Z",
+  "origin": "codex:019f7e48",
+  "text": "[err/default] [v8 run stack-string] ReferenceError: __ifttt_onSystemVram is not defined\n    at <anonymous>:1:1\n[err/default] [v8 run] no StackTrace object on exception\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] ReferenceError: __ifttt_onSystemRam is not defined\n[err/default] [v8 run source-line] __ifttt_onSystemRam(32960339968,67245187072)\n[err/default] [v8 run location] line=1 col=0\n[err/default] [v8 run stack-string] ReferenceError: __ifttt_onSystemRam is not defined\n    at <anonymous>:1:1\n[err/default] [v8 run] no StackTrace object on exception\n[err/default] [v8 run] failure detected (hasCaught=true)\n[err/default] [v8 run] ReferenceError: __ifttt_onSystemVram is not defined\n[err/default] [v8 run source-line] __ifttt_onSystemVram(2884562944,25753026560)\n[err/default] [v8 run location] line=1 col=0\n[err/default] [v8 run stack-string] ReferenceError: __ifttt_onSystemVram is not defined\n    at <anonymous>:1:1\n[err/default] [v8 run] no StackTrace object on exception",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:33:57.492Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:42:56.733Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced every eval-string dispatch in the native system-signal producer with typed optional V8 global calls. A missing IFTTT handler after context reset now drops the event instead of throwing, covering RAM, VRAM, cursor, focus, resize, pointer-device, slow-frame, hang, and file-drop callbacks. Added four-float typed dispatch support and pinned representative memory byte payloads across the JS Number boundary. Zig system-memory tests and an isolated ReleaseFast editor build pass; the running dev host must be rebuilt/restarted for live confirmation.",
+  "shas": [
+    "755e8f36b"
+  ],
+  "resolvedAt": "2026-07-21T10:42:56.733Z"
+}
