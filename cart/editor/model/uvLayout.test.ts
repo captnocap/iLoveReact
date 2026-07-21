@@ -20,6 +20,7 @@ import {
   uvIslandBoundarySegments,
   uvIslandBoundaryPath,
   uvIslandVertices,
+  uvSelectionBounds,
   uvTranslationSnapStep,
 } from './uvLayout';
 
@@ -65,6 +66,30 @@ test('real UV handles sit on triangle vertices and collapse shared fan corners',
   const vertices = uvIslandVertices(rect);
   assert(vertices.length === 4, `quad exposed ${vertices.length} handles instead of its four real corners`);
   assert(vertices[0]!.x === 0.5 && vertices[0]!.y === 0.5, 'first handle missed the authored UV vertex');
+});
+
+test('dense fan handles and bounds stay exact at production face counts', () => {
+  const faceCount = 600;
+  const rim = Array.from({ length: faceCount }, (_unused, index) => {
+    const angle = index / faceCount * Math.PI * 2;
+    return { x: 0.5 + Math.cos(angle) * 0.4, y: 0.5 + Math.sin(angle) * 0.4 };
+  });
+  const rect = {
+    x: 10,
+    y: 20,
+    w: 100,
+    h: 80,
+    group: 1,
+    triangles: rim.map((point, index) => {
+      const next = rim[(index + 1) % rim.length]!;
+      return { face: index, group: index, points: [0.5, 0.5, point.x, point.y, next.x, next.y] as const };
+    }),
+  };
+  const vertices = uvIslandVertices(rect);
+  assert(vertices.length === faceCount + 1, `dense fan exposed ${vertices.length} handles instead of ${faceCount + 1}`);
+  const bounds = uvSelectionBounds(rect)!;
+  assert(Math.abs(bounds.x - 20) < 0.0001 && Math.abs(bounds.y - 28) < 0.0001, 'dense fan minimum bounds drifted');
+  assert(Math.abs(bounds.w - 80) < 0.0001 && Math.abs(bounds.h - 64) < 0.0001, 'dense fan size bounds drifted');
 });
 
 test('moving a UV vertex rewrites coincident face corners without moving the rest', () => {

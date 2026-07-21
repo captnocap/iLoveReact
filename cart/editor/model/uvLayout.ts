@@ -305,24 +305,23 @@ function rebuildUvRect(rect: UvIslandRect, triangles: readonly AbsoluteUvTriangl
   };
 }
 
-function selectionPoints(rect: UvIslandRect, target?: UvFaceTarget): UvIslandVertex[] {
-  const points: UvIslandVertex[] = [];
-  for (const triangle of absoluteTriangles(rect)) {
+export function uvSelectionBounds(rect: UvIslandRect, target?: UvFaceTarget): UvSelectionBounds | null {
+  let x = Number.POSITIVE_INFINITY;
+  let y = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const triangle of rect.triangles ?? []) {
     if (!triangleMatchesTarget(triangle, target)) continue;
     for (let corner = 0; corner < 3; corner += 1) {
-      points.push({ x: triangle.points[corner * 2]!, y: triangle.points[corner * 2 + 1]! });
+      const px = rect.x + triangle.points[corner * 2]! * rect.w;
+      const py = rect.y + triangle.points[corner * 2 + 1]! * rect.h;
+      x = Math.min(x, px);
+      y = Math.min(y, py);
+      right = Math.max(right, px);
+      bottom = Math.max(bottom, py);
     }
   }
-  return points;
-}
-
-export function uvSelectionBounds(rect: UvIslandRect, target?: UvFaceTarget): UvSelectionBounds | null {
-  const points = selectionPoints(rect, target);
-  if (!points.length) return null;
-  const x = Math.min(...points.map((point) => point.x));
-  const y = Math.min(...points.map((point) => point.y));
-  const right = Math.max(...points.map((point) => point.x));
-  const bottom = Math.max(...points.map((point) => point.y));
+  if (!Number.isFinite(x)) return null;
   return { x, y, w: right - x, h: bottom - y, cx: (x + right) * 0.5, cy: (y + bottom) * 0.5 };
 }
 
@@ -487,13 +486,35 @@ const sameUvPoint = (ax: number, ay: number, bx: number, by: number): boolean =>
 /** Unique real UV vertices, with fan/shared-edge duplicates collapsed. */
 export function uvSelectionVertices(rect: UvIslandRect, target?: UvFaceTarget): UvIslandVertex[] {
   const vertices: UvIslandVertex[] = [];
+  // The old `vertices.some(...)` de-duplicator made selecting a dense island
+  // quadratic (600 faces means millions of point comparisons on every preview).
+  // Epsilon-sized spatial buckets preserve the same tolerant equality while
+  // keeping the walk linear for ordinary mesh topology. Adjacent buckets are
+  // checked because two epsilon-equal coordinates can straddle a cell edge.
+  const cellSize = UV_LAYOUT_TUNING.pointMatchEpsilon;
+  const buckets = new Map<string, UvIslandVertex[]>();
   for (const triangle of rect.triangles ?? []) {
     if (!triangleMatchesTarget(triangle, target)) continue;
     const points = absoluteTrianglePoints(rect, triangle);
     for (let corner = 0; corner < 3; corner += 1) {
       const x = points[corner * 2]!;
       const y = points[corner * 2 + 1]!;
-      if (!vertices.some((vertex) => sameUvPoint(vertex.x, vertex.y, x, y))) vertices.push({ x, y });
+      const cellX = Math.floor(x / cellSize);
+      const cellY = Math.floor(y / cellSize);
+      let duplicate = false;
+      for (let ox = -1; ox <= 1 && !duplicate; ox += 1) {
+        for (let oy = -1; oy <= 1 && !duplicate; oy += 1) {
+          const candidates = buckets.get(`${cellX + ox}:${cellY + oy}`);
+          duplicate = Boolean(candidates?.some((vertex) => sameUvPoint(vertex.x, vertex.y, x, y)));
+        }
+      }
+      if (duplicate) continue;
+      const vertex = { x, y };
+      vertices.push(vertex);
+      const key = `${cellX}:${cellY}`;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(vertex);
+      else buckets.set(key, [vertex]);
     }
   }
   return vertices;

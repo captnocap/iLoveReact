@@ -49,7 +49,7 @@ type View = { x: number; y: number; scale: number };
 type ScreenPoint = { x: number; y: number };
 type SelectionMode = 'island' | 'face';
 type UvLineGeometry = { faces: number[]; boundary: number[] };
-type UvLineGeometryCache = { rects: readonly UvIslandRect[]; view: View; geometry: UvLineGeometry };
+type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeometry };
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
@@ -60,32 +60,46 @@ type Gesture =
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
-function atlasGridSegments(atlasWidth: number, atlasHeight: number, view: View, surfaceWidth: number, surfaceHeight: number): number[] {
+function atlasGridSegments(atlasWidth: number, atlasHeight: number, viewScale: number): number[] {
   let step = UV_LAYOUT_TUNING.vertexSnapTexels;
-  while (step * view.scale < UV_LAYOUT_TUNING.minimumGridSpacingPx) step *= 2;
-  const firstX = Math.max(step, Math.ceil(Math.max(0, -view.x / view.scale) / step) * step);
-  const lastX = Math.min(atlasWidth, (surfaceWidth - view.x) / view.scale);
-  const firstY = Math.max(step, Math.ceil(Math.max(0, -view.y / view.scale) / step) * step);
-  const lastY = Math.min(atlasHeight, (surfaceHeight - view.y) / view.scale);
-  const screenTop = Math.max(0, view.y);
-  const screenBottom = Math.min(surfaceHeight, view.y + atlasHeight * view.scale);
-  const screenLeft = Math.max(0, view.x);
-  const screenRight = Math.min(surfaceWidth, view.x + atlasWidth * view.scale);
-  if (screenRight <= screenLeft || screenBottom <= screenTop) return [];
+  while (step * viewScale < UV_LAYOUT_TUNING.minimumGridSpacingPx) step *= 2;
   const segments: number[] = [];
-  for (let x = firstX; x < lastX; x += step) {
-    const sx = view.x + x * view.scale;
-    segments.push(sx, screenTop, sx, screenBottom);
+  for (let x = step; x < atlasWidth; x += step) {
+    segments.push(x, 0, x, atlasHeight);
   }
-  for (let y = firstY; y < lastY; y += step) {
-    const sy = view.y + y * view.scale;
-    segments.push(screenLeft, sy, screenRight, sy);
+  for (let y = step; y < atlasHeight; y += step) {
+    segments.push(0, y, atlasWidth, y);
   }
   return segments;
 }
 
 function sameRectReferences(a: readonly UvIslandRect[], b: readonly UvIslandRect[]): boolean {
   return a.length === b.length && a.every((rect, index) => rect === b[index]);
+}
+
+/** Build native atlas-space geometry once. Pan, zoom, and whole-island motion
+ * are Graph transforms, so a drag never re-hashes hundreds of triangle edges. */
+function uvLineGeometry(items: readonly UvIslandRect[]): UvLineGeometry {
+  return {
+    faces: uvFaceEdgeSegments(items, 1, 1),
+    boundary: uvIslandBoundarySegments(items, 1, 1),
+  };
+}
+
+function repeatedPointSegments(points: readonly { x: number; y: number }[]): number[] {
+  const segments = new Array<number>(points.length * 4);
+  let at = 0;
+  for (const point of points) {
+    segments[at++] = point.x;
+    segments[at++] = point.y;
+    segments[at++] = point.x;
+    segments[at++] = point.y;
+  }
+  return segments;
+}
+
+function sameAxisGuide(a: UvAxisGuide | null, b: UvAxisGuide | null): boolean {
+  return a === b || Boolean(a && b && a.axis === b.axis && a.coordinate === b.coordinate);
 }
 
 function UvNumberField(props: {
@@ -156,7 +170,7 @@ function toolButton(icon: string, active: boolean, tooltip: string, onPress: () 
   );
 }
 
-export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge }) {
+export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; expanded?: boolean }) {
   const { uv, bridge } = props;
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
@@ -175,6 +189,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const pendingPreviewRef = useRef<PendingUvPreview | null>(null);
   const previewFramePendingRef = useRef(false);
   const previewGenerationRef = useRef(0);
+  const pendingViewRef = useRef<View | null>(null);
+  const viewFramePendingRef = useRef(false);
+  const viewGenerationRef = useRef(0);
   const lastClickRef = useRef<{ at: number; x: number; y: number } | null>(null);
   const [view, setViewState] = useState<View>({ x: UV_LAYOUT_TUNING.canvasPaddingPx, y: UV_LAYOUT_TUNING.canvasPaddingPx, scale: 1 });
   const viewRef = useRef(view);
@@ -183,8 +200,38 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const activeLineCacheRef = useRef<UvLineGeometryCache | null>(null);
 
   const setView = (next: View) => {
+    viewGenerationRef.current += 1;
+    pendingViewRef.current = null;
+    viewFramePendingRef.current = false;
     viewRef.current = next;
     setViewState(next);
+  };
+  // SDL can deliver far more motion packets than the display can present. The
+  // native Graph transforms consume only the newest camera coordinates, so pan
+  // previews reconcile once per host frame instead of once per mouse packet.
+  const queueViewPreview = (next: View) => {
+    viewRef.current = next;
+    pendingViewRef.current = next;
+    if (viewFramePendingRef.current) return;
+    viewFramePendingRef.current = true;
+    const generation = viewGenerationRef.current;
+    const hostGlobal = globalThis as any;
+    const schedule: (callback: () => void) => unknown = typeof hostGlobal.requestAnimationFrame === 'function'
+      ? hostGlobal.requestAnimationFrame.bind(hostGlobal)
+      : (callback) => setTimeout(callback, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
+    schedule(() => {
+      if (generation !== viewGenerationRef.current) return;
+      viewFramePendingRef.current = false;
+      const pending = pendingViewRef.current;
+      pendingViewRef.current = null;
+      if (pending) setViewState(pending);
+    });
+  };
+  const settleViewPreview = () => {
+    viewGenerationRef.current += 1;
+    pendingViewRef.current = null;
+    viewFramePendingRef.current = false;
+    setViewState(viewRef.current);
   };
   const fittedView = (nativeScale = false): View => {
     const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
@@ -204,6 +251,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   // exact newest UV synchronously for commit, but reconcile at most one preview per
   // host frame so raw pointer frequency cannot dictate React/render work.
   const queueUvPreview = (index: number, changed: UvIslandRect, guide: UvAxisGuide | null) => {
+    const current = rectsRef.current[index];
+    const currentGuide = pendingPreviewRef.current?.guide ?? axisGuide;
+    if (current
+      && current.x === changed.x
+      && current.y === changed.y
+      && current.w === changed.w
+      && current.h === changed.h
+      && current.group === changed.group
+      && current.triangles === changed.triangles
+      && sameAxisGuide(currentGuide, guide)) return;
     const next = rectsRef.current.map((rect, rectIndex) => rectIndex === index ? changed : rect);
     rectsRef.current = next;
     const generation = previewGenerationRef.current;
@@ -237,6 +294,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     previewGenerationRef.current += 1;
     pendingPreviewRef.current = null;
     previewFramePendingRef.current = false;
+    viewGenerationRef.current += 1;
+    pendingViewRef.current = null;
+    viewFramePendingRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -259,11 +319,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   useEffect(() => {
     if (surfaceSize.width <= 1 || surfaceSize.height <= 1) return;
-    const key = `${uv.key}:${uv.w}x${uv.h}`;
+    const key = `${uv.key}:${uv.w}x${uv.h}:${props.expanded ? 'expanded' : 'compact'}:${surfaceSize.width}x${surfaceSize.height}`;
     if (viewKeyRef.current === key) return;
     viewKeyRef.current = key;
     setView(fittedView(true));
-  }, [uv.key, uv.w, uv.h, surfaceSize.width, surfaceSize.height]);
+  }, [uv.key, uv.w, uv.h, props.expanded, surfaceSize.width, surfaceSize.height]);
 
   const localScreenPoint = (event: any): ScreenPoint => {
     const eventX = Number(event?.x);
@@ -300,41 +360,56 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const selectedTarget = selectionMode === 'face' ? selectedFace ?? undefined : undefined;
-  const selectionBounds = selectedRect ? uvSelectionBounds(selectedRect, selectedTarget) : null;
-  const selectedOutlineRect = selectedRect && selectedTarget
-    ? { ...selectedRect, triangles: selectedRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
-    : selectedRect;
-  const lineGeometry = (items: readonly UvIslandRect[]): UvLineGeometry => ({
-    faces: uvFaceEdgeSegments(items, view.scale, view.scale, view.x, view.y),
-    boundary: uvIslandBoundarySegments(items, view.scale, view.scale, view.x, view.y),
-  });
+  // A translated island keeps identical local geometry. Cache that geometry in
+  // island-local atlas units and move it by changing only the Graph view origin.
+  // Dense head UVs therefore do not resend thousands of points per mouse sample.
+  const selectedLocalRect = useMemo<UvIslandRect | null>(() => selectedRect ? {
+    ...selectedRect,
+    x: 0,
+    y: 0,
+  } : null, [selectedRect?.triangles, selectedRect?.w, selectedRect?.h, selectedRect?.group]);
+  const selectedLocalBounds = useMemo(
+    () => selectedLocalRect ? uvSelectionBounds(selectedLocalRect, selectedTarget) : null,
+    [selectedLocalRect, selectedTarget?.face, selectedTarget?.group],
+  );
+  const selectionBounds = selectedRect && selectedLocalBounds ? {
+    ...selectedLocalBounds,
+    x: selectedRect.x + selectedLocalBounds.x,
+    y: selectedRect.y + selectedLocalBounds.y,
+    cx: selectedRect.x + selectedLocalBounds.cx,
+    cy: selectedRect.y + selectedLocalBounds.cy,
+  } : null;
+  const selectedOutlineLocalRect = useMemo(() => selectedLocalRect && selectedTarget
+    ? { ...selectedLocalRect, triangles: selectedLocalRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
+    : selectedLocalRect, [selectedLocalRect, selectedTarget?.face, selectedTarget?.group]);
   const cachedLineGeometry = (cacheRef: { current: UvLineGeometryCache | null }, items: readonly UvIslandRect[]): UvLineGeometry => {
     const cached = cacheRef.current;
     if (cached
-      && cached.view.x === view.x
-      && cached.view.y === view.y
-      && cached.view.scale === view.scale
       && sameRectReferences(cached.rects, items)) return cached.geometry;
-    const geometry = lineGeometry(items);
-    cacheRef.current = { rects: [...items], view: { ...view }, geometry };
+    const geometry = uvLineGeometry(items);
+    cacheRef.current = { rects: [...items], geometry };
     return geometry;
   };
   const fixedRects = rects.filter((_rect, index) => index !== selected);
   const fixedLines = cachedLineGeometry(fixedLineCacheRef, fixedRects);
-  const selectedIslandLines = selectedRect ? lineGeometry([selectedRect]) : { faces: [], boundary: [] };
-  const selectedOutlineLines = selectedOutlineRect === selectedRect
+  const selectedIslandLines = useMemo(
+    () => selectedLocalRect ? uvLineGeometry([selectedLocalRect]) : { faces: [], boundary: [] },
+    [selectedLocalRect],
+  );
+  const selectedOutlineLines = useMemo(() => selectedOutlineLocalRect === selectedLocalRect
     ? selectedIslandLines
-    : selectedOutlineRect ? lineGeometry([selectedOutlineRect]) : { faces: [], boundary: [] };
+    : selectedOutlineLocalRect ? uvLineGeometry([selectedOutlineLocalRect]) : { faces: [], boundary: [] },
+  [selectedOutlineLocalRect, selectedLocalRect, selectedIslandLines]);
   const activeFixedRects = activeRange ? fixedRects.filter((rect) => rect.group >= activeRange.lo && rect.group < activeRange.hi) : [];
   const activeFixedLines = activeFixedRects.length ? cachedLineGeometry(activeLineCacheRef, activeFixedRects) : { faces: [], boundary: [] };
   const selectedActiveBoundary = selectedRect && activeRange && selectedRect.group >= activeRange.lo && selectedRect.group < activeRange.hi
     ? selectedIslandLines.boundary
     : [];
-  const handlePoints = selectedRect ? uvSelectionVertices(selectedRect, selectedTarget).map((vertex, index) => ({
-    index,
-    x: view.x + vertex.x * view.scale,
-    y: view.y + vertex.y * view.scale,
-  })) : [];
+  const localHandlePoints = useMemo(
+    () => selectedLocalRect ? uvSelectionVertices(selectedLocalRect, selectedTarget) : [],
+    [selectedLocalRect, selectedTarget?.face, selectedTarget?.group],
+  );
+  const handleSegments = useMemo(() => repeatedPointSegments(localHandlePoints), [localHandlePoints]);
   const rotationHandle = selectionBounds ? {
     x: view.x + selectionBounds.cx * view.scale,
     y: view.y + selectionBounds.y * view.scale - UV_LAYOUT_TUNING.rotationHandleOffsetPx,
@@ -344,9 +419,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     y: view.y + (selectionBounds.y + selectionBounds.h) * view.scale + UV_LAYOUT_TUNING.scaleHandleOffsetPx,
   } : null;
   const hitHandle = (point: ScreenPoint): number => {
-    const radius = UV_LAYOUT_TUNING.vertexHandleHitPx;
-    for (const handle of handlePoints) {
-      if (Math.abs(point.x - handle.x) <= radius && Math.abs(point.y - handle.y) <= radius) return handle.index;
+    if (!selectedRect) return -1;
+    const atlas = atlasPoint(point);
+    const localX = atlas.x - selectedRect.x;
+    const localY = atlas.y - selectedRect.y;
+    const radius = UV_LAYOUT_TUNING.vertexHandleHitPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale);
+    for (let index = 0; index < localHandlePoints.length; index += 1) {
+      const handle = localHandlePoints[index]!;
+      if (Math.abs(localX - handle.x) <= radius && Math.abs(localY - handle.y) <= radius) return index;
     }
     return -1;
   };
@@ -391,31 +471,35 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const atlasEffectData = useMemo(() => [atlasW, atlasH, UV_LAYOUT_TUNING.checkerPx, 0], [atlasW, atlasH]);
   const thumbnailEffectData = useMemo(() => [32, 32, UV_LAYOUT_TUNING.checkerPx, 0], []);
   const gridSegments = useMemo(
-    () => atlasGridSegments(uv.w, uv.h, view, surfaceSize.width, surfaceSize.height),
-    [uv.w, uv.h, view.x, view.y, view.scale, surfaceSize.width, surfaceSize.height],
+    () => atlasGridSegments(uv.w, uv.h, view.scale),
+    [uv.w, uv.h, view.scale],
   );
-  const selectionFrameSegments = selectionBounds
+  const inverseViewScale = 1 / Math.max(UV_LAYOUT_TUNING.minimumZoom, view.scale);
+  const selectionFrameSegments = selectedLocalBounds
     ? (() => {
-      const x0 = view.x + selectionBounds.x * view.scale;
-      const y0 = view.y + selectionBounds.y * view.scale;
-      const x1 = view.x + (selectionBounds.x + selectionBounds.w) * view.scale;
-      const y1 = view.y + (selectionBounds.y + selectionBounds.h) * view.scale;
+      const x0 = selectedLocalBounds.x;
+      const y0 = selectedLocalBounds.y;
+      const x1 = selectedLocalBounds.x + selectedLocalBounds.w;
+      const y1 = selectedLocalBounds.y + selectedLocalBounds.h;
       return [x0, y0, x1, y0, x1, y0, x1, y1, x1, y1, x0, y1, x0, y1, x0, y0];
     })()
     : [];
-  const rotationStemSegments = selectionBounds && rotationHandle
-    ? [rotationHandle.x, rotationHandle.y, rotationHandle.x, view.y + selectionBounds.y * view.scale]
+  const rotationStemSegments = selectedLocalBounds
+    ? [selectedLocalBounds.cx, selectedLocalBounds.y - UV_LAYOUT_TUNING.rotationHandleOffsetPx * inverseViewScale, selectedLocalBounds.cx, selectedLocalBounds.y]
     : [];
   const guideSegments = axisGuide
     ? axisGuide.axis === 'horizontal'
-      ? [view.x, view.y + axisGuide.coordinate * view.scale, view.x + atlasW, view.y + axisGuide.coordinate * view.scale]
-      : [view.x + axisGuide.coordinate * view.scale, view.y, view.x + axisGuide.coordinate * view.scale, view.y + atlasH]
+      ? [0, axisGuide.coordinate, uv.w, axisGuide.coordinate]
+      : [axisGuide.coordinate, 0, axisGuide.coordinate, uv.h]
     : [];
   const host = globalThis as any;
   const finishGesture = (event?: any) => {
     const gesture = gestureRef.current;
     gestureRef.current = null;
-    if (gesture && gesture.kind !== 'pan') settleUvPreview();
+    if (gesture?.kind === 'pan') {
+      settleViewPreview();
+      setAxisGuide(null);
+    } else if (gesture) settleUvPreview();
     else setAxisGuide(null);
     if (gesture?.kind === 'move') {
       const end = event ? localScreenPoint(event) : null;
@@ -531,7 +615,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           if (!gesture) return;
           const screen = localScreenPoint(event);
           if (gesture.kind === 'pan') {
-            setView({ x: gesture.seed.x + screen.x - gesture.start.x, y: gesture.seed.y + screen.y - gesture.start.y, scale: gesture.seed.scale });
+            queueViewPreview({ x: gesture.seed.x + screen.x - gesture.start.x, y: gesture.seed.y + screen.y - gesture.start.y, scale: gesture.seed.scale });
             return;
           }
           const point = atlasPoint(screen);
@@ -574,27 +658,55 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, backgroundColor: '#0d1118', pointerEvents: 'none' }} />
         <Effect shader={ATLAS_SHADER} data={atlasEffectData} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, borderWidth: 2, borderColor: '#71839a', pointerEvents: 'none' }} />
-        <Graph style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          {gridSegments.length ? <Graph.Polyline segments points={gridSegments} stroke="#4d596b" strokeWidth={0.8} /> : null}
-          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#080b10" strokeWidth={2.4} /> : null}
-          {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#080b10" strokeWidth={2.4} /> : null}
-          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#8591a3" strokeWidth={0.9} /> : null}
-          {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#8591a3" strokeWidth={0.9} /> : null}
-          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#080b10" strokeWidth={3.2} /> : null}
-          {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#080b10" strokeWidth={3.2} /> : null}
-          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#c7d0df" strokeWidth={1.15} /> : null}
-          {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#c7d0df" strokeWidth={1.15} /> : null}
-          {activeFixedLines.boundary.length ? <Graph.Polyline segments points={activeFixedLines.boundary} stroke="#42d9e8" strokeWidth={1.65} /> : null}
-          {selectedActiveBoundary.length ? <Graph.Polyline segments points={selectedActiveBoundary} stroke="#42d9e8" strokeWidth={1.65} /> : null}
-          {selectedOutlineLines.faces.length ? <Graph.Polyline segments points={selectedOutlineLines.faces} stroke="#ffffff" strokeWidth={1.35} /> : null}
-          {selectedOutlineLines.boundary.length ? <Graph.Polyline segments points={selectedOutlineLines.boundary} stroke="#ffffff" strokeWidth={2.2} /> : null}
-          {selectionFrameSegments.length ? <Graph.Polyline segments points={selectionFrameSegments} stroke="#9ba8bc" strokeWidth={1} /> : null}
-          {rotationStemSegments.length ? <Graph.Polyline segments points={rotationStemSegments} stroke="#dce5f2" strokeWidth={1} /> : null}
-          {guideSegments.length ? <Graph.Polyline segments points={guideSegments} stroke="#4c9dff" strokeWidth={1.5} /> : null}
+        {/* Grid and mesh lines stay in native atlas-space and pan/zoom through
+            Graph's native transform, so their point buffers remain immutable
+            while the view or a complete island moves. */}
+        <Graph
+          style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }}
+          viewX={-view.x * inverseViewScale}
+          viewY={-view.y * inverseViewScale}
+          viewZoom={view.scale}
+          originTopLeft
+        >
+          {gridSegments.length ? <Graph.Polyline segments points={gridSegments} stroke="#4d596b" strokeWidth={0.8 * inverseViewScale} /> : null}
+          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#080b10" strokeWidth={2.4 * inverseViewScale} /> : null}
+          {fixedLines.faces.length ? <Graph.Polyline segments points={fixedLines.faces} stroke="#8591a3" strokeWidth={0.9 * inverseViewScale} /> : null}
+          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#080b10" strokeWidth={3.2 * inverseViewScale} /> : null}
+          {fixedLines.boundary.length ? <Graph.Polyline segments points={fixedLines.boundary} stroke="#c7d0df" strokeWidth={1.15 * inverseViewScale} /> : null}
+          {activeFixedLines.boundary.length ? <Graph.Polyline segments points={activeFixedLines.boundary} stroke="#42d9e8" strokeWidth={1.65 * inverseViewScale} /> : null}
         </Graph>
-        {handlePoints.map((handle) => (
-          <Box key={handle.index} style={{ position: 'absolute', left: handle.x - 4, top: handle.y - 4, width: 9, height: 9, borderRadius: 5, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#11151d', pointerEvents: 'none' }} />
-        ))}
+        {selectedRect ? (
+          <Graph
+            style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }}
+            viewX={-view.x * inverseViewScale - selectedRect.x}
+            viewY={-view.y * inverseViewScale - selectedRect.y}
+            viewZoom={view.scale}
+            originTopLeft
+          >
+            {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#080b10" strokeWidth={2.4 * inverseViewScale} /> : null}
+            {selectedIslandLines.faces.length ? <Graph.Polyline segments points={selectedIslandLines.faces} stroke="#8591a3" strokeWidth={0.9 * inverseViewScale} /> : null}
+            {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#080b10" strokeWidth={3.2 * inverseViewScale} /> : null}
+            {selectedIslandLines.boundary.length ? <Graph.Polyline segments points={selectedIslandLines.boundary} stroke="#c7d0df" strokeWidth={1.15 * inverseViewScale} /> : null}
+            {selectedActiveBoundary.length ? <Graph.Polyline segments points={selectedActiveBoundary} stroke="#42d9e8" strokeWidth={1.65 * inverseViewScale} /> : null}
+            {selectedOutlineLines.faces.length ? <Graph.Polyline segments points={selectedOutlineLines.faces} stroke="#ffffff" strokeWidth={1.35 * inverseViewScale} /> : null}
+            {selectedOutlineLines.boundary.length ? <Graph.Polyline segments points={selectedOutlineLines.boundary} stroke="#ffffff" strokeWidth={2.2 * inverseViewScale} /> : null}
+            {selectionFrameSegments.length ? <Graph.Polyline segments points={selectionFrameSegments} stroke="#9ba8bc" strokeWidth={1 * inverseViewScale} /> : null}
+            {rotationStemSegments.length ? <Graph.Polyline segments points={rotationStemSegments} stroke="#dce5f2" strokeWidth={1 * inverseViewScale} /> : null}
+            {handleSegments.length ? <Graph.Polyline segments points={handleSegments} stroke="#11151d" strokeWidth={9 * inverseViewScale} /> : null}
+            {handleSegments.length ? <Graph.Polyline segments points={handleSegments} stroke="#f8fafc" strokeWidth={7 * inverseViewScale} /> : null}
+          </Graph>
+        ) : null}
+        {guideSegments.length ? (
+          <Graph
+            style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height, pointerEvents: 'none' }}
+            viewX={-view.x * inverseViewScale}
+            viewY={-view.y * inverseViewScale}
+            viewZoom={view.scale}
+            originTopLeft
+          >
+            <Graph.Polyline segments points={guideSegments} stroke="#4c9dff" strokeWidth={1.5 * inverseViewScale} />
+          </Graph>
+        ) : null}
         {rotationHandle ? (
           <Box style={{ position: 'absolute', left: rotationHandle.x - 8, top: rotationHandle.y - 8, width: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: '#18202c', borderWidth: 1, borderColor: '#f8fafc', pointerEvents: 'none' }}>
             <Icon name="RotateCw" size={10} color="#f8fafc" />
