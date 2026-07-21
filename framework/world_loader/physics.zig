@@ -105,7 +105,7 @@ pub fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland,
         inst.x + isl.hi[0],
         inst.z + isl.hi[2],
         inst.y + isl.hi[1], // top — the island's own ceiling
-        if (exact_player_narrowphase) game_physics.CAMERA_ONLY_SOLID_FLAG else 1,
+        if (exact_player_narrowphase) game_physics.EXACT_MESH_COARSE_SOLID_FLAG else 1,
         PLAYER_SURFACE_FRICTION,
         PLAYER_SURFACE_RESTITUTION,
         inst.y + isl.lo[1], // floor — the island's own base (banded: walk under a high one)
@@ -158,12 +158,12 @@ pub fn resolveMeshPropPlayer(
     mesh: constructor.MeshPropMesh,
     inst: constructor.MeshPropInstance,
     cfg: ?constructor.PhysicsConfig,
-) void {
-    if (!mesh.solid or mesh.collision_triangles.len == 0) return;
+) bool {
+    if (!mesh.solid or mesh.collision_triangles.len == 0) return false;
     const radius = if (cfg) |value| value.player_radius else PLAYER_RADIUS_METERS;
     const height = if (cfg) |value| value.player_height else PLAYER_HEIGHT_METERS;
     const step_height = if (cfg) |value| value.step_height else PLAYER_STEP_HEIGHT_METERS;
-    if (!exactMeshBroadphase(mesh, inst, player.*, radius, height, step_height)) return;
+    if (!exactMeshBroadphase(mesh, inst, player.*, radius, height, step_height)) return false;
 
     var body: game_physics.mesh_collision.Body = .{
         .x = player.x,
@@ -183,7 +183,7 @@ pub fn resolveMeshPropPlayer(
     };
     var tuning = game_physics.mesh_collision.DEFAULT_TUNING;
     tuning.walkable_normal_y = RAMP_WALKABLE_SLOPE_COS;
-    _ = game_physics.mesh_collision.resolve(
+    const result = game_physics.mesh_collision.resolve(
         &body,
         mesh.collision_triangles,
         .{
@@ -201,6 +201,7 @@ pub fn resolveMeshPropPlayer(
     player.vy = body.vy;
     player.vz = body.vz;
     player.grounded = body.grounded;
+    return result.grounded_on_mesh;
 }
 
 /// Split a cooked/imported mesh prop into connected vertex ISLANDS (weld coincident

@@ -2,7 +2,7 @@
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-21. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328.
+req_3133 / req_3328 / req_3329.
 
 ## In one sentence
 
@@ -42,16 +42,20 @@ compares the stamp against the doc on disk:
   renders flat. Packages saved before the stamp existed take this path until
   their next save.
 
-## Collision follows the saved Outliner shape (req_2930 / req_3328)
+## Collision follows the exact saved Outliner surfaces (req_2930 / req_3328 / req_3329)
 
 `residentMeshFor` gives the full-resolution collision vertex form plus the
 saved RJMD range table and `parts.json` rows to
-`model/meshCollision.ts compileOutlinerCollisionBoxes`. Visible Outliner ranges
-are hard boundaries. Inside each range, a bounded top-down spatial split spends
-spare collider rows only where two child hulls materially fit the triangles
-better (curves, arches, figures, rising surfaces). The result is baked into the
-resident MESH_PROPS collision-box block; the host consumes those static boxes
-verbatim. No geometry is generated in the frame loop.
+`model/meshCollision.ts compileOutlinerCollision`. It bakes two views of the
+same visible saved geometry:
+
+- At most 24 local boxes remain the cheap whole-prop broadphase and camera
+  bands. Visible Outliner ranges are hard roots; a bounded top-down spatial
+  split spends spare rows where tighter child hulls help.
+- Every finite triangle belonging to a visible saved Outliner range is packed
+  as local-frame xyz into the resident MESH_PROPS v10 exact-collision tail.
+  Multiple Outliner members share one payload, but hidden members contribute
+  neither triangles nor boxes.
 
 This closes the single-row failure behind req_3328: the old compiler opted out
 when `doc.ranges.length < 2`, so most props shipped zero authored boxes and the
@@ -60,11 +64,24 @@ tallest points became one invisible block. A one-row Outliner now receives the
 same geometry-derived decomposition as a multi-row model. Flat faces receive a
 4 cm downward skin so their visible top remains the walkable height.
 
-The per-mesh ceiling remains 24 boxes. Models with more than 24 Outliner ranges
-coarsen nearby members of the same duplicate/group family locally; models below
-the ceiling spend the remaining rows refining complex ranges. This is a bounded
-box decomposition, not per-triangle mesh collision, but it removes the whole-
-model rectangle while retaining the established fixed-cost physics contract.
+Req_3329 proved boxes cannot be the final contact shape: even a box around one
+sloped triangle fills its empty corner. On the pictured `tunnel_test` face that
+put the box at z≈2.72 for the whole 6.34 m rise while the surface beside the
+1.65 m player was near z≈3.62, creating roughly 0.9 m of invisible wall. The
+host now tags the coarse boxes to bypass them only during player contact for a
+v10 exact mesh; the spring-arm camera and dynamic bodies still consume those
+bounded rows, and the same boxes gate the whole-prop broadphase. After ordinary
+world physics, it transforms the player cylinder into the prop's local frame,
+clips nearby static triangles to the player's vertical span,
+and resolves side, walkable-top, and ceiling contact against those actual
+clipped planes. Cheap triangle bounds reject distant faces before normal/contact
+math. The triangles are decoded once with the resident asset and remain
+immutable; the frame loop does not generate collision geometry.
+
+The 24-box ceiling still bounds broadphase/camera data. Older MESH_PROPS versions
+and semantic door exports have no exact payload and retain their established box
+path. Doors intentionally keep authored jamb/header/leaf collision rather than
+treating their movable leaf as a static triangle soup.
 
 ## Not yet covered
 

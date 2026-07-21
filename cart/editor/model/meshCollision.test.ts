@@ -49,8 +49,10 @@ function fixture(count: number, rise = 0.25): { vertices: Float32Array; doc: Pac
 
 test('rising Outliner members keep separate local height bands', () => {
   const f = fixture(3, 2);
-  const boxes = compileOutlinerCollisionBoxes(f.vertices, f.doc, f.parts);
+  const collision = compileOutlinerCollision(f.vertices, f.doc, f.parts);
+  const boxes = collision.boxes;
   assert(boxes.length === 3, `expected three part bands, got ${boxes.length}`);
+  assert(collision.triangles.length === 3 * 9, 'multi-Outliner exact payload did not retain every visible member');
   assert(boxes[0]!.maxY === 0 && boxes[1]!.maxY === 2 && boxes[2]!.maxY === 4, 'walkable tops no longer follow the visible rise');
   assert(boxes.every((box) => Math.abs((box.maxY - box.minY) - MESH_COLLISION_TUNING.minimumThicknessMeters) < 1e-9), 'flat decks did not receive a downward-only skin');
 });

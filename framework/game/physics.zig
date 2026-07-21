@@ -90,10 +90,10 @@ pub const CAMERA_OCCLUSION_OUTPUT_FLOATS: usize = 4 + MAX_CAMERA_OCCLUSION_HITS;
 // Wire sentinel for a collider band that extends down without a finite underside.
 // A non-solid row carrying this value is terrain/ground, not overhead geometry.
 pub const SOLID_TO_GROUND_FLOOR_METERS: f32 = -1e9;
-// Exact mesh props retain their coarse boxes for camera/broadphase use. This
-// sentinel keeps those boxes out of player ground/side/ceiling response while
-// `blocksCamera` still admits their finite bands.
-pub const CAMERA_ONLY_SOLID_FLAG: f32 = -1;
+// Exact mesh props retain their coarse boxes for broadphase, the spring-arm
+// camera, and dynamic bodies. Player contact alone skips this sentinel because
+// the exact triangle narrowphase owns that response.
+pub const EXACT_MESH_COARSE_SOLID_FLAG: f32 = -1;
 // req_0938: a heightfield whose surface sits more than this ABOVE the camera
 // pivot is a CEILING/ROOF the player is under — it must not cap the spring-arm
 // eye (the rek when you walk under a roof a storey-plus overhead). Heightfields
@@ -1317,11 +1317,11 @@ fn heightfieldSlopeGroundAt(x: f32, z: f32, current_y: f32, step_height: f32) bo
     return if (heightfieldGroundSurfaceAt(x, z, current_y, step_height)) |s| s.normal_y < 1.0 else false;
 }
 
-fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y: f32, step_height: f32) f32 {
+fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y: f32, step_height: f32, skip_exact_mesh_coarse: bool) f32 {
     var ground_y: f32 = -1000000;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
-        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
+        if (skip_exact_mesh_coarse and rects[at + 5] == EXACT_MESH_COARSE_SOLID_FLAG) continue;
         // Solid rects (walls, props) ARE standable tops, not just side blockers.
         // The step-height gate below keeps a tall wall from counting as ground at
         // its base (its top is far above current_y + step), so it only becomes
@@ -1336,7 +1336,7 @@ fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y
     // Oriented walls: rotate the foot point into each rect's frame, same test.
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
-        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
+        if (skip_exact_mesh_coarse and oriented[o + 5] == EXACT_MESH_COARSE_SOLID_FLAG) continue;
         const yaw = oriented[o + 11];
         var lx: f32 = undefined;
         var lz: f32 = undefined;
@@ -1354,7 +1354,6 @@ fn surfaceValueAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, cur
     var value = fallback;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
-        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         // Mirror groundAt: solids are standable, so when you rest on a prop's
         // top its friction/restitution (rect[6]/rect[7]) is the surface you read,
         // not the fallback. Same step-height gate keeps wall bases out.
@@ -1368,7 +1367,6 @@ fn surfaceValueAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, cur
     }
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
-        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
         const yaw = oriented[o + 11];
         var lx: f32 = undefined;
         var lz: f32 = undefined;
@@ -1426,11 +1424,12 @@ fn bodyOverlapsColliderBand(feet_y: f32, height: f32, floor_y: f32, top_y: f32) 
     return feet_y < top_y - COLLIDER_TOP_SIDE_CLEARANCE_METERS and feet_y + height > floor_y;
 }
 
-fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32, walkable_side_push_grace: f32) void {
+fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32, walkable_side_push_grace: f32, skip_exact_mesh_coarse: bool) void {
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
-        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
-        const solid = rects[at + 5] > 0.5;
+        const exact_mesh_coarse = rects[at + 5] == EXACT_MESH_COARSE_SOLID_FLAG;
+        if (skip_exact_mesh_coarse and exact_mesh_coarse) continue;
+        const solid = rects[at + 5] > 0.5 or exact_mesh_coarse;
         const rect_height = rects[at + 4];
         const rect_floor = rects[at + 8];
         const too_tall_to_step = rect_height > y + step_height;
@@ -1457,8 +1456,9 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
     // world. The first 9 floats are the AABB the push reads; [9..12] are pivot+yaw.
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
-        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
-        const solid = oriented[o + 5] > 0.5;
+        const exact_mesh_coarse = oriented[o + 5] == EXACT_MESH_COARSE_SOLID_FLAG;
+        if (skip_exact_mesh_coarse and exact_mesh_coarse) continue;
+        const solid = oriented[o + 5] > 0.5 or exact_mesh_coarse;
         const rect_height = oriented[o + 4];
         const rect_floor = oriented[o + 8];
         const too_tall_to_step = rect_height > y + step_height;
@@ -1508,7 +1508,7 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     var lowest: f32 = 1e30;
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
-        if (rects[at + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
+        if (rects[at + 5] == EXACT_MESH_COARSE_SOLID_FLAG) continue;
         const rf = rects[at + 8];
         if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue; // underside not between feet and head
@@ -1518,7 +1518,7 @@ fn ceilingUndersideAt(rects: []const f32, oriented: []const f32, x: f32, z: f32,
     }
     var o: usize = 0;
     while (o + ORIENTED_FLOATS <= oriented.len) : (o += ORIENTED_FLOATS) {
-        if (oriented[o + 5] == CAMERA_ONLY_SOLID_FLAG) continue;
+        if (oriented[o + 5] == EXACT_MESH_COARSE_SOLID_FLAG) continue;
         const rf = oriented[o + 8];
         if (!hasFiniteUnderside(rf)) continue;
         if (rf <= feet_y + 0.04 or rf >= head_y) continue;
@@ -1625,7 +1625,7 @@ pub fn step(input: []const f32) ?[]f32 {
     // ground, not a hole) — the slope limit only governs whether you can CLIMB
     // it, enforced by the move-cancel wall-block after the move, not by dropping
     // the surface from support here (that was the basin-wall fall-through bug).
-    var player_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
+    var player_ground_y = groundAt(rects, oriented, px, pz, py, step_height, true);
     player_ground_y = @max(player_ground_y, heightfieldFloorAt(px, pz, py, step_height));
     var player_grounded = py <= player_ground_y + 0.015 and pvy <= 0;
     if (player_grounded) {
@@ -1675,7 +1675,7 @@ pub fn step(input: []const f32) ?[]f32 {
             // pins you under the floor. When there isn't headroom you're climbing
             // ONTO that slab, not under a roof: stay on the support and let the
             // step-up mount you (slope-walkable already skips the side-push there).
-            const support = @max(groundAt(rects, oriented, px, pz, py, step_height), heightfieldFloorAt(px, pz, py, step_height));
+            const support = @max(groundAt(rects, oriented, px, pz, py, step_height, true), heightfieldFloorAt(px, pz, py, step_height));
             const limit = @max(ceiling - player_height, support);
             if (limit < py) py = limit;
             pvy = 0;
@@ -1686,10 +1686,10 @@ pub fn step(input: []const f32) ?[]f32 {
     // which branch (rect side-push vs. heightfield move-cancel) eats the move.
     const desired_px = px;
     const desired_pz = pz;
-    collideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height, walkable_side_push_grace);
+    collideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height, walkable_side_push_grace, true);
     const rect_push_x = px - desired_px; // how far the rect/oriented side-push pulled us off the desired path
     const rect_push_z = pz - desired_pz;
-    var next_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
+    var next_ground_y = groundAt(rects, oriented, px, pz, py, step_height, true);
     // Terrain hit detection on the real slope. The slope LIMIT is enforced by the
     // surface normal, not the step height: a single frame only nudges the player a
     // few cm, so a step-height gate would let them creep up any grade. Instead —
@@ -1800,10 +1800,10 @@ pub fn step(input: []const f32) ?[]f32 {
         y += vy * dt;
         z += vz * dt;
         const entity_step_height = @max(0.05, r * 0.35);
-        collideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height, walkable_side_push_grace);
+        collideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height, walkable_side_push_grace, false);
         // Painted terrain supports bodies too (req_0625: balls/cones fell
         // through heightfield landforms — only the player sampled them).
-        var gy = groundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
+        var gy = groundAt(rects, oriented, x, z, y - r, entity_step_height, false) + r;
         gy = @max(gy, heightfieldFloorAt(x, z, y - r, entity_step_height) + r);
         const surface_friction = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
         const surface_restitution = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);

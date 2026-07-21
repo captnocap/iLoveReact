@@ -80,6 +80,18 @@ fn normalizedAbsY(n: Vec3) f32 {
     return if (length > 0.000001) @abs(n.y) / length else 0;
 }
 
+fn pointInsideProjectionBounds(a: Vec3, b: Vec3, c: Vec3, x: f32, z: f32, margin: f32) bool {
+    return x + margin >= @min(a.x, @min(b.x, c.x)) and
+        x - margin <= @max(a.x, @max(b.x, c.x)) and
+        z + margin >= @min(a.z, @min(b.z, c.z)) and
+        z - margin <= @max(a.z, @max(b.z, c.z));
+}
+
+fn overlapsVerticalRange(a: Vec3, b: Vec3, c: Vec3, lower_exclusive: f32, upper_exclusive: f32) bool {
+    return @max(a.y, @max(b.y, c.y)) > lower_exclusive and
+        @min(a.y, @min(b.y, c.y)) < upper_exclusive;
+}
+
 fn surfaceYAt(a: Vec3, b: Vec3, c: Vec3, x: f32, z: f32, epsilon: f32) ?f32 {
     const denominator = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
     if (@abs(denominator) <= epsilon) return null;
@@ -104,6 +116,11 @@ fn walkableSurfaceAt(
         const a = vertex(triangles, triangle, 0);
         const b = vertex(triangles, triangle, 1);
         const c = vertex(triangles, triangle, 2);
+        // Most triangles in a detailed prop are nowhere near the player's
+        // foot point. Cull on coordinate bounds before the cross-product and
+        // barycentric work; the baked coarse boxes already culled whole props.
+        if (!pointInsideProjectionBounds(a, b, c, x, z, 0)) continue;
+        if (!overlapsVerticalRange(a, b, c, lower_exclusive, upper_inclusive + tuning.coordinate_epsilon_meters)) continue;
         if (normalizedAbsY(normal(a, b, c)) < tuning.walkable_normal_y) continue;
         const y = surfaceYAt(a, b, c, x, z, tuning.coordinate_epsilon_meters) orelse continue;
         if (y <= lower_exclusive or y > upper_inclusive) continue;
@@ -126,6 +143,8 @@ fn ceilingSurfaceAt(
         const a = vertex(triangles, triangle, 0);
         const b = vertex(triangles, triangle, 1);
         const c = vertex(triangles, triangle, 2);
+        if (!pointInsideProjectionBounds(a, b, c, x, z, 0)) continue;
+        if (!overlapsVerticalRange(a, b, c, feet_y + tuning.top_side_clearance_meters, head_y)) continue;
         if (normalizedAbsY(normal(a, b, c)) < tuning.walkable_normal_y) continue;
         const y = surfaceYAt(a, b, c, x, z, tuning.coordinate_epsilon_meters) orelse continue;
         if (y <= feet_y + tuning.top_side_clearance_meters or y >= head_y) continue;
@@ -225,15 +244,9 @@ fn projectedTrianglePush(
     c: Vec3,
     tuning: Tuning,
 ) ?Push {
-    const triangle_min_y = @min(a.y, @min(b.y, c.y));
-    const triangle_max_y = @max(a.y, @max(b.y, c.y));
-    if (triangle_max_y <= feet_y + tuning.top_side_clearance_meters or triangle_min_y >= head_y) return null;
-
-    const min_x = @min(a.x, @min(b.x, c.x));
-    const max_x = @max(a.x, @max(b.x, c.x));
-    const min_z = @min(a.z, @min(b.z, c.z));
-    const max_z = @max(a.z, @max(b.z, c.z));
-    if (point.x + radius < min_x or point.x - radius > max_x or point.z + radius < min_z or point.z - radius > max_z) return null;
+    if (!overlapsVerticalRange(a, b, c, feet_y + tuning.top_side_clearance_meters, head_y)) return null;
+    if (!pointInsideProjectionBounds(a, b, c, point.x, point.z, radius)) return null;
+    if (normalizedAbsY(normal(a, b, c)) >= tuning.walkable_normal_y) return null;
 
     const source = [_]Vec3{ a, b, c };
     var lower: [6]Vec3 = undefined;
@@ -319,7 +332,6 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
             const a = vertex(triangles, triangle, 0);
             const b = vertex(triangles, triangle, 1);
             const c = vertex(triangles, triangle, 2);
-            if (normalizedAbsY(normal(a, b, c)) >= tuning.walkable_normal_y) continue;
             const push = projectedTrianglePush(
                 .{ .x = x, .z = z },
                 .{ .x = vx, .z = vz },

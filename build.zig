@@ -1443,6 +1443,21 @@ pub fn build(b: *std.Build) void {
     const game_physics_test_step = b.step("test-game-physics", "Run the game physics/movement behavior tests");
     game_physics_test_step.dependOn(&run_game_physics_test.step);
 
+    const game_mesh_collision_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/game_mesh_collision.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    game_mesh_collision_test_mod.addImport("game_physics", game_physics_mod_for_tests);
+    const game_mesh_collision_test = b.addTest(.{
+        .name = "game-mesh-collision-test",
+        .root_module = game_mesh_collision_test_mod,
+    });
+    const run_game_mesh_collision_test = b.addRunArtifact(game_mesh_collision_test);
+    const game_mesh_collision_test_step = b.step("test-game-mesh-collision", "Run exact resident-mesh collision tests");
+    game_mesh_collision_test_step.dependOn(&run_game_mesh_collision_test.step);
+
     // ── Game pathing behavior tests (V5 capture, P4) ───────────────
     // Exercises framework/game/pathing.zig: routes found/blocked/
     // deterministic, flow + lane discipline (trio snap, junction apexes),

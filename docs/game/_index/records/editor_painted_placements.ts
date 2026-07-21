@@ -4,9 +4,9 @@ export const editor_painted_placements: DocIndex = {
   name: 'editor_painted_placements',
   file: 'editor_painted_placements.md',
   cart: 'cart/editor/world/livePush.ts',
-  purpose: ['building', 'texture_bake', 'rendering', 'persistence'],
+  purpose: ['building', 'texture_bake', 'rendering', 'persistence', 'physics'],
   summary:
-    'Which mesh and collision shape a placed authored model uses (req_2832/2833/2930/3133/3328): the full-res meshdoc with the painting\'s UVs rebound onto it — except when the painting was made on a quality-DECIMATED display. The full-res saved Outliner ranges always own a bounded, geometry-refined collision-box bake, including one-row models; painted.json stamps which doc revision owns a decimated exported look.',
+    'Which mesh and collision shape a placed authored model uses (req_2832/2833/2930/3133/3328/3329): the full-res meshdoc with the painting\'s UVs rebound onto it — except when the painting was made on a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles, including one-row and multi-row models; painted.json stamps which doc revision owns a decimated exported look.',
   interfaces: [
     {
       name: 'painted.json doc-stamp (writeModelArtifacts ↔ paintedFormIsCurrent)',
@@ -20,14 +20,14 @@ export const editor_painted_placements: DocIndex = {
       status: 'live',
     },
     {
-      name: 'compileOutlinerCollisionBoxes (saved Outliner → resident MESH_PROPS colliders)',
+      name: 'compileOutlinerCollision (saved Outliner → coarse boxes + exact MESH_PROPS v10 triangles)',
       purpose: ['building', 'physics', 'geometry'],
       kind: 'utility',
       sourceFile: 'cart/editor/model/meshCollision.ts',
       description:
-        'Bakes at most 24 local-frame boxes from the full-resolution RJMD triangles. Saved visible Outliner ranges are hard roots; spare rows recursively split a root only when child surface-area hulls materially tighten the fit. This includes a one-row Outliner — req_3328 removed the old ranges.length < 2 opt-out that sent most props to the host\'s one whole-mesh AABB fallback. Over-budget multi-row paths still merge nearby same-family roots locally; flat faces thicken 4 cm downward. livePush writes the boxes into the existing MESH_PROPS collision block and world_loader consumes them verbatim, so no dynamic shape work enters the frame loop.',
-      dependsOn: ['cart/editor/data/meshDoc.ts PackageMeshDoc ranges', 'framework/world/constructor.zig MeshPropMesh.collision_boxes'],
-      consumers: ['cart/editor/world/livePush.ts residentMeshFor', 'framework/world_loader/physics.zig meshPropIslands'],
+        'Bakes at most 24 local-frame broadphase/camera boxes plus every finite triangle owned by visible full-resolution RJMD Outliner ranges. Saved ranges remain hard box roots; one-row models refine too, over-budget multi-row models merge nearby same-family roots locally, and hidden rows emit nothing. livePush writes both views into MESH_PROPS v10. world_loader retains those coarse rows for the spring-arm camera, dynamic bodies, and whole-prop broadphase while player contact clips the immutable local triangles to the body band for exact side/top/ceiling response. This removes req_3329\'s sloped-face empty-corner wall without generating geometry per frame; older wire versions and semantic doors retain box collision.',
+      dependsOn: ['cart/editor/data/meshDoc.ts PackageMeshDoc ranges', 'framework/world/constructor.zig MeshPropMesh.collision_boxes/collision_triangles', 'framework/game/mesh_collision.zig'],
+      consumers: ['cart/editor/world/livePush.ts residentMeshFor', 'framework/world_loader/physics.zig meshPropIslands/resolveMeshPropPlayer'],
       status: 'live',
     },
   ],

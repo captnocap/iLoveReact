@@ -39,6 +39,7 @@ const CAMERA_YAW_DEGREES_PER_PIXEL = m_config.CAMERA_YAW_DEGREES_PER_PIXEL;
 const CAMERA_PITCH_DEGREES_PER_PIXEL = m_config.CAMERA_PITCH_DEGREES_PER_PIXEL;
 const PLAYER_WALK_SPEED_METERS_PER_SECOND = m_config.PLAYER_WALK_SPEED_METERS_PER_SECOND;
 const PLAYER_RUN_SPEED_METERS_PER_SECOND = m_config.PLAYER_RUN_SPEED_METERS_PER_SECOND;
+const PLAYER_JUMP_SPEED_METERS_PER_SECOND = m_config.PLAYER_JUMP_SPEED_METERS_PER_SECOND;
 const PHYSICS_SOLID_HEIGHT_METERS = m_config.PHYSICS_SOLID_HEIGHT_METERS;
 const SCAN_P = m_config.SCAN_P;
 const PhysicsColliders = m_state.PhysicsColliders;
@@ -368,15 +369,16 @@ pub fn emitMeshPropColliders(self: anytype, oriented_tmp: []f32, oc: *usize, cli
 /// Narrow the player against exact saved-Outliner triangles after the ordinary
 /// rect/heightfield step. Baked and editor-live placements share the same mesh
 /// function; the ghost preview is deliberately absent.
-pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) void {
+pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) bool {
+    var grounded_on_mesh = false;
     if (self.scene.mesh_props) |mp| {
         for (mp.instances) |inst| {
             const mesh_index: usize = @intCast(inst.mesh);
             if (mesh_index >= mp.meshes.len) continue;
-            resolveMeshPropPlayer(&self.player, mp.meshes[mesh_index], inst, cfg);
+            grounded_on_mesh = resolveMeshPropPlayer(&self.player, mp.meshes[mesh_index], inst, cfg) or grounded_on_mesh;
         }
     }
-    const pending = pendingLiveMeshFor(self.node_id) orelse return;
+    const pending = pendingLiveMeshFor(self.node_id) orelse return grounded_on_mesh;
     for (pending.refs) |ref| {
         const mesh = meshForHash(self, ref.hash) orelse continue;
         const inst: constructor.MeshPropInstance = .{
@@ -386,8 +388,9 @@ pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) voi
             .z = ref.z,
             .yaw_degrees = ref.yaw,
         };
-        resolveMeshPropPlayer(&self.player, mesh, inst, cfg);
+        grounded_on_mesh = resolveMeshPropPlayer(&self.player, mesh, inst, cfg) or grounded_on_mesh;
     }
+    return grounded_on_mesh;
 }
 
 /// Rebuild the player's near-field collider set from the spatial grid: the
@@ -499,8 +502,19 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         // Refresh the near-field collider window around the player (huge maps only).
         // Cheap — it touches only the spanning list + the cells around the player.
         if (self.windowed) rebuildWindow(self, self.player.x, self.player.z);
-        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE) and !self.camera.external, cfg, self.bodies);
-        resolveExactMeshProps(self, cfg);
+        const jump_requested = keyDown(SCAN_SPACE) and !self.camera.external;
+        const was_grounded = self.player.grounded;
+        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, jump_requested, cfg, self.bodies);
+        const rect_step_launched = self.player.vy > 0;
+        const grounded_on_exact_mesh = resolveExactMeshProps(self, cfg);
+        // The packed rect step cannot see an exact mesh's triangle top, so it
+        // cannot authorize a jump from that surface. Preserve the same jump law
+        // using last frame's exact grounded state, after this frame re-seats the
+        // feet on the immutable mesh plane.
+        if (jump_requested and was_grounded and !rect_step_launched and grounded_on_exact_mesh) {
+            self.player.vy = if (cfg) |value| value.jump_speed else PLAYER_JUMP_SPEED_METERS_PER_SECOND;
+            self.player.grounded = false;
+        }
     } else if (self.bodies.len > 0) {
         // Seated: the world keeps stepping — an intent-less step whose
         // player result is discarded, so kicked balls roll past you
