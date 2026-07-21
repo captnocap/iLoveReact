@@ -1,0 +1,30 @@
+{
+  "id": "req_3343",
+  "at": "2026-07-21T12:43:39.636Z",
+  "origin": "codex:019f7e48",
+  "text": "hm. so it seems that the uv is all over the place some are back wards some are forwards. like notice this is backwards [Image #1] and it literally can never be forward as much as i rotate it",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T12:43:54.492Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T12:48:17.035Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed mirrored texture mappings at both the unwrap and editing layers. Native atlas generation now uses each face's outward normal sign to emit one consistent UV handedness across both sides of every axis, preventing half of box/cylinder-style faces from starting backwards. Existing authored/imported layouts gain explicit Flip U and Flip V toolbar actions for either a whole island or a double-click-isolated face, since rotation cannot reverse handedness. Added exact-corner TypeScript regressions and a native cube projection regression; UV tests, native paint-island tests, editor type-check, and the ReleaseFast editor build all pass.",
+  "shas": [
+    "58d2a2693"
+  ],
+  "resolvedAt": "2026-07-21T12:48:17.035Z"
+}
