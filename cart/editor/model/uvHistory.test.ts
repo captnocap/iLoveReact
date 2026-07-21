@@ -4,7 +4,9 @@ import {
   UV_ATLAS_RELOAD_LABEL,
   UV_HISTORY_ACTIONS,
   isUvDocumentHistoryLabel,
+  parsePaintHistory,
   parseModelHistory,
+  uvHistoryAvailability,
   uvHistoryActionOrdinal,
 } from './uvHistory';
 
@@ -34,6 +36,25 @@ test('native history parsing keeps depths and top labels honest', () => {
   const clamped = parseModelHistory('{"undo":-8,"redo":2.9}');
   assert(clamped.undo === 0 && clamped.redo === 2, 'malformed depths escaped normalization');
   assert(parseModelHistory('not json') === EMPTY_MODEL_HISTORY, 'malformed history did not use the stable empty state');
+});
+
+test('paint history normalizes its older label field for chronology barriers', () => {
+  const parsed = parsePaintHistory('{"undo":3,"redo":1,"label":"stroke","redoLabel":"delete layer"}');
+  assert(parsed.undo === 3 && parsed.redo === 1, 'paint journal depths drifted');
+  assert(parsed.undoLabel === 'stroke' && parsed.redoLabel === 'delete layer', 'paint top labels drifted');
+  assert(parsePaintHistory(null) === EMPTY_MODEL_HISTORY, 'missing paint history did not stay honest-empty');
+});
+
+test('paint steps ahead of UV history block out-of-order document restores', () => {
+  const model = parseModelHistory('{"undo":2,"redo":1,"undoLabel":"move UV islands","redoLabel":"rotate UV"}');
+  assert(uvHistoryAvailability(model, EMPTY_MODEL_HISTORY).undo, 'clean UV undo was blocked');
+  assert(uvHistoryAvailability(model, EMPTY_MODEL_HISTORY).redo, 'clean UV redo was blocked');
+  const newerPaint = parsePaintHistory('{"undo":1,"redo":0,"label":"stroke"}');
+  assert(!uvHistoryAvailability(model, newerPaint).undo, 'UV undo could overwrite a newer stroke');
+  const earlierUndonePaint = parsePaintHistory('{"undo":0,"redo":1,"redoLabel":"stroke"}');
+  assert(!uvHistoryAvailability(model, earlierUndonePaint).redo, 'UV redo could skip an earlier paint redo');
+  const meshTop = parseModelHistory('{"undo":1,"redo":0,"undoLabel":"delete part"}');
+  assert(!uvHistoryAvailability(meshTop, EMPTY_MODEL_HISTORY).undo, 'UV panel could bypass a newer mesh edit');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

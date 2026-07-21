@@ -52,6 +52,7 @@ import {
   UV_ATLAS_IMPORT_LABEL,
   UV_ATLAS_RELOAD_LABEL,
   isUvDocumentHistoryLabel,
+  parsePaintHistory,
   parseModelHistory,
   uvHistoryActionOrdinal,
   type ModelHistoryDepths,
@@ -141,7 +142,7 @@ export type ModelFocusShape = {
 export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   paintLive: boolean;
-  uvHistory: ModelHistoryDepths;
+  readUvHistory: () => Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
   refreshUv: () => void;
   applyUvLayout: (rects: Uint32Array) => boolean;
   applyUvGeometry: (corners: Float32Array, action: UvHistoryAction) => boolean;
@@ -522,6 +523,7 @@ const meshAppendFile = (path: string, expectedPartCount: number) => readTopoResu
 const meshUndoDoor = () => readTopoResult(host.__mesh_undo?.());
 const meshRedoDoor = () => readTopoResult(host.__mesh_redo?.());
 const readMeshHistory = (): ModelHistoryDepths => parseModelHistory(host.__mesh_history?.());
+const readPaintHistory = (): ModelHistoryDepths => parsePaintHistory(host.__mesh_paint_history?.());
 // The parts-metadata note the restored snapshot carried (the shell sets it after every
 // part-structure change; read back after an undo/redo to resync the outliner).
 const meshJournalNote = (): string | null => {
@@ -1350,6 +1352,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!isUvDocumentHistoryLabel(label)) {
       return `${verb === 'undo' ? 'Undo' : 'Redo'} is currently owned by “${label || 'another model edit'}”; use the app-wide history control.`;
     }
+    const paintHistory = readPaintHistory();
+    const paintBarrier = redo ? paintHistory.redo : paintHistory.undo;
+    if (paintBarrier > 0) {
+      const reopen = paintMode ? '' : ' (re-enter Paint)';
+      return redo
+        ? `Redo ${paintBarrier} paint ${paintBarrier === 1 ? 'step' : 'steps'} first${reopen}; they were undone after this UV step.`
+        : `Undo ${paintBarrier} newer paint ${paintBarrier === 1 ? 'step' : 'steps'} first${reopen}.`;
+    }
     const result = redo ? meshRedoDoor() : meshUndoDoor();
     if (!adoptMeshHistoryResult(result)) return `${verb === 'undo' ? 'Undo' : 'Redo'} ${label} failed; the live model was left unchanged.`;
     onDocumentMutated?.();
@@ -1834,7 +1844,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       paintLive: paintMode,
-      uvHistory: readMeshHistory(),
+      readUvHistory: () => ({ uv: readMeshHistory(), paint: readPaintHistory() }),
       refreshUv: buildUvPanel,
       applyUvLayout,
       applyUvGeometry,

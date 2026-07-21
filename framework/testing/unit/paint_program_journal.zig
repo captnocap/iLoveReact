@@ -26,14 +26,51 @@ test "journal state restores layers and the stroke history it replaced" {
     const third = paint_program.layerAdd();
     try testing.expect(third != 0);
     try testing.expect(paint_program.layerRename(third, "Discard me"));
+    try testing.expect(paint_program.layerRename(second, "Live rename"));
+    try testing.expect(paint_program.layerSetActive(second));
     try testing.expectEqual(@as(usize, 3), paint_program.layerCount());
     try testing.expectEqual([2]u32{ 2, 0 }, paint_program.historyCounts());
 
     // Consumes the clone. No replay or allocator can fail after this boundary.
     paint_program.journalStateAdopt(restore);
     try testing.expectEqual(@as(usize, 2), paint_program.layerCount());
-    try testing.expectEqualStrings("Ink", paint_program.layerInfoAt(1).name);
+    try testing.expectEqualStrings("Live rename", paint_program.layerInfoAt(1).name);
     try testing.expectEqual(second, paint_program.activeLayerId());
     try testing.expectEqual([2]u32{ 1, 0 }, paint_program.historyCounts());
     try testing.expectEqualStrings("add layer", paint_program.undoLabel());
+}
+
+test "history swaps retain paint redo while a new UV action abandons the old branch" {
+    paint_program.reset();
+    defer paint_program.reset();
+    var environ = try std.testing.environ.createMap(std.testing.allocator);
+    defer environ.deinit();
+
+    try testing.expect(paint_program.layerAdd() != 0);
+    try testing.expect(paint_program.undoStroke(std.testing.io, &environ));
+    try testing.expectEqual([2]u32{ 0, 1 }, paint_program.historyCounts());
+
+    const swap_state = paint_program.journalStateCapture() orelse return error.TestUnexpectedResult;
+    const swap_restore = paint_program.journalStateClone(swap_state) orelse {
+        paint_program.journalStateFree(swap_state);
+        return error.TestUnexpectedResult;
+    };
+    paint_program.journalStateFree(swap_state);
+    try testing.expectEqual([2]u32{ 0, 1 }, paint_program.historyCounts());
+
+    // A mesh-journal swap retains paint units undone after the UV step, so redoing UV
+    // can expose those paint redos in the correct order afterward.
+    try testing.expect(paint_program.layerAdd() != 0);
+    paint_program.journalStateAdopt(swap_restore);
+    try testing.expectEqual([2]u32{ 0, 1 }, paint_program.historyCounts());
+
+    const new_action_state = paint_program.journalStateCaptureForNewAction() orelse return error.TestUnexpectedResult;
+    const new_action_restore = paint_program.journalStateClone(new_action_state) orelse {
+        paint_program.journalStateFree(new_action_state);
+        return error.TestUnexpectedResult;
+    };
+    paint_program.journalStateFree(new_action_state);
+    try testing.expect(paint_program.layerAdd() != 0);
+    paint_program.journalStateAdopt(new_action_restore);
+    try testing.expectEqual([2]u32{ 0, 0 }, paint_program.historyCounts());
 }

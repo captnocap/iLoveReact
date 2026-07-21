@@ -5,7 +5,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
 import { accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
-import { isUvDocumentHistoryLabel, type UvHistoryAction } from '../model/uvHistory';
+import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import {
   chainUvIslands,
   flattenUvFaceCorners,
@@ -60,6 +60,7 @@ type SelectionMode = 'island' | 'face';
 type UvLineGeometry = { faces: number[]; boundary: number[] };
 type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeometry };
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
+type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: View }
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
@@ -68,6 +69,17 @@ type Gesture =
   | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; seed: UvIslandRect };
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
+
+function sameHistory(a: ModelHistoryDepths, b: ModelHistoryDepths): boolean {
+  return a.undo === b.undo
+    && a.redo === b.redo
+    && a.undoLabel === b.undoLabel
+    && a.redoLabel === b.redoLabel;
+}
+
+function samePanelHistory(a: UvPanelHistory, b: UvPanelHistory): boolean {
+  return sameHistory(a.uv, b.uv) && sameHistory(a.paint, b.paint);
+}
 
 function atlasGridSegments(atlasWidth: number, atlasHeight: number, step: number): { minor: number[]; major: number[] } {
   const minor: number[] = [];
@@ -220,6 +232,21 @@ function historyActionButton(icon: string, label: string, enabled: boolean, tool
 
 export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; focused?: boolean }) {
   const { uv, bridge } = props;
+  const [documentHistory, setDocumentHistory] = useState<UvPanelHistory>(() => bridge.readUvHistory());
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      if (!live) return;
+      const next = bridge.readUvHistory();
+      setDocumentHistory((current) => samePanelHistory(current, next) ? current : next);
+    };
+    refresh();
+    const timer = setInterval(refresh, UV_HISTORY_TUNING.refreshMs);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [bridge]);
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
   const [rects, setRects] = useState<UvIslandRect[]>(initialRects);
@@ -662,16 +689,27 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     if (gesture?.kind === 'rotate') commit(rectsRef.current, gesture.target ? 'rotated detached UV face' : 'rotated UV island', 'rotate');
     if (gesture?.kind === 'scale') commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island', 'scale');
   };
-  const history = bridge.uvHistory;
-  const canUndoUv = history.undo > 0 && isUvDocumentHistoryLabel(history.undoLabel);
-  const canRedoUv = history.redo > 0 && isUvDocumentHistoryLabel(history.redoLabel);
-  const stepHistory = (redo: boolean) => setNote(redo ? bridge.redoUvHistory() : bridge.undoUvHistory());
+  const history = documentHistory.uv;
+  const paintHistory = documentHistory.paint;
+  const historyAvailable = uvHistoryAvailability(history, paintHistory);
+  const canUndoUv = historyAvailable.undo;
+  const canRedoUv = historyAvailable.redo;
+  const stepHistory = (redo: boolean) => {
+    setNote(redo ? bridge.redoUvHistory() : bridge.undoUvHistory());
+    setDocumentHistory(bridge.readUvHistory());
+  };
   const historyTooltip = (redo: boolean): string => {
     const depth = redo ? history.redo : history.undo;
     const label = redo ? history.redoLabel : history.undoLabel;
     const verb = redo ? 'Redo' : 'Undo';
     if (depth <= 0) return `${verb} — UV history is empty`;
     if (!isUvDocumentHistoryLabel(label)) return `${verb} “${label || 'model edit'}” from the app-wide history control`;
+    const paintBarrier = redo ? paintHistory.redo : paintHistory.undo;
+    if (paintBarrier > 0) {
+      return redo
+        ? `Redo ${paintBarrier} paint ${paintBarrier === 1 ? 'step' : 'steps'} first — they were undone after this UV step`
+        : `Undo ${paintBarrier} newer paint ${paintBarrier === 1 ? 'step' : 'steps'} first`;
+    }
     return `${verb} ${label}`;
   };
 

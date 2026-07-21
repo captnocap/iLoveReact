@@ -3133,7 +3133,7 @@ fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
     stack.clearRetainingCapacity();
 }
 
-fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
+fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?JournalEntry {
     const verts = g_edit_verts orelse return null;
     // g_edit_count == 0 is a valid EMPTY snapshot (req_2806): stepping the journal
     // away from an emptied model must be able to record "it was empty" for redo.
@@ -3173,7 +3173,10 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         entry.atlas = .{ .rgba = rgba, .w = atlas.w, .h = atlas.h };
     }
     if (restore_domain == .uv or restore_domain == .atlas) {
-        entry.paint_state = paint_program.journalStateCapture() orelse {
+        entry.paint_state = (if (new_document_action)
+            paint_program.journalStateCaptureForNewAction()
+        else
+            paint_program.journalStateCapture()) orelse {
             journalFreeEntry(&entry);
             return null;
         };
@@ -3220,6 +3223,14 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
     }
     if (g_journal_note) |n| entry.note = jalloc.dupe(u8, n) catch null;
     return entry;
+}
+
+fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
+    return journalSnapshotCurrentInner(label, false);
+}
+
+fn journalSnapshotForNewAction(label: []const u8) ?JournalEntry {
+    return journalSnapshotCurrentInner(label, true);
 }
 
 /// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
@@ -7022,7 +7033,7 @@ pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) b
     const verts = g_edit_verts orelse return false;
     const atlas = model_paint.atlas() orelse return false;
     if (mesh_journal_log.atlasCornersMatchInterleavedUv(verts, g_edit_count, atlas.w, atlas.h, corners)) return true;
-    var snap = journalSnapshotCurrent(label);
+    var snap = journalSnapshotForNewAction(label);
     if (snap == null) return false;
     if (!applyUvCornerGeometry(corners)) {
         journalDiscard(&snap);
@@ -7046,7 +7057,7 @@ pub fn replacePaintAtlas(rgba: []const u8) bool {
 pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
     const atlas = model_paint.atlas() orelse return false;
     if (std.mem.eql(u8, atlas.rgba, rgba)) return true;
-    var snap = journalSnapshotCurrent(mesh_journal_log.UV_TEXTURE_RELOAD_LABEL);
+    var snap = journalSnapshotForNewAction(mesh_journal_log.UV_TEXTURE_RELOAD_LABEL);
     if (snap == null or snap.?.atlas == null) {
         journalDiscard(&snap);
         return false;
@@ -7077,7 +7088,7 @@ pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool
     if (model_paint.atlas()) |atlas| {
         if (atlas.w == width and atlas.h == height and std.mem.eql(u8, atlas.rgba, rgba)) return true;
     } else return false;
-    var snap = journalSnapshotCurrent(mesh_journal_log.UV_TEXTURE_IMPORT_LABEL);
+    var snap = journalSnapshotForNewAction(mesh_journal_log.UV_TEXTURE_IMPORT_LABEL);
     if (snap == null or snap.?.atlas == null) {
         journalDiscard(&snap);
         return false;

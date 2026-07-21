@@ -359,7 +359,7 @@ const Snapshot = struct {
 /// Opaque, exact paint-authoring state carried by the model journal across UV and
 /// texture transactions. The raster lives in the model journal separately; this
 /// snapshot owns everything that makes that raster editable again: layers, strokes,
-/// shader recipes, the raster baseline, and both sides of the stroke undo journal.
+/// shader recipes, the raster baseline, and the applicable stroke undo/redo branches.
 /// Callers can clone, byte-count, adopt, or free it but cannot couple themselves to
 /// the paint program's internal representation.
 pub const JournalState = opaque {};
@@ -569,7 +569,7 @@ fn snapshotsContainStrokes(snapshots: []const Snapshot) bool {
     return false;
 }
 
-fn captureJournalStateData() ?JournalStateData {
+fn captureJournalStateData(discard_redo_branch: bool) ?JournalStateData {
     // A flattened/imported atlas commonly has an empty program but a full-size
     // baseline equal to the live raster. Do not copy those megabytes into every UV
     // gesture: with no current or historical strokes, the next stroke can recapture
@@ -592,7 +592,15 @@ fn captureJournalStateData() ?JournalStateData {
         .active_mat = g_active_mat,
         .active_rgb = g_active_rgb,
     };
-    return cloneJournalStateData(&source);
+    var captured = cloneJournalStateData(&source) orelse return null;
+    if (discard_redo_branch) {
+        // A UV/texture command is a NEW document action. Standard branch semantics
+        // discard paint redo that already existed before it; undoing the UV command
+        // must not resurrect that abandoned branch. A journal SWAP passes false so
+        // paint units already undone after this UV unit remain available after redo.
+        freeSnapshotStack(&captured.redo);
+    }
+    return captured;
 }
 
 fn journalStateData(state: *const JournalState) *const JournalStateData {
@@ -613,12 +621,20 @@ fn ownJournalState(data: JournalStateData) ?*JournalState {
     return @ptrCast(owned);
 }
 
-/// Capture the exact editable paint state. Any half-open stroke is first committed,
-/// matching the existing save/undo boundary: a UV or texture command can never strand
-/// a partial gesture outside both journals.
+/// Capture the exact editable paint state for an undo/redo swap. Any half-open stroke
+/// is first committed, matching the existing save/undo boundary; both history sides
+/// are retained because either may contain paint units adjacent to the UV unit.
 pub fn journalStateCapture() ?*JournalState {
     _ = endStrokeUnit();
-    const data = captureJournalStateData() orelse return null;
+    const data = captureJournalStateData(false) orelse return null;
+    return ownJournalState(data);
+}
+
+/// Capture the pre-state of a newly committed UV/texture action. Unlike a history
+/// swap, a new action abandons any paint-redo branch that existed before it.
+pub fn journalStateCaptureForNewAction() ?*JournalState {
+    _ = endStrokeUnit();
+    const data = captureJournalStateData(true) orelse return null;
     return ownJournalState(data);
 }
 
@@ -656,9 +672,19 @@ pub fn journalStateAdopt(state: *JournalState) void {
     const data = journalStateDataMut(state);
 
     // Layer visibility is view state (req_2752), not document history. Carry the live
-    // eye toggles for ids that exist on both sides, exactly like stroke undo/redo.
+    // eye toggles, names, and active target for ids that exist on both sides, exactly
+    // like a non-journaled panel edit. Swapping owned name buffers keeps adoption
+    // allocation-free: the discarded snapshot names are freed with the old live list.
+    const live_active = g_active_layer;
+    var preserve_live_active = false;
     for (data.layers.items) |*layer| {
-        if (layerIndexOf(layer.id)) |current| layer.visible = g_layers.items[current].visible;
+        if (layerIndexOf(layer.id)) |current| {
+            layer.visible = g_layers.items[current].visible;
+            const snapshot_name = layer.name;
+            layer.name = g_layers.items[current].name;
+            g_layers.items[current].name = snapshot_name;
+            preserve_live_active = preserve_live_active or layer.id == live_active;
+        }
     }
 
     g_open.clearRetainingCapacity();
@@ -691,7 +717,7 @@ pub fn journalStateAdopt(state: *JournalState) void {
     g_baseline = data.baseline;
     data.baseline = null;
 
-    g_active_layer = data.active;
+    g_active_layer = if (preserve_live_active) live_active else data.active;
     g_next_layer_id = data.next_id;
     g_have_active = data.have_active;
     g_active_is_mat = data.active_is_mat;

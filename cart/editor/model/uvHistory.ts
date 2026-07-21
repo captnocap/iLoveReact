@@ -20,6 +20,7 @@ export const UV_HISTORY_ACTIONS = [
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';
 export const UV_ATLAS_RELOAD_LABEL = 'reload UV texture';
 export const JOURNAL_UV_ATLAS_MUTATION = 1;
+export const UV_HISTORY_TUNING = { refreshMs: 250 } as const;
 
 export type UvHistoryAction = typeof UV_HISTORY_ACTIONS[number]['id'];
 
@@ -50,6 +51,18 @@ export function isUvDocumentHistoryLabel(label: string): boolean {
     || UV_HISTORY_ACTIONS.some((row) => row.label === label);
 }
 
+/**
+ * UV and paint use different replay engines but share one model chronology. A UV
+ * step may run only when no newer paint undo (or earlier-undone paint redo) sits
+ * in front of it.
+ */
+export function uvHistoryAvailability(model: ModelHistoryDepths, paint: ModelHistoryDepths): Readonly<{ undo: boolean; redo: boolean }> {
+  return {
+    undo: model.undo > 0 && paint.undo === 0 && isUvDocumentHistoryLabel(model.undoLabel),
+    redo: model.redo > 0 && paint.redo === 0 && isUvDocumentHistoryLabel(model.redoLabel),
+  };
+}
+
 function boundedDepth(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.trunc(value))
@@ -65,6 +78,22 @@ export function parseModelHistory(raw: unknown): ModelHistoryDepths {
       undo: boundedDepth(value.undo),
       redo: boundedDepth(value.redo),
       undoLabel: typeof value.undoLabel === 'string' ? value.undoLabel : '',
+      redoLabel: typeof value.redoLabel === 'string' ? value.redoLabel : '',
+    };
+  } catch {
+    return EMPTY_MODEL_HISTORY;
+  }
+}
+
+/** The paint journal uses `label` for its undo-side top; normalize it to the same shape. */
+export function parsePaintHistory(raw: unknown): ModelHistoryDepths {
+  if (typeof raw !== 'string' || raw.length === 0) return EMPTY_MODEL_HISTORY;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      undo: boundedDepth(value.undo),
+      redo: boundedDepth(value.redo),
+      undoLabel: typeof value.label === 'string' ? value.label : '',
       redoLabel: typeof value.redoLabel === 'string' ? value.redoLabel : '',
     };
   } catch {
