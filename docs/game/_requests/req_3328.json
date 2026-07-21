@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:03:51.927Z",
   "origin": "codex:019f83e9",
   "text": "exported props in the editor inthe the game world hold a physics rect that is not exact to the prop, it takes the widest part and the tallest part and defines it as one whole block. this becomes highly problematic very quickly you could imagine. it should be exact to its outliner",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f83e9-2fdd-7a03-942f-ca45df4b0cb9",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,24 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-21T09:13:58.729Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed: compileOutlinerCollisionBoxes returns no authored boxes for a one-row Outliner, so most exported props fall through to the host's single welded whole-mesh AABB. The earlier req_2930 fix only decomposes multi-row Outliners (and caps them at 24); this pass is extending the same baked collision contract to spatially decompose geometry inside each visible Outliner range."
+    },
+    {
+      "at": "2026-07-21T09:23:17.618Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Fixed the active editor's exported-prop collision bake: one-row Outliners no longer opt out to the host's widest-by-tallest whole-mesh AABB. Visible saved ranges remain hard boundaries, while spare rows form bounded geometry-derived local boxes under the existing 24-box contract. Added a welded doorway regression, updated the collision knowledge record, passed all 54 editor TypeScript suites plus the editor bundle and MESH_PROPS transport checks, and read-only checked the new tunnel_test geometry keeps its center passage open.",
+  "shas": [
+    "b12f96147"
+  ],
+  "resolvedAt": "2026-07-21T09:23:17.618Z"
 }
