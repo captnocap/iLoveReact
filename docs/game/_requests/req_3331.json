@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:43:17.979Z",
   "origin": "codex:019f7e48",
   "text": "ok all good. next so its giving me this path to copy \"/home/siah/demo/cart/editor/data/models/props/Model_45/atlases/base.png\" but it doesnt exist  and then secondly we need to next add in the capability to import in a texture to then be able to remap the uv to it",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-21T09:54:13.306Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "The UV texture workflow now writes and verifies the live atlas before copying its absolute base.png path, so the editor no longer advertises a file that has not landed. The UV panel also imports PNG/JPEG/WebP/BMP textures through the native picker at their own dimensions, preserves the current normalized UV map for immediate remapping, persists the imported raster as the model baseline, and restores that native size before the saved layout on reopen.",
+  "shas": [
+    "88749408c",
+    "2dc8be811"
+  ],
+  "resolvedAt": "2026-07-21T09:54:13.305Z"
 }
