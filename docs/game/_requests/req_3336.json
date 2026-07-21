@@ -1,0 +1,30 @@
+{
+  "id": "req_3336",
+  "at": "2026-07-21T10:26:24.692Z",
+  "origin": "codex:019f7e48",
+  "text": "one big performance problem on the uv still is panning the canvas around",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:26:29.943Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:31:15.435Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed raw-pointer-rate React churn from UV canvas panning. Motion now keeps the latest camera sample and reconciles once per presented host frame; the grid and dense mesh edges remain immutable in atlas space and pan through Graph view transforms instead of rebuilding screen-space point arrays for every SDL packet. Dense vertex handles are batched and the ReleaseFast editor build plus focused UV tests pass.",
+  "shas": [
+    "366c6161a"
+  ],
+  "resolvedAt": "2026-07-21T10:31:15.435Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_3335",
+  "at": "2026-07-21T10:17:21.566Z",
+  "origin": "codex:019f7e48",
+  "text": "ah the moment the uv is any actually tangible it is laggy. 6 cube faces is fine. 600 faces from a head is laggy as shit and its very hard to see what ur doing because the area is so small",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:17:32.045Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:31:15.426Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made production-scale UV editing practical for dense meshes. Whole-island previews now keep triangle edges and vertex handles in immutable atlas-space buffers and move them through native Graph transforms; vertex de-duplication is linear instead of quadratic; hundreds of vertex dots are two batched draws instead of hundreds of layout nodes; unchanged snap samples are discarded. Added a 600-face regression and a reversible expand control that widens the real Paint/UV panel from 480px to a fixed 760px workspace while retaining the stage beside it.",
+  "shas": [
+    "366c6161a",
+    "448f587c5"
+  ],
+  "resolvedAt": "2026-07-21T10:31:15.426Z"
+}
