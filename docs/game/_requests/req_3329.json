@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:30:26.336Z",
   "origin": "codex:019f83e9",
   "text": "ok so then here is the next problem still look at how bad this is. [Image #1] see the distance between me and the grey block thats all invisible wall i should be able to touch it",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f83e9-2fdd-7a03-942f-ca45df4b0cb9",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,19 @@
       "actor": "codex",
       "kind": "note",
       "text": "The screenshot matches tunnel_test's saved inner arch exactly: one sloped face runs from z≈3.94 at y≈0.47 to z≈2.72 at y≈6.81. The current triangle AABB blocks at z≈2.72 across that entire height; at the editor player's 1.65 m body span the visible face is near z≈3.62, leaving about 0.90 m of false wall before player radius. This is inherent to AABB narrowphase, not a box-budget/tuning issue."
+    },
+    {
+      "at": "2026-07-21T10:03:41.913Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Replaced the player-facing collision approximation for ordinary exported editor props with an immutable exact-triangle narrowphase carried by MESH_PROPS v10. Every finite triangle from every visible saved Outliner member now participates, while hidden members stay absent; the bounded 24-box bake remains for whole-prop broadphase, spring-arm camera collision, and dynamic bodies. The host clips nearby triangles to the player height band for exact side, walkable-top, and ceiling contact, preserves rotated placements and jumping from mesh tops, and culls distant faces before normal math. The regression uses the actual tunnel_test slope that previously created roughly 0.9 m of invisible wall. Older wire versions and semantic doors retain their box contracts. Focused TS/Zig tests and a ReleaseFast editor ship pass; user visual contact and the required 60-second spikewatch play pass remain the review gate.",
+  "shas": [
+    "88660f4d3",
+    "c615d12c6"
+  ],
+  "resolvedAt": "2026-07-21T10:03:41.913Z"
 }
