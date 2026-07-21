@@ -1,0 +1,37 @@
+{
+  "id": "req_3334",
+  "at": "2026-07-21T10:05:52.954Z",
+  "origin": "codex:019f7e48",
+  "text": "really good one thing you could lock in better is the snapping of moving around the uv it still feels very loose",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-21T10:06:06.056Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:11:28.506Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "COORDINATION: the UV snapping implementation was already staged in the shared worktree when req_3333's ledger commit ran, so those three files were preserved in commit a5384c41e alongside req_3333.json. Use a5384c41e as the implementation SHA; no UV content was altered by the req_3333 lane."
+    },
+    {
+      "at": "2026-07-21T10:12:16.961Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "UV translation now has a deliberate drag latch, so selection clicks and small pointer jitter cannot nudge an island or vertex. Island, isolated-face, and vertex movement share a zoom-aware power-of-two snap step that remains perceptible on screen, the active step is shown beneath the canvas, Alt consistently enables free movement, and samples that remain inside the same snap cell no longer churn the preview.",
+  "shas": [
+    "a5384c41e",
+    "200280c1b"
+  ],
+  "resolvedAt": "2026-07-21T10:12:16.961Z"
+}
