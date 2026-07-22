@@ -2253,10 +2253,9 @@ export default function AppFrame() {
         ...(propTarget ? { propRole: propTarget.role } : {}),
         ...(textureSlots.length > 0 ? { textureSlots } : {}),
       };
-      // A painted export contributes one palette tile per STORED painting, with
-      // no extra mutable base duplicate. Arm the newest visible skin (or the
-      // base fallback when there are no saved skins) so Export never arms a
-      // hidden/stale entry that the tray itself does not offer.
+      // Export arms the CURRENT base atlas — exactly the look visible in Studio.
+      // Stored paintings remain separate stable variants in the palette and can
+      // be armed deliberately; they never silently replace the current look.
       const armedPieceId = preferredAuthoredPaletteId(piece);
       const kindLabel = kind === 'prop'
         ? `${propTarget?.label ?? 'Scenery Prop'} [${describePropRig(rig)}]`

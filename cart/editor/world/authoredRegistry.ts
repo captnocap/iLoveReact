@@ -129,38 +129,40 @@ export function placeableKind(pieceId: string): PlaceableKind | undefined {
 export type PlaceableEntry = { id: string; label: string; hex: string; authored: boolean };
 export type PlaceableGroup = { kind: PlaceableKind; label: string; entries: PlaceableEntry[] };
 
-/** The palette entries for ONE exported model. Stored paintings are the
- *  exported catalog looks, so they REPLACE the mutable base entry rather than
- *  sitting beside it. A model with no stored painting keeps one base fallback.
- *  Passing `skins` makes this boundary independently testable; production reads
- *  the package's placeable paint-skin pairs from disk. */
+/** The palette entries for ONE exported model. The base entry is the model's
+ *  CURRENT saved atlas — the look visible in Studio and therefore the look Export
+ *  must arm. Named paintings remain stable, separately placeable variants beside
+ *  it. Passing `skins` makes this boundary independently testable; production
+ *  reads the package's placeable paint-skin pairs from disk. */
 export function authoredPaletteEntries(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): PlaceableEntry[] {
   const resolvedSkins = skins ?? (() => {
     const pkg = modelPackageById(ap.pkgId);
     return pkg ? listPaintSkins(pkg) : [];
   })();
-  if (resolvedSkins.length === 0) {
-    return [{ id: ap.id, label: ap.label, hex: ap.hex, authored: true }];
-  }
-  return resolvedSkins.map((skin) => ({
+  const current = {
+    id: ap.id,
+    label: resolvedSkins.length > 0 ? `${ap.label} · Current` : ap.label,
+    hex: ap.hex,
+    authored: true,
+  };
+  return [current, ...resolvedSkins.map((skin) => ({
     id: skinnedPieceId(ap.id, skin.id),
     label: `${ap.label} · ${skin.name}`,
     hex: ap.hex,
     authored: true,
-  }));
+  }))];
 }
 
-/** The visible entry Export arms. Paint skins are id-sorted, so the newest
- *  stored painting is the default; the tray still exposes every saved look. */
+/** Export arms the current saved atlas — exactly the look visible in Studio.
+ *  Named paintings stay available in the tray but never silently replace it. */
 export function preferredAuthoredPaletteId(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): string {
-  const entries = authoredPaletteEntries(ap, skins);
-  return entries[entries.length - 1]?.id ?? ap.id;
+  return authoredPaletteEntries(ap, skins)[0]?.id ?? ap.id;
 }
 
 /** Every placeable grouped by kind: catalog rows first, then authored pieces of
  *  that same affinity (so an exported "wall piece" sits under Wall). An authored
- *  model contributes exactly one tile per stored paint skin, or one base tile
- *  when it has no skins (req_2834); exported props occupy the trailing group. */
+ *  model contributes its current base look plus one tile per stored paint skin
+ *  (req_2834); exported props occupy the trailing group. */
 export function placeablesByKind(): PlaceableGroup[] {
   const byKind = new Map<PlaceableKind, PlaceableEntry[]>();
   for (const g of catalogByKind()) {
