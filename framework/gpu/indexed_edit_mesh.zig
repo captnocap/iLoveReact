@@ -1928,6 +1928,84 @@ test "reference multi-cut recursively spaces cuts from the amended offset" {
     try std.testing.expect(saw_far);
 }
 
+test "two perpendicular two-cut loops add exactly four planes to a manifold cuboid" {
+    const allocator = std.testing.allocator;
+    const half_width: f32 = 1.5;
+    const half_height: f32 = 1.5;
+    const half_depth: f32 = 0.0025;
+    const quads = [_][4]Vec3{
+        .{ .{ -half_width, half_height, -half_depth }, .{ -half_width, half_height, half_depth }, .{ half_width, half_height, half_depth }, .{ half_width, half_height, -half_depth } },
+        .{ .{ -half_width, -half_height, -half_depth }, .{ half_width, -half_height, -half_depth }, .{ half_width, -half_height, half_depth }, .{ -half_width, -half_height, half_depth } },
+        .{ .{ -half_width, -half_height, -half_depth }, .{ -half_width, half_height, -half_depth }, .{ half_width, half_height, -half_depth }, .{ half_width, -half_height, -half_depth } },
+        .{ .{ -half_width, -half_height, half_depth }, .{ half_width, -half_height, half_depth }, .{ half_width, half_height, half_depth }, .{ -half_width, half_height, half_depth } },
+        .{ .{ -half_width, -half_height, -half_depth }, .{ -half_width, -half_height, half_depth }, .{ -half_width, half_height, half_depth }, .{ -half_width, half_height, -half_depth } },
+        .{ .{ half_width, -half_height, -half_depth }, .{ half_width, half_height, -half_depth }, .{ half_width, half_height, half_depth }, .{ half_width, -half_height, half_depth } },
+    };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 12, fixture.groups, null);
+    defer mesh.deinit();
+
+    // Pick the -Z wall face and add two vertical loops.
+    var first_selected = [_]bool{false} ** 12;
+    first_selected[4] = true;
+    first_selected[5] = true;
+    try std.testing.expect(try mesh.loopCut(first_selected[0..], 1, 2, 0.5));
+    try std.testing.expectEqual(@as(usize, 14), mesh.faces.items.len);
+
+    // A committed edit re-lowers the mesh before the next face pick. Re-adopt
+    // those source-triangle ids exactly as the host session does, then choose a
+    // front panel's vertical edge for the perpendicular pair.
+    var first_lowered = try mesh.lower();
+    defer first_lowered.deinit();
+    mesh.adoptLoweredMetadata(&first_lowered, first_lowered.groups, null);
+    const second_selected = try allocator.alloc(bool, first_lowered.tri_count);
+    defer allocator.free(second_selected);
+    @memset(second_selected, false);
+    var second_direction: u32 = 0;
+    var found_front_panel = false;
+    for (mesh.faces.items) |*face| {
+        if (!face.alive) continue;
+        const normal = Mesh.faceNormal(&mesh, face);
+        if (normal[2] > -0.99) continue;
+        for (face.vertices.items, 0..) |vertex_id, edge_index| {
+            const next_id = face.vertices.items[(edge_index + 1) % face.vertices.items.len];
+            const a = mesh.vertices.items[vertex_id].position;
+            const b = mesh.vertices.items[next_id].position;
+            if (@abs(b[1] - a[1]) > 2.9) {
+                second_direction = @intCast(edge_index);
+                found_front_panel = true;
+                break;
+            }
+        }
+        if (!found_front_panel) continue;
+        for (face.source_triangles.items) |triangle| second_selected[triangle] = true;
+        break;
+    }
+    try std.testing.expect(found_front_panel);
+    try std.testing.expect(try mesh.loopCut(second_selected, second_direction, 2, 0.5));
+
+    // A 3x3 grid on front/back plus three strips on each remaining side is 30
+    // quads. Only x=+-0.5 and y=+-0.5 are new planes: no hidden fifth plane and
+    // no local diagonal promoted into the editable boundary graph.
+    try std.testing.expectEqual(@as(usize, 30), mesh.faces.items.len);
+    var saw_x_negative = false;
+    var saw_x_positive = false;
+    var saw_y_negative = false;
+    var saw_y_positive = false;
+    for (mesh.vertices.items) |vertex| {
+        const x = vertex.position[0];
+        const y = vertex.position[1];
+        if (@abs(x + 0.5) < 1e-5) saw_x_negative = true else if (@abs(x - 0.5) < 1e-5) saw_x_positive = true else try std.testing.expect(@abs(@abs(x) - half_width) < 1e-5);
+        if (@abs(y + 0.5) < 1e-5) saw_y_negative = true else if (@abs(y - 0.5) < 1e-5) saw_y_positive = true else try std.testing.expect(@abs(@abs(y) - half_height) < 1e-5);
+    }
+    try std.testing.expect(saw_x_negative and saw_x_positive and saw_y_negative and saw_y_positive);
+    var final_lowered = try mesh.lower();
+    defer final_lowered.deinit();
+    try std.testing.expectEqual(@as(u32, 60), final_lowered.tri_count);
+}
+
 test "offset preview reuses topology and only recomputes cut vertices" {
     const allocator = std.testing.allocator;
     const quads = [_][4]Vec3{.{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } }};

@@ -58,6 +58,58 @@ function boxMesh(box: VisualBox): EditMesh {
   return translateVerts(mesh, allVerts(mesh), [box.cx, box.cy, box.cz]);
 }
 
+/**
+ * Thin catalog walls are drawn as front/back half-depth boxes so each visible
+ * side can wear a different material. Those halves are presentation, not model
+ * topology: opening them verbatim creates a coincident internal face whose
+ * render diagonal becomes an editable edge. Rejoin each named pair into the
+ * single full-depth structural cuboid the wall represents.
+ */
+function coalesceWallRenderHalves(shapes: readonly VisualShape[]): VisualShape[] {
+  const frontSuffix = '.front';
+  const backSuffix = '.back';
+  const fronts = new Map<string, VisualBox>();
+  const backs = new Map<string, VisualBox>();
+  const structural: VisualShape[] = [];
+
+  for (const shape of shapes) {
+    if (shape.kind !== 'box') {
+      structural.push(shape);
+      continue;
+    }
+    if (shape.box.key.endsWith(frontSuffix)) {
+      fronts.set(shape.box.key.slice(0, -frontSuffix.length), shape.box);
+    } else if (shape.box.key.endsWith(backSuffix)) {
+      backs.set(shape.box.key.slice(0, -backSuffix.length), shape.box);
+    } else {
+      structural.push(shape);
+    }
+  }
+
+  for (const [prefix, front] of fronts) {
+    const back = backs.get(prefix);
+    if (!back) {
+      structural.push({ kind: 'box', box: front });
+      continue;
+    }
+    backs.delete(prefix);
+    structural.push({
+      kind: 'box',
+      box: {
+        ...front,
+        key: `${prefix}.solid`,
+        cx: (front.cx + back.cx) / 2,
+        cy: (front.cy + back.cy) / 2,
+        cz: (front.cz + back.cz) / 2,
+        sz: front.sz + back.sz,
+        slot: 'sides',
+      },
+    });
+  }
+  for (const back of backs.values()) structural.push({ kind: 'box', box: back });
+  return structural;
+}
+
 function editableShape(shape: VisualShape): EditMesh {
   const opacity = shape.kind === 'box' ? shape.box.opacity : shape.ramp.opacity;
   const mesh = shape.kind === 'box' ? boxMesh(shape.box) : rampMesh(shape.ramp);
@@ -85,6 +137,7 @@ export function buildPieceStarterParts(starterId: BuildPieceStarterId): ModelPar
     z: 0,
     yawDegrees: 0,
   }, rowHex(row));
+  const structuralShapes = coalesceWallRenderHalves(shapes);
   const mergeShapes = (source: readonly VisualShape[]): EditMesh | null => {
     let mesh: EditMesh | null = null;
     for (const shape of source) {
@@ -99,8 +152,8 @@ export function buildPieceStarterParts(starterId: BuildPieceStarterId): ModelPar
   // `VisualBox.door` comes from the semantic wall edit decomposition; no tile
   // kind or geometry guess participates in this split.
   if (starter.edit === 'door' || starter.edit === 'garageDoor') {
-    const leafShapes = shapes.filter((shape) => shape.kind === 'box' && shape.box.door === true);
-    const frameShapes = shapes.filter((shape) => !(shape.kind === 'box' && shape.box.door === true));
+    const leafShapes = structuralShapes.filter((shape) => shape.kind === 'box' && shape.box.door === true);
+    const frameShapes = structuralShapes.filter((shape) => !(shape.kind === 'box' && shape.box.door === true));
     const frame = mergeShapes(frameShapes);
     const leaf = mergeShapes(leafShapes);
     if (!frame || !leaf) return [];
@@ -122,7 +175,7 @@ export function buildPieceStarterParts(starterId: BuildPieceStarterId): ModelPar
     ];
   }
 
-  const mesh = mergeShapes(shapes);
+  const mesh = mergeShapes(structuralShapes);
   if (!mesh) return [];
 
   return [{

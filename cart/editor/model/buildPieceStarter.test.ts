@@ -64,6 +64,21 @@ test('every build starter is grounded, editable, and emits triangles', () => {
   }
 });
 
+test('a solid wall opens as one manifold cuboid, never two render halves', () => {
+  const wall = buildPieceStarterParts('wall')[0]!.mesh!;
+  const row = catalogRowFor('wall.concrete.common')!;
+  assert(wall.verts.length === 8, `wall should have 8 welded corners, got ${wall.verts.length}`);
+  assert(wall.faces.length === 6, `wall should have 6 boundary faces, got ${wall.faces.length}`);
+  assert(wall.faces.every((face) => face.loop.length === 4), 'wall has a triangulated or non-quad boundary face');
+
+  const xs = wall.verts.map((vert) => vert[0]);
+  const ys = wall.verts.map((vert) => vert[1]);
+  const zs = wall.verts.map((vert) => vert[2]);
+  assert(Math.abs(Math.max(...xs) - Math.min(...xs) - row.w) < 1e-6, 'wall width drifted while coalescing');
+  assert(Math.abs(Math.max(...ys) - Math.min(...ys) - row.h) < 1e-6, 'wall height drifted while coalescing');
+  assert(Math.abs(Math.max(...zs) - Math.min(...zs) - row.d) < 1e-6, 'wall depth drifted while coalescing');
+});
+
 test('stairs and elevator retain their compound silhouettes', () => {
   const stairs = buildPieceStarterParts('stairs')[0]!.mesh!;
   const elevator = buildPieceStarterParts('elevator')[0]!.mesh!;
