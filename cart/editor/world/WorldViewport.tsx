@@ -506,6 +506,38 @@ export default function WorldViewport(props: {
     return gp ? { x: gp.x, z: gp.z, terrainY: 0 } : null;
   }, [stage, props.floor]);
 
+  // Prop stacking (req_3363): the placement ray may strike a placed piece's TOP
+  // FACE before the terrain — a table top is a placement surface, exactly the
+  // hmsc-int rule ("nearest of (placed-piece face, ground) wins; piece faces
+  // stack from actual top faces", editors/build/snap.ts). Both pick paths run —
+  // host raycast for catalog pieces, JS slab test for authored (model:) meshes —
+  // and the nearest top-face hit that beats the ground along the ray becomes the
+  // prop's base. Side faces never stack; the ground resolve keeps them.
+  const supportUnder = useCallback((
+    px: number,
+    py: number,
+    gp: { x: number; z: number; terrainY: number },
+  ): { x: number; y: number; z: number } | null => {
+    const ray = stage.worldRay(px, py, rectRef.current);
+    if (!ray) return null;
+    const hostHit = pickBuildPieceHostHit(ray, piecesRef.current, 1000) ?? null;
+    const authoredHit = pickAuthoredPlacement(ray, piecesRef.current, 1000);
+    const best = hostHit && authoredHit ? (hostHit.t <= authoredHit.t ? hostHit : authoredHit) : (hostHit ?? authoredHit);
+    if (!best || !best.normal || best.normal.y <= 0.5) return null;
+    // The ground door intersects the storey-lifted surface (req_2744); rebuild
+    // that point and compare distances along the SAME ray so "the table is in
+    // front of the floor" means what the eye sees. t normalizes by |dir|² since
+    // the piece picks report t in ray-direction units.
+    const levelY = props.floor > 0 ? props.floor * METERS_PER_LEVEL : 0;
+    const dx = gp.x - ray.origin.x;
+    const dy = gp.terrainY + levelY - ray.origin.y;
+    const dz = gp.z - ray.origin.z;
+    const dirSq = ray.dir.x * ray.dir.x + ray.dir.y * ray.dir.y + ray.dir.z * ray.dir.z;
+    const groundT = dirSq > 0 ? (dx * ray.dir.x + dy * ray.dir.y + dz * ray.dir.z) / dirSq : Infinity;
+    if (best.t >= groundT) return null;
+    return { x: best.point.x, y: best.point.y, z: best.point.z };
+  }, [stage, props.floor]);
+
   const resolveSnap = useCallback((px: number, py: number): Snap | null => {
     const armed = armedRef.current;
     if (!armed) return null;
@@ -521,18 +553,23 @@ export default function WorldViewport(props: {
     // The floor INDEX threads through whole (req_2676): resolvePlacement records
     // it on the piece so the storey cutaway never re-derives storey from a y that
     // now carries the terrain base too (a mesa-top Ground piece is storey 0).
+    // An armed PROP first probes for a placed piece under the cursor (req_3363):
+    // a top-face hit nearer than the ground becomes the base, so a lamp lands ON
+    // the table exactly where the ray touched it.
+    const support = pieceKindOf(armed.pieceId) === 'prop' ? supportUnder(px, py, gp) : null;
     const placed = resolvePlacement(
       armed.pieceId,
-      gp.x,
-      gp.z,
+      support?.x ?? gp.x,
+      support?.z ?? gp.z,
       props.floor,
       gp.terrainY,
       propLiftRef.current,
       armed.yawDegrees,
       mapRenderedHeightMax,
+      support?.y ?? null,
     );
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
-  }, [groundUnder, props.floor]);
+  }, [groundUnder, supportUnder, props.floor]);
 
   // R changes the armed turn in AppFrame. Re-resolve immediately at the live
   // cursor so the user sees the ghost spin in place, rather than waiting for the
@@ -973,11 +1010,13 @@ export default function WorldViewport(props: {
     const mx = Number(g.getMouseX?.() ?? (r.x + r.width / 2));
     const my = Number(g.getMouseY?.() ?? (r.y + r.height / 2));
     // Armed prop → the wheel is the HEIGHT dial (req_2751): scroll up lifts the
-    // placement off its terrain/storey base (posters climb the wall), scroll
-    // down brings it back to ground (clamped — the base is the floor of the
-    // gesture). Props only: build pieces are grid pieces, their verticality is
-    // storeys. Ctrl+wheel keeps the camera tilt either way; zoom while placing
-    // a prop means disarming first, which is the deliberate trade.
+    // placement off its base (posters climb the wall), scroll down brings it
+    // back down (clamped — the base is the floor of the gesture). The base is
+    // the terrain/storey plane, or a placed piece's top face when the cursor is
+    // over one (req_3363) — a table top needs NO lift; the dial rides above it.
+    // Props only: build pieces are grid pieces, their verticality is storeys.
+    // Ctrl+wheel keeps the camera tilt either way; zoom while placing a prop
+    // means disarming first, which is the deliberate trade.
     const armed = armedRef.current;
     if (!currentModifiers().ctrl && toolRef.current === 'place' && armed && pieceKindOf(armed.pieceId) === 'prop') {
       propLiftRef.current = Math.max(0, propLiftRef.current + (dy > 0 ? PROP_LIFT_STEP_M : -PROP_LIFT_STEP_M));

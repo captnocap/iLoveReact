@@ -388,7 +388,11 @@ export function levelPieceGroupAboveTerrain(
  *  + a 1.5m lift, never a floating mesh). Grid pieces ignore it — their
  *  verticality is storeys. `yawTurnDegrees` is the user-controlled quarter-turn
  *  offset (R); edge snap supplies its natural facing first, then this offset
- *  is applied. */
+ *  is applied. `supportY` (req_3363) is a placed piece's TOP FACE under the
+ *  cursor, in world metres: when the placement ray strikes a table before the
+ *  ground, the prop bases on that surface instead of the terrain/storey plane
+ *  (the hmsc-int stacking rule — "piece faces stack from actual top faces").
+ *  The wheel lift rides above whichever base won. Prop-only, like lift. */
 export function resolvePlacement(
   pieceId: string,
   wx: number,
@@ -398,16 +402,18 @@ export function resolvePlacement(
   lift = 0,
   yawTurnDegrees = 0,
   terrainMaximum: TerrainMaximum | null = null,
+  supportY: number | null = null,
 ): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
   const levelY = floor > 0 ? floor * METERS_PER_LEVEL : 0;
   const y = terrainY + levelY;
   // Props FREE-place (req_2712): they land exactly under the cursor, grounded on
-  // the terrain/storey — a bench is not a 3m plate. No host validate either (the
-  // build validator indexes only the catalog grid pieces).
+  // the terrain/storey — or on a placed piece's top face when one is under the
+  // cursor (req_3363). No host validate either (the build validator indexes only
+  // the catalog grid pieces).
   if (kind === 'prop') {
-    return { id: '', pieceId, x: wx, y: y + lift, z: wz, yawDegrees: normalizeYawDegrees(yawTurnDegrees), floor };
+    return { id: '', pieceId, x: wx, y: (supportY ?? y) + lift, z: wz, yawDegrees: normalizeYawDegrees(yawTurnDegrees), floor };
   }
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
   const snapped = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };

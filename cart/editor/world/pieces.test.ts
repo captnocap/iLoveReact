@@ -140,6 +140,17 @@ test('exported prop remains a single free placement', () => {
   assert(run[0]?.x === 8.25 && run[0]?.z === 9.75, 'prop lands at the cursor without grid tiling');
 });
 
+test('prop bases on a support surface (a table top) instead of the terrain/storey plane', () => {
+  // req_3363: supportY is a placed piece's top face under the cursor — the prop
+  // sits exactly on it, the wheel lift rides above it, floor stays the record.
+  const onTable = resolvePlacement('prop:exported-chair', 8.25, 9.75, 0, 0.5, 0, 0, null, 1.75);
+  assert(onTable?.y === 1.75, `prop base is the support surface, got ${onTable?.y}`);
+  const lifted = resolvePlacement('prop:exported-chair', 8.25, 9.75, 0, 0.5, 0.5, 0, null, 1.75);
+  assert(lifted?.y === 2.25, `wheel lift rides above the support surface, got ${lifted?.y}`);
+  const noSupport = resolvePlacement('prop:exported-chair', 8.25, 9.75, 1, 0.5, 0, 0, null, null);
+  assert(noSupport?.y === 3.5, `without support the terrain+storey base holds, got ${noSupport?.y}`);
+});
+
 test('armed turn rotates the placement ghost and committed transform before drop', () => {
   const floor = resolvePlacement('model:exported-floor', 1.5, 1.5, 0, 0, 0, 90);
   assert(floor?.yawDegrees === 90, `floor turn carried into placement, got ${floor?.yawDegrees}`);
