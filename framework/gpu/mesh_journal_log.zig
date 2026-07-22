@@ -418,6 +418,39 @@ pub fn ownsExactPartPartition(groups: []const u32, ranges: []const u32, expected
     return true;
 }
 
+/// Return the same ordered range table with declarations that own no resident
+/// face removed. `groups` must cover the complete partition: displayed faces
+/// plus any host-stashed hidden faces. Refuse malformed/unowned input instead
+/// of laundering a corrupt partition into a smaller apparently-valid one.
+pub fn compactOccupiedPartRanges(allocator: std.mem.Allocator, groups: []const u32, ranges: []const u32) ![]u32 {
+    if (!structurallyValidRanges(ranges)) return error.InvalidPartPartition;
+
+    const part_count = ranges.len / 2;
+    const occupied = try allocator.alloc(bool, part_count);
+    defer allocator.free(occupied);
+    @memset(occupied, false);
+
+    for (groups) |group| {
+        if (group == NO_FACE_GROUP) return error.InvalidPartPartition;
+        const part_index = findPartInRanges(ranges, group) orelse return error.InvalidPartPartition;
+        occupied[part_index] = true;
+    }
+
+    var occupied_count: usize = 0;
+    for (occupied) |owns_face| {
+        if (owns_face) occupied_count += 1;
+    }
+    const compacted = try allocator.alloc(u32, occupied_count * 2);
+    var write_index: usize = 0;
+    for (occupied, 0..) |owns_face, part_index| {
+        if (!owns_face) continue;
+        compacted[write_index] = ranges[part_index * 2];
+        compacted[write_index + 1] = ranges[part_index * 2 + 1];
+        write_index += 2;
+    }
+    return compacted;
+}
+
 fn structurallyValidRanges(ranges: []const u32) bool {
     if (ranges.len % 2 != 0) return false;
     var previous_hi: u32 = 0;

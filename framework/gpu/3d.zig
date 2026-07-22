@@ -2448,6 +2448,29 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     };
     defer std.heap.c_allocator.free(owned);
 
+    // A face delete can empty one Outliner part while leaving the rest of the
+    // document alive. Carry the complete ownership partition (including hidden
+    // host-stashed parts) through the transaction and drop only ranges that no
+    // longer own a face. Leaving an empty range here deadlocks the next append:
+    // the strict boundary must reject a declared part with no geometry.
+    var compacted_ranges: ?[]u32 = null;
+    defer if (compacted_ranges) |ranges| std.heap.c_allocator.free(ranges);
+    if (has_groups) {
+        if (model_source.partRanges()) |live_ranges| {
+            var partition_groups: std.ArrayListUnmanaged(u32) = .empty;
+            defer partition_groups.deinit(std.heap.c_allocator);
+            partition_groups.appendSlice(std.heap.c_allocator, groups.items) catch return false;
+            for (g_hidden_groups.items) |hidden| {
+                partition_groups.appendSlice(std.heap.c_allocator, hidden.groups) catch return false;
+            }
+            compacted_ranges = mesh_journal_log.compactOccupiedPartRanges(
+                std.heap.c_allocator,
+                partition_groups.items,
+                live_ranges,
+            ) catch return false;
+        }
+    }
+
     var snap = journalSnapshotCurrent(label);
     const paint_stable = std.mem.eql(u8, label, "delete part");
     if (paint_stable) beginPaintStableReplace();
@@ -2456,13 +2479,15 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     if (ok) {
         if (kept > 0) {
             model_source.setFaceMaterials(materials.items);
-        }
-        if (kept > 0 and has_groups) {
-            model_source.setFaceGroups(groups.items);
-            _ = refreshPaintLayout();
-        } else if (kept == 0) {
-            model_source.setPartRanges(&.{}); // no faces → no parts own anything
+        } else {
             model_source.setFaceMaterials(&.{});
+        }
+        if (has_groups) {
+            model_source.setFaceGroups(groups.items);
+            if (compacted_ranges) |ranges| model_source.setPartRanges(ranges);
+            if (kept > 0) _ = refreshPaintLayout();
+        } else if (kept == 0) {
+            model_source.setPartRanges(&.{});
         }
         journalCommit(&snap);
     } else journalDiscard(&snap);

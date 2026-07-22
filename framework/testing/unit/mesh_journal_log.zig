@@ -153,6 +153,39 @@ test "append boundary requires the cart and host to share one complete partition
     try testing.expect(!journal_log.ownsExactPartPartition(&groups, &.{ 0, 7, 6, 10 }, 2));
 }
 
+test "deleting every face of one part compacts its range and reopens append" {
+    const old_ranges = [_]u32{ 0, 6, 6, 12, 12, 18 };
+    const surviving_groups = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    const compacted = try journal_log.compactOccupiedPartRanges(testing.allocator, &surviving_groups, &old_ranges);
+    defer testing.allocator.free(compacted);
+
+    try testing.expectEqualSlices(u32, &.{ 0, 6, 6, 12 }, compacted);
+    try testing.expect(journal_log.ownsExactPartPartition(&surviving_groups, compacted, 2));
+}
+
+test "part range compaction counts hidden resident faces" {
+    const old_ranges = [_]u32{ 0, 4, 4, 8, 8, 12 };
+    // The first range is displayed, the last is host-stashed and hidden; only
+    // the middle range was actually emptied by the delete.
+    const visible_and_hidden_groups = [_]u32{ 0, 3, 8, 11 };
+    const compacted = try journal_log.compactOccupiedPartRanges(testing.allocator, &visible_and_hidden_groups, &old_ranges);
+    defer testing.allocator.free(compacted);
+
+    try testing.expectEqualSlices(u32, &.{ 0, 4, 8, 12 }, compacted);
+    try testing.expect(journal_log.ownsExactPartPartition(&visible_and_hidden_groups, compacted, 2));
+}
+
+test "part range compaction refuses unowned survivor faces" {
+    try testing.expectError(
+        error.InvalidPartPartition,
+        journal_log.compactOccupiedPartRanges(testing.allocator, &.{ 0, 9 }, &.{ 0, 4, 4, 8 }),
+    );
+    try testing.expectError(
+        error.InvalidPartPartition,
+        journal_log.compactOccupiedPartRanges(testing.allocator, &.{journal_log.NO_FACE_GROUP}, &.{ 0, 4 }),
+    );
+}
+
 test "valid part ranges count every face exactly once" {
     var summary = try journal_log.analyze(testing.allocator, .{
         .vertex_count = 15,
