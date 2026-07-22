@@ -1,0 +1,30 @@
+{
+  "id": "req_3358",
+  "at": "2026-07-22T09:09:48.769Z",
+  "origin": "codex:019f7e48",
+  "text": "zoom works but right click actions didnt land at all it seems",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T09:10:02.136Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T09:13:57.502Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the UV right-click menu that was rendering off-screen. useContextMenu captures window coordinates, while UvEditor renders its popup inside the inspector's local absolute containing block; the prior implementation only nudged the global X and left global Y untouched. The editor now measures the UV panel, converts both axes to panel-local coordinates, opens toward the stage, and clamps the collapsed/expanded menu to the panel. Added focused regression coverage for a real right-side panel placement.",
+  "shas": [
+    "502fcebb5"
+  ],
+  "resolvedAt": "2026-07-22T09:13:57.502Z"
+}
