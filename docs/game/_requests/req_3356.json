@@ -1,0 +1,30 @@
+{
+  "id": "req_3356",
+  "at": "2026-07-22T08:31:09.038Z",
+  "origin": "codex:019f7e48",
+  "text": "Ok now give the uv better control. scroll wheel for zoom, middle mouse for panning, right click context menu functions rather than a bunch of buttons would be better",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T08:31:20.237Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T08:42:33.767Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the active cart/editor UV workspace around direct canvas control: raw host onScroll now performs cursor-anchored wheel zoom, the host middle-button route polls the live SDL mask for smooth middle-drag panning, and the former multi-row UV/texture button stack is consolidated into a grouped right-click menu. The compact header keeps mode, zoom, island count, and input hints visible while returning vertical space to the atlas.",
+  "shas": [
+    "e523ebef8"
+  ],
+  "resolvedAt": "2026-07-22T08:42:33.766Z"
+}

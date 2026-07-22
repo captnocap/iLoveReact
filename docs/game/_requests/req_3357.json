@@ -1,0 +1,30 @@
+{
+  "id": "req_3357",
+  "at": "2026-07-22T08:32:57.315Z",
+  "origin": "codex:019f7e48",
+  "text": "also you have double click to isolate from a grouping but you dont have double click to get back out of isolations",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T08:33:08.693Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T08:42:33.815Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made UV double-click isolation reversible. A double-click enters authored-face isolation from island mode; double-clicking a face while isolated returns to the complete island, clears the face target, and republishes the island selection without changing UV geometry. Added focused state-transition coverage.",
+  "shas": [
+    "e523ebef8"
+  ],
+  "resolvedAt": "2026-07-22T08:42:33.815Z"
+}
