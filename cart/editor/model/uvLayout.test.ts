@@ -20,6 +20,7 @@ import {
   shouldActivateUvDrag,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvFaceEdgePath,
@@ -336,6 +337,24 @@ test('middle pan derives from its seed and double-click toggles face isolation',
   assert(uvSelectionModeAfterDoubleClick('island', true) === 'face', 'double-click did not enter face isolation');
   assert(uvSelectionModeAfterDoubleClick('face', true) === 'island', 'double-click did not leave face isolation');
   assert(uvSelectionModeAfterDoubleClick('face', false) === 'face', 'blank double-click changed selection scope');
+});
+
+test('nested UV context menus convert window coordinates into the inspector', () => {
+  const placed = uvContextMenuPosition(
+    { x: 1800, y: 600 },
+    { x: 1500, y: 80, width: 430, height: 900 },
+    { width: 220, height: 390 },
+    4,
+  );
+  assert(placed.x === 80, `right-panel menu landed at the wrong local X (${placed.x})`);
+  assert(placed.y === 506, `bottom-edge menu was not kept inside the panel (${placed.y})`);
+  const topEdge = uvContextMenuPosition(
+    { x: 1502, y: 81 },
+    { x: 1500, y: 80, width: 430, height: 900 },
+    { width: 220, height: 390 },
+    4,
+  );
+  assert(topEdge.x === 4 && topEdge.y === 4, 'menu escaped the panel top/left edge');
 });
 
 test('uniform pack gives every island an equal, bounded cell', () => {

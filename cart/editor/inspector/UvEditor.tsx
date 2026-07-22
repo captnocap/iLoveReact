@@ -25,6 +25,7 @@ import {
   scaleUvSelection,
   shouldActivateUvDrag,
   uniformUvPack,
+  uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
@@ -35,6 +36,7 @@ import {
   UV_LAYOUT_TUNING,
   UV_SNAP_STEPS,
   type UvAxisGuide,
+  type UvCanvasRect,
   type UvCanvasView,
   type UvFaceTarget,
   type UvFlipAxis,
@@ -64,6 +66,13 @@ type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeo
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
 type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
+const UV_CONTEXT_MENU_TUNING = {
+  widthPx: 220,
+  edgePx: 4,
+  baseHeightPx: 278,
+  rowHeightPx: 26,
+  expandedRows: { transform: 3, arrange: 5, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
+} as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
@@ -267,6 +276,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const uvMenu = useContextMenu();
   const [axisGuide, setAxisGuide] = useState<UvAxisGuide | null>(null);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
+  const panelRef = useRef<UvCanvasRect>({ x: 0, y: 0, width: 1, height: 1 });
   const surfaceRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const gestureRef = useRef<Gesture | null>(null);
   const middlePanTimerRef = useRef<any>(null);
@@ -827,9 +837,27 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     middlePanActiveRef.current = true;
     middlePanTimerRef.current = setTimeout(middlePanStep, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
   };
+  const contextMenuHeight = UV_CONTEXT_MENU_TUNING.baseHeightPx
+    + (menuGroup ? UV_CONTEXT_MENU_TUNING.expandedRows[menuGroup] * UV_CONTEXT_MENU_TUNING.rowHeightPx : 0);
+  const contextMenuPosition = uvContextMenuPosition(
+    { x: uvMenu.x, y: uvMenu.y },
+    panelRef.current,
+    { width: UV_CONTEXT_MENU_TUNING.widthPx, height: contextMenuHeight },
+    UV_CONTEXT_MENU_TUNING.edgePx,
+  );
 
   return (
-    <Box style={{ flexGrow: 1, minHeight: 0, gap: 6 }}>
+    <Box
+      onLayout={(layout: any) => {
+        panelRef.current = {
+          x: Number(layout.x),
+          y: Number(layout.y),
+          width: Math.max(1, Number(layout.width)),
+          height: Math.max(1, Number(layout.height)),
+        };
+      }}
+      style={{ flexGrow: 1, minHeight: 0, gap: 6, position: 'relative' }}
+    >
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
         <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={12} color={accentFor('primary')} />
         <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
@@ -1079,9 +1107,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
       <uvMenu.ContextMenu
         onDismiss={() => setMenuGroup(null)}
-        style={{ left: Math.max(4, uvMenu.x - 224), width: 220 }}
+        style={{ left: contextMenuPosition.x, top: contextMenuPosition.y, width: UV_CONTEXT_MENU_TUNING.widthPx }}
       >
-        <C.HW_StageContextMenu style={{ width: 220 }}>
+        <C.HW_StageContextMenu style={{ width: UV_CONTEXT_MENU_TUNING.widthPx }}>
           <C.HW_ContextHead>
             <Icon name="Grid3x3" size={13} color={accentFor('primary')} />
             <Box style={{ gap: 1 }}>

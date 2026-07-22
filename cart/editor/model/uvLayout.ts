@@ -43,6 +43,7 @@ export type UvCanvasTool = 'select' | 'pan';
 export type UvSelectionMode = 'island' | 'face';
 export type UvCanvasView = { x: number; y: number; scale: number };
 export type UvCanvasPoint = { x: number; y: number };
+export type UvCanvasRect = UvCanvasPoint & { width: number; height: number };
 
 export type UvTrianglePoints = readonly [number, number, number, number, number, number];
 
@@ -108,6 +109,26 @@ export function panUvCanvasView(seed: UvCanvasView, start: UvCanvasPoint, curren
     x: seed.x + current.x - start.x,
     y: seed.y + current.y - start.y,
     scale: seed.scale,
+  };
+}
+
+/**
+ * `useContextMenu` captures window coordinates, but the UV popup is rendered
+ * inside the inspector. Convert to that containing block and keep the menu on
+ * panel; subtracting its width makes a right-edge menu open toward the stage.
+ */
+export function uvContextMenuPosition(
+  windowPoint: UvCanvasPoint,
+  container: UvCanvasRect,
+  menu: { width: number; height: number },
+  edgePx: number,
+): UvCanvasPoint {
+  const edge = Math.max(0, Number.isFinite(edgePx) ? edgePx : 0);
+  const maxX = Math.max(edge, container.width - menu.width - edge);
+  const maxY = Math.max(edge, container.height - menu.height - edge);
+  return {
+    x: clamp(windowPoint.x - container.x - menu.width, edge, maxX),
+    y: clamp(windowPoint.y - container.y, edge, maxY),
   };
 }
 
