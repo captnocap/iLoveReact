@@ -1,0 +1,30 @@
+{
+  "id": "req_3359",
+  "at": "2026-07-22T09:17:05.199Z",
+  "origin": "codex:019f7e48",
+  "text": "middle mouse button hits the stage not the uv map but scroll works",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T09:17:18.440Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T09:23:25.295Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Native mesh-stage orbit now yields to onMiddleClick and pointer-blocking editor chrome. Middle-button dispatch uses a button-specific hit-test so UV visual children cannot mask the owning Pressable. Zig event tests, right-click regression tests, UV tests, editor typecheck, and the ReleaseFast editor build pass.",
+  "shas": [
+    "417b98862"
+  ],
+  "resolvedAt": "2026-07-22T09:23:25.295Z"
+}
