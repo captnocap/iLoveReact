@@ -1,0 +1,30 @@
+{
+  "id": "req_3349",
+  "at": "2026-07-22T04:56:31.542Z",
+  "origin": "codex:019f7e48",
+  "text": "heres one for you, this clearly has at atlas because ive painted on it before [Image #1] but it isnt showing because i guess i have not in this session clicked on the paint button, which is kinda a silly way to be the means of loading the atlas for one that already exists",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T04:56:43.997Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T05:08:46.483Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved persisted model-paint restoration out of Paint-tool activation and into the model document-load lifecycle. Existing raster/program atlases and legacy saved variants now hydrate and publish to the UV inspector as soon as their model becomes active, while Paint only changes input mode. Tightened hot-session atlas truth so automatic blank layouts cannot masquerade as authored atlases and suppress hydration; stale topology still fails closed.",
+  "shas": [
+    "1e66ca897"
+  ],
+  "resolvedAt": "2026-07-22T05:08:46.483Z"
+}
