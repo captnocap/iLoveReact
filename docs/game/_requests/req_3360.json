@@ -1,0 +1,30 @@
+{
+  "id": "req_3360",
+  "at": "2026-07-22T09:30:29.194Z",
+  "origin": "codex:019f7e48",
+  "text": "[Image #1] ? how is it loading a texture while showing none.",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T09:30:44.257Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T09:34:49.855Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the contradictory resumed-session state where the native host retained and rendered a valid model atlas but the React UV bridge remained null unless Paint had been active. Resident, non-stale atlases now always publish their UV preview on remount; an active Paint tool still resumes Paint, and missing/stale atlases remain gated. Added regression coverage and verified the editor typecheck and ReleaseFast build.",
+  "shas": [
+    "54e0bc771"
+  ],
+  "resolvedAt": "2026-07-22T09:34:49.855Z"
+}
