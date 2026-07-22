@@ -1,0 +1,28 @@
+{
+  "id": "req_3348",
+  "at": "2026-07-22T04:54:49.198Z",
+  "origin": "codex:019f840f",
+  "text": "when i just loaded up a painting on a model it had to compile a shader is that expected? it also only got to 31% and then was done i guess idk lol [js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:77300:9) « at <anonymous>:77399:35 « at wrappedCreate (<anonymous>:26143:34)\n[apptick-split] total=79.8ms | jsTick(+microtasks)=77.6 (of which GC=5.2ms x2) tickDrain=0.0 drainFlush=1.2 dirty(snap=0.1+rebuild=0.8)\n[js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:77300:9) « at <anonymous>:77399:35 « at wrappedCreate (<anonymous>:26143:34)\n[apptick-split] total=76.8ms | jsTick(+microtasks)=74.5 (of which GC=6.0ms x5) tickDrain=0.0 drainFlush=1.2 dirty(snap=0.2+rebuild=0.8)\n[js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:77300:9) « at <anonymous>:77399:35 « at wrappedCreate (<anonymous>:26143:34)\n[shaders] compiling shader (731 KB WGSL) — ~2% (2s)\n[shaders] compiling shader (731 KB WGSL) — ~4% (4s)\n[shaders] compiling shader (731 KB WGSL) — ~7% (6s)\n[shaders] compiling shader (731 KB WGSL) — ~9% (8s)\n[shaders] compiling shader (731 KB WGSL) — ~12% (10s)\n[shaders] compiling shader (731 KB WGSL) — ~14% (12s)\n[shaders] compiling shader (731 KB WGSL) — ~17% (14s)\n[shaders] compiling shader (731 KB WGSL) — ~19% (16s)\n[shaders] compiling shader (731 KB WGSL) — ~22% (18s)\n[shaders] compiling shader (731 KB WGSL) — ~24% (20s)\n[shaders] compiling shader (731 KB WGSL) — ~26% (22s)\n[shaders] compiling shader (731 KB WGSL) — ~29% (24s)\n[shaders] compiling shader (731 KB WGSL) — ~31% (26s)",
+  "status": "review",
+  "sessionId": "019f840f-adce-7931-ada7-b96d5feb10d5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T04:55:02.580Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T04:56:33.324Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed this is expected under the current saved-paint design: program paintings embed each shader ink's WGSL recipe, and applying the program re-bakes that recipe to a 256x256 texture. The 731 KB module is the assembled fill/material shader. The effect pipeline is cached process-wide by exact WGSL source and bind-group layout, so the same painting/source should compile at most once in one running host; a historical painting can embed a different older shader source and legitimately incur its own first compile. The reported percentage is only elapsed time divided by the previous size-scaled machine baseline, because the blocking driver API exposes no real progress. This compile completed in 26.862s and refreshed the baseline at 749016 bytes, so ending near 31% means it beat the old roughly 84s estimate, not that compilation stopped early. The empty rangetrace messages and ~80ms JS ticks are separate temporary model-load diagnostics/GC churn.",
+  "shas": [],
+  "resolvedAt": "2026-07-22T04:56:33.324Z"
+}
