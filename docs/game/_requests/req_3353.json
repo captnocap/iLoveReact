@@ -1,0 +1,30 @@
+{
+  "id": "req_3353",
+  "at": "2026-07-22T07:22:45.451Z",
+  "origin": "codex:019f883f",
+  "text": "ok its better. the loop cut being able to see the cut before confirming corruption problem still exists. also, that corruption kinda just extends further than that. the mesh randomly inherits things it shouldnt for example: [Image #1] [Image #2] im going to make this specific face glass, and when i do: [Image #3] and now go to the other side and for the same piece [Image #4][Image #5][Image #6] i cant tell what is and isnt glass",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T07:22:57.741Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T07:40:26.270Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The reported Glass inheritance was presentation ambiguity rather than attribute leakage: the exact saved contract contains only six trailing glass vertices, i.e. the selected authored quad's two triangles. Raw render-triangle wireframe is now excluded from Vertex/Edge/Face modes, leaving only authored boundaries and loop-cut accents. Face mode also reads the authoritative per-face alpha through one shared Glass classification and gives only Glass faces a persistent cyan wash and centroid marker; a selected Glass face keeps the cyan marker under its orange selection wash. Native paint tests, mesh-edit tests, cart regression, ReleaseFast ship, exact live replay, and a silent 60-second gate on the twice-cut wall pass.",
+  "shas": [
+    "6e7dfd471"
+  ],
+  "resolvedAt": "2026-07-22T07:40:26.270Z"
+}

@@ -20,6 +20,29 @@
       "kind": "state",
       "from": "doing",
       "to": "review"
+    },
+    {
+      "at": "2026-07-22T07:23:25.337Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User verification confirms the exact cut count improved, but loop-cut preview still obscures cut boundaries; continue under req_3353's authored-face visibility repair."
+    },
+    {
+      "at": "2026-07-22T07:23:25.347Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T07:40:26.261Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "User verification confirmed the wall seam/count repair, then exposed the remaining preview failure: successful topology work could silently enable Scene3D's raw barycentric wireframe, drawing every render-triangle diagonal over the authored-boundary overlay. Edit modes now suppress raw triangle wireframe even when an old Wire preference is persisted, and topology operations no longer turn it on. The final compiled replay performs two two-cut passes, ends at 32 welded vertices / 60 editable edges / 30 authored faces with exactly two loop-cut journal entries, and passes the sustained face-mode frame gate."
     }
   ],
   "resolution": "The apparent third loop cut was the wall starter's pre-existing internal seam: two half-depth render boxes had been merged verbatim into editable topology. Restored the structural/render boundary so paired wall halves coalesce before model creation. Added a native regression for two cuts followed by two perpendicular cuts; the compiled-host replay ends at exactly 30 quads with two loop-cut history entries and valid ownership.",
