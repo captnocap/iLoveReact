@@ -1,0 +1,30 @@
+{
+  "id": "req_3350",
+  "at": "2026-07-22T05:17:14.002Z",
+  "origin": "codex:019f883f",
+  "text": "idk how we keep running into problems with loopcut but i somehow am getting 3 cuts when calling for 2, look here [Image #1] there is already 2 cuts done. il add 2 more the other direction [Image #2] you can see before i confirm the cut that i already am blind to where the other cuts are but i see the blue line for one of them\n[Image #3] and now i came out with 3 cuts. [Image #4]",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T05:17:20.111Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T05:33:05.993Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The apparent third loop cut was the wall starter's pre-existing internal seam: two half-depth render boxes had been merged verbatim into editable topology. Restored the structural/render boundary so paired wall halves coalesce before model creation. Added a native regression for two cuts followed by two perpendicular cuts; the compiled-host replay ends at exactly 30 quads with two loop-cut history entries and valid ownership.",
+  "shas": [
+    "19a9924b4"
+  ],
+  "resolvedAt": "2026-07-22T05:33:05.992Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3351",
+  "at": "2026-07-22T05:18:55.529Z",
+  "origin": "codex:019f883f",
+  "text": "also, this could be a huge part of that idk. but if you go and do new mesh -> build piece -> wall, this wall for whatever reason has an edge that cuts right through it diagonally which literally nothing does that [Image #1]",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T05:19:01.594Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T05:33:06.002Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "New Mesh > Build Piece > Wall now seeds one manifold cuboid: 8 welded corners, 6 authored quad faces, 12 editable edges. The coincident internal faces and their exposed diagonal are gone. Verified through the compiled editor's mesh contract.",
+  "shas": [
+    "19a9924b4"
+  ],
+  "resolvedAt": "2026-07-22T05:33:06.002Z"
+}
