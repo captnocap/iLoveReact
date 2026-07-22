@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Graph, Paintable, Pressable, Row, Text, TextInput } from '../../../runtime/primitives';
 import { usePaintable } from '../../../runtime/hooks/usePaintable';
+import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
-import { accentFor } from '../workspace.cls';
+import { C, accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import {
@@ -19,11 +20,12 @@ import {
   moveUvIslands,
   moveUvSelectionVertex,
   NO_UV_GROUP,
+  panUvCanvasView,
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
-  shouldPanUvCanvas,
   uniformUvPack,
+  uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
   uvIslandSetBounds,
@@ -33,12 +35,14 @@ import {
   UV_LAYOUT_TUNING,
   UV_SNAP_STEPS,
   type UvAxisGuide,
-  type UvCanvasTool,
+  type UvCanvasView,
   type UvFaceTarget,
   type UvFlipAxis,
   type UvIslandRect,
   type UvSelectionBounds,
+  type UvSelectionMode,
   type UvSizeMatch,
+  zoomUvCanvasViewAt,
 } from '../model/uvLayout';
 
 const ATLAS_SHADER = `
@@ -54,15 +58,14 @@ const ATLAS_SHADER = `
   return vec4f(mix(checker, sheet.rgb, sheet.a), 1.0);
 }`;
 
-type View = { x: number; y: number; scale: number };
 type ScreenPoint = { x: number; y: number };
-type SelectionMode = 'island' | 'face';
 type UvLineGeometry = { faces: number[]; boundary: number[] };
 type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeometry };
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
+type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
 type Gesture =
-  | { kind: 'pan'; start: ScreenPoint; seed: View }
+  | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
   | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
@@ -193,41 +196,41 @@ function UvNumberField(props: {
   );
 }
 
-function toolButton(icon: string, active: boolean, tooltip: string, onPress: () => void) {
+function UvContextRow(props: {
+  icon: string;
+  label: string;
+  detail?: string;
+  active?: boolean;
+  enabled?: boolean;
+  expanded?: boolean;
+  indented?: boolean;
+  tooltip?: string;
+  onPress: () => void;
+}) {
+  const enabled = props.enabled !== false;
+  const rowStyle = {
+    ...(enabled ? {} : { opacity: 0.36 }),
+    ...(props.indented ? { paddingLeft: 26 } : {}),
+  };
+  const rowProps = {
+    ...(enabled ? { onPress: props.onPress } : {}),
+    ...(Object.keys(rowStyle).length ? { style: rowStyle } : {}),
+    ...(props.tooltip ? { tooltip: props.tooltip } : {}),
+  };
+  const textProps = props.active ? { style: { color: accentFor('primary'), fontWeight: '800' } } : {};
   return (
-    <Pressable
-      tooltip={tooltip}
-      onPress={onPress}
-      style={{ width: 27, height: 25, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: active ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('border') }}
-    >
-      <Icon name={icon} size={12} color={active ? accentFor('primary') : accentFor('textDim')} />
-    </Pressable>
+    <C.HW_ContextRow {...rowProps}>
+      <Icon name={props.icon} size={12} color={accentFor(props.active ? 'primary' : 'textDim')} />
+      <C.HW_ContextText {...textProps}>{props.label}</C.HW_ContextText>
+      <C.HW_Spacer />
+      {props.detail ? <C.HW_KeyText>{props.detail}</C.HW_KeyText> : null}
+      {props.expanded !== undefined ? <Icon name={props.expanded ? 'ChevronDown' : 'ChevronRight'} size={11} color={accentFor('textFaint')} /> : null}
+    </C.HW_ContextRow>
   );
 }
 
-function selectionActionButton(label: string, enabled: boolean, tooltip: string, onPress: () => void) {
-  return (
-    <Pressable
-      tooltip={tooltip}
-      onPress={enabled ? onPress : undefined}
-      style={{ height: 23, minWidth: 34, paddingLeft: 7, paddingRight: 7, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: enabled ? accentFor('surfaceRaised') : accentFor('controlBg'), borderWidth: 1, borderColor: enabled ? accentFor('border') : accentFor('borderSoft') }}
-    >
-      <Text style={{ color: enabled ? accentFor('textDim') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function historyActionButton(icon: string, label: string, enabled: boolean, tooltip: string, onPress: () => void) {
-  return (
-    <Pressable
-      tooltip={tooltip}
-      onPress={enabled ? onPress : undefined}
-      style={{ height: 23, minWidth: 76, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 4, backgroundColor: enabled ? accentFor('surfaceRaised') : accentFor('controlBg'), borderWidth: 1, borderColor: enabled ? accentFor('border') : accentFor('borderSoft') }}
-    >
-      <Icon name={icon} size={11} color={enabled ? accentFor('textDim') : accentFor('textFaint')} />
-      <Text style={{ color: enabled ? accentFor('textDim') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{label}</Text>
-    </Pressable>
-  );
+function UvContextDivider() {
+  return <Box style={{ height: 1, marginTop: 3, marginBottom: 3, backgroundColor: accentFor('borderSoft') }} />;
 }
 
 export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBridge; focused?: boolean }) {
@@ -257,28 +260,31 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [selected, setSelected] = useState(initialSelectedIslands()[0] ?? -1);
   const [selectedFace, setSelectedFace] = useState<UvFaceTarget | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [tool, setTool] = useState<UvCanvasTool>('select');
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>('island');
+  const [selectionMode, setSelectionMode] = useState<UvSelectionMode>('island');
   const [snapBaseStep, setSnapBaseStep] = useState<number>(UV_SNAP_STEPS[0]);
   const [aspectLocked, setAspectLocked] = useState(false);
+  const [menuGroup, setMenuGroup] = useState<UvMenuGroup | null>(null);
+  const uvMenu = useContextMenu();
   const [axisGuide, setAxisGuide] = useState<UvAxisGuide | null>(null);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const surfaceRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const gestureRef = useRef<Gesture | null>(null);
+  const middlePanTimerRef = useRef<any>(null);
+  const middlePanActiveRef = useRef(false);
   const pendingPreviewRef = useRef<PendingUvPreview | null>(null);
   const previewFramePendingRef = useRef(false);
   const previewGenerationRef = useRef(0);
-  const pendingViewRef = useRef<View | null>(null);
+  const pendingViewRef = useRef<UvCanvasView | null>(null);
   const viewFramePendingRef = useRef(false);
   const viewGenerationRef = useRef(0);
   const lastClickRef = useRef<{ at: number; x: number; y: number } | null>(null);
-  const [view, setViewState] = useState<View>({ x: UV_LAYOUT_TUNING.canvasPaddingPx, y: UV_LAYOUT_TUNING.canvasPaddingPx, scale: 1 });
+  const [view, setViewState] = useState<UvCanvasView>({ x: UV_LAYOUT_TUNING.canvasPaddingPx, y: UV_LAYOUT_TUNING.canvasPaddingPx, scale: 1 });
   const viewRef = useRef(view);
   const viewKeyRef = useRef('');
   const fixedLineCacheRef = useRef<UvLineGeometryCache | null>(null);
   const activeLineCacheRef = useRef<UvLineGeometryCache | null>(null);
 
-  const setView = (next: View) => {
+  const setView = (next: UvCanvasView) => {
     viewGenerationRef.current += 1;
     pendingViewRef.current = null;
     viewFramePendingRef.current = false;
@@ -288,7 +294,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   // SDL can deliver far more motion packets than the display can present. The
   // native Graph transforms consume only the newest camera coordinates, so pan
   // previews reconcile once per host frame instead of once per mouse packet.
-  const queueViewPreview = (next: View) => {
+  const queueViewPreview = (next: UvCanvasView) => {
     viewRef.current = next;
     pendingViewRef.current = next;
     if (viewFramePendingRef.current) return;
@@ -312,7 +318,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     viewFramePendingRef.current = false;
     setViewState(viewRef.current);
   };
-  const fittedView = (nativeScale = false): View => {
+  const fittedView = (nativeScale = false): UvCanvasView => {
     const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
     const fit = Math.min(
       Math.max(1, surfaceSize.width - padding * 2) / Math.max(1, uv.w),
@@ -365,6 +371,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   };
 
   useEffect(() => () => {
+    if (middlePanTimerRef.current) clearTimeout(middlePanTimerRef.current);
+    middlePanTimerRef.current = null;
+    middlePanActiveRef.current = false;
     previewGenerationRef.current += 1;
     pendingPreviewRef.current = null;
     previewFramePendingRef.current = false;
@@ -598,11 +607,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     control && Math.hypot(point.x - control.x, point.y - control.y) <= radius,
   );
   const zoomAt = (point: ScreenPoint, factor: number) => {
-    const current = viewRef.current;
-    const nextScale = clamp(current.scale * factor, UV_LAYOUT_TUNING.minimumZoom, UV_LAYOUT_TUNING.maximumZoom);
-    const ax = (point.x - current.x) / current.scale;
-    const ay = (point.y - current.y) / current.scale;
-    setView({ x: point.x - ax * nextScale, y: point.y - ay * nextScale, scale: nextScale });
+    setView(zoomUvCanvasViewAt(viewRef.current, point, factor));
   };
 
   const changeCoordinate = (field: 'x' | 'y' | 'w' | 'h', value: number) => {
@@ -726,80 +731,112 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     return `${verb} ${label}`;
   };
 
+  const setSelectionScope = (mode: UvSelectionMode) => {
+    setSelectionMode(mode);
+    if (mode === 'island') {
+      setSelectedFace(null);
+      if (selectionMode === 'face' && selected >= 0) {
+        publishIslandSelection([selected], selected);
+        bridge.selectUvIsland(selected, false);
+      }
+      setNote('island selection · double-click a face to isolate it');
+      return;
+    }
+    if (selected >= 0) {
+      selectedIndicesRef.current = [selected];
+      setSelectedIndices([selected]);
+    }
+    setNote('face selection · double-click a face again to return to its island');
+  };
+  const packAtlas = () => {
+    const next = uniformUvPack(rectsRef.current, uv.w, uv.h);
+    rectsRef.current = next;
+    setRects(next);
+    commit(next, `packed ${next.length} islands into uniform cells`, 'pack');
+  };
+  const importAtlas = () => {
+    setNote('choosing a texture…');
+    void bridge.importUvAtlas().then(setNote);
+  };
+  const saveAndCopyAtlasPath = () => {
+    const saved = bridge.saveUvAtlas();
+    if (!saved.path) {
+      setNote(saved.note);
+      return;
+    }
+    host.__clipboard_set?.(saved.path);
+    setNote(`${saved.note} · path copied`);
+  };
+  const runMenuAction = (action: () => void) => {
+    action();
+    setMenuGroup(null);
+    uvMenu.close();
+  };
+  const toggleMenuGroup = (group: UvMenuGroup) => setMenuGroup((current) => current === group ? null : group);
+  const openUvMenu = (event: any, selectAtPointer: boolean) => {
+    const screen = localScreenPoint(event);
+    if (selectAtPointer) {
+      const point = atlasPoint(screen);
+      if (selectionMode === 'face') {
+        const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+        if (faceHit) {
+          selectedIndicesRef.current = [faceHit.island];
+          setSelectedIndices([faceHit.island]);
+          setSelected(faceHit.island);
+          setSelectedFace(faceHit.target);
+          bridge.selectUvFace(faceHit.target.face, false);
+        }
+      } else {
+        const index = hitUvIsland(rectsRef.current, point.x, point.y);
+        if (index >= 0 && !selectedIndicesRef.current.includes(index)) {
+          publishIslandSelection([index], index);
+          bridge.selectUvIsland(index, false);
+        }
+      }
+    }
+    setMenuGroup(null);
+    const x = Number(event?.x);
+    const y = Number(event?.y);
+    uvMenu.triggerProps.onRightClick({
+      x: Number.isFinite(x) ? x : surfaceRef.current.x + screen.x,
+      y: Number.isFinite(y) ? y : surfaceRef.current.y + screen.y,
+    });
+  };
+  const hostCursorPoint = (): ScreenPoint => ({
+    x: Number(host.getMouseX?.() ?? surfaceRef.current.x) - surfaceRef.current.x,
+    y: Number(host.getMouseY?.() ?? surfaceRef.current.y) - surfaceRef.current.y,
+  });
+  const middlePanStep = () => {
+    if (!middlePanActiveRef.current) return;
+    const held = (Number(host.getMouseButtons?.() ?? 0) & UV_LAYOUT_TUNING.middleMouseButtonsMask) !== 0;
+    if (!held) {
+      middlePanTimerRef.current = null;
+      middlePanActiveRef.current = false;
+      finishGesture();
+      return;
+    }
+    const gesture = gestureRef.current;
+    if (gesture?.kind === 'pan') queueViewPreview(panUvCanvasView(gesture.seed, gesture.start, hostCursorPoint()));
+    middlePanTimerRef.current = setTimeout(middlePanStep, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
+  };
+  const beginMiddlePan = () => {
+    if (middlePanActiveRef.current) return;
+    if (gestureRef.current) finishGesture();
+    const start = hostCursorPoint();
+    gestureRef.current = { kind: 'pan', start, seed: viewRef.current };
+    middlePanActiveRef.current = true;
+    middlePanTimerRef.current = setTimeout(middlePanStep, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
+  };
+
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, gap: 6 }}>
-      <Row style={{ height: 27, alignItems: 'center', gap: 5 }}>
-        {toolButton('MousePointer2', tool === 'select' && selectionMode === 'island', 'Island mode — transform one connected UV piece; double-click a face to isolate it', () => { setTool('select'); setSelectionMode('island'); setSelectedFace(null); })}
-        {toolButton('Triangle', tool === 'select' && selectionMode === 'face', 'Face mode — drag one authored face to break it out of its island', () => {
-          setTool('select');
-          setSelectionMode('face');
-          if (selected >= 0) {
-            selectedIndicesRef.current = [selected];
-            setSelectedIndices([selected]);
-          }
-        })}
-        {toolButton('Hand', tool === 'pan', 'Pan the UV canvas', () => setTool('pan'))}
-        {toolButton('Maximize2', false, 'Fit the complete atlas in the canvas', () => setView(fittedView(false)))}
-        {toolButton('FlipHorizontal2', false, 'Flip selected UV horizontally (U) — fixes mirrored text', () => flipSelected('u'))}
-        {toolButton('FlipVertical2', false, 'Flip selected UV vertically (V)', () => flipSelected('v'))}
-        <Pressable tooltip="Zoom out" onPress={() => zoomAt({ x: surfaceSize.width * 0.5, y: surfaceSize.height * 0.5 }, 0.8)} style={{ width: 25, height: 25, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-          <Text style={{ color: accentFor('textDim'), fontSize: 14, fontWeight: '900' }}>−</Text>
-        </Pressable>
-        <Text style={{ minWidth: 44, textAlign: 'center', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
-        <Pressable tooltip="Zoom in" onPress={() => zoomAt({ x: surfaceSize.width * 0.5, y: surfaceSize.height * 0.5 }, 1.25)} style={{ width: 25, height: 25, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-          <Text style={{ color: accentFor('textDim'), fontSize: 14, fontWeight: '900' }}>+</Text>
-        </Pressable>
+      <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
+        <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={12} color={accentFor('primary')} />
+        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
         <Box style={{ flexGrow: 1 }} />
+        <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
+        <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
         <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>{`${rects.length} islands`}</Text>
-      </Row>
-
-      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
-        <Text style={{ minWidth: 48, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>HISTORY</Text>
-        {historyActionButton('Undo2', `UNDO ${history.undo}`, canUndoUv, historyTooltip(false), () => stepHistory(false))}
-        {historyActionButton('Redo2', `REDO ${history.redo}`, canRedoUv, historyTooltip(true), () => stepHistory(true))}
-        <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>ONE GESTURE = ONE STEP</Text>
-      </Row>
-
-      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
-        <Text style={{ minWidth: 39, color: multiIslandSelection ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`SET ${selectedIndices.length}`}</Text>
-        {selectionActionButton('W =', multiIslandSelection, 'Match every selected island to the active white island width', () => matchSelectedSize('width'))}
-        {selectionActionButton('H =', multiIslandSelection, 'Match every selected island to the active white island height', () => matchSelectedSize('height'))}
-        {selectionActionButton('W×H', multiIslandSelection, 'Match every selected island to the active white island size', () => matchSelectedSize('both'))}
-        {selectionActionButton('X CHAIN', multiIslandSelection, 'Arrange selected islands left-to-right on the active snap grid', () => chainSelected('horizontal'))}
-        {selectionActionButton('Y CHAIN', multiIslandSelection, 'Arrange selected islands top-to-bottom on the active snap grid', () => chainSelected('vertical'))}
-        <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>SHIFT+CLICK</Text>
-      </Row>
-
-      <Row style={{ height: 25, alignItems: 'center', gap: 4 }}>
-        <Text style={{ minWidth: 39, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>SHAPE</Text>
-        {selectionActionButton('RESTORE', selectionMode === 'island' && selectedIndices.length > 0, 'Reproject selected islands from the 3D mesh — restores circles, rectangles, orientation, and square-texel aspect while keeping the current UV centre', restoreSelectedShapes)}
-        <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>FROM 3D · KEEPS CENTRE</Text>
-      </Row>
-
-      <Row style={{ height: 23, alignItems: 'center', gap: 4 }}>
-        <Text style={{ minWidth: 39, color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>GRID</Text>
-        {UV_SNAP_STEPS.map((step) => {
-          const active = snapBaseStep === step;
-          return (
-            <Pressable
-              key={`uv-snap-${step}`}
-              tooltip={`Use at least a ${step}-texel UV grid`}
-              onPress={() => {
-                setSnapBaseStep(step);
-                setNote(`grid set to ${uvTranslationSnapStep(view.scale, step)} texels at this zoom`);
-              }}
-              style={{ width: 27, height: 21, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: active ? accentFor('segActiveBg') : accentFor('controlBg'), borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('borderSoft') }}
-            >
-              <Text style={{ color: active ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{step}</Text>
-            </Pressable>
-          );
-        })}
-        <Text style={{ marginLeft: 3, color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`ACTIVE ${translationSnapStep}px`}</Text>
-        <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>ALT = FREE</Text>
       </Row>
 
       <Paintable id={texture.id} w={uv.w} h={uv.h} rgba />
@@ -810,18 +847,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           surfaceRef.current = next;
           if (next.width !== surfaceSize.width || next.height !== surfaceSize.height) setSurfaceSize({ width: next.width, height: next.height });
         }}
-        onWheel={(event: any) => {
+        onScroll={(event: any) => {
           const delta = Number(event?.deltaY ?? event?.delta ?? 0);
           if (!Number.isFinite(delta) || delta === 0) return;
-          zoomAt(localScreenPoint(event), delta > 0 ? 0.85 : 1.15);
+          zoomAt(localScreenPoint(event), delta > 0 ? 1.15 : 1 / 1.15);
         }}
+        onMiddleClick={beginMiddlePan}
+        onRightClick={(event: any) => openUvMenu(event, true)}
         onMouseDown={(event: any) => {
           const screen = localScreenPoint(event);
-          const mouseButtonsMask = Number(host.getMouseButtons?.() ?? event?.buttons ?? 0);
-          if (shouldPanUvCanvas(tool, mouseButtonsMask)) {
-            gestureRef.current = { kind: 'pan', start: screen, seed: viewRef.current };
-            return;
-          }
           if (selectedRect && selectionBounds && hitsControl(screen, rotationHandle, UV_LAYOUT_TUNING.rotationHandleHitPx)) {
             const point = atlasPoint(screen);
             gestureRef.current = {
@@ -851,15 +885,21 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             lastClickRef.current = null;
             const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
             if (faceHit) {
-              setTool('select');
-              setSelectionMode('face');
+              const nextMode = uvSelectionModeAfterDoubleClick(selectionMode, true);
               selectedIndicesRef.current = [faceHit.island];
               setSelectedIndices([faceHit.island]);
               setSelected(faceHit.island);
-              setSelectedFace(faceHit.target);
-              bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
-              setNote('isolated one authored UV face');
+              setSelectionMode(nextMode);
+              if (nextMode === 'island') {
+                setSelectedFace(null);
+                bridge.selectUvIsland(faceHit.island, false);
+                setNote('returned to the complete UV island');
+              } else {
+                setSelectedFace(faceHit.target);
+                bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
+                gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
+                setNote('isolated one authored UV face · double-click again to return');
+              }
               return;
             }
           }
@@ -892,7 +932,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           if (!gesture) return;
           const screen = localScreenPoint(event);
           if (gesture.kind === 'pan') {
-            queueViewPreview({ x: gesture.seed.x + screen.x - gesture.start.x, y: gesture.seed.y + screen.y - gesture.start.y, scale: gesture.seed.scale });
+            queueViewPreview(panUvCanvasView(gesture.seed, gesture.start, screen));
             return;
           }
           const point = atlasPoint(screen);
@@ -934,7 +974,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           queueUvPreview(gesture.index, changed, guide);
         }}
         onMouseUp={finishGesture}
-        onMouseLeave={finishGesture}
+        onMouseLeave={() => { if (!middlePanActiveRef.current) finishGesture(); }}
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#07090d' }}
       >
         <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, backgroundColor: '#0d1118', pointerEvents: 'none' }} />
@@ -1023,36 +1063,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>TEXTURES</Text>
           <Box style={{ flexGrow: 1 }} />
-          <Pressable tooltip="Repack all islands into equal editable cells" onPress={() => {
-            const next = uniformUvPack(rectsRef.current, uv.w, uv.h);
-            rectsRef.current = next;
-            setRects(next);
-            commit(next, `packed ${next.length} islands into uniform cells`, 'pack');
-          }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-            <Icon name="Grid3x3" size={11} color={accentFor('textDim')} />
-          </Pressable>
-          <Pressable tooltip="Import an image at its native size; UV geometry uniformly fits without turning circles into ovals" onPress={() => {
-            setNote('choosing a texture…');
-            void bridge.importUvAtlas().then(setNote);
-          }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-            <Icon name="ImagePlus" size={11} color={accentFor('textDim')} />
-          </Pressable>
-          <Pressable tooltip="Reload atlases/base.png after editing it externally" onPress={() => setNote(bridge.reloadUvAtlas())} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-            <Icon name="RefreshCw" size={11} color={accentFor('textDim')} />
-          </Pressable>
-          {uv.diskPath ? (
-            <Pressable tooltip="Write the current base.png, verify it exists, then copy its path" onPress={() => {
-              const saved = bridge.saveUvAtlas();
-              if (saved.path) {
-                host.__clipboard_set?.(saved.path);
-                setNote(`${saved.note} · path copied`);
-              } else {
-                setNote(saved.note);
-              }
-            }} style={{ width: 25, height: 23, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}>
-              <Icon name="Copy" size={11} color={accentFor('textDim')} />
-            </Pressable>
-          ) : null}
+          <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>RMB CANVAS · TEXTURE ACTIONS</Text>
         </Row>
         <Box style={{ height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 7, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}>
           <Box style={{ width: 32, height: 32, position: 'relative', overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
@@ -1065,6 +1076,83 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <Icon name="Save" size={13} color={accentFor('primary')} />
         </Box>
       </Box>
+
+      <uvMenu.ContextMenu
+        onDismiss={() => setMenuGroup(null)}
+        style={{ left: Math.max(4, uvMenu.x - 224), width: 220 }}
+      >
+        <C.HW_StageContextMenu style={{ width: 220 }}>
+          <C.HW_ContextHead>
+            <Icon name="Grid3x3" size={13} color={accentFor('primary')} />
+            <Box style={{ gap: 1 }}>
+              <Text style={{ color: accentFor('text'), fontSize: 10, fontWeight: '900', letterSpacing: 0.8 }}>UV ACTIONS</Text>
+              <C.HW_KeyText>WHEEL ZOOM · MMB PAN</C.HW_KeyText>
+            </Box>
+            <C.HW_Spacer />
+            <C.HW_KeyText>{`${Math.round(view.scale * 100)}%`}</C.HW_KeyText>
+          </C.HW_ContextHead>
+
+          <UvContextRow icon="MousePointer2" label="Island Selection" detail={selectionMode === 'island' ? 'ACTIVE' : 'DOUBLE'} active={selectionMode === 'island'} onPress={() => runMenuAction(() => setSelectionScope('island'))} />
+          <UvContextRow icon="Triangle" label="Face Isolation" detail={selectionMode === 'face' ? 'ACTIVE' : 'DOUBLE'} active={selectionMode === 'face'} onPress={() => runMenuAction(() => setSelectionScope('face'))} />
+          <UvContextRow icon="Maximize2" label="Fit Complete Atlas" detail="VIEW" onPress={() => runMenuAction(() => setView(fittedView(false)))} />
+
+          <UvContextDivider />
+          <UvContextRow icon="RotateCw" label="Transform Selection" detail={selectionMode === 'face' ? 'FACE' : `${selectedIndices.length} ISL`} expanded={menuGroup === 'transform'} onPress={() => toggleMenuGroup('transform')} />
+          {menuGroup === 'transform' ? (
+            <>
+              <UvContextRow indented icon="FlipHorizontal2" label="Flip Horizontally" detail="U" enabled={Boolean(selectedRect)} onPress={() => runMenuAction(() => flipSelected('u'))} />
+              <UvContextRow indented icon="FlipVertical2" label="Flip Vertically" detail="V" enabled={Boolean(selectedRect)} onPress={() => runMenuAction(() => flipSelected('v'))} />
+              <UvContextRow indented icon="RefreshCcw" label="Restore From 3D Shape" detail="KEEP CENTRE" enabled={selectionMode === 'island' && selectedIndices.length > 0} onPress={() => runMenuAction(restoreSelectedShapes)} />
+            </>
+          ) : null}
+
+          <UvContextRow icon="Rows3" label="Arrange Selected Islands" detail={`${selectedIndices.length} SELECTED`} expanded={menuGroup === 'arrange'} onPress={() => toggleMenuGroup('arrange')} />
+          {menuGroup === 'arrange' ? (
+            <>
+              <UvContextRow indented icon="MoveHorizontal" label="Match Active Width" detail="W =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('width'))} />
+              <UvContextRow indented icon="MoveVertical" label="Match Active Height" detail="H =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('height'))} />
+              <UvContextRow indented icon="Maximize" label="Match Active Size" detail="W×H" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('both'))} />
+              <UvContextRow indented icon="ArrowRight" label="Chain Left to Right" detail="X" enabled={multiIslandSelection} onPress={() => runMenuAction(() => chainSelected('horizontal'))} />
+              <UvContextRow indented icon="ArrowDown" label="Chain Top to Bottom" detail="Y" enabled={multiIslandSelection} onPress={() => runMenuAction(() => chainSelected('vertical'))} />
+            </>
+          ) : null}
+
+          <UvContextRow icon="Grid2x2" label="Snap Grid" detail={`${translationSnapStep}px ACTIVE`} expanded={menuGroup === 'snap'} onPress={() => toggleMenuGroup('snap')} />
+          {menuGroup === 'snap' ? UV_SNAP_STEPS.map((step) => (
+            <UvContextRow
+              key={`uv-context-snap-${step}`}
+              indented
+              icon="Grid2x2"
+              label={`${step} texel${step === 1 ? '' : 's'}`}
+              detail={snapBaseStep === step ? 'ACTIVE' : ''}
+              active={snapBaseStep === step}
+              onPress={() => runMenuAction(() => {
+                setSnapBaseStep(step);
+                setNote(`grid set to ${uvTranslationSnapStep(view.scale, step)} texels at this zoom · Alt moves freely`);
+              })}
+            />
+          )) : null}
+
+          <UvContextRow icon="History" label="Edit History" detail={`${history.undo} / ${history.redo}`} expanded={menuGroup === 'edit'} onPress={() => toggleMenuGroup('edit')} />
+          {menuGroup === 'edit' ? (
+            <>
+              <UvContextRow indented icon="Undo2" label="Undo UV Edit" detail={`${history.undo}`} enabled={canUndoUv} tooltip={historyTooltip(false)} onPress={() => runMenuAction(() => stepHistory(false))} />
+              <UvContextRow indented icon="Redo2" label="Redo UV Edit" detail={`${history.redo}`} enabled={canRedoUv} tooltip={historyTooltip(true)} onPress={() => runMenuAction(() => stepHistory(true))} />
+            </>
+          ) : null}
+
+          <UvContextDivider />
+          <UvContextRow icon="Image" label="Texture Atlas" detail={`${uv.w}×${uv.h}`} expanded={menuGroup === 'texture'} onPress={() => toggleMenuGroup('texture')} />
+          {menuGroup === 'texture' ? (
+            <>
+              <UvContextRow indented icon="Grid3x3" label="Uniform Pack All Islands" enabled={rects.length > 0} onPress={() => runMenuAction(packAtlas)} />
+              <UvContextRow indented icon="ImagePlus" label="Import Texture…" onPress={() => runMenuAction(importAtlas)} />
+              <UvContextRow indented icon="RefreshCw" label="Reload base.png" onPress={() => runMenuAction(() => setNote(bridge.reloadUvAtlas()))} />
+              <UvContextRow indented icon="Copy" label="Save & Copy Atlas Path" enabled={Boolean(uv.diskPath)} onPress={() => runMenuAction(saveAndCopyAtlasPath)} />
+            </>
+          ) : null}
+        </C.HW_StageContextMenu>
+      </uvMenu.ContextMenu>
     </Box>
   );
 }

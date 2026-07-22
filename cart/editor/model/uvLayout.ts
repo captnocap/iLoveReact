@@ -40,6 +40,9 @@ export type UvSnapStep = typeof UV_SNAP_STEPS[number];
 export const NO_UV_GROUP = 0xffffffff;
 
 export type UvCanvasTool = 'select' | 'pan';
+export type UvSelectionMode = 'island' | 'face';
+export type UvCanvasView = { x: number; y: number; scale: number };
+export type UvCanvasPoint = { x: number; y: number };
 
 export type UvTrianglePoints = readonly [number, number, number, number, number, number];
 
@@ -81,6 +84,37 @@ const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Ma
  */
 export function shouldPanUvCanvas(tool: UvCanvasTool, mouseButtonsMask: number): boolean {
   return tool === 'pan' || (integer(mouseButtonsMask) & UV_LAYOUT_TUNING.middleMouseButtonsMask) !== 0;
+}
+
+/** Cursor-anchored zoom: the atlas texel beneath the wheel stays beneath it. */
+export function zoomUvCanvasViewAt(view: UvCanvasView, point: UvCanvasPoint, factor: number): UvCanvasView {
+  const nextScale = clamp(
+    view.scale * (Number.isFinite(factor) && factor > 0 ? factor : 1),
+    UV_LAYOUT_TUNING.minimumZoom,
+    UV_LAYOUT_TUNING.maximumZoom,
+  );
+  const atlasX = (point.x - view.x) / Math.max(UV_LAYOUT_TUNING.minimumZoom, view.scale);
+  const atlasY = (point.y - view.y) / Math.max(UV_LAYOUT_TUNING.minimumZoom, view.scale);
+  return {
+    x: point.x - atlasX * nextScale,
+    y: point.y - atlasY * nextScale,
+    scale: nextScale,
+  };
+}
+
+/** Pan from an immutable gesture seed so high-rate mouse samples never accumulate drift. */
+export function panUvCanvasView(seed: UvCanvasView, start: UvCanvasPoint, current: UvCanvasPoint): UvCanvasView {
+  return {
+    x: seed.x + current.x - start.x,
+    y: seed.y + current.y - start.y,
+    scale: seed.scale,
+  };
+}
+
+/** Double-click is a reversible scope toggle: island -> authored face -> island. */
+export function uvSelectionModeAfterDoubleClick(mode: UvSelectionMode, hitFace: boolean): UvSelectionMode {
+  if (!hitFace) return mode;
+  return mode === 'face' ? 'island' : 'face';
 }
 
 export function isUvDoubleClick(previous: UvClickStamp | null, current: UvClickStamp): boolean {

@@ -11,6 +11,7 @@ import {
   moveUvIslands,
   moveUvSelectionVertex,
   moveUvIslandVertex,
+  panUvCanvasView,
   parseUvIslandRects,
   resizeUvIsland,
   resizeUvIslandFromCorner,
@@ -19,6 +20,7 @@ import {
   shouldActivateUvDrag,
   shouldPanUvCanvas,
   uniformUvPack,
+  uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvFaceEdgePath,
   uvIslandBoundarySegments,
@@ -27,6 +29,7 @@ import {
   uvIslandSetBounds,
   uvSelectionBounds,
   uvTranslationSnapStep,
+  zoomUvCanvasViewAt,
 } from './uvLayout';
 
 let passed = 0, failed = 0;
@@ -315,6 +318,24 @@ test('primary drag selects one face while hand tool or middle drag pans', () => 
   assert(!shouldPanUvCanvas('select', 1), 'primary button was mistaken for middle-button pan');
   assert(shouldPanUvCanvas('select', 2), 'middle button did not pan from the select tool');
   assert(shouldPanUvCanvas('pan', 1), 'hand tool did not pan with the primary button');
+});
+
+test('wheel zoom keeps the atlas point beneath the cursor fixed', () => {
+  const view = { x: 31, y: -12, scale: 2 };
+  const cursor = { x: 211, y: 108 };
+  const atlasBefore = { x: (cursor.x - view.x) / view.scale, y: (cursor.y - view.y) / view.scale };
+  const zoomed = zoomUvCanvasViewAt(view, cursor, 1.25);
+  const atlasAfter = { x: (cursor.x - zoomed.x) / zoomed.scale, y: (cursor.y - zoomed.y) / zoomed.scale };
+  assert(Math.abs(atlasAfter.x - atlasBefore.x) < 0.0001, 'wheel zoom slid the atlas horizontally beneath the cursor');
+  assert(Math.abs(atlasAfter.y - atlasBefore.y) < 0.0001, 'wheel zoom slid the atlas vertically beneath the cursor');
+});
+
+test('middle pan derives from its seed and double-click toggles face isolation', () => {
+  const panned = panUvCanvasView({ x: 10, y: 20, scale: 3 }, { x: 80, y: 70 }, { x: 101, y: 64 });
+  assert(panned.x === 31 && panned.y === 14 && panned.scale === 3, 'middle pan drifted or changed zoom');
+  assert(uvSelectionModeAfterDoubleClick('island', true) === 'face', 'double-click did not enter face isolation');
+  assert(uvSelectionModeAfterDoubleClick('face', true) === 'island', 'double-click did not leave face isolation');
+  assert(uvSelectionModeAfterDoubleClick('face', false) === 'face', 'blank double-click changed selection scope');
 });
 
 test('uniform pack gives every island an equal, bounded cell', () => {
