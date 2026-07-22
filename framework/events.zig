@@ -8,7 +8,7 @@
 
 const std = @import("std");
 const layout = @import("layout.zig");
-const Node = layout.Node;
+pub const Node = layout.Node;
 
 // ── Filter-aware pointer warp ───────────────────────────────────────────
 //
@@ -379,9 +379,18 @@ pub fn findCanvasNode(node: *Node, mx: f32, my: f32) ?*Node {
     return null;
 }
 
-/// Walk the tree back-to-front to find the deepest node containing (mx, my)
-/// that has a right-click handler or context_menu_items.
-pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
+const ButtonTarget = enum { right_click, middle_click };
+
+fn ownsButtonTarget(node: *const Node, comptime target: ButtonTarget) bool {
+    return node.blocks_pointer_events or switch (target) {
+        .right_click => node.handlers.on_right_click != null or node.context_menu_items != null,
+        .middle_click => node.handlers.js_on_middle_click != null,
+    };
+}
+
+/// Shared button-specific walker. Unlike the generic hit-test, a Graph/Canvas
+/// child without this button's handler cannot hide its interactive parent.
+fn hitTestButton(node: *Node, mx: f32, my: f32, comptime target: ButtonTarget) ?*Node {
     if (node.style.display == .none) return null;
 
     const r = node.computed;
@@ -411,26 +420,37 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
             ci -= 1;
             const child = &node.children[ci];
             if (child.canvas_clamp) {
-                if (hitTestRightClick(child, child_mx, child_my)) |hit| return hit;
+                if (hitTestButton(child, child_mx, child_my, target)) |hit| return hit;
             }
         }
-        if (node.blocks_pointer_events or node.handlers.on_right_click != null or node.context_menu_items != null) return node;
+        if (ownsButtonTarget(node, target)) return node;
         return null;
     }
 
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
-        if (hitTestRightClick(&node.children[i], child_mx, child_my)) |hit| return hit;
+        if (hitTestButton(&node.children[i], child_mx, child_my, target)) |hit| return hit;
     }
 
-    if (node.blocks_pointer_events or node.handlers.on_right_click != null or node.context_menu_items != null) {
+    if (ownsButtonTarget(node, target)) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }
     }
 
     return null;
+}
+
+/// Walk back-to-front for the node that owns a right-click action.
+pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
+    return hitTestButton(node, mx, my, .right_click);
+}
+
+/// Walk back-to-front for `onMiddleClick`, while allowing pointer-blocking
+/// chrome to consume the press before a native viewport can orbit beneath it.
+pub fn hitTestMiddleClick(node: *Node, mx: f32, my: f32) ?*Node {
+    return hitTestButton(node, mx, my, .middle_click);
 }
 
 /// Walk the tree back-to-front to find the deepest node containing (mx, my)

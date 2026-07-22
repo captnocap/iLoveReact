@@ -4437,9 +4437,15 @@ pub fn run(config_in: AppConfig) !void {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
                         if (event.button.button == c.SDL_BUTTON_MIDDLE) {
-                            me_orbiting = true;
-                            input.unfocus();
-                            continue;
+                            // Native orbit owns the model stage, not editor chrome.
+                            // A middle-specific handler (the UV canvas) or a blocking
+                            // chrome node must receive/consume this press below.
+                            const middle_events = @import("events.zig");
+                            if (middle_events.hitTestMiddleClick(config.root, mx, my) == null) {
+                                me_orbiting = true;
+                                input.unfocus();
+                                continue;
+                            }
                         }
                         // A slider/scrollbar under the cursor is chrome — yield so the LEFT
                         // handler below can grab it. meHitIsChrome uses layout.hitTest (topmost
@@ -4597,7 +4603,7 @@ pub fn run(config_in: AppConfig) !void {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
                         const events = @import("events.zig");
-                        if (events.hitTest(config.root, mx, my)) |h| {
+                        if (events.hitTestMiddleClick(config.root, mx, my)) |h| {
                             if (h.handlers.js_on_middle_click) |expr| {
                                 input.unfocus();
                                 const expr_str = std.mem.span(expr);

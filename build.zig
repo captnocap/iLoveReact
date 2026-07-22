@@ -996,6 +996,28 @@ pub fn build(b: *std.Build) void {
     const layout_test_step = b.step("test-layout", "Run the layout unit tests");
     layout_test_step.dependOn(&run_layout_test.step);
 
+    // ── Pointer-event hit-test unit tests ──────────────────────────
+    const events_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/events.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const events_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/events.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    events_test_mod.addImport("events", events_mod_for_tests);
+    const events_test = b.addTest(.{
+        .name = "events-test",
+        .root_module = events_test_mod,
+    });
+    const run_events_test = b.addRunArtifact(events_test);
+    const events_test_step = b.step("test-events", "Run pointer-event hit-test unit tests");
+    events_test_step.dependOn(&run_events_test.step);
+
     const layout_wrap_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/layout_wrap.zig"),
         .target = target,
