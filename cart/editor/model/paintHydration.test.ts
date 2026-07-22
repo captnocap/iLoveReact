@@ -10,6 +10,7 @@
 
 import {
   hydratePersistedModelPaint,
+  residentPaintResumeAction,
   type PaintHydrationPort,
   type PersistedPaintSources,
 } from './paintHydration';
@@ -87,6 +88,13 @@ test('a failed persisted record is distinct from a model with no paint', () => {
   assert(hydratePersistedModelPaint(failedHarness.sources, failedHarness.port).status === 'failed', 'failed record was reported missing');
   const emptyHarness = harness();
   assert(hydratePersistedModelPaint(emptyHarness.sources, emptyHarness.port).status === 'missing', 'empty model was reported failed');
+});
+
+test('a resident atlas publishes its preview even when Paint was not active', () => {
+  assert(residentPaintResumeAction({ atlasReady: true, atlasStale: false, paintToolActive: false }) === 'preview', 'resident atlas stayed hidden outside Paint');
+  assert(residentPaintResumeAction({ atlasReady: true, atlasStale: false, paintToolActive: true }) === 'paint', 'active Paint tool was not restored');
+  assert(residentPaintResumeAction({ atlasReady: false, atlasStale: false, paintToolActive: false }) === 'none', 'missing atlas published a preview');
+  assert(residentPaintResumeAction({ atlasReady: true, atlasStale: true, paintToolActive: false }) === 'none', 'stale atlas published a preview');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

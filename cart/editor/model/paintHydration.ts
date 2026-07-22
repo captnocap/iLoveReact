@@ -28,6 +28,22 @@ export type PaintHydrationResult =
   | { status: 'ready'; source: 'base' | 'variant' }
   | { status: 'missing' | 'stale' | 'failed' };
 
+export type ResidentPaintResumeAction = 'none' | 'preview' | 'paint';
+
+/**
+ * Decide how a remounted React surface should expose paint that is already live
+ * in the host. A resident atlas is document state even when the brush was not the
+ * active tool, so the inactive-tool path must still publish its UV preview.
+ */
+export function residentPaintResumeAction(input: {
+  atlasReady: boolean;
+  atlasStale: boolean;
+  paintToolActive: boolean;
+}): ResidentPaintResumeAction {
+  if (!input.atlasReady || input.atlasStale) return 'none';
+  return input.paintToolActive ? 'paint' : 'preview';
+}
+
 /**
  * Restore one model's authored paint state without entering Paint mode.
  *

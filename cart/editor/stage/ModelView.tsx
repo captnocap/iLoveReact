@@ -47,7 +47,7 @@ import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resol
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
-import { hydratePersistedModelPaint } from '../model/paintHydration';
+import { hydratePersistedModelPaint, residentPaintResumeAction } from '../model/paintHydration';
 import { triangleWireframeVisible } from '../model/viewportPresentation';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
@@ -2097,9 +2097,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const lcj = host.__mesh_lc_state?.();
         if (typeof lcj === 'string' && lcj && JSON.parse(lcj)?.ok === 1) host.__mesh_lc_end?.(0);
       } catch { /* no lc door / malformed state — nothing to cancel */ }
-      // You were painting when the reload hit and the atlas is still live → go
-      // straight back to the brush instead of dropping to view mode.
-      if (toolTwig?.paint && session.atlas) enterPaint();
+      // The host atlas is document state, not Paint-tool state. A remount must
+      // publish its UV preview even when the brush was inactive; otherwise the
+      // model renders the retained texture while the inspector falsely says none.
+      const paintResume = residentPaintResumeAction({
+        atlasReady: session.atlas,
+        atlasStale: atlasInvalidatedRef.current,
+        paintToolActive: toolTwig?.paint === true,
+      });
+      if (paintResume === 'paint') enterPaint();
+      else if (paintResume === 'preview') buildUvPanel();
       console.warn(`[modelview] resumed live host session for ${hotDocId} (${session.undo} undo · atlas ${session.atlas ? 'live' : 'none'} · mode ${sel.mode} · ${sel.sel} selected)`);
       return true;
     };
