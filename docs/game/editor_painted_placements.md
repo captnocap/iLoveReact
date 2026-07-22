@@ -1,8 +1,8 @@
 # Painted placements: which mesh a placed model renders
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
-Last verified: 2026-07-21. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328 / req_3329.
+Last verified: 2026-07-22. USER ASK req_2832 / req_2833 / req_2930 /
+req_3133 / req_3328 / req_3329 / req_3362.
 
 ## In one sentence
 
@@ -22,6 +22,21 @@ exported look and renders as-is (collision still comes from the full-res doc).
   cardinality equals the doc's; at decimated quality it is smaller.
 - `atlases/base.png` — the atlas. Pairing it with source UVs scrambles the
   painting (req_2833), hence painted.blob exists at all.
+
+## Cold-restart UV state (req_3362)
+
+`atlases/base.paint.json` v4 is the editable UV document paired with the raster
+baseline. `__model_atlas_read` publishes every render face as
+`[island, authoredGroup, x0, y0, x1, y1, x2, y2]`; Save strips the envelope and
+writes the six exact absolute-atlas corner coordinates per face as `cornerUv`.
+Cold ModelView hydration imports `raster-base.png`, applies that complete table
+through unjournaled `__model_uv_geometry_apply`, then replays any paint program.
+
+The preceding v2/v3 format stored only `[x,y,w,h]` per island. Those rectangles
+remain readable for old packages, but they are transform bounds rather than UV
+geometry: they cannot reproduce a rotated island, a detached cylinder wedge, or
+one moved vertex. New saves therefore emit v4 whenever the host's complete
+triangle table is present.
 
 ## The ambiguity and the stamp (req_3133)
 

@@ -6,8 +6,19 @@ export const editor_painted_placements: DocIndex = {
   cart: 'cart/editor/world/livePush.ts',
   purpose: ['building', 'texture_bake', 'rendering', 'persistence', 'physics'],
   summary:
-    'Which mesh and collision shape a placed authored model uses (req_2832/2833/2930/3133/3328/3329): the full-res meshdoc with the painting\'s UVs rebound onto it — except when the painting was made on a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles, including one-row and multi-row models; painted.json stamps which doc revision owns a decimated exported look.',
+    'Which mesh, UV document, and collision shape a saved/placed authored model uses (req_2832/2833/2930/3133/3328/3329/3362): base.paint.json v4 cold-restores every exact face-corner UV; placement uses the full-res meshdoc with the painting\'s UVs rebound onto it except when painting a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles; painted.json stamps which doc revision owns a decimated exported look.',
   interfaces: [
+    {
+      name: 'base.paint.json v4 exact UV restart record',
+      purpose: ['persistence', 'texture_bake'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/data/modelPackageStore.ts',
+      description:
+        'Save strips __model_atlas_read triangle rows to one six-float absolute-atlas coordinate row per render face and writes them as cornerUv beside the raster baseline. Cold ModelView hydration imports that fixed raster, applies the complete corner table through the unjournaled __model_uv_geometry_apply boundary, then replays paint. v1-v3 records remain readable through their historical program/island-rectangle paths. Rectangles alone cannot reproduce rotations, detached wedges, or moved UV vertices and are never the authored geometry for a new save.',
+      dependsOn: ['framework/v8_bindings_core.zig __model_atlas_read / __model_uv_geometry_apply', 'cart/editor/model/paintHydration.ts'],
+      consumers: ['cart/editor/stage/ModelView.tsx hydratePersistedAtlas'],
+      status: 'live',
+    },
     {
       name: 'painted.json doc-stamp (writeModelArtifacts ↔ paintedFormIsCurrent)',
       purpose: ['persistence', 'texture_bake'],

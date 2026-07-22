@@ -34,12 +34,30 @@ function harness(overrides: Partial<PersistedPaintSources> = {}) {
     setDetail: (detail) => { calls.push(`detail:${detail}`); },
     importAtlas: (raster) => { calls.push(`raster:${raster.width}x${raster.height}`); return true; },
     applyLayout: (layout) => { calls.push(`layout:${Array.from(layout).join(',')}`); return true; },
+    applyCornerUv: (cornerUv) => { calls.push(`corners:${Array.from(cornerUv).join(',')}`); return true; },
     applyProgram: (program) => { calls.push(`program:${program}`); return true; },
     applyProgramOverBase: (program) => { calls.push(`over:${program}`); return true; },
     applyAtlas: (detail, data) => { calls.push(`atlas:${detail}:${data}`); return true; },
   };
   return { calls, sources, port };
 }
+
+test('exact UV corner geometry hydrates after the raster and before paint replay', () => {
+  const h = harness({
+    basePaint: {
+      version: 4,
+      detail: 64,
+      program: 'strokes',
+      rasterBase: true,
+      layout: [1, 2, 30, 40],
+      cornerUv: [1.25, 2.5, 12, 3, 7.75, 9],
+    },
+    readRasterBase: () => ({ width: 320, height: 180, rgba: new Uint8Array(320 * 180 * 4) }),
+  });
+  const result = hydratePersistedModelPaint(h.sources, h.port);
+  assert(result.status === 'ready' && result.source === 'base', 'exact base paint did not become ready');
+  assert(h.calls.join('|') === 'detail:64|raster:320x180|corners:1.25,2.5,12,3,7.75,9|over:strokes', `wrong exact restore sequence: ${h.calls.join('|')}`);
+});
 
 test('a raster-backed atlas hydrates completely without activating a paint tool', () => {
   const h = harness({

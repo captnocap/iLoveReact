@@ -19,6 +19,7 @@ export type PaintHydrationPort = {
   setDetail: (detail: number) => void;
   importAtlas: (raster: DecodedPaintRaster) => boolean;
   applyLayout: (layout: Uint32Array) => boolean;
+  applyCornerUv: (cornerUv: Float32Array) => boolean;
   applyProgram: (program: string) => boolean;
   applyProgramOverBase: (program: string) => boolean;
   applyAtlas: (detail: number, data: string) => boolean;
@@ -66,7 +67,15 @@ export function hydratePersistedModelPaint(
     foundPersistedPaint = true;
     port.setDetail(base.detail > 1 ? base.detail : 1);
     let restored = false;
-    if (base.version === 3) {
+    if (base.version === 4) {
+      const raster = sources.readRasterBase();
+      const imported = !!raster && port.importAtlas(raster);
+      const geometryRestored = imported
+        && !!base.cornerUv?.length
+        && port.applyCornerUv(new Float32Array(base.cornerUv));
+      restored = geometryRestored
+        && (!base.program || port.applyProgramOverBase(base.program));
+    } else if (base.version === 3) {
       const raster = sources.readRasterBase();
       const imported = !!raster && port.importAtlas(raster);
       const layoutRestored = imported

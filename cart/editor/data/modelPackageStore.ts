@@ -221,7 +221,26 @@ export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
   return manifest !== null && manifest.id === id && manifest.kind === kind;
 }
 
-export type ModelBasePaint = { version: 1 | 2 | 3; detail: number; program: string; layout?: number[]; rasterBase?: true };
+/**
+ * Durable paint-document metadata.
+ *
+ * v1: stroke program only
+ * v2: stroke program + island rectangles
+ * v3: raster baseline + island rectangles + optional strokes
+ * v4: raster baseline + the exact UV coordinate of every render-face corner
+ *
+ * Island rectangles are transform bounds, not authored UV geometry. They cannot
+ * reproduce rotation, detached faces, or an individually moved vertex, so every
+ * new save uses v4 whenever the host publishes its complete triangle table.
+ */
+export type ModelBasePaint = {
+  version: 1 | 2 | 3 | 4;
+  detail: number;
+  program: string;
+  layout?: number[];
+  cornerUv?: number[];
+  rasterBase?: true;
+};
 
 const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
 const PAINT_RASTER_BASE_FILE = 'atlases/raster-base.png';
@@ -233,27 +252,69 @@ export function modelPaintLayoutIsStale(pkg: Pick<ModelPackage, 'kind' | 'id'>):
   return !!dir && exists(`${dir}/${PAINT_LAYOUT_STALE_FILE}`);
 }
 
+function parsedUvIslandLayout(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length % 4 !== 0) return null;
+  if (!value.every((entry, index) => Number.isInteger(entry) && entry >= 0 && (index % 4 < 2 || entry > 0))) return null;
+  return value.slice();
+}
+
+function parsedUvCornerGeometry(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length % 6 !== 0) return null;
+  if (!value.every((entry) => typeof entry === 'number' && Number.isFinite(entry) && entry >= 0)) return null;
+  return value.slice();
+}
+
 export function parseModelBasePaintText(text: string): ModelBasePaint | null {
   try {
     const value = JSON.parse(text) as Partial<ModelBasePaint>;
-    if (value.version !== 1 && value.version !== 2 && value.version !== 3) return null;
-    if (typeof value.program !== 'string' || (value.version !== 3 && !value.program)) return null;
-    if (value.version === 3 && value.rasterBase !== true) return null;
-    const layout = value.version === 2 || value.version === 3
-      ? Array.isArray(value.layout) && value.layout.length > 0 && value.layout.length % 4 === 0
-        && value.layout.every((entry, index) => Number.isInteger(entry) && entry >= 0 && (index % 4 < 2 || entry > 0))
-        ? value.layout.slice()
-        : null
-      : undefined;
+    if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4) return null;
+    const rasterBacked = value.version === 3 || value.version === 4;
+    if (typeof value.program !== 'string' || (!rasterBacked && !value.program)) return null;
+    if (rasterBacked && value.rasterBase !== true) return null;
+    const layout = parsedUvIslandLayout(value.layout);
     if ((value.version === 2 || value.version === 3) && !layout) return null;
+    if (value.version === 4 && value.layout !== undefined && !layout) return null;
+    const cornerUv = value.version === 4 ? parsedUvCornerGeometry(value.cornerUv) : null;
+    if (value.version === 4 && !cornerUv) return null;
     return {
       version: value.version,
       detail: typeof value.detail === 'number' && Number.isFinite(value.detail) ? value.detail : 1,
       program: value.program,
-      ...(layout ? { layout } : {}),
-      ...(value.version === 3 ? { rasterBase: true as const } : {}),
+      ...(value.version >= 2 && layout ? { layout } : {}),
+      ...(cornerUv ? { cornerUv } : {}),
+      ...(rasterBacked ? { rasterBase: true as const } : {}),
     };
   } catch { return null; }
+}
+
+/**
+ * Strip the atlas-read triangle envelope
+ *   [island, authoredGroup, x0, y0, x1, y1, x2, y2]
+ * into the exact six-float-per-render-face table accepted by
+ * __model_uv_geometry_apply. The host emits rows in render-face order; rejecting
+ * one malformed/out-of-bounds row prevents a partial layout from becoming disk
+ * truth.
+ */
+export function exactUvCornersFromAtlasTriangles(
+  triangles: unknown,
+  atlasWidth: number,
+  atlasHeight: number,
+): number[] | null {
+  if (!Array.isArray(triangles) || triangles.length === 0 || triangles.length % 8 !== 0) return null;
+  if (!Number.isFinite(atlasWidth) || atlasWidth <= 0 || !Number.isFinite(atlasHeight) || atlasHeight <= 0) return null;
+  const cornerUv = new Array<number>((triangles.length / 8) * 6);
+  let write = 0;
+  for (let index = 0; index < triangles.length; index += 8) {
+    if (!Number.isInteger(triangles[index]) || (triangles[index] as number) < 0) return null;
+    if (!Number.isInteger(triangles[index + 1]) || (triangles[index + 1] as number) < 0) return null;
+    for (let coordinate = 0; coordinate < 6; coordinate += 1) {
+      const value = triangles[index + 2 + coordinate];
+      const limit = coordinate % 2 === 0 ? atlasWidth : atlasHeight;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > limit) return null;
+      cornerUv[write++] = value;
+    }
+  }
+  return cornerUv;
 }
 
 export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): ModelBasePaint | null {
@@ -572,17 +633,28 @@ export function writeModelArtifacts(
     const baselineValue = host.__model_paint_baseline_read?.();
     const baseline = typeof baselineValue === 'string' ? baselineValue : '';
     const layout = Array.isArray(atlas.islands) && atlas.islands.length > 0 ? atlas.islands : null;
+    const cornerUv = exactUvCornersFromAtlasTriangles(atlas.triangles, atlas.w, atlas.h);
     const basePaintPath = `${atlasDir}/base.paint.json`;
     const rasterBasePath = `${dir}/${PAINT_RASTER_BASE_FILE}`;
-    if (baseline && layout) {
+    if (baseline && (cornerUv || layout)) {
       const rasterWritten = host.__image_write_png?.(rasterBasePath, baseline, atlas.w, atlas.h) === 1;
-      const basePaint: ModelBasePaint = {
-        version: 3,
-        detail: typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1,
-        program,
-        layout,
-        rasterBase: true,
-      };
+      const detail = typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1;
+      const basePaint: ModelBasePaint = cornerUv
+        ? {
+          version: 4,
+          detail,
+          program,
+          ...(layout ? { layout } : {}),
+          cornerUv,
+          rasterBase: true,
+        }
+        : {
+          version: 3,
+          detail,
+          program,
+          layout: layout!,
+          rasterBase: true,
+        };
       paintProgramWritten = rasterWritten && writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
     } else if (program.length > 0) {
       if (exists(rasterBasePath)) remove(rasterBasePath);

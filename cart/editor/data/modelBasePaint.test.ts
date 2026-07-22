@@ -1,4 +1,4 @@
-import { parseModelBasePaintText } from './modelPackageStore';
+import { exactUvCornersFromAtlasTriangles, parseModelBasePaintText, writeModelArtifacts } from './modelPackageStore';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -20,9 +20,80 @@ test('base paint v3 restores a raster baseline with an optional stroke recipe', 
   assert(paint?.version === 3 && paint.rasterBase === true && paint.program === '', 'raster baseline record was not restored');
 });
 
+test('base paint v4 restores every exact face-corner UV across a cold restart', () => {
+  const cornerUv = [1.25, 2.5, 12, 3, 7.75, 9, 20, 4, 30, 8, 21, 16];
+  const paint = parseModelBasePaintText(JSON.stringify({
+    version: 4,
+    detail: 64,
+    program: '',
+    rasterBase: true,
+    layout: [1, 2, 12, 9],
+    cornerUv,
+  }));
+  assert(paint?.version === 4 && paint.cornerUv?.join(',') === cornerUv.join(','), 'exact UV geometry was not restored');
+});
+
+test('atlas triangle metadata strips to the host corner-geometry table in face order', () => {
+  const corners = exactUvCornersFromAtlasTriangles([
+    0, 7, 1.25, 2.5, 12, 3, 7.75, 9,
+    1, 0xffffffff, 20, 4, 30, 8, 21, 16,
+  ], 32, 20);
+  assert(corners?.join(',') === '1.25,2.5,12,3,7.75,9,20,4,30,8,21,16', 'triangle envelopes leaked into persisted UV geometry');
+  assert(exactUvCornersFromAtlasTriangles([0, 7, -1, 2, 3, 4, 5, 6], 32, 20) === null, 'out-of-atlas UV was accepted');
+});
+
+test('saving model artifacts commits exact UV geometry as the restart record', () => {
+  const host = globalThis as any;
+  const names = [
+    '__fs_exists', '__fs_read', '__fs_mkdir', '__fs_remove', '__fs_write_bytes_atomic', '__fs_stat_json',
+    '__model_paint_layout_stale', '__model_atlas_read', '__image_write_png', '__model_painted_mesh_write',
+    '__model_paint_program_read', '__model_paint_baseline_read',
+  ];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  let savedBasePaint = '';
+  try {
+    host.__fs_exists = (path: string) => path.endsWith('/mesh/doc.blob');
+    host.__fs_read = () => null;
+    host.__fs_mkdir = () => true;
+    host.__fs_remove = () => true;
+    host.__fs_stat_json = () => JSON.stringify({ size: 128, mtimeMs: 10, isDir: false });
+    host.__fs_write_bytes_atomic = (path: string, bytes: Uint8Array) => {
+      if (path.endsWith('/atlases/base.paint.json')) {
+        savedBasePaint = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      }
+      return true;
+    };
+    host.__model_paint_layout_stale = () => 0;
+    host.__model_atlas_read = () => JSON.stringify({
+      w: 32,
+      h: 20,
+      detail: 64,
+      data: 'AAAA',
+      islands: [1, 2, 30, 16],
+      triangles: [0, 7, 1.25, 2.5, 12, 3, 7.75, 9],
+    });
+    host.__image_write_png = () => 1;
+    host.__model_painted_mesh_write = () => 1;
+    host.__model_paint_program_read = () => '';
+    host.__model_paint_baseline_read = () => 'AAAA';
+    const ok = writeModelArtifacts({ kind: 'prop', id: 'test:uv-restart-v4', name: 'uv restart v4' });
+    const record = parseModelBasePaintText(savedBasePaint);
+    assert(ok, 'artifact save failed');
+    assert(record?.version === 4, `save emitted v${record?.version ?? 'none'} instead of exact v4`);
+    assert(record?.cornerUv?.join(',') === '1.25,2.5,12,3,7.75,9', 'saved record dropped exact face-corner UVs');
+  } finally {
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
+});
+
 test('base paint refuses empty or unknown records', () => {
-  assert(parseModelBasePaintText('{"version":4,"detail":64,"program":"x"}') === null, 'unknown version was accepted');
+  assert(parseModelBasePaintText('{"version":5,"detail":64,"program":"x"}') === null, 'unknown version was accepted');
   assert(parseModelBasePaintText('{"version":3,"detail":64,"program":"","layout":[0,0,1,1]}') === null, 'v3 without raster marker was accepted');
+  assert(parseModelBasePaintText('{"version":4,"detail":64,"program":"","rasterBase":true,"cornerUv":[0,0,1,1]}') === null, 'incomplete exact UV geometry was accepted');
   assert(parseModelBasePaintText('{"version":2,"detail":64,"program":"x","layout":[0,0,0,1]}') === null, 'invalid UV layout was accepted');
   assert(parseModelBasePaintText('{"version":1,"detail":64,"program":""}') === null, 'empty program was accepted');
   assert(parseModelBasePaintText('broken') === null, 'malformed json was accepted');

@@ -1411,6 +1411,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setDetail: (savedDetail) => { changeDetail(savedDetail); },
       importAtlas: (raster) => host.__model_atlas_import?.(raster.rgba, raster.width, raster.height) === 1,
       applyLayout: (layout) => host.__model_uv_layout_apply?.(layout) === 1,
+      // Cold hydration restores authored UV GEOMETRY, not only each island's
+      // bounding rectangle. Omit a history ordinal: loading disk truth is not a
+      // new undoable edit in this session.
+      applyCornerUv: (cornerUv) => host.__model_uv_geometry_apply?.(cornerUv) === 1,
       applyProgram: (program) => host.__model_paint_program_apply?.(program) === 1,
       applyProgramOverBase: (program) => host.__model_paint_program_apply_over_base?.(program) === 1,
       applyAtlas: (savedDetail, data) => host.__model_atlas_apply?.(savedDetail, data) === 1,
