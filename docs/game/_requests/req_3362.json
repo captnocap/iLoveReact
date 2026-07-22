@@ -3,7 +3,7 @@
   "at": "2026-07-22T09:56:45.942Z",
   "origin": "codex:019f7e48",
   "text": "restarting the app resets the uv layout that is last saved",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-22T10:07:15.348Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "UV saves previously persisted only island bounding rectangles, so cold restart could not reconstruct rotated islands, detached faces, or moved vertices and could fail when authored UV edits changed island topology. Model package base.paint.json now has a backward-compatible v4 record containing the exact six absolute-atlas corner coordinates for every render face. Save validates and writes that complete table; cold ModelView hydration imports the fixed raster, applies exact UV geometry through the existing unjournaled native boundary, then replays paint. v1-v3 packages remain readable. Added parser, artifact-save, cold-hydration, and neighboring UV/mesh regression coverage; TypeScript checks and the ReleaseFast editor build pass.",
+  "shas": [
+    "566889488"
+  ],
+  "resolvedAt": "2026-07-22T10:07:15.348Z"
 }
