@@ -40,6 +40,24 @@ fn cornerBounds(corners: []const f32) CornerBounds {
     return bounds;
 }
 
+test "glass opacity classification is shared at the authored-face boundary" {
+    try testing.expect(model_paint.isGlassAlpha(model_paint.GLASS_ALPHA));
+    try testing.expect(model_paint.isGlassAlpha(model_paint.OPAQUE_ALPHA_MIN - 1));
+    try testing.expect(!model_paint.isGlassAlpha(model_paint.OPAQUE_ALPHA_MIN));
+    try testing.expect(!model_paint.isGlassAlpha(255));
+}
+
+test "face glass presentation reads authored opacity without sampling atlas colour" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(905, &quad, 6);
+    defer model_paint.test_support.clearTargetAndSource();
+
+    try testing.expect(!model_paint.faceIsGlass(0));
+    model_paint.paintFaceAlpha(0, model_paint.GLASS_ALPHA);
+    try testing.expect(model_paint.faceIsGlass(0));
+    try testing.expect(!model_paint.faceIsGlass(2)); // out-of-range is never glass
+}
+
 test "only authored or imported pixels make an atlas document-ready" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(906, &quad, 6);

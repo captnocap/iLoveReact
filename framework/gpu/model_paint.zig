@@ -72,6 +72,15 @@ var g_has_dirty: bool = false;
 /// the same as the plain shaded viewer until you paint it.
 pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
 pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ 0, 0, 0, 0 };
+// Authored opacity has one shared classification boundary. The renderer, durable mesh
+// partition, and editor overlay must agree or a face can draw as glass while presenting
+// as opaque (or vice versa).
+pub const GLASS_ALPHA: u8 = 87; // ~0.34 of 255 — the Studio glass opacity
+pub const OPAQUE_ALPHA_MIN: u8 = 250;
+
+pub fn isGlassAlpha(alpha: u8) bool {
+    return alpha < OPAQUE_ALPHA_MIN;
+}
 
 fn faceAlpha(face: u32) u8 {
     const rows = g_face_alpha orelse return DEFAULT_FACE[3];
@@ -137,6 +146,13 @@ pub fn isTarget(key_hash: u64) bool {
 }
 pub fn faceCount() u32 {
     return g_facecount;
+}
+
+/// Semantic authored-face opacity query for presentation and render routing. Reads the
+/// dedicated face-alpha table directly; callers never need to sample atlas RGB just to
+/// decide whether a face is glass.
+pub fn faceIsGlass(face: u32) bool {
+    return face < g_facecount and isGlassAlpha(faceAlpha(face));
 }
 
 // ── Atlas geometry: face → island texels ─────────────────────────────────────────

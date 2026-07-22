@@ -3642,8 +3642,6 @@ pub fn meshRedo() bool {
 
 // ── Part-level ops: duplicate / mirror / detach / merge / glass / solidify ────────
 
-const GLASS_ALPHA: u8 = 87; // ~0.34 of 255 — the old studio's glassOpacity
-
 /// Duplicate the part occupying authored-group range [lo, hi) — optionally REFLECTED
 /// across the origin plane of `mirror_axis` (0=X 1=Y 2=Z; -1 = plain copy). The copy
 /// appends as a fresh part (new group range) carrying the source's per-face paint;
@@ -4225,11 +4223,11 @@ pub fn meshSetSelectionGlass() bool {
             break;
         }
     }
-    const make_glass = colors[@as(usize, first) * 4 + 3] >= 250;
+    const make_glass = !model_paint.isGlassAlpha(colors[@as(usize, first) * 4 + 3]);
     f = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
-        colors[@as(usize, f) * 4 + 3] = if (make_glass) GLASS_ALPHA else 255;
+        colors[@as(usize, f) * 4 + 3] = if (make_glass) model_paint.GLASS_ALPHA else 255;
     }
     if (!partitionGlassFaces(colors)) {
         journalDiscard(&snap);
@@ -4262,7 +4260,7 @@ fn partitionGlassFaces(colors: []const u8) bool {
     inline for (.{ true, false }) |want_opaque| {
         var f: u32 = 0;
         while (f < tri_count) : (f += 1) {
-            const is_opaque = colors[@as(usize, f) * 4 + 3] >= 250;
+            const is_opaque = !model_paint.isGlassAlpha(colors[@as(usize, f) * 4 + 3]);
             if (is_opaque != want_opaque) continue;
             const base = @as(usize, f) * 24;
             if (base + 24 > cur_verts.len) break;
@@ -4296,7 +4294,7 @@ fn ensureGlassTrailing() void {
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
         const c = model_paint.faceColor(f) orelse continue;
-        const is_glass = c[3] < 250;
+        const is_glass = model_paint.isGlassAlpha(c[3]);
         if (is_glass and first_glass == null) first_glass = f;
         if (!is_glass and first_glass != null) needs = true;
     }
@@ -4313,7 +4311,7 @@ fn editGlassFirstVert() u32 {
     var k = fc;
     while (k > 0) : (k -= 1) {
         const c = model_paint.faceColor(k - 1) orelse break;
-        if (c[3] >= 250) break;
+        if (!model_paint.isGlassAlpha(c[3])) break;
     }
     return k * 3;
 }
@@ -4328,7 +4326,7 @@ pub fn modelGlassFirstVertex() u32 {
     if (colors.len < face_count * 4) return @intCast(face_count * 3);
     var first = face_count;
     while (first > 0) : (first -= 1) {
-        if (colors[(first - 1) * 4 + 3] >= 250) break;
+        if (!model_paint.isGlassAlpha(colors[(first - 1) * 4 + 3])) break;
     }
     return @intCast(first * 3);
 }
@@ -4940,8 +4938,15 @@ const OV_MAX_EDGE_LINES: u32 = 40000;
 // req_2611/req_2613 came from tinting atlas pixels; overlay geometry cannot bake).
 const OV_FACE_TINT = [4]f32{ 0.55, 0.66, 0.92, 0.10 }; // unselected face wash
 const OV_FACE_TINT_SEL = [4]f32{ 1.0, 0.52, 0.16, 0.22 }; // selected face wash over true atlas colour
+// Physical transparency alone is unreadable on a thin closed wall: the opaque face a
+// few millimetres behind it fills the same pixels. Face mode therefore carries authored
+// GLASS as an explicit cyan wash + marker, without touching paint or saved geometry.
+const OV_FACE_TINT_GLASS = [4]f32{ 0.10, 0.86, 1.0, 0.30 };
 const OV_FACE_DOT = [3]f32{ 0.72, 0.79, 0.95 }; // centroid dot fill
+const OV_FACE_DOT_GLASS = [3]f32{ 0.18, 0.94, 1.0 };
 const OV_FACE_DOT_PX: f32 = 3.0;
+const OV_FACE_DOT_GLASS_PX: f32 = 5.0;
+const OV_FACE_DOT_GLASS_SEL_PX: f32 = 6.5;
 const OV_FACE_DOT_SEL_PX: f32 = 5.0;
 const OV_MAX_FACE_TINT: u32 = 20000; // tint/dot pass fps guard (tris)
 // ── Loop-cut session accents (req_2625 gaps CC/DD) ─────────────────────────────────
@@ -5816,9 +5821,22 @@ fn selectionFaceMaskAlloc(fc: u32) ?[]bool {
     }
     return mask;
 }
+
+fn drawFaceSemanticDot(x: f32, y: f32, selected: bool, glass: bool) void {
+    if (glass) {
+        // Selection already owns the face wash (orange); retain cyan at the centroid so
+        // choosing a glass face never hides the very property the user is inspecting.
+        const radius = if (selected) OV_FACE_DOT_GLASS_SEL_PX else OV_FACE_DOT_GLASS_PX;
+        overlayDot(x, y, OV_FACE_DOT_GLASS[0], OV_FACE_DOT_GLASS[1], OV_FACE_DOT_GLASS[2], radius);
+    } else if (selected) {
+        overlayDot(x, y, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], OV_FACE_DOT_SEL_PX);
+    } else {
+        overlayDot(x, y, OV_FACE_DOT[0], OV_FACE_DOT[1], OV_FACE_DOT[2], OV_FACE_DOT_PX);
+    }
+}
 /// Face-mode wash (req_2618 gap B): every FRONT-facing in-scope triangle gets a subtle
-/// translucent overlay quad (selected faces a stronger orange). Pure overlay polys — the
-/// paint atlas and vertex colors are never touched, so nothing can bake (req_2611/2613).
+/// translucent overlay quad (selected faces orange, authored glass cyan). Pure overlay
+/// polys — the paint atlas and vertex colors are never touched, so nothing can bake.
 fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     const pos = model_paint.positions() orelse return;
     const fc = model_paint.faceCount();
@@ -5840,11 +5858,11 @@ fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const bb = ovProject(cam, p1, ox, oy) orelse continue;
         const cc = ovProject(cam, p2, ox, oy) orelse continue;
         const selected = if (mask) |m| m[f] else false;
-        const col = if (selected) OV_FACE_TINT_SEL else OV_FACE_TINT;
+        const col = if (selected) OV_FACE_TINT_SEL else if (model_paint.faceIsGlass(f)) OV_FACE_TINT_GLASS else OV_FACE_TINT;
         polys.drawTri(a[0], a[1], bb[0], bb[1], cc[0], cc[1], col[0], col[1], col[2], col[3]);
     }
 }
-const FaceDotAcc = struct { cen: [3]f32, nrm: [3]f32, w: f32, sel: bool };
+const FaceDotAcc = struct { cen: [3]f32, nrm: [3]f32, w: f32, sel: bool, glass: bool };
 /// Face-mode centroid dots — the old studio's signature look: one small dot per AUTHORED
 /// face (a cube face reads as one dot, not two triangle dots), front-facing only.
 fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
@@ -5866,26 +5884,24 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const n = vcross(vsub(p1, p0), vsub(p2, p0));
         const cen = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
         const selected = if (mask) |m| m[f] else false;
+        const glass = model_paint.faceIsGlass(f);
         const grp = model_source.faceGroupOf(f);
         if (grp == model_source.NO_FACE_GROUP) {
             // Ungrouped soup: a dot per front-facing triangle.
             if (vdot(n, vsub(cam.eye, cen)) <= 0) continue;
             const sp = ovProject(cam, cen, ox, oy) orelse continue;
-            if (selected) {
-                overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], OV_FACE_DOT_SEL_PX);
-            } else {
-                overlayDot(sp[0], sp[1], OV_FACE_DOT[0], OV_FACE_DOT[1], OV_FACE_DOT[2], OV_FACE_DOT_PX);
-            }
+            drawFaceSemanticDot(sp[0], sp[1], selected, glass);
             continue;
         }
         // Authored face: accumulate an area-weighted centroid across the group's tris.
         const w = @sqrt(vdot(n, n)); // 2 × tri area
         const g = groups.getOrPut(std.heap.c_allocator, grp) catch continue;
-        if (!g.found_existing) g.value_ptr.* = .{ .cen = .{ 0, 0, 0 }, .nrm = .{ 0, 0, 0 }, .w = 0, .sel = false };
+        if (!g.found_existing) g.value_ptr.* = .{ .cen = .{ 0, 0, 0 }, .nrm = .{ 0, 0, 0 }, .w = 0, .sel = false, .glass = false };
         g.value_ptr.cen = vadd(g.value_ptr.cen, vmul(cen, w));
         g.value_ptr.nrm = vadd(g.value_ptr.nrm, n);
         g.value_ptr.w += w;
         g.value_ptr.sel = g.value_ptr.sel or selected;
+        g.value_ptr.glass = g.value_ptr.glass or glass;
     }
     var it = groups.iterator();
     while (it.next()) |entry| {
@@ -5894,11 +5910,7 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const cen = vmul(acc.cen, 1.0 / acc.w);
         if (vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing face
         const sp = ovProject(cam, cen, ox, oy) orelse continue;
-        if (acc.sel) {
-            overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], OV_FACE_DOT_SEL_PX);
-        } else {
-            overlayDot(sp[0], sp[1], OV_FACE_DOT[0], OV_FACE_DOT[1], OV_FACE_DOT[2], OV_FACE_DOT_PX);
-        }
+        drawFaceSemanticDot(sp[0], sp[1], acc.sel, acc.glass);
     }
 }
 /// The model's BOUNDARY edges as real lines (Blender/Blockbench style) — triangulation

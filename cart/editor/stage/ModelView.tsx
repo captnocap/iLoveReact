@@ -48,6 +48,7 @@ import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
 import { hydratePersistedModelPaint } from '../model/paintHydration';
+import { triangleWireframeVisible } from '../model/viewportPresentation';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
   UV_ATLAS_IMPORT_LABEL,
@@ -849,7 +850,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const applyTopo = (r: TopoResult | null, fail: string) => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
-      setWire(true);
       // The host operation owns its result mode/selection (Create Face returns the
       // new face focused; Face Extrude returns its cap; edge ops remain in Edge).
       adoptHostSelection({ mode: 2, verts: 0, edges: 0, sel: 0 });
@@ -1074,8 +1074,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setFocusMode(false);
     meshFocusTool(false);
     // Topology is shown by the host's boundary-edge overlay (real model edges, no
-    // triangulation diagonals) — NOT the GPU triangle wireframe, which would draw every
-    // quad's diagonal. Wireframe (W) stays an independent "show all triangles" toggle.
+    // triangulation diagonals). The raw GPU wireframe remains a View-mode diagnostic;
+    // while an edit tool owns the pane ModelView suppresses it at the Scene3D boundary.
     meshSetMode(m);
     adoptHostSelection({ mode: m, verts: 0, edges: 0, sel: 0 });
   };
@@ -2186,7 +2186,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         meshSelectEdge(idx, i > 0);
       });
       setSelMode(2);
-      setWire(true);
       setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 1 });
     }
     const edgeOp = callHost<string | null>('__env_get', null, 'RJIT_EDGEOP');
@@ -2194,7 +2193,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const r = edgeOp === 'face' ? meshCreateFace() : edgeOp === 'loopcut' ? meshLoopCut() : meshExtrudeEdge(0);
       if (r?.ok && r.key && typeof r.count === 'number') {
         setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
-        setWire(true);
         const fallbackMode = edgeOp === 'face' ? 3 : 2;
         adoptHostSelection({ mode: fallbackMode, verts: 0, edges: 0, sel: edgeOp === 'face' ? 1 : 0 });
       }
@@ -2497,7 +2495,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0b0d12' }}>
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0b0d12" showAxes={false} wireframe={wire}>
+      <Scene3D
+        style={{ width: '100%', height: '100%' }}
+        backgroundColor="#0b0d12"
+        showAxes={false}
+        wireframe={triangleWireframeVisible(wire, selMode)}
+      >
         {/* The host owns this camera: position comes from orbit state seeded by the
             load door and driven by the overlay's drag/wheel — never from props here. */}
         <Scene3D.Camera orbit fov={50} />
@@ -2724,7 +2727,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         {!hostChrome && model && (
           <Pressable
             onPress={() => setWire((w) => !w)}
-            tooltip="Toggle wireframe (W)"
+            tooltip="Toggle render-triangle wireframe in View mode (W); edit modes show authored edges"
             style={{
               marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
               backgroundColor: wire ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: wire ? '#5a86c0' : '#2c4a6a',
