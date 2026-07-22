@@ -42,11 +42,12 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
-import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
+import { listPaintVariants, type PaintTarget } from '../data/paintVariants';
 import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import { hydratePersistedModelPaint } from '../model/paintHydration';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
   UV_ATLAS_IMPORT_LABEL,
@@ -1388,67 +1389,64 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintMode(true);
     buildUvPanel();
   };
-  // Reopen a model that already has saved paintings: rebuild the atlas at the painting's
-  // own resolution, then replay it — so paint mode restores the work instead of asking for
-  // a fresh atlas size again (req_2526). Program variants replay strokes; legacy atlas
-  // variants blit their pixels.
-  const restoreSavedPaint = (v: PaintVariant): void => {
-    changeDetail(v.detail > 1 ? v.detail : 1);
-    if (v.format === 'program') host.__model_paint_program_apply?.(v.data);
-    else if (v.data) host.__model_atlas_apply?.(v.detail, v.data);
+  // Hydrate authored paint as DOCUMENT state. This is deliberately independent of
+  // Paint mode: opening a model must publish its existing UV atlas immediately, while
+  // the Paint button only decides which tool owns viewport input (req_3349).
+  const hydratePersistedAtlas = (): boolean => {
+    if (!paintTarget || !paintTargetOnDisk || !resolvePackageDir(paintTarget.kind, paintTarget.id)) return false;
+    const result = hydratePersistedModelPaint({
+      stale: modelPaintLayoutIsStale(paintTarget),
+      basePaint: readModelBasePaint(paintTarget),
+      readRasterBase: () => {
+        const encoded = readModelRasterBase(paintTarget);
+        const decoded = encoded ? imageOps(encoded).raw() : null;
+        return decoded ? { width: decoded.width, height: decoded.height, rgba: decoded.rgba } : null;
+      },
+      readLatestVariant: () => {
+        const saved = listPaintVariants(paintTarget);
+        return saved.length > 0 ? saved[saved.length - 1]! : null;
+      },
+    }, {
+      invalidateLayout: () => { host.__model_paint_layout_invalidate?.(); },
+      setDetail: (savedDetail) => { changeDetail(savedDetail); },
+      importAtlas: (raster) => host.__model_atlas_import?.(raster.rgba, raster.width, raster.height) === 1,
+      applyLayout: (layout) => host.__model_uv_layout_apply?.(layout) === 1,
+      applyProgram: (program) => host.__model_paint_program_apply?.(program) === 1,
+      applyProgramOverBase: (program) => host.__model_paint_program_apply_over_base?.(program) === 1,
+      applyAtlas: (savedDetail, data) => host.__model_atlas_apply?.(savedDetail, data) === 1,
+    });
+    if (result.status === 'ready') {
+      atlasReadyRef.current = true;
+      atlasInvalidatedRef.current = false;
+      return true;
+    }
+    atlasReadyRef.current = false;
+    if (result.status === 'stale') {
+      atlasInvalidatedRef.current = true;
+      setPaintMode(false);
+    } else if (result.status === 'failed') {
+      console.error(`[paint] persisted atlas for ${paintTarget.id} exists but could not be hydrated`);
+    }
+    return false;
   };
+
+  // Model adoption happens in the mount effect below. Once its host-resident key lands,
+  // hydrate any saved atlas and publish it to the UV bridge without arming the brush.
+  useEffect(() => {
+    if (!model || atlasReadyRef.current || atlasInvalidatedRef.current) return;
+    if (hydratePersistedAtlas()) buildUvPanel();
+  }, [model?.key, paintTarget?.kind, paintTarget?.id, paintTargetOnDisk]);
+
   const togglePaint = () => {
     if (paintMode) {
       setPaintMode(false);
       return;
     }
     if (!model) return;
-    // A cold load restores the durable mismatch marker before consulting any old
-    // base/variant. The host gate makes this true even for script/direct-door use.
-    if (paintTarget && modelPaintLayoutIsStale(paintTarget)) {
-      host.__model_paint_layout_invalidate?.();
-      atlasReadyRef.current = false;
-      atlasInvalidatedRef.current = true;
-    }
     if (!atlasReadyRef.current) {
-      if (!atlasInvalidatedRef.current) {
-        const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
-        if (basePaint) {
-          changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
-          let restored = false;
-          if (basePaint.version === 3) {
-            const encoded = readModelRasterBase(paintTarget!);
-            const decoded = encoded ? imageOps(encoded).raw() : null;
-            // Raster-backed atlases retain the imported image's native dimensions.
-            // Adopt those pixels first, then restore the authored absolute UV layout
-            // over them; applying layout before sizing would validate against the
-            // temporary density-derived atlas and reject legitimate coordinates.
-            const imported = !!decoded && host.__model_atlas_import?.(decoded.rgba, decoded.width, decoded.height) === 1;
-            const layoutOk = imported && (!basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1);
-            if (layoutOk) {
-              restored = !basePaint.program || host.__model_paint_program_apply_over_base?.(basePaint.program) === 1;
-            }
-          } else {
-            const layoutOk = !basePaint.layout?.length || host.__model_uv_layout_apply?.(new Uint32Array(basePaint.layout)) === 1;
-            if (layoutOk) {
-              restored = host.__model_paint_program_apply?.(basePaint.program) === 1;
-            }
-          }
-          if (restored) {
-            atlasReadyRef.current = true;
-            enterPaint();
-            return;
-          }
-        }
-        // Already-painted model? Its atlas is a solved question — restore the latest
-        // painting (which rebuilds the atlas) rather than re-prompting (req_2526).
-        const saved = paintTarget ? listPaintVariants(paintTarget) : [];
-        if (saved.length > 0) {
-          restoreSavedPaint(saved[saved.length - 1]);
-          atlasReadyRef.current = true;
-          enterPaint();
-          return;
-        }
+      if (hydratePersistedAtlas()) {
+        enterPaint();
+        return;
       }
       setAtlasPrompt(true);
       return;
@@ -1920,10 +1918,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   // A fresh model NEVER inherits paint state: paint mode drops (the live atlas belonged
   // to the PREVIOUS mesh — painting straight onto a new one is how the oversized-atlas
-  // crash was triggered) and the atlas gate re-arms so the next paint entry prompts.
+  // crash was triggered) and the old preview disappears. The model-key effect above
+  // then hydrates THIS document's persisted atlas, if it has one.
   const freshModelPaintReset = () => {
     setPaintMode(false);
     setAtlasPrompt(false);
+    setUvPanel(null);
     atlasReadyRef.current = false;
     atlasInvalidatedRef.current = false;
     setLc(null); // the host drops a live loop-cut session with the old mesh's journal

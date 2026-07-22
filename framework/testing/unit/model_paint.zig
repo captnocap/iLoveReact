@@ -40,6 +40,31 @@ fn cornerBounds(corners: []const f32) CornerBounds {
     return bounds;
 }
 
+test "only authored or imported pixels make an atlas document-ready" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(906, &quad, 6);
+    defer model_paint.test_support.clearTargetAndSource();
+
+    // Every mesh receives an automatic layout for editing, but that blank allocation
+    // must not prevent a persisted atlas from hydrating on cold/hot document load.
+    try testing.expect(!model_paint.hasAuthoredAtlas());
+
+    const generated = model_paint.atlas().?;
+    const saved_pixels = try testing.allocator.dupe(u8, generated.rgba);
+    defer testing.allocator.free(saved_pixels);
+    try testing.expect(model_paint.setAtlas(saved_pixels));
+    try testing.expect(model_paint.hasAuthoredAtlas());
+
+    // A genuinely new target returns to automatic-only state until imported pixels land.
+    model_paint.setTarget(907, &quad, 6);
+    try testing.expect(!model_paint.hasAuthoredAtlas());
+    const fresh = model_paint.atlas().?;
+    const imported = try testing.allocator.dupe(u8, fresh.rgba);
+    defer testing.allocator.free(imported);
+    try testing.expect(model_paint.importAtlasPreservingUvGeometry(imported, fresh.w, fresh.h, &quad, 6));
+    try testing.expect(model_paint.hasAuthoredAtlas());
+}
+
 test "unused atlas space stays transparent while real faces retain their alpha" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(907, &quad, 6);

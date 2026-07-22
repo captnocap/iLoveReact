@@ -587,7 +587,8 @@ fn hostModelBdGizmoPos(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 /// __model_session_json() → {"key","count","radius","undo","redo","atlas"} | "".
 /// The resident mesh-editor session (req_2898): what model the host is STILL holding
 /// live across a hot reload — edit mesh key/count, orbit radius, journal depths, and
-/// whether a paint atlas exists. The remounted viewer compares this against its hot
+/// whether an authored paint atlas exists (automatic blank layouts report false). The
+/// remounted viewer compares this against its hot
 /// twig and ADOPTS the live session instead of re-loading the stale seed.
 fn hostModelSessionJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);

@@ -774,6 +774,13 @@ pub fn activateBase() void {
     g_base_active = true;
 }
 
+/// Whether the resident atlas belongs to the document rather than merely being the
+/// automatic blank layout every loaded mesh receives. The editor's hot-session resume
+/// uses this distinction to decide whether disk hydration is still required.
+pub fn hasAuthoredAtlas() bool {
+    return g_base_active;
+}
+
 // Lay the chosen base onto the (already background-cleared) atlas — only once the user has
 // actually created it for this model.
 fn applyBase() void {
@@ -808,6 +815,7 @@ pub fn setAtlas(rgba: []const u8) bool {
     const buf = g_rgba orelse return false;
     if (rgba.len != buf.len) return false;
     @memcpy(buf, rgba);
+    g_base_active = true;
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1);
     return true;
@@ -913,6 +921,7 @@ pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32
     g_rgba = pixels_new;
     g_atlas_w = width;
     g_atlas_h = height;
+    g_base_active = true;
     keep_layout_new = true;
     keep_triangle_index = true;
     keep_pixels_new = true;

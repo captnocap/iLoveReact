@@ -140,7 +140,7 @@ function UvSection({
       ) : (
         <C.HW_ReadRow>
           <C.HW_FormLabel>atlas</C.HW_FormLabel>
-          <C.HW_ReadValue>none — created on first Paint</C.HW_ReadValue>
+          <C.HW_ReadValue>none saved — use Paint to create one</C.HW_ReadValue>
         </C.HW_ReadRow>
       )}
       {workspace.showScope ? (

@@ -3433,8 +3433,8 @@ pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
 
 /// The resident mesh-editor SESSION (req_2898 hot-reload resume). A dev hot reload
 /// tears down the JS world but this process — the live edit mesh, its journal, the
-/// paint atlas, and the orbit pose — all survive. This readback gives the remounted
-/// viewer everything it needs to decide "the host still holds my live document":
+/// authored paint atlas, and the orbit pose — all survive. This readback gives the
+/// remounted viewer everything it needs to decide "the host still holds my live document":
 /// adopt it instead of re-loading the stale seed (which would wipe the edits).
 /// Null when no edit mesh is resident (cold boot / viewer never loaded).
 pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
@@ -3455,7 +3455,7 @@ pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
     };
     var print_buf: [192]u8 = undefined;
     const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{},\"paintStale\":{}}}", .{
-        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.atlas() != null, g_paint_layout_stale,
+        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.hasAuthoredAtlas(), g_paint_layout_stale,
     }) catch return null;
     out.appendSlice(alloc, rendered) catch return null;
     return out.toOwnedSlice(alloc) catch null;
