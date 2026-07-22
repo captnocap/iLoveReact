@@ -1,0 +1,30 @@
+{
+  "id": "req_3354",
+  "at": "2026-07-22T07:44:02.049Z",
+  "origin": "codex:019f883f",
+  "text": "this is broken: file -> new mesh -> cube -> add cube -> add cube -> select all (selecting the 3rd cube) -> delete key -> add cube -> cube doesnt show up",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T07:44:08.431Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T07:51:47.225Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deleting every face of one mesh part now compacts that empty native ownership range while preserving visible and hidden survivor ranges. The next Add Cube succeeds, the mesh document remains writable, and undo/redo restores the matching range table.",
+  "shas": [
+    "ff1946ce8"
+  ],
+  "resolvedAt": "2026-07-22T07:51:47.225Z"
+}

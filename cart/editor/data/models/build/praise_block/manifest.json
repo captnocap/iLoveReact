@@ -38,5 +38,6 @@
       "color": "#a34364"
     }
   ],
-  "paints": []
+  "paints": [],
+  "hidden": true
 }

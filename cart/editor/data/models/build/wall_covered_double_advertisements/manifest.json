@@ -23,5 +23,6 @@
   "placeable": {
     "as": "build-piece",
     "kind": "wall"
-  }
+  },
+  "hidden": true
 }

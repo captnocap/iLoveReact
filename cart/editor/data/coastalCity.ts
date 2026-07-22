@@ -310,6 +310,7 @@ export const COASTAL_CITY_TUNING = {
     sidewalkWidthEachM: 2,
   },
   roadTopology: {
+    minimumNetworkRoads: 120,
     minimumIntersectionAngleDegrees: 30,
     minimumJunctionSpacingM: 24,
     junctionMergeRadiusM: 1,
@@ -329,7 +330,6 @@ export const COASTAL_CITY_TUNING = {
     },
     coastHighway: { northZ: 90, northCoastOffsetM: 150, southZ: 2780, southCoastOffsetM: 150 },
     stateRoute8: { northX: 460, northZ: 160, northViaX: 1080, northViaZ: 760, southX: 2250, southZ: 2640 },
-    diagonalParkway: { northX: 2610, northZ: 360, southX: 700, southZ: 2670, burnsideMergeBackM: 350 },
     railway: { northX: 1300, northZ: 140, southX: 600, southZ: 2100 },
   },
   rail: {
@@ -645,6 +645,166 @@ function roadWidthM(path: CoastalTransportPath): number {
     + (p.sidewalks ? roads.sidewalkWidthEachM * 2 : 0);
 }
 
+type RoadIntersection = {
+  x: number;
+  z: number;
+  angleDegrees: number;
+  pathA: string;
+  pathB: string;
+};
+
+type RoadJunction = { x: number; z: number; pathIds: Set<string> };
+
+function segmentIntersection(
+  a: CoastalPoint,
+  b: CoastalPoint,
+  c: CoastalPoint,
+  d: CoastalPoint,
+): { x: number; z: number; angleDegrees: number } | null {
+  const abX = b.x - a.x, abZ = b.z - a.z;
+  const cdX = d.x - c.x, cdZ = d.z - c.z;
+  const denominator = abX * cdZ - abZ * cdX;
+  if (Math.abs(denominator) <= Number.EPSILON) return null;
+  const acX = c.x - a.x, acZ = c.z - a.z;
+  const alongAB = (acX * cdZ - acZ * cdX) / denominator;
+  const alongCD = (acX * abZ - acZ * abX) / denominator;
+  const epsilon = COASTAL_CITY_TUNING.roadTopology.intersectionParameterEpsilon;
+  if (alongAB < -epsilon || alongAB > 1 + epsilon || alongCD < -epsilon || alongCD > 1 + epsilon) return null;
+  const abLength = Math.hypot(abX, abZ), cdLength = Math.hypot(cdX, cdZ);
+  if (abLength <= Number.EPSILON || cdLength <= Number.EPSILON) return null;
+  const absoluteDot = Math.abs((abX * cdX + abZ * cdZ) / (abLength * cdLength));
+  return {
+    x: a.x + abX * clamp(alongAB, 0, 1),
+    z: a.z + abZ * clamp(alongAB, 0, 1),
+    angleDegrees: Math.acos(clamp(absoluteDot, 0, 1)) * 180 / Math.PI,
+  };
+}
+
+function mergeRoadIntersection(rows: RoadIntersection[], next: RoadIntersection): void {
+  const radius = COASTAL_CITY_TUNING.roadTopology.junctionMergeRadiusM;
+  const existing = rows.find((row) => Math.hypot(row.x - next.x, row.z - next.z) <= radius);
+  if (!existing) {
+    rows.push(next);
+    return;
+  }
+  // A curve can contribute several segment pairs at one physical node. The
+  // least favorable tangent is the honest angle the raster junction must carry.
+  existing.angleDegrees = Math.min(existing.angleDegrees, next.angleDegrees);
+}
+
+function roadPairIntersections(a: CoastalTransportPath, b: CoastalTransportPath): RoadIntersection[] {
+  const found: RoadIntersection[] = [];
+  const pointsA = curvedPathPoints(a), pointsB = curvedPathPoints(b);
+  for (let ai = 0; ai + 1 < pointsA.length; ai += 1) {
+    for (let bi = 0; bi + 1 < pointsB.length; bi += 1) {
+      const hit = segmentIntersection(pointsA[ai]!, pointsA[ai + 1]!, pointsB[bi]!, pointsB[bi + 1]!);
+      if (hit) mergeRoadIntersection(found, { ...hit, pathA: a.id, pathB: b.id });
+    }
+  }
+  return found;
+}
+
+function roadSelfIntersects(path: CoastalTransportPath): boolean {
+  const points = curvedPathPoints(path);
+  for (let a = 0; a + 1 < points.length; a += 1) {
+    for (let b = a + 2; b + 1 < points.length; b += 1) {
+      // Consecutive segments share their authored vertex by construction.
+      if (b === a + 1) continue;
+      if (segmentIntersection(points[a]!, points[a + 1]!, points[b]!, points[b + 1]!)) return true;
+    }
+  }
+  return false;
+}
+
+function pointToSegmentDistance(pointValue: CoastalPoint, a: CoastalPoint, b: CoastalPoint): number {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const denominator = dx * dx + dz * dz;
+  const t = denominator > 0
+    ? clamp(((pointValue.x - a.x) * dx + (pointValue.z - a.z) * dz) / denominator, 0, 1)
+    : 0;
+  return Math.hypot(pointValue.x - (a.x + dx * t), pointValue.z - (a.z + dz * t));
+}
+
+function segmentDistance(a: CoastalPoint, b: CoastalPoint, c: CoastalPoint, d: CoastalPoint): number {
+  if (segmentIntersection(a, b, c, d)) return 0;
+  return Math.min(
+    pointToSegmentDistance(a, c, d),
+    pointToSegmentDistance(b, c, d),
+    pointToSegmentDistance(c, a, b),
+    pointToSegmentDistance(d, a, b),
+  );
+}
+
+function roadCorridorsOverlap(a: CoastalTransportPath, b: CoastalTransportPath): boolean {
+  if (roadPairIntersections(a, b).length > 0) return false;
+  const minimum = roadWidthM(a) / 2 + roadWidthM(b) / 2 + COASTAL_CITY_TUNING.roadTopology.corridorGapM;
+  const pointsA = curvedPathPoints(a), pointsB = curvedPathPoints(b);
+  for (let ai = 0; ai + 1 < pointsA.length; ai += 1) {
+    for (let bi = 0; bi + 1 < pointsB.length; bi += 1) {
+      if (segmentDistance(pointsA[ai]!, pointsA[ai + 1]!, pointsB[bi]!, pointsB[bi + 1]!) < minimum) return true;
+    }
+  }
+  return false;
+}
+
+function mergeRoadJunction(junctions: RoadJunction[], hit: RoadIntersection): RoadJunction {
+  const radius = COASTAL_CITY_TUNING.roadTopology.junctionMergeRadiusM;
+  let junction = junctions.find((candidate) => Math.hypot(candidate.x - hit.x, candidate.z - hit.z) <= radius);
+  if (!junction) {
+    junction = { x: hit.x, z: hit.z, pathIds: new Set() };
+    junctions.push(junction);
+  }
+  junction.pathIds.add(hit.pathA);
+  junction.pathIds.add(hit.pathB);
+  return junction;
+}
+
+function collectRoadJunctions(roads: readonly CoastalTransportPath[]): { crossings: RoadIntersection[]; junctions: RoadJunction[] } {
+  const crossings: RoadIntersection[] = [];
+  const junctions: RoadJunction[] = [];
+  for (let a = 0; a < roads.length; a += 1) {
+    for (let b = a + 1; b < roads.length; b += 1) {
+      for (const hit of roadPairIntersections(roads[a]!, roads[b]!)) {
+        crossings.push(hit);
+        mergeRoadJunction(junctions, hit);
+      }
+    }
+  }
+  return { crossings, junctions };
+}
+
+/** Inspect the road graph the native cardinal junction grammar will receive. */
+export function inspectCoastalRoadTopology(paths: readonly CoastalTransportPath[]): CoastalRoadTopology {
+  const roads = paths.filter((path) => path.kind === 'road');
+  const selfIntersectionPathIds = roads.filter(roadSelfIntersects).map((path) => path.id);
+  const repeatedIntersectionPairs: string[] = [];
+  const overlappingCorridorPairs: string[] = [];
+  for (let a = 0; a < roads.length; a += 1) {
+    for (let b = a + 1; b < roads.length; b += 1) {
+      const intersections = roadPairIntersections(roads[a]!, roads[b]!);
+      if (intersections.length > 1) repeatedIntersectionPairs.push(`${roads[a]!.id}|${roads[b]!.id}`);
+      if (intersections.length === 0 && roadCorridorsOverlap(roads[a]!, roads[b]!)) overlappingCorridorPairs.push(`${roads[a]!.id}|${roads[b]!.id}`);
+    }
+  }
+  const { crossings, junctions } = collectRoadJunctions(roads);
+  let minimumJunctionSpacingM = Infinity;
+  for (let a = 0; a < junctions.length; a += 1) {
+    for (let b = a + 1; b < junctions.length; b += 1) {
+      minimumJunctionSpacingM = Math.min(minimumJunctionSpacingM, Math.hypot(junctions[a]!.x - junctions[b]!.x, junctions[a]!.z - junctions[b]!.z));
+    }
+  }
+  return {
+    crossingCount: crossings.length,
+    junctionCount: junctions.length,
+    minimumAngleDegrees: crossings.length ? Math.min(...crossings.map((hit) => hit.angleDegrees)) : null,
+    minimumJunctionSpacingM: Number.isFinite(minimumJunctionSpacingM) ? minimumJunctionSpacingM : null,
+    maximumJunctionDegree: junctions.reduce((maximum, junction) => Math.max(maximum, junction.pathIds.size), 0),
+    selfIntersectionPathIds,
+    repeatedIntersectionPairs,
+    overlappingCorridorPairs,
+  };
+}
+
 type TransportClearanceSegment = { pathId: string; a: CoastalPoint; b: CoastalPoint; radiusM: number };
 type TransportBucketIndex = { columns: number; rows: number; buckets: TransportClearanceSegment[][] };
 const CURVED_PATH_CACHE = new WeakMap<object, readonly CoastalPoint[]>();
@@ -799,8 +959,80 @@ function insideDistrictGrid(district: CoastalDistrict, u: number, v: number): bo
   return sq(u / district.radiusX) + sq(v / district.radiusZ) <= COASTAL_CITY_TUNING.districtEllipseSlack;
 }
 
-function buildDistrictRoads(seed: number, districts: readonly CoastalDistrict[]): CoastalTransportPath[] {
+function districtOwnershipMetric(district: CoastalDistrict, x: number, z: number): number {
+  const dx = x - district.center.x, dz = z - district.center.z;
+  const c = Math.cos(district.angleRadians), s = Math.sin(district.angleRadians);
+  const u = dx * c + dz * s;
+  const v = -dx * s + dz * c;
+  return sq(u / district.radiusX) + sq(v / district.radiusZ);
+}
+
+function districtOwnsPoint(district: CoastalDistrict, districts: readonly CoastalDistrict[], x: number, z: number): boolean {
+  const epsilon = COASTAL_CITY_TUNING.roadTopology.districtOwnershipTieEpsilon;
+  const ownMetric = districtOwnershipMetric(district, x, z);
+  for (const other of districts) {
+    if (other.id === district.id) continue;
+    const otherMetric = districtOwnershipMetric(other, x, z);
+    if (otherMetric < ownMetric - epsilon) return false;
+    if (Math.abs(otherMetric - ownMetric) <= epsilon && other.id < district.id) return false;
+  }
+  return true;
+}
+
+function cloneRoadJunctions(junctions: readonly RoadJunction[]): RoadJunction[] {
+  return junctions.map((junction) => ({ x: junction.x, z: junction.z, pathIds: new Set(junction.pathIds) }));
+}
+
+function districtRoadFitsTopology(
+  candidate: CoastalTransportPath,
+  accepted: readonly CoastalTransportPath[],
+  acceptedJunctions: RoadJunction[],
+): boolean {
+  if (roadSelfIntersects(candidate)) return false;
+  const topology = COASTAL_CITY_TUNING.roadTopology;
+  const pendingJunctions: RoadJunction[] = [];
+  for (const prior of accepted) {
+    const intersections = roadPairIntersections(candidate, prior);
+    if (intersections.length > 1) return false;
+    if (candidate.districtId && prior.districtId && candidate.districtId !== prior.districtId && intersections.length > 0) return false;
+    if (intersections.some((hit) => hit.angleDegrees < topology.minimumIntersectionAngleDegrees)) return false;
+    if (intersections.length === 0 && roadCorridorsOverlap(candidate, prior)) return false;
+    for (const hit of intersections) mergeRoadJunction(pendingJunctions, hit);
+  }
+
+  for (let index = 0; index < pendingJunctions.length; index += 1) {
+    const pending = pendingJunctions[index]!;
+    for (let otherIndex = index + 1; otherIndex < pendingJunctions.length; otherIndex += 1) {
+      const other = pendingJunctions[otherIndex]!;
+      if (Math.hypot(pending.x - other.x, pending.z - other.z) < topology.minimumJunctionSpacingM) return false;
+    }
+    for (const existing of acceptedJunctions) {
+      const separation = Math.hypot(pending.x - existing.x, pending.z - existing.z);
+      if (separation <= topology.junctionMergeRadiusM) {
+        const degree = new Set([...existing.pathIds, ...pending.pathIds]).size;
+        if (degree > topology.maximumJunctionDegree) return false;
+      } else if (separation < topology.minimumJunctionSpacingM) {
+        return false;
+      }
+    }
+  }
+
+  for (const pending of pendingJunctions) {
+    const merge = acceptedJunctions.find((junction) => Math.hypot(junction.x - pending.x, junction.z - pending.z) <= topology.junctionMergeRadiusM);
+    if (merge) for (const pathId of pending.pathIds) merge.pathIds.add(pathId);
+    else acceptedJunctions.push({ x: pending.x, z: pending.z, pathIds: new Set(pending.pathIds) });
+  }
+  return true;
+}
+
+function buildDistrictRoads(
+  seed: number,
+  districts: readonly CoastalDistrict[],
+  priorityRoads: readonly CoastalTransportPath[],
+): CoastalTransportPath[] {
   const roads: CoastalTransportPath[] = [];
+  const accepted: CoastalTransportPath[] = [...priorityRoads];
+  const acceptedJunctions = cloneRoadJunctions(collectRoadJunctions(priorityRoads).junctions);
   for (const district of districts) {
     let serial = 0;
     const addRuns = (axis: 'u' | 'v', line: number, hierarchy: CoastalRoadHierarchy, name: string): void => {
@@ -826,15 +1058,20 @@ function buildDistrictRoads(seed: number, districts: readonly CoastalDistrict[])
         if (run.length >= 2) {
           const id = `road-${district.id}-${axis}-${serial + 1}`;
           const candidate = makeRoad(id, name, hierarchy, run, { formalFrontage: true, districtId: district.id });
-          if (pathLength(candidate) >= COASTAL_CITY_TUNING.districtGridMinimumRunM && pathIsDryAndUnprotected(candidate, seed)) {
+          if (pathLength(candidate) >= COASTAL_CITY_TUNING.districtGridMinimumRunM
+            && pathIsDryAndUnprotected(candidate, seed)
+            && districtRoadFitsTopology(candidate, accepted, acceptedJunctions)) {
             roads.push(candidate);
+            accepted.push(candidate);
             serial += 1;
           }
         }
         run = [];
       };
       for (const sample of samples) {
-        if (isWaterAt(sample.x, sample.z, seed) || isProtectedAt(sample.x, sample.z, seed)) flush();
+        if (isWaterAt(sample.x, sample.z, seed)
+          || isProtectedAt(sample.x, sample.z, seed)
+          || !districtOwnsPoint(district, districts, sample.x, sample.z)) flush();
         else run.push(sample);
       }
       flush();
@@ -886,26 +1123,28 @@ function buildTransport(seed: number, districts: readonly CoastalDistrict[]): { 
   ), { formalFrontage: true, crossingId: coastHighwayCrossing.id }));
   const stateRoute8 = crossingRoute(
     stateRoute8Crossing,
-    { x: layout.stateRoute8.northX, z: layout.stateRoute8.northZ },
+    { x: layout.stateRoute8.northViaX, z: layout.stateRoute8.northViaZ },
     { x: layout.stateRoute8.southX, z: layout.stateRoute8.southZ },
     seed,
   );
-  stateRoute8.splice(1, 0, point(layout.stateRoute8.northViaX, layout.stateRoute8.northViaZ));
-  paths.push(makeRoad('road-state-route-8', 'State Route 8', 'highway', stateRoute8, { crossingId: stateRoute8Crossing.id }));
+  // The via belongs between the north terminus and the causeway route. The old
+  // splice put it ahead of a route that restarted back at the terminus, making
+  // SR-8 fold across itself and cross some neighborhood streets three times.
+  stateRoute8.unshift(point(layout.stateRoute8.northX, layout.stateRoute8.northZ));
+  const stateRoute8Road = makeRoad('road-state-route-8', 'State Route 8', 'highway', stateRoute8, { crossingId: stateRoute8Crossing.id });
+  paths.push(stateRoute8Road);
   paths.push(makeRoad('road-central-avenue', 'Central Avenue', 'arterial', crossingRoute(
     centralAvenueCrossing, northside, southside, seed,
   ), { formalFrontage: true, crossingId: centralAvenueCrossing.id }));
-  paths.push(makeRoad('road-division-way', 'Division Way', 'arterial', crossingRoute(
+  const divisionWayRoad = makeRoad('road-division-way', 'Division Way', 'arterial', crossingRoute(
     divisionWayCrossing, beachfront, foothills, seed,
-  ), { formalFrontage: true, crossingId: divisionWayCrossing.id }));
+  ), { formalFrontage: true, crossingId: divisionWayCrossing.id });
+  paths.push(divisionWayRoad);
   paths.push(makeRoad('road-burnside-boulevard', 'Burnside Boulevard', 'arterial', landRouteOnRiverSide(
     harborDistrict, eastbank, 1, seed,
   ), { formalFrontage: true }));
-  paths.push(makeRoad('road-diagonal-parkway', 'Diagonal Parkway', 'arterial', landRouteOnRiverSide(
-    { x: layout.diagonalParkway.southX, z: layout.diagonalParkway.southZ }, eastbank, 1, seed,
-  ), { formalFrontage: true }));
 
-  paths.push(...buildDistrictRoads(seed, districts));
+  paths.push(...buildDistrictRoads(seed, districts, paths));
 
   // One regional alignment plus a light-rail graph. An edge shared by several
   // named services exists ONCE here; line/service metadata can reference these
@@ -1049,6 +1288,28 @@ function validateTransport(paths: readonly CoastalTransportPath[], crossings: re
         }
       }
     }
+  }
+
+  const topology = inspectCoastalRoadTopology(paths);
+  const policy = COASTAL_CITY_TUNING.roadTopology;
+  const roadCount = paths.filter((path) => path.kind === 'road').length;
+  if (roadCount < policy.minimumNetworkRoads) {
+    throw new Error(`coastal road network retained only ${roadCount} roads; minimum is ${policy.minimumNetworkRoads}`);
+  }
+  if (topology.selfIntersectionPathIds.length > 0) {
+    throw new Error(`coastal roads self-intersect: ${topology.selfIntersectionPathIds.join(', ')}`);
+  }
+  if (topology.repeatedIntersectionPairs.length > 0) {
+    throw new Error(`coastal road pairs cross more than once: ${topology.repeatedIntersectionPairs.join(', ')}`);
+  }
+  if (topology.minimumAngleDegrees !== null && topology.minimumAngleDegrees + policy.intersectionParameterEpsilon < policy.minimumIntersectionAngleDegrees) {
+    throw new Error(`coastal road intersection angle ${topology.minimumAngleDegrees.toFixed(2)}° is below ${policy.minimumIntersectionAngleDegrees}°`);
+  }
+  if (topology.minimumJunctionSpacingM !== null && topology.minimumJunctionSpacingM + policy.intersectionParameterEpsilon < policy.minimumJunctionSpacingM) {
+    throw new Error(`coastal road junction spacing ${topology.minimumJunctionSpacingM.toFixed(2)}m is below ${policy.minimumJunctionSpacingM}m`);
+  }
+  if (topology.maximumJunctionDegree > policy.maximumJunctionDegree) {
+    throw new Error(`coastal road junction degree ${topology.maximumJunctionDegree} exceeds ${policy.maximumJunctionDegree}`);
   }
 }
 
@@ -1290,6 +1551,27 @@ function makeLandUses(seed: number): CoastalLandUse[] {
     { id: 'cedar-ridge', name: 'Cedar Ridge Forest', kind: 'forest', protected: true, shape: 'ellipse', center: { x: p.forest.centerX, z: p.forest.centerZ }, radiusX: p.forest.radiusX, radiusZ: p.forest.radiusZ, generationStage: 'protectedLand' },
     { id: 'growth-reserve', name: 'Valley Growth Reserve', kind: 'reserve', protected: true, shape: 'ellipse', center: { x: p.reserve.centerX, z: p.reserve.centerZ }, radiusX: p.reserve.radiusX, radiusZ: p.reserve.radiusZ, generationStage: 'protectedLand' },
   ];
+}
+
+/** Lightweight presentation slice for the linked city map. This deliberately
+ * stops before transport and building-site generation: the native transport
+ * snapshot is authoritative for what is currently loaded, while these stable
+ * geography records provide coast, district, and protected-land context. */
+export type CoastalCityOverview = Pick<CoastalCityPlan, 'seed' | 'bounds' | 'districts' | 'landUses'>;
+
+export function coastalCityOverview(seed: number): CoastalCityOverview {
+  const normalizedSeed = normalizeCoastalCitySeed(seed);
+  return {
+    seed: normalizedSeed,
+    bounds: {
+      minX: COASTAL_CITY_TUNING.world.minX,
+      minZ: COASTAL_CITY_TUNING.world.minZ,
+      maxX: COASTAL_CITY_TUNING.world.maxX,
+      maxZ: COASTAL_CITY_TUNING.world.maxZ,
+    },
+    districts: makeDistricts(normalizedSeed),
+    landUses: makeLandUses(normalizedSeed),
+  };
 }
 
 export function generateCoastalCity(seed: number): CoastalCityPlan {

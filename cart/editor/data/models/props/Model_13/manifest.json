@@ -1,10 +1,10 @@
 {
   "version": 1,
   "id": "primitive:cube:13",
-  "name": "Model 13",
+  "name": "bed_king",
   "kind": "prop",
   "stage": "wip",
-  "folderId": "props",
+  "folderId": "model-primitive_cube_13",
   "semanticKind": "cube",
   "sourceKind": "primitive",
   "color": "#5a86c0",
@@ -15,5 +15,7 @@
   "mesh": {},
   "decompositions": [],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
 }

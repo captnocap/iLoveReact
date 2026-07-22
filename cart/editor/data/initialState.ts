@@ -118,6 +118,7 @@ export function initialState(): EditorState {
     colorSpineScenePick: null,
     buildDialogOpen: false,
     mapDocumentOpen: false,
+    mapOverviewOpen: false,
     activeMapStem,
     activeMapName: mapDocumentName(activeMapStem),
     addChunkOpen: false,

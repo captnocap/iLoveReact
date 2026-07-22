@@ -15,5 +15,6 @@
   "mesh": {},
   "decompositions": [],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "hidden": true
 }

@@ -53,6 +53,7 @@ import {
   type WorldFloraPatch,
 } from './surfaceFlora';
 import { FLORA_KIND_DEFINITIONS } from './floraKinds';
+import MiniMap from '../stage/MiniMap';
 
 // authored placeable id → semantic resident key: authoredResidentKeyOf (authoredRegistry).
 
@@ -120,6 +121,8 @@ function boxSegments(stage: IsoStage, rect: Rect, cx: number, baseY: number, cz:
 }
 
 export default function WorldViewport(props: {
+  mapOverviewOpen: boolean;
+  onToggleMap: () => void;
   gameFile: string;
   storeDir: string;
   pieces: readonly PlacedPiece[];
@@ -307,6 +310,12 @@ export default function WorldViewport(props: {
     setHotState(ISO_POSE_TWIG_KEY, stage.pose); // req_2898: the view survives the next hot reload
     return true;
   }, [stage]);
+
+  const centerFromMap = useCallback((x: number, z: number): void => {
+    stage.centerOn(x, z);
+    pushCamera();
+    reprojectOverlays();
+  }, [stage, pushCamera, reprojectOverlays]);
 
   // Boot: aim the camera as soon as the loader node exists. The node id lands a
   // few frames after mount (host-side create), so retry until the push takes —
@@ -1074,6 +1083,15 @@ export default function WorldViewport(props: {
         onScroll={onScroll}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />
+
+      {props.mapOverviewOpen ? (
+        <MiniMap
+          pieces={props.pieces}
+          camera={{ x: stage.pose.centerX, z: stage.pose.centerZ, yawDegrees: stage.pose.yaw }}
+          onCenter={centerFromMap}
+          onClose={props.onToggleMap}
+        />
+      ) : null}
     </Box>
   );
 }

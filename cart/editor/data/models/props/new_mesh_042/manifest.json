@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "studio:mdl-mqyqugbt-igw",
-  "name": "new_mesh_042",
+  "name": "car_001",
   "kind": "prop",
   "stage": "wip",
   "folderId": "model-studio_mdl-mqyqugbt-igw",
@@ -28,5 +28,7 @@
       "color": "#8a93a3"
     }
   ],
-  "paints": []
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
 }

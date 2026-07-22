@@ -2411,7 +2411,14 @@ export default function AppFrame() {
       };
 
       if (command.id === 'toggle-minimap') {
-        next = { ...next, rightPane: prev.rightPane === 'grid' ? 'inspector' : 'grid' };
+        const mapOverviewOpen = !prev.mapOverviewOpen;
+        next = {
+          ...next,
+          mapOverviewOpen,
+          status: mapOverviewOpen
+            ? 'linked 2D city map — drag to pan, wheel to zoom, right-click to move the 3D camera'
+            : 'returned to the 3D world view',
+        };
       } else if (command.id === 'open-color-studio') {
         const doc = materialDocument(asset);
         next = {

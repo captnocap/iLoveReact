@@ -26,6 +26,7 @@
 //!   __map_event_drain() -> Float32 ArrayBuffer [count, fixed event rows…]
 //!   __map_save_file(path) / __map_load_file(path) -> 0|1
 //!   __map_inspect_file(path) -> Float32 ArrayBuffer [version, chunkCount]
+//!   __map_path_snapshot() -> Float32 ArrayBuffer [version, pathCount, path records...]
 //!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
 //!   __map_height_at(worldX, worldZ) -> f64       — canonical terrain sample
@@ -524,6 +525,7 @@ fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // draftCurveRadius, maxGrade, controls, lastControlId, previewPathId,
 // previewDistance, previewValid, authoringTool, level]. UI-rate diagnostics.
 var path_stats_out: [19]f32 = undefined;
+var path_snapshot_out: [engine.PATH_SNAPSHOT_MAX_FLOATS]f32 = undefined;
 
 fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -554,6 +556,17 @@ fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     path_stats_out[17] = @intFromEnum(engine.pathAuthoringTool());
     path_stats_out[18] = @floatFromInt(engine.pathLevel());
     setReturnF32Buffer(info, path_stats_out[0..]);
+}
+
+// __map_path_snapshot() -> compact current authored transport recipes in world
+// metres. See engine.writePathSnapshot for the bounded versioned wire.
+fn hostPathSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const written = engine.writePathSnapshot(path_snapshot_out[0..]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    setReturnF32Buffer(info, path_snapshot_out[0..written]);
 }
 
 // Dedicated Map Paint history. Ctrl+Z routing stays cart-side, but the journal
@@ -916,6 +929,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_path_delete", hostPathDelete);
     v8_runtime.registerHostFn("__map_path_control_delete", hostPathControlDelete);
     v8_runtime.registerHostFn("__map_path_stats", hostPathStats);
+    v8_runtime.registerHostFn("__map_path_snapshot", hostPathSnapshot);
     v8_runtime.registerHostFn("__map_history", hostMapHistory);
     v8_runtime.registerHostFn("__map_undo", hostMapUndo);
     v8_runtime.registerHostFn("__map_redo", hostMapRedo);

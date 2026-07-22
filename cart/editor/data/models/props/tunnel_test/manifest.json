@@ -41,5 +41,6 @@
     "behaviors": []
   },
   "textureSlots": [],
-  "lights": []
+  "lights": [],
+  "hidden": true
 }

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "seat",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 0
+    }
+  ]
+}

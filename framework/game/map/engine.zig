@@ -1435,6 +1435,72 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     return n;
 }
 
+// ── compact 2D transport overview ───────────────────────────────────────────
+// UI-rate readback of the authored recipes, not chunk/cell copies. The editor's
+// linked map decodes this once when opened; later path edits request a new
+// snapshot. Coordinates leave the native author grid in world metres, matching
+// the WorldLoader camera and generated-map input contract.
+pub const PATH_SNAPSHOT_VERSION: u32 = 1;
+pub const PATH_SNAPSHOT_HEADER_FLOATS: usize = 2;
+pub const PATH_SNAPSHOT_PATH_HEADER_FLOATS: usize = 9;
+pub const PATH_SNAPSHOT_POINT_FLOATS: usize = 3;
+pub const PATH_SNAPSHOT_MAX_FLOATS: usize = PATH_SNAPSHOT_HEADER_FLOATS +
+    transport.MAX_PATHS * (PATH_SNAPSHOT_PATH_HEADER_FLOATS + transport.MAX_POINTS_PER_PATH * PATH_SNAPSHOT_POINT_FLOATS);
+
+pub fn pathSnapshotFloatCount() usize {
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    const count = transport.collectPaths(paths[0..]);
+    var floats: usize = PATH_SNAPSHOT_HEADER_FLOATS;
+    for (paths[0..count]) |path| {
+        floats += PATH_SNAPSHOT_PATH_HEADER_FLOATS + path.points.len * PATH_SNAPSHOT_POINT_FLOATS;
+    }
+    return floats;
+}
+
+pub fn writePathSnapshot(out: []f32) ?usize {
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    const count = transport.collectPaths(paths[0..]);
+    const required = pathSnapshotFloatCount();
+    if (out.len < required) return null;
+
+    out[0] = @floatFromInt(PATH_SNAPSHOT_VERSION);
+    out[1] = @floatFromInt(count);
+    var cursor: usize = PATH_SNAPSHOT_HEADER_FLOATS;
+    const author_origin = chunks.CHUNK_METERS / 2;
+    for (paths[0..count]) |path| {
+        const kind = transport.kindOf(path.profile);
+        const road_profile: ?transport.RoadProfile = switch (path.profile) {
+            .road => |profile| profile,
+            else => null,
+        };
+        const tracks: i32 = switch (path.profile) {
+            .light_rail => |profile| profile.tracks,
+            .railway => |profile| profile.tracks,
+            else => 0,
+        };
+        const header = [_]f32{
+            @floatFromInt(path.id),
+            @floatFromInt(@intFromEnum(kind)),
+            @floatFromInt(if (road_profile) |profile| profile.lanesF else 0),
+            @floatFromInt(if (road_profile) |profile| profile.lanesB else 0),
+            if (road_profile != null and road_profile.?.sidewalks) 1 else 0,
+            @floatFromInt(tracks),
+            path.curve_radius_m,
+            if (road_profile) |profile| profile.speedLimitKph else 0,
+            @floatFromInt(path.points.len),
+        };
+        @memcpy(out[cursor .. cursor + PATH_SNAPSHOT_PATH_HEADER_FLOATS], header[0..]);
+        cursor += PATH_SNAPSHOT_PATH_HEADER_FLOATS;
+        for (path.points) |point_value| {
+            out[cursor] = point_value.gx - author_origin;
+            out[cursor + 1] = point_value.gz - author_origin;
+            out[cursor + 2] = point_value.elevation_m;
+            cursor += PATH_SNAPSHOT_POINT_FLOATS;
+        }
+    }
+    return cursor;
+}
+
 // ── roads: strokes compile to tile stamps with an UNDERCOAT ──────────────────
 // ROADSTROKE-0610 semantics (PaintCanvas:1143): a road is a recipe (centerline
 // + profile, roads.zig); stamping is DESTRUCTIVE into the chunk tile grids —

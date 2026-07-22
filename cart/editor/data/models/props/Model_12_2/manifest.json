@@ -16,5 +16,6 @@
   "decompositions": [],
   "atlases": [],
   "paints": [],
-  "textureSlots": []
+  "textureSlots": [],
+  "hidden": true
 }

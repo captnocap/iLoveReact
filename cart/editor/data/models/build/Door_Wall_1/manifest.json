@@ -20,5 +20,6 @@
     "as": "build-piece",
     "kind": "wall",
     "edit": "door"
-  }
+  },
+  "hidden": true
 }

@@ -198,6 +198,37 @@ test "transport pen previews after one anchor and keeps rail out of the road til
     for (chunk.tiles) |tile| try std.testing.expectEqual(chunks.EMPTY_CELL, tile);
 }
 
+test "linked map path snapshot is bounded and returns world-space recipes" {
+    engine.reset();
+    defer engine.reset();
+    _ = chunks.growChunk(0, 0).?;
+    engine.setTool(.{ .channel = .road });
+    engine.setPathProfile(.{ .road = .{ .lanesF = 2, .lanesB = 1, .sidewalks = true, .speedLimitKph = 50 } }, 10);
+    engine.strokeBegin(std.testing.io, -20, 12);
+    _ = engine.strokeEnd(std.testing.io);
+    engine.strokeBegin(std.testing.io, 30, 42);
+    _ = engine.strokeEnd(std.testing.io);
+    const path_id = engine.pathCommit(std.testing.io).?;
+
+    try std.testing.expectEqual(@as(usize, 17), engine.pathSnapshotFloatCount());
+    var short: [16]f32 = undefined;
+    try std.testing.expect(engine.writePathSnapshot(short[0..]) == null);
+    var snapshot: [17]f32 = undefined;
+    const written = engine.writePathSnapshot(snapshot[0..]).?;
+    try std.testing.expectEqual(snapshot.len, written);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(engine.PATH_SNAPSHOT_VERSION)), snapshot[0]);
+    try std.testing.expectEqual(@as(f32, 1), snapshot[1]);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(path_id)), snapshot[2]);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(@intFromEnum(engine.transport.Kind.road))), snapshot[3]);
+    try std.testing.expectEqual(@as(f32, 2), snapshot[4]);
+    try std.testing.expectEqual(@as(f32, 1), snapshot[5]);
+    try std.testing.expectEqual(@as(f32, 1), snapshot[6]);
+    try std.testing.expectApproxEqAbs(@as(f32, -20), snapshot[11], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12), snapshot[12], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 30), snapshot[14], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 42), snapshot[15], 0.001);
+}
+
 test "rail storey points derive grade and TC Stops sample the same 3D path" {
     engine.reset();
     defer engine.reset();

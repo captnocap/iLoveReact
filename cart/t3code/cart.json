@@ -1,6 +1,0 @@
-{
-  "name": "T3 Code",
-  "description": "Minimal GUI for coding agents. Port of https://github.com/pingdotgg/t3code to reactjit.",
-  "width": 1280,
-  "height": 840
-}

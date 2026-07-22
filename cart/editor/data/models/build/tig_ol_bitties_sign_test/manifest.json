@@ -30,5 +30,6 @@
       "color": "#c2c6cf"
     }
   ],
-  "paints": []
+  "paints": [],
+  "hidden": true
 }

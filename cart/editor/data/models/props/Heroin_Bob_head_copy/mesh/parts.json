@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cube 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 0
+    },
+    {
+      "name": "Cylinder 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cylinder",
+      "outlinerOrder": 1
+    },
+    {
+      "name": "Cylinder 2",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cylinder",
+      "outlinerOrder": 2
+    },
+    {
+      "name": "Cube 2",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 4
+    },
+    {
+      "name": "Cube 3",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 6
+    },
+    {
+      "name": "Icosphere 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "icosphere",
+      "outlinerOrder": 7
+    },
+    {
+      "name": "Icosphere 1 (2)",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "icosphere",
+      "outlinerOrder": 9
+    },
+    {
+      "name": "Cone 1 (2)",
+      "color": "#c9b48f",
+      "visible": false,
+      "kind": "cone",
+      "groupId": "part-group:12991",
+      "groupName": "Liberty Spikes",
+      "groupPath": [
+        {
+          "id": "part-group:12991",
+          "name": "Liberty Spikes"
+        }
+      ],
+      "outlinerOrder": 10
+    },
+    {
+      "name": "Cone 1 (3)",
+      "color": "#c9b48f",
+      "visible": false,
+      "kind": "cone",
+      "groupId": "part-group:12991",
+      "groupName": "Liberty Spikes",
+      "groupPath": [
+        {
+          "id": "part-group:12991",
+          "name": "Liberty Spikes"
+        }
+      ],
+      "outlinerOrder": 11
+    },
+    {
+      "name": "Cone 1 (4)",
+      "color": "#c9b48f",
+      "visible": false,
+      "kind": "cone",
+      "groupId": "part-group:12991",
+      "groupName": "Liberty Spikes",
+      "groupPath": [
+        {
+          "id": "part-group:12991",
+          "name": "Liberty Spikes"
+        }
+      ],
+      "outlinerOrder": 12
+    },
+    {
+      "name": "Cone 1 (5)",
+      "color": "#c9b48f",
+      "visible": false,
+      "kind": "cone",
+      "groupId": "part-group:12991",
+      "groupName": "Liberty Spikes",
+      "groupPath": [
+        {
+          "id": "part-group:12991",
+          "name": "Liberty Spikes"
+        }
+      ],
+      "outlinerOrder": 13
+    },
+    {
+      "name": "part 15",
+      "color": "#c9b48f",
+      "visible": false,
+      "groupId": "part-group:12991",
+      "groupName": "Liberty Spikes",
+      "groupPath": [
+        {
+          "id": "part-group:12991",
+          "name": "Liberty Spikes"
+        }
+      ],
+      "outlinerOrder": 14
+    },
+    {
+      "name": "Plane 1 (2)",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "plane",
+      "outlinerOrder": 15
+    },
+    {
+      "name": "Plane 1 (3)",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "plane",
+      "outlinerOrder": 16
+    },
+    {
+      "name": "Cylinder 2 (3)",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cylinder",
+      "outlinerOrder": 16
+    }
+  ]
+}

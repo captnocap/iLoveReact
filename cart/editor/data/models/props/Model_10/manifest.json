@@ -38,5 +38,6 @@
     },
     "contacts": [],
     "behaviors": []
-  }
+  },
+  "hidden": true
 }

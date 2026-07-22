@@ -47,5 +47,6 @@
       "purpose": "flora"
     }
   ],
-  "lights": []
+  "lights": [],
+  "hidden": true
 }

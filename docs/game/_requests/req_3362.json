@@ -1,0 +1,18 @@
+{
+  "id": "req_3362",
+  "at": "2026-07-22T09:56:45.942Z",
+  "origin": "codex:019f7e48",
+  "text": "restarting the app resets the uv layout that is last saved",
+  "status": "doing",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T09:56:53.294Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

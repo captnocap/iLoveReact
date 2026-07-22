@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "studio:mdl-mqq5dvmz-12b",
-  "name": "new_mesh_029",
+  "name": "sidetable_01",
   "kind": "prop",
   "stage": "wip",
   "folderId": "model-studio_mdl-mqq5dvmz-12b",
@@ -19,5 +19,7 @@
     "palette:0"
   ],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
 }

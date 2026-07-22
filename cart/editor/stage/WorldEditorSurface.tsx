@@ -30,6 +30,8 @@ export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 // click drops one so the place→live-render loop is visible. The active FLOOR
 // comes from the action bar's one real floor control (req_2485).
 export default function WorldEditorSurface(props: {
+  mapOverviewOpen: boolean;
+  onToggleMap: () => void;
   paintActive: boolean;
   mapPaint: MapPaintState;
   mapStem: string;
@@ -84,6 +86,8 @@ export default function WorldEditorSurface(props: {
   return (
     <C.HW_WorldEditorSurface>
       <WorldViewport
+        mapOverviewOpen={props.mapOverviewOpen}
+        onToggleMap={props.onToggleMap}
         gameFile={EDITOR_GAME_FILE}
         storeDir={EDITOR_STORE_DIR}
         pieces={visiblePieces}

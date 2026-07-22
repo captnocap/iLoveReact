@@ -17,6 +17,7 @@ import {
   isProtectedAt,
   isWaterAt,
   isWaterForPlanAt,
+  inspectCoastalRoadTopology,
   packCoastalCityPaintingStream,
   protectedLandKindAt,
   riverHalfWidthAt,
@@ -76,7 +77,7 @@ test('coast, river, beach, and protected land retain distinct semantics', () => 
 test('semantic transport has a nontrivial hierarchy within native caps', () => {
   assert(plan.paths.length <= COASTAL_CITY_TUNING.wire.maxPaths, 'path cap exceeded');
   assert(plan.paths.every((path) => path.points.length >= 2 && path.points.length <= COASTAL_CITY_TUNING.wire.maxPointsPerPath), 'point cap or minimum violated');
-  assert(plan.stats.roadCount >= 150, `city-scale street hierarchy is too small (${plan.stats.roadCount})`);
+  assert(plan.stats.roadCount >= COASTAL_CITY_TUNING.roadTopology.minimumNetworkRoads, `city-scale street hierarchy is too small (${plan.stats.roadCount})`);
   assert(plan.paths.some((path) => path.hierarchy === 'highway'), 'highway missing');
   assert(plan.paths.some((path) => path.hierarchy === 'arterial'), 'arterial missing');
   assert(plan.paths.some((path) => path.hierarchy === 'collector'), 'collector missing');
@@ -130,6 +131,17 @@ test('semantic transport has a nontrivial hierarchy within native caps', () => {
   }
   assert(plan.crossings.length === 6 && plan.crossings.every((crossing) => crossing.kind === 'causeway' && crossing.name.includes('Causeway') && crossing.pathIds.length > 0), 'named causeway constraints disappeared');
   assert(new Set(plan.crossings.map((crossing) => crossing.x)).size === plan.crossings.length, 'unrelated transport paths still share a bridge deck');
+});
+
+test('road graph rejects the shallow, repeated, and clustered crossings the native junction grammar cannot represent', () => {
+  const topology = inspectCoastalRoadTopology(plan.paths);
+  const policy = COASTAL_CITY_TUNING.roadTopology;
+  assert(topology.selfIntersectionPathIds.length === 0, `self-intersecting roads survived: ${topology.selfIntersectionPathIds.join(',')}`);
+  assert(topology.repeatedIntersectionPairs.length === 0, `road pairs cross repeatedly: ${topology.repeatedIntersectionPairs.join(',')}`);
+  assert(topology.minimumAngleDegrees !== null && topology.minimumAngleDegrees >= policy.minimumIntersectionAngleDegrees, `minimum road angle is ${topology.minimumAngleDegrees}`);
+  assert(topology.minimumJunctionSpacingM !== null && topology.minimumJunctionSpacingM >= policy.minimumJunctionSpacingM, `minimum junction spacing is ${topology.minimumJunctionSpacingM}`);
+  assert(topology.maximumJunctionDegree <= policy.maximumJunctionDegree, `junction degree reached ${topology.maximumJunctionDegree}`);
+  assert(topology.overlappingCorridorPairs.length === 0, `road corridors overlap without a junction: ${topology.overlappingCorridorPairs.join(',')}`);
 });
 
 test('every named crossing replaces wet bed with honest dry causeway terrain', () => {

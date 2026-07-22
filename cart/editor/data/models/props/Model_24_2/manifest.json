@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "id": "primitive:cylinder:24",
+  "name": "Model 24",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cylinder_24",
+  "semanticKind": "cylinder",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": [],
+  "hidden": true
+}

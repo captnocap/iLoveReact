@@ -41,5 +41,6 @@
       "id": "surface_6",
       "label": "Surface 6"
     }
-  ]
+  ],
+  "hidden": true
 }

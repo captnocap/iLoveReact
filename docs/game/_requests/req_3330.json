@@ -3,7 +3,7 @@
   "at": "2026-07-21T09:32:57.920Z",
   "origin": "codex:019f744e",
   "text": "ok some of  them are still kinda choppy but a lot of them are better. next with that is look at some of these road intersections [Image #1] [Image #2][Image #3] also, it would be of use to build a 2d map like google maps from these so i could better see the thing in whole",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,16 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-21T10:22:39.544Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Reworked coastal-city transport generation to reject self-crossings, repeated road-pair crossings, shallow joins, clustered junctions, and over-degree nodes; fixed the SR-8 route ordering; taught native road planning to recognize diagonal junctions from true tangents; and replaced the retired minimap toggle with a live full-stage 2D city map backed by a compact native transport snapshot, batched site footprints, geography context, pan/zoom, and right-click 3D camera recentering. Targeted Zig and TypeScript tests plus the ReleaseFast editor build pass; visual and 60-second frame-time verification remain for the user.",
+  "shas": [],
+  "resolvedAt": "2026-07-21T10:22:39.544Z"
 }

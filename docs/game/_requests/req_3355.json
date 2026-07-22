@@ -1,0 +1,30 @@
+{
+  "id": "req_3355",
+  "at": "2026-07-22T07:44:56.246Z",
+  "origin": "codex:019f883f",
+  "text": "there is no 'delete all' i meant that i selected all the faces of that cube and hit the del key on my keyboard",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T07:45:03.336Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T07:51:47.265Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Handled the clarified scoped case: Select All affects only the focused third cube, Delete empties that part, and native range compaction removes only that empty part rather than treating the whole document as deleted.",
+  "shas": [
+    "ff1946ce8"
+  ],
+  "resolvedAt": "2026-07-22T07:51:47.265Z"
+}

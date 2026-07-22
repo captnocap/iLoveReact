@@ -17,5 +17,6 @@
   "atlases": [],
   "paints": [],
   "textureSlots": [],
-  "lights": []
+  "lights": [],
+  "hidden": true
 }

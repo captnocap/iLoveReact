@@ -533,6 +533,84 @@ export type MapPathStats = {
   level: number;
 };
 
+export type MapPathSnapshotPoint = { x: number; z: number; elevationM: number };
+export type MapPathSnapshotPath = {
+  id: number;
+  kind: MapPathKind;
+  profile: MapPathProfile & { speedLimitKph: number };
+  points: readonly MapPathSnapshotPoint[];
+};
+export type MapPathSnapshot = { version: 1; paths: readonly MapPathSnapshotPath[] };
+
+export const MAP_PATH_SNAPSHOT_WIRE = {
+  version: 1,
+  headerFloats: 2,
+  pathHeaderFloats: 9,
+  pointFloats: 3,
+  maxPaths: 384,
+  maxPointsPerPath: 128,
+} as const;
+
+function wholeInRange(value: number | undefined, minimum: number, maximum: number): value is number {
+  return Number.isFinite(value) && Number.isInteger(value) && value! >= minimum && value! <= maximum;
+}
+
+/** Strict decoder for the native overview wire. Malformed/truncated buffers do
+ * not become a partial city map. */
+export function decodeMapPathSnapshot(raw: Float32Array): MapPathSnapshot | null {
+  const wire = MAP_PATH_SNAPSHOT_WIRE;
+  if (raw.length < wire.headerFloats || raw[0] !== wire.version) return null;
+  const count = raw[1];
+  if (!wholeInRange(count, 0, wire.maxPaths)) return null;
+  const paths: MapPathSnapshotPath[] = [];
+  let cursor = wire.headerFloats;
+  for (let index = 0; index < count; index += 1) {
+    if (cursor + wire.pathHeaderFloats > raw.length) return null;
+    const id = raw[cursor];
+    const kindIndex = raw[cursor + 1];
+    const lanesF = raw[cursor + 2];
+    const lanesB = raw[cursor + 3];
+    const sidewalks = raw[cursor + 4];
+    const tracks = raw[cursor + 5];
+    const curveRadiusM = raw[cursor + 6];
+    const speedLimitKph = raw[cursor + 7];
+    const pointCount = raw[cursor + 8];
+    if (!wholeInRange(id, 1, 16_777_215)
+      || !wholeInRange(kindIndex, 0, PATH_KINDS.length - 1)
+      || !wholeInRange(lanesF, 0, 3)
+      || !wholeInRange(lanesB, 0, 3)
+      || (sidewalks !== 0 && sidewalks !== 1)
+      || !wholeInRange(tracks, 0, 2)
+      || !Number.isFinite(curveRadiusM) || curveRadiusM! < 0
+      || !Number.isFinite(speedLimitKph) || speedLimitKph! < 0
+      || !wholeInRange(pointCount, 2, wire.maxPointsPerPath)) return null;
+    cursor += wire.pathHeaderFloats;
+    if (cursor + pointCount * wire.pointFloats > raw.length) return null;
+    const points: MapPathSnapshotPoint[] = [];
+    for (let point = 0; point < pointCount; point += 1) {
+      const x = raw[cursor], z = raw[cursor + 1], elevationM = raw[cursor + 2];
+      if (![x, z, elevationM].every(Number.isFinite)) return null;
+      points.push({ x: x!, z: z!, elevationM: elevationM! });
+      cursor += wire.pointFloats;
+    }
+    paths.push({
+      id,
+      kind: PATH_KINDS[kindIndex]!,
+      profile: { lanesF, lanesB, sidewalks: sidewalks === 1, tracks, curveRadiusM, speedLimitKph },
+      points,
+    });
+  }
+  if (cursor !== raw.length) return null;
+  return { version: 1, paths };
+}
+
+/** Current native transport recipes for the linked 2D map. One bounded UI-rate
+ * copy; never reads the 625 chunk height/cell owners through JS. */
+export function mapPathSnapshot(): MapPathSnapshot | null {
+  const buffer = callHost<ArrayBuffer | null>('__map_path_snapshot', null);
+  return buffer ? decodeMapPathSnapshot(new Float32Array(buffer)) : null;
+}
+
 export function mapPathStats(): MapPathStats {
   const ab = callHost<ArrayBuffer | null>('__map_path_stats', null);
   if (!ab) {

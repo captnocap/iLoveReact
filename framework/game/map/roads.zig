@@ -41,6 +41,11 @@ pub const LANE_TILES: i32 = 3;
 pub const SIDEWALK_TILES: i32 = 2;
 /// The zebra band reaches 2 cells into each leg, just outside the junction box.
 pub const CROSSWALK_DEPTH: usize = 2;
+/// Two separately authored carriageways must differ by at least this much in
+/// true tangent direction before their shared cells become a junction. This is
+/// sin(15°): shallow overlaps remain one corridor, while diagonal crossings no
+/// longer disappear merely because both tangents quantize to the X (or Z) axis.
+pub const JUNCTION_MIN_CROSSING_SINE: f32 = 0.258819;
 pub const MAX_LANES_PER_SIDE: i32 = 3;
 /// Legacy saves predate authored curve reach and keep their original 5 m turn.
 pub const ROAD_FILLET_TILES: f32 = transport.TUNING.legacy_road_curve_radius_m;
@@ -303,7 +308,13 @@ fn rightOf(dir: Dir) Dir {
     return .{ .dx = -dir.dz, .dz = dir.dx };
 }
 
-const CenterCell = struct { gx: i32, gz: i32, dir: Dir };
+const CenterCell = struct {
+    gx: i32,
+    gz: i32,
+    dir: Dir,
+    tangent_x: f32,
+    tangent_z: f32,
+};
 
 // ── corner fillets (ROADCURVE-0610, roadData.ts:173-199) ──────────────────────
 
@@ -328,7 +339,12 @@ fn rasterizeCenterline(arena: std.mem.Allocator, points: []const RoadPoint) ![]C
         const a = points[i];
         const b = points[i + 1];
         const dir = segmentDir(a, b) orelse continue;
-        const span = @max(@abs(b.gx - a.gx), @abs(b.gz - a.gz));
+        const dx = b.gx - a.gx;
+        const dz = b.gz - a.gz;
+        const length = @sqrt(dx * dx + dz * dz);
+        const tangent_x = dx / length;
+        const tangent_z = dz / length;
+        const span = @max(@abs(dx), @abs(dz));
         const steps: usize = @max(1, @as(usize, @ceil(span * 4)));
         var s: usize = 0;
         while (s <= steps) : (s += 1) {
@@ -338,7 +354,13 @@ fn rasterizeCenterline(arena: std.mem.Allocator, points: []const RoadPoint) ![]C
             const key = cellKeyOf(gx, gz);
             const gop = try seen.getOrPut(arena, key);
             if (gop.found_existing) continue;
-            try out.append(arena, .{ .gx = gx, .gz = gz, .dir = dir });
+            try out.append(arena, .{
+                .gx = gx,
+                .gz = gz,
+                .dir = dir,
+                .tangent_x = tangent_x,
+                .tangent_z = tangent_z,
+            });
         }
     }
     return out.items;
@@ -403,11 +425,8 @@ pub fn crossSection(profile: RoadProfile) CrossSection {
 }
 
 // ── per-stroke rasterization (roadData.ts:270-328) ────────────────────────────
-// Travel-axis bits per carriageway cell — the junction discriminator: a
-// junction needs CROSSING traffic; parallel overlap must read as ONE road.
-
-const AXIS_X: u8 = 1;
-const AXIS_Z: u8 = 2;
+// Each carriageway cell retains its true tangent for junction discrimination;
+// lane flow remains cardinal elsewhere in the compiled grammar.
 
 const StrokeRaster = struct {
     stroke: RoadStroke,
@@ -419,8 +438,8 @@ const StrokeRaster = struct {
     walk: std.AutoHashMapUnmanaged(u64, void),
     /// cell → |offset| that produced it (the corner tiebreak)
     rank: std.AutoHashMapUnmanaged(u64, i32),
-    /// cell → travel-axis bits (AXIS_X / AXIS_Z) along this stroke
-    axes: std.AutoHashMapUnmanaged(u64, u8),
+    /// cell → true unit tangent of the winning carriageway column
+    tangents: std.AutoHashMapUnmanaged(u64, [2]f32),
 };
 
 fn axisMarking(dir: Dir) u8 {
@@ -490,24 +509,21 @@ fn rasterizeStroke(arena: std.mem.Allocator, stroke: RoadStroke) !StrokeRaster {
         .markings = .empty,
         .walk = .empty,
         .rank = .empty,
-        .axes = .empty,
+        .tangents = .empty,
     };
 
     for (center) |c| {
         const rt = rightOf(c.dir);
-        const axis: u8 = if (c.dir.dx != 0) AXIS_X else AXIS_Z;
         for (xs.carriage[0..xs.carriage_count]) |col| {
             const gx = c.gx + rt.dx * col.off;
             const gz = c.gz + rt.dz * col.off;
             const key = cellKeyOf(gx, gz);
-            const axes_gop = try r.axes.getOrPut(arena, key);
-            if (!axes_gop.found_existing) axes_gop.value_ptr.* = 0;
-            axes_gop.value_ptr.* |= axis;
             const score: i32 = @intCast(@abs(col.off));
             if (r.rank.get(key)) |prev| {
                 if (prev <= score) continue;
             }
             try r.rank.put(arena, key, score);
+            try r.tangents.put(arena, key, .{ c.tangent_x, c.tangent_z });
             const kind: RoadCellKind = switch (col.kind) {
                 .median => .median,
                 .forward => laneKindFor(c.dir),
@@ -551,26 +567,34 @@ pub const PlanResult = struct {
     truncated: bool,
 };
 
-/// Cells the road network reads as junction: ≥2 carriageways whose travel axes
-/// CROSS (ts:392). Shared by planRoads' stamp and deriveJunctions.
+/// Cells the road network reads as junction: at least two distinct carriageways
+/// whose true tangents cross. Gameplay flow remains compass-quantized, but
+/// junction identity cannot use that lossy representation: two 34° streets are
+/// both "X" to lane flow and still form a real physical intersection.
 fn junctionCells(arena: std.mem.Allocator, rasters: []StrokeRaster) !std.AutoHashMapUnmanaged(u64, void) {
-    var cover: std.AutoHashMapUnmanaged(u64, u32) = .empty;
-    var cover_axes: std.AutoHashMapUnmanaged(u64, u8) = .empty;
+    const Cover = struct {
+        tangent: [2]f32,
+        crossing: bool,
+    };
+    var cover: std.AutoHashMapUnmanaged(u64, Cover) = .empty;
     for (rasters) |*r| {
-        var it = r.axes.iterator();
+        var it = r.tangents.iterator();
         while (it.next()) |entry| {
-            const cgop = try cover.getOrPut(arena, entry.key_ptr.*);
-            if (!cgop.found_existing) cgop.value_ptr.* = 0;
-            cgop.value_ptr.* += 1;
-            const agop = try cover_axes.getOrPut(arena, entry.key_ptr.*);
-            if (!agop.found_existing) agop.value_ptr.* = 0;
-            agop.value_ptr.* |= entry.value_ptr.*;
+            const gop = try cover.getOrPut(arena, entry.key_ptr.*);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{ .tangent = entry.value_ptr.*, .crossing = false };
+                continue;
+            }
+            const prior = gop.value_ptr.tangent;
+            const next = entry.value_ptr.*;
+            const cross = @abs(prior[0] * next[1] - prior[1] * next[0]);
+            if (cross >= JUNCTION_MIN_CROSSING_SINE) gop.value_ptr.crossing = true;
         }
     }
     var out: std.AutoHashMapUnmanaged(u64, void) = .empty;
     var it = cover.iterator();
     while (it.next()) |entry| {
-        if (entry.value_ptr.* >= 2 and (cover_axes.get(entry.key_ptr.*) orelse 0) == (AXIS_X | AXIS_Z)) {
+        if (entry.value_ptr.crossing) {
             try out.put(arena, entry.key_ptr.*, {});
         }
     }
@@ -1153,6 +1177,30 @@ test "head-on parallel overlap stays box-free; crossing axes still box" {
         testStroke(2, &tee, 1, 1, false),
     }, test_plan[0..]);
     try std.testing.expect(countKind(&test_plan, res.count, .junction) > 0);
+}
+
+test "diagonal crossing forms a junction even when both flows quantize to X" {
+    const horizontal = [_]RoadPoint{ .{ .gx = 0, .gz = 10 }, .{ .gx = 30, .gz = 10 } };
+    // atan(20/30) = 33.7 degrees, but segmentDir classifies BOTH strokes as X.
+    const diagonal = [_]RoadPoint{ .{ .gx = 0, .gz = 0 }, .{ .gx = 30, .gz = 20 } };
+    const res = planRoads(&.{
+        testStroke(1, &horizontal, 1, 1, false),
+        testStroke(2, &diagonal, 1, 1, false),
+    }, test_plan[0..]);
+    try std.testing.expect(!res.truncated);
+    try std.testing.expect(countKind(&test_plan, res.count, .junction) > 0);
+}
+
+test "shallow overlapping carriageways do not become a junction carpet" {
+    const horizontal = [_]RoadPoint{ .{ .gx = 0, .gz = 10 }, .{ .gx = 30, .gz = 10 } };
+    // 9.5 degrees: overlapping corridor paint, not a crossing road.
+    const shallow = [_]RoadPoint{ .{ .gx = 0, .gz = 6 }, .{ .gx = 30, .gz = 11 } };
+    const res = planRoads(&.{
+        testStroke(1, &horizontal, 1, 1, false),
+        testStroke(2, &shallow, 1, 1, false),
+    }, test_plan[0..]);
+    try std.testing.expect(!res.truncated);
+    try std.testing.expectEqual(@as(usize, 0), countKind(&test_plan, res.count, .junction));
 }
 
 test "filletPoints rounds corners into arcs, leaves straights and endpoints alone" {

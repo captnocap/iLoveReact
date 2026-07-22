@@ -123,6 +123,8 @@ export default function Stage(props: {
           })()
         ) : activeDocument.kind === 'world' ? (
           <WorldEditorSurface
+            mapOverviewOpen={props.state.mapOverviewOpen}
+            onToggleMap={() => props.onCommand('toggle-minimap', 'stage')}
             paintActive={props.state.mapPaint.active}
             mapPaint={props.state.mapPaint}
             mapStem={props.state.activeMapStem}
@@ -182,10 +184,10 @@ export default function Stage(props: {
         {/* Sims build bar (req_2563) — overlays the bottom of the viewport in
             Build (Place) mode. Last child so it paints + hit-tests over the
             world surface's pointer-capture Pressable. */}
-        {activeDocument.kind === 'world' && !props.state.mapPaint.active && worldToolFor(props.state.activeCommandId) === 'place' ? (
+        {activeDocument.kind === 'world' && !props.state.mapOverviewOpen && !props.state.mapPaint.active && worldToolFor(props.state.activeCommandId) === 'place' ? (
           <BuildBar armedPieceId={props.state.armedPieceId} prefabs={props.state.worldPrefabs} onArm={props.onArmPiece} />
         ) : null}
-        {activeDocument.kind === 'world' && (props.state.mapPaint.active || props.state.mapPaint.texturePickerOpen) ? (
+        {activeDocument.kind === 'world' && !props.state.mapOverviewOpen && (props.state.mapPaint.active || props.state.mapPaint.texturePickerOpen) ? (
           <MapPaintDock state={props.state.mapPaint} customFlora={props.state.authoredFloraSpecies} onPatch={props.onMapPaint} />
         ) : null}
       </C.HW_StageViewport>

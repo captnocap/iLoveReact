@@ -524,6 +524,9 @@ export type EditorState = {
   /** Named map-document picker. Map documents own BOTH native painting and
    * React-authored placements; switching replaces those concerns together. */
   mapDocumentOpen: boolean;
+  /** Full-stage live transport overview. The 3D world remains mounted beneath
+   * it so returning preserves camera and streaming residency. */
+  mapOverviewOpen: boolean;
   /** Directory stem below zig-out/game/editor/maps/. */
   activeMapStem: string;
   /** Friendly title from the stable document directory's metadata. */
