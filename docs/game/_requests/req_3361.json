@@ -1,0 +1,30 @@
+{
+  "id": "req_3361",
+  "at": "2026-07-22T09:43:20.313Z",
+  "origin": "codex:019f7e48",
+  "text": "ok so it has this texture but it places in the world like this [Image #1][Image #2]",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T09:43:40.598Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T09:50:07.030Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The world was not dropping couch_002's texture: Export silently armed the newest saved Painting 1 skin, whose nine-color atlas exactly matched the bright cyan/pink/yellow placement, while Studio displayed the current purple base atlas. The authored palette now always exposes the current Studio look first, keeps every named painting as a separate selectable placeable, and Export arms Current instead of silently substituting a saved variant. Focused authored-registry tests, editor TypeScript check, and the ReleaseFast editor ship all pass.",
+  "shas": [
+    "c2ee5fecc"
+  ],
+  "resolvedAt": "2026-07-22T09:50:07.030Z"
+}
