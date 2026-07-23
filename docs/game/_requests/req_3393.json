@@ -1,0 +1,30 @@
+{
+  "id": "req_3393",
+  "at": "2026-07-23T19:58:03.251Z",
+  "origin": "codex:019f7e48",
+  "text": "ok uuh not what i would quite call a uv stack. [Image #1][Image #2] more like a uv pow-wow but not quite a stack bewcause i would expect it to be exact",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T19:58:14.196Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T20:02:50.652Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected UV stacking from bounding-box normalization to an exact topology-compatible copy. Each compatible selected island now receives the active island's exact transform frame and six triangle-corner coordinates per render face while retaining its own face rows, authored groups, and welded vertex identities. Different triangle counts are left unchanged and explicitly reported instead of producing an approximate pile. The context action is now labeled Stack Exactly on Active, with a skewed-quad regression test proving both triangles coincide exactly.",
+  "shas": [
+    "d336fec11"
+  ],
+  "resolvedAt": "2026-07-23T20:02:50.652Z"
+}
