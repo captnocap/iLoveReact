@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { cylinder, editMeshToGeometry, loopCutFromFace, mirrorEditAxes, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
+import { cylinder, editMeshToGeometry, extrudeEdge, loopCutFromFace, mirrorEditAxes, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -59,6 +59,25 @@ test('the plane primitive is one intact indexed quad before host append', () => 
   for (let vertex = 0; vertex < 6; vertex += 1) {
     assert(lowered.positions[vertex * 8 + 1] === 0, `lowered plane vertex ${vertex} has y=${lowered.positions[vertex * 8 + 1]}`);
   }
+});
+
+test('edge extrusion continues a panel in-plane instead of creating a depth flap', () => {
+  const source: EditMesh = {
+    verts: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+    faces: [{ loop: [0, 1, 2, 3] }],
+  };
+  const extruded = extrudeEdge(source, [0, 3], 0.25);
+  assert(extruded.verts.length === 6, `edge extrusion added ${extruded.verts.length - source.verts.length} vertices instead of two`);
+  assert(extruded.faces.length === 2, `edge extrusion added ${extruded.faces.length - source.faces.length} faces instead of one`);
+  assert(positionSetKey(extruded.verts.slice(4)) === positionSetKey([[-0.25, 0, 0], [-0.25, 1, 0]]),
+    `new edge did not continue outward in the panel plane: ${positionSetKey(extruded.verts.slice(4))}`);
+  assert(extruded.verts.slice(4).every((vertex) => vertex[2] === 0), 'edge extrusion created a perpendicular depth flap');
+  assert(source.verts.every((vertex, index) => positionSetKey([vertex]) === positionSetKey([extruded.verts[index]])),
+    'edge extrusion mutated the existing panel');
+
+  const repeated = extrudeEdge(extruded, [4, 5], 0.25);
+  assert(positionSetKey(repeated.verts.slice(6)) === positionSetKey([[-0.5, 0, 0], [-0.5, 1, 0]]),
+    `re-extruding the focused outer edge changed planes: ${positionSetKey(repeated.verts.slice(6))}`);
 });
 
 test('equal-length non-planar mirror quads carry the same physical diagonal', () => {

@@ -1461,21 +1461,25 @@ fn selectWeldedEdgeAt(p: [3]f32, q: [3]f32) bool {
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     if (!model_paint.hasTarget()) return false;
     const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
-    const ep = mesh_edit.edgeEndpointsPub(edge_idx);
-    const a = mesh_edit.vertPosPub(ep[0]);
-    const b = mesh_edit.vertPosPub(ep[1]);
-    var n = mesh_edit.edgeAverageNormalPub(edge_idx);
-    if (vdot(n, n) < 0.5) n = .{ 0, 1, 0 };
+    const frame = mesh_edit.edgeExtrusionFramePub(edge_idx) orelse return false;
     const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
-    const c = vadd(a, vmul(n, dist));
-    const d = vadd(b, vmul(n, dist));
+    const outer = frame.outer(dist);
+    const c = outer[0];
+    const d = outer[1];
 
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
         return false;
     }
-    if (!appendQuadSplit(&verts, a, b, d, c)) {
+    // Edge ids are position-sorted, not wound. Keep the new coplanar face on the
+    // same visible side as its authored neighbour instead of randomly back-culling.
+    const forward = vdot(normalOf(frame.a, frame.b, d), frame.face_normal) >= 0;
+    const appended = if (forward)
+        appendQuadSplit(&verts, frame.a, frame.b, d, c)
+    else
+        appendQuadSplit(&verts, frame.b, frame.a, c, d);
+    if (!appended) {
         verts.deinit(std.heap.c_allocator);
         return false;
     }

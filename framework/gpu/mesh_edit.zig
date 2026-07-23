@@ -481,37 +481,116 @@ pub fn selectedEdgesCommonPartPub() ?u32 {
     }
     return owner;
 }
-pub fn edgeAverageNormalPub(edge_idx: u32) [3]f32 {
-    if (!ensureTopology()) return .{ 0, 1, 0 };
-    const edges = g_edges orelse return .{ 0, 1, 0 };
-    const corners = g_corner_vert orelse return .{ 0, 1, 0 };
-    const pos = model_paint.positions() orelse return .{ 0, 1, 0 };
-    if (edge_idx >= g_edge_count) return .{ 0, 1, 0 };
-    const a = edges[edge_idx * 2];
-    const b = edges[edge_idx * 2 + 1];
-    var acc: [3]f32 = .{ 0, 0, 0 };
-    var f: u32 = 0;
-    const fc = model_paint.faceCount();
-    while (f < fc) : (f += 1) {
+
+/// Geometry needed to extend one selected edge without inventing a perpendicular
+/// flap. The outer edge stays in the adjacent authored face's plane; the caller
+/// chooses only the distance and owns the topology transaction.
+pub const EdgeExtrusionFrame = struct {
+    a: [3]f32,
+    b: [3]f32,
+    outward: [3]f32,
+    face_normal: [3]f32,
+
+    pub fn outer(self: EdgeExtrusionFrame, distance: f32) [2][3]f32 {
+        return .{
+            vecAdd(self.a, vecMul(self.outward, distance)),
+            vecAdd(self.b, vecMul(self.outward, distance)),
+        };
+    }
+};
+
+/// Solve the default edge-extrusion direction from the authored face beside the
+/// edge. Using the whole face group matters: deriving it from only the incident
+/// render triangle makes a triangulated quad extrude diagonally toward its hidden
+/// crease. The face centroid gives a translation-invariant direction away from
+/// the face interior, and projection removes any non-planar numerical residue.
+///
+/// At a seam shared by authored faces, the first resident face is the deterministic
+/// reference, matching the editor's existing face order. Degenerate faces fail the
+/// operation before the resident soup is rebuilt.
+pub fn edgeExtrusionFramePub(edge_idx: u32) ?EdgeExtrusionFrame {
+    if (!ensureTopology()) return null;
+    const edges = g_edges orelse return null;
+    const corners = g_corner_vert orelse return null;
+    const positions = model_paint.positions() orelse return null;
+    const face_count = model_paint.faceCount();
+    if (edge_idx >= g_edge_count or
+        !edgeIsBoundaryPub(edge_idx) or
+        !edgeInScopePub(edge_idx) or
+        positions.len < @as(usize, face_count) * 9)
+    {
+        return null;
+    }
+
+    const endpoint_a = edges[edge_idx * 2];
+    const endpoint_b = edges[edge_idx * 2 + 1];
+    var reference_face: ?u32 = null;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
         var has_a = false;
         var has_b = false;
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const cv = corners[f * 3 + k];
-            has_a = has_a or cv == a;
-            has_b = has_b or cv == b;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const vertex = corners[face * 3 + corner];
+            has_a = has_a or vertex == endpoint_a;
+            has_b = has_b or vertex == endpoint_b;
         }
-        if (!has_a or !has_b) continue;
-        const p0: [3]f32 = .{ pos[f * 9 + 0], pos[f * 9 + 1], pos[f * 9 + 2] };
-        const p1: [3]f32 = .{ pos[f * 9 + 3], pos[f * 9 + 4], pos[f * 9 + 5] };
-        const p2: [3]f32 = .{ pos[f * 9 + 6], pos[f * 9 + 7], pos[f * 9 + 8] };
-        const n = vecNorm(vecCross(vecSub(p1, p0), vecSub(p2, p0)));
-        acc[0] += n[0];
-        acc[1] += n[1];
-        acc[2] += n[2];
+        if (has_a and has_b) {
+            reference_face = face;
+            break;
+        }
     }
-    const n = vecNorm(acc);
-    return if (vecDot(n, n) > 0.5) n else .{ 0, 1, 0 };
+    const anchor = reference_face orelse return null;
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    const reference_group = model_source.faceGroupOf(anchor);
+
+    var other_vertices = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer other_vertices.deinit(alloc);
+    var other_sum: [3]f32 = .{ 0, 0, 0 };
+    var normal_sum: [3]f32 = .{ 0, 0, 0 };
+
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        const same_authored_face = if (has_groups)
+            model_source.faceGroupOf(face) == reference_group
+        else
+            face == anchor;
+        if (!same_authored_face) continue;
+
+        const position_base = @as(usize, face) * 9;
+        const p0: [3]f32 = .{ positions[position_base], positions[position_base + 1], positions[position_base + 2] };
+        const p1: [3]f32 = .{ positions[position_base + 3], positions[position_base + 4], positions[position_base + 5] };
+        const p2: [3]f32 = .{ positions[position_base + 6], positions[position_base + 7], positions[position_base + 8] };
+        normal_sum = vecAdd(normal_sum, vecCross(vecSub(p1, p0), vecSub(p2, p0)));
+
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const vertex = corners[face * 3 + corner];
+            if (vertex == endpoint_a or vertex == endpoint_b) continue;
+            const entry = other_vertices.getOrPut(alloc, vertex) catch return null;
+            if (entry.found_existing) continue;
+            other_sum = vecAdd(other_sum, vertPosPub(vertex));
+        }
+    }
+    if (other_vertices.count() == 0) return null;
+
+    const face_normal = vecNorm(normal_sum);
+    if (vecDot(face_normal, face_normal) < 0.5) return null;
+    const a = vertPosPub(endpoint_a);
+    const b = vertPosPub(endpoint_b);
+    const midpoint = vecMul(vecAdd(a, b), 0.5);
+    const other_centroid = vecMul(other_sum, 1.0 / @as(f32, @floatFromInt(other_vertices.count())));
+    const away = vecSub(midpoint, other_centroid);
+    const in_plane = vecSub(away, vecMul(face_normal, vecDot(away, face_normal)));
+    const outward = vecNorm(in_plane);
+    if (vecDot(outward, outward) < 0.5) return null;
+
+    return .{
+        .a = a,
+        .b = b,
+        .outward = outward,
+        .face_normal = face_normal,
+    };
 }
 
 fn activeSet() ?[]bool {

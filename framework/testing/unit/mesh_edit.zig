@@ -652,6 +652,96 @@ test "focusing an edge by rebuilt endpoints replaces the previous edge selection
     try testing.expect(is_top_edge);
 }
 
+test "edge extrusion extends a grouped quad outward in its plane" {
+    var soup = [_]f32{
+        // One authored quad split across the A-C render diagonal.
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3381, soup[0..], 6, &.{ 7, 7 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.focusEdgeByEndpoints(.{ 0, 0, 0 }, .{ 0, 1, 0 }));
+    const frame = mesh_edit.edgeExtrusionFramePub(mesh_edit.selectedEdgeIndexPub().?) orelse
+        return error.TestUnexpectedResult;
+
+    // The hidden render triangle touching this edge points toward the upper-right
+    // corner. Using that triangle alone would introduce a Y component; using the
+    // authored quad must produce the exact -X continuation the user expects.
+    try testing.expectApproxEqAbs(@as(f32, -1), frame.outward[0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), frame.outward[1], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), frame.outward[2], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 1), frame.face_normal[2], 1e-6);
+
+    const outer = frame.outer(0.25);
+    try testing.expectApproxEqAbs(@as(f32, -0.25), outer[0][0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, -0.25), outer[1][0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), outer[0][2], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), outer[1][2], 1e-6);
+}
+
+test "edge extrusion rejects a hidden triangulation diagonal" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3382, soup[0..], 6, &.{ 3, 3 });
+    defer mesh_edit.test_support.clear();
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var diagonal: ?u32 = null;
+    for (0..mesh_edit.edgeCount()) |edge| {
+        const index: u32 = @intCast(edge);
+        if (!mesh_edit.edgeIsBoundaryPub(index)) {
+            diagonal = index;
+            break;
+        }
+    }
+    try testing.expect(diagonal != null);
+    try testing.expect(mesh_edit.edgeExtrusionFramePub(diagonal.?) == null);
+}
+
+test "repeated edge extrusion keeps extending the same authored strip" {
+    var soup = [_]f32{
+        // Original quad, group 7.
+        0,     0, 0, 0, 0, 1, 0, 0,
+        1,     0, 0, 0, 0, 1, 0, 0,
+        1,     1, 0, 0, 0, 1, 0, 0,
+        0,     0, 0, 0, 0, 1, 0, 0,
+        1,     1, 0, 0, 0, 1, 0, 0,
+        0,     1, 0, 0, 0, 1, 0, 0,
+        // First bridge, group 8: this is the resident result after one extrusion.
+        0,     0, 0, 0, 0, 1, 0, 0,
+        0,     1, 0, 0, 0, 1, 0, 0,
+        -0.25, 1, 0, 0, 0, 1, 0, 0,
+        0,     0, 0, 0, 0, 1, 0, 0,
+        -0.25, 1, 0, 0, 0, 1, 0, 0,
+        -0.25, 0, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3383, soup[0..], 12, &.{ 7, 7, 8, 8 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.focusEdgeByEndpoints(.{ -0.25, 0, 0 }, .{ -0.25, 1, 0 }));
+    const frame = mesh_edit.edgeExtrusionFramePub(mesh_edit.selectedEdgeIndexPub().?) orelse
+        return error.TestUnexpectedResult;
+    const next = frame.outer(0.25);
+
+    try testing.expectApproxEqAbs(@as(f32, -0.5), next[0][0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), next[1][0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), next[0][2], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0), next[1][2], 1e-6);
+}
+
 test "same-face diagonal adoption keeps boundary edge selection" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,

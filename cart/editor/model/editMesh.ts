@@ -1923,27 +1923,44 @@ export function detachPanel(m: EditMesh, faceIndices: Iterable<number>, thicknes
 // ── Extrude an EDGE: pull a new edge off it, bridge the gap (req_1163) ──────────
 // The edge analog of extrudeFace (the user: "we gave extrude to faces but didn't
 // give it to edges"). Copy the selected edge's two verts, push the copy out, and
-// BRIDGE the original edge to the copy with ONE quad. Direction defaults to the
-// AVERAGE NORMAL of the faces sharing the edge — so a boundary edge lifts straight
-// out of its face, and a box edge lifts along the two-face bisector — then the
-// move gizmo shapes it, exactly like the face cap. The bridge quad gets the default
-// full-square UV (the side-wall pattern) and is wound to share the edge OPPOSITE to
-// how its adjacent face traverses it (two faces sharing an edge run it in opposite
-// directions when both face outward) — so the new flap is consistently outward-
-// facing, continuous with that neighbor. A normal-based "away from center" flip is
-// degenerate here: the quad normal is always perpendicular to the bisector extrude
-// direction, so the dot is 0 and decides nothing. A negative distance pulls the
-// copy the other way. The NEW edge is the two trailing verts (the caller re-finds
-// it via meshEdges to keep the selection on it). Pure + headless.
+// BRIDGE the original edge to the copy with ONE quad. Req_3381 corrects the old
+// average-normal lift: on a flat panel that made a perpendicular flap, which read
+// as a destroyed wireframe and a giant slab as soon as the camera turned. Match
+// Blockbench's edge path instead — continue away from the adjacent authored face's
+// interior, inside that face plane. The move gizmo then shapes the already-focused
+// new edge. The bridge quad gets the default full-square UV (the side-wall pattern)
+// and is wound opposite the adjacent face's edge traversal. A negative distance
+// pulls the copy back through the face. Pure + headless.
 export function extrudeEdge(m: EditMesh, edge: Edge, distance: number): EditMesh {
   const [a, b] = edge;
   if (a === b || !m.verts[a] || !m.verts[b]) return m;
   const adj = facesUsingEdges(m, [edge]).map((fi) => m.faces[fi]);
-  // direction = average adjacent-face normal (loose edge → +Y).
-  let nx = 0, ny = 0, nz = 0;
-  for (const f of adj) { const n = faceNormal(m, f); nx += n[0]; ny += n[1]; nz += n[2]; }
-  const nl = Math.hypot(nx, ny, nz);
-  const dir: V3 = nl < 1e-9 ? [0, 1, 0] : [nx / nl, ny / nl, nz / nl];
+  const reference = adj[0];
+  let dir: V3 = [0, 1, 0]; // loose-edge fallback
+  if (reference) {
+    const others = reference.loop.filter((vertex) => vertex !== a && vertex !== b);
+    if (others.length) {
+      const midpoint: V3 = [
+        (m.verts[a][0] + m.verts[b][0]) / 2,
+        (m.verts[a][1] + m.verts[b][1]) / 2,
+        (m.verts[a][2] + m.verts[b][2]) / 2,
+      ];
+      const centroid = others.reduce<V3>(
+        (sum, vertex) => [sum[0] + m.verts[vertex][0], sum[1] + m.verts[vertex][1], sum[2] + m.verts[vertex][2]],
+        [0, 0, 0],
+      ).map((value) => value / others.length) as V3;
+      const normal = faceNormal(m, reference);
+      const away: V3 = [midpoint[0] - centroid[0], midpoint[1] - centroid[1], midpoint[2] - centroid[2]];
+      const residue = dot(away, normal);
+      const inPlane: V3 = [
+        away[0] - normal[0] * residue,
+        away[1] - normal[1] * residue,
+        away[2] - normal[2] * residue,
+      ];
+      const length = Math.hypot(...inPlane);
+      if (length >= 1e-9) dir = [inPlane[0] / length, inPlane[1] / length, inPlane[2] / length];
+    }
+  }
   const off: V3 = [dir[0] * distance, dir[1] * distance, dir[2] * distance];
   const verts: V3[] = m.verts.map((v) => [v[0], v[1], v[2]]);
   const a2 = verts.length; verts.push([verts[a][0] + off[0], verts[a][1] + off[1], verts[a][2] + off[2]]);
