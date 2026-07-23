@@ -604,11 +604,14 @@ fn cloneIndexedEditMeshOrImport(
     materials: ?[]const u32,
 ) ?indexed_edit_mesh.Mesh {
     if (g_indexed_edit_mesh) |*mesh| {
-        if (mesh.residentMetadataMatches(tri_count, groups, parts, materials)) {
+        if (mesh.residentMetadataMatches(tri_count, groups, parts, materials) and
+            mesh.residentUvsMatch(verts, tri_count))
+        {
             return mesh.clone() catch null;
         }
-        // A structural group/part edit can leave the triangle positions untouched.
-        // Never lower the cached pre-edit ownership back over the live document.
+        // A structural group/part edit can leave triangle positions untouched, and a
+        // UV edit can leave every metadata row untouched. Never lower either stale
+        // cache back over the live document.
         clearIndexedEditMesh();
     }
     return indexed_edit_mesh.Mesh.fromSoupWithMaterials(std.heap.c_allocator, verts, tri_count, groups, parts, materials) catch null;
@@ -756,7 +759,9 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
     var mirror_triangulation_changed = false;
     if (g_indexed_edit_mesh) |*mesh| {
         const verts = g_edit_verts orelse return false;
-        if (!mesh.updatePositionsFromInterleaved(verts, g_edit_count / 3)) {
+        if (!mesh.residentUvsMatch(verts, g_edit_count / 3) or
+            !mesh.updatePositionsFromInterleaved(verts, g_edit_count / 3))
+        {
             clearIndexedEditMesh();
         } else if (mesh_edit.mirrorMask() != 0 and model_source.count() == g_edit_count) {
             mirror_triangulation_changed = (mesh.synchronizeMirrorDiagonals(mesh_edit.mirrorMask()) catch sync_failed: {
@@ -2565,6 +2570,167 @@ fn captureFaceMaterials(total_faces: u32) ?[]u32 {
     return out;
 }
 
+fn optionalU32SlicesEqual(expected: ?[]const u32, actual: ?[]const u32) bool {
+    if (expected == null or actual == null) return expected == null and actual == null;
+    return std.mem.eql(u32, expected.?, actual.?);
+}
+
+fn optionalU8SlicesEqual(expected: ?[]const u8, actual: ?[]const u8) bool {
+    if (expected == null or actual == null) return expected == null and actual == null;
+    return std.mem.eql(u8, expected.?, actual.?);
+}
+
+fn hiddenModelStateHash() u64 {
+    var hash: u64 = 0;
+    for (g_hidden_groups.items) |hidden| {
+        hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&hidden.lo));
+        hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&hidden.hi));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.verts));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.source_verts));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.groups));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.materials));
+        hash = std.hash.Wyhash.hash(hash, hidden.colors);
+    }
+    return hash;
+}
+
+/// Exact resident-state guard for metadata-only mesh transactions. Geometry, UVs,
+/// paint, source projection, visibility/part ownership, and document identity are
+/// one state: changing an authored face id is allowed to change only the requested
+/// group rows. A mismatch aborts before the journal entry is committed.
+const ResidentMetadataGuard = struct {
+    edit_verts: ?[]f32 = null,
+    source_verts: ?[]f32 = null,
+    groups: ?[]u32 = null,
+    part_ranges: ?[]u32 = null,
+    face_parts: ?[]u32 = null,
+    materials: ?[]u32 = null,
+    source_colors: ?[]u8 = null,
+    face_colors: ?[]u8 = null,
+    atlas_present: bool = false,
+    atlas_len: usize = 0,
+    atlas_hash: u64 = 0,
+    atlas_w: u32 = 0,
+    atlas_h: u32 = 0,
+    edit_key: ?[]u8 = null,
+    edit_count: u32,
+    source_count: u32,
+    paint_face_count: u32,
+    edit_key_hash: u64,
+    part_count: u32,
+    hidden_part_count: usize,
+    hidden_state_hash: u64,
+    paint_layout_revision: u64,
+    paint_layout_stale: bool,
+    authored_atlas: bool,
+
+    fn capture() ?ResidentMetadataGuard {
+        const verts = g_edit_verts orelse return null;
+        const need = @as(usize, g_edit_count) * 8;
+        if (verts.len < need) return null;
+        const current_groups = model_source.faceGroups() orelse return null;
+        if (current_groups.len != g_edit_count / 3) return null;
+        var guard = ResidentMetadataGuard{
+            .edit_count = g_edit_count,
+            .source_count = model_source.count(),
+            .paint_face_count = model_paint.faceCount(),
+            .edit_key_hash = g_edit_key_hash,
+            .part_count = hostPartCount(),
+            .hidden_part_count = g_hidden_groups.items.len,
+            .hidden_state_hash = hiddenModelStateHash(),
+            .paint_layout_revision = model_paint.layoutRevision(),
+            .paint_layout_stale = g_paint_layout_stale,
+            .authored_atlas = model_paint.hasAuthoredAtlas(),
+        };
+        errdefer guard.deinit();
+        guard.edit_verts = std.heap.c_allocator.dupe(f32, verts[0..need]) catch return null;
+        guard.groups = std.heap.c_allocator.dupe(u32, current_groups) catch return null;
+        guard.face_colors = collectCurrentFaceColors() orelse return null;
+        if (model_source.verts()) |rows|
+            guard.source_verts = std.heap.c_allocator.dupe(f32, rows) catch return null;
+        if (model_source.partRanges()) |rows|
+            guard.part_ranges = std.heap.c_allocator.dupe(u32, rows) catch return null;
+        if (capturePartOfFaces()) |rows| guard.face_parts = rows;
+        if (model_source.faceMaterials()) |rows|
+            guard.materials = std.heap.c_allocator.dupe(u32, rows) catch return null;
+        if (model_source.colors()) |rows|
+            guard.source_colors = std.heap.c_allocator.dupe(u8, rows) catch return null;
+        if (model_paint.atlas()) |atlas| {
+            guard.atlas_present = true;
+            guard.atlas_len = atlas.rgba.len;
+            guard.atlas_hash = std.hash.Wyhash.hash(0, atlas.rgba);
+            guard.atlas_w = atlas.w;
+            guard.atlas_h = atlas.h;
+        }
+        if (g_edit_key) |key| guard.edit_key = std.heap.c_allocator.dupe(u8, key) catch return null;
+        return guard;
+    }
+
+    fn deinit(guard: *ResidentMetadataGuard) void {
+        if (guard.edit_verts) |rows| std.heap.c_allocator.free(rows);
+        if (guard.source_verts) |rows| std.heap.c_allocator.free(rows);
+        if (guard.groups) |rows| std.heap.c_allocator.free(rows);
+        if (guard.part_ranges) |rows| std.heap.c_allocator.free(rows);
+        if (guard.face_parts) |rows| std.heap.c_allocator.free(rows);
+        if (guard.materials) |rows| std.heap.c_allocator.free(rows);
+        if (guard.source_colors) |rows| std.heap.c_allocator.free(rows);
+        if (guard.face_colors) |rows| std.heap.c_allocator.free(rows);
+        if (guard.edit_key) |key| std.heap.c_allocator.free(key);
+        guard.* = undefined;
+    }
+
+    fn matchesGroupOnly(guard: *const ResidentMetadataGuard, expected_groups: []const u32) bool {
+        if (g_edit_count != guard.edit_count or
+            model_source.count() != guard.source_count or
+            model_paint.faceCount() != guard.paint_face_count or
+            g_edit_key_hash != guard.edit_key_hash or
+            hostPartCount() != guard.part_count or
+            g_hidden_groups.items.len != guard.hidden_part_count or
+            hiddenModelStateHash() != guard.hidden_state_hash or
+            model_paint.layoutRevision() != guard.paint_layout_revision or
+            g_paint_layout_stale != guard.paint_layout_stale or
+            model_paint.hasAuthoredAtlas() != guard.authored_atlas)
+        {
+            return false;
+        }
+        const live_verts = g_edit_verts orelse return false;
+        const expected_edit_verts = guard.edit_verts orelse return false;
+        if (live_verts.len < expected_edit_verts.len or !std.mem.eql(f32, expected_edit_verts, live_verts[0..expected_edit_verts.len]))
+            return false;
+        if (guard.source_verts) |expected| {
+            const actual = model_source.verts() orelse return false;
+            if (!std.mem.eql(f32, expected, actual)) return false;
+        } else if (model_source.verts() != null) return false;
+        const live_groups = model_source.faceGroups() orelse return false;
+        if (!std.mem.eql(u32, expected_groups, live_groups)) return false;
+        if (!optionalU32SlicesEqual(guard.part_ranges, model_source.partRanges())) return false;
+        const live_face_parts = capturePartOfFaces();
+        defer if (live_face_parts) |rows| std.heap.c_allocator.free(rows);
+        if (!optionalU32SlicesEqual(guard.face_parts, live_face_parts)) return false;
+        if (!optionalU32SlicesEqual(guard.materials, model_source.faceMaterials())) return false;
+        if (!optionalU8SlicesEqual(guard.source_colors, model_source.colors())) return false;
+        const live_colors = collectCurrentFaceColors() orelse return false;
+        defer std.heap.c_allocator.free(live_colors);
+        const expected_face_colors = guard.face_colors orelse return false;
+        if (!std.mem.eql(u8, expected_face_colors, live_colors)) return false;
+        if (guard.atlas_present) {
+            const atlas = model_paint.atlas() orelse return false;
+            if (atlas.w != guard.atlas_w or
+                atlas.h != guard.atlas_h or
+                atlas.rgba.len != guard.atlas_len or
+                std.hash.Wyhash.hash(0, atlas.rgba) != guard.atlas_hash)
+            {
+                return false;
+            }
+        } else if (model_paint.atlas() != null) return false;
+        if (guard.edit_key) |expected| {
+            const actual = g_edit_key orelse return false;
+            if (!std.mem.eql(u8, expected, actual)) return false;
+        } else if (g_edit_key != null) return false;
+        return true;
+    }
+};
+
 fn maxGroupId(groups: []const u32) i64 {
     var mx: i64 = -1;
     for (groups) |g| {
@@ -4244,44 +4410,91 @@ pub fn meshFlipSelectionWinding() bool {
     return true;
 }
 
-/// Fuse selected faces into ONE clean authored face.  Beyond regrouping, this rebuilds
-/// the selected region as a boundary fan: shared seams and their collinear midpoint
-/// verts disappear, exactly like Studio's mergeFaces.
+/// Fuse selected faces into one authored face without rewriting the resident render
+/// mesh. Shared seams disappear from edit topology because the selected triangles now
+/// share one group, while their exact winding, UVs, atlas pixels, materials, colours,
+/// part ownership, and Outliner ranges stay byte-stable.
 pub fn meshMergeSelectedFaces() bool {
     if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return false;
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
-    if (tri_count == 0) return false;
+    if (tri_count == 0 or model_source.faceGroups() == null) return false;
     const mask = jalloc.alloc(bool, tri_count) catch return false;
     defer jalloc.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return false;
-    const groups = captureFaceGroups();
-    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(groups);
     const parts = capturePartOfFaces();
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
-    const part_count = hostPartCount();
+    const materials = captureFaceMaterials(tri_count) orelse return false;
+    defer std.heap.c_allocator.free(materials);
     const base_colors = collectCurrentFaceColors() orelse return false;
     defer std.heap.c_allocator.free(base_colors);
-    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts, model_source.faceMaterials()) orelse return false;
+    if (base_colors.len != @as(usize, tri_count) * 4) return false;
+
+    // A single authored face cannot straddle opaque and glass draw passes. RGB may
+    // vary per source triangle (painted detail is retained), but alpha class may not.
+    var selected_glass: ?bool = null;
+    var triangle: usize = 0;
+    while (triangle < tri_count) : (triangle += 1) {
+        if (!mask[triangle]) continue;
+        const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
+        if (selected_glass) |expected| {
+            if (expected != is_glass) return false;
+        } else selected_glass = is_glass;
+    }
+
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.mergeSelected(mask) catch return false)) return false;
-    var lowered = indexed.lower() catch return false;
-    defer lowered.deinit();
-    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
-    defer std.heap.c_allocator.free(colors);
-    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
 
-    var snap = journalSnapshotCurrent("merge faces");
+    const merged_groups = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_groups);
+    const merged_parts = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_parts);
+    const merged_materials = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_materials);
+    if (!indexed.writeResidentMetadata(merged_groups, merged_parts, merged_materials)) return false;
+
+    // Merge Faces is not allowed to re-parent or re-material any resident triangle.
+    if (parts) |base_parts| {
+        if (!std.mem.eql(u32, base_parts, merged_parts)) return false;
+    } else {
+        for (merged_parts) |part| if (part != indexed_edit_mesh.NO_PART) return false;
+    }
+    if (!std.mem.eql(u32, materials, merged_materials)) return false;
+
+    // Selection tint is presentation state. Restore the true atlas first, then guard
+    // the complete durable model state and commit only the requested group delta.
     mesh_edit.clearSelection();
-    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors);
-    if (ok) {
-        if (parts != null) renormalizePartRanges(lowered.parts, part_count);
-        adoptIndexedEditMesh(&indexed, &lowered);
-        journalCommit(&snap);
-    } else journalDiscard(&snap);
-    return ok;
+    var guard = ResidentMetadataGuard.capture() orelse return false;
+    defer guard.deinit();
+    var snap: ?JournalEntry = journalSnapshotCurrent("merge faces") orelse return false;
+
+    model_source.setFaceGroups(merged_groups);
+    mesh_edit.faceGroupsChanged();
+    const live_parts: ?[]const u32 = if (parts) |rows| rows else null;
+    const committed = guard.matchesGroupOnly(merged_groups) and
+        indexed.residentMetadataMatches(tri_count, merged_groups, live_parts, model_source.faceMaterials()) and
+        indexed.residentUvsMatch(verts, tri_count);
+    if (!committed) {
+        const old_groups = guard.groups orelse {
+            journalDiscard(&snap);
+            return false;
+        };
+        model_source.setFaceGroups(old_groups);
+        mesh_edit.faceGroupsChanged();
+        journalDiscard(&snap);
+        log.print("[mesh] Merge Faces rolled back: resident model-state invariant rejected the group commit\n", .{});
+        return false;
+    }
+
+    indexed.clearCutOrigins();
+    clearIndexedEditMesh();
+    g_indexed_edit_mesh = indexed;
+    indexed = .{ .allocator = std.heap.c_allocator };
+    journalCommit(&snap);
+    return true;
 }
 
 /// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent

@@ -291,7 +291,7 @@ test "merging authored faces dissolves their shared selectable edge (req_2871)" 
     try testing.expectEqual(@as(u32, 6), mesh_edit.boundaryEdgeCount());
 }
 
-test "dissolving an irregular four-quad grid drops seam verts and rebuilds a clean quad" {
+test "dissolving an irregular four-quad grid cleans authored boundary without rebuilding render triangles" {
     // A sheared/transformed plane, not the unit-cube convenience case.  The four
     // selected authored quads contain nine welded vertices and twelve visible edge
     // runs before dissolve; the clean outer boundary is four corners / four runs.
@@ -328,9 +328,146 @@ test "dissolving an irregular four-quad grid drops seam verts and rebuilds a cle
     try testing.expect(try indexed.mergeSelected(selected[0..]));
     var lowered = try indexed.lower();
     defer lowered.deinit();
-    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
-    try testing.expectEqualSlices(u32, &.{ 10, 10 }, lowered.groups);
+    try testing.expectEqual(@as(u32, 8), lowered.tri_count);
+    try testing.expectEqualSlices(u32, &.{ 10, 10, 10, 10, 10, 10, 10, 10 }, lowered.groups);
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
+}
+
+test "sequential concave face merges preserve resident triangles uv and part ownership" {
+    // Bookshelf sides are not one convex rectangle: shelf offsets leave an inward
+    // corner along the three-face perimeter. Merging one side and then its opposite
+    // must change authored face identity only. Re-fanning either concave perimeter
+    // reverses render triangles (the face disappears under back-face culling), moves
+    // pinned atlas samples, and leaves the second merge lowering corrupted ownership.
+    const front = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0.35, 0 }, .{ 3, 0, 0 },
+        .{ 0, 1, 0 }, .{ 1, 1, 0 }, .{ 2, 1, 0 },    .{ 3, 1, 0 },
+    };
+    const back = [_][3]f32{
+        .{ 0, 0, -0.2 }, .{ 1, 0, -0.2 }, .{ 2, 0.35, -0.2 }, .{ 3, 0, -0.2 },
+        .{ 0, 1, -0.2 }, .{ 1, 1, -0.2 }, .{ 2, 1, -0.2 },    .{ 3, 1, -0.2 },
+    };
+    var soup = [_]f32{0} ** (12 * 3 * 8);
+    const Emit = struct {
+        fn triangle(
+            out: []f32,
+            triangle_index: usize,
+            a: [3]f32,
+            b: [3]f32,
+            c: [3]f32,
+            uv_pin: f32,
+        ) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+                out[base + 6] = uv_pin + @as(f32, @floatFromInt(corner)) * 0.001;
+                out[base + 7] = uv_pin + @as(f32, @floatFromInt(triangle_index)) * 0.001;
+            }
+        }
+    };
+    var triangle: usize = 0;
+    for (0..3) |panel| {
+        Emit.triangle(soup[0..], triangle, front[panel], front[panel + 1], front[panel + 5], 0.1 + @as(f32, @floatFromInt(panel)) * 0.1);
+        triangle += 1;
+        Emit.triangle(soup[0..], triangle, front[panel], front[panel + 5], front[panel + 4], 0.1 + @as(f32, @floatFromInt(panel)) * 0.1);
+        triangle += 1;
+    }
+    for (0..3) |panel| {
+        // Reverse winding for the opposite side while retaining a distinct atlas pin.
+        Emit.triangle(soup[0..], triangle, back[panel], back[panel + 5], back[panel + 1], 0.6 + @as(f32, @floatFromInt(panel)) * 0.1);
+        triangle += 1;
+        Emit.triangle(soup[0..], triangle, back[panel], back[panel + 4], back[panel + 5], 0.6 + @as(f32, @floatFromInt(panel)) * 0.1);
+        triangle += 1;
+    }
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const parts = [_]u32{0} ** 12;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 12, groups[0..], parts[0..]);
+    defer indexed.deinit();
+    try testing.expect(indexed.residentUvsMatch(soup[0..], 12));
+    var uv_edited = soup;
+    uv_edited[6] += 0.125;
+    try testing.expect(!indexed.residentUvsMatch(uv_edited[0..], 12));
+
+    var first_selection = [_]bool{false} ** 12;
+    @memset(first_selection[0..6], true);
+    try testing.expect(try indexed.mergeSelected(first_selection[0..]));
+    var resident_groups: [12]u32 = undefined;
+    var resident_parts: [12]u32 = undefined;
+    var resident_materials: [12]u32 = undefined;
+    try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0, 0, 0, 3, 3, 4, 4, 5, 5 }, &resident_groups);
+    try testing.expectEqualSlices(u32, parts[0..], &resident_parts);
+    try testing.expectEqualSlices(u32, &([_]u32{indexed_edit_mesh.NO_MATERIAL} ** 12), &resident_materials);
+    var first = try indexed.lower();
+    defer first.deinit();
+    try testing.expectEqual(@as(u32, 12), first.tri_count);
+    for (0..12 * 3) |vertex| {
+        const source = vertex * 8;
+        const position = vertex * 3;
+        const uv = vertex * 2;
+        try testing.expectEqualSlices(f32, soup[source .. source + 3], first.positions[position .. position + 3]);
+        try testing.expectEqualSlices(f32, soup[source + 6 .. source + 8], first.uvs[uv .. uv + 2]);
+    }
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0, 0, 0, 3, 3, 4, 4, 5, 5 }, first.groups);
+    try testing.expectEqualSlices(u32, parts[0..], first.parts);
+
+    indexed.adoptLoweredMetadata(&first, first.groups, first.parts);
+    var second_selection = [_]bool{false} ** 12;
+    @memset(second_selection[6..12], true);
+    try testing.expect(try indexed.mergeSelected(second_selection[0..]));
+    var second = try indexed.lower();
+    defer second.deinit();
+    try testing.expectEqual(@as(u32, 12), second.tri_count);
+    for (0..12 * 3) |vertex| {
+        const source = vertex * 8;
+        const position = vertex * 3;
+        const uv = vertex * 2;
+        try testing.expectEqualSlices(f32, soup[source .. source + 3], second.positions[position .. position + 3]);
+        try testing.expectEqualSlices(f32, soup[source + 6 .. source + 8], second.uvs[uv .. uv + 2]);
+    }
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3 }, second.groups);
+    try testing.expectEqualSlices(u32, parts[0..], second.parts);
+}
+
+test "merge faces rejects mixed material identity" {
+    const left = [4][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    const right = [4][3]f32{
+        .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ 1, 1, 0 },
+    };
+    var soup = [_]f32{0} ** (4 * 3 * 8);
+    const Emit = struct {
+        fn triangle(out: []f32, triangle_index: usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+            }
+        }
+    };
+    Emit.triangle(soup[0..], 0, left[0], left[1], left[2]);
+    Emit.triangle(soup[0..], 1, left[0], left[2], left[3]);
+    Emit.triangle(soup[0..], 2, right[0], right[1], right[2]);
+    Emit.triangle(soup[0..], 3, right[0], right[2], right[3]);
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const parts = [_]u32{0} ** 4;
+    const materials = [_]u32{ 7, 7, 9, 9 };
+    const selected = [_]bool{true} ** 4;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        testing.allocator,
+        soup[0..],
+        4,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+    );
+    defer indexed.deinit();
+
+    try testing.expect(!(try indexed.mergeSelected(selected[0..])));
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqualSlices(u32, groups[0..], lowered.groups);
+    try testing.expectEqualSlices(u32, materials[0..], lowered.materials);
 }
 
 test "merge faces rejects a connected bent surface without changing its topology" {
@@ -426,9 +563,9 @@ test "merge faces discards cached ownership after structural part merge" {
     try testing.expect(try refreshed.mergeSelected(selected[0..]));
     var lowered = try refreshed.lower();
     defer lowered.deinit();
-    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
-    try testing.expectEqualSlices(u32, &.{ 8, 8 }, lowered.groups);
-    try testing.expectEqualSlices(u32, &.{ 0, 0 }, lowered.parts);
+    try testing.expectEqual(@as(u32, 4), lowered.tri_count);
+    try testing.expectEqualSlices(u32, &.{ 8, 8, 8, 8 }, lowered.groups);
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0 }, lowered.parts);
 }
 
 test "loop cut ignores collapsed quad members in an unrelated outliner part" {
@@ -478,10 +615,13 @@ test "loop cut ignores collapsed quad members in an unrelated outliner part" {
         if (part == 1 or part == 2) {
             collapsed_triangles += 1;
             try testing.expectEqual(part, group);
-            try testing.expectEqual(if (part == 1) @as(u32, 2) else @as(u32, 5), source);
+            if (part == 1)
+                try testing.expect(source == 2 or source == 3)
+            else
+                try testing.expect(source == 4 or source == 5);
         }
     }
-    try testing.expectEqual(@as(u32, 2), collapsed_triangles);
+    try testing.expectEqual(@as(u32, 4), collapsed_triangles);
 }
 
 test "focusing an edge by rebuilt endpoints replaces the previous edge selection" {

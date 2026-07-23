@@ -52,6 +52,11 @@ pub const Face = struct {
     /// Stable texture-role index authored in the Rig panel. Rendering remains
     /// triangle soup, but splits/cuts inherit this identity from their source face.
     material: u32 = NO_MATERIAL,
+    /// True while `source_triangles` still names the exact resident render
+    /// tessellation for this authored face. Authored grouping (Merge Faces) may
+    /// change without changing those triangles; geometric edits invalidate the
+    /// mapping until their newly lowered soup is adopted.
+    source_tessellation_valid: bool = false,
     alive: bool = true,
 
     fn deinit(face: *Face, allocator: std.mem.Allocator) void {
@@ -67,6 +72,7 @@ pub const Face = struct {
             .group = face.group,
             .part = face.part,
             .material = face.material,
+            .source_tessellation_valid = face.source_tessellation_valid,
             .alive = face.alive,
             .diagonal = face.diagonal,
         };
@@ -126,6 +132,10 @@ pub const Mesh = struct {
     /// deterministic derived order. Position-only gizmo mutations must use this map,
     /// never guess that an old model was already lowered by today's diagonal policy.
     render_triangles: std.ArrayListUnmanaged([3]u32) = .empty,
+    /// Exact per-corner UVs paired with `render_triangles`. Authored n-gons may be
+    /// concave and their source triangles may sample independent atlas pins, so a
+    /// polygon fan cannot reconstruct this state.
+    render_uvs: std.ArrayListUnmanaged([3]Vec2) = .empty,
     next_group: u32 = 0,
 
     pub fn deinit(mesh: *Mesh) void {
@@ -133,6 +143,7 @@ pub const Mesh = struct {
         mesh.faces.deinit(mesh.allocator);
         mesh.vertices.deinit(mesh.allocator);
         mesh.render_triangles.deinit(mesh.allocator);
+        mesh.render_uvs.deinit(mesh.allocator);
         mesh.* = undefined;
     }
 
@@ -141,6 +152,7 @@ pub const Mesh = struct {
         errdefer out.deinit();
         try out.vertices.appendSlice(mesh.allocator, mesh.vertices.items);
         try out.render_triangles.appendSlice(mesh.allocator, mesh.render_triangles.items);
+        try out.render_uvs.appendSlice(mesh.allocator, mesh.render_uvs.items);
         for (mesh.faces.items) |*face| try out.faces.append(mesh.allocator, try face.clone(mesh.allocator));
         return out;
     }
@@ -156,7 +168,7 @@ pub const Mesh = struct {
         parts: ?[]const u32,
         materials: ?[]const u32,
     ) bool {
-        if (mesh.render_triangles.items.len != tri_count) return false;
+        if (mesh.render_triangles.items.len != tri_count or mesh.render_uvs.items.len != tri_count) return false;
         if (groups) |rows| if (rows.len < tri_count) return false;
         if (parts) |rows| if (rows.len < tri_count) return false;
         if (materials) |rows| if (rows.len < tri_count) return false;
@@ -178,6 +190,55 @@ pub const Mesh = struct {
                 {
                     return false;
                 }
+                seen[triangle] = true;
+                seen_count += 1;
+            }
+        }
+        return seen_count == tri_count;
+    }
+
+    /// UV editing mutates the resident interleaved soup without changing face
+    /// metadata. A cached topology with old UV rows must be re-imported before the
+    /// next structural edit or it would lower stale atlas coordinates over the model.
+    pub fn residentUvsMatch(mesh: *const Mesh, interleaved: []const f32, tri_count: u32) bool {
+        if (mesh.render_uvs.items.len != tri_count or interleaved.len < @as(usize, tri_count) * 24) return false;
+        for (mesh.render_uvs.items, 0..) |triangle_uvs, triangle| {
+            for (triangle_uvs, 0..) |uv, corner| {
+                const base = (triangle * 3 + corner) * 8;
+                if (uv[0] != interleaved[base + 6] or uv[1] != interleaved[base + 7]) return false;
+            }
+        }
+        return true;
+    }
+
+    /// Project authored face metadata back onto the unchanged resident triangle
+    /// rows. This is the inverse of `fromSoup` and is the safe commit path for
+    /// topology-only edits such as Merge Faces.
+    pub fn writeResidentMetadata(
+        mesh: *const Mesh,
+        groups: []u32,
+        parts: []u32,
+        materials: []u32,
+    ) bool {
+        const tri_count = mesh.render_triangles.items.len;
+        if (mesh.render_uvs.items.len != tri_count or
+            groups.len != tri_count or
+            parts.len != tri_count or
+            materials.len != tri_count)
+        {
+            return false;
+        }
+        const seen = mesh.allocator.alloc(bool, tri_count) catch return false;
+        defer mesh.allocator.free(seen);
+        @memset(seen, false);
+        var seen_count: usize = 0;
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.source_triangles.items) |triangle| {
+                if (triangle >= tri_count or seen[triangle]) return false;
+                groups[triangle] = face.group;
+                parts[triangle] = face.part;
+                materials[triangle] = face.material;
                 seen[triangle] = true;
                 seen_count += 1;
             }
@@ -296,6 +357,11 @@ pub const Mesh = struct {
                 corner_vertex[triangle * 3 + 1],
                 corner_vertex[triangle * 3 + 2],
             });
+            try mesh.render_uvs.append(allocator, .{
+                .{ interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 6], interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 7] },
+                .{ interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 6], interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 7] },
+                .{ interleaved[(@as(usize, triangle) * 3 + 2) * 8 + 6], interleaved[(@as(usize, triangle) * 3 + 2) * 8 + 7] },
+            });
         }
 
         var buckets = std.ArrayListUnmanaged(Bucket).empty;
@@ -361,7 +427,13 @@ pub const Mesh = struct {
         corner_vertex: []const u32,
         bucket: *const Bucket,
     ) !Face {
-        var face = Face{ .id = 0, .group = bucket.group, .part = bucket.part, .material = bucket.material };
+        var face = Face{
+            .id = 0,
+            .group = bucket.group,
+            .part = bucket.part,
+            .material = bucket.material,
+            .source_tessellation_valid = true,
+        };
         errdefer face.deinit(allocator);
         try face.source_triangles.appendSlice(allocator, bucket.triangles.items);
 
@@ -757,6 +829,7 @@ pub const Mesh = struct {
             }
             twin.id = @intCast(mesh.faces.items.len);
             twin.group = group_entry.value_ptr.*;
+            twin.source_tessellation_valid = false;
             twin.vertices.clearRetainingCapacity();
             twin.uvs.clearRetainingCapacity();
             try twin.vertices.appendSlice(mesh.allocator, twin_vertices.items);
@@ -951,6 +1024,7 @@ pub const Mesh = struct {
                     if (sameUndirectedEdge(existing, reflected_diagonal)) continue;
                 }
                 twin.diagonal = reflected_diagonal;
+                twin.source_tessellation_valid = false;
                 changed += 1;
             }
         }
@@ -994,9 +1068,12 @@ pub const Mesh = struct {
         }
         if (selected.items.len < 2) return false;
         const reference_part = mesh.faces.items[selected.items[0]].part;
+        const reference_material = mesh.faces.items[selected.items[0]].material;
+        var source_tessellation_valid = true;
         for (selected.items) |face_id| {
             const face = &mesh.faces.items[face_id];
-            if (face.part != reference_part) return false;
+            if (face.part != reference_part or face.material != reference_material) return false;
+            source_tessellation_valid = source_tessellation_valid and face.source_tessellation_valid;
         }
         if (!selectedFacesAreCoplanar(mesh, selected.items)) return false;
 
@@ -1059,6 +1136,8 @@ pub const Mesh = struct {
         try target.vertices.appendSlice(mesh.allocator, loop.items);
         try target.uvs.appendSlice(mesh.allocator, uvs.items);
         try target.source_triangles.appendSlice(mesh.allocator, sources.items);
+        target.diagonal = null;
+        target.source_tessellation_valid = source_tessellation_valid;
         for (selected.items) |face_id| {
             if (face_id != target_id) mesh.faces.items[face_id].alive = false;
         }
@@ -1441,6 +1520,7 @@ pub const Mesh = struct {
             .group = mesh.next_group,
             .part = source.part,
             .material = source.material,
+            .source_tessellation_valid = false,
         };
         mesh.next_group += 1;
         errdefer out.deinit(mesh.allocator);
@@ -1458,12 +1538,14 @@ pub const Mesh = struct {
         try face.vertices.appendSlice(mesh.allocator, vertices);
         try face.uvs.appendSlice(mesh.allocator, uvs);
         face.diagonal = if (face.vertices.items.len == 4) chosenQuadDiagonal(mesh, face) else null;
+        face.source_tessellation_valid = false;
     }
 
     fn reverseFace(mesh: *Mesh, face_id: u32) void {
         if (face_id >= mesh.faces.items.len) return;
         std.mem.reverse(u32, mesh.faces.items[face_id].vertices.items);
         std.mem.reverse(Vec2, mesh.faces.items[face_id].uvs.items);
+        mesh.faces.items[face_id].source_tessellation_valid = false;
     }
 
     fn findNeighbor(mesh: *const Mesh, processed: *const std.AutoHashMapUnmanaged(u32, void), current_face: u32, edge: [2]u32) ?u32 {
@@ -1508,7 +1590,36 @@ pub const Mesh = struct {
 
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.vertices.items.len < 3) continue;
-            if (face.vertices.items.len == 4) {
+            if (face.source_tessellation_valid and face.source_triangles.items.len > 0) {
+                // Emit in resident row order, not the face's provenance order.
+                // Import may move the first non-collapsed source to slot zero for
+                // colour inheritance, and Merge Faces combines several source lists.
+                // The render order itself remains authoritative.
+                var source_triangle: u32 = 0;
+                while (source_triangle < mesh.render_triangles.items.len) : (source_triangle += 1) {
+                    var owned = false;
+                    for (face.source_triangles.items) |candidate| {
+                        if (candidate == source_triangle) {
+                            owned = true;
+                            break;
+                        }
+                    }
+                    if (!owned) continue;
+                    try emitResidentSourceTri(
+                        mesh,
+                        face,
+                        source_triangle,
+                        &positions,
+                        &uvs,
+                        &triangle_vertices,
+                        &groups,
+                        &sources,
+                        &face_ids,
+                        &parts,
+                        &materials,
+                    );
+                }
+            } else if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
                 try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
                 try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
@@ -1546,6 +1657,37 @@ pub const Mesh = struct {
             .materials = material_owned,
             .tri_count = @intCast(group_owned.len),
         };
+    }
+
+    fn emitResidentSourceTri(
+        mesh: *const Mesh,
+        face: *const Face,
+        source_triangle: u32,
+        positions: *std.ArrayListUnmanaged(f32),
+        uvs: *std.ArrayListUnmanaged(f32),
+        triangle_vertices: *std.ArrayListUnmanaged([3]u32),
+        groups: *std.ArrayListUnmanaged(u32),
+        sources: *std.ArrayListUnmanaged(u32),
+        face_ids: *std.ArrayListUnmanaged(u32),
+        parts: *std.ArrayListUnmanaged(u32),
+        materials: *std.ArrayListUnmanaged(u32),
+    ) !void {
+        if (source_triangle >= mesh.render_triangles.items.len or source_triangle >= mesh.render_uvs.items.len)
+            return error.InvalidSourceTessellation;
+        const triangle = mesh.render_triangles.items[source_triangle];
+        const triangle_uvs = mesh.render_uvs.items[source_triangle];
+        for (triangle, 0..) |vertex_id, corner| {
+            if (vertex_id >= mesh.vertices.items.len) return error.InvalidSourceTessellation;
+            const position = mesh.vertices.items[vertex_id].position;
+            try positions.appendSlice(mesh.allocator, position[0..]);
+            try uvs.appendSlice(mesh.allocator, triangle_uvs[corner][0..]);
+        }
+        try triangle_vertices.append(mesh.allocator, triangle);
+        try groups.append(mesh.allocator, face.group);
+        try sources.append(mesh.allocator, source_triangle);
+        try face_ids.append(mesh.allocator, face.id);
+        try parts.append(mesh.allocator, face.part);
+        try materials.append(mesh.allocator, face.material);
     }
 
     fn emitLoweredTri(
@@ -1587,8 +1729,19 @@ pub const Mesh = struct {
         // mapping intact. A missing map would make the next position-only gizmo update
         // fail (or tempt this layer to reconstruct identity from soup order again).
         mesh.render_triangles.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
+        mesh.render_uvs.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
         mesh.render_triangles.clearRetainingCapacity();
+        mesh.render_uvs.clearRetainingCapacity();
         mesh.render_triangles.appendSliceAssumeCapacity(lowered.triangle_vertices);
+        var render_index: usize = 0;
+        while (render_index < lowered.triangle_vertices.len) : (render_index += 1) {
+            const uv = render_index * 6;
+            mesh.render_uvs.appendAssumeCapacity(.{
+                .{ lowered.uvs[uv], lowered.uvs[uv + 1] },
+                .{ lowered.uvs[uv + 2], lowered.uvs[uv + 3] },
+                .{ lowered.uvs[uv + 4], lowered.uvs[uv + 5] },
+            });
+        }
         var touched = std.AutoHashMapUnmanaged(u32, void).empty;
         defer touched.deinit(mesh.allocator);
         for (lowered.face_ids, 0..) |face_id, triangle| {
@@ -1602,6 +1755,7 @@ pub const Mesh = struct {
                 if (triangle < rows.len) mesh.faces.items[face_id].part = rows[triangle];
             }
             mesh.faces.items[face_id].source_triangles.clearRetainingCapacity();
+            mesh.faces.items[face_id].source_tessellation_valid = true;
         }
         for (lowered.face_ids, 0..) |face_id, triangle| {
             if (face_id >= mesh.faces.items.len) continue;
