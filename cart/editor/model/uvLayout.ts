@@ -723,49 +723,79 @@ export function matchUvIslandSize(
   });
 }
 
+export type UvStackResult = Readonly<{
+  rects: UvIslandRect[];
+  compatible: number;
+  skipped: number;
+}>;
+
+const sameTrianglePoints = (left: UvTrianglePoints, right: UvTrianglePoints): boolean => (
+  left.every((value, index) => value === right[index])
+);
+
 /**
- * Overlap every selected island on the active island's authored UV footprint.
- * This deliberately does not join mesh topology: each face remains independently
- * selectable, but all stacked faces sample the same fixed atlas pixels.
+ * Copy the active island's exact triangle-corner coordinates onto every compatible
+ * selected island. This deliberately does not join mesh topology: source face rows,
+ * authored groups, and welded vertex identities remain independently selectable,
+ * while their UV coordinates become byte-for-byte the active footprint.
+ *
+ * Islands with different render-triangle counts are not approximately scaled into
+ * place. They are left unchanged and reported to the caller as incompatible.
  */
 export function stackUvIslands(
   rects: readonly UvIslandRect[],
   indices: readonly number[],
   activeIndex: number,
-  atlasW: number,
-  atlasH: number,
-): UvIslandRect[] {
+): UvStackResult {
   const selected = uniqueUvIslandIndices(rects, indices);
-  if (selected.length < 2 || !selected.includes(activeIndex)) return [...rects];
+  if (selected.length < 2 || !selected.includes(activeIndex)) {
+    return { rects: [...rects], compatible: 0, skipped: 0 };
+  }
   const active = rects[activeIndex];
-  if (!active) return [...rects];
-  const target = wholeIslandBounds(active);
-  if (target.w <= UV_LAYOUT_TUNING.pointMatchEpsilon || target.h <= UV_LAYOUT_TUNING.pointMatchEpsilon) return [...rects];
+  if (!active) return { rects: [...rects], compatible: 0, skipped: 0 };
+  const activeTriangles = active.triangles ?? [];
   const selectedSet = new Set(selected);
-  return rects.map((rect, index) => {
+  let compatible = 0;
+  let skipped = 0;
+  const next = rects.map((rect, index) => {
     if (!selectedSet.has(index) || index === activeIndex) return rect;
-    const source = wholeIslandBounds(rect);
-    if (source.w <= UV_LAYOUT_TUNING.pointMatchEpsilon || source.h <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
-    const scaleX = target.w / source.w;
-    const scaleY = target.h / source.h;
-    const unchanged = Math.abs(source.x - target.x) <= UV_LAYOUT_TUNING.pointMatchEpsilon
-      && Math.abs(source.y - target.y) <= UV_LAYOUT_TUNING.pointMatchEpsilon
-      && Math.abs(scaleX - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon
-      && Math.abs(scaleY - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon;
+    const sourceTriangles = rect.triangles ?? [];
+    if (sourceTriangles.length !== activeTriangles.length) {
+      skipped += 1;
+      return rect;
+    }
+    compatible += 1;
+    const unchanged = rect.x === active.x
+      && rect.y === active.y
+      && rect.w === active.w
+      && rect.h === active.h
+      && sourceTriangles.every((triangle, triangleIndex) => (
+        sameTrianglePoints(triangle.points, activeTriangles[triangleIndex]!.points)
+      ));
     if (unchanged) return rect;
-    if (!rect.triangles?.length) {
-      return { ...rect, x: target.x, y: target.y, w: target.w, h: target.h };
+    if (sourceTriangles.length === 0) {
+      return { ...rect, x: active.x, y: active.y, w: active.w, h: active.h };
     }
-    const triangles = absoluteTriangles(rect);
-    for (const triangle of triangles) {
-      for (let corner = 0; corner < 3; corner += 1) {
-        const at = corner * 2;
-        triangle.points[at] = target.x + (triangle.points[at]! - source.x) * scaleX;
-        triangle.points[at + 1] = target.y + (triangle.points[at + 1]! - source.y) * scaleY;
-      }
-    }
-    return rebuildUvRect(rect, triangles, atlasW, atlasH);
+    return {
+      ...rect,
+      x: active.x,
+      y: active.y,
+      w: active.w,
+      h: active.h,
+      triangles: sourceTriangles.map((triangle, triangleIndex) => ({
+        ...triangle,
+        points: [
+          activeTriangles[triangleIndex]!.points[0],
+          activeTriangles[triangleIndex]!.points[1],
+          activeTriangles[triangleIndex]!.points[2],
+          activeTriangles[triangleIndex]!.points[3],
+          activeTriangles[triangleIndex]!.points[4],
+          activeTriangles[triangleIndex]!.points[5],
+        ],
+      })),
+    };
   });
+  return { rects: next, compatible, skipped };
 }
 
 /** Reflect a complete island or one authored face through its own transform

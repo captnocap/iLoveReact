@@ -531,8 +531,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setNote('Shift-click two or more UV islands first.');
       return;
     }
-    const next = stackUvIslands(rectsRef.current, selectedIndicesRef.current, selected, uv.w, uv.h);
-    applyIslandSetEdit(next, `stacked ${selectedIndices.length} islands onto one active UV footprint`, 'stack');
+    const result = stackUvIslands(rectsRef.current, selectedIndicesRef.current, selected);
+    if (result.compatible === 0) {
+      setNote('Exact stack needs islands with the same triangle count as the active island.');
+      return;
+    }
+    const skipped = result.skipped > 0 ? ` · skipped ${result.skipped} incompatible` : '';
+    applyIslandSetEdit(result.rects, `exact-stacked ${result.compatible + 1} islands onto the active UV${skipped}`, 'stack');
   };
   const restoreSelectedShapes = () => {
     const indices = selectedIndicesRef.current;
@@ -1184,7 +1189,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <UvContextRow icon="Rows3" label="Arrange Selected Islands" detail={`${selectedIndices.length} SELECTED`} expanded={menuGroup === 'arrange'} onPress={() => toggleMenuGroup('arrange')} />
           {menuGroup === 'arrange' ? (
             <>
-              <UvContextRow indented icon="Layers3" label="Stack on Active Island" detail={`${selectedIndices.length} → 1`} enabled={multiIslandSelection} tooltip="Overlap every selected island on the white active island so all selected faces sample the same pixels" onPress={() => runMenuAction(stackSelected)} />
+              <UvContextRow indented icon="Layers3" label="Stack Exactly on Active" detail={`${selectedIndices.length} → 1`} enabled={multiIslandSelection} tooltip="Copy the white active island's exact triangle corners onto every compatible selected island" onPress={() => runMenuAction(stackSelected)} />
               <UvContextRow indented icon="MoveHorizontal" label="Match Active Width" detail="W =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('width'))} />
               <UvContextRow indented icon="MoveVertical" label="Match Active Height" detail="H =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('height'))} />
               <UvContextRow indented icon="Maximize" label="Match Active Size" detail="W×H" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('both'))} />

@@ -198,21 +198,47 @@ test('selected islands match the active size without changing unselected UVs', (
 
 test('stacking selected islands makes them sample one active UV footprint', () => {
   const rects = parseUvIslandRects(
-    [0, 0, 4, 2, 20, 10, 8, 4, 40, 40, 4, 4],
+    [0, 0, 10, 10, 20, 10, 12, 10, 40, 40, 4, 4],
     [10, 11, 12],
     [
-      0, 10, 0, 0, 4, 0, 0, 2,
-      1, 11, 20, 10, 28, 10, 20, 14,
+      0, 10, 0, 0, 10, 0, 8, 10,
+      0, 10, 0, 0, 8, 10, 2, 7,
+      1, 11, 20, 10, 32, 12, 29, 20,
+      1, 11, 20, 10, 29, 20, 22, 16,
       2, 12, 40, 40, 44, 40, 40, 44,
     ],
+    [
+      1, 2, 3, 1, 3, 4,
+      10, 11, 12, 10, 12, 13,
+      20, 21, 22,
+    ],
   );
-  const stacked = stackUvIslands(rects, [0, 1], 1, 64, 64);
-  const corners = flattenUvFaceCorners(stacked)!;
-  assert([...corners.slice(0, 6)].join(',') === [...corners.slice(6, 12)].join(','), 'stacked faces did not sample the same atlas coordinates');
-  assert(stacked[1] === rects[1], 'stacking rewrote the active UV island');
-  assert(stacked[2] === rects[2], 'stacking rewrote an unselected UV island');
-  const repeated = stackUvIslands(stacked, [0, 1], 1, 64, 64);
-  assert(repeated[0] === stacked[0], 'stacking an already-overlapped island churned its geometry');
+  const result = stackUvIslands(rects, [0, 1], 1);
+  const corners = flattenUvFaceCorners(result.rects)!;
+  assert([...corners.slice(0, 6)].join(',') === [...corners.slice(12, 18)].join(','), 'first source triangle did not exactly copy the active triangle');
+  assert([...corners.slice(6, 12)].join(',') === [...corners.slice(18, 24)].join(','), 'second source triangle did not exactly copy the active triangle');
+  assert(result.compatible === 1 && result.skipped === 0, 'compatible exact stack was reported as skipped');
+  assert(result.rects[0]!.triangles?.[0]?.face === 0 && result.rects[0]!.triangles?.[1]?.face === 1, 'exact stack replaced source face rows');
+  assert(result.rects[0]!.triangles?.[0]?.vertices?.join(',') === '1,2,3', 'exact stack replaced source welded vertex identities');
+  assert(result.rects[1] === rects[1], 'stacking rewrote the active UV island');
+  assert(result.rects[2] === rects[2], 'stacking rewrote an unselected UV island');
+  const repeated = stackUvIslands(result.rects, [0, 1], 1);
+  assert(repeated.rects[0] === result.rects[0], 'stacking an already-overlapped island churned its geometry');
+});
+
+test('exact stacking refuses incompatible triangle counts instead of approximating bounds', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 4, 4, 20, 20, 8, 8],
+    [10, 11],
+    [
+      0, 10, 0, 0, 4, 0, 0, 4,
+      1, 11, 20, 20, 28, 20, 28, 28,
+      1, 11, 20, 20, 28, 28, 20, 28,
+    ],
+  );
+  const result = stackUvIslands(rects, [0, 1], 1);
+  assert(result.compatible === 0 && result.skipped === 1, 'incompatible stack did not report its skipped island');
+  assert(result.rects[0] === rects[0], 'incompatible source island was approximately rescaled');
 });
 
 test('horizontal and vertical chains follow the snap grid and report atlas overflow', () => {
