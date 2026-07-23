@@ -1,0 +1,28 @@
+{
+  "id": "req_3392",
+  "at": "2026-07-23T19:56:14.676Z",
+  "origin": "codex:019f7e48",
+  "text": "so how do u stack? select faces and then right click action ?",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T19:56:23.123Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T19:56:30.072Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the existing UV stacking workflow: use UV Island Select, Shift-click the source islands, make the desired destination island the white active selection with a normal click, then open the UV canvas context menu and choose Arrange Selected Islands → Stack on Active Island. The operation overlaps UV footprints without merging mesh topology and can be undone.",
+  "shas": [],
+  "resolvedAt": "2026-07-23T19:56:30.072Z"
+}
