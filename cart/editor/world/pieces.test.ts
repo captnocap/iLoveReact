@@ -10,7 +10,7 @@
 
 import { setAuthoredPieces } from './authoredRegistry';
 import { cacheAuthoredMesh } from './authoredMesh';
-import { resolveMovedPlacement, resolvePlacement, resolveRunPlacements, retainPieceSequence, supportsRunPlacement, visibleStoreyPieces, type PlacedPiece } from './pieces';
+import { pickAuthoredPlacement, resolveMovedPlacement, resolvePlacement, resolveRunPlacements, retainPieceSequence, supportsRunPlacement, visibleStoreyPieces, type PlacedPiece } from './pieces';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -45,6 +45,21 @@ cacheAuthoredMesh('offset-floor', new Float32Array([
   0, 0, 3, 0, 0, 0, 0, 0,
   6, 0, 3, 0, 0, 0, 0, 0,
 ]));
+cacheAuthoredMesh('exported-chair', new Float32Array([
+  -1, 0, -1, 0, 0, 0, 0, 0,
+  1, 0, -1, 0, 0, 0, 0, 0,
+  -1, 1, 1, 0, 0, 0, 0, 0,
+  1, 1, 1, 0, 0, 0, 0, 0,
+]));
+
+test('scaled prop placements pick at their scaled bounds (req_3367)', () => {
+  const prop: PlacedPiece = { id: 'p1', pieceId: 'prop:exported-chair', x: 0, y: 0, z: 0, yawDegrees: 0, floor: 0, scale: 2 };
+  const down = { origin: { x: 1.5, y: 10, z: 0 }, dir: { x: 0, y: -1, z: 0 } };
+  const hit = pickAuthoredPlacement(down, [prop], 100);
+  assert(!!hit, 'a ray inside the 2× footprint (outside the 1× one) hits');
+  assert(Math.abs(hit!.point.y - 2) < 1e-6, `top face sits at the scaled height, got ${hit?.point.y}`);
+  assert(pickAuthoredPlacement(down, [{ ...prop, scale: 1 }], 100) === null, 'the same ray misses the authored-size prop');
+});
 
 test('exported wall inherits wall drag-run placement', () => {
   assert(supportsRunPlacement('model:exported-wall'), 'exported wall is runnable');

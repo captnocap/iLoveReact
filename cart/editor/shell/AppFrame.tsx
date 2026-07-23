@@ -2571,7 +2571,8 @@ export default function AppFrame() {
       && piece.y === destination.y
       && piece.z === destination.z
       && piece.yawDegrees === destination.yawDegrees
-      && (piece.floor ?? 0) === floor;
+      && (piece.floor ?? 0) === floor
+      && (piece.scale ?? 1) === (destination.scale ?? piece.scale ?? 1);
     if (unchanged) {
       setState((prev) => ({ ...prev, status: `${piece.pieceId} stayed put` }));
       return;
@@ -2585,6 +2586,9 @@ export default function AppFrame() {
         z: destination.z,
         yawDegrees: destination.yawDegrees,
         floor,
+        // The gizmo's scale rides the move transform (req_3367); an absent scale
+        // keeps the piece's current one (planPieceMove never resets it).
+        ...(destination.scale !== undefined ? { scale: destination.scale } : {}),
       },
     }, 'viewport');
   };

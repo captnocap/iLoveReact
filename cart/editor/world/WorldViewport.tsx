@@ -24,7 +24,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
+import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pieceScaleOf, pickAuthoredPlacement, PIECE_MODULE_METERS, PIECE_SCALE_LIMITS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
 import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
@@ -77,6 +77,45 @@ const MOVE_PREVIEW_INTERVAL_MS = 33;
 // The iso camera pose's hot twig (req_2898 — framework/state/hotstate.zig): survives
 // dev hot reloads (in-process), resets on a cold launch. Written on every camera push.
 const ISO_POSE_TWIG_KEY = 'editor:isopose:v1';
+
+// ── Selection gizmo (req_3367) — the studio's transform gizmo brought to placed
+// props: click a placed prop (Select tool) and Move/Rotate/Scale it in place.
+// Same fixed SCREEN sizes and axis palette as the host studio gizmo (the
+// req_2827 port in gpu/3d.zig: armPx 48 / headPx 9 / grabPx 14, #e0584e /
+// #5ec26a / #4aa3ff, gold on grab), drawn as this viewport draws every overlay:
+// JS-projected 2D polylines over the loader. One combined gizmo, no tool
+// switching — arrow arms MOVE (X/Z slide, Y lifts), the ring turns YAW, the
+// solid hub square is the studio's radial UNIFORM-SCALE grab.
+const GIZMO_ARM_PX = 48;
+const GIZMO_HEAD_PX = 9;
+const GIZMO_HIT_PX = 14;
+const GIZMO_HUB_PX = 6;
+const GIZMO_HUB_HIT_PX = 10;
+const GIZMO_RING_PX = 34;
+const GIZMO_RING_HIT_PX = 8;
+const GIZMO_RING_SEGMENTS = 32;
+const GIZMO_X_COLOR = '#e0584e';
+const GIZMO_Y_COLOR = '#5ec26a';
+const GIZMO_Z_COLOR = '#4aa3ff';
+const GIZMO_ACTIVE_COLOR = '#ffd24a';
+const GIZMO_RING_COLOR = '#cfe2ff';
+const GIZMO_HUB_COLOR = '#bfe6ee';
+// Stepped drag mapping, studio-style: coarse by default, fine while shift held.
+const GIZMO_MOVE_STEP_M = 0.05;
+const GIZMO_MOVE_STEP_FINE_M = 0.01;
+const GIZMO_YAW_STEP_DEG = 5;
+const GIZMO_YAW_STEP_FINE_DEG = 1;
+const GIZMO_SCALE_STEP = 0.05;
+const GIZMO_SCALE_STEP_FINE = 0.01;
+
+type GizmoHandle = 'x' | 'y' | 'z' | 'ring' | 'hub';
+type GizmoAxisPx = { x: number; y: number; pxPerMeter: number } | null;
+
+/** Pane-space distance from a point to the arm segment anchor→anchor+dir×len. */
+function distToArmPx(px: number, py: number, ax: number, ay: number, dir: { x: number; y: number }, len: number): number {
+  const t = Math.max(0, Math.min(len, (px - ax) * dir.x + (py - ay) * dir.y));
+  return Math.hypot(px - (ax + dir.x * t), py - (ay + dir.y * t));
+}
 
 const g: any = globalThis;
 
@@ -183,6 +222,20 @@ export default function WorldViewport(props: {
   // Move previews remain LOCAL while the pointer travels. The world model only
   // changes once on drop, keeping live-push and React off the per-frame path.
   const [movePreview, setMovePreview] = useState<PlacedPiece | null>(null);
+  // The selection gizmo's in-flight transform (req_3367): a LOCAL preview like
+  // movePreview — the world model changes once, on drop, via props.onMove.
+  // State draws the overlay/ghost; the ref is what the pointer handlers read.
+  const [gizmoPreview, setGizmoPreview] = useState<PlacedPiece | null>(null);
+  const gizmoDragRef = useRef<{
+    handle: GizmoHandle;
+    piece: PlacedPiece;
+    axis: GizmoAxisPx;
+    anchorPx: { x: number; y: number };
+    startMouse: { x: number; y: number };
+    startWorldAngleDeg: number | null;
+    startDistPx: number;
+    preview: PlacedPiece;
+  } | null>(null);
   // Bumped on every camera move (zoom/rotate/pan) to force the overlays to RE-PROJECT. The
   // placement ghost re-renders for free via setSnap, but the selection box has no such trigger
   // when the tool isn't armed — without this it freezes at its last projection while the world
@@ -221,6 +274,76 @@ export default function WorldViewport(props: {
   onStampStickerRef.current = props.onStampSticker;
   const onPaintFloraRef = useRef(props.onPaintFlora);
   onPaintFloraRef.current = props.onPaintFlora;
+  const selectedIdsRef = useRef(props.selectedIds);
+  selectedIdsRef.current = props.selectedIds;
+  const paintActiveRef = useRef(props.paintActive);
+  paintActiveRef.current = props.paintActive;
+
+  // ── Selection gizmo (req_3367) ──────────────────────────────────────────────
+  // The piece the gizmo serves: Select tool, exactly ONE selected piece, and it
+  // is a PROP (grid pieces keep their storey/grid verbs — Move tool, R, floors).
+  const gizmoTarget = useCallback((): PlacedPiece | null => {
+    if (toolRef.current !== 'select' || paintActiveRef.current) return null;
+    const ids = selectedIdsRef.current;
+    if (ids.length !== 1) return null;
+    const sel = piecesRef.current.find((piece) => piece.id === ids[0]);
+    return sel && pieceKindOf(sel.pieceId) === 'prop' ? sel : null;
+  }, []);
+
+  // The gizmo's pane-space frame at a piece: projected anchor + each world
+  // axis's screen direction with its px-per-metre (the drag's exact mapping —
+  // pixels along the projected axis divide back into world metres).
+  const gizmoScreen = useCallback((piece: PlacedPiece): { anchor: { x: number; y: number }; x: GizmoAxisPx; y: GizmoAxisPx; z: GizmoAxisPx } | null => {
+    const r = rectRef.current;
+    const anchor = stage.project(piece.x, piece.y, piece.z, r);
+    if (!anchor) return null;
+    const axis = (dx: number, dy: number, dz: number): GizmoAxisPx => {
+      const tip = stage.project(piece.x + dx, piece.y + dy, piece.z + dz, r);
+      if (!tip) return null;
+      const vx = tip.x - anchor.x;
+      const vy = tip.y - anchor.y;
+      const len = Math.hypot(vx, vy);
+      return len > 0.001 ? { x: vx / len, y: vy / len, pxPerMeter: len } : null;
+    };
+    return { anchor, x: axis(1, 0, 0), y: axis(0, 1, 0), z: axis(0, 0, 1) };
+  }, [stage]);
+
+  // Which handle a pane-local point grabs. Innermost first (hub inside the
+  // ring inside the arm tips) so overlapping hit zones resolve predictably.
+  const gizmoHandleAt = useCallback((px: number, py: number): GizmoHandle | null => {
+    const piece = gizmoTarget();
+    if (!piece) return null;
+    const screen = gizmoScreen(piece);
+    if (!screen) return null;
+    const dist = Math.hypot(px - screen.anchor.x, py - screen.anchor.y);
+    if (dist <= GIZMO_HUB_HIT_PX) return 'hub';
+    let best: GizmoHandle | null = null;
+    let bestDist = GIZMO_HIT_PX;
+    const arms: [GizmoHandle, GizmoAxisPx][] = [['x', screen.x], ['y', screen.y], ['z', screen.z]];
+    for (const [handle, axis] of arms) {
+      if (!axis) continue;
+      const d = distToArmPx(px, py, screen.anchor.x, screen.anchor.y, axis, GIZMO_ARM_PX + GIZMO_HEAD_PX);
+      if (d <= bestDist) { best = handle; bestDist = d; }
+    }
+    if (best) return best;
+    return Math.abs(dist - GIZMO_RING_PX) <= GIZMO_RING_HIT_PX ? 'ring' : null;
+  }, [gizmoTarget, gizmoScreen]);
+
+  // The cursor's world-space bearing about the piece anchor, on the piece's own
+  // ground plane (ray ∩ y=piece.y) — the ring's drag mapping. Deriving yaw from
+  // the WORLD point keeps the sign correct at any camera and makes the prop
+  // track the cursor exactly. Null near the anchor / a parallel ray.
+  const gizmoWorldAngleAt = useCallback((px: number, py: number, piece: PlacedPiece): number | null => {
+    const ray = stage.worldRay(px, py, rectRef.current);
+    if (!ray || Math.abs(ray.dir.y) < 1e-6) return null;
+    const t = (piece.y - ray.origin.y) / ray.dir.y;
+    if (t <= 0) return null;
+    const wx = ray.origin.x + ray.dir.x * t - piece.x;
+    const wz = ray.origin.z + ray.dir.z * t - piece.z;
+    if (Math.hypot(wx, wz) < 0.05) return null;
+    // The renderer's +Y yaw carries local +X to world (cos yaw, -sin yaw).
+    return (Math.atan2(-wz, wx) * 180) / Math.PI;
+  }, [stage]);
 
   // The one placed-piece pick, from PANE-local coords: host raycast for catalog pieces,
   // JS slab-test for authored (model:) placements, nearest hit wins. Shared by the
@@ -454,7 +577,9 @@ export default function WorldViewport(props: {
   }, [props.authoredPieces, props.floraSpecies]);
 
   // Mesh GHOST: an authored piece previews as its real translucent mesh while
-  // it is armed OR being moved. Catalog pieces keep the projected box ghost.
+  // it is armed OR being moved OR mid-gizmo-drag (req_3367 — the drag preview
+  // shows the real mesh at the candidate transform, scale included). Catalog
+  // pieces keep the projected box ghost.
   useEffect(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
@@ -462,13 +587,19 @@ export default function WorldViewport(props: {
     const placementGhost = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap
       ? { pieceId: armed.pieceId, x: snap.x, y: snap.y, z: snap.z, yawDegrees: snap.yaw }
       : null;
-    const ghost = placementGhost ?? (props.tool === 'move' && movePreview && isAuthoredPiece(movePreview.pieceId) ? movePreview : null);
+    const ghost = placementGhost
+      ?? (props.tool === 'move' && movePreview && isAuthoredPiece(movePreview.pieceId) ? movePreview : null)
+      ?? (gizmoPreview && isAuthoredPiece(gizmoPreview.pieceId) ? gizmoPreview : null);
     if (ghost && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
-      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredResidentKeyOf(ghost.pieceId), x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees }));
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({
+        key: authoredResidentKeyOf(ghost.pieceId),
+        x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees,
+        scale: pieceScaleOf(ghost),
+      }));
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }
-  }, [snap, movePreview, props.armed, props.tool]);
+  }, [snap, movePreview, gizmoPreview, props.armed, props.tool]);
 
   // Unmount: drop the loader runtime + its pending camera.
   useEffect(() => () => {
@@ -764,6 +895,29 @@ export default function WorldViewport(props: {
       if (mapPaintRef.current.floraSpeciesId) return;
     }
     if (props.paintActive) return;
+    // Selection gizmo grab (req_3367): with one prop selected, a down on a
+    // handle owns the WHOLE gesture — nothing below (pick, pan, run) runs.
+    // Commits once on release via props.onMove, exactly like the Move tool.
+    if (!shift && toolRef.current === 'select') {
+      const handle = gizmoHandleAt(p.x, p.y);
+      const piece = handle ? gizmoTarget() : null;
+      const screen = piece ? gizmoScreen(piece) : null;
+      if (handle && piece && screen) {
+        gizmoDragRef.current = {
+          handle,
+          piece,
+          axis: handle === 'x' ? screen.x : handle === 'y' ? screen.y : handle === 'z' ? screen.z : null,
+          anchorPx: screen.anchor,
+          startMouse: p,
+          startWorldAngleDeg: handle === 'ring' ? gizmoWorldAngleAt(p.x, p.y, piece) : null,
+          startDistPx: Math.max(GIZMO_HUB_HIT_PX, Math.hypot(p.x - screen.anchor.x, p.y - screen.anchor.y)),
+          preview: piece,
+        };
+        setGizmoPreview(piece);
+        dragRef.current = null;
+        return;
+      }
+    }
     // Drag-run anchor (req_2747): a left-down on the Place tool with a grid
     // piece armed remembers the ground point under it — if the gesture turns
     // into a drag, that point anchors the wall run / floor rect. Exported build
@@ -804,10 +958,47 @@ export default function WorldViewport(props: {
       flora: null,
     };
     if (paint) paintFaceAt(p.x, p.y, paint);
-  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, props.paintActive]);
+  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, gizmoHandleAt, gizmoTarget, gizmoScreen, gizmoWorldAngleAt, props.paintActive]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
+    // A live gizmo drag (req_3367) owns the pointer: map travel through the
+    // grabbed handle into a candidate transform, preview it, commit on release.
+    const gd = gizmoDragRef.current;
+    if (gd) {
+      const fine = currentModifiers().shift;
+      let next = gd.preview;
+      if ((gd.handle === 'x' || gd.handle === 'y' || gd.handle === 'z') && gd.axis) {
+        // Pixels along the projected axis ÷ px-per-metre = world metres.
+        const alongPx = (p.x - gd.startMouse.x) * gd.axis.x + (p.y - gd.startMouse.y) * gd.axis.y;
+        const step = fine ? GIZMO_MOVE_STEP_FINE_M : GIZMO_MOVE_STEP_M;
+        const meters = Math.round(alongPx / gd.axis.pxPerMeter / step) * step;
+        next = gd.handle === 'x' ? { ...gd.piece, x: gd.piece.x + meters }
+          : gd.handle === 'z' ? { ...gd.piece, z: gd.piece.z + meters }
+          : { ...gd.piece, y: Math.max(0, gd.piece.y + meters) };
+      } else if (gd.handle === 'ring') {
+        const nowAngle = gizmoWorldAngleAt(p.x, p.y, gd.piece);
+        if (gd.startWorldAngleDeg !== null && nowAngle !== null) {
+          const step = fine ? GIZMO_YAW_STEP_FINE_DEG : GIZMO_YAW_STEP_DEG;
+          const delta = Math.round((nowAngle - gd.startWorldAngleDeg) / step) * step;
+          const yaw = ((gd.piece.yawDegrees + delta) % 360 + 360) % 360;
+          next = { ...gd.piece, yawDegrees: yaw };
+        }
+      } else if (gd.handle === 'hub') {
+        // The studio hub law (req_2827): the factor is the cursor's RADIAL
+        // distance over its grab distance, stepped, clamped.
+        const dist = Math.hypot(p.x - gd.anchorPx.x, p.y - gd.anchorPx.y);
+        const step = fine ? GIZMO_SCALE_STEP_FINE : GIZMO_SCALE_STEP;
+        const raw = pieceScaleOf(gd.piece) * (dist / gd.startDistPx);
+        const scale = Math.min(PIECE_SCALE_LIMITS.max, Math.max(PIECE_SCALE_LIMITS.min, Math.round(raw / step) * step));
+        next = { ...gd.piece, scale };
+      }
+      if (!samePieceTransform(gd.preview, next) || (gd.preview.scale ?? 1) !== (next.scale ?? 1)) {
+        gd.preview = next;
+        setGizmoPreview(next);
+      }
+      return;
+    }
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
@@ -895,9 +1086,22 @@ export default function WorldViewport(props: {
       }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, props.floor, paintFaceAt, floraSampleAt]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, props.floor, paintFaceAt, floraSampleAt]);
 
   const onUp = useCallback((e: any) => {
+    // Gizmo release (req_3367): commit the previewed transform ONCE through the
+    // same undoable move command the Move tool uses (scale rides the transform).
+    const gd = gizmoDragRef.current;
+    if (gd) {
+      gizmoDragRef.current = null;
+      setGizmoPreview(null);
+      dragRef.current = null;
+      const done = gd.preview;
+      const changed = done.x !== gd.piece.x || done.y !== gd.piece.y || done.z !== gd.piece.z
+        || done.yawDegrees !== gd.piece.yawDegrees || (done.scale ?? 1) !== (gd.piece.scale ?? 1);
+      if (changed) props.onMove(gd.piece.id, done);
+      return;
+    }
     const d = dragRef.current;
     dragRef.current = null;
     const runPieces = runRef.current;
@@ -1067,7 +1271,15 @@ export default function WorldViewport(props: {
   // is the destination that will land on mouse-up.
   if (movePreview && props.tool === 'move') {
     const look = pieceLook(movePreview.pieceId);
-    if (look) ghostSegs.push(...boxSegments(stage, rect, movePreview.x, movePreview.y, movePreview.z, look.w, look.h, look.d, movePreview.yawDegrees));
+    const ms = pieceScaleOf(movePreview);
+    if (look) ghostSegs.push(...boxSegments(stage, rect, movePreview.x, movePreview.y, movePreview.z, look.w * ms, look.h * ms, look.d * ms, movePreview.yawDegrees));
+  }
+  // A gizmo drag previews the candidate transform the release will commit
+  // (req_3367) — same green outline vocabulary as the Move preview, scaled.
+  if (gizmoPreview) {
+    const look = pieceLook(gizmoPreview.pieceId);
+    const gs = pieceScaleOf(gizmoPreview);
+    if (look) ghostSegs.push(...boxSegments(stage, rect, gizmoPreview.x, gizmoPreview.y, gizmoPreview.z, look.w * gs, look.h * gs, look.d * gs, gizmoPreview.yawDegrees));
   }
   // The selection highlight: the same projected box around the selected piece (req_2550), so a
   // Select/Move/Focus click shows what it grabbed. Same overlay technique as the ghost. NOT shown
@@ -1077,7 +1289,63 @@ export default function WorldViewport(props: {
   if (props.tool !== 'place') for (const selectedId of props.selectedIds) {
     const sel = props.pieces.find((p) => p.id === selectedId);
     const look = sel ? pieceLook(sel.pieceId) : null;
-    if (sel && look) selectedSegs.push(...boxSegments(stage, rect, sel.x, sel.y, sel.z, look.w, look.h, look.d, sel.yawDegrees));
+    const ss = sel ? pieceScaleOf(sel) : 1;
+    if (sel && look) selectedSegs.push(...boxSegments(stage, rect, sel.x, sel.y, sel.z, look.w * ss, look.h * ss, look.d * ss, sel.yawDegrees));
+  }
+  // ── The selection gizmo (req_3367): studio handles over the selected prop.
+  // Drawn at the drag preview mid-gesture so the handles ride the transform.
+  const gizmoLines: { color: string; segs: number[]; width: number }[] = [];
+  {
+    const target = gizmoTarget();
+    const at = target ? (gizmoPreview ?? target) : null;
+    const screen = at ? gizmoScreen(at) : null;
+    if (screen) {
+      const active = gizmoDragRef.current?.handle ?? null;
+      const arm = (axis: GizmoAxisPx, color: string, handle: GizmoHandle) => {
+        if (!axis) return;
+        const tipX = screen.anchor.x + axis.x * GIZMO_ARM_PX;
+        const tipY = screen.anchor.y + axis.y * GIZMO_ARM_PX;
+        // Arrowhead chevron: two strokes swept back from the tip.
+        const perpX = -axis.y;
+        const perpY = axis.x;
+        gizmoLines.push({
+          color: active === handle ? GIZMO_ACTIVE_COLOR : color,
+          width: 2.5,
+          segs: [
+            screen.anchor.x, screen.anchor.y, tipX, tipY,
+            tipX, tipY, tipX + (-axis.x * 0.8 + perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 + perpY * 0.55) * GIZMO_HEAD_PX,
+            tipX, tipY, tipX + (-axis.x * 0.8 - perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 - perpY * 0.55) * GIZMO_HEAD_PX,
+          ],
+        });
+      };
+      arm(screen.x, GIZMO_X_COLOR, 'x');
+      arm(screen.y, GIZMO_Y_COLOR, 'y');
+      arm(screen.z, GIZMO_Z_COLOR, 'z');
+      const ring: number[] = [];
+      for (let i = 0; i < GIZMO_RING_SEGMENTS; i += 1) {
+        const a0 = (i / GIZMO_RING_SEGMENTS) * Math.PI * 2;
+        const a1 = ((i + 1) / GIZMO_RING_SEGMENTS) * Math.PI * 2;
+        ring.push(
+          screen.anchor.x + Math.cos(a0) * GIZMO_RING_PX, screen.anchor.y + Math.sin(a0) * GIZMO_RING_PX,
+          screen.anchor.x + Math.cos(a1) * GIZMO_RING_PX, screen.anchor.y + Math.sin(a1) * GIZMO_RING_PX,
+        );
+      }
+      gizmoLines.push({ color: active === 'ring' ? GIZMO_ACTIVE_COLOR : GIZMO_RING_COLOR, segs: ring, width: 1.6 });
+      // The scale hub: the studio's SOLID square (thick stroke reads as fill).
+      const h = GIZMO_HUB_PX;
+      const ax = screen.anchor.x;
+      const ay = screen.anchor.y;
+      gizmoLines.push({
+        color: active === 'hub' ? GIZMO_ACTIVE_COLOR : GIZMO_HUB_COLOR,
+        width: 4,
+        segs: [
+          ax - h, ay - h, ax + h, ay - h,
+          ax + h, ay - h, ax + h, ay + h,
+          ax + h, ay + h, ax - h, ay + h,
+          ax - h, ay + h, ax - h, ay - h,
+        ],
+      });
+    }
   }
 
   return (
@@ -1107,6 +1375,17 @@ export default function WorldViewport(props: {
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
             <Graph.Polyline segments points={selectedSegs} stroke="#42d9e8" strokeWidth={2.2} />
+          </Graph>
+        </Box>
+      ) : null}
+
+      {/* Selection gizmo (req_3367) — studio move/rotate/scale handles on the selected prop. */}
+      {gizmoLines.length ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            {gizmoLines.map((line, index) => (
+              <Graph.Polyline key={index} segments points={line.segs} stroke={line.color} strokeWidth={line.width} />
+            ))}
           </Graph>
         </Box>
       ) : null}

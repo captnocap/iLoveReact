@@ -99,6 +99,7 @@ pub const setLiveLights = live_inputs.setLiveLights;
 pub const clearLiveLights = live_inputs.clearLiveLights;
 pub const setLiveMeshProps = live_inputs.setLiveMeshProps;
 pub const setLiveMeshProps2 = live_inputs.setLiveMeshProps2;
+pub const setLiveMeshProps3 = live_inputs.setLiveMeshProps3;
 pub const clearLiveMeshProps = live_inputs.clearLiveMeshProps;
 pub const setLiveMaterial = live_inputs.setLiveMaterial;
 pub const setLiveSkinBoxes = live_inputs.setLiveSkinBoxes;

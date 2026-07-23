@@ -259,9 +259,12 @@ pub fn meshPosKey(mesh_index: usize, x: f32, z: f32, yaw: f32) u64 {
 // spin_deg_per_sec (SPINPROP req_3128): a continuous visual yaw rate — the draw
 // spins about the placement anchor while colliders/door identity keep the
 // authored yaw (the tickers/traffic law: animation is visual-only).
-pub const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32, spin_deg_per_sec: f32 = 0, mats: []u32 = &.{} };
+// scale (req_3367 world gizmo): uniform per-instance scale — draw, colliders, and
+// picking all multiply through it; 1 = the authored size (v1/v2 wires).
+pub const LiveMeshRef = struct { hash: u32, x: f32, y: f32, z: f32, yaw: f32, spin_deg_per_sec: f32 = 0, scale: f32 = 1, mats: []u32 = &.{} };
 pub const LIVE_MESH_HEADER_BYTES: usize = 24; // v1: u32 keyHash + 4×f32 + u32 matCount, then matCount×u32
 pub const LIVE_MESH_HEADER_BYTES_V2: usize = 28; // v2: u32 keyHash + f32 x,y,z,yaw,spin + u32 matCount, then matCount×u32
+pub const LIVE_MESH_HEADER_BYTES_V3: usize = 32; // v3: u32 keyHash + f32 x,y,z,yaw,spin,scale + u32 matCount, then matCount×u32
 pub const PendingLiveMesh = struct {
     node_id: u32 = 0,
     set: bool = false,
@@ -292,6 +295,13 @@ pub fn setLiveMeshProps2(node_id: u32, bytes: []const u8) void {
     setLiveMeshPropsWire(node_id, bytes, LIVE_MESH_HEADER_BYTES_V2);
 }
 
+/// The v3 wire (req_3367 world gizmo): a 32-byte header that carries uniform
+/// scale between spin and matCount. Its own door
+/// (__compiled_world_set_live_mesh_props3), presence-gated by the editor.
+pub fn setLiveMeshProps3(node_id: u32, bytes: []const u8) void {
+    setLiveMeshPropsWire(node_id, bytes, LIVE_MESH_HEADER_BYTES_V3);
+}
+
 fn setLiveMeshPropsWire(node_id: u32, bytes: []const u8, header_bytes: usize) void {
     const alloc = std.heap.page_allocator;
     var slot: ?*PendingLiveMesh = pendingLiveMeshFor(node_id);
@@ -307,7 +317,8 @@ fn setLiveMeshPropsWire(node_id: u32, bytes: []const u8, header_bytes: usize) vo
     // VARIABLE STRIDE (req_2025): each ref is a fixed header + matCount×u32, so walk the
     // buffer with a cursor into an ArrayList instead of a fixed divide. A malformed tail
     // (header runs past the buffer) just stops the walk — never reads out of bounds.
-    const v2 = header_bytes == LIVE_MESH_HEADER_BYTES_V2;
+    const has_spin = header_bytes >= LIVE_MESH_HEADER_BYTES_V2;
+    const has_scale = header_bytes >= LIVE_MESH_HEADER_BYTES_V3;
     var built: std.ArrayListUnmanaged(LiveMeshRef) = .empty;
     var off: usize = 0;
     while (off + header_bytes <= bytes.len) {
@@ -322,13 +333,17 @@ fn setLiveMeshPropsWire(node_id: u32, bytes: []const u8, header_bytes: usize) vo
                 mats[k] = std.mem.bytesToValue(u32, bytes[off + header_bytes + k * 4 ..][0..4]);
             }
         }
+        // A non-positive/non-finite scale would invert or vanish the draw AND its
+        // colliders — clamp the wire to "authored size" instead of trusting it.
+        const wire_scale = if (has_scale) std.mem.bytesToValue(f32, bytes[off + 24 ..][0..4]) else 1;
         built.append(alloc, .{
             .hash = std.mem.bytesToValue(u32, bytes[off..][0..4]),
             .x = std.mem.bytesToValue(f32, bytes[off + 4 ..][0..4]),
             .y = std.mem.bytesToValue(f32, bytes[off + 8 ..][0..4]),
             .z = std.mem.bytesToValue(f32, bytes[off + 12 ..][0..4]),
             .yaw = std.mem.bytesToValue(f32, bytes[off + 16 ..][0..4]),
-            .spin_deg_per_sec = if (v2) std.mem.bytesToValue(f32, bytes[off + 20 ..][0..4]) else 0,
+            .spin_deg_per_sec = if (has_spin) std.mem.bytesToValue(f32, bytes[off + 20 ..][0..4]) else 0,
+            .scale = if (std.math.isFinite(wire_scale) and wire_scale > 0) wire_scale else 1,
             .mats = mats,
         }) catch {
             if (mats.len > 0) alloc.free(mats);
@@ -621,7 +636,9 @@ pub fn pendingMeshGhostFor(node_id: u32) ?*PendingMeshGhost {
 }
 
 /// Set the placement-ghost mesh ref for a node (LIVEMESH req_1841). `bytes` is ONE ref:
-/// u32 keyHash, f32 x,y,z,yaw — the same layout as a live mesh-prop ref.
+/// u32 keyHash, f32 x,y,z,yaw — the same layout as a live mesh-prop ref. A 28-byte
+/// buffer (req_3367 gizmo drag preview) additionally carries f32 uniform scale at
+/// offset 20; the 24-byte form stays scale 1, and a pre-scale host ignores the tail.
 pub fn setLiveMeshGhost(node_id: u32, bytes: []const u8) void {
     if (bytes.len < LIVE_MESH_HEADER_BYTES) {
         clearLiveMeshGhost(node_id);
@@ -637,6 +654,7 @@ pub fn setLiveMeshGhost(node_id: u32, bytes: []const u8) void {
         }
     }
     const p = slot orelse return;
+    const ghost_scale = if (bytes.len >= 28) std.mem.bytesToValue(f32, bytes[20..24]) else 1;
     p.node_id = node_id;
     p.set = true;
     p.has = true;
@@ -646,6 +664,7 @@ pub fn setLiveMeshGhost(node_id: u32, bytes: []const u8) void {
         .y = std.mem.bytesToValue(f32, bytes[8..12]),
         .z = std.mem.bytesToValue(f32, bytes[12..16]),
         .yaw = std.mem.bytesToValue(f32, bytes[16..20]),
+        .scale = if (std.math.isFinite(ghost_scale) and ghost_scale > 0) ghost_scale else 1,
     };
 }
 
@@ -827,7 +846,7 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
     if (pm) |pmx| {
         for (pmx.refs) |r| {
             const mesh = live_scene.meshForHash(runtime, r.hash) orelse continue;
-            const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw };
+            const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw, .scale = r.scale };
             const isls = meshPropIslands(alloc, mesh) catch continue;
             defer alloc.free(isls);
             for (isls) |isl| {

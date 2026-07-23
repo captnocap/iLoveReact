@@ -34,7 +34,9 @@ export type WorldPieceEditAction = 'move' | 'rotate' | 'spin' | 'delete';
 
 export const WORLD_PIECE_EDIT_LIMITS = Object.freeze({ maxFloor: 128 });
 
-export type PieceTransform = Pick<PlacedPiece, 'x' | 'y' | 'z' | 'yawDegrees'> & { floor: number };
+/** scale (req_3367 world gizmo): optional uniform instance scale. Absent keeps
+ *  the piece's current scale; present it must be finite and > 0. */
+export type PieceTransform = Pick<PlacedPiece, 'x' | 'y' | 'z' | 'yawDegrees'> & { floor: number; scale?: number };
 export type PieceMoveArgs = { documentId: string; pieceId: string; transform: PieceTransform };
 export type PieceRotateArgs = { documentId: string; pieceId: string; quarterTurns: -1 | 1 };
 /** spinDegPerSec 0 stops the spin (the field clears); any other finite rate spins.
@@ -215,9 +217,16 @@ export function planPieceMove(world: PieceEditWorld, args: PieceMoveArgs): Piece
       !Number.isInteger(transform.floor) || transform.floor < 0 || transform.floor > WORLD_PIECE_EDIT_LIMITS.maxFloor) {
     reject('invalid-args', `move transform must be finite and floor must be an integer from 0 to ${WORLD_PIECE_EDIT_LIMITS.maxFloor}`);
   }
-  const after = clonePiece({ ...before.piece, ...transform });
+  if (transform.scale !== undefined && (!finite(transform.scale) || transform.scale <= 0)) {
+    reject('invalid-args', 'move transform scale must be a finite value above 0');
+  }
+  // An absent scale keeps the piece's current one — spreading an undefined key
+  // would silently reset a scaled prop to authored size on every plain move.
+  const { scale: nextScale, ...coreTransform } = transform;
+  const after = clonePiece({ ...before.piece, ...coreTransform, ...(nextScale !== undefined ? { scale: nextScale } : {}) });
   if (before.piece.x === after.x && before.piece.y === after.y && before.piece.z === after.z &&
-      before.piece.yawDegrees === after.yawDegrees && before.piece.floor === after.floor) {
+      before.piece.yawDegrees === after.yawDegrees && before.piece.floor === after.floor &&
+      (before.piece.scale ?? 1) === (after.scale ?? 1)) {
     reject('no-change', `piece '${args.pieceId}' already has that transform`);
   }
   const destination = placementSlotKey(after);

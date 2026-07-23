@@ -132,6 +132,7 @@ function validPiece(value: unknown): value is PlacedPiece {
     }
   }
   if (piece.spinDegPerSec !== undefined && !finite(piece.spinDegPerSec)) return false;
+  if (piece.scale !== undefined && (!finite(piece.scale) || piece.scale <= 0)) return false;
   if (piece.surfaceFlora !== undefined) {
     if (!Array.isArray(piece.surfaceFlora) || piece.surfaceFlora.length > SURFACE_FLORA_TUNING.maxPatchesPerPiece) return false;
     if (!piece.surfaceFlora.every(validSurfaceFloraPatch)) return false;

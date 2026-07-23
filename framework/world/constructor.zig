@@ -219,6 +219,9 @@ pub const MeshPropInstance = struct {
     y: f32,
     z: f32,
     yaw_degrees: f32,
+    /// Uniform instance scale (req_3367 world gizmo). Baked lumps carry no
+    /// scale — decode leaves the default 1; only live editor refs set it.
+    scale: f32 = 1,
     slot_materials: []u32 = &.{},
     /// WALLHIDE req_2058: this placement is a wall (cooked from a wall seed). The
     /// editor build pane's hide-walls hides its mesh-prop node. False in v<8 bakes.

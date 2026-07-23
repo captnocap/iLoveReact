@@ -9,7 +9,7 @@
 //                        (req_2577); returns false until the loader node exists.
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { liveMaterialFor, pieceSkinBoxes, type LiveMaterial } from './pieceSkins';
-import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, type ResidentMesh, type MeshRef } from './meshProps';
+import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, encodeMeshRefsV3, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredPieceFrom, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData, groundRebase } from './authoredMesh';
 import { exists, readFile, readFileBase64, stat } from '../../../runtime/hooks/fs';
@@ -217,6 +217,7 @@ export function pushLiveWorld(
         key: authoredResidentKeyOf(piece.pieceId),
         x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees,
         ...(piece.spinDegPerSec ? { spin: piece.spinDegPerSec } : {}),
+        ...(piece.scale && piece.scale !== 1 ? { scale: piece.scale } : {}),
         ...(roleMaterials.some((hash) => hash !== 0) ? { materials: roleMaterials } : {}),
       });
     }
@@ -224,9 +225,13 @@ export function pushLiveWorld(
     // world-space meshes, so the ref is identity.
     refs.push(...liveFacadeRefs());
     refs.push(...surfaceFloraMeshRefs(pieces, worldFlora, floraSpecies));
-    // SPINPROP req_3128: the v2 door carries per-placement spin. Presence-gated —
-    // a host binary that predates it still draws everything via v1 (spin dropped).
-    if (typeof g.__compiled_world_set_live_mesh_props2 === 'function') {
+    // Newest wire door first, presence-gated: v3 carries spin + uniform scale
+    // (req_3367), v2 spin only (SPINPROP req_3128), v1 the bare transform. An
+    // older host still draws everything — the missing fields just drop.
+    if (typeof g.__compiled_world_set_live_mesh_props3 === 'function') {
+      g.__compiled_world_set_live_mesh_props3(nodeId, encodeMeshRefsV3(refs));
+    } else if (typeof g.__compiled_world_set_live_mesh_props2 === 'function') {
+      if (refs.some((r) => r.scale && r.scale !== 1)) console.warn('[place] this host predates scaled props — rebuild the dev host to see their real size');
       g.__compiled_world_set_live_mesh_props2(nodeId, encodeMeshRefsV2(refs));
     } else {
       if (refs.some((r) => r.spin)) console.warn('[place] this host predates spinning props — rebuild the dev host to see them turn');

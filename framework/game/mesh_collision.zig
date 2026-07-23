@@ -16,6 +16,10 @@ pub const Transform = struct {
     y: f32 = 0,
     z: f32 = 0,
     yaw_radians: f32 = 0,
+    /// Uniform instance scale (req_3367 world-gizmo scaled props). The triangle
+    /// payload stays the unscaled asset; resolve() works in the asset's local
+    /// units by inverse-scaling the body, so contact math is exact at any scale.
+    scale: f32 = 1,
 };
 
 pub const Body = struct {
@@ -297,17 +301,24 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
 
     const cs = @cos(transform.yaw_radians);
     const sn = @sin(transform.yaw_radians);
+    // Uniform scale: solve in the asset's local units. Body extents divide by
+    // the scale so a 2× prop presents 2× surfaces to a normal-sized player.
+    const scale = if (transform.scale > 0) transform.scale else 1;
+    const inv_scale = 1.0 / scale;
+    const radius = body.radius * inv_scale;
+    const height = body.height * inv_scale;
+    const step_height = body.step_height * inv_scale;
     const world_dx = body.x - transform.x;
     const world_dz = body.z - transform.z;
-    var x = cs * world_dx - sn * world_dz;
-    var z = sn * world_dx + cs * world_dz;
-    var y = body.y - transform.y;
-    var vx = cs * body.vx - sn * body.vz;
-    var vz = sn * body.vx + cs * body.vz;
+    var x = (cs * world_dx - sn * world_dz) * inv_scale;
+    var z = (sn * world_dx + cs * world_dz) * inv_scale;
+    var y = (body.y - transform.y) * inv_scale;
+    var vx = (cs * body.vx - sn * body.vz) * inv_scale;
+    var vz = (sn * body.vx + cs * body.vz) * inv_scale;
 
     if (body.vy > 0) {
-        if (ceilingSurfaceAt(triangles, x, z, y, y + body.height, tuning)) |ceiling| {
-            y = ceiling - body.height;
+        if (ceilingSurfaceAt(triangles, x, z, y, y + height, tuning)) |ceiling| {
+            y = ceiling - height;
             body.vy = 0;
             result.hit_ceiling = true;
         }
@@ -316,7 +327,7 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
     // Pre-mount a walkable top within step reach so its vertical side does not
     // push the body away before the ordinary step-up law can seat the feet.
     if (body.vy <= 0) {
-        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + body.step_height, tuning)) |ground| {
+        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + step_height, tuning)) |ground| {
             y = ground;
             body.vy = 0;
             body.grounded = true;
@@ -335,9 +346,9 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
             const push = projectedTrianglePush(
                 .{ .x = x, .z = z },
                 .{ .x = vx, .z = vz },
-                body.radius,
+                radius,
                 y,
-                y + body.height,
+                y + height,
                 a,
                 b,
                 c,
@@ -365,7 +376,7 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
     // support at the final horizontal point; never clear grounding supplied by
     // the ordinary rect/heightfield lanes when no mesh top is present.
     if (body.vy <= 0) {
-        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + body.step_height, tuning)) |ground| {
+        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + step_height, tuning)) |ground| {
             y = ground;
             body.vy = 0;
             body.grounded = true;
@@ -373,10 +384,10 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
         }
     }
 
-    body.x = transform.x + x * cs + z * sn;
-    body.y = transform.y + y;
-    body.z = transform.z - x * sn + z * cs;
-    body.vx = vx * cs + vz * sn;
-    body.vz = -vx * sn + vz * cs;
+    body.x = transform.x + (x * scale) * cs + (z * scale) * sn;
+    body.y = transform.y + y * scale;
+    body.z = transform.z - (x * scale) * sn + (z * scale) * cs;
+    body.vx = (vx * cs + vz * sn) * scale;
+    body.vz = (-vx * sn + vz * cs) * scale;
     return result;
 }

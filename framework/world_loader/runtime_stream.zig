@@ -387,6 +387,7 @@ pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) boo
             .y = ref.y,
             .z = ref.z,
             .yaw_degrees = ref.yaw,
+            .scale = ref.scale,
         };
         grounded_on_mesh = resolveMeshPropPlayer(&self.player, mesh, inst, cfg) or grounded_on_mesh;
     }

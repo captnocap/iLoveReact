@@ -102,16 +102,22 @@ pub fn appendMeshPropNode(
         break :blk if (m.wgsl.len == 0 and m.decal_doc.len == 0 and m.opacity < 0.999) GLASS_TINT else null;
     } else null;
     const node_color: [3]f32 = if (textured) .{ 1, 1, 1 } else (glass_tint orelse mesh.color);
+    // Uniform instance scale (req_3367 world gizmo): the shared geometry draws
+    // through the node's scale — culling radius grows with it.
+    const inst_scale = if (inst.scale > 0) inst.scale else 1;
     try self.kid_list.append(self.allocator, .{
         .scene3d_mesh = count > 0,
         .scene3d_geom_key = key,
         .scene3d_vertices = vertices,
         .scene3d_vert_count = count,
-        .scene3d_bounds_radius = mesh.bounds_radius,
+        .scene3d_bounds_radius = mesh.bounds_radius * inst_scale,
         .scene3d_pos_x = inst.x,
         .scene3d_pos_y = inst.y,
         .scene3d_pos_z = inst.z,
         .scene3d_rot_y = inst.yaw_degrees,
+        .scene3d_scale_x = inst_scale,
+        .scene3d_scale_y = inst_scale,
+        .scene3d_scale_z = inst_scale,
         .scene3d_color_r = node_color[0],
         .scene3d_color_g = node_color[1],
         .scene3d_color_b = node_color[2],
@@ -199,7 +205,7 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
         @mod(r.yaw + r.spin_deg_per_sec * self.live_spin_seconds, 360.0)
     else
         r.yaw;
-    const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = draw_yaw };
+    const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = draw_yaw, .scale = r.scale };
     // A placement (never the translucent ghost) binds to the live two-state
     // machine compiled by applyLiveColliders. Node indices are refreshed on
     // every append because the live draw tail is rebuilt every frame.

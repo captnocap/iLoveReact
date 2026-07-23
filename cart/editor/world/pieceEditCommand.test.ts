@@ -74,6 +74,34 @@ test('move owns destination replacement and restores exact content/order on undo
   same(redone, plan.next, 'move redo did not reproduce the same transaction');
 });
 
+test('move transform carries the gizmo scale and preserves it when absent (req_3367)', () => {
+  const prop = piece('lamp', 1.5, { pieceId: 'prop.streetlamp.common', scale: 2 });
+  const before = world([prop], 'lamp');
+  // Scale-only change is a real transaction…
+  const scalePlan = planPieceMove(before, {
+    documentId: 'main', pieceId: 'lamp',
+    transform: { x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0, scale: 0.5 },
+  });
+  assert(scalePlan.transaction.after?.scale === 0.5, 'scale did not land on the transform');
+  same(applyPieceEditInverse(scalePlan.next, scalePlan.transaction), before, 'scale undo drifted');
+  // …an absent scale keeps the current one instead of resetting to 1…
+  const movePlan = planPieceMove(before, {
+    documentId: 'main', pieceId: 'lamp',
+    transform: { x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+  });
+  assert(movePlan.transaction.after?.scale === 2, 'plain move reset the piece scale');
+  // …and identical transform + scale is no-change; invalid scale rejects.
+  for (const bad of [
+    () => planPieceMove(before, { documentId: 'main', pieceId: 'lamp', transform: { x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0, scale: 2 } }),
+    () => planPieceMove(before, { documentId: 'main', pieceId: 'lamp', transform: { x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0, scale: 0 } }),
+    () => planPieceMove(before, { documentId: 'main', pieceId: 'lamp', transform: { x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0, scale: Number.NaN } }),
+  ]) {
+    let rejected = false;
+    try { bad(); } catch (error) { rejected = error instanceof PieceEditRejected; }
+    assert(rejected, 'invalid/no-change scale transform was accepted');
+  }
+});
+
 test('rotate changes only yaw, replaces its edge destination, and round-trips exact rows', () => {
   const original = piece('wall', 1.5, {
     pieceId: 'wall.concrete.common', yawDegrees: 270,

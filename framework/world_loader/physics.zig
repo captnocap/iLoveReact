@@ -99,16 +99,19 @@ pub fn meshVertexBoundsIsland(mesh: constructor.MeshPropMesh) MeshIsland {
 /// the island's local AABB offset to the anchor and banded by its OWN Y range (an
 /// overhead board bands high → walk-under), then yawed about the anchor like the mesh.
 pub fn islandOrientedFloats(inst: constructor.MeshPropInstance, isl: MeshIsland, exact_player_narrowphase: bool) [game_physics.ORIENTED_FLOATS]f32 {
+    // Local-frame island extents multiply by the instance's uniform scale
+    // (req_3367) before anchoring — a 2× table's top collides 2× as high.
+    const s = if (inst.scale > 0) inst.scale else 1;
     return .{
-        inst.x + isl.lo[0],
-        inst.z + isl.lo[2],
-        inst.x + isl.hi[0],
-        inst.z + isl.hi[2],
-        inst.y + isl.hi[1], // top — the island's own ceiling
+        inst.x + isl.lo[0] * s,
+        inst.z + isl.lo[2] * s,
+        inst.x + isl.hi[0] * s,
+        inst.z + isl.hi[2] * s,
+        inst.y + isl.hi[1] * s, // top — the island's own ceiling
         if (exact_player_narrowphase) game_physics.EXACT_MESH_COARSE_SOLID_FLAG else 1,
         PLAYER_SURFACE_FRICTION,
         PLAYER_SURFACE_RESTITUTION,
-        inst.y + isl.lo[1], // floor — the island's own base (banded: walk under a high one)
+        inst.y + isl.lo[1] * s, // floor — the island's own base (banded: walk under a high one)
         inst.x,
         inst.z,
         inst.yaw_degrees * std.math.pi / 180.0,
@@ -135,16 +138,22 @@ fn exactMeshBroadphase(
     const yaw = inst.yaw_degrees * std.math.pi / 180.0;
     const cs = @cos(yaw);
     const sn = @sin(yaw);
-    const dx = player.x - inst.x;
-    const dz = player.z - inst.z;
+    // Uniform instance scale (req_3367): test in the asset's unscaled local
+    // frame — player position and extents divide by the scale, same law the
+    // triangle narrowphase applies.
+    const inv_s = 1.0 / (if (inst.scale > 0) inst.scale else 1);
+    const dx = (player.x - inst.x) * inv_s;
+    const dz = (player.z - inst.z) * inv_s;
     const local_x = cs * dx - sn * dz;
     const local_z = sn * dx + cs * dz;
-    const feet_y = player.y - inst.y;
-    const head_y = feet_y + height;
+    const feet_y = (player.y - inst.y) * inv_s;
+    const head_y = feet_y + height * inv_s;
+    const radius_local = radius * inv_s;
+    const step_local = step_height * inv_s;
     for (mesh.collision_boxes) |box| {
-        if (!circleOverlapsBox(local_x, local_z, radius, box)) continue;
+        if (!circleOverlapsBox(local_x, local_z, radius_local, box)) continue;
         const body_overlap = feet_y < box.max_y and head_y > box.min_y;
-        const step_reach = box.max_y >= feet_y - game_physics.mesh_collision.DEFAULT_TUNING.ground_snap_meters and box.max_y <= feet_y + step_height;
+        const step_reach = box.max_y >= feet_y - game_physics.mesh_collision.DEFAULT_TUNING.ground_snap_meters and box.max_y <= feet_y + step_local;
         if (body_overlap or step_reach) return true;
     }
     return false;
@@ -191,6 +200,7 @@ pub fn resolveMeshPropPlayer(
             .y = inst.y,
             .z = inst.z,
             .yaw_radians = inst.yaw_degrees * std.math.pi / 180.0,
+            .scale = inst.scale,
         },
         tuning,
     );

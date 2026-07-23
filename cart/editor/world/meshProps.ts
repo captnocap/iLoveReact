@@ -197,22 +197,29 @@ export type MeshRef = {
   /** SPINPROP req_3128: continuous visual spin, deg/s (absent or 0 = static).
    *  Rides the v2 wire only — the v1 fallback drops it (older host, no spin). */
   spin?: number;
+  /** req_3367: uniform instance scale (absent or 1 = authored size). Rides the
+   *  v3 wire only — the v2/v1 fallbacks drop it (older host, authored size). */
+  scale?: number;
   /** Per-resident-slot live material hashes. Zero keeps the model's painted atlas. */
   materials?: readonly number[];
 };
 const MESH_REF_HEADER_BYTES = 24; // v1: u32 hash, f32 x,y,z,yaw, u32 matCount
 const MESH_REF_HEADER_BYTES_V2 = 28; // v2: u32 hash, f32 x,y,z,yaw,spin, u32 matCount
+const MESH_REF_HEADER_BYTES_V3 = 32; // v3: u32 hash, f32 x,y,z,yaw,spin,scale, u32 matCount
 
-/** Pack one live mesh ref (no per-slot materials → the mesh's own look). */
+/** Pack one live mesh ref (no per-slot materials → the mesh's own look).
+ *  28 bytes: the ghost door's scale-bearing form (f32 scale at offset 20 — a
+ *  pre-scale host reads only the first 20 bytes, so the tail is harmless). */
 export function encodeMeshGhost(ref: MeshRef): Uint8Array {
-  const buf = new ArrayBuffer(MESH_REF_HEADER_BYTES);
+  const buf = new ArrayBuffer(28);
   const dv = new DataView(buf);
   dv.setUint32(0, meshKeyHash(ref.key), true);
   dv.setFloat32(4, ref.x, true);
   dv.setFloat32(8, ref.y, true);
   dv.setFloat32(12, ref.z, true);
   dv.setFloat32(16, ref.yaw, true);
-  dv.setUint32(20, 0, true); // matCount
+  dv.setFloat32(20, ref.scale ?? 1, true);
+  dv.setUint32(24, 0, true); // matCount
   return new Uint8Array(buf);
 }
 
@@ -253,6 +260,29 @@ export function encodeMeshRefsV2(refs: readonly MeshRef[]): Uint8Array {
     const materials = r.materials ?? [];
     dv.setUint32(o + 24, materials.length, true);
     o += MESH_REF_HEADER_BYTES_V2;
+    for (const material of materials) { dv.setUint32(o, material >>> 0, true); o += 4; }
+  }
+  return new Uint8Array(buf);
+}
+
+/** The v3 wire for __compiled_world_set_live_mesh_props3 (req_3367 world gizmo):
+ *  32 bytes each — uniform scale lands between spin and matCount, matching the
+ *  host's setLiveMeshProps3 decode verbatim. */
+export function encodeMeshRefsV3(refs: readonly MeshRef[]): Uint8Array {
+  const buf = new ArrayBuffer(refs.reduce((bytes, ref) => bytes + MESH_REF_HEADER_BYTES_V3 + (ref.materials?.length ?? 0) * 4, 0));
+  const dv = new DataView(buf);
+  let o = 0;
+  for (const r of refs) {
+    dv.setUint32(o, meshKeyHash(r.key), true);
+    dv.setFloat32(o + 4, r.x, true);
+    dv.setFloat32(o + 8, r.y, true);
+    dv.setFloat32(o + 12, r.z, true);
+    dv.setFloat32(o + 16, r.yaw, true);
+    dv.setFloat32(o + 20, r.spin ?? 0, true);
+    dv.setFloat32(o + 24, r.scale ?? 1, true);
+    const materials = r.materials ?? [];
+    dv.setUint32(o + 28, materials.length, true);
+    o += MESH_REF_HEADER_BYTES_V3;
     for (const material of materials) { dv.setUint32(o, material >>> 0, true); o += 4; }
   }
   return new Uint8Array(buf);

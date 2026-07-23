@@ -112,6 +112,10 @@ export type PlacedPiece = {
   // live loader draws them at yaw + rate×clock; colliders keep the authored yaw.
   // Absent or 0 ⇒ static.
   spinDegPerSec?: number;
+  // Uniform instance scale (req_3367 — the world gizmo's scale handle, "studio
+  // to world size is much harder than it looks"). Props only; absent ⇒ 1. Draw,
+  // colliders, and picking all multiply through it (live mesh ref v3 wire).
+  scale?: number;
   /** Flora stroke recipes attached to Studio-rigged flora faces. */
   surfaceFlora?: SurfaceFloraPatch[];
   // Procedural building-site provenance. Present only on the single real floor
@@ -122,6 +126,16 @@ export type PlacedPiece = {
 /** The Spin quick-verb's one rate (SPINPROP req_3128) — a storefront-sign turn:
  *  slow enough to read the prop, fast enough to catch the eye. */
 export const PIECE_SPIN_RATE_DEG_PER_SEC = 45;
+
+/** The piece's uniform instance scale (req_3367): absent/invalid ⇒ 1. */
+export function pieceScaleOf(piece: Pick<PlacedPiece, 'scale'>): number {
+  const s = piece.scale;
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 1;
+}
+
+/** The gizmo's scale clamp (req_3367): generous enough for "studio size to world
+ *  size", tight enough that a slip can't vanish or planet-size a prop. */
+export const PIECE_SCALE_LIMITS = Object.freeze({ min: 0.05, max: 20 });
 
 /** The build-bar selection carried by Place mode. `yawDegrees` is the user's
  *  turn from the snap's natural facing: edge pieces still align to the picked
@@ -178,7 +192,13 @@ export function pickAuthoredPlacement(
     const oz = ray.origin.z - piece.z;
     const localOrigin = { x: ox * ca - oz * sa, y: oy, z: ox * sa + oz * ca };
     const localDir = { x: ray.dir.x * ca - ray.dir.z * sa, y: ray.dir.y, z: ray.dir.x * sa + ray.dir.z * ca };
-    const entry = rayAabbEntry(localOrigin, localDir, b, maxDistance);
+    // A scaled placement (req_3367) occupies its bounds × scale about the anchor.
+    const s = pieceScaleOf(piece);
+    const scaled: MeshBounds = s === 1 ? b : {
+      minX: b.minX * s, minY: b.minY * s, minZ: b.minZ * s,
+      maxX: b.maxX * s, maxY: b.maxY * s, maxZ: b.maxZ * s,
+    };
+    const entry = rayAabbEntry(localOrigin, localDir, scaled, maxDistance);
     if (entry !== null && (!best || entry.t < best.t)) best = { piece, t: entry.t, entry };
   }
   if (!best) return null;
@@ -656,6 +676,10 @@ export function pieceInstanceRows(pieces: readonly PlacedPiece[]): Float32Array 
       console.warn(`[world] no shapes for piece '${piece.pieceId}' — not rendered live`);
       continue;
     }
+    // A scaled catalog PROP (req_3367) grows its shapes about the placement
+    // anchor — grid pieces never carry scale, so this is identity for them.
+    const s = pieceKindOf(piece.pieceId) === 'prop' ? pieceScaleOf(piece) : 1;
+    const scaled = (v: number, anchor: number): number => anchor + (v - anchor) * s;
     for (const shape of shapes) {
       if (shape.kind === 'box') {
         const b = shape.box;
@@ -663,12 +687,12 @@ export function pieceInstanceRows(pieces: readonly PlacedPiece[]): Float32Array 
         // box takes ITS slot's material colour (per-face, req_2886).
         const hex = b.door || b.opacity !== undefined ? b.color : boxColorHex(piece, b.slot, b.color);
         const rgb = hexToRgb(hex);
-        rows.push(b.cx, b.cy, b.cz, 0, b.yawDegrees, 0, b.sx, b.sy, b.sz, rgb[0], rgb[1], rgb[2]);
+        rows.push(scaled(b.cx, piece.x), scaled(b.cy, piece.y), scaled(b.cz, piece.z), 0, b.yawDegrees, 0, b.sx * s, b.sy * s, b.sz * s, rgb[0], rgb[1], rgb[2]);
       } else {
         const r = shape.ramp;
         const rgb = hexToRgb(boxColorHex(piece, r.slot, r.color));
         // Bounding-box approximation for the live overlay (base at r.y, rises to height).
-        rows.push(r.x, r.y + r.height / 2, r.z, 0, r.yawDegrees, 0, r.width, Math.max(r.height, r.slabThickness), r.depth, rgb[0], rgb[1], rgb[2]);
+        rows.push(scaled(r.x, piece.x), scaled(r.y + r.height / 2, piece.y), scaled(r.z, piece.z), 0, r.yawDegrees, 0, r.width * s, Math.max(r.height, r.slabThickness) * s, r.depth * s, rgb[0], rgb[1], rgb[2]);
       }
     }
   }
