@@ -484,6 +484,34 @@ test "loop cut ignores collapsed quad members in an unrelated outliner part" {
     try testing.expectEqual(@as(u32, 2), collapsed_triangles);
 }
 
+test "focusing an edge by rebuilt endpoints replaces the previous edge selection" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3379, soup[0..], 6, &.{ 1, 1 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.selectEdgeByIndex(0, false));
+    // The outer top edge is the equivalent of an edge extrusion's newly minted
+    // edge. A tiny coordinate drift models the soup rebuild across that operation.
+    try testing.expect(mesh_edit.focusEdgeByEndpoints(.{ 0.0001, 1, 0 }, .{ 1, 1, 0 }));
+    try testing.expectEqual(mesh_edit.Mode.edge, mesh_edit.mode());
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selCount());
+    const focused = mesh_edit.selectedEdgeIndexPub().?;
+    const endpoints = mesh_edit.edgeEndpointsPub(focused);
+    const a = mesh_edit.vertPosPub(endpoints[0]);
+    const b = mesh_edit.vertPosPub(endpoints[1]);
+    const is_top_edge = (a[1] == 1 and b[1] == 1) and
+        ((a[0] == 0 and b[0] == 1) or (a[0] == 1 and b[0] == 0));
+    try testing.expect(is_top_edge);
+}
+
 test "same-face diagonal adoption keeps boundary edge selection" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,

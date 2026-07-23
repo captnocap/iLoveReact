@@ -1450,19 +1450,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
 /// Select the welded edge whose endpoints sit at (p, q) — how a topo op hands its NEW
 /// edge to the gizmo so the user can move it without re-clicking (req_3114).
 fn selectWeldedEdgeAt(p: [3]f32, q: [3]f32) bool {
-    if (!mesh_edit.ensureTopologyPub()) return false;
-    const eps2: f32 = 1e-8;
-    const n = mesh_edit.edgeCount();
-    var e: u32 = 0;
-    while (e < n) : (e += 1) {
-        const ep = mesh_edit.edgeEndpointsPub(e);
-        const va = mesh_edit.vertPosPub(ep[0]);
-        const vb = mesh_edit.vertPosPub(ep[1]);
-        if ((dist2(va, p) <= eps2 and dist2(vb, q) <= eps2) or
-            (dist2(va, q) <= eps2 and dist2(vb, p) <= eps2))
-            return mesh_edit.selectEdgeByIndex(e, false);
-    }
-    return false;
+    return mesh_edit.focusEdgeByEndpoints(p, q);
 }
 
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
@@ -1503,19 +1491,21 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("extrude edge");
-    const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
-    if (ok) {
-        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
-            if (snap) |*before| _ = journalInstall(before);
-            journalDiscard(&snap);
-            return false;
-        }
-        model_source.setFaceMaterials(materials);
-        _ = selectWeldedEdgeAt(c, d);
-        mesh_edit.setMode(.edge);
-        journalCommit(&snap);
-    } else journalDiscard(&snap);
-    return ok;
+    if (!replaceActiveEditMesh(owned, g_edit_count + 6)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part) or
+        !selectWeldedEdgeAt(c, d))
+    {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return false;
+    }
+    model_source.setFaceMaterials(materials);
+    mesh_edit.setMode(.edge);
+    journalCommit(&snap);
+    return true;
 }
 
 fn findUniqueIndex(items: []const u32, count: u32, v: u32) ?usize {

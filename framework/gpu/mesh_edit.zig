@@ -1039,6 +1039,43 @@ pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {
     return true;
 }
 
+// An extrusion rebuilds the resident soup before it can hand its new outer edge
+// back to the editor.  The rebuilt positions can differ by a few float ULPs, so
+// selection uses this deliberately small squared endpoint tolerance rather than
+// requiring byte-identical coordinates.
+const EXTRUSION_EDGE_FOCUS_ENDPOINT_DISTANCE_SQ: f32 = 1e-6;
+
+fn pointDistanceSq(a: [3]f32, b: [3]f32) f32 {
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    const dz = a[2] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+/// Replace the active edge selection with the boundary edge at these endpoints.
+/// Topology operations use this to keep their newly created outer edge ready for
+/// the next operation without a second click.
+pub fn focusEdgeByEndpoints(p: [3]f32, q: [3]f32) bool {
+    if (!ensureTopology()) return false;
+    var closest: ?u32 = null;
+    var closest_error = std.math.inf(f32);
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!edgeIsBoundaryPub(edge) or !edgeInScopePub(edge)) continue;
+        const endpoints = edgeEndpointsPub(edge);
+        const a = vertPosPub(endpoints[0]);
+        const b = vertPosPub(endpoints[1]);
+        const direct = pointDistanceSq(a, p) + pointDistanceSq(b, q);
+        const reversed = pointDistanceSq(a, q) + pointDistanceSq(b, p);
+        const distance_error = @min(direct, reversed);
+        if (distance_error <= EXTRUSION_EDGE_FOCUS_ENDPOINT_DISTANCE_SQ and distance_error < closest_error) {
+            closest = edge;
+            closest_error = distance_error;
+        }
+    }
+    return if (closest) |focused_edge| selectEdgeByIndex(focused_edge, false) else false;
+}
+
 // ── Topology ─────────────────────────────────────────────────────────────────────
 /// Face mode needs ONLY a per-face selection bit array — never the welded vertex/edge
 /// topology. Building the weld on the first face click is wasted work that made selection
