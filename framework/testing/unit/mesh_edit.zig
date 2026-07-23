@@ -333,6 +333,59 @@ test "dissolving an irregular four-quad grid drops seam verts and rebuilds a cle
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
 }
 
+test "loop cut ignores collapsed quad members in an unrelated outliner part" {
+    const clean = [4][3]f32{
+        .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 2, 0 }, .{ 0, 2, 0 },
+    };
+    const collapsed = [3][3]f32{
+        .{ 10, 0, 0 }, .{ 12, 0, 0 }, .{ 12, 2, 0 },
+    };
+    const collapsed_first = [3][3]f32{
+        .{ 20, 0, 0 }, .{ 22, 0, 0 }, .{ 22, 2, 0 },
+    };
+    var soup = [_]f32{0} ** (6 * 3 * 8);
+    const Emit = struct {
+        fn triangle(out: []f32, triangle_index: usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+            }
+        }
+    };
+    Emit.triangle(soup[0..], 0, clean[0], clean[1], clean[2]);
+    Emit.triangle(soup[0..], 1, clean[0], clean[2], clean[3]);
+    // This is the exact collapsed-quad form from the car_seat fixture: the
+    // second render triangle repeats one corner and has zero area.
+    Emit.triangle(soup[0..], 2, collapsed[0], collapsed[1], collapsed[2]);
+    Emit.triangle(soup[0..], 3, collapsed[0], collapsed[2], collapsed[0]);
+    // The same collapse can put the zero-area member first; both orders occur in
+    // the saved car_seat geometry from the report.
+    Emit.triangle(soup[0..], 4, collapsed_first[0], collapsed_first[1], collapsed_first[1]);
+    Emit.triangle(soup[0..], 5, collapsed_first[0], collapsed_first[1], collapsed_first[2]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2 };
+    const parts = [_]u32{ 0, 0, 1, 1, 2, 2 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 6, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    try testing.expectEqual(@as(usize, 3), indexed.faces.items.len);
+    try testing.expectEqual(@as(usize, 3), indexed.faces.items[1].vertices.items.len);
+    try testing.expectEqual(@as(usize, 3), indexed.faces.items[2].vertices.items.len);
+    const selected = [_]bool{ true, true, false, false, false, false };
+    try testing.expect(try indexed.loopCut(selected[0..], 0, 1, 0.5));
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    var collapsed_triangles: u32 = 0;
+    for (lowered.parts, lowered.groups, lowered.source_triangles) |part, group, source| {
+        if (part == 1 or part == 2) {
+            collapsed_triangles += 1;
+            try testing.expectEqual(part, group);
+            try testing.expectEqual(if (part == 1) @as(u32, 2) else @as(u32, 5), source);
+        }
+    }
+    try testing.expectEqual(@as(u32, 2), collapsed_triangles);
+}
+
 test "same-face diagonal adoption keeps boundary edge selection" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,

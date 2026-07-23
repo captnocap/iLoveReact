@@ -302,6 +302,13 @@ pub const Mesh = struct {
         return (@as(u64, @min(a, b)) << 32) | @as(u64, @max(a, b));
     }
 
+    fn triangleIsCollapsed(corner_vertex: []const u32, triangle: u32) bool {
+        const a = corner_vertex[triangle * 3];
+        const b = corner_vertex[triangle * 3 + 1];
+        const c = corner_vertex[triangle * 3 + 2];
+        return a == b or b == c or c == a;
+    }
+
     fn buildFaceFromBucket(
         allocator: std.mem.Allocator,
         interleaved: []const f32,
@@ -323,16 +330,36 @@ pub const Mesh = struct {
             return face;
         }
 
+        // Provenance drives colour inheritance after lowering.  When the first
+        // render member is the collapsed half of a quad, prefer the first real
+        // member while retaining every source id for whole-authored-face selection.
+        for (face.source_triangles.items, 0..) |triangle, index| {
+            if (triangleIsCollapsed(corner_vertex, triangle)) continue;
+            if (index != 0) std.mem.swap(u32, &face.source_triangles.items[0], &face.source_triangles.items[index]);
+            break;
+        }
+
         var uses = std.AutoHashMapUnmanaged(u64, u32).empty;
         defer uses.deinit(allocator);
         var directed = std.ArrayListUnmanaged(BoundaryEdge).empty;
         defer directed.deinit(allocator);
+        // A collapsed authored quad is still a valid face: lowering it produces
+        // one real triangle plus one zero-area triangle with a repeated stable
+        // vertex. That zero-area member contributes no boundary. Counting its
+        // two opposite copies of the surviving diagonal made the diagonal look
+        // three-used, leaving only two boundary edges and rejecting the ENTIRE
+        // composite mesh at import (req_3365).
         for (bucket.triangles.items) |triangle| {
+            if (triangleIsCollapsed(corner_vertex, triangle)) continue;
+            const triangle_vertices = [3]u32{
+                corner_vertex[triangle * 3],
+                corner_vertex[triangle * 3 + 1],
+                corner_vertex[triangle * 3 + 2],
+            };
             var corner: u32 = 0;
             while (corner < 3) : (corner += 1) {
-                const from = corner_vertex[triangle * 3 + corner];
-                const to = corner_vertex[triangle * 3 + (corner + 1) % 3];
-                if (from == to) continue;
+                const from = triangle_vertices[corner];
+                const to = triangle_vertices[(corner + 1) % 3];
                 const key = edgeKey(from, to);
                 const entry = try uses.getOrPut(allocator, key);
                 if (!entry.found_existing) entry.value_ptr.* = 0;
