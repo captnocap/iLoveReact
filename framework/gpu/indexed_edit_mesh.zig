@@ -13,6 +13,12 @@ pub const NO_MATERIAL: u32 = std.math.maxInt(u32);
 const IMPORT_WELD_SCALE: f32 = 1024.0;
 const IMPORT_WELD_EPS: f32 = 1.0 / IMPORT_WELD_SCALE;
 const MIRROR_MATCH_SCALE: f32 = 1000.0;
+// Merge Faces is a planar dissolve, not a general polygon stitch. A permissive
+// normal gate can turn a bent perimeter into a fan whose diagonals cut through the
+// model even when its output triangle count happens to match the input.
+const MERGE_FACE_NORMAL_DOT_MIN: f32 = 0.9999;
+const MERGE_FACE_PLANE_ABS_EPS: f32 = IMPORT_WELD_EPS * 2.0;
+const MERGE_FACE_PLANE_REL_EPS: f32 = 0.00001;
 
 pub const Vec2 = [2]f32;
 pub const Vec3 = [3]f32;
@@ -137,6 +143,46 @@ pub const Mesh = struct {
         try out.render_triangles.appendSlice(mesh.allocator, mesh.render_triangles.items);
         for (mesh.faces.items) |*face| try out.faces.append(mesh.allocator, try face.clone(mesh.allocator));
         return out;
+    }
+
+    /// True only when this cached indexed topology describes the CURRENT resident
+    /// triangle metadata. Group-only operations can leave positions unchanged while
+    /// replacing authored group ids or part ownership; reusing that cache would lower
+    /// the old ownership table back over the new document.
+    pub fn residentMetadataMatches(
+        mesh: *const Mesh,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+    ) bool {
+        if (mesh.render_triangles.items.len != tri_count) return false;
+        if (groups) |rows| if (rows.len < tri_count) return false;
+        if (parts) |rows| if (rows.len < tri_count) return false;
+        if (materials) |rows| if (rows.len < tri_count) return false;
+
+        const seen = mesh.allocator.alloc(bool, tri_count) catch return false;
+        defer mesh.allocator.free(seen);
+        @memset(seen, false);
+        var seen_count: u32 = 0;
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.source_triangles.items) |triangle| {
+                if (triangle >= tri_count or seen[triangle]) return false;
+                const expected_group = if (groups) |rows| rows[triangle] else NO_GROUP;
+                const expected_part = if (parts) |rows| rows[triangle] else NO_PART;
+                const expected_material = if (materials) |rows| rows[triangle] else NO_MATERIAL;
+                if (face.group != expected_group or
+                    face.part != expected_part or
+                    face.material != expected_material)
+                {
+                    return false;
+                }
+                seen[triangle] = true;
+                seen_count += 1;
+            }
+        }
+        return seen_count == tri_count;
     }
 
     const WeldKey = struct {
@@ -911,6 +957,33 @@ pub const Mesh = struct {
         return changed;
     }
 
+    fn selectedFacesAreCoplanar(mesh: *const Mesh, selected: []const u32) bool {
+        if (selected.len == 0) return false;
+        const reference = &mesh.faces.items[selected[0]];
+        if (reference.vertices.items.len < 3) return false;
+        const reference_normal = faceNormal(mesh, reference);
+        if (length3(reference_normal) < 0.5) return false;
+        const reference_point = mesh.vertices.items[reference.vertices.items[0]].position;
+
+        var extent: f32 = 1.0;
+        for (selected) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            for (face.vertices.items) |vertex_id| {
+                extent = @max(extent, length3(sub3(mesh.vertices.items[vertex_id].position, reference_point)));
+            }
+        }
+        const plane_tolerance = @max(MERGE_FACE_PLANE_ABS_EPS, extent * MERGE_FACE_PLANE_REL_EPS);
+        for (selected) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            if (dot3(faceNormal(mesh, face), reference_normal) < MERGE_FACE_NORMAL_DOT_MIN) return false;
+            for (face.vertices.items) |vertex_id| {
+                const offset = sub3(mesh.vertices.items[vertex_id].position, reference_point);
+                if (@abs(dot3(offset, reference_normal)) > plane_tolerance) return false;
+            }
+        }
+        return true;
+    }
+
     /// Dissolve a connected coplanar face selection into one ordered boundary face.
     /// Shared seams cancel by vertex-id edge keys; no position reconstruction occurs.
     pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !bool {
@@ -920,12 +993,12 @@ pub const Mesh = struct {
             if (faceFullySelected(face, selected_triangles)) try selected.append(mesh.allocator, face.id);
         }
         if (selected.items.len < 2) return false;
-        const reference_normal = faceNormal(mesh, &mesh.faces.items[selected.items[0]]);
         const reference_part = mesh.faces.items[selected.items[0]].part;
         for (selected.items) |face_id| {
             const face = &mesh.faces.items[face_id];
-            if (face.part != reference_part or dot3(faceNormal(mesh, face), reference_normal) < 0.5) return false;
+            if (face.part != reference_part) return false;
         }
+        if (!selectedFacesAreCoplanar(mesh, selected.items)) return false;
 
         const Directed = struct { from: u32, to: u32, uv: Vec2, key: u64 };
         var uses = std.AutoHashMapUnmanaged(u64, u32).empty;

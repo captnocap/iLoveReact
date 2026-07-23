@@ -603,7 +603,14 @@ fn cloneIndexedEditMeshOrImport(
     parts: ?[]const u32,
     materials: ?[]const u32,
 ) ?indexed_edit_mesh.Mesh {
-    if (g_indexed_edit_mesh) |*mesh| return mesh.clone() catch null;
+    if (g_indexed_edit_mesh) |*mesh| {
+        if (mesh.residentMetadataMatches(tri_count, groups, parts, materials)) {
+            return mesh.clone() catch null;
+        }
+        // A structural group/part edit can leave the triangle positions untouched.
+        // Never lower the cached pre-edit ownership back over the live document.
+        clearIndexedEditMesh();
+    }
     return indexed_edit_mesh.Mesh.fromSoupWithMaterials(std.heap.c_allocator, verts, tri_count, groups, parts, materials) catch null;
 }
 
@@ -1693,10 +1700,20 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return;
     const fc = g_edit_count / 3;
     if (face_part.len < fc) return;
+    for (face_part[0..fc], 0..) |owner, face| {
+        if (owner == model_source.NO_PART or owner < part_count) continue;
+        log.print("[mesh] refused part-range normalization: face {d} carries stale owner {d} but only {d} parts exist (req_3374)\n", .{
+            face, owner, part_count,
+        });
+        return;
+    }
     const groups = captureFaceGroups() orelse return;
     defer std.heap.c_allocator.free(groups);
     const new_groups = std.heap.c_allocator.alloc(u32, fc) catch return;
     defer std.heap.c_allocator.free(new_groups);
+    // Every valid owner is rewritten below. Keeping a defined fallback makes this
+    // transaction fail closed if a future ownership class is added without a pass.
+    @memcpy(new_groups, groups);
     var ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer ranges.deinit(std.heap.c_allocator);
 
@@ -1728,6 +1745,7 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     }
     model_source.setFaceGroups(new_groups);
     model_source.setPartRanges(ranges.items);
+    clearIndexedEditMesh();
     mesh_edit.reset(); // part membership moved → weld/scope masks are stale
     _ = refreshPaintLayout(); // islands key off the grouping
 }
@@ -4107,6 +4125,7 @@ pub fn meshDetachSelection() AppendResult {
         } else |_| {}
     }
     _ = ensureDisjointPartRanges("detach faces");
+    clearIndexedEditMesh();
     mesh_edit.reset();
     _ = refreshPaintLayout();
     journalCommit(&snap);
@@ -4179,6 +4198,7 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
         }
     }
     _ = ensureDisjointPartRanges("merge parts");
+    clearIndexedEditMesh();
     mesh_edit.reset(); // part membership moved → weld re-keys
     _ = refreshPaintLayout();
     journalCommit(&snap);

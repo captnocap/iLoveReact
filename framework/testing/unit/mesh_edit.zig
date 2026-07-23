@@ -333,6 +333,104 @@ test "dissolving an irregular four-quad grid drops seam verts and rebuilds a cle
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
 }
 
+test "merge faces rejects a connected bent surface without changing its topology" {
+    // Both authored quads point generally the same way and share one full edge, but
+    // the second rises out of the first quad's plane. The old 0.5 normal-dot gate
+    // accepted this 27-degree bend and lowered its six-corner perimeter as one fan,
+    // changing physical diagonals even though the displayed triangle count happened
+    // to stay constant (the bookshelf corruption from req_3374).
+    const flat = [4][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    const bent = [4][3]f32{
+        .{ 1, 1, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0.5 }, .{ 2, 1, 0.5 },
+    };
+    var soup = [_]f32{0} ** (4 * 3 * 8);
+    const Emit = struct {
+        fn triangle(out: []f32, triangle_index: usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+            }
+        }
+    };
+    Emit.triangle(soup[0..], 0, flat[0], flat[1], flat[2]);
+    Emit.triangle(soup[0..], 1, flat[0], flat[2], flat[3]);
+    Emit.triangle(soup[0..], 2, bent[0], bent[1], bent[2]);
+    Emit.triangle(soup[0..], 3, bent[0], bent[2], bent[3]);
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const parts = [_]u32{ 0, 0, 0, 0 };
+    const selected = [_]bool{true} ** 4;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 4, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    try testing.expect(!(try indexed.mergeSelected(selected[0..])));
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 4), lowered.tri_count);
+    try testing.expectEqualSlices(u32, groups[0..], lowered.groups);
+    try testing.expectEqualSlices(u32, parts[0..], lowered.parts);
+}
+
+test "merge faces discards cached ownership after structural part merge" {
+    // Two coplanar quads begin in independent Outliner parts, so their coincident
+    // seam deliberately has separate stable vertex ids in the cached topology.
+    // Merge Parts changes only resident groups/ownership. Merge Faces must reject
+    // that stale cache, re-import under the sole surviving part, and then dissolve
+    // the now-shared seam without resurrecting either old part id.
+    const left = [4][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    const right = [4][3]f32{
+        .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ 1, 1, 0 },
+    };
+    var soup = [_]f32{0} ** (4 * 3 * 8);
+    const Emit = struct {
+        fn triangle(out: []f32, triangle_index: usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }, 0..) |position, corner| {
+                const base = (triangle_index * 3 + corner) * 8;
+                @memcpy(out[base .. base + 3], position[0..]);
+            }
+        }
+    };
+    Emit.triangle(soup[0..], 0, left[0], left[1], left[2]);
+    Emit.triangle(soup[0..], 1, left[0], left[2], left[3]);
+    Emit.triangle(soup[0..], 2, right[0], right[1], right[2]);
+    Emit.triangle(soup[0..], 3, right[0], right[2], right[3]);
+
+    const old_groups = [_]u32{ 0, 0, 1, 1 };
+    const old_parts = [_]u32{ 0, 0, 1, 1 };
+    const merged_groups = [_]u32{ 8, 8, 9, 9 };
+    const merged_parts = [_]u32{ 0, 0, 0, 0 };
+    var cached = try indexed_edit_mesh.Mesh.fromSoup(
+        testing.allocator,
+        soup[0..],
+        4,
+        old_groups[0..],
+        old_parts[0..],
+    );
+    defer cached.deinit();
+    try testing.expect(cached.residentMetadataMatches(4, old_groups[0..], old_parts[0..], null));
+    try testing.expect(!cached.residentMetadataMatches(4, merged_groups[0..], merged_parts[0..], null));
+
+    var refreshed = try indexed_edit_mesh.Mesh.fromSoup(
+        testing.allocator,
+        soup[0..],
+        4,
+        merged_groups[0..],
+        merged_parts[0..],
+    );
+    defer refreshed.deinit();
+    try testing.expect(refreshed.residentMetadataMatches(4, merged_groups[0..], merged_parts[0..], null));
+    const selected = [_]bool{true} ** 4;
+    try testing.expect(try refreshed.mergeSelected(selected[0..]));
+    var lowered = try refreshed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
+    try testing.expectEqualSlices(u32, &.{ 8, 8 }, lowered.groups);
+    try testing.expectEqualSlices(u32, &.{ 0, 0 }, lowered.parts);
+}
+
 test "loop cut ignores collapsed quad members in an unrelated outliner part" {
     const clean = [4][3]f32{
         .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 2, 0 }, .{ 0, 2, 0 },
