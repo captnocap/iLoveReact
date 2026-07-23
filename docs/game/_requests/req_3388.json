@@ -1,0 +1,30 @@
+{
+  "id": "req_3388",
+  "at": "2026-07-23T15:49:37.871Z",
+  "origin": "codex:019f7e48",
+  "text": "with the uv mapping i want to be able to click on the faces on the mesh and be able to collect all the uvs for the faces in the same orientation since it breaks shit up into millions of pieces",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T15:49:52.041Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T16:00:43.681Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a direction-sensitive UV orientation collection action: select one 3D face, then collect every in-scope UV island projected from the same signed axis. The native face selection remains authoritative, so the 3D highlight and scattered UV pieces stay synchronized and move as one multi-island group. Exposed from both mesh and UV right-click menus; opposite-facing islands remain separate.",
+  "shas": [
+    "054ed8db6"
+  ],
+  "resolvedAt": "2026-07-23T16:00:43.680Z"
+}
