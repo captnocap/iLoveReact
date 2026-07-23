@@ -1,0 +1,30 @@
+{
+  "id": "req_3391",
+  "at": "2026-07-23T19:37:35.460Z",
+  "origin": "codex:019f7e48",
+  "text": "it would help if, when i click on a uv / face, that the verts of the face take different colors and do the same on the uv so i can very quickly see which vert is which since most of them are upside down and backwards",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T19:37:52.574Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T19:51:04.280Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Face selection now carries exact welded corner identities into the UV atlas snapshot. Selected mesh corners and their corresponding UV corners render with the same deterministic, high-contrast color; shared seam copies intentionally reuse the same color, so mirrored or reversed mappings are immediately legible. The native overlay is capped at 256 selected render triangles and UV markers only rebuild on selection or layout changes.",
+  "shas": [
+    "5229567a0"
+  ],
+  "resolvedAt": "2026-07-23T19:51:04.280Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3390",
+  "at": "2026-07-23T19:32:56.997Z",
+  "origin": "codex:019f7e48",
+  "text": "is there any way to, say i have 4 legs on a table, and i wand all 4 sides of the leg to be the same thing, so am i able to merge them all into one uv to map rather than 8 of them i mean 16* of them",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T19:33:07.606Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T19:50:58.785Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Repeated table-leg faces can now share one authored UV footprint without merging mesh topology. Shift-select all 16 repeated UV islands, keep the intended footprint active, then use UV canvas right-click → Arrange Selected Islands → Stack on Active Island. Every selected face maps into the active bounds and samples the same texture pixels; the operation participates in UV undo/redo.",
+  "shas": [
+    "5229567a0"
+  ],
+  "resolvedAt": "2026-07-23T19:50:58.785Z"
+}
