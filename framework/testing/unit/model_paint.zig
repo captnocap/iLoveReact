@@ -327,6 +327,21 @@ test "append after stale topology preserves the raster and isolates the fresh pa
     try testing.expectEqual(model_paint.DEFAULT_FACE, model_paint.faceColor(2).?);
 }
 
+test "atlas coordinate revision changes on repack but not preserving adoption" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(179, &quad, 6);
+    defer model_paint.test_support.clearTargetAndSource();
+
+    const original_revision = model_paint.layoutRevision();
+    try testing.expect(original_revision != 0);
+
+    try testing.expect(model_paint.setTargetPreservingAtlas(180, &quad, 6, &.{ 0, 0 }));
+    try testing.expectEqual(original_revision, model_paint.layoutRevision());
+
+    model_paint.rebuildLayout(&quad, 6);
+    try testing.expect(model_paint.layoutRevision() != original_revision);
+}
+
 test "deleting a fresh part preserves the surviving authored group's exact paint" {
     var joined: [12 * 8]f32 = undefined;
     @memcpy(joined[0 .. 6 * 8], &QUAD_VERTS);

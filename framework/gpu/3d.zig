@@ -2375,12 +2375,10 @@ pub fn meshDeleteGroupRange(lo: u32, hi: u32) bool {
     return deleteMaskedFaces(verts, tri_count, mask, "delete part");
 }
 
-/// Structural part operations preserve every surviving face's stable paint key
-/// (authored group + intra-group ordinal). Arm both halves of the same-document
-/// target swap together: exact atlas texels for the immediate image, and the full
-/// stroke program/journal for later save, replay, and paint undo. Topology edits that
-/// can change a survivor's key must not use this path.
-fn beginPaintStableReplace() void {
+/// Preserve the current atlas through a target swap, keyed by authored face group.
+/// This is also the safe fallback when history restores UVs from an atlas coordinate
+/// space that a later hide/show repack has already replaced.
+fn beginPaintRasterCarry() void {
     // An empty target can be the midpoint of delete-last → undo. In that state the
     // previous target's carry is the only exact raster left; do not erase it by trying
     // to snapshot a nonexistent live atlas.
@@ -2389,11 +2387,24 @@ fn beginPaintStableReplace() void {
         model_paint.snapshotAtlasForCarry();
         mesh_edit.resumeFaceTint();
     }
+}
+
+fn cancelPaintRasterCarry() void {
+    model_paint.dropAtlasCarry();
+}
+
+/// Structural part operations preserve every surviving face's stable paint key
+/// (authored group + intra-group ordinal). Arm both halves of the same-document
+/// target swap together: exact atlas texels for the immediate image, and the full
+/// stroke program/journal for later save, replay, and paint undo. Topology edits that
+/// can change a survivor's key must not carry the program through this path.
+fn beginPaintStableReplace() void {
+    beginPaintRasterCarry();
     paint_program.carryProgramAcrossNextTarget();
 }
 
 fn cancelPaintStableReplace() void {
-    model_paint.dropAtlasCarry();
+    cancelPaintRasterCarry();
     paint_program.cancelProgramCarry();
 }
 
@@ -3036,6 +3047,7 @@ const JournalEntry = struct {
     atlas: ?JournalAtlas,
     paint_state: ?*paint_program.JournalState,
     paint_layout_stale: bool,
+    paint_layout_revision: u64,
     note: ?[]u8,
     label: []const u8, // static string — the op that FOLLOWED this snapshot
     action_id: u32 = 0,
@@ -3176,6 +3188,7 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .atlas = null,
         .paint_state = null,
         .paint_layout_stale = g_paint_layout_stale,
+        .paint_layout_revision = model_paint.layoutRevision(),
         .note = null,
         .label = label,
         .action_id = 0,
@@ -3541,23 +3554,36 @@ fn journalInstall(e: *const JournalEntry) bool {
     else
         false;
     // Indexed structural installs keep the atlas raster alive and journal snapshots
-    // retain their exact interleaved UVs. Undo/redo must use those UVs too; running the
-    // generic replace here would repack before the snapshot's stale flag is restored.
+    // retain their exact interleaved UVs. Reuse that raster only while it is still the
+    // SAME coordinate space the snapshot recorded. Hide/show performs a group-keyed
+    // repack; installing older UVs over that later raster makes opaque faces sample
+    // transparent shelf padding (req_3364).
+    const same_atlas_coordinates = e.paint_layout_revision == model_paint.layoutRevision();
     const preserve_indexed_atlas = invalidates_layout and
+        same_atlas_coordinates and
         e.count >= 3 and
         model_paint.atlas() != null and
         e.colors != null;
     // Part-only journals add/remove whole stable groups; survivor paint identity is
-    // unchanged, so undo/redo must preserve exact pixels AND the durable program.
-    // Other topology journals may rewrite identity and keep the conservative reset.
+    // unchanged, so undo/redo preserves exact pixels AND the durable program. Other
+    // topology journals may rewrite program identity, but when their old coordinate
+    // space is gone they still need a group-keyed raster carry through the rebuild;
+    // snapshot colours seed any restored-only face.
     const paint_stable = !preserve_indexed_atlas and paintStableJournalLabel(e.label);
-    if (paint_stable) beginPaintStableReplace();
+    const carry_repacked_atlas = !preserve_indexed_atlas and invalidates_layout;
+    if (paint_stable)
+        beginPaintStableReplace()
+    else if (carry_repacked_atlas)
+        beginPaintRasterCarry();
     const installed = if (preserve_indexed_atlas)
         replaceActiveEditMeshPreservingAtlas(vcopy, e.count, e.groups, e.colors.?)
     else
         replaceActiveEditMesh(vcopy, e.count);
     if (!installed) {
-        if (paint_stable) cancelPaintStableReplace();
+        if (paint_stable)
+            cancelPaintStableReplace()
+        else if (carry_repacked_atlas)
+            cancelPaintRasterCarry();
         return false;
     }
     // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).

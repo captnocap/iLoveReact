@@ -41,6 +41,12 @@ var g_atlas_h: u32 = 0;
 // The island layout (paint_islands.zig): one island per authored face, sized by its
 // physical footprint × density. corner_uv is the face→atlas map every paint op uses.
 var g_layout: ?paint_islands.Layout = null;
+// Monotonic identity of the atlas COORDINATE SPACE. A full island rebuild moves
+// UV rectangles and advances this value; setTargetPreservingAtlas deliberately
+// does not because it adopts geometry into the existing raster coordinates.
+// Mesh-history snapshots use it to decide whether their stored UVs may still
+// sample the live raster byte-for-byte or need a group-keyed carry/repack first.
+var g_layout_revision: u64 = 0;
 // island → its triangles, CSR-packed: island i's triangles are
 // g_isl_tris[g_isl_start[i] .. g_isl_start[i+1]]. Stamp clipping walks these — a dab
 // is clipped to the island's whole silhouette, so strokes cross a quad's diagonal.
@@ -80,6 +86,15 @@ pub const OPAQUE_ALPHA_MIN: u8 = 250;
 
 pub fn isGlassAlpha(alpha: u8) bool {
     return alpha < OPAQUE_ALPHA_MIN;
+}
+
+pub fn layoutRevision() u64 {
+    return g_layout_revision;
+}
+
+fn advanceLayoutRevision() void {
+    g_layout_revision +%= 1;
+    if (g_layout_revision == 0) g_layout_revision = 1;
 }
 
 fn faceAlpha(face: u32) u8 {
@@ -624,6 +639,7 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     }
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1); // the whole fresh atlas needs its first upload
+    advanceLayoutRevision();
 }
 
 pub fn clear() void {
@@ -2615,6 +2631,7 @@ test "topology adoption preserves the live atlas bytes and supplied UVs" {
     defer test_support.clearTargetAndSource();
 
     const before_atlas = atlas() orelse return error.TestUnexpectedResult;
+    const before_layout_revision = layoutRevision();
     const before = try std.testing.allocator.dupe(u8, before_atlas.rgba);
     defer std.testing.allocator.free(before);
     if (g_rgba) |rgba| {
@@ -2636,6 +2653,7 @@ test "topology adoption preserves the live atlas bytes and supplied UVs" {
     try std.testing.expectEqual(before_atlas.h, after.h);
     try std.testing.expectEqualSlices(u8, before, after.rgba);
     try std.testing.expectEqualSlices(f32, &supplied_uvs, &edited);
+    try std.testing.expectEqual(before_layout_revision, layoutRevision());
     try std.testing.expectEqual(@as(u32, 4), faceCount());
     try std.testing.expect(isTarget(7002));
     try std.testing.expectEqual(@as(usize, 2), g_layout.?.islands.len);
