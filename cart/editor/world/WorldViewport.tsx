@@ -26,6 +26,7 @@ import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
 import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pieceScaleOf, pickAuthoredPlacement, PIECE_MODULE_METERS, PIECE_SCALE_LIMITS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
+import { findVertexSnap, type VertexSnapHit } from './vertexSnap';
 import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
@@ -530,11 +531,25 @@ export default function WorldViewport(props: {
       if (panTimerRef.current) { clearTimeout(panTimerRef.current); panTimerRef.current = null; }
       heldRef.current.clear();
     };
+    // (the V snap key rides its own subscription below — WASD owns this one)
     // Subscribe ONCE on mount: onPanKeyDown/onPanKeyUp just wrap the module key bus and panStep is
     // stable, so re-subscribing per render is both unnecessary and harmful — it would clear the
     // held-key set mid-pan on any unrelated re-render and stall the camera.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Held V = vertex snapping (req_3378): while a prop is gizmo- or Move-dragged,
+  // its cursor-nearest vertex locks onto the nearest placed-piece vertex. Same
+  // key bus as WASD; only the drag mappings read the flag.
+  const vertexSnapHeldRef = useRef(false);
+  useEffect(() => {
+    const offDown = onPanKeyDown((key) => { if (key === 'v') vertexSnapHeldRef.current = true; });
+    const offUp = onPanKeyUp((key) => { if (key === 'v') vertexSnapHeldRef.current = false; });
+    return () => { offDown(); offUp(); vertexSnapHeldRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The live lock, for the overlay marker: set while a drag is snapped, null otherwise.
+  const [vertexSnapMark, setVertexSnapMark] = useState<VertexSnapHit | null>(null);
 
   const nativePaintRouteRef = useRef<{ nodeId: number; enabled: boolean } | null>(null);
   const setNativePaintRoute = useCallback((enabled: boolean) => {
@@ -875,6 +890,29 @@ export default function WorldViewport(props: {
     return ground ? { kind: 'ground', x: ground.x, y: ground.terrainY, z: ground.z } : null;
   }, [groundUnder, pickFloraSurfaceAt]);
 
+  // Vertex snap for the FREE Move drag (req_3378): props only (grid pieces keep
+  // their module/edge slot semantics), the whole lock delta applies. Shared by
+  // the 30Hz preview and the release commit so the drop is exactly the preview.
+  const applyMoveVertexSnap = useCallback((target: PlacedPiece, px: number, py: number): { target: PlacedPiece; hit: VertexSnapHit | null } => {
+    if (!vertexSnapHeldRef.current || pieceKindOf(target.pieceId) !== 'prop') return { target, hit: null };
+    const hit = findVertexSnap(target, stage.worldRay(px, py, rectRef.current), piecesRef.current);
+    if (!hit) return { target, hit: null };
+    return {
+      target: { ...target, x: target.x + hit.dx, y: Math.max(0, target.y + hit.dy), z: target.z + hit.dz },
+      hit,
+    };
+  }, [stage]);
+
+  // The overlay marker only re-renders when the LOCK changes, not per mouse tick.
+  const publishSnapMark = useCallback((hit: VertexSnapHit | null) => {
+    setVertexSnapMark((prev) => {
+      if (!prev && !hit) return prev;
+      if (prev && hit
+        && prev.target.x === hit.target.x && prev.target.y === hit.target.y && prev.target.z === hit.target.z) return prev;
+      return hit;
+    });
+  }, []);
+
   const onDown = useCallback((e: any) => {
     const p = local(e);
     const liveModifiers = currentModifiers();
@@ -968,6 +1006,7 @@ export default function WorldViewport(props: {
     if (gd) {
       const fine = currentModifiers().shift;
       let next = gd.preview;
+      let snapMark: VertexSnapHit | null = null;
       if ((gd.handle === 'x' || gd.handle === 'y' || gd.handle === 'z') && gd.axis) {
         // Pixels along the projected axis ÷ px-per-metre = world metres.
         const alongPx = (p.x - gd.startMouse.x) * gd.axis.x + (p.y - gd.startMouse.y) * gd.axis.y;
@@ -976,6 +1015,17 @@ export default function WorldViewport(props: {
         next = gd.handle === 'x' ? { ...gd.piece, x: gd.piece.x + meters }
           : gd.handle === 'z' ? { ...gd.piece, z: gd.piece.z + meters }
           : { ...gd.piece, y: Math.max(0, gd.piece.y + meters) };
+        // Held V (req_3378): vertex snap, constrained to the dragged axis — take
+        // only that component of the lock delta so the arm stays an arm.
+        if (vertexSnapHeldRef.current) {
+          const hit = findVertexSnap(next, stage.worldRay(p.x, p.y, rectRef.current), piecesRef.current);
+          if (hit) {
+            next = gd.handle === 'x' ? { ...next, x: next.x + hit.dx }
+              : gd.handle === 'z' ? { ...next, z: next.z + hit.dz }
+              : { ...next, y: Math.max(0, next.y + hit.dy) };
+            snapMark = hit;
+          }
+        }
       } else if (gd.handle === 'ring') {
         const nowAngle = gizmoWorldAngleAt(p.x, p.y, gd.piece);
         if (gd.startWorldAngleDeg !== null && nowAngle !== null) {
@@ -997,6 +1047,7 @@ export default function WorldViewport(props: {
         gd.preview = next;
         setGizmoPreview(next);
       }
+      publishSnapMark(snapMark);
       return;
     }
     const d = dragRef.current;
@@ -1039,16 +1090,19 @@ export default function WorldViewport(props: {
         d.move.previewAtMs = now;
         const gp = groundUnder(p.x, p.y);
         if (gp) {
-          const target = resolveMovedPlacement(
+          const resolved = resolveMovedPlacement(
             d.move.piece,
             d.move.piece.x + (gp.x - d.move.anchorX),
             d.move.piece.z + (gp.z - d.move.anchorZ),
             gp.terrainY,
             mapRenderedHeightMax,
           );
-          if (!samePieceTransform(d.move.target, target)) {
-            d.move.target = target;
-            setMovePreview(target);
+          // Held V (req_3378): the Move drag is free, so the lock applies whole.
+          const snapped = resolved ? applyMoveVertexSnap(resolved, p.x, p.y) : { target: resolved, hit: null };
+          publishSnapMark(snapped.hit);
+          if (!samePieceTransform(d.move.target, snapped.target)) {
+            d.move.target = snapped.target;
+            setMovePreview(snapped.target);
           }
         }
         return;
@@ -1086,9 +1140,10 @@ export default function WorldViewport(props: {
       }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, props.floor, paintFaceAt, floraSampleAt]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt]);
 
   const onUp = useCallback((e: any) => {
+    publishSnapMark(null); // any release retires the vertex-snap marker
     // Gizmo release (req_3367): commit the previewed transform ONCE through the
     // same undoable move command the Move tool uses (scale rides the transform).
     const gd = gizmoDragRef.current;
@@ -1110,8 +1165,9 @@ export default function WorldViewport(props: {
     const movePointer = d?.move ? local(e) : null;
     const moveGround = d?.move && movePointer ? groundUnder(movePointer.x, movePointer.y) : null;
     // Commit the exact release point even when the bounded preview has not yet
-    // sampled this last mouse event.
-    const moveTarget = d?.move && moveGround
+    // sampled this last mouse event. The vertex-snap lock (req_3378) applies
+    // here too, so the drop is exactly what the snapped preview showed.
+    const moveResolved = d?.move && moveGround
       ? resolveMovedPlacement(
         d.move.piece,
         d.move.piece.x + (moveGround.x - d.move.anchorX),
@@ -1120,6 +1176,9 @@ export default function WorldViewport(props: {
         mapRenderedHeightMax,
       )
       : null;
+    const moveTarget = moveResolved && movePointer
+      ? applyMoveVertexSnap(moveResolved, movePointer.x, movePointer.y).target
+      : moveResolved;
     setMovePreview(null);
     if (!d) { console.warn('[place] up with no down — click dropped'); return; }
     if (d.flora) {
@@ -1191,7 +1250,7 @@ export default function WorldViewport(props: {
       [{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }],
       { mode: 'click', inputAtMs: Date.now(), pointerX: d.x0, pointerY: d.y0 },
     );
-  }, [resolveSnap, groundUnder, props.onPlace, props.onMove, local, stage, pickPieceAt]);
+  }, [resolveSnap, groundUnder, applyMoveVertexSnap, publishSnapMark, props.onPlace, props.onMove, local, stage, pickPieceAt]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
   // mode and report it up with the WINDOW coords (the root-mounted menu lands at the
@@ -1343,6 +1402,25 @@ export default function WorldViewport(props: {
           ax + h, ay - h, ax + h, ay + h,
           ax + h, ay + h, ax - h, ay + h,
           ax - h, ay + h, ax - h, ay - h,
+        ],
+      });
+    }
+  }
+  // Vertex-snap lock marker (req_3378): a gold diamond on the vertex the drag
+  // locked onto — visible for gizmo AND Move-tool snaps (its own push, so it
+  // draws even when the gizmo handles aren't up).
+  if (vertexSnapMark) {
+    const mark = stage.project(vertexSnapMark.target.x, vertexSnapMark.target.y, vertexSnapMark.target.z, rect);
+    if (mark) {
+      const r = 6;
+      gizmoLines.push({
+        color: GIZMO_ACTIVE_COLOR,
+        width: 2.2,
+        segs: [
+          mark.x, mark.y - r, mark.x + r, mark.y,
+          mark.x + r, mark.y, mark.x, mark.y + r,
+          mark.x, mark.y + r, mark.x - r, mark.y,
+          mark.x - r, mark.y, mark.x, mark.y - r,
         ],
       });
     }

@@ -4976,13 +4976,17 @@ pub fn run(config_in: AppConfig) !void {
                         if (me_gizmo_dragging) {
                             // Stepped drags (req_2759): no modifier = whole modeling units,
                             // Shift = the fine grid, Ctrl (or Alt, the old studio's key) = freeform.
+                            // Held V (req_3378) = vertex snapping on the MOVE tool.
                             const gmod = c.SDL_GetModState();
+                            const gkeys = c.SDL_GetKeyboardState(null);
+                            const snap_vertex = gkeys != null and gkeys[c.SDL_SCANCODE_V];
                             _ = r3d.meshGizmoDrag(
                                 me_gizmo_axis,
                                 event.motion.xrel,
                                 event.motion.yrel,
                                 (gmod & c.SDL_KMOD_SHIFT) != 0,
                                 (gmod & (c.SDL_KMOD_CTRL | c.SDL_KMOD_ALT)) != 0,
+                                snap_vertex,
                             );
                             state_mod.markDirty();
                             continue;

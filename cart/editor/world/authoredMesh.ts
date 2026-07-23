@@ -28,6 +28,13 @@ export function groundRebase(vertices: Float32Array): Float32Array {
   return out;
 }
 
+// Bumped on every mesh re-cache so derived caches elsewhere (the vertex-snap
+// sets, req_3378) can expire without a cross-module listener.
+let meshRevision = 0;
+export function authoredMeshRevision(): number {
+  return meshRevision;
+}
+
 /** Stash a model's resolved vertices under its bare id (call at export). Every
  *  derived value for that revision expires with it: keeping an old AABB beside
  *  new vertices renders the correct mesh inside the previous export's ghost. */
@@ -35,6 +42,7 @@ export function cacheAuthoredMesh(modelId: string, vertices: Float32Array): void
   if (vertices.length < 8) return;
   CACHE.set(modelId, groundRebase(vertices));
   BOUNDS_CACHE.delete(modelId);
+  meshRevision += 1;
 }
 
 /** The vertices for an authored piece's model: the export-time capture, else the

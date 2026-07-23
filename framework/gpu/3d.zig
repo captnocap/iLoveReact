@@ -4976,6 +4976,8 @@ pub fn meshGizmoFinish() bool {
     g_gizmo_readout_len = 0; // the drag is ending — drop the live step readout
     g_gizmo_pivot0 = null;
     g_gizmo_active = -1; // release drops the gold glow
+    g_gizmo_snap_ref0 = null; // req_3378: the vertex-snap lock ends with the drag
+    g_gizmo_snap_marker = null;
     const before = g_guard_before orelse {
         journalDiscard(&g_gizmo_snap);
         return false;
@@ -5594,6 +5596,13 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const core_col = if (g_gizmo_tool == .scale) (if (hub_active) GIZMO_ACTIVE else GIZMO_HUB_FILL) else GIZMO_DARK;
         capsules.drawCapsule(pc[0] + ox, pc[1] + oy, pc[0] + ox, pc[1] + oy, core_col[0], core_col[1], core_col[2], 1.0, GIZMO_CENTER_PX * 2 - 2);
     }
+    // Vertex-snap lock (req_3378): the target vertex the held-V drag is flush
+    // against, marked gold — the same active color as the grabbed handle.
+    if (g_gizmo_snap_marker) |v| {
+        if (model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, v)) |mp| {
+            overlayDot(mp[0] + ox, mp[1] + oy, GIZMO_ACTIVE[0], GIZMO_ACTIVE[1], GIZMO_ACTIVE[2], 7);
+        }
+    }
     // Live step readout (req_2759): the drag's current SNAPPED value beside the pivot —
     // "+3.00u" / "+15°" / "×1.20" — so the grid the drag clicks along can be read off.
     if (g_gizmo_readout_len > 0) {
@@ -5771,6 +5780,12 @@ var g_gizmo_readout_len: usize = 0;
 var g_gizmo_active: i32 = -1; // the grabbed handle's hit code (gold glow); -1 = none
 var g_gizmo_cursor: [2]f32 = .{ 0, 0 }; // live cursor (vp-local px), accumulated from grab
 var g_gizmo_start_dist: f32 = 40; // cursor→anchor px at grab — the uniform drag's ×1 base
+// Vertex snapping (req_3378, held V during a MOVE drag): the selection's snap
+// reference vertex frozen at grab, and the locked target vertex the overlay
+// marks gold. Both live only for one drag.
+var g_gizmo_snap_ref0: ?[3]f32 = null;
+var g_gizmo_snap_marker: ?[3]f32 = null;
+const GIZMO_SNAP_PX: f32 = 18; // screen radius the lock engages within
 
 fn snapStep(value: f32, step: f32, fine: f32, shift: bool, free: bool) f32 {
     if (free) return value;
@@ -5787,15 +5802,81 @@ fn setGizmoReadout(comptime fmt: []const u8, args: anytype) void {
     g_gizmo_readout_len = line.len;
 }
 
+/// The selection's vertex nearest its pivot — held V drags snap BY this vertex
+/// (the predictable Blender read: single selected vert = that vert). Null only
+/// when nothing is selected; the pivot itself is the fallback.
+fn selectionSnapReference() ?[3]f32 {
+    const pivot = mesh_edit.selectionPivot() orelse return null;
+    if (!mesh_edit.ensureTopologyPub()) return pivot;
+    var best: ?[3]f32 = null;
+    var best_d: f32 = std.math.floatMax(f32);
+    var i: u32 = 0;
+    const n = mesh_edit.vertCount();
+    while (i < n) : (i += 1) {
+        if (!mesh_edit.vertSelectedPub(i) or !mesh_edit.vertInScopePub(i)) continue;
+        const p = mesh_edit.vertPosPub(i);
+        const ddx = p[0] - pivot[0];
+        const ddy = p[1] - pivot[1];
+        const ddz = p[2] - pivot[2];
+        const d = ddx * ddx + ddy * ddy + ddz * ddz;
+        if (d < best_d) {
+            best_d = d;
+            best = p;
+        }
+    }
+    return best orelse pivot;
+}
+
+const VertexLock = struct { t: f32, vertex: [3]f32 };
+
+/// Held-V candidate for an axis-constrained MOVE drag: among UNSELECTED in-scope
+/// vertices, the one nearest the reference vertex's current drag position (within
+/// a screen-px radius converted through the axis' px-per-unit). The lock value is
+/// that vertex's exact projection onto the drag axis — the reference vertex lands
+/// flush with it, the perpendicular offset stays (the arm remains an arm).
+fn vertexSnapAlongAxis(axis: [3]f32, px_per_unit: f32) ?VertexLock {
+    const ref0 = g_gizmo_snap_ref0 orelse return null;
+    if (!mesh_edit.ensureTopologyPub()) return null;
+    const radius = GIZMO_SNAP_PX / @max(px_per_unit, 0.0001);
+    const at: [3]f32 = .{
+        ref0[0] + axis[0] * g_gizmo_raw,
+        ref0[1] + axis[1] * g_gizmo_raw,
+        ref0[2] + axis[2] * g_gizmo_raw,
+    };
+    var best: ?VertexLock = null;
+    var best_d = radius * radius;
+    var i: u32 = 0;
+    const n = mesh_edit.vertCount();
+    while (i < n) : (i += 1) {
+        if (mesh_edit.vertSelectedPub(i)) continue; // never lock onto the moving selection
+        if (!mesh_edit.vertInScopePub(i)) continue;
+        const p = mesh_edit.vertPosPub(i);
+        const ddx = p[0] - at[0];
+        const ddy = p[1] - at[1];
+        const ddz = p[2] - at[2];
+        const d = ddx * ddx + ddy * ddy + ddz * ddz;
+        if (d < best_d) {
+            best_d = d;
+            best = .{
+                .t = (p[0] - ref0[0]) * axis[0] + (p[1] - ref0[1]) * axis[1] + (p[2] - ref0[2]) * axis[2],
+                .vertex = p,
+            };
+        }
+    }
+    return best;
+}
+
 /// Reset the stepped-drag accumulator — the grab site (meshGizmoBegin) calls this.
 fn gizmoDragReset() void {
     g_gizmo_raw = 0;
     g_gizmo_applied = if (g_gizmo_tool == .scale) 1.0 else 0.0;
     g_gizmo_pivot0 = mesh_edit.selectionPivot();
     g_gizmo_readout_len = 0;
+    g_gizmo_snap_ref0 = selectionSnapReference();
+    g_gizmo_snap_marker = null;
 }
 
-pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool) bool {
+pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, snap_vertex: bool) bool {
     if (axis_code < 0 or axis_code > GIZMO_NEG_BASE + 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
     g_gizmo_active = axis_code; // the grabbed handle glows gold until release
     // The FROZEN grab pivot keeps cumulative rotate/scale exact (each step re-derives
@@ -5838,9 +5919,22 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool) 
     switch (g_gizmo_tool) {
         .move => {
             g_gizmo_raw += px * move_wpp;
-            const target = snapStep(g_gizmo_raw, GIZMO_STEP_M, GIZMO_STEP_FINE_M, shift, free);
-            const units = target / GIZMO_STEP_M;
-            setGizmoReadout("{s}{d:.2}u", .{ if (units < 0) "-" else "+", @abs(units) });
+            var target = snapStep(g_gizmo_raw, GIZMO_STEP_M, GIZMO_STEP_FINE_M, shift, free);
+            // Held V (req_3378): the reference vertex locks onto the nearest
+            // unselected vertex's exact axis projection — flush, not stepped.
+            g_gizmo_snap_marker = null;
+            if (snap_vertex) {
+                if (vertexSnapAlongAxis(av, s.px_per_unit)) |lock| {
+                    target = lock.t;
+                    g_gizmo_snap_marker = lock.vertex;
+                }
+            }
+            if (g_gizmo_snap_marker != null) {
+                setGizmoReadout("snap {d:.2}u", .{target / GIZMO_STEP_M});
+            } else {
+                const units = target / GIZMO_STEP_M;
+                setGizmoReadout("{s}{d:.2}u", .{ if (units < 0) "-" else "+", @abs(units) });
+            }
             const d = target - g_gizmo_applied;
             if (@abs(d) < 1e-7) return false;
             const m = mesh_edit.translateSelection(vmul(av, d));
