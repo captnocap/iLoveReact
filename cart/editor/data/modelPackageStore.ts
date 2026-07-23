@@ -496,9 +496,28 @@ export function loadMaterializedPackages(): ModelPackage[] {
       const text = readFile(`${dir}/manifest.json`);
       if (!text) continue;
       try {
-        const manifest = parseManifest(text);
-        indexPackageDir(manifest.kind, manifest.id, dir);
-        out.push(manifestToPackage(manifest, dir));
+        let manifest = parseManifest(text);
+        let home = dir;
+        // Rename-follow SELF-HEAL (req_3369): a rename typed in the focus
+        // panel's name field deferred its folder move (req_3246) and nothing
+        // ever settled it, so the folder kept reading as the OLD name
+        // (props/Model_26 holding a model named "body"). This walk is the one
+        // place every manifest passes through — settle any drift here, so the
+        // tree always reads as the names the user gave (req_2735).
+        const want = nameDirFor(manifest.kind, manifest.id, manifest.name);
+        if (want !== dir) {
+          if (movePackageDir(manifest, dir, want)) {
+            home = want;
+            // The move may rewrite viewerPath inside the manifest — re-read
+            // disk truth rather than patching the parse in two places.
+            const movedText = readFile(`${want}/manifest.json`);
+            if (movedText) manifest = parseManifest(movedText);
+          } else {
+            console.error(`[model-packages] '${dir}' carries a stale folder name (model is '${manifest.name}') — move failed, package intact`);
+          }
+        }
+        indexPackageDir(manifest.kind, manifest.id, home);
+        out.push(manifestToPackage(manifest, home));
       } catch {
         // Not a valid manifest — skip this directory, keep the roster intact.
       }

@@ -5329,8 +5329,14 @@ export default function AppFrame() {
   // on screen; an unmaterialized doc keeps the name pending (dirty chip) until its
   // first save applies it. The open doc tab retitles in the same update.
   // The FOLDER move does not ride the keystrokes (req_3246): moving a package home
-  // copies every blob in it, so the rename-follow is deferred to finishRenameModel.
-  const renameModel = (id: string, name: string) =>
+  // copies every blob in it, so the rename-follow settles once after typing ends —
+  // finishRenameModel for the library's rename bar, and a debounced settle below
+  // for the focus panel's name field, which has no end-of-rename event (req_3369:
+  // its renames never settled, so folders kept stale names like props/Model_26
+  // holding a model named "body").
+  const renameSettleTimerRef = useRef<any>(null);
+  const RENAME_SETTLE_DEBOUNCE_MS = 1200;
+  const renameModel = (id: string, name: string) => {
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
       const durable = pkg ? updateManifestIdentity(pkg.kind, id, { name }, { deferRenameFollow: true }) : false;
@@ -5341,6 +5347,14 @@ export default function AppFrame() {
         modelDirty: durable ? prev.modelDirty : { ...prev.modelDirty, [id]: true },
       };
     });
+    if (renameSettleTimerRef.current) clearTimeout(renameSettleTimerRef.current);
+    renameSettleTimerRef.current = setTimeout(() => {
+      renameSettleTimerRef.current = null;
+      const s = stateRef.current;
+      const pkg = effectiveModelPackage(id, s.modelOverrides, s.modelDupes);
+      if (pkg) settleRenamedPackageDir(pkg.kind, id);
+    }, RENAME_SETTLE_DEBOUNCE_MS);
+  };
   const finishRenameModel = () =>
     setState((prev) => {
       const id = prev.modelRenamingId;
