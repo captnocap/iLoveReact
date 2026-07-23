@@ -1017,6 +1017,63 @@ test "solidify keeps a triangulated planar panel parallel at exact thickness" {
     }
 }
 
+test "pen edge wire triangles weld into naked selectable boundary edges" {
+    // The Pen Edges format: one zero-area triangle (a, b, b) per wire segment.
+    // Two segments over three points — P0(0,0,0) → P1(1,0,0) → P2(1,1,0).
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const p0 = [3]f32{ 0, 0, 0 };
+    const p1 = [3]f32{ 1, 0, 0 };
+    const p2 = [3]f32{ 1, 1, 0 };
+    const corners = [6][3]f32{ p0, p1, p1, p1, p2, p2 };
+    for (corners, 0..) |corner, row| {
+        soup[row * 8 + 0] = corner[0];
+        soup[row * 8 + 1] = corner[1];
+        soup[row * 8 + 2] = corner[2];
+    }
+    mesh_edit.test_support.loadGroupedSoup(4407, soup[0..], 6, &.{ 5, 5 });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expect(mesh_edit.ensureTopologyPub());
+    // Three welded vertices, two distinct edges — and BOTH edges must classify as
+    // real boundary edges. Before the per-face incidence dedupe, each degenerate
+    // triangle walked its lone edge twice (incidence 2, same group), which hid the
+    // whole wire as if it were a triangulation diagonal.
+    try testing.expectEqual(@as(u32, 3), mesh_edit.vertCount());
+    try testing.expectEqual(@as(u32, 2), mesh_edit.edgeCount());
+    try testing.expectEqual(@as(u32, 2), mesh_edit.boundaryEdgeCount());
+    try testing.expect(mesh_edit.edgeIsBoundaryPub(0));
+    try testing.expect(mesh_edit.edgeIsBoundaryPub(1));
+    // Both classify WIRE — no rasterizing face touches them, which is what routes
+    // them through the view-mode wire overlay.
+    try testing.expect(mesh_edit.edgeIsWirePub(0));
+    try testing.expect(mesh_edit.edgeIsWirePub(1));
+}
+
+test "a real face's edges never classify as pen wire" {
+    // One genuine triangle (distinct corners) alongside one wire segment.
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const real = [3][3]f32{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 } };
+    const wire_a = [3]f32{ 3, 0, 0 };
+    const wire_b = [3]f32{ 4, 0, 0 };
+    const corners = [6][3]f32{ real[0], real[1], real[2], wire_a, wire_b, wire_b };
+    for (corners, 0..) |corner, row| {
+        soup[row * 8 + 0] = corner[0];
+        soup[row * 8 + 1] = corner[1];
+        soup[row * 8 + 2] = corner[2];
+    }
+    mesh_edit.test_support.loadGroupedSoup(4408, soup[0..], 6, &.{ 1, 2 });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expect(mesh_edit.ensureTopologyPub());
+    try testing.expectEqual(@as(u32, 4), mesh_edit.edgeCount());
+    var wire_edges: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        if (mesh_edit.edgeIsWirePub(edge)) wire_edges += 1;
+    }
+    try testing.expectEqual(@as(u32, 1), wire_edges);
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);

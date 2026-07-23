@@ -1037,6 +1037,22 @@ fn hostMeshAppendPathPlane(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshAppendReturn(info, result);
 }
 
+/// __mesh_append_path_edges(Float32Array normalizedXY, closed, expectedParts) → append JSON.
+/// The Pen Edges tool: the path commits as naked wire edges (no fill face), open or
+/// closed, through the same validated part boundary as every other Add Part.
+fn hostMeshAppendPathEdges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnString(info, "{\"ok\":0}");
+    if (bytes.len % @sizeOf(f32) != 0) return setReturnString(info, "{\"ok\":0}");
+    const closed = (argToI32(info, 1) orelse 0) != 0;
+    const expected_raw = argToI32(info, 2) orelse return setReturnString(info, "{\"ok\":0}");
+    if (expected_raw < 0) return setReturnString(info, "{\"ok\":0}");
+    const points: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const result = scene3d.meshAppendPathWire(points, closed, @intCast(expected_raw));
+    if (result.ok) state.markDirty();
+    setMeshAppendReturn(info, result);
+}
+
 /// __mesh_set_group_hidden(lo, hi, hidden, journal=1) → JSON {"ok","key","count"}.
 /// Hide/show the part in the group range, moving its triangles to/from a host stash
 /// (non-destructive of edits). Cold hydration passes journal=0 because restoring saved
@@ -3482,6 +3498,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
     v8_runtime.registerHostFn("__mesh_append_path_plane", hostMeshAppendPathPlane);
+    v8_runtime.registerHostFn("__mesh_append_path_edges", hostMeshAppendPathEdges);
     v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);
     v8_runtime.registerHostFn("__mesh_undo", hostMeshUndo);
     v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);

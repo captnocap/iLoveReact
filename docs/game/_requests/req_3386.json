@@ -1,0 +1,24 @@
+{
+  "id": "req_3386",
+  "at": "2026-07-23T08:04:19.582Z",
+  "origin": "session:8ff3c6e4",
+  "text": "here is a tool to make in the studio editor: i need to basically have the pen tool that is already there, but i just need the edges retained from it and not the face it creates. Also, that pen tool needs love, it has no ability to really modify anything without accidently placing another point and it then getting all fucked up. also there is no clear depth and then all of a sudden u come out with a face that is completely off from what it looked like, i would treat the points like verts and give them a gizmo for pulling around",
+  "status": "doing",
+  "sessionId": "8ff3c6e4-7cbc-4637-9b58-87cb5e3d7ffd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T08:04:24.441Z",
+      "actor": "fable-pen",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T08:26:52.807Z",
+      "actor": "fable-pen",
+      "kind": "note",
+      "text": "Built the Pen Edges tool + pen overhaul. Zig: path_plane.buildWire commits the pen path as naked wire edges (one zero-area (a,b,b) triangle per segment — welding/gizmo/undo/save all ride the normal part transaction); mesh_edit ensureTopology dedupes per-face edge incidence so wire edges classify as real boundary edges, plus a new wire classification + view-mode overlay pass in 3d.zig so wires stay visible outside edit modes; new door __mesh_append_path_edges. TSX: mesh-path-edges command/tool, ModelView pathEdges mode (open OR closed paths commit), both pen tools now drop straight into vertex mode on commit so every pen point is a gizmo-draggable vert (the depth fix); PenPathOverlay gained an ADD/EDIT lock so grabbing a point can never mint a stray anchor, bigger hit radii. Unit tests: path_plane +2, mesh_edit +2, all green."
+    }
+  ]
+}

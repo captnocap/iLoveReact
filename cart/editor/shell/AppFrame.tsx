@@ -1951,6 +1951,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-rotate') api.gizmo(2);
         else if (commandId === 'mesh-paint') api.paint();
         else if (commandId === 'mesh-path-plane') api.pathPlane();
+        else if (commandId === 'mesh-path-edges') api.pathEdges();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-cam-lock') api.camLock();
@@ -3450,23 +3451,24 @@ export default function AppFrame() {
     if (bridge?.paintLive) bridge.refreshUv?.();
   };
 
-  // A Pen Plane is generated against the live host camera, so its geometry never
-  // takes a cart-side seed detour. Register only the metadata/range that the host
-  // append reports, then focus the new row like every other Add Part flow.
-  const registerPathPlanePart = (range: { lo: number; hi: number }) => {
+  // A Pen Plane / Pen Edges part is generated against the live host camera, so its
+  // geometry never takes a cart-side seed detour. Register only the metadata/range that
+  // the host append reports, then focus the new row like every other Add Part flow.
+  const registerPathPlanePart = (range: { lo: number; hi: number }, kind: 'plane' | 'edges' = 'plane') => {
     const current = stateRef.current;
     const modelId = activePartsModelId(current);
+    const toolName = kind === 'edges' ? 'Pen Edges' : 'Path Plane';
     if (!modelId || range.hi <= range.lo) {
-      setState((prev) => ({ ...prev, status: 'Path Plane was created, but no active model could own its outliner row' }));
+      setState((prev) => ({ ...prev, status: `${toolName} was created, but no active model could own its outliner row` }));
       return;
     }
     const parts = current.modelParts[modelId] ?? [];
     const number = parts.filter((part) => part.id.startsWith('part:path:')).length + 1;
     const placed: ModelPart = {
       id: `part:path:${current.seq}`,
-      name: `Path Plane ${number}`,
+      name: `${toolName} ${number}`,
       visible: true,
-      color: '#ad77ff',
+      color: kind === 'edges' ? '#58e8a6' : '#ad77ff',
       lo: range.lo,
       hi: range.hi,
     };
@@ -3479,7 +3481,9 @@ export default function AppFrame() {
       seq: prev.seq + 1,
       modelParts: { ...prev.modelParts, [modelId]: [...(prev.modelParts[modelId] ?? []), placed] },
       modelActivePartId: placed.id,
-      status: `created ${placed.name} from the closed pen path`,
+      status: kind === 'edges'
+        ? `created ${placed.name} — wire only, pull its verts with the move gizmo`
+        : `created ${placed.name} from the closed pen path`,
     }));
   };
 

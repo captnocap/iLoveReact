@@ -140,6 +140,107 @@ fn cameraRay(camera: Camera, viewport_w: f32, viewport_h: f32, x: f32, y: f32) R
     }) };
 }
 
+/// Project every normalized viewport point onto the plane through the orbit focus,
+/// perpendicular to the view. Null when a point leaves the viewport or its ray
+/// grazes the plane. Caller owns the returned world positions.
+fn projectToFocusPlane(
+    allocator: std.mem.Allocator,
+    points: []const f32,
+    camera: Camera,
+    viewport_w: f32,
+    viewport_h: f32,
+) ?[][3]f32 {
+    const point_count = points.len / 2;
+    const world = allocator.alloc([3]f32, point_count) catch return null;
+    const plane_normal = normalize(sub(camera.target, camera.eye));
+    for (world, 0..) |*destination, index| {
+        const nx = points[index * 2 + 0];
+        const ny = points[index * 2 + 1];
+        if (nx < 0 or nx > 1 or ny < 0 or ny > 1) {
+            allocator.free(world);
+            return null;
+        }
+        const ray = cameraRay(camera, viewport_w, viewport_h, nx * viewport_w, ny * viewport_h);
+        const denominator = dot(ray.d, plane_normal);
+        if (@abs(denominator) <= EPS) {
+            allocator.free(world);
+            return null;
+        }
+        const distance = dot(sub(camera.target, ray.o), plane_normal) / denominator;
+        if (distance <= EPS) {
+            allocator.free(world);
+            return null;
+        }
+        destination.* = .{
+            ray.o[0] + ray.d[0] * distance,
+            ray.o[1] + ray.d[1] * distance,
+            ray.o[2] + ray.d[2] * distance,
+        };
+    }
+    return world;
+}
+
+/// The pen path as naked EDGES: one zero-area render triangle (a, b, b) per segment
+/// carries each wire edge through the ordinary triangle-soup part transaction — no
+/// fill face is authored. mesh_edit's welded topology reads the repeated corner back
+/// as a single real boundary edge, so a committed wire is immediately selectable and
+/// gizmo-draggable vertex by vertex. Open paths are legal; closed adds the return
+/// segment. Consecutive duplicate points contribute no segment.
+pub fn buildWire(
+    allocator: std.mem.Allocator,
+    points: []const f32,
+    closed: bool,
+    camera: Camera,
+    viewport_w: f32,
+    viewport_h: f32,
+) ?Mesh {
+    if (viewport_w <= 0 or viewport_h <= 0) return null;
+    if (points.len < 4 or points.len % 2 != 0) return null;
+    const point_count = points.len / 2;
+    if (closed and point_count < 3) return null;
+    const world = projectToFocusPlane(allocator, points, camera, viewport_w, viewport_h) orelse return null;
+    defer allocator.free(world);
+
+    // The wire's carried normal looks back at the authoring eye — degenerate
+    // triangles never rasterize, but readers of the soup still get a finite one.
+    const normal = normalize(sub(camera.eye, camera.target));
+    const segment_count = if (closed) point_count else point_count - 1;
+    var verts = std.ArrayListUnmanaged(f32).empty;
+    errdefer verts.deinit(allocator);
+    var segments_written: usize = 0;
+    var segment: usize = 0;
+    while (segment < segment_count) : (segment += 1) {
+        const a = world[segment];
+        const b = world[(segment + 1) % point_count];
+        const gap = sub(b, a);
+        if (dot(gap, gap) <= EPS * EPS) continue;
+        const corners = [3][3]f32{ a, b, b };
+        for (corners) |corner| {
+            const row = [8]f32{ corner[0], corner[1], corner[2], normal[0], normal[1], normal[2], 0, 0 };
+            verts.appendSlice(allocator, row[0..]) catch {
+                verts.deinit(allocator);
+                return null;
+            };
+        }
+        segments_written += 1;
+    }
+    if (segments_written == 0) {
+        verts.deinit(allocator);
+        return null;
+    }
+    const groups = allocator.alloc(u32, segments_written) catch {
+        verts.deinit(allocator);
+        return null;
+    };
+    @memset(groups, 0);
+    const owned = verts.toOwnedSlice(allocator) catch {
+        verts.deinit(allocator);
+        allocator.free(groups);
+        return null;
+    };
+    return .{ .verts = owned, .groups = groups };
+}
+
 /// Project and triangulate a normalized viewport path on the camera-focus plane.
 pub fn build(
     allocator: std.mem.Allocator,
@@ -152,24 +253,8 @@ pub fn build(
     const triangles = triangulate(allocator, points) orelse return null;
     defer allocator.free(triangles);
     const point_count = points.len / 2;
-    const world = allocator.alloc([3]f32, point_count) catch return null;
+    const world = projectToFocusPlane(allocator, points, camera, viewport_w, viewport_h) orelse return null;
     defer allocator.free(world);
-    const plane_normal = normalize(sub(camera.target, camera.eye));
-    for (world, 0..) |*destination, index| {
-        const nx = points[index * 2 + 0];
-        const ny = points[index * 2 + 1];
-        if (nx < 0 or nx > 1 or ny < 0 or ny > 1) return null;
-        const ray = cameraRay(camera, viewport_w, viewport_h, nx * viewport_w, ny * viewport_h);
-        const denominator = dot(ray.d, plane_normal);
-        if (@abs(denominator) <= EPS) return null;
-        const distance = dot(sub(camera.target, ray.o), plane_normal) / denominator;
-        if (distance <= EPS) return null;
-        destination.* = .{
-            ray.o[0] + ray.d[0] * distance,
-            ray.o[1] + ray.d[1] * distance,
-            ray.o[2] + ray.d[2] * distance,
-        };
-    }
 
     var min_x: f32 = 1.0;
     var min_y: f32 = 1.0;

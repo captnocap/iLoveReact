@@ -2907,6 +2907,21 @@ pub fn meshAppendPathPlane(points: []const f32, expected_parts: u32) AppendResul
     return meshAppendGroup(plane.verts, @intCast(plane.verts.len / 8), plane.groups, expected_parts);
 }
 
+/// Turn a normalized pen path into naked wire EDGES on the same focus plane — the
+/// Pen Edges tool. No fill face is authored: each segment rides as a zero-area
+/// triangle whose welded topology reads back as one real boundary edge. Open paths
+/// are legal (closed=false skips the return segment); the append goes through the
+/// ordinary part transaction, so undo, save, and outliner ownership treat the wire
+/// exactly like any added part.
+pub fn meshAppendPathWire(points: []const f32, closed: bool, expected_parts: u32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (points.len < 4 or points.len % 2 != 0 or points.len > paint_program.MAX_POLYGON_POINTS * 2) return fail;
+    const camera = path_plane.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    var wire = path_plane.buildWire(std.heap.c_allocator, points, closed, camera, g_paint_vp_w, g_paint_vp_h) orelse return fail;
+    defer wire.deinit(std.heap.c_allocator);
+    return meshAppendGroup(wire.verts, @intCast(wire.verts.len / 8), wire.groups, expected_parts);
+}
+
 fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
     const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
     // An EMPTIED model (req_2806: delete-all is legal) has no paint target but a live
@@ -5333,6 +5348,7 @@ const GIZMO_HIT_PX: f32 = 14; // studio grabPx — click radius around a handle 
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
 const OV_EDGE = [3]f32{ 0.62, 0.70, 0.85 }; // unselected boundary edge (real model edges)
+const OV_WIRE = [3]f32{ 0.35, 0.91, 0.65 }; // naked Pen Edges wire (the tool's #58e8a6 accent)
 // Above this boundary-edge count, skip the overlay edge lines (a huge triangle soup with no
 // grouping would flood the pass) — the GPU wireframe toggle still shows topology.
 const OV_MAX_EDGE_LINES: u32 = 40000;
@@ -6410,6 +6426,21 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         drawFaceSemanticDot(sp[0], sp[1], acc.sel, acc.glass);
     }
 }
+/// Naked Pen Edges wires in plain VIEW mode: a wire edge has no rasterizing face, so
+/// without this pass a committed wire part is invisible the moment the user leaves the
+/// vertex/edge/face tools. Edit modes render the same edges through drawEdgeOverlay.
+fn drawWireEdgesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    if (mesh_edit.boundaryEdgeCount() > OV_MAX_EDGE_LINES) return;
+    const n = mesh_edit.edgeCount();
+    var e: u32 = 0;
+    while (e < n) : (e += 1) {
+        if (!mesh_edit.edgeIsWirePub(e)) continue;
+        const ep = mesh_edit.edgeEndpointsPub(e);
+        const a = ovProject(cam, mesh_edit.vertPosPub(ep[0]), ox, oy) orelse continue;
+        const b = ovProject(cam, mesh_edit.vertPosPub(ep[1]), ox, oy) orelse continue;
+        overlayLine(a[0], a[1], b[0], b[1], OV_WIRE[0], OV_WIRE[1], OV_WIRE[2], 1.6);
+    }
+}
 /// The model's BOUNDARY edges as real lines (Blender/Blockbench style) — triangulation
 /// diagonals stay hidden (req_2367). Vertex/edge modes draw them at full presence; face
 /// mode gets a dimmer pass so authored faces read (and loop-cut previews show, req_2625).
@@ -6739,6 +6770,10 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // Layer 4 (capsules): edges, dots, loop-cut accents, gizmo, marquee.
     if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.ensureTopologyPub()) {
         drawEdgeOverlay(cam, mode, ox, oy);
+    } else if (mode == 0 and !g_paint_session and mesh_edit.ensureTopologyPub()) {
+        // Plain view: only the naked Pen Edges wires — they have no faces to rasterize,
+        // so this is their ONLY visual outside the edit modes. Paint stays quiet (req_2662).
+        drawWireEdgesOverlay(cam, ox, oy);
     }
     if (mode == 3) drawFaceDotsOverlay(cam, ox, oy);
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger

@@ -7,8 +7,8 @@ export const PEN_PATH_TUNING = {
   maxPolygonPoints: 64,
   curveStepPx: 12,
   maxCurveSteps: 16,
-  anchorHitPx: 8,
-  handleHitPx: 7,
+  anchorHitPx: 10,
+  handleHitPx: 9,
 } as const;
 
 export type PenPoint = { x: number; y: number };
@@ -99,13 +99,32 @@ export function flattenClosedPenPath(
   return resampleOpen(closed, maxPoints + 1).slice(0, maxPoints);
 }
 
-export function normalizedPenPolygon(
+/** Flatten an OPEN pen path — same cubic sampling, but the last anchor is a real
+ * endpoint and no return segment exists. The Pen Edges tool commits these. */
+export function flattenOpenPenPath(
   anchors: readonly PenAnchor[],
-  width: number,
-  height: number,
   maxPoints = PEN_PATH_TUNING.maxPolygonPoints,
-): Float32Array {
-  const points = flattenClosedPenPath(anchors, maxPoints);
+): PenPoint[] {
+  if (anchors.length < 2 || maxPoints < 2) return [];
+  const dense: PenPoint[] = [{ x: anchors[0]!.x, y: anchors[0]!.y }];
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const a = anchors[index]!;
+    const b = anchors[index + 1]!;
+    const c1 = finitePoint(a.out) ? a.out : a;
+    const c2 = finitePoint(b.in) ? b.in : b;
+    const steps = Math.max(1, Math.min(
+      PEN_PATH_TUNING.maxCurveSteps,
+      Math.ceil(segmentEstimate(a, b) / PEN_PATH_TUNING.curveStepPx),
+    ));
+    for (let step = 1; step <= steps; step += 1) {
+      dense.push(pointAtCubic(a, c1, c2, b, step / steps));
+    }
+  }
+  if (dense.length <= maxPoints) return dense;
+  return resampleOpen(dense, maxPoints);
+}
+
+function normalizePoints(points: readonly PenPoint[], width: number, height: number): Float32Array {
   const out = new Float32Array(points.length * 2);
   const w = Math.max(1, width);
   const h = Math.max(1, height);
@@ -114,6 +133,27 @@ export function normalizedPenPolygon(
     out[index * 2 + 1] = Math.max(0, Math.min(1, point.y / h));
   });
   return out;
+}
+
+export function normalizedPenPolygon(
+  anchors: readonly PenAnchor[],
+  width: number,
+  height: number,
+  maxPoints = PEN_PATH_TUNING.maxPolygonPoints,
+): Float32Array {
+  return normalizePoints(flattenClosedPenPath(anchors, maxPoints), width, height);
+}
+
+/** The open/closed-aware twin of normalizedPenPolygon for edge-only consumers. */
+export function normalizedPenPath(
+  anchors: readonly PenAnchor[],
+  closed: boolean,
+  width: number,
+  height: number,
+  maxPoints = PEN_PATH_TUNING.maxPolygonPoints,
+): Float32Array {
+  const points = closed ? flattenClosedPenPath(anchors, maxPoints) : flattenOpenPenPath(anchors, maxPoints);
+  return normalizePoints(points, width, height);
 }
 
 export function penPathD(anchors: readonly PenAnchor[], closed: boolean): string {

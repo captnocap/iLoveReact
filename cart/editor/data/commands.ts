@@ -226,6 +226,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-path-plane', menu: 'Edit', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
+  // Pen Edges: the same pen path, committed as naked wire edges (open or closed) with NO
+  // fill face — the outline's anchors become welded verts you pull with the move gizmo.
+  { id: 'mesh-path-edges', menu: 'Edit', scope: 'model', name: 'Pen Edges', icon: 'Spline', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
   // Camera lock (req_2893): freeze the orbit view where the user set it — every camera
@@ -451,7 +454,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -570,7 +573,7 @@ export function isMeshToolCommand(id: string): boolean {
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; focus: boolean; wire: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; pathEdges?: boolean; focus: boolean; wire: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
@@ -583,6 +586,7 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-rotate': return tool.selMode !== 0 && tool.gizmoTool === 2;
     case 'mesh-paint': return tool.paint;
     case 'mesh-path-plane': return tool.pathPlane === true;
+    case 'mesh-path-edges': return tool.pathEdges === true;
     case 'mesh-paint-fill': return tool.paint && tool.brushTool === 'fill';
     case 'mesh-paint-brush': return tool.paint && tool.brushTool === 'brush';
     case 'mesh-paint-pen': return tool.paint && tool.brushTool === 'pen';

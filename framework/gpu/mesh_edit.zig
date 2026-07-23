@@ -109,6 +109,11 @@ var g_edge_count: u32 = 0;
 // carries no grouping at all (a plain triangle soup — every edge is real). Selection and the
 // edit overlay use ONLY boundary edges, so a cube reads as 12 edges, not 18. (req_2367)
 var g_edge_boundary: ?[]bool = null;
+// Per welded edge: is it a naked WIRE edge — contributed ONLY by degenerate (repeated-
+// corner) triangles, the Pen Edges format? Wire edges have no rasterizing face at all,
+// so the view-mode overlay must draw them or the committed wire is invisible outside
+// the edit modes. Cleared the moment any real (non-degenerate) face touches the edge.
+var g_edge_wire: ?[]bool = null;
 // Active edit SCOPE: when set, vertex/edge/face selection AND the overlay only consider faces
 // whose authored group falls in ANY of g_scope_ranges' [lo,hi) pairs — the outliner focusing
 // one part (one range) or a shift-accumulated multi-select (several ranges, req_2659) so you
@@ -690,6 +695,7 @@ pub fn reset() void {
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
     if (g_edge_boundary) |b| alloc.free(b);
+    if (g_edge_wire) |w| alloc.free(w);
     if (g_scope_vert) |s| alloc.free(s);
     if (g_scope_edge) |s| alloc.free(s);
     if (g_affect_vert) |s| alloc.free(s);
@@ -708,6 +714,7 @@ pub fn reset() void {
     g_corner_vert = null;
     g_edges = null;
     g_edge_boundary = null;
+    g_edge_wire = null;
     g_scope_vert = null;
     g_scope_edge = null;
     g_scope_built = 0;
@@ -1310,11 +1317,17 @@ fn ensureTopology() bool {
     // hide). This is what makes a cube read as 12 edges instead of 18.
     g_edge_boundary = alloc.alloc(bool, g_edge_count) catch return false;
     const boundary = g_edge_boundary.?;
+    g_edge_wire = alloc.alloc(bool, g_edge_count) catch return false;
+    const wire = g_edge_wire.?;
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     if (!has_groups) {
         @memset(boundary, true);
+        @memset(wire, false);
     } else {
         @memset(boundary, false);
+        // An edge starts as wire and loses the flag the moment a real (non-degenerate)
+        // face touches it — surviving flags mark Pen Edges wires with no face at all.
+        @memset(wire, true);
         const first_group = alloc.alloc(u32, g_edge_count) catch return false;
         defer alloc.free(first_group);
         const seen = alloc.alloc(bool, g_edge_count) catch return false;
@@ -1326,12 +1339,30 @@ fn ensureTopology() bool {
         f = 0;
         while (f < fc) : (f += 1) {
             const g = model_source.faceGroupOf(f);
+            const ca = corner_vert[f * 3 + 0];
+            const cb = corner_vert[f * 3 + 1];
+            const cc = corner_vert[f * 3 + 2];
+            const face_degenerate = ca == cb or cb == cc or ca == cc;
+            // Count each DISTINCT edge once per face: a degenerate wire triangle
+            // (a, b, b — the Pen Edges format) walks its one real edge twice, and
+            // double-counting would classify every naked pen edge as an internal
+            // diagonal and hide it.
+            var face_edges: [3]u32 = undefined;
+            var face_edge_count: usize = 0;
             var k: u32 = 0;
             while (k < 3) : (k += 1) {
                 const va = corner_vert[f * 3 + k];
                 const vb = corner_vert[f * 3 + (k + 1) % 3];
                 if (va == vb) continue;
                 const idx = emap.get(edgeKey(va, vb)) orelse continue;
+                var repeat = false;
+                for (face_edges[0..face_edge_count]) |prior| {
+                    if (prior == idx) repeat = true;
+                }
+                if (repeat) continue;
+                face_edges[face_edge_count] = idx;
+                face_edge_count += 1;
+                if (!face_degenerate) wire[idx] = false;
                 if (incidence[idx] < std.math.maxInt(u16)) incidence[idx] += 1;
                 if (!seen[idx]) {
                     seen[idx] = true;
@@ -1454,11 +1485,15 @@ pub fn adoptSameFaceTriangulation() bool {
     const new_boundary = alloc.alloc(bool, new_edge_count) catch return false;
     var boundary_adopted = false;
     defer if (!boundary_adopted) alloc.free(new_boundary);
+    const new_wire = alloc.alloc(bool, new_edge_count) catch return false;
+    defer if (!boundary_adopted) alloc.free(new_wire);
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     if (!has_groups) {
         @memset(new_boundary, true);
+        @memset(new_wire, false);
     } else {
         @memset(new_boundary, false);
+        @memset(new_wire, true);
         const first_group = alloc.alloc(u32, new_edge_count) catch return false;
         defer alloc.free(first_group);
         const seen = alloc.alloc(bool, new_edge_count) catch return false;
@@ -1470,12 +1505,28 @@ pub fn adoptSameFaceTriangulation() bool {
         face = 0;
         while (face < face_count) : (face += 1) {
             const group = model_source.faceGroupOf(face);
+            const fa = new_corners[face * 3 + 0];
+            const fb = new_corners[face * 3 + 1];
+            const fc_corner = new_corners[face * 3 + 2];
+            const face_degenerate = fa == fb or fb == fc_corner or fa == fc_corner;
+            // Same distinct-edge-per-face rule as ensureTopology: a degenerate Pen
+            // Edges triangle must not double-count its lone edge into hiding.
+            var face_edges: [3]u32 = undefined;
+            var face_edge_count: usize = 0;
             var corner: u32 = 0;
             while (corner < 3) : (corner += 1) {
                 const a = new_corners[face * 3 + corner];
                 const b = new_corners[face * 3 + (corner + 1) % 3];
                 if (a == b) continue;
                 const edge = edge_map.get(edgeKey(a, b)) orelse continue;
+                var repeat = false;
+                for (face_edges[0..face_edge_count]) |prior| {
+                    if (prior == edge) repeat = true;
+                }
+                if (repeat) continue;
+                face_edges[face_edge_count] = edge;
+                face_edge_count += 1;
+                if (!face_degenerate) new_wire[edge] = false;
                 if (incidence[edge] < std.math.maxInt(u16)) incidence[edge] += 1;
                 if (!seen[edge]) {
                     seen[edge] = true;
@@ -1506,6 +1557,7 @@ pub fn adoptSameFaceTriangulation() bool {
     if (g_corner_vert) |old| alloc.free(old);
     if (g_edges) |old| alloc.free(old);
     if (g_edge_boundary) |old| alloc.free(old);
+    if (g_edge_wire) |old| alloc.free(old);
     if (g_sel_edge) |old| alloc.free(old);
     if (g_scope_vert) |old| alloc.free(old);
     if (g_scope_edge) |old| alloc.free(old);
@@ -1513,6 +1565,7 @@ pub fn adoptSameFaceTriangulation() bool {
     g_corner_vert = new_corners;
     g_edges = owned_edges;
     g_edge_boundary = new_boundary;
+    g_edge_wire = new_wire;
     g_sel_edge = new_selection;
     g_scope_vert = null;
     g_scope_edge = null;
@@ -1532,6 +1585,13 @@ pub fn adoptSameFaceTriangulation() bool {
 pub fn edgeIsBoundaryPub(e: u32) bool {
     const b = g_edge_boundary orelse return true;
     return e >= b.len or b[e];
+}
+
+/// A naked Pen Edges wire edge — no rasterizing face anywhere on it. The view-mode
+/// overlay draws these so a committed wire stays visible outside the edit modes.
+pub fn edgeIsWirePub(e: u32) bool {
+    const w = g_edge_wire orelse return false;
+    return e < w.len and w[e];
 }
 
 /// Count of boundary edges (the ones selection + the overlay actually use).

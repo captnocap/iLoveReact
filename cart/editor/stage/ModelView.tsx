@@ -107,7 +107,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -173,6 +173,7 @@ export type ModelToolApi = {
   scaleBy: (factor: number) => boolean;
   paint: () => void;
   pathPlane: () => void;
+  pathEdges: () => void;
   focus: () => void;
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
@@ -255,9 +256,10 @@ export type ModelViewProps = {
   // Fired after a file-parts mount with each part's authored-group range in the freshly
   // loaded host mesh — the shell stamps these onto its outliner parts (lo/hi).
   onPartRanges?: (ranges: PartRange[]) => void;
-  // A path-plane append is born inside the host; report its fresh range so the
-  // shell can add the matching outliner row without recreating geometry.
-  onPathPlaneCreated?: (range: PartRange) => void;
+  // A path-plane / pen-edges append is born inside the host; report its fresh range so
+  // the shell can add the matching outliner row without recreating geometry. `kind`
+  // names which pen tool committed it ('plane' fills a face, 'edges' is wire only).
+  onPathPlaneCreated?: (range: PartRange, kind?: 'plane' | 'edges') => void;
   // The model's package identity, so the viewer can find its saved paintings on disk and
   // restore the latest instead of re-prompting for a new atlas every open (req_2526).
   paintTarget?: PaintTarget;
@@ -485,6 +487,8 @@ const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array, expec
 };
 const meshAppendPathPlane = (points: Float32Array, expectedPartCount: number) =>
   readTopoResult(host.__mesh_append_path_plane?.(points, expectedPartCount));
+const meshAppendPathEdges = (points: Float32Array, closed: boolean, expectedPartCount: number) =>
+  readTopoResult(host.__mesh_append_path_edges?.(points, closed ? 1 : 0, expectedPartCount));
 const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean, journal = true) =>
   readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0, journal ? 1 : 0));
 // ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
@@ -705,6 +709,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
+  const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
   // View bookmarks (req_3067/req_3074): named orbit poses the user pins and jumps back
@@ -1061,6 +1066,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (mode !== 0) {
       setPaintMode(false);
       setPathPlaneMode(false);
+      setPathEdgesMode(false);
       setFocusMode(false);
       meshFocusTool(false);
     }
@@ -1073,6 +1079,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setSelMode(m);
     setPaintMode(false);
     setPathPlaneMode(false);
+    setPathEdgesMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     // Topology is shown by the host's boundary-edge overlay (real model edges, no
@@ -1249,6 +1256,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     host.__mesh_paint_session?.(0);
     setPaintMode(false);
     setPathPlaneMode(false);
+    setPathEdgesMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     const ok = host.__model_uv_island_select?.(index, additive ? 1 : 0) === 1;
@@ -1264,6 +1272,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     host.__mesh_paint_session?.(0);
     setPaintMode(false);
     setPathPlaneMode(false);
+    setPathEdgesMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     const ok = host.__mesh_edit_select_face?.(face, additive ? 1 : 0) === 1;
@@ -1384,6 +1393,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   const enterPaint = () => {
     setPathPlaneMode(false);
+    setPathEdgesMode(false);
     setFocusMode(false);
     meshFocusTool(false);
     setSelMode(0);
@@ -1466,7 +1476,27 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     meshFocusTool(false);
     setSelMode(0);
     meshSetMode(0);
+    setPathEdgesMode(false);
     setPathPlaneMode((active) => !active);
+  };
+  const togglePathEdges = () => {
+    if (!model) return;
+    setPaintMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    setSelMode(0);
+    meshSetMode(0);
+    setPathPlaneMode(false);
+    setPathEdgesMode((active) => !active);
+  };
+  // Both pen commits land their anchors as welded verts; dropping straight into vertex
+  // mode makes every pen point immediately draggable with the move gizmo (the depth
+  // story: lay the outline flat, then pull real depth vertex by vertex).
+  const enterVertexModeOnPenCommit = () => {
+    setPathPlaneMode(false);
+    setPathEdgesMode(false);
+    chooseGizmoTool(0);
+    chooseSelMode(1);
   };
   // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
   const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
@@ -1486,7 +1516,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setAtlasPrompt(false);
     enterPaint();
   };
-  const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setPathPlaneMode(false); setSelMode(0); meshSetMode(0); } return nv; });
+  const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setPathPlaneMode(false); setPathEdgesMode(false); setSelMode(0); meshSetMode(0); } return nv; });
   // Camera lock is a pure view toggle — it doesn't leave the current tool/mode; the
   // host gate is what freezes the orbit. Pushed on every change AND at mount, so a
   // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
@@ -1639,6 +1669,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     scaleBy: meshScaleBy,
     paint: togglePaint,
     pathPlane: togglePathPlane,
+    pathEdges: togglePathEdges,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     camLock: toggleCamLock,
@@ -1843,8 +1874,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -2678,10 +2709,36 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               partRangesRef.current = [...partRangesRef.current, range];
               meshSetPartRanges(partRangesRef.current);
             }
-            onPathPlaneCreated?.(range);
+            onPathPlaneCreated?.(range, 'plane');
             onDocumentMutated?.();
             setError(null);
-            setPathPlaneMode(false);
+            enterVertexModeOnPenCommit();
+          }}
+        />
+      ) : null}
+
+      {model && pathEdgesMode ? (
+        <PenPathOverlay
+          resetKey={`path-edges:${model.key}:${penRevision}`}
+          accent="#58e8a6"
+          label="Pen Edges · open or closed path · commits edges only, no face"
+          allowOpenConfirm
+          onCancel={() => setPathEdgesMode(false)}
+          onConfirm={(points, closedPath) => {
+            const result = meshAppendPathEdges(points, closedPath, partRangesRef.current.length);
+            if (!adoptMesh(result) || result?.lo == null || result?.hi == null) {
+              setError('Pen Edges refused — draw at least one segment and keep the model document active');
+              return;
+            }
+            const range = { lo: result.lo, hi: result.hi };
+            if (!resyncPartRanges()) {
+              partRangesRef.current = [...partRangesRef.current, range];
+              meshSetPartRanges(partRangesRef.current);
+            }
+            onPathPlaneCreated?.(range, 'edges');
+            onDocumentMutated?.();
+            setError(null);
+            enterVertexModeOnPenCommit();
           }}
         />
       ) : null}

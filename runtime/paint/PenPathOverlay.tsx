@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable, Row, Text } from '../primitives';
 import {
-  normalizedPenPolygon,
+  normalizedPenPath,
   penHandleLinesD,
   penPathD,
   PEN_PATH_TUNING,
@@ -24,17 +24,22 @@ function mirrored(point: PenPoint, around: PenPoint): PenPoint {
 
 /** Known-editor pen interaction shared by flat paint and the 3D mesh stage:
  * click adds a corner, click-drag gives it symmetric Bezier handles, clicking
- * the first anchor closes, and the separate Confirm button commits. */
+ * the first anchor closes, and the separate Confirm button commits. The EDIT
+ * mode chip locks out new anchors so grabbing a point can never misfire into
+ * placing one; allowOpenConfirm lets edge-only consumers commit an unclosed
+ * path (onConfirm's second argument reports which shape was committed). */
 export function PenPathOverlay(props: {
-  onConfirm: (normalizedPoints: Float32Array) => void;
+  onConfirm: (normalizedPoints: Float32Array, closed: boolean) => void;
   onCancel: () => void;
   resetKey?: string | number;
   label?: string;
   accent?: string;
+  allowOpenConfirm?: boolean;
 }) {
   const accent = props.accent ?? '#58d8e8';
   const [anchors, setAnchors] = useState<PenAnchor[]>([]);
   const [closed, setClosed] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [rect, setRect] = useState({ x: 0, y: 0, width: 1, height: 1 });
   const gestureRef = useRef<Gesture | null>(null);
   const anchorsRef = useRef(anchors);
@@ -43,6 +48,7 @@ export function PenPathOverlay(props: {
   useEffect(() => {
     setAnchors([]);
     setClosed(false);
+    setEditing(false);
     gestureRef.current = null;
   }, [props.resetKey]);
 
@@ -66,7 +72,7 @@ export function PenPathOverlay(props: {
   const onDown = (event: any) => {
     const point = localPoint(event);
     const found = hit(point);
-    if (found?.kind === 'anchor' && found.index === 0 && anchorsRef.current.length >= 3 && !closed) {
+    if (found?.kind === 'anchor' && found.index === 0 && anchorsRef.current.length >= 3 && !closed && !editing) {
       setClosed(true);
       return;
     }
@@ -77,7 +83,9 @@ export function PenPathOverlay(props: {
       } else gestureRef.current = found;
       return;
     }
-    if (closed || anchorsRef.current.length >= PEN_PATH_TUNING.maxAnchors) return;
+    // EDIT locks placement: an empty-space press that missed its grab does nothing
+    // instead of quietly minting a stray anchor.
+    if (editing || closed || anchorsRef.current.length >= PEN_PATH_TUNING.maxAnchors) return;
     const index = anchorsRef.current.length;
     setAnchors((current) => [...current, { x: point.x, y: point.y }]);
     gestureRef.current = { kind: 'new-handle', index };
@@ -111,10 +119,18 @@ export function PenPathOverlay(props: {
     if (closed) { setClosed(false); return; }
     setAnchors((current) => current.slice(0, -1));
   };
+  const canConfirmOpen = props.allowOpenConfirm === true && !closed && anchors.length >= 2;
   const confirm = () => {
-    if (!closed || anchorsRef.current.length < 3) return;
-    const polygon = normalizedPenPolygon(anchorsRef.current, rect.width, rect.height);
-    if (polygon.length >= 6) props.onConfirm(polygon);
+    const current = anchorsRef.current;
+    if (closed && current.length >= 3) {
+      const polygon = normalizedPenPath(current, true, rect.width, rect.height);
+      if (polygon.length >= 6) props.onConfirm(polygon, true);
+      return;
+    }
+    if (props.allowOpenConfirm === true && !closed && current.length >= 2) {
+      const line = normalizedPenPath(current, false, rect.width, rect.height);
+      if (line.length >= 4) props.onConfirm(line, false);
+    }
   };
 
   const handlesD = penHandleLinesD(anchors);
@@ -133,6 +149,7 @@ export function PenPathOverlay(props: {
           if (key === 'escape') props.onCancel();
           else if (key === 'backspace' || key === 'delete') undoPoint();
           else if (key === 'enter') confirm();
+          else if (key === 'tab' || key === 'e') setEditing((mode) => !mode);
         }}
         focusable
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
@@ -149,10 +166,11 @@ export function PenPathOverlay(props: {
         ) : null)))}
       </Pressable>
       <Row style={{ position: 'absolute', left: 12, bottom: 12, alignItems: 'center', gap: 6, padding: 6, borderRadius: 7, backgroundColor: 'rgba(12,15,21,0.94)', borderWidth: 1, borderColor: '#313a49' }}>
-        <Text style={{ color: '#aeb8c7', fontSize: 9, marginLeft: 2 }}>{closed ? `${anchors.length} anchors · edit or confirm` : props.label ?? 'Click corners · drag for curves · click gold anchor to close'}</Text>
+        <Text style={{ color: '#aeb8c7', fontSize: 9, marginLeft: 2 }}>{closed ? `${anchors.length} anchors · edit or confirm` : editing ? 'EDIT · drag anchors and handles · no new points' : props.label ?? 'Click corners · drag for curves · click gold anchor to close'}</Text>
+        <Pressable onPress={() => setEditing((mode) => !mode)} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: editing ? accent : '#202631' }}><Text style={{ color: editing ? '#081015' : '#d8dee9', fontSize: 9, fontWeight: '800' }}>{editing ? 'EDIT' : 'ADD'}</Text></Pressable>
         <Pressable onPress={undoPoint} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: '#202631' }}><Text style={{ color: '#d8dee9', fontSize: 9, fontWeight: '800' }}>{closed ? 'REOPEN' : 'UNDO POINT'}</Text></Pressable>
         {!closed ? <Pressable onPress={() => { if (anchors.length >= 3) setClosed(true); }} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: anchors.length >= 3 ? '#263546' : '#1a1e25' }}><Text style={{ color: anchors.length >= 3 ? '#d8dee9' : '#6f7784', fontSize: 9, fontWeight: '800' }}>CLOSE</Text></Pressable> : null}
-        {closed ? <Pressable onPress={confirm} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: accent }}><Text style={{ color: '#081015', fontSize: 9, fontWeight: '900' }}>CONFIRM</Text></Pressable> : null}
+        {closed || canConfirmOpen ? <Pressable onPress={confirm} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: accent }}><Text style={{ color: '#081015', fontSize: 9, fontWeight: '900' }}>CONFIRM</Text></Pressable> : null}
         <Pressable onPress={props.onCancel} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: '#2a2025' }}><Text style={{ color: '#efa9af', fontSize: 9, fontWeight: '800' }}>CANCEL</Text></Pressable>
       </Row>
     </Box>
