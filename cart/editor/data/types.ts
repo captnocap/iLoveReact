@@ -176,6 +176,9 @@ export type ModelToolApi = {
   // Merge the selected vertices at their center (req_3382); edge mode collapses
   // the selected edges' endpoints. Degenerated faces leave in the same undo step.
   weld: () => void;
+  // Collect the UV islands projected from the same direction as the selected
+  // authored face. Returns the resulting authored-face count.
+  selectUvOrientation: () => number;
   // Reverse selected face winding so its normal points to the opposite side.
   flipSelection: () => boolean;
   loopCut: () => void;

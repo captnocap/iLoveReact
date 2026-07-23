@@ -69,7 +69,7 @@ type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
 const UV_CONTEXT_MENU_TUNING = {
   widthPx: 220,
   edgePx: 4,
-  baseHeightPx: 278,
+  baseHeightPx: 304,
   rowHeightPx: 26,
   expandedRows: { transform: 3, arrange: 5, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
 } as const;
@@ -777,6 +777,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     host.__clipboard_set?.(saved.path);
     setNote(`${saved.note} · path copied`);
   };
+  const collectUvOrientation = () => {
+    const count = bridge.selectUvOrientation();
+    if (count === 0) {
+      setNote('select one face on the 3D mesh first, then collect its UV orientation');
+      return;
+    }
+    setSelectionMode('island');
+    setSelectedFace(null);
+    setNote(`collected ${count} same-orientation faces · their UV islands now move as one set`);
+  };
   const runMenuAction = (action: () => void) => {
     action();
     setMenuGroup(null);
@@ -1122,6 +1132,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
           <UvContextRow icon="MousePointer2" label="Island Selection" detail={selectionMode === 'island' ? 'ACTIVE' : 'DOUBLE'} active={selectionMode === 'island'} onPress={() => runMenuAction(() => setSelectionScope('island'))} />
           <UvContextRow icon="Triangle" label="Face Isolation" detail={selectionMode === 'face' ? 'ACTIVE' : 'DOUBLE'} active={selectionMode === 'face'} onPress={() => runMenuAction(() => setSelectionScope('face'))} />
+          <UvContextRow icon="Layers3" label="Collect Same Orientation" detail="FROM 3D FACE" enabled={!bridge.paintLive && selectedIndices.length > 0} tooltip="Select a face on the mesh, then collect every UV island projected from the same direction" onPress={() => runMenuAction(collectUvOrientation)} />
           <UvContextRow icon="Maximize2" label="Fit Complete Atlas" detail="VIEW" onPress={() => runMenuAction(() => setView(fittedView(false)))} />
 
           <UvContextDivider />

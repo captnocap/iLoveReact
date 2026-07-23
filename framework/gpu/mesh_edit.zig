@@ -1016,6 +1016,46 @@ pub fn selectFacesByTriangleMask(mask: []const bool) u32 {
     return selCount();
 }
 
+/// Expand the current authored-face selection to every UV island projected from
+/// the same dominant surface direction. The paint layout already classifies each
+/// island as one of the six direction-sensitive axis faces (±X/±Y/±Z); using that
+/// existing truth is both more useful for a fragmented atlas and more stable than
+/// re-bucketing normals independently in the cart.
+///
+/// The first selected displayed triangle supplies the direction. A normal click
+/// selects one authored face, so this remains deterministic while still accepting
+/// selections made from either the 3D mesh or the UV panel. The active Outliner
+/// scope remains an ownership boundary, and opposite-facing islands never match.
+pub fn selectSameUvOrientation() u32 {
+    if (g_mode != .face or !ensureFaceSel()) return 0;
+    const selected = g_sel_face orelse return 0;
+    const islands = model_paint.layoutIslands() orelse return 0;
+    const face_count = model_paint.faceCount();
+
+    var seed_island: ?u32 = null;
+    var face: u32 = 0;
+    while (face < face_count and face < selected.len) : (face += 1) {
+        if (!selected[face]) continue;
+        const island_index = model_paint.islandIndexForFace(face) orelse continue;
+        if (island_index >= islands.len) continue;
+        seed_island = island_index;
+        break;
+    }
+    const seed = islands[seed_island orelse return 0];
+
+    @memset(selected, false);
+    face = 0;
+    while (face < face_count and face < selected.len) : (face += 1) {
+        if (!faceInScope(face)) continue;
+        const island_index = model_paint.islandIndexForFace(face) orelse continue;
+        if (island_index >= islands.len) continue;
+        const island = islands[island_index];
+        selected[face] = island.axis == seed.axis and island.sign == seed.sign;
+    }
+    applyFaceHighlight();
+    return selCount();
+}
+
 /// Select (face mode) every displayed face whose authored group id is in [lo, hi). The
 /// outliner grabs a whole PART this way — each part occupies a contiguous group range in the
 /// composed mesh. Returns the selected face count, or -1 if there's no mesh.

@@ -178,6 +178,43 @@ test "created ungrouped quad focuses both appended triangles" {
     try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
 }
 
+test "UV orientation collection joins disconnected same-direction islands only" {
+    var soup = [_]f32{
+        // Two disconnected +Z faces become separate islands with one orientation.
+        0, 0, 0, 0, 0, 1,  0, 0,
+        1, 0, 0, 0, 0, 1,  0, 0,
+        0, 1, 0, 0, 0, 1,  0, 0,
+        2, 0, 0, 0, 0, 1,  0, 0,
+        3, 0, 0, 0, 0, 1,  0, 0,
+        2, 1, 0, 0, 0, 1,  0, 0,
+        // Same dominant axis, opposite sign: must remain separate.
+        4, 0, 0, 0, 0, -1, 0, 0,
+        4, 1, 0, 0, 0, -1, 0, 0,
+        5, 0, 0, 0, 0, -1, 0, 0,
+        // +X is a different projection direction.
+        0, 0, 2, 1, 0, 0,  0, 0,
+        0, 1, 2, 1, 0, 0,  0, 0,
+        0, 0, 3, 1, 0, 0,  0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3388, soup[0..], 12, &.{ 0, 1, 2, 3 });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    try testing.expectEqual(@as(u32, 2), mesh_edit.selectSameUvOrientation());
+    try testing.expect(mesh_edit.faceSelectedPub(0));
+    try testing.expect(mesh_edit.faceSelectedPub(1));
+    try testing.expect(!mesh_edit.faceSelectedPub(2));
+    try testing.expect(!mesh_edit.faceSelectedPub(3));
+
+    // Outliner focus is an ownership boundary even when another matching island
+    // exists elsewhere in the model.
+    mesh_edit.setEditScope(0, 1);
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectSameUvOrientation());
+    try testing.expect(mesh_edit.faceSelectedPub(0));
+    try testing.expect(!mesh_edit.faceSelectedPub(1));
+}
+
 test "detached seam create-face selection carries the detached part owner" {
     // Two position-coincident quads model the exact detach seam: their render
     // positions overlap, but each authored face belongs to an independent part.

@@ -153,6 +153,7 @@ export type ModelFocusBridge = {
   redoUvHistory: () => string;
   selectUvIsland: (index: number, additive: boolean) => boolean;
   selectUvFace: (face: number, additive: boolean) => boolean;
+  selectUvOrientation: () => number;
   saveUvAtlas: () => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
   reloadUvAtlas: () => string;
@@ -187,6 +188,7 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
+  selectUvOrientation: () => number;
   flipSelection: () => boolean;
   loopCut: () => void;
   basicCut: () => void;
@@ -1282,6 +1284,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     syncUvSelection();
     return true;
   };
+  const selectUvOrientation = (): number => {
+    if (paintMode) return 0;
+    host.__mesh_paint_session?.(0);
+    setPaintMode(false);
+    setPathPlaneMode(false);
+    setPathEdgesMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    const count = Math.max(0, Number(host.__mesh_edit_select_uv_orientation?.() ?? 0) | 0);
+    if (count === 0) return 0;
+    setSelMode(3);
+    adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: count });
+    syncUvSelection();
+    return count;
+  };
   const reloadUvAtlas = (): string => {
     if (!paintTarget) return 'Reload refused — this viewer has no package-backed paint target.';
     const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
@@ -1681,6 +1698,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     weld: () => applyTopo(meshWeld(), 'Select at least two vertices (or an edge) to weld'),
+    selectUvOrientation,
     flipSelection: () => adoptMesh(meshFlipFaces()),
     // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
     // with live preview); edge mode keeps the one-shot perpendicular-plane cut.
@@ -1898,6 +1916,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       redoUvHistory: () => stepUvHistory(true),
       selectUvIsland,
       selectUvFace,
+      selectUvOrientation,
       saveUvAtlas,
       importUvAtlas,
       reloadUvAtlas,

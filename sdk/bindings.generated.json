@@ -313,6 +313,10 @@
           "zig": "hostMeshEditSelectFace"
         },
         {
+          "js": "__mesh_edit_select_uv_orientation",
+          "zig": "hostMeshEditSelectUvOrientation"
+        },
+        {
           "js": "__mesh_edit_select_group_range",
           "zig": "hostMeshEditSelectGroupRange"
         },

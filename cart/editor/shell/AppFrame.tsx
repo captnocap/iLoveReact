@@ -1933,6 +1933,16 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Scale By opened — ${source}` }));
       return;
     }
+    if (commandId === 'mesh-select-uv-orientation') {
+      const count = withNativeMeshActionSource(source, () => modelToolApiRef.current?.selectUvOrientation() ?? 0);
+      setState((prev) => ({
+        ...prev,
+        status: count > 0
+          ? `collected ${count} same-orientation faces and their UV islands`
+          : 'select one face before collecting its UV orientation',
+      }));
+      return;
+    }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
     // owns the state and reports it back, so we don't mutate world state here.
     // Route to the viewer's mesh-tool API — but ONLY for actual mesh TOOLS (all

@@ -79,6 +79,7 @@ declare global {
   function __mesh_edit_snapshot(...args: unknown[]): unknown;
   function __mesh_edit_revert(...args: unknown[]): unknown;
   function __mesh_edit_select_face(...args: unknown[]): unknown;
+  function __mesh_edit_select_uv_orientation(...args: unknown[]): unknown;
   function __mesh_edit_select_group_range(...args: unknown[]): unknown;
   function __mesh_edit_scope(...args: unknown[]): unknown;
   function __mesh_edit_scope_ranges(...args: unknown[]): unknown;

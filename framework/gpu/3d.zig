@@ -6849,6 +6849,12 @@ pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
     if (g_paint_session) return false; // req_2662: selection doors are inert in paint mode
     return mesh_edit.selectFaceByIndex(idx, additive);
 }
+/// Collect every UV island whose projection direction matches the currently
+/// selected authored face. Returns the resulting authored-face count.
+pub fn meshEditSelectUvOrientation() i32 {
+    if (g_paint_session) return 0;
+    return @intCast(mesh_edit.selectSameUvOrientation());
+}
 /// Select every face in the authored group range [lo, hi) — the outliner grabs a whole part.
 pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
     if (g_paint_session) return -1; // req_2662: an outliner click mid-paint must not force face mode

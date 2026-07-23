@@ -51,6 +51,7 @@ test('a single face exposes the winding correction beside face extrude', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 1 }, 1));
   assert(commands.includes('mesh-extrude-face'), 'single-face Extrude disappeared');
   assert(commands.includes('mesh-flip-face'), 'single-face Flip disappeared');
+  assert(commands.includes('mesh-select-uv-orientation'), 'single-face UV orientation collection disappeared');
 });
 
 test('multi-part outliner selection cannot fall through to Merge Faces', () => {
@@ -72,7 +73,7 @@ test('model context menu folds stable tool families without hiding a command', (
   assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-scale-by|mesh-rotate', 'gizmos escaped their group');
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
-  assert(ids(layout.directToolCommands).join('|') === 'mesh-paint|mesh-path-plane', 'Paint Faces and Pen Plane must remain one click away');
+  assert(ids(layout.directToolCommands).join('|') === 'mesh-paint|mesh-path-plane|mesh-path-edges', 'Paint Faces and both Pen tools must remain one click away');
   assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
 
   const expected = ids([...meshToolCommands(), commandById('mesh-scale-by'), ...meshPartCommands(true, 2)]).sort().join('|');

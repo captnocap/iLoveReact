@@ -1790,6 +1790,16 @@ fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_edit_select_uv_orientation() → authored-face count. Starting from
+/// the current face selection, collect every UV island projected from the same
+/// direction (±X/±Y/±Z) so fragmented atlas pieces become one rigid selection.
+fn hostMeshEditSelectUvOrientation(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const count = scene3d.meshEditSelectUvOrientation();
+    if (count > 0) state.markDirty();
+    setReturnNumber(info, count);
+}
+
 /// __mesh_edit_select_edge(idx, additive) → bool. Programmatic welded-edge select for
 /// topology tools and headless verification.
 fn hostMeshEditSelectEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -3523,6 +3533,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
+    v8_runtime.registerHostFn("__mesh_edit_select_uv_orientation", hostMeshEditSelectUvOrientation);
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
     v8_runtime.registerHostFn("__mesh_edit_scope_ranges", hostMeshEditScopeRanges);
