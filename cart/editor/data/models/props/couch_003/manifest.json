@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "id": "primitive:cube:54::dup-18610",
+  "name": "couch_003",
+  "kind": "prop",
+  "stage": "wip",
+  "favorite": false,
+  "hidden": false,
+  "folderId": "model-primitive_cube_54__dup-18610",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "primitive:cube:54::dup-18610",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cube:54::dup-18610"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  },
+  "textureSlots": [],
+  "lights": []
+}
