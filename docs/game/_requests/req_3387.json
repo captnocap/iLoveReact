@@ -1,0 +1,30 @@
+{
+  "id": "req_3387",
+  "at": "2026-07-23T15:42:01.718Z",
+  "origin": "codex:019f883f",
+  "text": "ok i cant add more than one mesh from another saved already. and after one is used i cant at any type of outliner",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T15:42:23.837Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T16:04:51.139Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the shared Add Outliner failure after a saved-mesh import. The first append had converted its one neutral UV gutter texel into an occupied placeholder island; the next saved mesh or primitive therefore failed before geometry installation. The host now reuses that neutral texel for every un-atlased append in the same stale-layout session and invalidates it only when the atlas coordinate space is genuinely rebuilt. Added a repeated-preserving-append Zig regression and an import-capable part-operations replay. Verified 43/43 model-paint tests, 3/3 multipart residency tests, a ReleaseFast editor build, the exact bookshelf-import twice then cube sequence, and a stress replay with five bookshelf imports plus cube, cylinder, and sphere; all cart rows, face counts, and host ranges stayed ordered and exact.",
+  "shas": [
+    "d2dda54f8"
+  ],
+  "resolvedAt": "2026-07-23T16:04:51.139Z"
+}
