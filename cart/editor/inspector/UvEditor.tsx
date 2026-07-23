@@ -24,8 +24,11 @@ import {
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
+  stackUvIslands,
   uniformUvPack,
   uvContextMenuPosition,
+  uvCornerIdentityColor,
+  uvFaceCornerIdentityMarkers,
   uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
@@ -71,7 +74,7 @@ const UV_CONTEXT_MENU_TUNING = {
   edgePx: 4,
   baseHeightPx: 304,
   rowHeightPx: 26,
-  expandedRows: { transform: 3, arrange: 5, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 3, arrange: 6, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
@@ -523,6 +526,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     applyIslandSetEdit(result.rects, `chained ${selectedIndices.length} islands ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}`, axis === 'horizontal' ? 'chain-horizontal' : 'chain-vertical');
   };
+  const stackSelected = () => {
+    if (!multiIslandSelection) {
+      setNote('Shift-click two or more UV islands first.');
+      return;
+    }
+    const next = stackUvIslands(rectsRef.current, selectedIndicesRef.current, selected, uv.w, uv.h);
+    applyIslandSetEdit(next, `stacked ${selectedIndices.length} islands onto one active UV footprint`, 'stack');
+  };
   const restoreSelectedShapes = () => {
     const indices = selectedIndicesRef.current;
     if (selectionMode !== 'island' || indices.length === 0) {
@@ -593,6 +604,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     [selectedLocalRect, selectedTarget?.face, selectedTarget?.group, multiIslandSelection],
   );
   const handleSegments = useMemo(() => repeatedPointSegments(localHandlePoints), [localHandlePoints]);
+  const selectedFacesKey = uv.selectedFaces.join(',');
+  const cornerIdentityMarkers = useMemo(
+    () => uvFaceCornerIdentityMarkers(rects, uv.selectedFaces),
+    [rects, selectedFacesKey],
+  );
   const rotationHandle = primarySelectionBounds && !multiIslandSelection ? {
     x: view.x + primarySelectionBounds.cx * view.scale,
     y: view.y + primarySelectionBounds.y * view.scale - UV_LAYOUT_TUNING.rotationHandleOffsetPx,
@@ -1071,6 +1087,26 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Graph.Polyline segments points={guideSegments} stroke="#4c9dff" strokeWidth={1.5 * inverseViewScale} />
           </Graph>
         ) : null}
+        {cornerIdentityMarkers.map((marker, index) => {
+          const size = UV_LAYOUT_TUNING.cornerIdentityHandlePx;
+          return (
+            <Box
+              key={`uv-corner-id-${marker.vertex}-${index}`}
+              style={{
+                position: 'absolute',
+                left: view.x + marker.x * view.scale - size * 0.5,
+                top: view.y + marker.y * view.scale - size * 0.5,
+                width: size,
+                height: size,
+                borderRadius: size * 0.5,
+                backgroundColor: uvCornerIdentityColor(marker.vertex),
+                borderWidth: 2,
+                borderColor: '#080b10',
+                pointerEvents: 'none',
+              }}
+            />
+          );
+        })}
         {rotationHandle ? (
           <Box style={{ position: 'absolute', left: rotationHandle.x - 8, top: rotationHandle.y - 8, width: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: '#18202c', borderWidth: 1, borderColor: '#f8fafc', pointerEvents: 'none' }}>
             <Icon name="RotateCw" size={10} color="#f8fafc" />
@@ -1148,6 +1184,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <UvContextRow icon="Rows3" label="Arrange Selected Islands" detail={`${selectedIndices.length} SELECTED`} expanded={menuGroup === 'arrange'} onPress={() => toggleMenuGroup('arrange')} />
           {menuGroup === 'arrange' ? (
             <>
+              <UvContextRow indented icon="Layers3" label="Stack on Active Island" detail={`${selectedIndices.length} → 1`} enabled={multiIslandSelection} tooltip="Overlap every selected island on the white active island so all selected faces sample the same pixels" onPress={() => runMenuAction(stackSelected)} />
               <UvContextRow indented icon="MoveHorizontal" label="Match Active Width" detail="W =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('width'))} />
               <UvContextRow indented icon="MoveVertical" label="Match Active Height" detail="H =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('height'))} />
               <UvContextRow indented icon="Maximize" label="Match Active Size" detail="W×H" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('both'))} />

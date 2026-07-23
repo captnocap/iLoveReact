@@ -2279,6 +2279,7 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 
 /// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
 /// "groups":[g,...],"triangles":[island,faceGroup,x0,y0,x1,y1,x2,y2,...],
+/// "cornerVertices":[v0,v1,v2,...],
 /// "data":"<base64 rgba>"} for the current painting, or "" if there's
 /// no paint target. `detail` is the applied density (texels/meter); `islands` is the
 /// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
@@ -2338,6 +2339,21 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
                 triangle.corners[3],
                 triangle.corners[4],
                 triangle.corners[5],
+            }) catch return setReturnString(info, "");
+            emitted += 1;
+        }
+        w.writeAll("]") catch return setReturnString(info, "");
+        w.writeAll(",\"cornerVertices\":[") catch return setReturnString(info, "");
+        face = 0;
+        emitted = 0;
+        while (face < face_count) : (face += 1) {
+            const fallback = [3]u32{ face * 3, face * 3 + 1, face * 3 + 2 };
+            const vertices = scene3d.paintUvCornerVertices(face) orelse fallback;
+            w.print("{s}{d},{d},{d}", .{
+                if (emitted == 0) "" else ",",
+                vertices[0],
+                vertices[1],
+                vertices[2],
             }) catch return setReturnString(info, "");
             emitted += 1;
         }
@@ -2416,26 +2432,34 @@ fn hostModelUvRestoreShape(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __model_uv_selection_read() → JSON [islandIndex,...]. The UV panel polls this
-/// only when the native model selection commits, avoiding an expensive atlas-byte
-/// read merely to synchronize selection chrome.
+/// __model_uv_selection_read() → JSON {"islands":[...],"faces":[...]}. The UV panel
+/// polls this only when native model selection commits, avoiding an expensive
+/// atlas-byte read merely to synchronize selection and corner-identity chrome.
 fn hostModelUvSelectionRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const islands = scene3d.paintIslands() orelse {
-        setReturnString(info, "[]");
+        setReturnString(info, "{\"islands\":[],\"faces\":[]}");
         return;
     };
     var out: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
     defer out.deinit();
     const writer = &out.writer;
-    writer.writeAll("[") catch return setReturnString(info, "[]");
+    writer.writeAll("{\"islands\":[") catch return setReturnString(info, "{\"islands\":[],\"faces\":[]}");
     var emitted: usize = 0;
     for (islands, 0..) |_, island_index| {
         if (!scene3d.paintIslandSelected(@intCast(island_index))) continue;
-        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", island_index }) catch return setReturnString(info, "[]");
+        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", island_index }) catch return setReturnString(info, "{\"islands\":[],\"faces\":[]}");
         emitted += 1;
     }
-    writer.writeAll("]") catch return setReturnString(info, "[]");
+    writer.writeAll("],\"faces\":[") catch return setReturnString(info, "{\"islands\":[],\"faces\":[]}");
+    emitted = 0;
+    var face: u32 = 0;
+    while (face < scene3d.paintFaceCount()) : (face += 1) {
+        if (!scene3d.paintFaceSelected(face)) continue;
+        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", face }) catch return setReturnString(info, "{\"islands\":[],\"faces\":[]}");
+        emitted += 1;
+    }
+    writer.writeAll("]}") catch return setReturnString(info, "{\"islands\":[],\"faces\":[]}");
     setReturnString(info, out.written());
 }
 

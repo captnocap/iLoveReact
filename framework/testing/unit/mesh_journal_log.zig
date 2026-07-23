@@ -99,6 +99,7 @@ test "UV action ordinals labels and restore domains stay bridge exact" {
         "chain UV vertically",
         "pack UV islands",
         journal_log.UV_RESTORE_SHAPE_LABEL,
+        "stack UV islands",
     };
     try testing.expectEqual(@typeInfo(journal_log.UvAction).@"enum".fields.len, expected.len);
     for (expected, 0..) |label, ordinal| {

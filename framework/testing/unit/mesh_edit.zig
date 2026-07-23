@@ -178,6 +178,26 @@ test "created ungrouped quad focuses both appended triangles" {
     try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
 }
 
+test "UV corner identities preserve the welded vertices of an authored quad" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0,
+        1, 1, 0, 0, 0, 1, 1, 1,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 1, 1,
+        0, 1, 0, 0, 0, 1, 0, 1,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3391, soup[0..], 6, &.{ 12, 12 });
+    defer mesh_edit.test_support.clear();
+
+    const first = mesh_edit.faceCornerVerticesPub(0) orelse return error.MissingFirstFace;
+    const second = mesh_edit.faceCornerVerticesPub(1) orelse return error.MissingSecondFace;
+    try testing.expectEqual(first[0], second[0]);
+    try testing.expectEqual(first[2], second[1]);
+    try testing.expect(first[0] != first[1] and first[1] != first[2] and first[0] != first[2]);
+    try testing.expect(second[2] != first[0] and second[2] != first[1] and second[2] != first[2]);
+}
+
 test "UV orientation collection joins disconnected same-direction islands only" {
     var soup = [_]f32{
         // Two disconnected +Z faces become separate islands with one orientation.

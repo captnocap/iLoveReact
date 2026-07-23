@@ -213,6 +213,16 @@ pub fn cornerVertPub(f: u32, k: u32) u32 {
     if (idx >= corners.len) return 0;
     return corners[idx];
 }
+/// The three welded vertex identities behind one displayed triangle. UV authoring
+/// carries these alongside its corner coordinates so 2D and 3D can label the same
+/// physical corner without guessing from either view's projected position.
+pub fn faceCornerVerticesPub(face: u32) ?[3]u32 {
+    if (!ensureTopology()) return null;
+    const corners = g_corner_vert orelse return null;
+    const base = @as(usize, face) * 3;
+    if (base + 2 >= corners.len) return null;
+    return .{ corners[base], corners[base + 1], corners[base + 2] };
+}
 
 /// Solidify works from the authored surface, not its render triangulation. These
 /// values are deliberately centralized because both the host operation and its

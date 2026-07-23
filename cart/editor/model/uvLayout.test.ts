@@ -19,11 +19,14 @@ import {
   matchUvIslandSize,
   shouldActivateUvDrag,
   shouldPanUvCanvas,
+  stackUvIslands,
   uniformUvPack,
   uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvFaceEdgePath,
+  uvFaceCornerIdentityMarkers,
+  uvCornerIdentityColor,
   uvIslandBoundarySegments,
   uvIslandBoundaryPath,
   uvIslandVertices,
@@ -64,6 +67,23 @@ test('new atlas rows preserve each authored face group inside one connected isla
   assert(parsed[0]!.triangles?.[1]?.group === 701, 'second authored face group was lost');
   const hit = hitUvFace(parsed, 2, 8);
   assert(hit?.island === 0 && hit.target.group === 701, 'exact face hit collapsed back to the connected island');
+});
+
+test('selected UV corners retain the welded 3D vertex identities and colors', () => {
+  const parsed = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [100],
+    [
+      0, 700, 1, 1, 9, 1, 9, 9,
+      0, 700, 1, 1, 9, 9, 1, 9,
+    ],
+    [41, 42, 43, 41, 43, 44],
+  );
+  const markers = uvFaceCornerIdentityMarkers(parsed, [0, 1]);
+  assert(markers.length === 4, `quad exposed ${markers.length} identity markers instead of four welded corners`);
+  assert(markers.map((marker) => marker.vertex).join(',') === '41,42,43,44', 'UV marker order drifted from the mesh triangle/corner order');
+  assert(new Set(markers.map((marker) => uvCornerIdentityColor(marker.vertex))).size === 4, 'one face assigned duplicate corner colors');
+  assert(uvCornerIdentityColor(41) === uvCornerIdentityColor(41), 'one welded vertex did not retain a stable color');
 });
 
 test('real UV handles sit on triangle vertices and collapse shared fan corners', () => {
@@ -174,6 +194,25 @@ test('selected islands match the active size without changing unselected UVs', (
   assert(Math.abs(activeBounds.w - matchedBounds.w) < 0.0001, 'matched island width missed the active island');
   assert(Math.abs(activeBounds.h - matchedBounds.h) < 0.0001, 'matched island height missed the active island');
   assert(matched[2] === rects[2], 'size matching rewrote an unselected island');
+});
+
+test('stacking selected islands makes them sample one active UV footprint', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 4, 2, 20, 10, 8, 4, 40, 40, 4, 4],
+    [10, 11, 12],
+    [
+      0, 10, 0, 0, 4, 0, 0, 2,
+      1, 11, 20, 10, 28, 10, 20, 14,
+      2, 12, 40, 40, 44, 40, 40, 44,
+    ],
+  );
+  const stacked = stackUvIslands(rects, [0, 1], 1, 64, 64);
+  const corners = flattenUvFaceCorners(stacked)!;
+  assert([...corners.slice(0, 6)].join(',') === [...corners.slice(6, 12)].join(','), 'stacked faces did not sample the same atlas coordinates');
+  assert(stacked[1] === rects[1], 'stacking rewrote the active UV island');
+  assert(stacked[2] === rects[2], 'stacking rewrote an unselected UV island');
+  const repeated = stackUvIslands(stacked, [0, 1], 1, 64, 64);
+  assert(repeated[0] === stacked[0], 'stacking an already-overlapped island churned its geometry');
 });
 
 test('horizontal and vertical chains follow the snap grid and report atlas overflow', () => {

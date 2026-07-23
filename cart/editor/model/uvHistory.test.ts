@@ -16,7 +16,7 @@ function test(name: string, fn: () => void) { try { fn(); passed += 1; log(`  ok
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 test('every UV mutation has one stable append-only host ordinal', () => {
-  assert(UV_HISTORY_ACTIONS.length === 14, `expected 14 UV actions, got ${UV_HISTORY_ACTIONS.length}`);
+  assert(UV_HISTORY_ACTIONS.length === 15, `expected 15 UV actions, got ${UV_HISTORY_ACTIONS.length}`);
   UV_HISTORY_ACTIONS.forEach((row, ordinal) => {
     assert(uvHistoryActionOrdinal(row.id) === ordinal, `${row.id} drifted from ordinal ${ordinal}`);
     assert(isUvDocumentHistoryLabel(row.label), `${row.label} is not admitted by the UV history gate`);

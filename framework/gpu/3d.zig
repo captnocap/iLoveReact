@@ -5370,6 +5370,11 @@ const OV_FACE_DOT_GLASS_PX: f32 = 5.0;
 const OV_FACE_DOT_GLASS_SEL_PX: f32 = 6.5;
 const OV_FACE_DOT_SEL_PX: f32 = 5.0;
 const OV_MAX_FACE_TINT: u32 = 20000; // tint/dot pass fps guard (tris)
+const OV_FACE_CORNER_ID_PX: f32 = 11.0;
+const OV_MAX_FACE_CORNER_ID_TRIS: u32 = 256;
+const OV_FACE_CORNER_HUE_STEP_DEGREES: u32 = 137;
+const OV_FACE_CORNER_CHROMA_BYTE: u32 = 184;
+const OV_FACE_CORNER_VALUE_BYTE: u32 = 255;
 // ── Loop-cut session accents (req_2625 gaps CC/DD) ─────────────────────────────────
 const OV_LC_ACCENT = [3]f32{ 0.30, 0.95, 1.0 }; // fresh cut edges while the popup is live
 const OV_LC_HANDLE_PX: f32 = 34; // translate-style handle half-length on the cut plane
@@ -6426,6 +6431,52 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         drawFaceSemanticDot(sp[0], sp[1], acc.sel, acc.glass);
     }
 }
+fn faceCornerIdentityColor(vertex: u32) [3]f32 {
+    const hue_degrees = (vertex *% OV_FACE_CORNER_HUE_STEP_DEGREES) % 360;
+    const sector = hue_degrees / 60;
+    const remainder = hue_degrees % 60;
+    const rising = OV_FACE_CORNER_CHROMA_BYTE * remainder / 60;
+    const falling = OV_FACE_CORNER_CHROMA_BYTE * (60 - remainder) / 60;
+    const x = if (sector % 2 == 0) rising else falling;
+    const m = OV_FACE_CORNER_VALUE_BYTE - OV_FACE_CORNER_CHROMA_BYTE;
+    const rgb = switch (sector) {
+        0 => [3]u32{ OV_FACE_CORNER_CHROMA_BYTE, x, 0 },
+        1 => [3]u32{ x, OV_FACE_CORNER_CHROMA_BYTE, 0 },
+        2 => [3]u32{ 0, OV_FACE_CORNER_CHROMA_BYTE, x },
+        3 => [3]u32{ 0, x, OV_FACE_CORNER_CHROMA_BYTE },
+        4 => [3]u32{ x, 0, OV_FACE_CORNER_CHROMA_BYTE },
+        else => [3]u32{ OV_FACE_CORNER_CHROMA_BYTE, 0, x },
+    };
+    const byte_to_unit = 1.0 / @as(f32, @floatFromInt(OV_FACE_CORNER_VALUE_BYTE));
+    return .{
+        @as(f32, @floatFromInt(rgb[0] + m)) * byte_to_unit,
+        @as(f32, @floatFromInt(rgb[1] + m)) * byte_to_unit,
+        @as(f32, @floatFromInt(rgb[2] + m)) * byte_to_unit,
+    };
+}
+/// Selected face corners use their welded vertex id as a shared 2D/3D color key.
+/// This is overlay-only authoring chrome; neither mesh colors nor atlas pixels change.
+fn drawFaceCornerIdentityOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const face_count = model_paint.faceCount();
+    var selected_count: u32 = 0;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (!mesh_edit.faceSelectedPub(face)) continue;
+        selected_count += 1;
+        if (selected_count > OV_MAX_FACE_CORNER_ID_TRIS) return;
+    }
+    if (selected_count == 0) return;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!mesh_edit.faceSelectedPub(face)) continue;
+        const vertices = mesh_edit.faceCornerVerticesPub(face) orelse continue;
+        for (vertices) |vertex| {
+            const point = ovProject(cam, mesh_edit.vertPosPub(vertex), ox, oy) orelse continue;
+            const color = faceCornerIdentityColor(vertex);
+            overlayDot(point[0], point[1], color[0], color[1], color[2], OV_FACE_CORNER_ID_PX);
+        }
+    }
+}
 /// Naked Pen Edges wires in plain VIEW mode: a wire edge has no rasterizing face, so
 /// without this pass a committed wire part is invisible the moment the user leaves the
 /// vertex/edge/face tools. Edit modes render the same edges through drawEdgeOverlay.
@@ -6775,7 +6826,10 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         // so this is their ONLY visual outside the edit modes. Paint stays quiet (req_2662).
         drawWireEdgesOverlay(cam, ox, oy);
     }
-    if (mode == 3) drawFaceDotsOverlay(cam, ox, oy);
+    if (mode == 3) {
+        drawFaceDotsOverlay(cam, ox, oy);
+        drawFaceCornerIdentityOverlay(cam, ox, oy);
+    }
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
@@ -7497,6 +7551,9 @@ pub const PaintUvTriangle = model_paint.UvTriangle;
 pub fn paintUvTriangle(face: u32) ?PaintUvTriangle {
     return model_paint.uvTriangle(face);
 }
+pub fn paintUvCornerVertices(face: u32) ?[3]u32 {
+    return mesh_edit.faceCornerVerticesPub(face);
+}
 
 /// Authored-face identity for one rendered triangle. The UV editor uses this to
 /// move both halves of a quad together while still allowing a cylinder-cap wedge
@@ -7516,6 +7573,9 @@ pub fn paintIslandSelected(island_index: u32) bool {
         if (model_paint.islandIndexForFace(face) == island_index) return true;
     }
     return false;
+}
+pub fn paintFaceSelected(face: u32) bool {
+    return mesh_edit.faceSelectedPub(face);
 }
 
 /// Select one UV island through the native authored-face selection. This is the

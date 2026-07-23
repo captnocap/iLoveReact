@@ -30,6 +30,11 @@ export const UV_LAYOUT_TUNING = {
   rotationSnapDegrees: 1,
   axisSnapToleranceDegrees: 1,
   minimumSelectionScale: 0.05,
+  cornerIdentityHandlePx: 11,
+  cornerIdentityMaxFaceTriangles: 256,
+  cornerIdentityHueStepDegrees: 137,
+  cornerIdentityChromaByte: 184,
+  cornerIdentityValueByte: 255,
 } as const;
 
 /** Explicit authoring precision. Zoom may raise the effective step so a snap
@@ -54,6 +59,8 @@ export type UvIslandTriangle = {
   /** Authored face shared by render triangles (a quad), or 0xffffffff when loose. */
   group: number;
   points: UvTrianglePoints;
+  /** Welded 3D vertex identity for each triangle corner. */
+  vertices?: readonly [number, number, number];
 };
 
 export type UvIslandVertex = { x: number; y: number };
@@ -167,6 +174,7 @@ export function parseUvIslandRects(
   rects: readonly number[] | undefined,
   groups: readonly number[] | undefined,
   triangles?: readonly number[],
+  cornerVertices?: readonly number[],
 ): UvIslandRect[] {
   if (!rects || rects.length % 4 !== 0) return [];
   const out: UvIslandRect[] = [];
@@ -195,12 +203,25 @@ export function parseUvIslandRects(
         if (!Number.isFinite(x) || !Number.isFinite(y)) { local.length = 0; break; }
         local.push((x - island.x) / island.w, (y - island.y) / island.h);
       }
+      const face = index / triangleStride;
+      const vertexOffset = face * 3;
+      const vertices = cornerVertices
+        && Number.isInteger(cornerVertices[vertexOffset])
+        && Number.isInteger(cornerVertices[vertexOffset + 1])
+        && Number.isInteger(cornerVertices[vertexOffset + 2])
+        ? [
+          integer(cornerVertices[vertexOffset]) >>> 0,
+          integer(cornerVertices[vertexOffset + 1]) >>> 0,
+          integer(cornerVertices[vertexOffset + 2]) >>> 0,
+        ] as const
+        : undefined;
       if (local.length === 6) island.triangles!.push({
         // __model_atlas_read emits every face in render-face order. Keeping that
         // row identity is what lets a deformed triangle round-trip exactly.
-        face: index / triangleStride,
+        face,
         group,
         points: [local[0]!, local[1]!, local[2]!, local[3]!, local[4]!, local[5]!],
+        ...(vertices ? { vertices } : {}),
       });
     }
   }
@@ -440,7 +461,12 @@ function absoluteTrianglePoints(rect: UvIslandRect, triangle: UvIslandTriangle):
   ];
 }
 
-type AbsoluteUvTriangle = { face: number; group: number; points: [number, number, number, number, number, number] };
+type AbsoluteUvTriangle = {
+  face: number;
+  group: number;
+  points: [number, number, number, number, number, number];
+  vertices?: readonly [number, number, number];
+};
 
 const triangleMatchesTarget = (triangle: Pick<UvIslandTriangle, 'face' | 'group'>, target?: UvFaceTarget): boolean => (
   !target || (target.group !== NO_UV_GROUP ? triangle.group === target.group : triangle.face === target.face)
@@ -451,6 +477,7 @@ function absoluteTriangles(rect: UvIslandRect): AbsoluteUvTriangle[] {
     face: triangle.face,
     group: triangle.group,
     points: [...absoluteTrianglePoints(rect, triangle)] as AbsoluteUvTriangle['points'],
+    ...(triangle.vertices ? { vertices: triangle.vertices } : {}),
   }));
 }
 
@@ -488,6 +515,7 @@ function rebuildUvRect(rect: UvIslandRect, triangles: readonly AbsoluteUvTriangl
         (triangle.points[2] - x) / w, (triangle.points[3] - y) / h,
         (triangle.points[4] - x) / w, (triangle.points[5] - y) / h,
       ],
+      ...(triangle.vertices ? { vertices: triangle.vertices } : {}),
     })),
   };
 }
@@ -510,6 +538,64 @@ export function uvSelectionBounds(rect: UvIslandRect, target?: UvFaceTarget): Uv
   }
   if (!Number.isFinite(x)) return null;
   return { x, y, w: right - x, h: bottom - y, cx: (x + right) * 0.5, cy: (y + bottom) * 0.5 };
+}
+
+export type UvCornerIdentityMarker = {
+  x: number;
+  y: number;
+  vertex: number;
+};
+
+/** Shared deterministic palette key for one welded mesh vertex. */
+export function uvCornerIdentityColor(vertex: number): string {
+  const hueDegrees = (Math.imul(integer(vertex) >>> 0, UV_LAYOUT_TUNING.cornerIdentityHueStepDegrees) >>> 0) % 360;
+  const sector = Math.floor(hueDegrees / 60);
+  const remainder = hueDegrees % 60;
+  const chroma = UV_LAYOUT_TUNING.cornerIdentityChromaByte;
+  const rising = Math.floor(chroma * remainder / 60);
+  const falling = Math.floor(chroma * (60 - remainder) / 60);
+  const x = sector % 2 === 0 ? rising : falling;
+  const m = UV_LAYOUT_TUNING.cornerIdentityValueByte - chroma;
+  const channels = sector === 0 ? [chroma, x, 0]
+    : sector === 1 ? [x, chroma, 0]
+      : sector === 2 ? [0, chroma, x]
+        : sector === 3 ? [0, x, chroma]
+          : sector === 4 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  return `#${channels.map((channel) => (channel + m).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Exact UV copies of every selected 3D face corner. A torn seam may expose one
+ * welded vertex twice; both copies intentionally retain the same identity color. */
+export function uvFaceCornerIdentityMarkers(
+  rects: readonly UvIslandRect[],
+  selectedFaces: readonly number[],
+): UvCornerIdentityMarker[] {
+  const selected = new Set(selectedFaces.filter((face) => Number.isInteger(face) && face >= 0));
+  if (selected.size === 0 || selected.size > UV_LAYOUT_TUNING.cornerIdentityMaxFaceTriangles) return [];
+  const rows: Array<{ rect: UvIslandRect; triangle: UvIslandTriangle }> = [];
+  for (const rect of rects) {
+    for (const triangle of rect.triangles ?? []) {
+      if (selected.has(triangle.face)) rows.push({ rect, triangle });
+    }
+  }
+  rows.sort((a, b) => a.triangle.face - b.triangle.face);
+  const seen = new Set<string>();
+  const markers: UvCornerIdentityMarker[] = [];
+  for (const row of rows) {
+    if (!row.triangle.vertices) continue;
+    const points = absoluteTrianglePoints(row.rect, row.triangle);
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = row.triangle.vertices[corner];
+      const x = points[corner * 2]!;
+      const y = points[corner * 2 + 1]!;
+      const key = `${vertex}:${Math.round(x / UV_LAYOUT_TUNING.pointMatchEpsilon)}:${Math.round(y / UV_LAYOUT_TUNING.pointMatchEpsilon)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      markers.push({ x, y, vertex });
+    }
+  }
+  return markers;
 }
 
 function clampSelectionTranslation(bounds: UvSelectionBounds, dx: number, dy: number, atlasW: number, atlasH: number): [number, number] {
@@ -634,6 +720,51 @@ export function matchUvIslandSize(
       w: width,
       h: height,
     };
+  });
+}
+
+/**
+ * Overlap every selected island on the active island's authored UV footprint.
+ * This deliberately does not join mesh topology: each face remains independently
+ * selectable, but all stacked faces sample the same fixed atlas pixels.
+ */
+export function stackUvIslands(
+  rects: readonly UvIslandRect[],
+  indices: readonly number[],
+  activeIndex: number,
+  atlasW: number,
+  atlasH: number,
+): UvIslandRect[] {
+  const selected = uniqueUvIslandIndices(rects, indices);
+  if (selected.length < 2 || !selected.includes(activeIndex)) return [...rects];
+  const active = rects[activeIndex];
+  if (!active) return [...rects];
+  const target = wholeIslandBounds(active);
+  if (target.w <= UV_LAYOUT_TUNING.pointMatchEpsilon || target.h <= UV_LAYOUT_TUNING.pointMatchEpsilon) return [...rects];
+  const selectedSet = new Set(selected);
+  return rects.map((rect, index) => {
+    if (!selectedSet.has(index) || index === activeIndex) return rect;
+    const source = wholeIslandBounds(rect);
+    if (source.w <= UV_LAYOUT_TUNING.pointMatchEpsilon || source.h <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
+    const scaleX = target.w / source.w;
+    const scaleY = target.h / source.h;
+    const unchanged = Math.abs(source.x - target.x) <= UV_LAYOUT_TUNING.pointMatchEpsilon
+      && Math.abs(source.y - target.y) <= UV_LAYOUT_TUNING.pointMatchEpsilon
+      && Math.abs(scaleX - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon
+      && Math.abs(scaleY - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon;
+    if (unchanged) return rect;
+    if (!rect.triangles?.length) {
+      return { ...rect, x: target.x, y: target.y, w: target.w, h: target.h };
+    }
+    const triangles = absoluteTriangles(rect);
+    for (const triangle of triangles) {
+      for (let corner = 0; corner < 3; corner += 1) {
+        const at = corner * 2;
+        triangle.points[at] = target.x + (triangle.points[at]! - source.x) * scaleX;
+        triangle.points[at + 1] = target.y + (triangle.points[at + 1]! - source.y) * scaleY;
+      }
+    }
+    return rebuildUvRect(rect, triangles, atlasW, atlasH);
   });
 }
 
@@ -819,14 +950,15 @@ export function moveUvSelectionVertex(
 
   const absolute = rect.triangles.map((triangle) => {
     const points = [...absoluteTrianglePoints(rect, triangle)] as [number, number, number, number, number, number];
-    if (!triangleMatchesTarget(triangle, target)) return { face: triangle.face, group: triangle.group, points };
+    const identity = triangle.vertices ? { vertices: triangle.vertices } : {};
+    if (!triangleMatchesTarget(triangle, target)) return { face: triangle.face, group: triangle.group, points, ...identity };
     for (let corner = 0; corner < 3; corner += 1) {
       const at = corner * 2;
       if (!sameUvPoint(points[at]!, points[at + 1]!, selected.x, selected.y)) continue;
       points[at] = targetX;
       points[at + 1] = targetY;
     }
-    return { face: triangle.face, group: triangle.group, points };
+    return { face: triangle.face, group: triangle.group, points, ...identity };
   });
 
   let lowX = Number.POSITIVE_INFINITY;
@@ -861,6 +993,7 @@ export function moveUvSelectionVertex(
         (triangle.points[2] - x) / w, (triangle.points[3] - y) / h,
         (triangle.points[4] - x) / w, (triangle.points[5] - y) / h,
       ],
+      ...(triangle.vertices ? { vertices: triangle.vertices } : {}),
     })),
   };
 }

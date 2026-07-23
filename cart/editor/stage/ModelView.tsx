@@ -122,6 +122,7 @@ export type ModelFocusUv = {
   rgba: Uint8Array | null;
   islands: UvIslandRect[];
   selectedIslands: number[];
+  selectedFaces: number[];
   w: number;
   h: number;
   detail: number;
@@ -1153,15 +1154,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     return out;
   };
-  const readUvSelection = (): number[] => {
+  const readUvSelection = (): { islands: number[]; faces: number[] } => {
+    const empty = { islands: [], faces: [] };
+    const validIndices = (value: unknown): number[] => Array.isArray(value)
+      ? value.filter((index): index is number => Number.isInteger(index) && index >= 0)
+      : [];
     try {
       const json = host.__model_uv_selection_read?.();
-      if (typeof json !== 'string' || !json) return [];
+      if (typeof json !== 'string' || !json) return empty;
       const parsed = JSON.parse(json);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((index): index is number => Number.isInteger(index) && index >= 0);
+      if (!parsed || typeof parsed !== 'object') return empty;
+      return {
+        islands: validIndices((parsed as any).islands),
+        faces: validIndices((parsed as any).faces),
+      };
     } catch {
-      return [];
+      return empty;
     }
   };
   const buildUvPanel = () => {
@@ -1171,6 +1179,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       rgba: null,
       islands: [],
       selectedIslands: [],
+      selectedFaces: [],
       w,
       h,
       detail: d,
@@ -1182,7 +1191,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
-    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; triangles?: number[]; data: string };
+    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; triangles?: number[]; cornerVertices?: number[]; data: string };
     try {
       o = JSON.parse(j);
     } catch {
@@ -1198,14 +1207,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
-    const islands = parseUvIslandRects(o.islands, o.groups, o.triangles);
+    const islands = parseUvIslandRects(o.islands, o.groups, o.triangles, o.cornerVertices);
+    const selection = readUvSelection();
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     setUvPanel({
       key: `${model?.key ?? 'model'}-${o.w}x${o.h}`,
       revision: ++uvRevisionRef.current,
       rgba,
       islands,
-      selectedIslands: readUvSelection(),
+      selectedIslands: selection.islands,
+      selectedFaces: selection.faces,
       w: o.w,
       h: o.h,
       detail: o.detail,
@@ -1215,12 +1226,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     });
   };
   const syncUvSelection = () => {
-    const selectedIslands = readUvSelection();
+    const selection = readUvSelection();
     setUvPanel((current) => {
       if (!current) return current;
-      const same = current.selectedIslands.length === selectedIslands.length
-        && current.selectedIslands.every((index, at) => index === selectedIslands[at]);
-      return same ? current : { ...current, selectedIslands };
+      const sameIslands = current.selectedIslands.length === selection.islands.length
+        && current.selectedIslands.every((index, at) => index === selection.islands[at]);
+      const sameFaces = current.selectedFaces.length === selection.faces.length
+        && current.selectedFaces.every((index, at) => index === selection.faces[at]);
+      return sameIslands && sameFaces ? current : {
+        ...current,
+        selectedIslands: selection.islands,
+        selectedFaces: selection.faces,
+      };
     });
   };
   const applyUvLayout = (rects: Uint32Array): boolean => {
