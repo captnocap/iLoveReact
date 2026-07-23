@@ -685,6 +685,39 @@ test "edge extrusion extends a grouped quad outward in its plane" {
     try testing.expectApproxEqAbs(@as(f32, 0), outer[1][2], 1e-6);
 }
 
+test "part range rebase keeps an unchanged scope push from clearing edge focus" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3385, soup[0..], 6, &.{ 0, 0 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.test_support.setPartRanges(&.{ 0, 1 });
+
+    mesh_edit.setEditScope(0, 1);
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.focusEdgeByEndpoints(.{ 0, 0, 0 }, .{ 0, 1, 0 }));
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectedEdgeCountPub());
+
+    // Appending a new authored face widens the same part. The native transaction
+    // rebases before rebuilding, then the cart echoes the resulting range after
+    // adoption. Neither step may make the freshly focused edge disappear.
+    try testing.expect(mesh_edit.rebaseEditScopePartRanges(&.{ 0, 1 }, &.{ 0, 2 }));
+    var scope: [4]u32 = undefined;
+    try testing.expectEqual(@as(usize, 2), mesh_edit.scopeRangesPub(scope[0..]));
+    try testing.expectEqualSlices(u32, &.{ 0, 2 }, scope[0..2]);
+    mesh_edit.setEditScope(0, 2);
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectedEdgeCountPub());
+
+    // A genuinely different outliner focus remains a selection boundary.
+    mesh_edit.setEditScope(2, 3);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.selectedEdgeCountPub());
+}
+
 test "edge extrusion rejects a hidden triangulation diagonal" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,

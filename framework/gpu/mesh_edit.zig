@@ -773,14 +773,26 @@ pub const test_support = if (builtin.is_test) struct {
 } else struct {};
 
 // ── Edit scope (focus one part, or a multi-selected set of parts) ─────────────────
+fn editScopeMatches(ranges: []const [2]u32) bool {
+    if (!g_scope_active) return ranges.len == 0;
+    if (g_scope_count != ranges.len) return false;
+    for (ranges, 0..) |range, index| {
+        if (g_scope_ranges[index][0] != range[0] or g_scope_ranges[index][1] != range[1]) return false;
+    }
+    return true;
+}
+
 /// Restrict editing to the authored group range [lo, hi). hi <= lo clears the scope (edit
 /// the whole model). The outliner sets this to the focused part's range.
 pub fn setEditScope(lo: u32, hi: u32) void {
     if (hi > lo) {
+        const next = [1][2]u32{.{ lo, hi }};
+        if (editScopeMatches(next[0..])) return;
         g_scope_active = true;
         g_scope_ranges[0] = .{ lo, hi };
         g_scope_count = 1;
     } else {
+        if (editScopeMatches(&.{})) return;
         g_scope_active = false;
         g_scope_count = 0;
     }
@@ -795,20 +807,50 @@ pub fn setEditScope(lo: u32, hi: u32) void {
 /// skipped; zero valid pairs clears the scope. Beyond MAX_SCOPE_RANGES the excess is
 /// dropped LOUDLY (never silently mis-scoped).
 pub fn setEditScopeRanges(pairs: []const u32) void {
-    g_scope_count = 0;
+    var next: [MAX_SCOPE_RANGES][2]u32 = undefined;
+    var next_count: usize = 0;
     var i: usize = 0;
     while (i + 1 < pairs.len) : (i += 2) {
         if (pairs[i + 1] <= pairs[i]) continue;
-        if (g_scope_count >= MAX_SCOPE_RANGES) {
+        if (next_count >= MAX_SCOPE_RANGES) {
             std.debug.print("[mesh_edit] scope ranges TRUNCATED at {d} — {d} pairs requested\n", .{ MAX_SCOPE_RANGES, pairs.len / 2 });
             break;
         }
-        g_scope_ranges[g_scope_count] = .{ pairs[i], pairs[i + 1] };
-        g_scope_count += 1;
+        next[next_count] = .{ pairs[i], pairs[i + 1] };
+        next_count += 1;
     }
+    if (editScopeMatches(next[0..next_count])) return;
+    @memcpy(g_scope_ranges[0..next_count], next[0..next_count]);
+    g_scope_count = next_count;
     g_scope_active = g_scope_count > 0;
     g_scope_built = 0;
     clearSelection();
+}
+
+/// Part-range ids are compact authored metadata, so topology edits can widen or
+/// renumber them while preserving the same outliner-part identity. Rebase the
+/// active scope by part rank before the topology cache rebuilds; otherwise a newly
+/// appended face can immediately fall outside the stale pre-op range and its own
+/// transaction rejects the result. This only updates the ownership boundary. The
+/// caller decides whether selection/topology must be rebuilt.
+pub fn rebaseEditScopePartRanges(old_pairs: []const u32, new_pairs: []const u32) bool {
+    if (!g_scope_active or old_pairs.len != new_pairs.len or old_pairs.len % 2 != 0) return false;
+    var changed = false;
+    for (g_scope_ranges[0..g_scope_count]) |*scope| {
+        var pair: usize = 0;
+        while (pair + 1 < old_pairs.len) : (pair += 2) {
+            if (scope[0] != old_pairs[pair] or scope[1] != old_pairs[pair + 1]) continue;
+            const next_lo = new_pairs[pair];
+            const next_hi = new_pairs[pair + 1];
+            if (scope[0] != next_lo or scope[1] != next_hi) {
+                scope.* = .{ next_lo, next_hi };
+                changed = true;
+            }
+            break;
+        }
+    }
+    if (changed) g_scope_built = 0;
+    return changed;
 }
 
 /// Read-only flattened [lo,hi) scope ranges for diagnostics. Empty means the whole

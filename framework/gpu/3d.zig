@@ -1504,13 +1504,16 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
         journalDiscard(&snap);
         return false;
     }
-    if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part) or
-        !selectWeldedEdgeAt(c, d))
-    {
+    if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
         if (snap) |*before| _ = journalInstall(before);
         journalDiscard(&snap);
         return false;
     }
+    // Selection handoff is UI state, not mesh integrity. A valid appended face must
+    // never be rolled back under a different host key merely because its convenience
+    // focus could not be established. The scope rebase above normally makes this
+    // succeed; failure leaves a valid committed mesh with no edge selected.
+    _ = selectWeldedEdgeAt(c, d);
     model_source.setFaceMaterials(materials);
     mesh_edit.setMode(.edge);
     journalCommit(&snap);
@@ -1699,6 +1702,11 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return;
     const fc = g_edit_count / 3;
     if (face_part.len < fc) return;
+    const old_ranges = if (model_source.partRanges()) |rows|
+        (std.heap.c_allocator.dupe(u32, rows) catch null)
+    else
+        null;
+    defer if (old_ranges) |rows| std.heap.c_allocator.free(rows);
     for (face_part[0..fc], 0..) |owner, face| {
         if (owner == model_source.NO_PART or owner < part_count) continue;
         log.print("[mesh] refused part-range normalization: face {d} carries stale owner {d} but only {d} parts exist (req_3374)\n", .{
@@ -1744,6 +1752,7 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     }
     model_source.setFaceGroups(new_groups);
     model_source.setPartRanges(ranges.items);
+    if (old_ranges) |old| _ = mesh_edit.rebaseEditScopePartRanges(old, ranges.items);
     clearIndexedEditMesh();
     mesh_edit.reset(); // part membership moved → weld/scope masks are stale
     _ = refreshPaintLayout(); // islands key off the grouping
