@@ -4474,7 +4474,9 @@ export default function AppFrame() {
         if (geo.positions.length === 0) continue;
         const row = meta[index];
         const color = row?.color ?? nextColor();
-        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color, existing.length + added.length));
+        const expectedPartCount = existing.length + added.length;
+        if (source === 'headless') console.error(`[partops] import append ${pkg.id} range ${index} expects ${expectedPartCount} resident part(s)`);
+        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color, expectedPartCount));
         if (!r) continue;
         added.push({
           id: `part:imp:${state.seq}:${added.length}`,
@@ -4738,19 +4740,21 @@ export default function AppFrame() {
   // Drives the REAL outliner handlers by row index — the shell-side twin of
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
   //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
-  //   modifier record for the call) · add:kind · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
+  //   modifier record for the call) · add:kind · import:model-id · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
   //   report (rows + selected set + primary) · audit (adds face counts + host selection).
   // Handlers are per-render closures — the ref keeps the once-installed timer calling
   // the CURRENT ones (the same mount-frozen-closure trap as the meshops harness).
-  const partOpsRef = useRef({ selectPart, addPrimitivePart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
-  partOpsRef.current = { selectPart, addPrimitivePart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo };
+  const partOpsRef = useRef({ selectPart, addPrimitivePart, importModelAsParts, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
+  partOpsRef.current = { selectPart, addPrimitivePart, importModelAsParts, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo };
   useEffect(() => {
     const opsText = (globalThis as any).__env_get?.('RJIT_PARTOPS') as string | null | undefined;
     if (!opsText) return;
     const ops = opsText.split(';').map((t) => t.trim()).filter(Boolean);
     let step = 0;
     const runOp = (op: string) => {
-      const [name, arg] = op.split(':');
+      const separator = op.indexOf(':');
+      const name = separator >= 0 ? op.slice(0, separator) : op;
+      const arg = separator >= 0 ? op.slice(separator + 1) : undefined;
       const s = stateRef.current;
       const mid = activePartsModelId(s);
       const parts = mid ? (s.modelParts[mid] ?? []) : [];
@@ -4764,6 +4768,10 @@ export default function AppFrame() {
         try { h.selectPart(id); } finally { m.shift = false; }
       } else if (name === 'add' && PRIMITIVE_MESHES.some((primitive) => primitive.kind === arg)) {
         h.addPrimitivePart(arg as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
+      } else if (name === 'import' && arg) {
+        const pkg = effectiveModelPackage(arg, s.modelOverrides, s.modelDupes);
+        if (pkg) h.importModelAsParts(pkg, 'headless');
+        else console.error(`[partops] import package not found: ${arg}`);
       } else if (name === 'eye' && id) h.toggleVisiblePart(id);
       else if (name === 'dup' && id) h.duplicatePartById(id, -1);
       else if (name === 'del' && id) h.deletePart(id);
@@ -4783,7 +4791,9 @@ export default function AppFrame() {
         });
         let selection = null;
         try { selection = JSON.parse(host.__mesh_edit_counts?.() ?? 'null'); } catch { /* malformed host read stays null */ }
-        console.error(`[partops] audit → ${JSON.stringify({ rows, selection })}`);
+        let hostRanges = null;
+        try { hostRanges = JSON.parse(host.__mesh_part_ranges?.() ?? 'null'); } catch { /* malformed host read stays null */ }
+        console.error(`[partops] audit → ${JSON.stringify({ rows, selection, hostRanges, status: s.status })}`);
       } else if (name !== 'wait') console.error(`[partops] unknown/invalid op: ${op}`);
     };
     const runNext = () => {

@@ -47,6 +47,17 @@ var g_layout: ?paint_islands.Layout = null;
 // Mesh-history snapshots use it to decide whether their stored UVs may still
 // sample the live raster byte-for-byte or need a group-keyed carry/repack first.
 var g_layout_revision: u64 = 0;
+// Geometry appended after an atlas exists is deliberately kept OUTSIDE the
+// authored UV contract until Remake Atlas. Every such face may sample the same
+// neutral gutter texel; requiring a fresh unused texel per append eventually
+// exhausts the gutter and blocks every later Add Outliner operation. Tie the
+// reusable coordinate to the layout revision so a real repack invalidates it.
+const NeutralPlaceholder = struct {
+    layout_revision: u64,
+    x: u32,
+    y: u32,
+};
+var g_neutral_placeholder: ?NeutralPlaceholder = null;
 // island → its triangles, CSR-packed: island i's triangles are
 // g_isl_tris[g_isl_start[i] .. g_isl_start[i+1]]. Stamp clipping walks these — a dab
 // is clipped to the island's whole silhouette, so strokes cross a quad's diagonal.
@@ -1262,10 +1273,12 @@ pub fn atlas() ?Atlas {
     return .{ .rgba = buf, .w = g_atlas_w, .h = g_atlas_h };
 }
 
-/// Reserve one texel outside every authored island for geometry that has just been
-/// appended to an already-painted mesh.  The new part must remain visible without
-/// sampling an arbitrary piece of the old painting, but it is not allowed to join
-/// that painting's UV contract until the user explicitly remakes the atlas.
+/// Find (or reuse) one texel outside every authored island for geometry that has
+/// just been appended to an already-painted mesh. The new part must remain visible
+/// without sampling an arbitrary piece of the old painting, but it is not allowed
+/// to join that painting's UV contract until the user explicitly remakes the atlas.
+/// All appended faces in the same stale-layout session share this neutral texel;
+/// a real layout revision invalidates it and searches the new packing space.
 ///
 /// Packed layouts always leave a gutter at the right edge.  Reconstructed legacy
 /// layouts are checked rather than trusted: if no unowned edge texel exists, fail
@@ -1274,6 +1287,22 @@ pub fn reserveNeutralPlaceholderUv() ?[2]f32 {
     const rgba = g_rgba orelse return null;
     const lay = &(g_layout orelse return null);
     if (g_atlas_w == 0 or g_atlas_h == 0) return null;
+
+    if (g_neutral_placeholder) |placeholder| {
+        if (placeholder.layout_revision == g_layout_revision and placeholder.x < g_atlas_w and placeholder.y < g_atlas_h) {
+            const pixel = (@as(usize, placeholder.y) * g_atlas_w + placeholder.x) * 4;
+            rgba[pixel + 0] = DEFAULT_FACE[0];
+            rgba[pixel + 1] = DEFAULT_FACE[1];
+            rgba[pixel + 2] = DEFAULT_FACE[2];
+            rgba[pixel + 3] = DEFAULT_FACE[3];
+            markRows(placeholder.y, placeholder.y);
+            return .{
+                (@as(f32, @floatFromInt(placeholder.x)) + 0.5) / @as(f32, @floatFromInt(g_atlas_w)),
+                (@as(f32, @floatFromInt(placeholder.y)) + 0.5) / @as(f32, @floatFromInt(g_atlas_h)),
+            };
+        }
+        g_neutral_placeholder = null;
+    }
 
     const x = g_atlas_w - 1;
     var y: u32 = 0;
@@ -1294,6 +1323,7 @@ pub fn reserveNeutralPlaceholderUv() ?[2]f32 {
         rgba[pixel + 2] = DEFAULT_FACE[2];
         rgba[pixel + 3] = DEFAULT_FACE[3];
         markRows(y, y);
+        g_neutral_placeholder = .{ .layout_revision = g_layout_revision, .x = x, .y = y };
         return .{
             (@as(f32, @floatFromInt(x)) + 0.5) / @as(f32, @floatFromInt(g_atlas_w)),
             (@as(f32, @floatFromInt(y)) + 0.5) / @as(f32, @floatFromInt(g_atlas_h)),

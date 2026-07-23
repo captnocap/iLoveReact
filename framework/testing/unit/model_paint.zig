@@ -363,6 +363,29 @@ test "append after stale topology preserves the raster and isolates the fresh pa
     try testing.expectEqual(before_atlas.h, after.h);
     try testing.expectEqualSlices(u8, before, after.rgba);
     try testing.expectEqual(model_paint.DEFAULT_FACE, model_paint.faceColor(2).?);
+
+    // A second Add Outliner operation runs while the atlas is already stale from
+    // the first append. It still needs a neutral placeholder and another preserving
+    // adoption, regardless of whether the next row is a saved mesh or a primitive.
+    const second_placeholder = model_paint.reserveNeutralPlaceholderUv() orelse return error.TestUnexpectedResult;
+    try testing.expectApproxEqAbs(placeholder[0], second_placeholder[0], 1e-6);
+    try testing.expectApproxEqAbs(placeholder[1], second_placeholder[1], 1e-6);
+    const before_second = try testing.allocator.dupe(u8, model_paint.atlas().?.rgba);
+    defer testing.allocator.free(before_second);
+
+    var grown_again: [18 * 8]f32 = undefined;
+    @memcpy(grown_again[0 .. 12 * 8], &grown);
+    @memcpy(grown_again[12 * 8 ..], &initial);
+    vertex = 12;
+    while (vertex < 18) : (vertex += 1) {
+        grown_again[vertex * 8 + 0] += 4.0;
+        grown_again[vertex * 8 + 6] = second_placeholder[0];
+        grown_again[vertex * 8 + 7] = second_placeholder[1];
+    }
+    try testing.expect(model_paint.setTargetPreservingAtlas(179, &grown_again, 18, &.{ 0, 0, 1, 1, 2, 2 }));
+    const after_second = model_paint.atlas().?;
+    try testing.expectEqualSlices(u8, before_second, after_second.rgba);
+    try testing.expectEqual(model_paint.DEFAULT_FACE, model_paint.faceColor(4).?);
 }
 
 test "atlas coordinate revision changes on repack but not preserving adoption" {
