@@ -187,7 +187,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir } from '../data/modelPackageStore';
+import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -1962,6 +1962,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-extrude') (state.modelTool.selMode === 3 ? api.extrudeFace() : api.extrudeEdge());
         else if (commandId === 'mesh-extrude-face') api.extrudeFace();
         else if (commandId === 'mesh-create-face') api.createFace();
+        else if (commandId === 'mesh-weld') api.weld();
         else if (commandId === 'mesh-loopcut') api.loopCut();
         else if (commandId === 'mesh-cut') api.basicCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
@@ -5312,14 +5313,25 @@ export default function AppFrame() {
       };
     });
 
+  // Delete REMOVES the package from disk (req_3370, USER RULING — the old
+  // hidden:true soft-delete kept every "deleted" folder squatting the models
+  // tree; git history is the undo). The session still marks the id hidden so
+  // an open roster entry vanishes immediately; an unmaterialized model has
+  // nothing on disk and just hides. A failed removal falls back to the old
+  // manifest hide and SAYS so.
   const deleteModel = (id: string) =>
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
-      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { hidden: true }) : false;
+      const removed = pkg ? removeModelPackage(pkg.kind, id) : false;
+      const durable = !removed && pkg ? updateManifestIdentity(pkg.kind, id, { hidden: true }) : false;
       return {
         ...prev,
         modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], hidden: true } },
-        status: durable ? 'deleted model (hidden from browser — recorded in its manifest)' : 'deleted model (hidden from browser)',
+        status: removed
+          ? 'deleted model (package removed from disk)'
+          : durable
+            ? 'deleted model (disk removal FAILED — hidden in its manifest instead)'
+            : 'deleted model (hidden from browser)',
       };
     });
 

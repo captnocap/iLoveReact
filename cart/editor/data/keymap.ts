@@ -56,7 +56,7 @@ const WORLD_KEYS: Record<string, string> = {
 // whose commands never coexist: B is Fill while painting / Glass in face mode; X is Face Safety
 // while painting / Flip Face in face mode.
 // (Delete/Backspace/Escape stay ModelView-local — they're viewport-native, not registry commands.)
-export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'face' }[] = [
+export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'face' | 'vertex' | 'edge' }[] = [
   { key: '1', commandId: 'mesh-vertex' },
   { key: '2', commandId: 'mesh-edge' },
   { key: '3', commandId: 'mesh-face' },
@@ -77,6 +77,10 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'x', commandId: 'mesh-flip-face', mode: 'face' },
   { key: 'd', commandId: 'mesh-detach' },
   { key: 'o', commandId: 'mesh-solidify' },
+  // M is contextual (req_3382): Weld in vertex/edge mode (Blender's merge key),
+  // Merge Faces everywhere else — the scoped rows sit first so they win.
+  { key: 'm', commandId: 'mesh-weld', mode: 'vertex' },
+  { key: 'm', commandId: 'mesh-weld', mode: 'edge' },
   { key: 'm', commandId: 'mesh-merge-faces' },
   { key: 'b', commandId: 'mesh-paint-fill', mode: 'paint' },
   { key: 'b', commandId: 'mesh-glass', mode: 'face' },
@@ -133,6 +137,8 @@ function modelCommandForKey(key: string, tool: ModelToolSnapshot): string | null
     if (!b.mode) return b.commandId;
     if (b.mode === 'paint' && tool.paint) return b.commandId;
     if (b.mode === 'face' && tool.selMode === 3 && !tool.paint) return b.commandId;
+    if (b.mode === 'vertex' && tool.selMode === 1 && !tool.paint) return b.commandId;
+    if (b.mode === 'edge' && tool.selMode === 2 && !tool.paint) return b.commandId;
   }
   return null;
 }

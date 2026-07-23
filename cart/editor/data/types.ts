@@ -172,6 +172,9 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
+  // Merge the selected vertices at their center (req_3382); edge mode collapses
+  // the selected edges' endpoints. Degenerated faces leave in the same undo step.
+  weld: () => void;
   // Reverse selected face winding so its normal points to the opposite side.
   flipSelection: () => boolean;
   loopCut: () => void;

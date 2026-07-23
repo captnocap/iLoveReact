@@ -436,6 +436,8 @@ const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_ex
 const meshExtrudeFace = (distance: number) => readTopoResult(host.__mesh_topo_extrude_face?.(distance));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
+// Weld (req_3382): merge the selected vertices at their center (host op).
+const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
 // ── Face loop cut (the studio's Blockbench treatment): a host-owned popup session ──
@@ -1647,6 +1649,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
+    weld: () => applyTopo(meshWeld(), 'Select at least two vertices (or an edge) to weld'),
     flipSelection: () => adoptMesh(meshFlipFaces()),
     // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
     // with live preview); edge mode keeps the one-shot perpendicular-plane cut.

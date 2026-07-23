@@ -1593,6 +1593,21 @@ pub fn selectionPivot() ?[3]f32 {
     return .{ sum[0] * inv, sum[1] * inv, sum[2] * inv };
 }
 
+/// The active selection's affected logical-vertex mask, copied into `out`
+/// (welding, req_3382 — vertex mode welds the selected verts, edge mode the
+/// selected edges' endpoints, exactly the set transforms move). Returns the
+/// affected count; 0 = nothing selected / no topology.
+pub fn affectedSelectionVertsPub(out: []bool) u32 {
+    const mask = fillAffectedVerts() orelse return 0;
+    const n = @min(out.len, mask.len);
+    @memcpy(out[0..n], mask[0..n]);
+    var count: u32 = 0;
+    for (out[0..n]) |flag| {
+        if (flag) count += 1;
+    }
+    return count;
+}
+
 pub const SelectionFrame = struct {
     center: [3]f32,
     radius: f32,

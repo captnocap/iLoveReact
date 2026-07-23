@@ -2371,6 +2371,68 @@ pub fn meshDeleteSelection() bool {
     return deleteMaskedFaces(verts, tri_count, mask, "delete selection");
 }
 
+/// WELD (req_3382) — the Blender Merge-at-Center verb: every vertex the active
+/// selection affects (selected verts in vertex mode, edge endpoints in edge
+/// mode) collapses to the selection centroid. Faces the collapse degenerates
+/// (two corners now coincident) leave the mesh in the SAME masked rebuild, so
+/// the whole weld is one journal step ("weld") and one undo.
+pub fn meshTopoWeldSelection() bool {
+    if (!model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    if (!mesh_edit.ensureTopologyPub()) return false;
+    const vert_count = mesh_edit.vertCount();
+    if (vert_count == 0) return false;
+    const affected = std.heap.c_allocator.alloc(bool, vert_count) catch return false;
+    defer std.heap.c_allocator.free(affected);
+    const affected_count = mesh_edit.affectedSelectionVertsPub(affected);
+    if (affected_count < 2) return false;
+    const center = mesh_edit.selectionPivot() orelse return false;
+
+    // Final position per corner: the centroid for affected corners, the soup's
+    // own position otherwise. Faces with two coincident final corners are
+    // degenerate slivers — masked out of the rebuild.
+    const corner_positions = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
+    defer std.heap.c_allocator.free(corner_positions);
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    var moved_any = false;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const soup_base = @as(usize, f) * 24;
+        const cp_base = @as(usize, f) * 9;
+        if (soup_base + 24 > verts.len) break;
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const lv = mesh_edit.cornerVertPub(f, @intCast(k));
+            const collapse = lv < vert_count and affected[lv];
+            if (collapse) moved_any = true;
+            corner_positions[cp_base + k * 3 + 0] = if (collapse) center[0] else verts[soup_base + k * 8 + 0];
+            corner_positions[cp_base + k * 3 + 1] = if (collapse) center[1] else verts[soup_base + k * 8 + 1];
+            corner_positions[cp_base + k * 3 + 2] = if (collapse) center[2] else verts[soup_base + k * 8 + 2];
+        }
+        mask[f] = weldTriangleDegenerate(corner_positions[cp_base .. cp_base + 9]);
+    }
+    if (!moved_any) return false;
+    return rebuildMaskedFaces(verts, tri_count, mask, "weld", corner_positions);
+}
+
+/// Two of a triangle's three FINAL corners coincide → the weld flattened it.
+fn weldTriangleDegenerate(corners: []const f32) bool {
+    const eps: f32 = 1e-6;
+    var a: usize = 0;
+    while (a < 3) : (a += 1) {
+        var b: usize = a + 1;
+        while (b < 3) : (b += 1) {
+            if (@abs(corners[a * 3 + 0] - corners[b * 3 + 0]) < eps and
+                @abs(corners[a * 3 + 1] - corners[b * 3 + 1]) < eps and
+                @abs(corners[a * 3 + 2] - corners[b * 3 + 2]) < eps) return true;
+        }
+    }
+    return false;
+}
+
 /// Delete every face whose authored group id is in [lo, hi) — the outliner removing a
 /// PART. Structural, not a selection gesture: it must not route through the interactive
 /// selection doors, which the paint session makes inert (req_2662) — that routing made
@@ -2451,6 +2513,15 @@ fn paintStableJournalLabel(label: []const u8) bool {
 }
 
 fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
+    return rebuildMaskedFaces(verts, tri_count, mask, label, null);
+}
+
+/// The masked-rebuild core delete shares with WELD (req_3382): drop masked faces,
+/// carry groups/materials/parts, one journal step. `corner_positions` (xyz per
+/// corner, tri_count×9) overrides surviving corners' positions while copying —
+/// weld moves its collapsed vertices in the SAME transaction that removes the
+/// faces the collapse degenerated, so undo is one step.
+fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8, corner_positions: ?[]const f32) bool {
     // Drop the selection FIRST (same rule as detach/glass): the orange tint is
     // real atlas pixels with per-face saved patches, and both are keyed by the
     // CURRENT face indices. Restoring after the survivors compact would paint
@@ -2475,6 +2546,20 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
         if (!appendFloats(&out, verts[base .. base + 24])) {
             out.deinit(std.heap.c_allocator);
             return false;
+        }
+        // Weld's collapsed positions land on the just-appended corners (pos
+        // floats only — normals/uvs ride the copy like every transform).
+        if (corner_positions) |cp| {
+            const cp_base = @as(usize, f) * 9;
+            if (cp_base + 9 <= cp.len) {
+                const tail = out.items[out.items.len - 24 ..];
+                var k: usize = 0;
+                while (k < 3) : (k += 1) {
+                    tail[k * 8 + 0] = cp[cp_base + k * 3 + 0];
+                    tail[k * 8 + 1] = cp[cp_base + k * 3 + 1];
+                    tail[k * 8 + 2] = cp[cp_base + k * 3 + 2];
+                }
+            }
         }
         if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
         materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch {};

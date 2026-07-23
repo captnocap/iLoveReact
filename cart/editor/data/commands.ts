@@ -244,6 +244,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-extrude-face', menu: 'Edit', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
+  // Weld (req_3382): merge the selected vertices at their center — Blender's
+  // Merge-at-Center. Edge mode collapses the selected edges' endpoints.
+  { id: 'mesh-weld', menu: 'Edit', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
   { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
@@ -395,7 +398,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -462,10 +465,15 @@ export function meshToolCommands(): Command[] {
 // same way in the toolbar and context menu.
 export function meshTopoCommands(tool: { selMode: number; sel: number }, selectedPartCount = 0): Command[] {
   if (tool.sel < 1) return [];
+  // Vertex mode (req_3382): two or more selected verts weld at their center.
+  if (tool.selMode === 1) {
+    return tool.sel >= 2 ? [commandById('mesh-weld')] : [];
+  }
   if (tool.selMode === 2) {
+    // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
     return tool.sel === 1
-      ? [commandById('mesh-extrude'), commandById('mesh-loopcut')]
-      : [commandById('mesh-create-face')];
+      ? [commandById('mesh-extrude'), commandById('mesh-loopcut'), commandById('mesh-weld')]
+      : [commandById('mesh-create-face'), commandById('mesh-weld')];
   }
   if (tool.selMode === 3) {
     return [

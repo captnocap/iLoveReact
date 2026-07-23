@@ -857,6 +857,17 @@ fn hostMeshTopoFlipFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_weld() → JSON {"ok","key","count"}. Merge the selected vertices
+/// at their center (req_3382): vertex mode welds the selected verts, edge mode
+/// an edge's endpoints (edge collapse). Degenerated faces leave the mesh in the
+/// same one-undo transaction.
+fn hostMeshTopoWeld(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshTopoWeldSelection();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the axis-aligned
 /// plane across the ONE selected edge (normal = the edge's dominant world axis, through
 /// its midpoint — req_2837: keeps the ring level on tapered shapes) — the host-native loop
@@ -3460,6 +3471,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
+    v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
     v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);
