@@ -293,6 +293,44 @@ test "appending an authored group carries exact paint texels and the atlas base"
     try testing.expectEqual(@as([4]u8, .{ 31, 47, 63, 255 }), model_paint.faceColor(2).?);
 }
 
+test "atlas carry keeps destination substrate outside the old face silhouette" {
+    // The old and restored triangles intentionally share one authored identity and
+    // bounding rect but only partly overlap. Undoing a topology edit can produce this:
+    // the face identity survives while its triangle silhouette changes.
+    var old = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+    };
+    var restored = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    const groups = [_]u32{71};
+
+    model_paint.setTarget(8801, &old, 3);
+    model_paint.test_support.setFaceGroupsAndRebuild(&groups, &old, 3);
+    model_paint.setDetail(32, &old, 3);
+    model_paint.paintFace(0, .{ 240, 20, 10, model_paint.GLASS_ALPHA });
+    model_paint.snapshotAtlasForCarry();
+
+    // Match the edit install order: the new paint target lands first, then the
+    // authoritative face groups trigger the carry rebuild.
+    model_paint.setTarget(8802, &restored, 3);
+    model_paint.test_support.setFaceGroupsAndRebuild(&groups, &restored, 3);
+    defer {
+        model_paint.setDetail(1, &restored, 3);
+        model_paint.test_support.clearTargetAndSource();
+        model_paint.dropAtlasCarry();
+    }
+
+    // Old rectangle padding must not overwrite newly exposed real face pixels.
+    try testing.expectEqual(model_paint.DEFAULT_FACE, model_paint.sampleTexel(0, 0.10, 0.70).?);
+    // Overlap keeps old RGB detail, while opacity remains owned by the restored face.
+    try testing.expectEqual(@as([4]u8, .{ 240, 20, 10, 255 }), model_paint.sampleTexel(0, 0.40, 0.20).?);
+}
+
 test "append after stale topology preserves the raster and isolates the fresh part" {
     var initial = QUAD_VERTS;
     model_paint.setTarget(177, &initial, 6);

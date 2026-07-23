@@ -474,9 +474,11 @@ pub fn dropAtlasCarry() void {
 }
 
 /// Blit every new island whose authored group has a stashed twin, old rect → new rect
-/// (nearest-neighbour when the size changed). Marks which islands were carried whole so
-/// the flat colour fallback skips them (flooding would re-wipe the strokes). Returns the
-/// per-island carried mask (caller frees), or null when there was no stash / no memory.
+/// (nearest-neighbour when the size changed). Only the intersection of the old and new
+/// triangle silhouettes carries RGB: transparent rect padding is not face content, and
+/// opacity belongs to the current authored face table. Marks which islands were carried
+/// so the flat colour fallback skips them (flooding would re-wipe the strokes). Returns
+/// the per-island carried mask (caller frees), or null when there was no stash / memory.
 fn consumeAtlasCarry(lay: *const paint_islands.Layout, rgba: []u8) ?[]bool {
     const old_isles = g_carry_isles orelse return null;
     const old_rgba = g_carry_rgba orelse return null;
@@ -501,7 +503,8 @@ fn consumeAtlasCarry(lay: *const paint_islands.Layout, rgba: []u8) ?[]bool {
                 const src = (@as(usize, sy) * g_carry_w + sx) * 4;
                 const dst = (@as(usize, ni.y + py) * g_atlas_w + (ni.x + px)) * 4;
                 if (src + 4 > old_rgba.len or dst + 4 > rgba.len) continue;
-                @memcpy(rgba[dst .. dst + 4], old_rgba[src .. src + 4]);
+                if (old_rgba[src + 3] == 0 or rgba[dst + 3] == 0) continue;
+                @memcpy(rgba[dst .. dst + 3], old_rgba[src .. src + 3]);
             }
         }
         carried[i] = true;
@@ -623,8 +626,9 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     }
 
     // Texel-true carry first (req_2660): islands stashed by snapshotAtlasForCarry blit
-    // whole — every sub-face stroke survives. Only faces whose island was NOT blitted
-    // fall back to the flat base-colour flood (the pre-req_2660 behaviour).
+    // through their old/new silhouette intersection, so sub-face strokes survive
+    // without copying transparent packing space onto a changed face. Only faces whose
+    // island was NOT matched fall back to the flat base-colour flood.
     const carried: ?[]bool = if (carry) consumeAtlasCarry(&g_layout.?, rgba) else null;
     defer if (carried) |c| alloc.free(c);
     if (snap) |s| {
