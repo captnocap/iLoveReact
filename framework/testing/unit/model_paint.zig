@@ -580,6 +580,72 @@ test "authored UV rectangle edits keep texture pixels fixed and rewrite displaye
     try testing.expect(dabbed[1] > 220 and dabbed[0] < 30);
 }
 
+test "removing a part can preserve moved UVs and the exact resident atlas" {
+    var joined: [12 * 8]f32 = undefined;
+    var survivor: [6 * 8]f32 = undefined;
+    @memcpy(joined[0 .. 6 * 8], &QUAD_VERTS);
+    @memcpy(joined[6 * 8 ..], &QUAD_VERTS);
+    var vertex: usize = 6;
+    while (vertex < 12) : (vertex += 1) joined[vertex * 8] += 2.0;
+
+    model_paint.setTarget(911, &joined, 12);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0, 1, 1 }, &joined, 12);
+    model_paint.setDetail(32, &joined, 12);
+    defer {
+        if (model_paint.faceCount() == 2)
+            model_paint.setDetail(1, &survivor, 6)
+        else
+            model_paint.setDetail(1, &joined, 12);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    // Give the raster unmistakable non-flat content, then swap the two UV islands
+    // over that fixed artwork exactly as a UV-panel transform does.
+    const atlas = model_paint.atlas().?;
+    const patterned = try testing.allocator.dupe(u8, atlas.rgba);
+    defer testing.allocator.free(patterned);
+    var pixel: usize = 0;
+    while (pixel < patterned.len) : (pixel += 4) {
+        patterned[pixel + 0] = @intCast((pixel / 4) % 251);
+        patterned[pixel + 1] = @intCast(((pixel / 4) / atlas.w) % 251);
+        patterned[pixel + 2] = 173;
+    }
+    try testing.expect(model_paint.setAtlas(patterned));
+    model_paint.paintFaceAlpha(0, model_paint.GLASS_ALPHA);
+    model_paint.paintFaceAlpha(1, model_paint.GLASS_ALPHA);
+
+    var rects: [8]u32 = undefined;
+    try testing.expect(model_paint.copyLayoutRects(&rects));
+    const moved = [8]u32{
+        rects[4], rects[5], rects[2], rects[3],
+        rects[0], rects[1], rects[6], rects[7],
+    };
+    try testing.expect(model_paint.applyIslandRects(&moved, &joined, 12));
+    const revision = model_paint.layoutRevision();
+    const expected_atlas = try testing.allocator.dupe(u8, model_paint.atlas().?.rgba);
+    defer testing.allocator.free(expected_atlas);
+    @memcpy(&survivor, joined[6 * 8 ..]);
+
+    // Delete the first part by adopting only the second part's indexed rows. The
+    // deleted face was glass, so exact parented opacity must also replace the stale
+    // by-index classification without rewriting the retained image.
+    try testing.expect(model_paint.setTargetPreservingAtlas(912, &survivor, 6, &.{ 1, 1 }));
+    try testing.expect(model_paint.setFaceAlphaMetadata(0, 255));
+    try testing.expect(model_paint.setFaceAlphaMetadata(1, 255));
+
+    try testing.expectEqual(revision, model_paint.layoutRevision());
+    try testing.expectEqualSlices(u8, expected_atlas, model_paint.atlas().?.rgba);
+    const triangle = model_paint.uvTriangle(0) orelse return error.TestUnexpectedResult;
+    const width: f32 = @floatFromInt(atlas.w);
+    const height: f32 = @floatFromInt(atlas.h);
+    for (0..3) |corner| {
+        try testing.expectApproxEqAbs(survivor[corner * 8 + 6] * width, triangle.corners[corner * 2 + 0], 0.0001);
+        try testing.expectApproxEqAbs(survivor[corner * 8 + 7] * height, triangle.corners[corner * 2 + 1], 0.0001);
+    }
+    try testing.expect(!model_paint.faceIsGlass(0));
+    try testing.expect(!model_paint.faceIsGlass(1));
+}
+
 test "exact UV vertices deform face sampling while atlas pixels stay fixed" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(906, &quad, 6);

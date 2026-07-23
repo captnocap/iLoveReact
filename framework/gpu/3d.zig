@@ -1121,6 +1121,13 @@ fn replaceActiveEditMeshPreservingAtlas(
     if (old_ranges) |ranges| model_source.setPartRanges(ranges);
     if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
     if (!applyExactSourceFaceColors(colors, count / 3)) return false;
+    // setTargetPreservingAtlas can only retain opacity by the old displayed index.
+    // Indexed subset/reorder installs provide the exact parented colour table, so
+    // re-parent metadata without touching a single retained texture pixel.
+    var face: u32 = 0;
+    while (face < count / 3) : (face += 1) {
+        if (!model_paint.setFaceAlphaMetadata(face, colors[@as(usize, face) * 4 + 3])) return false;
+    }
     return true;
 }
 
@@ -2434,12 +2441,15 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     // "selection moved to the other side of the model" residue (req_2559).
     mesh_edit.clearSelection();
 
+    const paint_stable = std.mem.eql(u8, label, "delete part");
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
     var materials: std.ArrayListUnmanaged(u32) = .empty;
     defer materials.deinit(std.heap.c_allocator);
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
+    defer colors.deinit(std.heap.c_allocator);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         if (mask[f]) continue;
@@ -2451,6 +2461,13 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
         }
         if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
         materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch {};
+        if (paint_stable) {
+            const color = trueFaceColor(f);
+            colors.appendSlice(std.heap.c_allocator, &color) catch {
+                out.deinit(std.heap.c_allocator);
+                return false;
+            };
+        }
     }
     const kept: u32 = @intCast(out.items.len / 8);
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
@@ -2483,10 +2500,24 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     }
 
     var snap = journalSnapshotCurrent(label);
-    const paint_stable = std.mem.eql(u8, label, "delete part");
-    if (paint_stable) beginPaintStableReplace();
-    const ok = replaceActiveEditMesh(owned, kept);
-    if (!ok and paint_stable) cancelPaintStableReplace();
+    // A non-empty Outliner delete is an indexed subset of the current soup: every
+    // surviving vertex already carries the exact authored UV that samples the live
+    // raster. Keep both byte-for-byte and merely retire the removed groups. Repacking
+    // here made moved UVs jump on delete, then paired the old undo UVs with a twice-
+    // resampled image on restore (req_3372). The all-deleted case has no resident
+    // target to preserve and retains the carry-through-empty fallback.
+    const preserve_indexed_atlas = paint_stable and
+        kept >= 3 and
+        has_groups and
+        model_paint.atlas() != null and
+        groups.items.len == kept / 3 and
+        colors.items.len == @as(usize, kept / 3) * 4;
+    if (paint_stable and !preserve_indexed_atlas) beginPaintStableReplace();
+    const ok = if (preserve_indexed_atlas)
+        replaceActiveEditMeshPreservingAtlas(owned, kept, groups.items, colors.items)
+    else
+        replaceActiveEditMesh(owned, kept);
+    if (!ok and paint_stable and !preserve_indexed_atlas) cancelPaintStableReplace();
     if (ok) {
         if (kept > 0) {
             model_source.setFaceMaterials(materials.items);
@@ -2496,7 +2527,7 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
         if (has_groups) {
             model_source.setFaceGroups(groups.items);
             if (compacted_ranges) |ranges| model_source.setPartRanges(ranges);
-            if (kept > 0) _ = refreshPaintLayout();
+            if (kept > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout();
         } else if (kept == 0) {
             model_source.setPartRanges(&.{});
         }

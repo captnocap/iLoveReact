@@ -723,6 +723,17 @@ pub fn paintFaceAlpha(face: u32, alpha: u8) void {
     paintFaceTexels(face, null, alpha);
 }
 
+/// Adopt face-level opacity identity without rewriting texture pixels. Indexed
+/// subset/reorder installs retain the exact resident atlas but must re-parent the
+/// glass classification from their explicit face-colour table; painting alpha here
+/// would mutate deliberately moved UV artwork during an otherwise lossless install.
+pub fn setFaceAlphaMetadata(face: u32, alpha: u8) bool {
+    const rows = g_face_alpha orelse return false;
+    if (@as(usize, face) >= rows.len) return false;
+    rows[@as(usize, face)] = alpha;
+    return true;
+}
+
 // ── Texture template (req_2537) ─────────────────────────────────────────────────────
 // Fill every UV island a distinct flat colour — Blockbench's "Texture Template". The atlas
 // gets real tone and each face shows its own island colour on the model, so painting starts
