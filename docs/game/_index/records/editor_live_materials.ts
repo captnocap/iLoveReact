@@ -1,0 +1,83 @@
+import type { DocIndex } from '../types';
+
+export const editor_live_materials: DocIndex = {
+  name: 'editor_live_materials',
+  file: 'editor_live_materials.md',
+  cart: 'cart/editor/render3d/regionFormula.ts',
+  purpose: ['rendering', 'texture_bake', 'ui'],
+  summary:
+    'Live material regions (req_3394-3397, the lavalamp arc): texture slots wearing a liveMaterial render their faces per-frame over OBJECT-SPACE position through a host region pipeline — one continuous animated field across N faces (no per-face restarts/seams). Formula static (ground-look pattern), picks are data; membership is slot-bound host truth; a LightRig colorFrom makes the lamp glow follow the goo via host-stepped palette blending.',
+  interfaces: [
+    {
+      name: '__model_region_formula / __model_region_bind_slot / __model_region_set / __model_region_clear',
+      purpose: ['rendering', 'host_bridge'],
+      kind: 'host_fn',
+      sourceFile: 'framework/v8_bindings_core.zig',
+      description:
+        'The region doors: push the composed WGSL once (hash-gated in ensureRegionPipeline — picks never recompile), then bind regions as DATA. bind_slot resolves faces HOST-side from model_source.faceMaterialOf at draw time (face_materials_gen invalidation), so assign/cut/undo need no JS re-push; region_set takes an explicit face list for non-resident meshes. Regions draw as indexed overlays into the retained vertices at depth less_equal, after ground, before transparent — glass shells blend over their lava.',
+      dependsOn: ['scene3d_region_prefix/epilogue (framework/gpu/shaders.zig)', 'model_source.faceMaterialOf'],
+      consumers: ['cart/editor/stage/ModelView.tsx'],
+      status: 'live',
+    },
+    {
+      name: 'EDITOR_REGION_FORMULA + buildRegionData',
+      purpose: ['rendering', 'texture_bake'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/render3d/regionFormula.ts',
+      description:
+        'Composes FILL_FUNCS with mat_pal ACTIVE (regions carry a real palette section, so palette recoloring works like paint inks) and U.time→S.time, plus a triplanar region_rgb (fill_pick over p.yz/p.xz/p.xy, |normal|-weighted, deliberately UN-fracted so continuous materials never seam). buildRegionData packs a ModelLiveMaterial into the D stream: spec data[] + palette + domainScale; unknown fns return null loudly.',
+      dependsOn: ['render3d/shaders/_generated/dispatch FILL_FUNCS'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/inspector/RigSection.tsx'],
+      status: 'live',
+    },
+    {
+      name: 'ModelTextureSlot.liveMaterial + LightRig.colorFrom',
+      purpose: ['ui', 'rendering'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/model/modelTextureSlotAuthoring.ts',
+      description:
+        'The persistence contract: a slot may wear liveMaterial { fn, variant, seed, scale, palette } (normalizeModelLiveMaterial guards hand-edited manifests); a rig light may wear colorFrom = a live slot id (normalizeModelLights carries it). Rig panel: FACE RIGS cards grew a type-to-bind `live` row + motion/scale; the light editor grew `glow from`. ModelView pushes bindings keyed on the mesh hostKey and hands colorFromRegion (slot index) to the emitted lights; the host steps the light color from the region palette on the render wall-clock (regionLightRgb, 3d.zig) — no JS in the frame loop, no readback.',
+      dependsOn: ['scene3d_light_region node field (framework/layout.zig, v8_app.zig)'],
+      consumers: ['cart/editor/stage/Stage.tsx', 'cart/editor/stage/ModelDocumentSurface.tsx'],
+      status: 'live',
+    },
+    {
+      name: 'lava_plasma catalog material',
+      purpose: ['rendering'],
+      kind: 'shader',
+      sourceFile: 'cart/editor/render3d/shaders/materials/lava_plasma.wgsl',
+      description:
+        'The four-wave sine plasma (runtime/effects/Plasma.tsx) as a catalog fill — board neon_surface, materialId 58, 3 palette slots (primary/secondary/tertiary), variants retune motion only (Classic Wave / Fast Storm / Slow Churn — the lavalamp mode). The reference material for the object-space domain: pure sin, continuous everywhere.',
+      consumers: ['cart/editor/render3d/regionFormula.ts'],
+      status: 'live',
+    },
+  ],
+  patterns: [
+    {
+      name: 'formula static, picks are data (regions edition)',
+      purpose: ['rendering'],
+      description:
+        'Same law as the painted ground (req_2693): the region WGSL compiles once per run/hot-reload; binding a material, changing a variant, or recoloring a palette ships floats, never source. And the region DOMAIN is object space, never per-face UV — continuity across faces must come from the domain (req_3395 ruling in the arc), so never reintroduce per-face bases for region-spanning materials.',
+      examples: ['editor_live_materials'],
+      status: 'resolved',
+    },
+  ],
+  hazards: [
+    {
+      name: 'regions preview only in the editor render path',
+      purpose: ['rendering'],
+      description:
+        'Placed props in WorldViewport and the (not-yet-existing) compiled route do not evaluate live regions yet — only the ModelView resident mesh does. Wiring livePush/world placement is the follow-up; light colorFrom tier 2 (the light PROJECTS the field onto walls via the material fn in lamp space) is designed in req_3396 but unbuilt.',
+      evidence: ['cart/editor/world/livePush.ts', 'docs/game/_requests/req_3396.json'],
+      severity: 'medium',
+    },
+    {
+      name: 'un-fracted triplanar changes framed materials',
+      purpose: ['rendering'],
+      description:
+        'region_rgb passes continuous scaled coords (no fract) so animated fields never seam — but materials whose look depends on the [0,1] uv frame (edge vignettes like plasma_glass, framed compositions) read differently as regions than as tiles. Pick continuous-friendly surface materials; do not "fix" this by fracting the domain (that reintroduces seams at every tile boundary).',
+      evidence: ['cart/editor/render3d/regionFormula.ts'],
+      severity: 'low',
+    },
+  ],
+};
