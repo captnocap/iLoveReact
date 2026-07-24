@@ -77,6 +77,8 @@ import {
 } from '../stage/mapPaint';
 import { compileCoastalCityPainting } from '../stage/coastalCity';
 import MapTexturePicker from '../stage/MapTexturePicker';
+import MaterialPickerPopover from './MaterialPickerPopover';
+import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
@@ -342,6 +344,11 @@ export default function AppFrame() {
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
   // The Add From Library picker (append a saved model into the OPEN model as parts).
   const [importPartOpen, setImportPartOpen] = useState(false);
+  // Live-material picker (req_3401): which model+slot the app-root thumbnail
+  // popover is currently binding. Materials are picked BY LOOK — the Rig row's
+  // `pick` verb opens this; a pick patches the slot's liveMaterial and the
+  // popover stays up so looks can be compared live on the mesh.
+  const [liveMaterialPicker, setLiveMaterialPicker] = useState<{ modelId: string; slotIndex: number } | null>(null);
   // STL conversion is intentionally a blocking operation: a local Blender job can
   // run long enough that a status-bar update looks like a click that did nothing.
   const [stlConversionName, setStlConversionName] = useState<string | null>(null);
@@ -5832,6 +5839,7 @@ export default function AppFrame() {
             onSetModelTextureSlots={setModelTextureSlots}
             onSetModelLights={setModelLights}
             onModelTextureMembershipChanged={markModelTextureMembershipDirty}
+            onOpenLiveMaterialPicker={(modelId, slotIndex) => setLiveMaterialPicker({ modelId, slotIndex })}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
             // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
@@ -6056,6 +6064,36 @@ export default function AppFrame() {
           <MapTexturePicker state={state.mapPaint} onPatch={patchMapPaint} />
         </RenderProbe>
       ) : null}
+      {/* Live-material picker (req_3401): the Rig row's `pick` verb binds a
+          texture slot's live material BY LOOK — same picker organ as the map
+          brush. A pick patches the slot and STAYS OPEN so looks compare live
+          on the mesh; the scrim closes it. */}
+      {liveMaterialPicker ? (() => {
+        const pkg = visibleModels.find((m) => m.id === liveMaterialPicker.modelId);
+        const slots = state.modelTextureSlots[liveMaterialPicker.modelId] ?? pkg?.textureSlots ?? [];
+        const slot = slots[liveMaterialPicker.slotIndex];
+        if (!slot) return null;
+        return (
+          <RenderProbe id="Live Material Picker">
+            <MaterialPickerPopover
+              title={`${slot.label} wears:`}
+              boundFn={slot.liveMaterial?.fn ?? null}
+              boundVariant={slot.liveMaterial?.variant ?? 0}
+              materials={REGION_MATERIALS}
+              onPick={(fn, variant) => {
+                const next = slots.map((s, at) => {
+                  if (at !== liveMaterialPicker.slotIndex) return s;
+                  const { liveMaterial: prior, ...rest } = s;
+                  return { ...rest, liveMaterial: { fn, variant, ...(prior?.scale ? { scale: prior.scale } : {}) } };
+                });
+                setModelTextureSlots(liveMaterialPicker.modelId, next);
+              }}
+              onClose={() => setLiveMaterialPicker(null)}
+              anchor={{ right: 360, top: 120 }}
+            />
+          </RenderProbe>
+        );
+      })() : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor
           (window origin) and hit-tests above everything (paint order). Self-gates
           on right-click; the kind check keeps it out of non-model surfaces. */}

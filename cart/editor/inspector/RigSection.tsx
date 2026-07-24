@@ -24,6 +24,9 @@ import type { LightRig, V3 } from '../model/editMesh';
 import { createTextureSlotFromSelection } from '../model/modelTextureSlotAuthoring';
 import { MODEL_LIGHT_TUNING, newModelLight, normalizeModelLights } from '../model/modelLights';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
+import ShaderThumb from '../shell/ShaderThumb';
+import { FILL_SHADER } from '../render3d/shaders/index';
+import { materialThumbData } from '../shell/MaterialPickerPopover';
 
 const host = globalThis as any;
 
@@ -95,6 +98,9 @@ export default function RigSection(props: {
   textureSlots: ModelTextureSlot[];
   onTextureSlotsChange: (slots: ModelTextureSlot[]) => void;
   onTextureMembershipChanged: (message: string, dirty?: boolean) => void;
+  /** Open the shared thumbnail picker (app-root overlay) for this slot's live
+   * material — picking is BY LOOK, never by name (req_3401). */
+  onPickLiveMaterial: (slotIndex: number) => void;
   lights: LightRig[];
   onLightsChange: (lights: LightRig[]) => void;
 }) {
@@ -147,18 +153,19 @@ export default function RigSection(props: {
     host.__mesh_texture_slot_remove?.(index);
     props.onTextureSlotsChange(props.textureSlots.filter((_, at) => at !== index));
   };
-  // ── Live material binding (req_3397, bind-as-verb per req_3400): a slot
+  // ── Live material binding (req_3397; picked BY LOOK per req_3401): a slot
   // wearing a liveMaterial renders its faces as one continuous animated field
   // (object-space domain) instead of the painted atlas — the lavalamp's goo.
-  // Typing only edits a DRAFT; the binding (and its one small shader compile)
-  // happens on Enter / the bind verb, never per keystroke — the first cut
-  // bound on the first letter and kicked a catalog-sized compile that froze
-  // the app. Committing empty text returns the slot to paint.
-  const [liveDraft, setLiveDraft] = useState<{ index: number; text: string } | null>(null);
+  // The user's ruling: materials are known "only by the way they look" — the
+  // `pick` verb opens the shared thumbnail picker (MaterialPickerPopover at
+  // the app root); NOTHING here ever resolves a material from a typed string
+  // (the first cut's type-to-bind grabbed autumn_leaves off one keystroke).
   const liveMaterialLabel = (slot: ModelTextureSlot): string => {
     if (!slot.liveMaterial) return '';
     return REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn)?.name ?? slot.liveMaterial.fn;
   };
+  const liveMaterialOf = (slot: ModelTextureSlot) =>
+    slot.liveMaterial ? REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn) ?? null : null;
   const patchLiveMaterial = (index: number, next: ModelLiveMaterial | undefined) => props.onTextureSlotsChange(
     props.textureSlots.map((slot, at) => {
       if (at !== index) return slot;
@@ -166,25 +173,6 @@ export default function RigSection(props: {
       return next ? { ...rest, liveMaterial: next } : rest;
     }),
   );
-  const commitLiveMaterial = (index: number) => {
-    if (liveDraft?.index !== index) return;
-    const query = liveDraft.text.trim().toLowerCase();
-    setLiveDraft(null);
-    if (!query) {
-      patchLiveMaterial(index, undefined);
-      props.onTextureMembershipChanged(`${props.textureSlots[index]?.label ?? 'role'} returned to paint`, false);
-      return;
-    }
-    const match = REGION_MATERIALS.find((m) => m.name.toLowerCase().includes(query) || m.fn.includes(query.replace(/[\s-]+/g, '_')));
-    if (!match) {
-      props.onTextureMembershipChanged(`no surface material matches '${liveDraft.text.trim()}'`, false);
-      return;
-    }
-    const current = props.textureSlots[index]?.liveMaterial;
-    if (current?.fn === match.fn) return;
-    patchLiveMaterial(index, { fn: match.fn, variant: 0, ...(current?.scale ? { scale: current.scale } : {}) });
-    props.onTextureMembershipChanged(`bound ${match.name} live — compiling its shader (a moment)`, false);
-  };
   const cycleLiveVariant = (index: number) => {
     const slot = props.textureSlots[index];
     if (!slot?.liveMaterial) return;
@@ -258,18 +246,19 @@ export default function RigSection(props: {
           </C.HW_TextureRoleActionRow>
           <C.HW_ReadRow>
             <C.HW_FormLabel>live</C.HW_FormLabel>
-            <C.HW_RenameInput
-              value={liveDraft?.index === index ? liveDraft.text : liveMaterialLabel(slot)}
-              placeholder="type a material, press bind"
-              onChange={(text: string) => setLiveDraft({ index, text })}
-              onSubmit={() => commitLiveMaterial(index)}
-              onSubmitEditing={() => commitLiveMaterial(index)}
-            />
-            {liveDraft?.index === index ? (
-              <C.HW_OvToggleOn tooltip="bind this material live (compiles one small shader)" onPress={() => commitLiveMaterial(index)}>
-                <C.HW_OvToggleTextOn>bind</C.HW_OvToggleTextOn>
-              </C.HW_OvToggleOn>
-            ) : slot.liveMaterial ? (
+            {liveMaterialOf(slot) ? (
+              <ShaderThumb
+                shader={FILL_SHADER}
+                data={materialThumbData(liveMaterialOf(slot)!.materialId, liveMaterialOf(slot)!.boardIndex, slot.liveMaterial!.variant ?? 0)}
+                size={22}
+              />
+            ) : null}
+            <C.HW_ReadValue>{slot.liveMaterial ? liveMaterialLabel(slot) : 'painted atlas'}</C.HW_ReadValue>
+            <C.HW_Spacer />
+            <C.HW_OvToggleOn tooltip="pick a live material by its look — the slot's faces animate with it" onPress={() => props.onPickLiveMaterial(index)}>
+              <C.HW_OvToggleTextOn>pick</C.HW_OvToggleTextOn>
+            </C.HW_OvToggleOn>
+            {slot.liveMaterial ? (
               <C.HW_OvBtn tooltip="return this role's faces to the painted atlas" onPress={() => patchLiveMaterial(index, undefined)}><C.HW_OvBtnText>×</C.HW_OvBtnText></C.HW_OvBtn>
             ) : <C.HW_OvResetIdle />}
           </C.HW_ReadRow>

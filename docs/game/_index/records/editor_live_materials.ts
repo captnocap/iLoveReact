@@ -67,7 +67,7 @@ export const editor_live_materials: DocIndex = {
       name: 'never compose the whole catalog into a live pipeline',
       purpose: ['rendering', 'shader'],
       description:
-        'req_3400: the whole generated dispatch is megashader-class (735 KB and growing with the catalog) — pushing it into a pipeline that compiles ON the render thread numbs the entire app for minutes. Regions only ever draw their BOUND materials, so compose the subset. The painted ground legitimately needs the full catalog and pays its one narrated compile per run; do not let any new live pipeline copy that shape without the ground\'s justification. UI corollary: any control whose commit triggers a shader compile must be a deliberate VERB (Enter/bind), never a per-keystroke side effect.',
+        'req_3400: the whole generated dispatch is megashader-class (735 KB and growing with the catalog) — pushing it into a pipeline that compiles ON the render thread numbs the entire app for minutes. Regions only ever draw their BOUND materials, so compose the subset. The painted ground legitimately needs the full catalog and pays its one narrated compile per run; do not let any new live pipeline copy that shape without the ground\'s justification. UI corollaries: any control whose commit triggers a shader compile must be a deliberate VERB, and materials are picked BY LOOK through shell/MaterialPickerPopover — NEVER resolved from a typed string (req_3401 user ruling: "i dont know the shaders by any formal name only by the way they look"; the type-to-bind cut grabbed autumn_leaves off one keystroke).',
       evidence: ['cart/editor/render3d/regionFormula.ts', 'docs/game/_requests/req_3400.json'],
       severity: 'high',
     },

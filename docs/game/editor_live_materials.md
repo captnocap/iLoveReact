@@ -42,9 +42,16 @@ bound SET recompiles (hash-gated); variant/seed/palette/scale are pure data.
 `ModelTextureSlot` gains `liveMaterial { fn, variant, seed, scale, palette }`
 (manifest-normalized in modelTextureSlotAuthoring.ts); ModelView pushes
 formula + per-slot data keyed on the mesh hostKey; the Rig panel's FACE RIGS
-cards grew a `live` row — typing edits a **draft**, the binding (and its one
-small compile) happens on Enter / the `bind` verb only — plus motion/scale
-rows.
+cards grew a `live` row — a thumbnail of the bound material + a `pick` verb
+opening the shared thumbnail picker — plus motion/scale rows.
+
+**Materials are picked BY LOOK, never by name (req_3401, user ruling: "i dont
+know the shaders by any formal name only by the way they look").** The picker
+is ONE organ: `shell/MaterialPickerPopover.tsx` (paged live-thumbnail grid +
+variant chips + scrim, rendered at the app root), which MapTexturePicker (the
+map brush look) now also rides. A pick patches the slot and the popover stays
+open, so looks compare live on the mesh. No surface may resolve a material
+from a typed string.
 
 ## The light follows the goo (req_3396 tier 1)
 

@@ -246,6 +246,8 @@ export default function Inspector(props: {
   onSetModelTextureSlots: (pkgId: string, slots: ModelTextureSlot[]) => void;
   onSetModelLights: (pkgId: string, lights: LightRig[]) => void;
   onModelTextureMembershipChanged: (pkgId: string, message: string, dirty?: boolean) => void;
+  /** Open the app-root live-material thumbnail picker for a texture slot (req_3401). */
+  onOpenLiveMaterialPicker: (pkgId: string, slotIndex: number) => void;
   // World-piece focus-panel material edits.
   onAssignSlot: (id: string, role: string) => void;
   onClearSlot: (id: string, role: string) => void;
@@ -572,6 +574,7 @@ export default function Inspector(props: {
                 textureSlots={props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []}
                 onTextureSlotsChange={(slots) => props.onSetModelTextureSlots(activeModel.id, slots)}
                 onTextureMembershipChanged={(message, dirty) => props.onModelTextureMembershipChanged(activeModel.id, message, dirty)}
+                onPickLiveMaterial={(slotIndex) => props.onOpenLiveMaterialPicker(activeModel.id, slotIndex)}
                 lights={props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []}
                 onLightsChange={(lights) => props.onSetModelLights(activeModel.id, lights)}
               />
