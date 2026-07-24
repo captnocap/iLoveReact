@@ -8107,6 +8107,12 @@ const RegionSlot = struct {
     ibuf: ?*wgpu.Buffer = null,
     ibuf_count: u32 = 0,
     ibuf_dirty: bool = false,
+    // Slot-bound mode (>= 0): membership is the resident edit mesh's TEXTURE
+    // SLOT — indices regenerate from model_source.faceMaterialOf whenever
+    // face_materials_gen moves, so re-assignments/cuts/undo keep the region
+    // current with no JS resync. -1 = explicit face list (the general door).
+    slot_material: i32 = -1,
+    mats_gen: u32 = 0, // model_source.face_materials_gen the indices were built from
 };
 var g_regions: [REGION_POOL]RegionSlot = [_]RegionSlot{.{}} ** REGION_POOL;
 var g_region_data_buf: [REGION_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** REGION_POOL;
@@ -8163,6 +8169,52 @@ pub fn setRegion(key: []const u8, region_id: i32, faces: []const u32, data: []co
     if (s.indices) |old| std.heap.c_allocator.free(old);
     s.indices = indices;
     s.max_index = max_index;
+    s.ibuf_dirty = true;
+    if (data.len > REGION_DATA_FLOATS) {
+        log.print("[r3d-region] region {d} data is {d} floats, cap {d} — TRUNCATED (palette/extras past the cap are lost)\n", .{ region_id, data.len, REGION_DATA_FLOATS });
+    }
+    const n: u32 = @intCast(@min(data.len, REGION_DATA_FLOATS));
+    @memcpy(s.data[0..n], data[0..n]);
+    s.data_len = n;
+    s.data_dirty = true;
+    s.key_hash = kh;
+    s.region_id = region_id;
+    s.active = true;
+    return true;
+}
+
+/// __model_region_bind_slot: bind a region to a TEXTURE SLOT of the resident
+/// edit mesh — face membership stays HOST truth (model_source face materials),
+/// resolved at draw time, so assigning more faces to the slot, cutting them, or
+/// undoing flows into the region with no JS re-push. `data` as in setRegion.
+pub fn setRegionSlotBound(key: []const u8, region_id: i32, slot_material: u32, data: []const f32) bool {
+    if (data.len == 0) return false;
+    const kh = hashKey(key);
+    var slot_index: ?usize = null;
+    for (&g_regions, 0..) |*s, i| {
+        if (s.active and s.key_hash == kh and s.region_id == region_id) {
+            slot_index = i;
+            break;
+        }
+    }
+    if (slot_index == null) {
+        for (&g_regions, 0..) |*s, i| {
+            if (!s.active) {
+                slot_index = i;
+                break;
+            }
+        }
+    }
+    const si = slot_index orelse {
+        log.print("[r3d-region] region pool full ({d}) — dropping slot-bound region {d} for key '{s}'\n", .{ REGION_POOL, region_id, key });
+        return false;
+    };
+    const s = &g_regions[si];
+    if (s.indices) |old| std.heap.c_allocator.free(old);
+    s.indices = null;
+    s.max_index = 0;
+    s.slot_material = @intCast(slot_material);
+    s.mats_gen = 0; // force the first draw-time regeneration
     s.ibuf_dirty = true;
     if (data.len > REGION_DATA_FLOATS) {
         log.print("[r3d-region] region {d} data is {d} floats, cap {d} — TRUNCATED (palette/extras past the cap are lost)\n", .{ region_id, data.len, REGION_DATA_FLOATS });
@@ -11665,6 +11717,40 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                 var inst_written = false;
                 for (&g_regions, 0..) |*s, s_i| {
                     if (!s.active or s.key_hash != rkh) continue;
+                    // Slot-bound region on the resident edit mesh: regenerate
+                    // indices whenever the face materials moved (assignment,
+                    // cut, undo — every path bumps face_materials_gen), so the
+                    // binding follows the slot with no JS re-push.
+                    if (s.slot_material >= 0 and model_paint.isTarget(rkh) and
+                        (s.mats_gen != model_source.face_materials_gen or s.indices == null))
+                    {
+                        const slot_mat: u32 = @intCast(s.slot_material);
+                        const tri_count: u32 = rslot[rm_i].count / 3;
+                        var nfaces: u32 = 0;
+                        var f: u32 = 0;
+                        while (f < tri_count) : (f += 1) {
+                            if (model_source.faceMaterialOf(f) == slot_mat) nfaces += 1;
+                        }
+                        if (std.heap.c_allocator.alloc(u32, nfaces * 3)) |idx| {
+                            var wr: usize = 0;
+                            var max_index: u32 = 0;
+                            f = 0;
+                            while (f < tri_count) : (f += 1) {
+                                if (model_source.faceMaterialOf(f) != slot_mat) continue;
+                                const base = f * 3;
+                                idx[wr] = base;
+                                idx[wr + 1] = base + 1;
+                                idx[wr + 2] = base + 2;
+                                wr += 3;
+                                if (base + 2 > max_index) max_index = base + 2;
+                            }
+                            if (s.indices) |old| std.heap.c_allocator.free(old);
+                            s.indices = idx;
+                            s.max_index = max_index;
+                            s.ibuf_dirty = true;
+                            s.mats_gen = model_source.face_materials_gen;
+                        } else |_| {}
+                    }
                     if (s.max_index >= rslot[rm_i].count) continue; // mesh shrank under the binding — JS re-push follows
                     const dbuf = g_region_data_buf[s_i] orelse continue;
                     const dbg = g_region_data_bg[s_i] orelse continue;

@@ -356,7 +356,23 @@ export type ModelPaintVariant = {
  * the legacy/default material role. Screen delivery and flora scattering both
  * consume the same stable face membership instead of inventing parallel masks. */
 export type ModelFacePurpose = 'material' | 'screen' | 'flora';
-export type ModelTextureSlot = { id: string; label: string; purpose?: ModelFacePurpose };
+
+/** A LIVE material bound to a texture slot (req_3394/3395/3397): the slot's
+ * faces render a catalog material evaluated per-frame over OBJECT-SPACE
+ * position (one continuous animated field across all faces — the lavalamp's
+ * goo), instead of the baked paint atlas. `fn` is the catalog material's
+ * stable authoring key; palette overrides follow the material's extracted
+ * slots (the palette-slot contract). */
+export type ModelLiveMaterial = {
+  fn: string;
+  variant?: number;
+  seed?: number;
+  /** material tiles per world unit over the object-space domain (default 1). */
+  scale?: number;
+  palette?: readonly (readonly [number, number, number])[];
+};
+
+export type ModelTextureSlot = { id: string; label: string; purpose?: ModelFacePurpose; liveMaterial?: ModelLiveMaterial };
 
 // Per-model UI mutations (right-click actions). Package manifests are disk truth;
 // these overrides are the live projection used during the current render cycle.

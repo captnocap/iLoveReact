@@ -152,6 +152,7 @@ export default function Stage(props: {
           <ModelDocumentSurface
             model={activeModel}
             lights={activeModel ? (props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []) : []}
+            textureSlots={activeModel ? (props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []) : []}
             triggerProps={props.modelContextTrigger}
             onToolApi={props.onModelToolApi}
             onToolState={props.onModelToolState}

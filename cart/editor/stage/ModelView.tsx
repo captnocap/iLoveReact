@@ -20,6 +20,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import type { LightRig } from '../model/editMesh';
+import type { ModelTextureSlot } from '../data/types';
+import { EDITOR_REGION_FORMULA, buildRegionData } from '../render3d/regionFormula';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
@@ -274,6 +276,11 @@ export type ModelViewProps = {
   /** Model-local emitted lights from the Rig draft. They illuminate the same
    * geometry here that each placed instance illuminates in World. */
   authoredLights?: readonly LightRig[];
+  /** The model's texture-slot table (Rig draft ?? manifest). Slots wearing a
+   * `liveMaterial` become LIVE MATERIAL REGIONS (req_3397): the host renders
+   * their faces per-frame over object-space position; membership binds BY SLOT
+   * so face re-assignment/cuts/undo never need a JS re-push. */
+  textureSlots?: readonly ModelTextureSlot[];
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -703,7 +710,7 @@ const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [] }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -773,6 +780,33 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // unmount effect below are the only closers.
   }, [bdActive?.id, bdActive ? bdActive.pos.join(',') : '']);
   useEffect(() => () => { host.__model_bd_gizmo_clear?.(); }, []);
+  // ── Live material regions (req_3397) ──────────────────────────────────────
+  // Texture slots wearing a liveMaterial render per-frame over OBJECT-SPACE
+  // position through the host's region pipeline — one continuous animated field
+  // across the slot's faces (the lavalamp's goo), never per-face restarts. The
+  // FORMULA ships whole and is hash-gated host-side; every material pick is
+  // DATA. Binding is BY SLOT INDEX (__model_region_bind_slot), so face
+  // re-assignment, cuts, and undo stay host-truth with no JS re-push.
+  const regionSig = (textureSlots ?? []).map((s, i) => (s.liveMaterial ? `${i}:${s.id}:${JSON.stringify(s.liveMaterial)}` : '')).filter(Boolean).join('|');
+  useEffect(() => {
+    if (!model || typeof host.__model_region_bind_slot !== 'function') return;
+    const key = model.key;
+    host.__model_region_clear?.(key, -1);
+    if (!regionSig) return;
+    host.__model_region_formula?.(EDITOR_REGION_FORMULA);
+    (textureSlots ?? []).forEach((slot, index) => {
+      if (!slot.liveMaterial) return;
+      const data = buildRegionData(slot.liveMaterial);
+      if (data) host.__model_region_bind_slot(key, index, index, data);
+    });
+    return () => { host.__model_region_clear?.(key, -1); };
+  }, [model?.key, regionSig]);
+  // colorFrom (req_3396): a rig light bound to a live-material slot hands its
+  // color to the host, which steps it from the region's palette each frame.
+  const liveRegionIdOf = (light: LightRig): number => {
+    if (!light.colorFrom) return -1;
+    return (textureSlots ?? []).findIndex((s) => s.id === light.colorFrom && s.liveMaterial);
+  };
   useEffect(() => {
     if (!bdActive) return;
     const id = bdActive.id;
@@ -2612,6 +2646,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             range={light.range}
             cone={light.spread ?? 32}
             castsShadow={light.castsShadow !== false}
+            colorFromRegion={liveRegionIdOf(light)}
           />
         ) : (
           <Scene3D.PointLight
@@ -2620,6 +2655,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             color={light.color}
             intensity={light.intensity}
             range={light.range}
+            colorFromRegion={liveRegionIdOf(light)}
           />
         )) : null}
         {/* White material: all colour comes from the host's per-face paint atlas

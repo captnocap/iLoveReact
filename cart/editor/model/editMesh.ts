@@ -154,6 +154,10 @@ export type LightRig = {
   spread?: number;
   /** a spot renders a shadow map from its tip (defaults on for spots). */
   castsShadow?: boolean;
+  /** colorFrom (req_3396): the id of a texture slot wearing a LIVE material —
+   *  the host steps this light's color from that material's palette slots each
+   *  frame, so the lamp's glow follows the goo. Absent = fixed `color`. */
+  colorFrom?: string;
 };
 
 /** One named re-skinnable surface on a part (req_1542). The face set is implicit:

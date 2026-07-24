@@ -2271,6 +2271,33 @@ fn hostModelRegionSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_region_bind_slot(key, regionId, slotIndex, Float32Array data) → 1|0.
+/// Slot-bound region: membership = every face of the resident edit mesh wearing
+/// texture slot `slotIndex`, resolved HOST-side at draw time — face assignment,
+/// cuts, and undo flow into the region automatically. `data` as in __model_region_set.
+fn hostModelRegionBindSlot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const key = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+    const region_id = argToI32(info, 1) orelse 0;
+    const slot_index: u32 = @intCast(@max(0, argToI32(info, 2) orelse 0));
+    const data_bytes = argBytes(info, 3) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (data_bytes.len == 0 or data_bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const data: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, data_bytes));
+    const ok = scene3d.setRegionSlotBound(key, region_id, slot_index, data);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_region_clear(key[, regionId]) → 1. regionId >= 0 clears that one
 /// region of `key`; omitted/negative clears every region of `key`; an empty key
 /// clears ALL regions (model switch / unmount).
@@ -3662,6 +3689,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
     v8_runtime.registerHostFn("__model_region_formula", hostModelRegionFormula);
     v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
+    v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
     v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);

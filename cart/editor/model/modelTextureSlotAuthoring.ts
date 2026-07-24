@@ -1,4 +1,4 @@
-import type { ModelFacePurpose, ModelTextureSlot } from '../data/types';
+import type { ModelFacePurpose, ModelLiveMaterial, ModelTextureSlot } from '../data/types';
 
 export type CreateTextureSlotResult = {
   slots: readonly ModelTextureSlot[];
@@ -13,6 +13,26 @@ export function normalizeModelFacePurpose(value: unknown): ModelFacePurpose {
   return value === 'screen' || value === 'flora' ? value : 'material';
 }
 
+/** Runtime boundary for the live-material binding (req_3397): a hand-edited
+ * manifest must not push garbage into the region shader's D stream. Unknown
+ * shapes drop the binding (the slot stays a plain painted role). */
+export function normalizeModelLiveMaterial(value: unknown): ModelLiveMaterial | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as Record<string, unknown>;
+  if (typeof row.fn !== 'string' || !row.fn.trim()) return undefined;
+  const out: ModelLiveMaterial = { fn: row.fn };
+  if (typeof row.variant === 'number' && Number.isFinite(row.variant)) out.variant = row.variant;
+  if (typeof row.seed === 'number' && Number.isFinite(row.seed)) out.seed = row.seed;
+  if (typeof row.scale === 'number' && Number.isFinite(row.scale) && row.scale > 0) out.scale = row.scale;
+  if (Array.isArray(row.palette)) {
+    const palette = row.palette
+      .filter((c): c is [number, number, number] => Array.isArray(c) && c.length === 3 && c.every((v) => typeof v === 'number' && Number.isFinite(v)))
+      .map((c) => [c[0], c[1], c[2]] as [number, number, number]);
+    if (palette.length > 0) out.palette = palette;
+  }
+  return out;
+}
+
 /** Preserve role-table cardinality because faceMaterials stores slot indexes.
  * Invalid rows receive deterministic identity instead of being filtered and
  * shifting every later face assignment. */
@@ -24,7 +44,8 @@ export function normalizeModelTextureSlots(value: unknown): ModelTextureSlot[] |
     const id = typeof row.id === 'string' && row.id.trim() ? row.id : fallbackId;
     const label = typeof row.label === 'string' && row.label.trim() ? row.label : id;
     const purpose = normalizeModelFacePurpose(row.purpose);
-    return { id, label, ...(purpose === 'material' ? {} : { purpose }) };
+    const liveMaterial = normalizeModelLiveMaterial(row.liveMaterial);
+    return { id, label, ...(purpose === 'material' ? {} : { purpose }), ...(liveMaterial ? { liveMaterial } : {}) };
   });
 }
 

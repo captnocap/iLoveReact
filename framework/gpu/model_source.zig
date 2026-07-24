@@ -114,12 +114,18 @@ pub fn faceGroups() ?[]const u32 {
     return g_source_face_group;
 }
 
+/// Bumped on every face-material change so consumers (live material regions,
+/// req_3397) can cheaply notice and rebuild derived structures — assignments,
+/// undo restores, and clears all funnel through the two setters below.
+pub var face_materials_gen: u32 = 1;
+
 pub fn setFaceMaterials(m: []const u32) void {
     if (g_source_face_material) |old| alloc.free(old);
     g_source_face_material = if (m.len == g_source_count / 3)
         alloc.dupe(u32, m) catch null
     else
         null;
+    face_materials_gen +%= 1;
 }
 
 pub fn faceMaterials() ?[]const u32 {
@@ -129,6 +135,7 @@ pub fn faceMaterials() ?[]const u32 {
 pub fn clearFaceMaterials() void {
     if (g_source_face_material) |old| alloc.free(old);
     g_source_face_material = null;
+    face_materials_gen +%= 1;
 }
 
 pub fn faceMaterialOf(displayed_face: u32) u32 {

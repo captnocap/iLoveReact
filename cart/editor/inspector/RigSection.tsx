@@ -19,10 +19,11 @@ import {
   type PropRig,
   type CoverClass,
 } from '../../../runtime/skeleton';
-import type { ModelFacePurpose, ModelTextureSlot } from '../data/types';
+import type { ModelFacePurpose, ModelLiveMaterial, ModelTextureSlot } from '../data/types';
 import type { LightRig, V3 } from '../model/editMesh';
 import { createTextureSlotFromSelection } from '../model/modelTextureSlotAuthoring';
 import { MODEL_LIGHT_TUNING, newModelLight, normalizeModelLights } from '../model/modelLights';
+import { REGION_MATERIALS } from '../render3d/regionFormula';
 
 const host = globalThis as any;
 
@@ -146,6 +147,41 @@ export default function RigSection(props: {
     host.__mesh_texture_slot_remove?.(index);
     props.onTextureSlotsChange(props.textureSlots.filter((_, at) => at !== index));
   };
+  // ── Live material binding (req_3397): a slot wearing a liveMaterial renders
+  // its faces as one continuous animated field (object-space domain) instead of
+  // the painted atlas — the lavalamp's goo. Type a material name to bind; the
+  // first case-insensitive match in the surface catalog wins. Empty text
+  // returns the slot to paint.
+  const liveMaterialLabel = (slot: ModelTextureSlot): string => {
+    if (!slot.liveMaterial) return '';
+    return REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn)?.name ?? slot.liveMaterial.fn;
+  };
+  const patchLiveMaterial = (index: number, next: ModelLiveMaterial | undefined) => props.onTextureSlotsChange(
+    props.textureSlots.map((slot, at) => {
+      if (at !== index) return slot;
+      const { liveMaterial: _drop, ...rest } = slot;
+      return next ? { ...rest, liveMaterial: next } : rest;
+    }),
+  );
+  const typeLiveMaterial = (index: number, text: string) => {
+    const query = text.trim().toLowerCase();
+    if (!query) {
+      patchLiveMaterial(index, undefined);
+      return;
+    }
+    const match = REGION_MATERIALS.find((m) => m.name.toLowerCase().includes(query) || m.fn.includes(query.replace(/[\s-]+/g, '_')));
+    if (!match) return; // keep the current binding until the query resolves
+    const current = props.textureSlots[index]?.liveMaterial;
+    if (current?.fn === match.fn) return;
+    patchLiveMaterial(index, { fn: match.fn, variant: 0, ...(current?.scale ? { scale: current.scale } : {}) });
+  };
+  const cycleLiveVariant = (index: number) => {
+    const slot = props.textureSlots[index];
+    if (!slot?.liveMaterial) return;
+    const mat = REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn);
+    const count = Math.max(1, mat?.variantLabels.length ?? 1);
+    patchLiveMaterial(index, { ...slot.liveMaterial, variant: ((slot.liveMaterial.variant ?? 0) + 1) % count });
+  };
   const clearSelectedTextureSlots = () => {
     const changed = Number(host.__mesh_texture_slot_clear?.() ?? 0);
     props.onTextureMembershipChanged(changed > 0
@@ -210,6 +246,25 @@ export default function RigSection(props: {
               <C.HW_VerbText>assign selected</C.HW_VerbText>
             </C.HW_VerbPrimary>
           </C.HW_TextureRoleActionRow>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>live</C.HW_FormLabel>
+            <C.HW_RenameInput value={liveMaterialLabel(slot)} placeholder="type a material — e.g. lava plasma" onChange={(text: string) => typeLiveMaterial(index, text)} />
+            {slot.liveMaterial ? (
+              <C.HW_OvBtn tooltip="return this role's faces to the painted atlas" onPress={() => patchLiveMaterial(index, undefined)}><C.HW_OvBtnText>×</C.HW_OvBtnText></C.HW_OvBtn>
+            ) : <C.HW_OvResetIdle />}
+          </C.HW_ReadRow>
+          {slot.liveMaterial ? (
+            <>
+              <CycleRow
+                label="motion"
+                value={REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn)?.variantLabels[slot.liveMaterial.variant ?? 0] ?? `variant ${slot.liveMaterial.variant ?? 0}`}
+                tooltip="cycle the material's variant"
+                onNext={() => cycleLiveVariant(index)}
+              />
+              <StepRow label="scale" value={slot.liveMaterial.scale ?? 1} step={0.25} min={0.25} max={8}
+                onSet={(scale) => patchLiveMaterial(index, { ...slot.liveMaterial!, scale })} />
+            </>
+          ) : null}
         </C.HW_TextureRole>
       ))}
       {props.textureSlots.length === 0 ? (
@@ -268,6 +323,22 @@ export default function RigSection(props: {
             tooltip="cycle the emitter color"
             onNext={() => editLight({ color: cycleNext(LIGHT_COLORS, selectedLight.color as typeof LIGHT_COLORS[number]) })}
           />
+          {props.textureSlots.some((slot) => slot.liveMaterial) ? (
+            <CycleRow
+              label="glow from"
+              value={selectedLight.colorFrom
+                ? (props.textureSlots.find((slot) => slot.id === selectedLight.colorFrom)?.label ?? selectedLight.colorFrom)
+                : 'fixed color'}
+              tooltip="follow a live material's palette — the lamp glows with its goo — or keep the fixed color"
+              onNext={() => {
+                const liveIds = props.textureSlots.filter((slot) => slot.liveMaterial).map((slot) => slot.id);
+                const cycle: (string | undefined)[] = [undefined, ...liveIds];
+                const at = selectedLight.colorFrom ? cycle.indexOf(selectedLight.colorFrom) : 0;
+                const next = cycle[(at + 1) % cycle.length];
+                editLight({ colorFrom: next });
+              }}
+            />
+          ) : null}
           {(['x', 'y', 'z'] as const).map((label, axis) => (
             <StepRow key={`light-pos-${label}`} label={`pos ${label}`} value={selectedLight.position[axis]} step={0.25} min={-1000} max={1000} onSet={(value) => editLightVector('position', axis as 0 | 1 | 2, value)} />
           ))}

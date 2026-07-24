@@ -75,6 +75,7 @@ export function normalizeModelLights(value: unknown): LightRig[] {
         spread: clamp(finite(row.spread, MODEL_LIGHT_TUNING.defaultConeDegrees), MODEL_LIGHT_TUNING.minConeDegrees, MODEL_LIGHT_TUNING.maxConeDegrees),
         castsShadow: row.castsShadow !== false,
       } : {}),
+      ...(typeof row.colorFrom === 'string' && row.colorFrom.trim() ? { colorFrom: row.colorFrom.trim() } : {}),
     });
   }
   return out;
