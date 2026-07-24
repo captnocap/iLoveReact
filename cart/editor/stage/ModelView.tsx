@@ -91,6 +91,10 @@ export type ModelViewInitialMesh = {
   // Saved visibility is applied only AFTER the complete document is resident and its
   // ownership ranges are installed. Hidden is presentation state, never missing seed data.
   hiddenRanges?: { lo: number; hi: number }[];
+  /** doc.blob's trailing-glass boundary (RJMD v2+). Glass's durable truth —
+   * the paint baseline/program are RGB-only (req_2928), so the mount re-applies
+   * the glass alpha from THIS after paint hydration (req_3402). */
+  glassFirstVertex?: number | null;
 };
 // The live tool state, mirrored out so an embedding shell (the editor) can drive
 // the SAME host-native tools from its own toolbar / context menu instead of the
@@ -1521,9 +1525,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   // Model adoption happens in the mount effect below. Once its host-resident key lands,
   // hydrate any saved atlas and publish it to the UV bridge without arming the brush.
+  // Glass restore (req_3402) runs AFTER hydration in the same pass: hydration
+  // rebuilds the atlas from the RGB-only baseline + program (req_2928), so the
+  // saved trailing-glass run (doc.blob glassFirstVertex) must be re-applied on
+  // top — before this, every restart silently un-glassed the model.
+  const glassRestoredRef = useRef(false);
   useEffect(() => {
-    if (!model || atlasReadyRef.current || atlasInvalidatedRef.current) return;
-    if (hydratePersistedAtlas()) buildUvPanel();
+    if (!model) return;
+    if (!atlasReadyRef.current && !atlasInvalidatedRef.current) {
+      if (hydratePersistedAtlas()) buildUvPanel();
+    }
+    const gv = initialMesh?.glassFirstVertex;
+    if (!glassRestoredRef.current && typeof gv === 'number' && gv >= 0) {
+      glassRestoredRef.current = true;
+      host.__model_glass_restore?.(gv);
+    }
   }, [model?.key, paintTarget?.kind, paintTarget?.id, paintTargetOnDisk]);
 
   const togglePaint = () => {

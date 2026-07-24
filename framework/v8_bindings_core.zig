@@ -1429,6 +1429,18 @@ fn hostMeshTopoGlass(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setMeshTopoReturn(info, ok);
 }
 
+/// __model_glass_restore(glassFirstVertex) → 1|0. Re-apply the saved glass run
+/// after a mount (doc.blob header v2+ carries the boundary; the paint program/
+/// baseline are RGB-only by design, req_2928/req_3402). A load, never an edit —
+/// nothing journals, the model does not go dirty.
+fn hostModelGlassRestore(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const gv: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const ok = scene3d.meshRestoreGlass(gv);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __mesh_topo_solidify(thickness) → JSON {"ok","key","count"}. Give the selected faces
 /// thickness in place (inner skin + rim walls). thickness <= 0 uses 0.125 m (2/16).
 fn hostMeshTopoSolidify(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -3651,6 +3663,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
     v8_runtime.registerHostFn("__mesh_topo_glass", hostMeshTopoGlass);
+    v8_runtime.registerHostFn("__model_glass_restore", hostModelGlassRestore);
     v8_runtime.registerHostFn("__mesh_topo_solidify", hostMeshTopoSolidify);
     v8_runtime.registerHostFn("__mesh_append_file", hostMeshAppendFile);
     v8_runtime.registerHostFn("__mesh_surviving_groups", hostMeshSurvivingGroups);

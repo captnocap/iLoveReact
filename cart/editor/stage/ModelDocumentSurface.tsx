@@ -57,7 +57,7 @@ export type OutlinerApi = OutlinerHandlers & {
 // fan-triangulated soup back into the original authored faces.
 type ViewerSource =
   | { kind: 'path'; path: string }
-  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array; faceMaterials?: Uint32Array }
+  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array; faceMaterials?: Uint32Array; glassFirstVertex?: number | null }
   | { kind: 'missing'; title: string; label: string }
   | null;
 
@@ -169,6 +169,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
           count: Math.floor(mountDoc.vertices.length / 8),
           faceGroups: mountDoc.faceGroups ?? undefined,
           faceMaterials: mountDoc.faceMaterials ?? undefined,
+          glassFirstVertex: mountDoc.glassFirstVertex,
           partColors,
           hiddenRanges: meshDocHiddenRanges(mountDoc.ranges, rowsByLo),
         }
@@ -212,7 +213,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
       ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups, faceMaterials: viewer.faceMaterials }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups, faceMaterials: viewer.faceMaterials, glassFirstVertex: viewer.glassFirstVertex }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
@@ -295,7 +296,7 @@ function resolveViewer(model: ModelPackage): ViewerSource {
   // a saved-then-reopened model must show its EDITS, not re-arm its primitive seed.
   const doc = packageMeshDoc(model);
   if (doc && doc.vertices.length >= 8) {
-    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined, faceMaterials: doc.faceMaterials ?? undefined };
+    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined, faceMaterials: doc.faceMaterials ?? undefined, glassFirstVertex: doc.glassFirstVertex };
   }
   // A freshly-authored primitive builds its geometry on the spot (cuboid → grouped soup),
   // keyed by the doc id so each new cube is its own resident mesh.
