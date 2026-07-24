@@ -20,12 +20,12 @@ export const editor_live_materials: DocIndex = {
       status: 'live',
     },
     {
-      name: 'EDITOR_REGION_FORMULA + buildRegionData',
+      name: 'buildRegionFormula + buildRegionData',
       purpose: ['rendering', 'texture_bake'],
       kind: 'utility',
       sourceFile: 'cart/editor/render3d/regionFormula.ts',
       description:
-        'Composes FILL_FUNCS with mat_pal ACTIVE (regions carry a real palette section, so palette recoloring works like paint inks) and U.time→S.time, plus a triplanar region_rgb (fill_pick over p.yz/p.xz/p.xy, |normal|-weighted, deliberately UN-fracted so continuous materials never seam). buildRegionData packs a ModelLiveMaterial into the D stream: spec data[] + palette + domainScale; unknown fns return null loudly.',
+        'Composes the region formula PER BOUND-MATERIAL SET, never per catalog (req_3400: composing all 410 materials was 735 KB WGSL and froze the app for minutes in naga; one material is ~19 KB, sub-second). Brace-extracts just the bound fn bodies from FILL_FUNCS (+ helpers prelude + transitive material calls, drift-guarded), mat_pal ACTIVE (palette recoloring works like paint inks), U.time→S.time, small if-chain dispatch under a triplanar region_rgb (p.yz/p.xz/p.xy, |normal|-weighted, deliberately UN-fracted so continuous materials never seam). Set changes recompile (hash-gated); variant/seed/palette/scale are data. buildRegionData packs a ModelLiveMaterial into the D stream; unknown fns return null loudly.',
       dependsOn: ['render3d/shaders/_generated/dispatch FILL_FUNCS'],
       consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/inspector/RigSection.tsx'],
       status: 'live',
@@ -63,6 +63,14 @@ export const editor_live_materials: DocIndex = {
     },
   ],
   hazards: [
+    {
+      name: 'never compose the whole catalog into a live pipeline',
+      purpose: ['rendering', 'shader'],
+      description:
+        'req_3400: the whole generated dispatch is megashader-class (735 KB and growing with the catalog) — pushing it into a pipeline that compiles ON the render thread numbs the entire app for minutes. Regions only ever draw their BOUND materials, so compose the subset. The painted ground legitimately needs the full catalog and pays its one narrated compile per run; do not let any new live pipeline copy that shape without the ground\'s justification. UI corollary: any control whose commit triggers a shader compile must be a deliberate VERB (Enter/bind), never a per-keystroke side effect.',
+      evidence: ['cart/editor/render3d/regionFormula.ts', 'docs/game/_requests/req_3400.json'],
+      severity: 'high',
+    },
     {
       name: 'regions preview only in the editor render path',
       purpose: ['rendering'],

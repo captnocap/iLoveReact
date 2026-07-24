@@ -28,15 +28,23 @@ faces, cuts, and undo flow into the region with **no JS re-push**. The general
 `__model_region_set(key, regionId, facesU32, data)` takes an explicit face
 list for non-resident meshes.
 
-**Cart (cart/editor).** `render3d/regionFormula.ts` composes `FILL_FUNCS` with
-`mat_pal` ACTIVE (regions carry a real palette section — recoloring works like
-paint inks) and `U.time → S.time`, plus a triplanar `region_rgb` (fill_pick on
-p.yz / p.xz / p.xy, |normal|-weighted, deliberately **un-fracted** so
-continuous materials never seam at 1-unit tiles). `ModelTextureSlot` gains
-`liveMaterial { fn, variant, seed, scale, palette }` (manifest-normalized in
-modelTextureSlotAuthoring.ts); ModelView pushes formula + per-slot data keyed
-on the mesh hostKey; the Rig panel's FACE RIGS cards grew a `live` row
-(type-to-bind against the surface catalog) + motion/scale rows.
+**Cart (cart/editor).** `render3d/regionFormula.ts` composes the formula
+**per bound-material SET, never per catalog** (req_3400: the first cut
+composed all 410 materials — 735 KB of WGSL — and froze the app for minutes in
+naga; a one-material module is ~19 KB, sub-second). `buildRegionFormula(fns)`
+brace-extracts just the bound fn bodies out of `FILL_FUNCS` (plus the helpers
+prelude and any material fn they call) with drift guards, keeps `mat_pal`
+ACTIVE (regions carry a real palette section — recoloring works like paint
+inks), rewrites `U.time → S.time`, and emits a small if-chain dispatch under
+the triplanar `region_rgb` (p.yz / p.xz / p.xy, |normal|-weighted,
+deliberately **un-fracted** so continuous materials never seam). Changing the
+bound SET recompiles (hash-gated); variant/seed/palette/scale are pure data.
+`ModelTextureSlot` gains `liveMaterial { fn, variant, seed, scale, palette }`
+(manifest-normalized in modelTextureSlotAuthoring.ts); ModelView pushes
+formula + per-slot data keyed on the mesh hostKey; the Rig panel's FACE RIGS
+cards grew a `live` row — typing edits a **draft**, the binding (and its one
+small compile) happens on Enter / the `bind` verb only — plus motion/scale
+rows.
 
 ## The light follows the goo (req_3396 tier 1)
 
