@@ -147,11 +147,14 @@ export default function RigSection(props: {
     host.__mesh_texture_slot_remove?.(index);
     props.onTextureSlotsChange(props.textureSlots.filter((_, at) => at !== index));
   };
-  // ── Live material binding (req_3397): a slot wearing a liveMaterial renders
-  // its faces as one continuous animated field (object-space domain) instead of
-  // the painted atlas — the lavalamp's goo. Type a material name to bind; the
-  // first case-insensitive match in the surface catalog wins. Empty text
-  // returns the slot to paint.
+  // ── Live material binding (req_3397, bind-as-verb per req_3400): a slot
+  // wearing a liveMaterial renders its faces as one continuous animated field
+  // (object-space domain) instead of the painted atlas — the lavalamp's goo.
+  // Typing only edits a DRAFT; the binding (and its one small shader compile)
+  // happens on Enter / the bind verb, never per keystroke — the first cut
+  // bound on the first letter and kicked a catalog-sized compile that froze
+  // the app. Committing empty text returns the slot to paint.
+  const [liveDraft, setLiveDraft] = useState<{ index: number; text: string } | null>(null);
   const liveMaterialLabel = (slot: ModelTextureSlot): string => {
     if (!slot.liveMaterial) return '';
     return REGION_MATERIALS.find((m) => m.fn === slot.liveMaterial!.fn)?.name ?? slot.liveMaterial.fn;
@@ -163,17 +166,24 @@ export default function RigSection(props: {
       return next ? { ...rest, liveMaterial: next } : rest;
     }),
   );
-  const typeLiveMaterial = (index: number, text: string) => {
-    const query = text.trim().toLowerCase();
+  const commitLiveMaterial = (index: number) => {
+    if (liveDraft?.index !== index) return;
+    const query = liveDraft.text.trim().toLowerCase();
+    setLiveDraft(null);
     if (!query) {
       patchLiveMaterial(index, undefined);
+      props.onTextureMembershipChanged(`${props.textureSlots[index]?.label ?? 'role'} returned to paint`, false);
       return;
     }
     const match = REGION_MATERIALS.find((m) => m.name.toLowerCase().includes(query) || m.fn.includes(query.replace(/[\s-]+/g, '_')));
-    if (!match) return; // keep the current binding until the query resolves
+    if (!match) {
+      props.onTextureMembershipChanged(`no surface material matches '${liveDraft.text.trim()}'`, false);
+      return;
+    }
     const current = props.textureSlots[index]?.liveMaterial;
     if (current?.fn === match.fn) return;
     patchLiveMaterial(index, { fn: match.fn, variant: 0, ...(current?.scale ? { scale: current.scale } : {}) });
+    props.onTextureMembershipChanged(`bound ${match.name} live — compiling its shader (a moment)`, false);
   };
   const cycleLiveVariant = (index: number) => {
     const slot = props.textureSlots[index];
@@ -248,8 +258,18 @@ export default function RigSection(props: {
           </C.HW_TextureRoleActionRow>
           <C.HW_ReadRow>
             <C.HW_FormLabel>live</C.HW_FormLabel>
-            <C.HW_RenameInput value={liveMaterialLabel(slot)} placeholder="type a material — e.g. lava plasma" onChange={(text: string) => typeLiveMaterial(index, text)} />
-            {slot.liveMaterial ? (
+            <C.HW_RenameInput
+              value={liveDraft?.index === index ? liveDraft.text : liveMaterialLabel(slot)}
+              placeholder="type a material, press bind"
+              onChange={(text: string) => setLiveDraft({ index, text })}
+              onSubmit={() => commitLiveMaterial(index)}
+              onSubmitEditing={() => commitLiveMaterial(index)}
+            />
+            {liveDraft?.index === index ? (
+              <C.HW_OvToggleOn tooltip="bind this material live (compiles one small shader)" onPress={() => commitLiveMaterial(index)}>
+                <C.HW_OvToggleTextOn>bind</C.HW_OvToggleTextOn>
+              </C.HW_OvToggleOn>
+            ) : slot.liveMaterial ? (
               <C.HW_OvBtn tooltip="return this role's faces to the painted atlas" onPress={() => patchLiveMaterial(index, undefined)}><C.HW_OvBtnText>×</C.HW_OvBtnText></C.HW_OvBtn>
             ) : <C.HW_OvResetIdle />}
           </C.HW_ReadRow>

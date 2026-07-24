@@ -7,11 +7,17 @@
 // a property of the domain, never of per-face bases (the compounding "every
 // face restarts the material" failure this feature exists to kill, req_3395).
 //
-// Same split as the painted ground (groundFormula.ts): the FORMULA is static —
-// composed once from the generated fill catalog and pushed via
-// __model_region_formula — while every material PICK arrives as DATA through
-// __model_region_bind_slot / __model_region_set. Rebinding a slot or recoloring
-// a palette never recompiles WGSL.
+// COMPOSITION IS PER-BINDING-SET, NOT PER-CATALOG (req_3400). The first cut
+// composed the whole generated dispatch (410 materials, ~735 KB WGSL) like the
+// painted ground does — and binding a material froze the app for minutes while
+// naga chewed it on the render thread. Unlike the ground (where any tile can
+// be any material in ONE draw), a region draw only ever needs the materials
+// actually BOUND on the model — so buildRegionFormula() extracts JUST those
+// fn bodies (plus the shared helpers prelude and any material fn they call)
+// out of FILL_FUNCS and emits a small if-chain dispatch. A one-material module
+// is tens of KB and compiles in well under a second; changing the bound SET
+// recompiles (hash-gated host-side), changing variant/seed/palette/scale is
+// still pure data.
 //
 // Region D layout (the palette-slot contract + region extras):
 //   [0] materialId  [1] variant  [2] seed  [3] quality (unused here)  [4] board
@@ -30,30 +36,102 @@ import type { ModelLiveMaterial } from '../data/types';
 // Drift guards, same discipline as groundFormula.composedFillFuncs: each edit
 // asserts its pattern so a build-shaders.ts output change fails LOUD.
 const D_DECL = '@group(0) @binding(1) var<storage, read> D: array<f32>;';
+// Every catalog material is generated with this exact signature (build-shaders
+// validates fn name == @material and the fill contract fixes the params).
+const MAT_FN_SIG = /fn ([A-Za-z0-9_]+)\(uv: vec2f, px: vec2f, variant: f32, seed: f32\) -> vec3f \{/g;
 
-function composedRegionFuncs(): string {
+/** FILL_FUNCS split once: the helpers prelude (helpers.wgsl + mat_pal reader —
+ *  everything before the first material fn) and each material fn's body,
+ *  brace-matched. fill_pick has a different signature, so it never lands in
+ *  the map — regions dispatch through their own small if-chain instead. */
+let cachedSplit: { prelude: string; bodies: Map<string, string> } | null = null;
+function splitDispatch(): { prelude: string; bodies: Map<string, string> } {
+  if (cachedSplit) return cachedSplit;
   if (!FILL_FUNCS.includes(D_DECL)) {
     throw new Error('[regionFormula] dispatch drift: D declaration not found — re-check build-shaders.ts output');
   }
-  // Unlike the ground composition, mat_pal stays FULLY ACTIVE: a region's D
-  // stream really is the fill contract (data[] + palette section), so palette
-  // recoloring works exactly as it does for paint inks and thumbnails.
-  return FILL_FUNCS.replace(D_DECL, '// (D is declared by the region harness — framework/gpu/shaders.zig)')
-    .replace(/\bU\.time\b/g, 'S.time');
+  const bodies = new Map<string, string>();
+  let firstAt = -1;
+  MAT_FN_SIG.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = MAT_FN_SIG.exec(FILL_FUNCS))) {
+    const start = match.index;
+    if (firstAt < 0) firstAt = start;
+    let depth = 0;
+    let at = start + match[0].length - 1; // the opening brace
+    for (; at < FILL_FUNCS.length; at += 1) {
+      const ch = FILL_FUNCS[at];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          at += 1;
+          break;
+        }
+      }
+    }
+    bodies.set(match[1]!, FILL_FUNCS.slice(start, at));
+    MAT_FN_SIG.lastIndex = at;
+  }
+  if (firstAt < 0 || bodies.size === 0) {
+    throw new Error('[regionFormula] dispatch drift: no material fn bodies found — re-check build-shaders.ts output');
+  }
+  const prelude = FILL_FUNCS.slice(0, firstAt)
+    .replace(D_DECL, '// (D is declared by the region harness — framework/gpu/shaders.zig)');
+  cachedSplit = { prelude, bodies };
+  return cachedSplit;
 }
 
-/** Build the STATIC region formula: triplanar evaluation of the bound catalog
- *  material over mesh-local position. The blend weights come from the world
- *  normal, so a curved shell (the lavalamp glass, a blob) crossfades its three
- *  planar slices smoothly — and any face pair sharing an edge agrees exactly. */
-export function editorRegionFormula(): string {
+const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
+
+/** Compose the region formula for ONE SET of bound material fns: shared
+ *  helpers prelude + just those fn bodies (plus any material fn they call) +
+ *  a small dispatch + the triplanar region_rgb. mat_pal stays ACTIVE — a
+ *  region's D stream really is the fill contract, so palette recoloring works
+ *  exactly as it does for paint inks. Returns null (loudly) if a requested fn
+ *  is missing from the generated dispatch, so callers never push a formula
+ *  the shader would miscompile. */
+export function buildRegionFormula(fns: readonly string[]): string | null {
+  const { prelude, bodies } = splitDispatch();
+  const wanted = [...new Set(fns)].sort();
+  if (wanted.length === 0) return null;
+  const need: string[] = [];
+  const queue = [...wanted];
+  while (queue.length > 0) {
+    const fn = queue.shift()!;
+    if (need.includes(fn)) continue;
+    const body = bodies.get(fn);
+    if (!body) {
+      console.error(`[regionFormula] material fn '${fn}' not found in the generated dispatch — region formula not composed`);
+      return null;
+    }
+    need.push(fn);
+    // Pull in material fns this body calls (compositions layering surfaces).
+    for (const other of bodies.keys()) {
+      if (other !== fn && !need.includes(other) && !queue.includes(other) && new RegExp(`\\b${other}\\s*\\(`).test(body)) {
+        queue.push(other);
+      }
+    }
+  }
+  const dispatch = wanted
+    .map((fn) => {
+      const mat = MATERIAL_BY_FN.get(fn);
+      return mat ? `  if (mat == ${mat.materialId} && board == ${mat.boardIndex}) { return ${fn}(uv, px, variant, seed); }` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
   return `
-${composedRegionFuncs()}
+${prelude}
+${need.map((fn) => bodies.get(fn)!).join('\n')}
+fn region_mat(mat: i32, board: i32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+${dispatch}
+  return vec3f(1.0, 0.0, 1.0); // material not in this composed set — loud magenta
+}
 fn region_rgb(p: vec3f, n: vec3f) -> vec3f {
   let mat = i32(D[0]);
   let variant = D[1];
   let seed = D[2];
-  let board = D[4];
+  let board = i32(D[4]);
   let slotCount = u32(max(D[5], 0.0) + 0.5);
   var scale = D[6u + slotCount * 3u];
   if (scale <= 0.0001) { scale = 1.0; }
@@ -62,18 +140,13 @@ fn region_rgb(p: vec3f, n: vec3f) -> vec3f {
   let uvx = p.yz * scale;
   let uvy = p.xz * scale;
   let uvz = p.xy * scale;
-  let cx = fill_pick(mat, board, uvx, uvx * 64.0, variant, seed);
-  let cy = fill_pick(mat, board, uvy, uvy * 64.0, variant, seed);
-  let cz = fill_pick(mat, board, uvz, uvz * 64.0, variant, seed);
+  let cx = region_mat(mat, board, uvx, uvx * 64.0, variant, seed);
+  let cy = region_mat(mat, board, uvy, uvy * 64.0, variant, seed);
+  let cz = region_mat(mat, board, uvz, uvz * 64.0, variant, seed);
   return cx * w.x + cy * w.y + cz * w.z;
 }
-`;
+`.replace(/\bU\.time\b/g, 'S.time');
 }
-
-/** THE region formula — static for the whole run; material picks are data. */
-export const EDITOR_REGION_FORMULA = editorRegionFormula();
-
-const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
 
 /** The catalog materials a region can bind to. Surface recipes only, same
  *  rationale as GROUND_MATERIALS — gradients/compositions read wrong tiled

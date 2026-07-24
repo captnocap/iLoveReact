@@ -21,7 +21,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import type { LightRig } from '../model/editMesh';
 import type { ModelTextureSlot } from '../data/types';
-import { EDITOR_REGION_FORMULA, buildRegionData } from '../render3d/regionFormula';
+import { buildRegionFormula, buildRegionData } from '../render3d/regionFormula';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
@@ -784,16 +784,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Texture slots wearing a liveMaterial render per-frame over OBJECT-SPACE
   // position through the host's region pipeline — one continuous animated field
   // across the slot's faces (the lavalamp's goo), never per-face restarts. The
-  // FORMULA ships whole and is hash-gated host-side; every material pick is
-  // DATA. Binding is BY SLOT INDEX (__model_region_bind_slot), so face
-  // re-assignment, cuts, and undo stay host-truth with no JS re-push.
+  // formula is composed from ONLY the bound material fns (req_3400 — composing
+  // the whole catalog froze the app for minutes in naga) and is hash-gated
+  // host-side, so re-binding the same set is free; variant/seed/palette/scale
+  // changes are pure data. Binding is BY SLOT INDEX (__model_region_bind_slot),
+  // so face re-assignment, cuts, and undo stay host-truth with no JS re-push.
   const regionSig = (textureSlots ?? []).map((s, i) => (s.liveMaterial ? `${i}:${s.id}:${JSON.stringify(s.liveMaterial)}` : '')).filter(Boolean).join('|');
   useEffect(() => {
     if (!model || typeof host.__model_region_bind_slot !== 'function') return;
     const key = model.key;
     host.__model_region_clear?.(key, -1);
     if (!regionSig) return;
-    host.__model_region_formula?.(EDITOR_REGION_FORMULA);
+    const boundFns = (textureSlots ?? []).filter((s) => s.liveMaterial).map((s) => s.liveMaterial!.fn);
+    const formula = buildRegionFormula(boundFns);
+    if (!formula) return; // loud console.error already emitted — keep the old pipeline
+    host.__model_region_formula?.(formula);
     (textureSlots ?? []).forEach((slot, index) => {
       if (!slot.liveMaterial) return;
       const data = buildRegionData(slot.liveMaterial);
