@@ -902,7 +902,7 @@ Scene3DBase.DirectionalLight = ({ direction, color, intensity, ...rest }: any) =
 // PointLight — an omni "bulb" (a sign-edge bulb, a lamp): a tip that throws
 // light in every direction, falling off over `range`. The host treats it as the
 // user's pyramid opened all the way (spread 0 → full sphere).
-Scene3DBase.PointLight = ({ position, color, intensity, range, ...rest }: any) => {
+Scene3DBase.PointLight = ({ position, color, intensity, range, colorFromRegion, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 0, 0, 0);
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
   return h('View', {
@@ -913,6 +913,9 @@ Scene3DBase.PointLight = ({ position, color, intensity, range, ...rest }: any) =
     scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
     scene3dIntensity: intensity ?? 1.0,
     scene3dRange: range ?? 0,
+    // colorFrom: a live material region id — the host steps this light's color
+    // from the region's palette slots each frame (the lavalamp's glow).
+    scene3dLightRegion: colorFromRegion ?? -1,
   });
 };
 // SpotLight — the user's pyramid: a tip at `position`, aimed down `direction`,
@@ -920,7 +923,7 @@ Scene3DBase.PointLight = ({ position, color, intensity, range, ...rest }: any) =
 // a spotlight; wide cone approaches the omni bulb. A spot CASTS A SHADOW by
 // default (shadows are part of a light) — the first shadow-casting spot in a
 // scene owns the shadow map today; pass castsShadow={false} to opt a spot out.
-Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, castsShadow, ...rest }: any) => {
+Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, castsShadow, colorFromRegion, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 0, 0, 0);
   const [dx, dy, dz] = _vec3(direction, 0, -1, 0);
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
@@ -935,6 +938,7 @@ Scene3DBase.SpotLight = ({ position, direction, color, intensity, cone, range, c
     scene3dSpread: cone ?? 30,
     scene3dRange: range ?? 0,
     scene3dCastShadow: castsShadow ?? true,
+    scene3dLightRegion: colorFromRegion ?? -1,
   });
 };
 // OrbitControls — host has no flag for this today (no scene3d_orbit on

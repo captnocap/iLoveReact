@@ -1803,6 +1803,107 @@ pub const scene3d_ground_epilogue =
     \\}
 ;
 
+/// Live material region pipeline (req_3397) — faces of a model bound to a
+/// catalog material evaluated per-frame over OBJECT-SPACE position, so N faces
+/// sample ONE continuous animated field (no per-face restarts/seams). Module =
+///   scene3d_region_prefix + effect_math + <formula> + scene3d_region_epilogue
+/// The JS-composed formula must define `fn region_rgb(p: vec3f, n: vec3f) -> vec3f`
+/// (p = mesh-local position, n = world normal for the triplanar blend) and may
+/// read S.time and the region's D stream (spec data[] + palette + extras).
+/// Same two vertex buffers as scene3d_wgsl; drawn INDEXED into the mesh's
+/// retained vertices, group1 = the region's own D storage (ground BGL shape).
+pub const scene3d_region_prefix = oct_decode_wgsl ++
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    light_count: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    time: f32,      // 124 — wrapped wall-clock the host writes each frame
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    wire: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var<storage, read> D: array<f32>;
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,
+    \\    @location(5) inst_scale: vec4f,
+    \\    @location(6) inst_color: vec4f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    // Mesh-local position — THE region domain. Faces are windows into one
+    \\    // continuous field over this space; continuity across faces is a
+    \\    // property of the domain, never of stitching.
+    \\    @location(2) local_pos: vec3f,
+    \\    @location(3) inst_color: vec4f,
+    \\    @location(4) @interpolate(linear) screen_y: f32,
+    \\};
+    \\// Rebuild the model matrix from the packed instance (32-byte InstanceData) —
+    \\// column-major twin of makeInstance's row-major T·Ry·Rx·Rz·S. MUST stay in sync.
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
+    \\    let world = model * vec4f(in.position, 1.0);
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
+    \\    out.local_pos = in.position;
+    \\    out.inst_color = in.inst_color;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+;
+
+/// fs_main for the region pipeline: the bound material is EMISSIVE (self-lit —
+/// a lavalamp's goo, a screen, a neon core), so no Blinn-Phong; aerial fog
+/// still applies so the surface sits in the world like everything else.
+pub const scene3d_region_epilogue =
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    let rgb = region_rgb(in.local_pos, normalize(in.world_normal));
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(rgb, fog_target, fog_t);
+    \\    let out_a = in.inst_color.a;
+    \\    return vec4f(final_rgb * out_a, out_a);
+    \\}
+;
+
 /// Analytic procedural skybox. Drawn as ONE fullscreen triangle BEFORE the
 /// meshes, with depth-test = always + depth-write off, so it fills the whole
 /// 3D target and meshes paint over it. Every visual is driven by uniforms, so

@@ -403,6 +403,8 @@ export const MATERIALS: RegistryMaterial[] = [
     slots: [{ name: "dusk", rgb: [0.12, 0.08, 0.18] }, { name: "white", rgb: [0.8, 0.94, 0.99] }, { name: "fire", rgb: [0.98, 0.28, 0.14] }, { name: "dusk 2", rgb: [0.16, 0.08, 0.24] }, { name: "white 2", rgb: [0.95, 0.7, 0.96] }, { name: "fire 2", rgb: [0.96, 0.45, 0.16] }, { name: "dusk 3", rgb: [0.34, 0.06, 0.09] }, { name: "white 3", rgb: [0.98, 0.38, 0.42] }, { name: "fire 3", rgb: [1, 0.1, 0.35] }, { name: "color", rgb: [0.06, 0.06, 0.06] }, { name: "color 2", rgb: [0.04, 0.04, 0.04] }] },
   { fn: "tungsten_glaze", slug: "tungsten-glaze", name: "Tungsten Glaze", board: "neon_surface", boardIndex: 4, materialId: 57, variantLabels: ["Matte Glaze", "Frost Glaze", "Burn Glaze"], kind: "surface", tags: ["neon_surface", "tungsten", "glaze", "ceramic"], author: "editor",
     slots: [{ name: "matte", rgb: [0.38, 0.38, 0.38] }, { name: "glaze", rgb: [0.98, 0.98, 0.98] }, { name: "dark", rgb: [0.08, 0.08, 0.09] }, { name: "matte 2", rgb: [0.3, 0.3, 0.31] }, { name: "glaze 2", rgb: [0.9, 0.97, 1] }, { name: "dark 2", rgb: [0.18, 0.18, 0.2] }, { name: "matte 3", rgb: [0.22, 0.22, 0.23] }, { name: "glaze 3", rgb: [1, 0.74, 0.42] }, { name: "dark 3", rgb: [0.34, 0.23, 0.16] }, { name: "color", rgb: [0.05, 0.05, 0.05] }, { name: "color 2", rgb: [0.03, 0.03, 0.03] }] },
+  { fn: "lava_plasma", slug: "lava-plasma", name: "Lava Plasma", board: "neon_surface", boardIndex: 4, materialId: 58, variantLabels: ["Classic Wave", "Fast Storm", "Slow Churn"], kind: "surface", tags: ["neon_surface", "plasma", "lava", "animated"], author: "editor",
+    slots: [{ name: "primary", rgb: [0.93, 0.2, 0.78] }, { name: "secondary", rgb: [0.15, 0.83, 0.9] }, { name: "tertiary", rgb: [0.98, 0.86, 0.25] }] },
   { fn: "cash_stack", slug: "cash-stack", name: "Cash Stack", board: "contraband", boardIndex: 5, materialId: 0, variantLabels: ["Clean", "Worn", "Blood"], kind: "surface", tags: ["contraband", "cash", "stack"], author: "legacy",
     slots: [{ name: "paper low", rgb: [0.3, 0.42, 0.3] }, { name: "paper high", rgb: [0.52, 0.66, 0.5] }, { name: "face low", rgb: [0.2, 0.36, 0.24] }, { name: "face high", rgb: [0.42, 0.6, 0.42] }, { name: "portrait", rgb: [0.55, 0.68, 0.54] }, { name: "color", rgb: [0.1, 0.1, 0.1] }, { name: "color 2", rgb: [0.05, 0.04, 0] }, { name: "blotch", rgb: [0.4, 0.02, 0.02] }] },
   { fn: "product_baggie", slug: "product-baggie", name: "Product Baggie", board: "contraband", boardIndex: 5, materialId: 1, variantLabels: ["Crystal", "Powder", "Brick"], kind: "surface", tags: ["contraband", "product", "baggie"], author: "legacy",
@@ -1045,6 +1047,7 @@ export const FILL_BOARDS: FillBoard[] = [
     { slug: "neon-trellis", name: "Neon Trellis", variants: ["Thin Trellis", "Thick Trellis", "Melting Trellis"] },
     { slug: "plasma-rim", name: "Plasma Rim", variants: ["Cool Rim", "Balanced Rim", "Hot Rim"] },
     { slug: "tungsten-glaze", name: "Tungsten Glaze", variants: ["Matte Glaze", "Frost Glaze", "Burn Glaze"] },
+    { slug: "lava-plasma", name: "Lava Plasma", variants: ["Classic Wave", "Fast Storm", "Slow Churn"] },
   ] },
   { board: 5, letter: "F", title: "Contraband", seedCoef: [41, 23, 229], materials: [
     { slug: "cash-stack", name: "Cash Stack", variants: ["Clean", "Worn", "Blood"] },

@@ -2057,6 +2057,8 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_spread = f;
         } else if (std.mem.eql(u8, k, "scene3dCastShadow")) {
             if (jsonBool(v)) |b| node.scene3d_cast_shadow = b;
+        } else if (std.mem.eql(u8, k, "scene3dLightRegion")) {
+            if (jsonFloat(v)) |f| node.scene3d_light_region = @intFromFloat(f);
         }
         // ── Distance fog (one <Scene3D.Fog> child). near/far in world units,
         // color as [r,g,b] 0..1. 0 / sentinel = auto (anchor to camera far). ──

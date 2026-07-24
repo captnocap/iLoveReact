@@ -2216,6 +2216,79 @@ fn hostModelPaintMaterialClear(info_c: ?*const v8.c.FunctionCallbackInfo) callco
     setReturnNumber(info, 1);
 }
 
+/// __model_region_formula(wgsl) → 1|0. Install the composed live-material-region
+/// WGSL (region_rgb over the fill catalog) — pushed ONCE per run/hot-reload, like
+/// the ground look. Per-region material picks arrive as DATA via __model_region_set.
+fn hostModelRegionFormula(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const wgsl = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(wgsl);
+    if (wgsl.len == 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    scene3d.setRegionFormula(wgsl);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
+/// __model_region_set(key, regionId, Uint32Array faces, Float32Array data) → 1|0.
+/// Bind (or update) one live material region on mesh `key`: `faces` are triangle
+/// indices in render order, `data` is the spec's data[] + palette section (the
+/// palette-slot contract) + region extras (domain scale …). The region renders
+/// per-frame over object-space position — one continuous field across all faces.
+fn hostModelRegionSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const key = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+    const region_id = argToI32(info, 1) orelse 0;
+    const face_bytes = argBytes(info, 2) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (face_bytes.len == 0 or face_bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const faces: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, face_bytes));
+    const data_bytes = argBytes(info, 3) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (data_bytes.len == 0 or data_bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const data: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, data_bytes));
+    const ok = scene3d.setRegion(key, region_id, faces, data);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_region_clear(key[, regionId]) → 1. regionId >= 0 clears that one
+/// region of `key`; omitted/negative clears every region of `key`; an empty key
+/// clears ALL regions (model switch / unmount).
+fn hostModelRegionClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var key: []const u8 = "";
+    var key_owned = false;
+    if (argToStringAlloc(info, 0)) |k| {
+        key = k;
+        key_owned = true;
+    }
+    defer if (key_owned) std.heap.c_allocator.free(key);
+    const region_id = argToI32(info, 1) orelse -1;
+    scene3d.clearRegions(key, region_id);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
 /// __model_set_paint_detail(density) → the ACTUAL density after the change. `density`
 /// is texels-per-METER (Blockbench 16x semantics: 16/32/64/128, plus 256/512; 1 =
 /// fill-only look). Rebuilds the island atlas and re-uploads the mesh (see
@@ -3587,6 +3660,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_polygon", hostModelPaintPolygon);
     v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
+    v8_runtime.registerHostFn("__model_region_formula", hostModelRegionFormula);
+    v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
+    v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);

@@ -8081,6 +8081,154 @@ var g_ground_grid_vert_count: u32 = 0;
 // floor colliders first), so it gets its OWN small buffer — one InstanceData per
 // drawn chunk, never contending with foliage. GROUND_POOL * 32 B = 4 KB.
 var g_ground_inst_buf: ?*wgpu.Buffer = null;
+// ── Live material regions (req_3397) — faces of a keyed model bound to a
+// catalog material evaluated per-frame over OBJECT-SPACE (mesh-local) position,
+// so a region spanning N faces samples ONE continuous animated field — no
+// per-face restarts, no seams. The cart composes the formula (region_rgb over
+// FILL_FUNCS) once and pushes per-region spec data[] (palette-slot contract) +
+// face lists through the __model_region_* doors. Each region draws as an
+// INDEXED overlay into the mesh's retained vertices with depth compare
+// less_equal — the base mesh draw stays untouched, the region wins at equal
+// depth. group1 reuses the ground BGL shape (one read-only storage D).
+var g_region_pipeline: ?*wgpu.RenderPipeline = null;
+var g_region_built_hash: u64 = 0; // formula hash the live pipeline was built from
+var g_region_formula: ?[]u8 = null; // owned (c_allocator) JS-composed WGSL
+const REGION_POOL = 16; // simultaneously bound regions across all meshes
+const REGION_DATA_FLOATS = 256; // spec data[] + palette section + region extras
+const RegionSlot = struct {
+    active: bool = false,
+    key_hash: u64 = 0, // hashKey(geom key) of the mesh the region rides
+    region_id: i32 = -1,
+    data: [REGION_DATA_FLOATS]f32 = @splat(0),
+    data_len: u32 = 0,
+    data_dirty: bool = false,
+    indices: ?[]u32 = null, // owned (c_allocator); 3 per face, mesh-local
+    max_index: u32 = 0, // guard: skip the draw when the mesh shrank under the binding
+    ibuf: ?*wgpu.Buffer = null,
+    ibuf_count: u32 = 0,
+    ibuf_dirty: bool = false,
+};
+var g_regions: [REGION_POOL]RegionSlot = [_]RegionSlot{.{}} ** REGION_POOL;
+var g_region_data_buf: [REGION_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** REGION_POOL;
+var g_region_data_bg: [REGION_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** REGION_POOL;
+var g_region_inst_buf: ?*wgpu.Buffer = null; // one InstanceData per drawn region mesh
+
+/// __model_region_formula: install/replace the composed region WGSL (must
+/// define `fn region_rgb(p: vec3f, n: vec3f) -> vec3f`). Hash-gated in
+/// ensureRegionPipeline — re-pushing an unchanged formula is a no-op, a
+/// hot-reload edit rebuilds the pipeline.
+pub fn setRegionFormula(formula: []const u8) void {
+    const copy = std.heap.c_allocator.dupe(u8, formula) catch return;
+    if (g_region_formula) |old| std.heap.c_allocator.free(old);
+    g_region_formula = copy;
+}
+
+/// __model_region_set: bind (or update) one live material region — the faces of
+/// mesh `key` that render the material described by `data` (spec data[] +
+/// palette section + region extras). `faces` are triangle indices in render
+/// order (the meshdoc's faceMaterials order); the mesh is a non-indexed
+/// triangle list, so face f owns vertices 3f..3f+2.
+pub fn setRegion(key: []const u8, region_id: i32, faces: []const u32, data: []const f32) bool {
+    if (faces.len == 0 or data.len == 0) return false;
+    const kh = hashKey(key);
+    var slot_index: ?usize = null;
+    for (&g_regions, 0..) |*s, i| {
+        if (s.active and s.key_hash == kh and s.region_id == region_id) {
+            slot_index = i;
+            break;
+        }
+    }
+    if (slot_index == null) {
+        for (&g_regions, 0..) |*s, i| {
+            if (!s.active) {
+                slot_index = i;
+                break;
+            }
+        }
+    }
+    const si = slot_index orelse {
+        log.print("[r3d-region] region pool full ({d}) — dropping region {d} for key '{s}'\n", .{ REGION_POOL, region_id, key });
+        return false;
+    };
+    const s = &g_regions[si];
+    const indices = std.heap.c_allocator.alloc(u32, faces.len * 3) catch return false;
+    var max_index: u32 = 0;
+    for (faces, 0..) |f, fi| {
+        const base = f * 3;
+        indices[fi * 3 + 0] = base;
+        indices[fi * 3 + 1] = base + 1;
+        indices[fi * 3 + 2] = base + 2;
+        if (base + 2 > max_index) max_index = base + 2;
+    }
+    if (s.indices) |old| std.heap.c_allocator.free(old);
+    s.indices = indices;
+    s.max_index = max_index;
+    s.ibuf_dirty = true;
+    if (data.len > REGION_DATA_FLOATS) {
+        log.print("[r3d-region] region {d} data is {d} floats, cap {d} — TRUNCATED (palette/extras past the cap are lost)\n", .{ region_id, data.len, REGION_DATA_FLOATS });
+    }
+    const n: u32 = @intCast(@min(data.len, REGION_DATA_FLOATS));
+    @memcpy(s.data[0..n], data[0..n]);
+    s.data_len = n;
+    s.data_dirty = true;
+    s.key_hash = kh;
+    s.region_id = region_id;
+    s.active = true;
+    return true;
+}
+
+/// __model_region_clear: region_id >= 0 clears that one region of `key`;
+/// region_id < 0 clears every region of `key`; an empty key clears ALL regions
+/// (model switch / unmount).
+pub fn clearRegions(key: []const u8, region_id: i32) void {
+    const kh = if (key.len > 0) hashKey(key) else 0;
+    for (&g_regions) |*s| {
+        if (!s.active) continue;
+        if (key.len > 0 and s.key_hash != kh) continue;
+        if (region_id >= 0 and s.region_id != region_id) continue;
+        if (s.indices) |old| std.heap.c_allocator.free(old);
+        if (s.ibuf) |b| b.release();
+        s.* = .{};
+    }
+}
+
+fn regionCountForKeyHash(kh: u64) u32 {
+    var n: u32 = 0;
+    for (&g_regions) |*s| {
+        if (s.active and s.key_hash == kh) n += 1;
+    }
+    return n;
+}
+
+/// Host-stepped light color from a region's palette slots (LightRig colorFrom,
+/// req_3396 tier 1): a slow phase-shifted blend of the spec's extracted slot
+/// colors — tracks the aggregate glow of the animated material with zero GPU
+/// readback, because the material is a procedural program whose palette is
+/// data. Layout per the palette-slot contract: data[5] = slot count,
+/// data[6 + 3i ..] = slot i rgb.
+fn regionLightRgb(region_id: i32, t: f32) ?[3]f32 {
+    for (&g_regions) |*s| {
+        if (!s.active or s.region_id != region_id) continue;
+        if (s.data_len < 6) return null;
+        const slot_count: u32 = @intFromFloat(@max(0, s.data[5]));
+        if (slot_count == 0) return null;
+        var rgb: [3]f32 = .{ 0, 0, 0 };
+        var wsum: f32 = 0;
+        var i: u32 = 0;
+        while (i < slot_count) : (i += 1) {
+            const base = 6 + i * 3;
+            if (base + 2 >= s.data_len) break;
+            const w = 0.55 + 0.45 * @sin(t * 0.9 + @as(f32, @floatFromInt(i)) * 2.4);
+            rgb[0] += s.data[base] * w;
+            rgb[1] += s.data[base + 1] * w;
+            rgb[2] += s.data[base + 2] * w;
+            wsum += w;
+        }
+        if (wsum <= 0.0001) return null;
+        return .{ rgb[0] / wsum, rgb[1] / wsum, rgb[2] / wsum };
+    }
+    return null;
+}
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
@@ -8564,6 +8712,40 @@ pub fn init(environ: *const std.process.Environ.Map) void {
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
+    // ── Live-material-region group(1) pool (req_3397): the SAME storage shape
+    //    as ground, so g_ground_bgl serves both pipelines. Slot i of g_regions
+    //    owns buffer/bind-group i — data uploads only when a region's data is
+    //    dirty, never per frame. ──
+    {
+        var region_i: usize = 0;
+        while (region_i < REGION_POOL) : (region_i += 1) {
+            const buf = device.createBuffer(&.{
+                .label = wgpu.StringView.fromSlice("r3d_region_data"),
+                .size = REGION_DATA_FLOATS * @sizeOf(f32),
+                .usage = wgpu.BufferUsages.storage | wgpu.BufferUsages.copy_dst,
+                .mapped_at_creation = 0,
+            });
+            g_region_data_buf[region_i] = buf;
+            if (buf) |b| {
+                g_region_data_bg[region_i] = device.createBindGroup(&.{
+                    .layout = g_ground_bgl.?,
+                    .entry_count = 1,
+                    .entries = @ptrCast(&wgpu.BindGroupEntry{
+                        .binding = 0,
+                        .buffer = b,
+                        .offset = 0,
+                        .size = REGION_DATA_FLOATS * @sizeOf(f32),
+                    }),
+                });
+            }
+        }
+    }
+    g_region_inst_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("r3d_region_instances"),
+        .size = REGION_POOL * @sizeOf(InstanceData),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
     initGroundGridTopology(device);
     g_ground_data_ptr = @splat(0);
     g_ground_data_version = @splat(0);
@@ -8909,6 +9091,24 @@ pub fn deinit() void {
         g_ground_data_buf[i] = null;
     }
     if (g_ground_pipeline) |p| p.release();
+    // Live material regions: GPU pool + per-region index buffers; the CPU-side
+    // bindings (indices/data/formula) survive so a re-init redraws them.
+    if (g_region_inst_buf) |b| b.release();
+    g_region_inst_buf = null;
+    for (0..REGION_POOL) |i| {
+        if (g_region_data_bg[i]) |bg| bg.release();
+        if (g_region_data_buf[i]) |b| b.release();
+        g_region_data_bg[i] = null;
+        g_region_data_buf[i] = null;
+        if (g_regions[i].ibuf) |b| b.release();
+        g_regions[i].ibuf = null;
+        g_regions[i].ibuf_count = 0;
+        g_regions[i].ibuf_dirty = true;
+        g_regions[i].data_dirty = true;
+    }
+    if (g_region_pipeline) |p| p.release();
+    g_region_pipeline = null;
+    g_region_built_hash = 0;
     if (g_ground_bgl) |l| l.release();
     g_ground_pipeline = null;
     g_ground_bgl = null;
@@ -10289,6 +10489,91 @@ fn ensureGroundPipeline(io: std.Io, environ: *const std.process.Environ.Map, for
     }
 }
 
+// Build the live-material-region pipeline from the cart-composed formula
+// (region_rgb over FILL_FUNCS). Same shape as ensureGroundPipeline — hash-gated
+// so an unchanged formula is a no-op and a hot-reload edit recompiles. The one
+// deliberate difference: depth compare is LESS_EQUAL, because region triangles
+// are the SAME triangles the base mesh already drew — equal depth must pass so
+// the region overlay wins the fragment.
+fn ensureRegionPipeline(io: std.Io, environ: *const std.process.Environ.Map, formula: []const u8) void {
+    const h = std.hash.Wyhash.hash(0, formula);
+    if (g_region_pipeline != null and h == g_region_built_hash) return;
+    const device = core.getDevice() orelse return;
+    if (g_bind_group_layout == null or g_ground_bgl == null) return;
+    if (g_region_pipeline) |old| old.release();
+    g_region_pipeline = null;
+    const wgsl = std.fmt.allocPrint(std.heap.c_allocator, "{s}\n{s}\n{s}\n{s}", .{
+        shaders.scene3d_region_prefix, effect_assemble.MATH, formula, shaders.scene3d_region_epilogue,
+    }) catch {
+        log.print("[r3d-region] ERROR: out of memory assembling the region shader ({d}B formula, hash {x}) — live material regions will NOT draw until this is fixed.\n", .{ formula.len, h });
+        return;
+    };
+    defer std.heap.c_allocator.free(wgsl);
+    var progress = compile_progress.CompileProgress{};
+    progress.start(io, environ, wgsl.len);
+    defer progress.finishMemory();
+    defer progress.stop();
+    const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_region", .code = wgsl });
+    const sm = device.createShaderModule(&sm_desc) orelse {
+        log.print("[r3d-region] ERROR: region formula WGSL FAILED TO COMPILE (hash {x}, {d}B) — live material regions will NOT draw; check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
+        return;
+    };
+    defer sm.release();
+    const gl = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_ground_bgl.? };
+    const pl = device.createPipelineLayout(&.{
+        .bind_group_layout_count = gl.len,
+        .bind_group_layouts = @ptrCast(&gl),
+    }) orelse return;
+    defer pl.release();
+    const vert_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
+        .{ .format = .snorm16x2, .offset = 12, .shader_location = 1 }, // oct normal
+        .{ .format = .float16x2, .offset = 16, .shader_location = 2 }, // uv
+    };
+    const inst_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0, .shader_location = 3 },
+        .{ .format = .uint16x4, .offset = 12, .shader_location = 4 },
+        .{ .format = .float16x4, .offset = 20, .shader_location = 5 },
+        .{ .format = .unorm8x4, .offset = 28, .shader_location = 6 },
+    };
+    const vert_layouts = [_]wgpu.VertexBufferLayout{
+        .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
+        .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
+    };
+    const color_target = wgpu.ColorTargetState{
+        .format = .rgba8_unorm,
+        .blend = &wgpu.BlendState.premultiplied_alpha_blending,
+        .write_mask = wgpu.ColorWriteMasks.all,
+    };
+    const frag = wgpu.FragmentState{
+        .module = sm,
+        .entry_point = wgpu.StringView.fromSlice("fs_main"),
+        .target_count = 1,
+        .targets = @ptrCast(&color_target),
+    };
+    const depth_stencil = wgpu.DepthStencilState{
+        .format = .depth24_plus,
+        .depth_write_enabled = .true,
+        .depth_compare = .less_equal,
+        .stencil_front = .{},
+        .stencil_back = .{},
+    };
+    g_region_pipeline = device.createRenderPipeline(&.{
+        .layout = pl,
+        .vertex = .{ .module = sm, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+        .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+        .depth_stencil = &depth_stencil,
+        .multisample = .{},
+        .fragment = &frag,
+    });
+    if (g_region_pipeline != null) {
+        g_region_built_hash = h;
+        progress.finishOk();
+    } else {
+        log.print("[r3d-region] ERROR: createRenderPipeline returned null for the region formula (hash {x}) — live material regions will NOT draw until this is fixed.\n", .{h});
+    }
+}
+
 fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
@@ -10305,6 +10590,10 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     // Placed point/spot lights collected from <Scene3D.PointLight/SpotLight>
     // children. Overflow past MAX_LIGHTS is dropped loudly (a one-shot warn).
     var placed_lights: [MAX_LIGHTS]Light = undefined;
+    // LightRig colorFrom (req_3396): per-light region binding, -1 = none. Bound
+    // lights get their color overridden from the region's palette slots (host-
+    // stepped) just before the upload below.
+    var placed_light_region: [MAX_LIGHTS]i32 = undefined;
     var n_placed: u32 = 0;
     // The first shadow-casting spot owns the single shadow map. Its index into
     // placed_lights + the params needed to build its light-space VP.
@@ -10396,6 +10685,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                             .cos_inner = cos_inner,
                             .kind = if (is_spot) 1 else 0,
                         };
+                        placed_light_region[n_placed] = child.scene3d_light_region;
                         // First shadow-casting spot claims the shadow map.
                         if (is_spot and child.scene3d_cast_shadow and shadow_caster < 0) {
                             shadow_caster = @intCast(n_placed);
@@ -10745,6 +11035,20 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     // Wrapped wall-clock (mod 1e6 s) so float32 keeps precision — the grass
     // pipeline's wind reads S.time. Same wrap drawSky uses for cloud drift.
     const scene_time: f32 = @as(f32, @floatFromInt(@mod(std.Io.Clock.now(.awake, io).toMilliseconds(), 1_000_000))) / 1000.0;
+    // LightRig colorFrom (req_3396 tier 1): a light bound to a live material
+    // region takes its color from that region's palette slots, host-stepped on
+    // the same wall-clock the region shader animates with — the lamp's glow
+    // follows the goo with zero JS in the frame loop and zero GPU readback.
+    {
+        var li: u32 = 0;
+        while (li < n_placed) : (li += 1) {
+            if (placed_light_region[li] >= 0) {
+                if (regionLightRgb(placed_light_region[li], scene_time)) |rgb| {
+                    placed_lights[li].color = rgb;
+                }
+            }
+        }
+    }
     // Upload the placed lights collected above. The shader loops light_count of
     // them; an empty frame writes nothing and the loop runs zero times.
     if (n_placed > 0) {
@@ -10804,6 +11108,12 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     var gslot: [GROUND_POOL]GeoSlice = undefined;
     var gshared: [GROUND_POOL]bool = undefined;
     var gcount: usize = 0;
+    // Meshes carrying live material regions (req_3397) — drawn as an indexed
+    // overlay pass after the ground pass. rslot keeps the FULL vertex range
+    // (recorded before the glass partition trims the opaque draw's count).
+    var ridx: [REGION_POOL]u32 = undefined;
+    var rslot: [REGION_POOL]GeoSlice = undefined;
+    var rcount: usize = 0;
     var dbg_ground_seen: u32 = 0; // ground-formula meshes SEEN (uncapped) vs gcount collected
 
     var dbg_inst_seen: u32 = 0; // req_0727: instanced (bucket) meshes seen vs collected
@@ -10890,6 +11200,16 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                 collected_logical += 1;
             }
             continue;
+        }
+
+        // Live material regions ride single (non-instanced) meshes — the model
+        // editor's resident mesh and placed one-offs. Record the child + FULL
+        // slot NOW: the glass partition below trims the opaque draw's count,
+        // but region indices address the whole vertex range.
+        if (child.scene3d_instance_count == 0 and rcount < REGION_POOL and regionCountForKeyHash(hashKey(key)) > 0) {
+            ridx[rcount] = ci;
+            rslot[rcount] = maybe_slot.?;
+            rcount += 1;
         }
 
         var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
@@ -11324,6 +11644,87 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     }
     if (censusOn() and g_dbg_frame % 120 == 1) {
         log.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
+    }
+
+    // ── Live material region pass (req_3397): each bound region re-draws its
+    //    faces as an INDEXED overlay into the same retained vertices, through
+    //    the region pipeline (object-space domain + S.time, depth LESS_EQUAL so
+    //    equal-depth fragments beat the base draw). Opaque + emissive, so it
+    //    lands BEFORE the transparent pass — a glass shell (the lavalamp)
+    //    blends over its lava. One draw per region; D uploads only on change. ──
+    if (rcount > 0 and g_region_formula != null and g_region_inst_buf != null) {
+        ensureRegionPipeline(io, environ, g_region_formula.?);
+        if (g_region_pipeline) |rp| {
+            var pipeline_bound = false;
+            var rm_i: usize = 0;
+            while (rm_i < rcount) : (rm_i += 1) {
+                const child = &scene_node.children[ridx[rm_i]];
+                const rkey = child.scene3d_geom_key orelse continue;
+                const rkh = hashKey(rkey);
+                const ri_off: u64 = @as(u64, @intCast(rm_i)) * @sizeOf(InstanceData);
+                var inst_written = false;
+                for (&g_regions, 0..) |*s, s_i| {
+                    if (!s.active or s.key_hash != rkh) continue;
+                    if (s.max_index >= rslot[rm_i].count) continue; // mesh shrank under the binding — JS re-push follows
+                    const dbuf = g_region_data_buf[s_i] orelse continue;
+                    const dbg = g_region_data_bg[s_i] orelse continue;
+                    if (s.data_dirty) {
+                        bu.writeTypedBuffer(queue, dbuf, 0, f32, s.data[0..REGION_DATA_FLOATS]);
+                        s.data_dirty = false;
+                    }
+                    if (s.ibuf_dirty) {
+                        if (s.ibuf) |old| old.release();
+                        s.ibuf = null;
+                        s.ibuf_count = 0;
+                        if (s.indices) |idx| {
+                            s.ibuf = device.createBuffer(&.{
+                                .label = wgpu.StringView.fromSlice("r3d_region_indices"),
+                                .size = idx.len * @sizeOf(u32),
+                                .usage = wgpu.BufferUsages.index | wgpu.BufferUsages.copy_dst,
+                                .mapped_at_creation = 0,
+                            });
+                            if (s.ibuf) |ib| {
+                                bu.writeTypedBuffer(queue, ib, 0, u32, idx);
+                                s.ibuf_count = @intCast(idx.len);
+                            }
+                        }
+                        s.ibuf_dirty = false;
+                    }
+                    const ib = s.ibuf orelse continue;
+                    if (s.ibuf_count == 0) continue;
+                    if (!pipeline_bound) {
+                        pass.setPipeline(rp);
+                        pass.setBindGroup(0, g_bind_group.?, 0, null);
+                        pipeline_bound = true;
+                    }
+                    if (!inst_written) {
+                        var ri_data = makeInstance(
+                            child.scene3d_pos_x,
+                            child.scene3d_pos_y,
+                            child.scene3d_pos_z,
+                            child.scene3d_rot_x,
+                            child.scene3d_rot_y,
+                            child.scene3d_rot_z,
+                            child.scene3d_scale_x,
+                            child.scene3d_scale_y,
+                            child.scene3d_scale_z,
+                            child.scene3d_color_r,
+                            child.scene3d_color_g,
+                            child.scene3d_color_b,
+                            child.scene3d_color_a,
+                        );
+                        bu.writeValue(queue, g_region_inst_buf.?, ri_off, &ri_data);
+                        inst_written = true;
+                    }
+                    pass.setBindGroup(1, dbg, 0, null);
+                    pass.setVertexBuffer(0, g_retained_vbuf.?, rslot[rm_i].offset, bu.bytesOfCount(Vertex, rslot[rm_i].count));
+                    pass.setVertexBuffer(1, g_region_inst_buf.?, ri_off, @sizeOf(InstanceData));
+                    pass.setIndexBuffer(ib, .uint32, 0, @as(u64, s.ibuf_count) * @sizeOf(u32));
+                    pass.drawIndexed(s.ibuf_count, 1, 0, 0, 0);
+                    recordDraw(s.ibuf_count, 1);
+                }
+            }
+        }
     }
 
     // Glass and other alpha<1 meshes, drawn after every opaque draw so they read

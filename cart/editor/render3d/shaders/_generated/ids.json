@@ -955,6 +955,11 @@
     "index": 57
   },
   {
+    "fn": "lava_plasma",
+    "board": 4,
+    "index": 58
+  },
+  {
     "fn": "cash_stack",
     "board": 5,
     "index": 0
