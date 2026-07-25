@@ -272,6 +272,14 @@ export function nextBuildStarterDocId(starterId: BuildPieceStarterId, docs: Work
   return allocateBuildStarterModelId(starterId, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id));
 }
 
+/** Headless-harness lookup (req_3406): RJIT_MODELDOC=open:<name> boots a SAVED
+ * package by its manifest name (case-insensitive). Roster only — synthesizers
+ * need an id shape, and the harness names real on-disk packages. */
+export function modelPackageByName(name: string): ModelPackage | null {
+  const wanted = name.trim().toLowerCase();
+  return MODEL_PACKAGES.find((model) => model.name.toLowerCase() === wanted) ?? null;
+}
+
 export function modelPackageById(id: string): ModelPackage | null {
   // DISK-BACKED WINS (req_2620 S): a saved primitive doc has a real package in the
   // catalog (loadMaterializedPackages / a session save) — its manifest name is the

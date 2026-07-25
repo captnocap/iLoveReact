@@ -172,7 +172,7 @@ import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import {
   leftPanelForFolder,
   leftPanelsFor,
@@ -3722,6 +3722,13 @@ export default function AppFrame() {
     } else if (kind?.startsWith('build:')) {
       const starterId = kind.slice('build:'.length) as BuildPieceStarterId;
       if (buildPieceStarter(starterId)) createBuildPieceStarterDocument(starterId);
+    } else if (kind?.startsWith('open:')) {
+      // req_3406: boot straight into a SAVED package — the repro path for
+      // open-a-real-model bugs (the blank Lavalampsad viewport). The roster is
+      // built synchronously at module init, so the lookup is immediate.
+      const pkg = modelPackageByName(kind.slice('open:'.length));
+      if (pkg) openModelDocument(pkg);
+      else console.error(`[modeldoc-harness] open: no package named '${kind.slice('open:'.length)}' in the roster`);
     } else if (kind && PRIMITIVE_MESHES.some((primitive) => primitive.kind === kind)) {
       createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
     }
