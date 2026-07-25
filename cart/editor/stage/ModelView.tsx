@@ -157,6 +157,8 @@ export type ModelFocusBridge = {
   applyUvLayout: (rects: Uint32Array) => boolean;
   applyUvGeometry: (corners: Float32Array, action: UvHistoryAction) => boolean;
   restoreUvShapes: (islandIndices: Uint32Array) => boolean;
+  autoUvSize: (islandIndices: Uint32Array) => boolean;
+  projectUvFromView: (islandIndices: Uint32Array) => boolean;
   undoUvHistory: () => string;
   redoUvHistory: () => string;
   selectUvIsland: (index: number, additive: boolean) => boolean;
@@ -1306,6 +1308,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return true;
   };
+  const autoUvSize = (islandIndices: Uint32Array): boolean => {
+    if (islandIndices.length === 0) return false;
+    const ok = host.__model_uv_auto_size?.(islandIndices) === 1;
+    if (!ok) return false;
+    onDocumentMutated?.();
+    buildUvPanel();
+    return true;
+  };
+  const projectUvFromView = (islandIndices: Uint32Array): boolean => {
+    if (islandIndices.length === 0) return false;
+    const ok = host.__model_uv_project_view?.(islandIndices) === 1;
+    if (!ok) return false;
+    onDocumentMutated?.();
+    buildUvPanel();
+    return true;
+  };
   const selectUvIsland = (index: number, additive: boolean): boolean => {
     if (!Number.isInteger(index) || index < 0) return false;
     // Paint owns the 3D surface and deliberately has no edit-selection tint. Keep
@@ -1985,6 +2003,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       applyUvLayout,
       applyUvGeometry,
       restoreUvShapes,
+      autoUvSize,
+      projectUvFromView,
       undoUvHistory: () => stepUvHistory(false),
       redoUvHistory: () => stepUvHistory(true),
       selectUvIsland,

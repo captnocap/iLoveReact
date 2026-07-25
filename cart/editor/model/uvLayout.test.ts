@@ -13,6 +13,7 @@ import {
   moveUvIslandVertex,
   panUvCanvasView,
   parseUvIslandRects,
+  pasteUvTransform,
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
@@ -428,6 +429,22 @@ test('uniform pack gives every island an equal, bounded cell', () => {
   assert(packed.length === 4, 'pack dropped islands');
   assert(packed.every((rect) => rect.x >= 0 && rect.y >= 0 && rect.x + rect.w <= 64 && rect.y + rect.h <= 64), 'pack escaped atlas');
   assert(new Set(packed.map((rect) => `${rect.w}x${rect.h}`)).size === 1, 'pack did not normalize cell shapes');
+});
+
+test('paste transform scales and moves an island to the copied frame, clamped inside the atlas', () => {
+  const rects = parseUvIslandRects(
+    [4, 4, 10, 10],
+    [7],
+    [0, 4, 4, 14, 4, 4, 14],
+  );
+  const pasted = pasteUvTransform(rects[0]!, undefined, { x: 30, y: 40, w: 20, h: 5 }, 64, 64);
+  const bounds = uvSelectionBounds(pasted);
+  assert(Boolean(bounds), 'pasted island lost its silhouette');
+  assert(Math.abs(bounds!.x - 30) < 0.001 && Math.abs(bounds!.y - 40) < 0.001, `pasted frame origin drifted (${bounds!.x},${bounds!.y})`);
+  assert(Math.abs(bounds!.w - 20) < 0.001 && Math.abs(bounds!.h - 5) < 0.001, `pasted frame size drifted (${bounds!.w}×${bounds!.h})`);
+  const clamped = pasteUvTransform(rects[0]!, undefined, { x: 60, y: 60, w: 20, h: 5 }, 64, 64);
+  const clampedBounds = uvSelectionBounds(clamped)!;
+  assert(clampedBounds.x + clampedBounds.w <= 64.001 && clampedBounds.y + clampedBounds.h <= 64.001, 'pasted frame escaped the atlas');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

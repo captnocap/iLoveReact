@@ -21,6 +21,7 @@ import {
   moveUvSelectionVertex,
   NO_UV_GROUP,
   panUvCanvasView,
+  pasteUvTransform,
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
@@ -47,6 +48,7 @@ import {
   type UvSelectionBounds,
   type UvSelectionMode,
   type UvSizeMatch,
+  type UvTransformFrame,
   zoomUvCanvasViewAt,
 } from '../model/uvLayout';
 
@@ -74,7 +76,7 @@ const UV_CONTEXT_MENU_TUNING = {
   edgePx: 4,
   baseHeightPx: 304,
   rowHeightPx: 26,
-  expandedRows: { transform: 3, arrange: 6, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 8, arrange: 6, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
@@ -276,6 +278,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [snapBaseStep, setSnapBaseStep] = useState<number>(UV_SNAP_STEPS[0]);
   const [aspectLocked, setAspectLocked] = useState(false);
   const [menuGroup, setMenuGroup] = useState<UvMenuGroup | null>(null);
+  // Copy/Paste Transform clipboard (req_3427) — one frame survives selection changes;
+  // where the context menu opened, in atlas texels, so Move Here lands on the cursor.
+  const [transformClipboard, setTransformClipboard] = useState<UvTransformFrame | null>(null);
+  const menuAtlasPointRef = useRef<ScreenPoint>({ x: 0, y: 0 });
   const uvMenu = useContextMenu();
   const [axisGuide, setAxisGuide] = useState<UvAxisGuide | null>(null);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
@@ -808,6 +814,86 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setSelectedFace(null);
     setNote(`collected ${count} same-orientation faces · their UV islands now move as one set`);
   };
+  const copySelectedTransform = () => {
+    if (!selectionBounds) {
+      setNote('Select a UV island or face to copy its transform.');
+      return;
+    }
+    const frame = { x: selectionBounds.x, y: selectionBounds.y, w: selectionBounds.w, h: selectionBounds.h };
+    setTransformClipboard(frame);
+    setNote(`copied transform ${Math.round(frame.w)}×${Math.round(frame.h)} at ${Math.round(frame.x)},${Math.round(frame.y)}`);
+  };
+  const pasteSelectedTransform = () => {
+    const frame = transformClipboard;
+    if (!frame) {
+      setNote('Copy a transform first — it survives selection changes.');
+      return;
+    }
+    if (selectionMode === 'face') {
+      const rect = rectsRef.current[selected];
+      if (!rect || !selectedTarget) {
+        setNote('Double-click a UV face first.');
+        return;
+      }
+      replaceSelected(pasteUvTransform(rect, selectedTarget, frame, uv.w, uv.h), 'pasted transform onto the UV face', 'paste-transform');
+      return;
+    }
+    const indices = selectedIndicesRef.current;
+    if (indices.length === 0) {
+      setNote('Select one or more UV islands first.');
+      return;
+    }
+    const selectedSet = new Set(indices);
+    const next = rectsRef.current.map((rect, index) => selectedSet.has(index) ? pasteUvTransform(rect, undefined, frame, uv.w, uv.h) : rect);
+    applyIslandSetEdit(next, `pasted transform onto ${indices.length} ${indices.length === 1 ? 'island' : 'islands'}`, 'paste-transform');
+  };
+  const moveSelectionToMenuPoint = () => {
+    const point = menuAtlasPointRef.current;
+    if (selectionMode === 'face') {
+      const rect = rectsRef.current[selected];
+      if (!rect || !selectedTarget) {
+        setNote('Double-click a UV face first.');
+        return;
+      }
+      const bounds = uvSelectionBounds(rect, selectedTarget);
+      if (!bounds) return;
+      replaceSelected(moveUvFace(rect, selectedTarget, point.x - bounds.cx, point.y - bounds.cy, uv.w, uv.h, translationSnapStep, true), 'moved UV face to the cursor', 'move-here');
+      return;
+    }
+    const bounds = uvIslandSetBounds(rectsRef.current, selectedIndicesRef.current);
+    if (!bounds) {
+      setNote('Select one or more UV islands first.');
+      return;
+    }
+    const next = moveUvIslands(rectsRef.current, selectedIndicesRef.current, point.x - bounds.cx, point.y - bounds.cy, uv.w, uv.h, translationSnapStep, true);
+    applyIslandSetEdit(next, 'moved UV selection to the cursor', 'move-here');
+  };
+  const autoSizeSelected = () => {
+    const indices = selectedIndicesRef.current;
+    if (selectionMode !== 'island' || indices.length === 0) {
+      setNote('Select one or more complete UV islands first.');
+      return;
+    }
+    if (!bridge.autoUvSize(new Uint32Array(indices))) {
+      setNote('Auto UV refused — the live mesh or UV selection changed.');
+      bridge.refreshUv();
+      return;
+    }
+    setNote(`sized ${indices.length} UV ${indices.length === 1 ? 'island' : 'islands'} to the real face size at ${uv.detail} texels/m`);
+  };
+  const projectSelectedFromView = () => {
+    const indices = selectedIndicesRef.current;
+    if (selectionMode !== 'island' || indices.length === 0) {
+      setNote('Select one or more complete UV islands first.');
+      return;
+    }
+    if (!bridge.projectUvFromView(new Uint32Array(indices))) {
+      setNote('Project From View refused — every selected face must be in front of the 3D camera.');
+      bridge.refreshUv();
+      return;
+    }
+    setNote(`projected ${indices.length} UV ${indices.length === 1 ? 'island' : 'islands'} from the current 3D view`);
+  };
   const runMenuAction = (action: () => void) => {
     action();
     setMenuGroup(null);
@@ -816,8 +902,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const toggleMenuGroup = (group: UvMenuGroup) => setMenuGroup((current) => current === group ? null : group);
   const openUvMenu = (event: any, selectAtPointer: boolean) => {
     const screen = localScreenPoint(event);
+    menuAtlasPointRef.current = atlasPoint(screen);
     if (selectAtPointer) {
-      const point = atlasPoint(screen);
+      const point = menuAtlasPointRef.current;
       if (selectionMode === 'face') {
         const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
         if (faceHit) {
@@ -1183,6 +1270,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               <UvContextRow indented icon="FlipHorizontal2" label="Flip Horizontally" detail="U" enabled={Boolean(selectedRect)} onPress={() => runMenuAction(() => flipSelected('u'))} />
               <UvContextRow indented icon="FlipVertical2" label="Flip Vertically" detail="V" enabled={Boolean(selectedRect)} onPress={() => runMenuAction(() => flipSelected('v'))} />
               <UvContextRow indented icon="RefreshCcw" label="Restore From 3D Shape" detail="KEEP CENTRE" enabled={selectionMode === 'island' && selectedIndices.length > 0} onPress={() => runMenuAction(restoreSelectedShapes)} />
+              <UvContextRow indented icon="Copy" label="Copy Transform" detail="X·Y·W·H" enabled={Boolean(selectionBounds)} tooltip="Copy the selection's position and size — paste it onto any later selection" onPress={() => runMenuAction(copySelectedTransform)} />
+              <UvContextRow indented icon="ClipboardPaste" label="Paste Transform" detail={transformClipboard ? `${Math.round(transformClipboard.w)}×${Math.round(transformClipboard.h)}` : 'EMPTY'} enabled={Boolean(transformClipboard) && Boolean(selectionBounds)} tooltip="Scale and move the selection to the copied frame" onPress={() => runMenuAction(pasteSelectedTransform)} />
+              <UvContextRow indented icon="LocateFixed" label="Move Here" detail="CURSOR" enabled={Boolean(selectionBounds)} tooltip="Centre the selection where this menu was opened" onPress={() => runMenuAction(moveSelectionToMenuPoint)} />
+              <UvContextRow indented icon="Ruler" label="Auto UV Real Size" detail={`${uv.detail}/m`} enabled={selectionMode === 'island' && selectedIndices.length > 0} tooltip="Resize the selected islands to their faces' real physical size at the atlas density" onPress={() => runMenuAction(autoSizeSelected)} />
+              <UvContextRow indented icon="Eye" label="Project From View" detail="3D CAM" enabled={selectionMode === 'island' && selectedIndices.length > 0} tooltip="Rewrite the selected islands as the current 3D viewport's projection of their faces" onPress={() => runMenuAction(projectSelectedFromView)} />
             </>
           ) : null}
 

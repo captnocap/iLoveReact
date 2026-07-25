@@ -798,6 +798,38 @@ export function stackUvIslands(
   return { rects: next, compatible, skipped };
 }
 
+export type UvTransformFrame = Readonly<{ x: number; y: number; w: number; h: number }>;
+
+/** Apply a copied transform frame (position + size) onto one island or one isolated
+ * face (req_3427 Copy/Paste Transform): the selection scales to the frame's width and
+ * height, then its north-west corner lands on the frame's origin, clamped inside the
+ * atlas. Texture pixels never move — only sampling coordinates. */
+export function pasteUvTransform(
+  rect: UvIslandRect,
+  target: UvFaceTarget | undefined,
+  frame: UvTransformFrame,
+  atlasW: number,
+  atlasH: number,
+): UvIslandRect {
+  if (!(frame.w > 0) || !(frame.h > 0) || atlasW < 1 || atlasH < 1) return rect;
+  const bounds = target ? uvSelectionBounds(rect, target) : wholeIslandBounds(rect);
+  if (!bounds) return rect;
+  if (!target && !rect.triangles?.length) {
+    const width = clamp(frame.w, UV_LAYOUT_TUNING.minimumIslandTexels, atlasW);
+    const height = clamp(frame.h, UV_LAYOUT_TUNING.minimumIslandTexels, atlasH);
+    return { ...rect, x: clamp(frame.x, 0, atlasW - width), y: clamp(frame.y, 0, atlasH - height), w: width, h: height };
+  }
+  const scaleX = frame.w / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.w);
+  const scaleY = frame.h / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.h);
+  const scaled = scaleUvSelection(rect, target, scaleX, scaleY, atlasW, atlasH);
+  const scaledBounds = target ? uvSelectionBounds(scaled, target) : wholeIslandBounds(scaled);
+  if (!scaledBounds) return scaled;
+  const triangles = absoluteTriangles(scaled);
+  const [dx, dy] = clampSelectionTranslation(scaledBounds, frame.x - scaledBounds.x, frame.y - scaledBounds.y, atlasW, atlasH);
+  translateAbsoluteSelection(triangles, target, dx, dy);
+  return rebuildUvRect(scaled, triangles, atlasW, atlasH);
+}
+
 /** Reflect a complete island or one authored face through its own transform
  * center. Rotation cannot change UV handedness; this is the operation that
  * makes mirrored text and logos read forward without moving texture pixels. */

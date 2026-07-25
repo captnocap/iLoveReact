@@ -17,6 +17,10 @@ export const UV_HISTORY_ACTIONS = [
   { id: 'pack', label: 'pack UV islands' },
   { id: 'restore-shape', label: 'restore UV shape' },
   { id: 'stack', label: 'stack UV islands' },
+  { id: 'paste-transform', label: 'paste UV transform' },
+  { id: 'move-here', label: 'move UV to cursor' },
+  { id: 'auto-size', label: 'auto UV size' },
+  { id: 'project-view', label: 'project UV from view' },
 ] as const;
 
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';

@@ -2544,6 +2544,45 @@ fn hostModelUvRestoreShape(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_uv_auto_size(Uint32Array[island,...]) → 1. Resize the selected islands to
+/// their faces' real physical footprint at the atlas density (req_3427 "auto uv"),
+/// keeping each island's centre, committed as one journaled UV action.
+fn hostModelUvAutoSize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const island_indices: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ok = scene3d.autoUvIslandSizesJournaled(island_indices);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_uv_project_view(Uint32Array[island,...]) → 1. Rewrite the selected islands'
+/// UVs as the live 3D viewport's screen projection of their faces (req_3427 "project
+/// from view"), fitted into the selection's current UV footprint and journaled as one
+/// UV action. Returns 0 untouched when a selected corner is behind the camera.
+fn hostModelUvProjectView(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const island_indices: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ok = scene3d.projectUvFromViewJournaled(island_indices);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_uv_selection_read() → JSON {"islands":[...],"faces":[...]}. The UV panel
 /// polls this only when native model selection commits, avoiding an expensive
 /// atlas-byte read merely to synchronize selection and corner-identity chrome.
@@ -3712,6 +3751,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
     v8_runtime.registerHostFn("__model_uv_geometry_apply", hostModelUvGeometryApply);
     v8_runtime.registerHostFn("__model_uv_restore_shape", hostModelUvRestoreShape);
+    v8_runtime.registerHostFn("__model_uv_auto_size", hostModelUvAutoSize);
+    v8_runtime.registerHostFn("__model_uv_project_view", hostModelUvProjectView);
     v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
     v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
