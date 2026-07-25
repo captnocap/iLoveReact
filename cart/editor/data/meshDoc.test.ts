@@ -84,6 +84,12 @@ test('a degraded host cannot overwrite a multi-part mesh document', () => {
   assert(meshDocPartMetadataCanShrink(15, 15, 1, true), 'an explicitly authorized delete from a healthy document was blocked');
   assert(meshDocPartMetadataCanShrink(0, 15, 15), 'an exact recovered outliner could not repair its zero-range document');
   assert(!meshDocPartMetadataCanShrink(15, 1, 1), 'the durable range table did not outvote already-collapsed metadata');
+  // req_3405: the two-file transaction TORE (an authorized merge wrote doc.blob's
+  // collapsed range table; the app died before parts.json followed). The doc's own
+  // table is the boundary truth — a stale 3-row sidecar may not hold the merged
+  // 1-range document hostage; the save repairs the sidecar.
+  assert(meshDocPartMetadataCanShrink(1, 3, 1), 'a torn stale parts.json held the merged document hostage');
+  assert(!meshDocPartMetadataCanShrink(2, 3, 1), 'matching the stale sidecar instead of the doc range table was allowed to destroy a boundary');
 });
 
 test('save recovery accepts only complete non-overlapping live ranges', () => {

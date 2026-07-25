@@ -80,7 +80,17 @@ export function meshDocPartMetadataCanShrink(
   // Counts may grow freely. Shrinking is destructive and therefore requires the
   // explicit capability minted by a real Delete/Merge/Undo action in AppFrame.
   // Hydration, paint saves, and autosave never possess that capability.
-  const durablePartCount = Math.max(storedRangeCount ?? 0, savedPartCount);
+  //
+  // The BOUNDARY truth is doc.blob's own range table (req_3405): the two-file
+  // transaction can tear — an authorized merge landed doc.blob's collapsed
+  // ranges but the app died before parts.json followed — and taking
+  // max(docRanges, sidecarRows) let the STALE SIDECAR hold the document
+  // hostage forever (the authorization ref does not survive a restart).
+  // When the doc carries a real range table, matching ITS count destroys no
+  // boundary — the save REPAIRS the sidecar. A rangeless legacy doc still
+  // falls back to the sidecar's count as its only durable authority, so a
+  // collapsed parts.json can never overwrite 15 saved names (the reverse tear).
+  const durablePartCount = (storedRangeCount ?? 0) >= 1 ? storedRangeCount! : savedPartCount;
   return livePartCount >= durablePartCount || explicitlyAuthorized;
 }
 
