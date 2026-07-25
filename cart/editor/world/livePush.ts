@@ -207,7 +207,8 @@ export function pushLiveWorld(
       if (!isAuthoredPiece(piece.pieceId)) continue;
       const authored = authoredPieceFrom(authoredPieces, piece.pieceId);
       const authoredPackage = authored ? modelPackageById(authored.pkgId) : null;
-      const roleMaterials = (authoredPackage?.textureSlots ?? authored?.textureSlots ?? []).map((slot) => {
+      const slotDefs = authoredPackage?.textureSlots ?? authored?.textureSlots ?? [];
+      const roleMaterials = slotDefs.map((slot) => {
         const ref = piece.slots?.[slot.id];
         if (!ref) return 0;
         const material = liveMaterialFor(ref);
@@ -215,12 +216,17 @@ export function pushLiveWorld(
         liveMaterials.set(material.hash, material);
         return material.hash;
       });
+      // A slot wearing a liveMaterial NEEDS the loader's per-slot split even
+      // with no skins assigned (req_3425): the region binds to the ':slot-N'
+      // node, and the host only splits when the ref carries a materials array
+      // (runtime_live_scene line ~220). Zero hashes = the baked atlas look.
+      const needsSlotSplit = roleMaterials.some((hash) => hash !== 0) || slotDefs.some((slot) => slot.liveMaterial);
       refs.push({
         key: authoredResidentKeyOf(piece.pieceId),
         x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees,
         ...(piece.spinDegPerSec ? { spin: piece.spinDegPerSec } : {}),
         ...(piece.scale && piece.scale !== 1 ? { scale: piece.scale } : {}),
-        ...(roleMaterials.some((hash) => hash !== 0) ? { materials: roleMaterials } : {}),
+        ...(needsSlotSplit ? { materials: roleMaterials } : {}),
       });
     }
     // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
@@ -290,7 +296,12 @@ function pushLiveMaterialRegions(pieces: readonly PlacedPiece[], authoredPieces?
   if (binds.length === 0) return;
   // ONE formula shared with the studio pusher — union, never clobber.
   if (!ensureRegionFormula(wantFns)) return;
-  for (const bind of binds) g.__model_region_set(bind.key, bind.regionId, bind.faces, bind.data);
+  let landed = 0;
+  for (const bind of binds) {
+    if (g.__model_region_set(bind.key, bind.regionId, bind.faces, bind.data) === 1) landed += 1;
+    else console.error(`[live-regions] host REFUSED region bind '${bind.key}' (#${bind.regionId}, ${bind.faces.length} face(s))`);
+  }
+  console.warn(`[live-regions] ${landed}/${binds.length} placed-prop region(s) bound: ${binds.map((b) => b.key).join(', ')}`);
 }
 
 /** Keep the authored meshes RESIDENT so their placements can draw (req_2577).

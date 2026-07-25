@@ -11728,6 +11728,11 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     }
     if (censusOn() and g_dbg_frame % 120 == 1) {
         log.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, GROUND_POOL });
+        var dbg_regions_active: u32 = 0;
+        for (&g_regions) |*rs| {
+            if (rs.active) dbg_regions_active += 1;
+        }
+        log.print("[r3d-region] census: bound={d} collected(rcount)={d} formula={s} pipeline={s}\n", .{ dbg_regions_active, rcount, if (g_region_formula != null) @as([]const u8, "yes") else "no", if (g_region_pipeline != null) @as([]const u8, "built") else "none" });
     }
 
     // ── Live material region pass (req_3397): each bound region re-draws its
