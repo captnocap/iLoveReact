@@ -1124,7 +1124,7 @@ pub fn writeCanonicalIslandCorners(island_indices: []const u32, out: []f32) bool
 
     const frames = alloc.alloc(CanonicalUvFrame, canonical.islands.len) catch return false;
     defer alloc.free(frames);
-    gatherCanonicalFrames(selected_faces, live, canonical, frames);
+    gatherCanonicalFrames(selected_faces, live, &canonical, frames);
 
     var restored_any = false;
     for (frames) |*frame| {
@@ -1181,7 +1181,7 @@ pub fn writeAutoSizeIslandCorners(island_indices: []const u32, out: []f32) bool 
 
     const frames = alloc.alloc(CanonicalUvFrame, canonical.islands.len) catch return false;
     defer alloc.free(frames);
-    gatherCanonicalFrames(selected_faces, live, canonical, frames);
+    gatherCanonicalFrames(selected_faces, live, &canonical, frames);
 
     const atlas_w: f32 = @floatFromInt(g_atlas_w);
     const atlas_h: f32 = @floatFromInt(g_atlas_h);
