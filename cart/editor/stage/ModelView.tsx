@@ -21,7 +21,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import type { LightRig } from '../model/editMesh';
 import type { ModelTextureSlot } from '../data/types';
-import { buildRegionFormula, buildRegionData } from '../render3d/regionFormula';
+import { buildRegionData } from '../render3d/regionFormula';
+import { ensureRegionFormula } from '../render3d/liveRegions';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
@@ -800,9 +801,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     host.__model_region_clear?.(key, -1);
     if (!regionSig) return;
     const boundFns = (textureSlots ?? []).filter((s) => s.liveMaterial).map((s) => s.liveMaterial!.fn);
-    const formula = buildRegionFormula(boundFns);
-    if (!formula) return; // loud console.error already emitted — keep the old pipeline
-    host.__model_region_formula?.(formula);
+    // Shared union with the world's placed-prop bindings (render3d/liveRegions):
+    // the host holds ONE formula, so pushers must never clobber each other.
+    if (!ensureRegionFormula(boundFns)) return; // loud error already emitted — keep the old pipeline
     (textureSlots ?? []).forEach((slot, index) => {
       if (!slot.liveMaterial) return;
       const data = buildRegionData(slot.liveMaterial);

@@ -27,6 +27,8 @@ import { encodeLiveLights, normalizeModelLights, placeModelLight, type WorldLigh
 import type { AuthoredFloraSpecies } from './floraSpecies';
 import type { WorldFloraPatch } from './surfaceFlora';
 import { builtinSurfaceFloraResidentMeshes, customFloraResidentAdapters, surfaceFloraMeshRefs } from './surfaceFlora';
+import { buildRegionData } from '../render3d/regionFormula';
+import { ensureRegionFormula } from '../render3d/liveRegions';
 
 const g: any = globalThis;
 
@@ -243,7 +245,52 @@ export function pushLiveWorld(
       g.__compiled_world_set_live_material(nodeId, material.hash, 0, material.wgsl, new Float32Array(material.data), material.opacity);
     }
   }
+  pushLiveMaterialRegions(pieces, authoredPieces);
   return true;
+}
+
+/** Live material regions on placed props (req_3402/req_3423): a texture slot
+ *  wearing a liveMaterial binds a region against the loader's per-slot geometry
+ *  key — runtime_live_scene draws every slot as its own node keyed
+ *  `<residentKey>:slot-N`, and that node's interned geometry IS the slot's
+ *  triangle bucket (compileTextureSlotMesh), so the binding is simply every
+ *  face of that node ([0..bucketTris)). The placed prop then renders the same
+ *  object-space animated field the studio shows, host-side, per frame.
+ *  Instances share the resident key, so one bind covers every placement of the
+ *  same model (the region pool holds bindings per KEY, drawn per instance). */
+function pushLiveMaterialRegions(pieces: readonly PlacedPiece[], authoredPieces?: readonly AuthoredBuildPiece[]): void {
+  if (typeof g.__model_region_set !== 'function') return;
+  const boundKeys = new Set<string>();
+  const wantFns: string[] = [];
+  const binds: { key: string; regionId: number; faces: Uint32Array; data: Float32Array }[] = [];
+  for (const piece of pieces) {
+    if (!isAuthoredPiece(piece.pieceId)) continue;
+    const residentKey = authoredResidentKeyOf(piece.pieceId);
+    if (boundKeys.has(residentKey)) continue;
+    const authored = authoredPieceFrom(authoredPieces, piece.pieceId);
+    const pkg = authored ? modelPackageById(authored.pkgId) : null;
+    const slots = pkg?.textureSlots ?? authored?.textureSlots ?? [];
+    if (!slots.some((slot) => slot.liveMaterial)) continue;
+    boundKeys.add(residentKey);
+    const mats = pkg ? packageMeshDoc(pkg)?.faceMaterials : null;
+    if (!mats) continue; // no durable face-role table — nothing to scope a region to
+    slots.forEach((slot, index) => {
+      if (!slot.liveMaterial) return;
+      let bucketTris = 0;
+      for (let t = 0; t < mats.length; t += 1) if (mats[t] === index) bucketTris += 1;
+      if (bucketTris === 0) return;
+      const data = buildRegionData(slot.liveMaterial);
+      if (!data) return; // unknown material fn — already loud
+      const faces = new Uint32Array(bucketTris);
+      for (let t = 0; t < bucketTris; t += 1) faces[t] = t;
+      wantFns.push(slot.liveMaterial.fn);
+      binds.push({ key: `${residentKey}:slot-${index}`, regionId: index, faces, data });
+    });
+  }
+  if (binds.length === 0) return;
+  // ONE formula shared with the studio pusher — union, never clobber.
+  if (!ensureRegionFormula(wantFns)) return;
+  for (const bind of binds) g.__model_region_set(bind.key, bind.regionId, bind.faces, bind.data);
 }
 
 /** Keep the authored meshes RESIDENT so their placements can draw (req_2577).
