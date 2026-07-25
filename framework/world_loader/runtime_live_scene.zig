@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const material_tex = @import("../gpu/material_tex.zig");
+const scene3d = @import("../gpu/3d.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
@@ -234,9 +235,15 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
     // range (faces before slot 0) and any trailing loader slot past mats.len (glass/leaf)
     // get no override → the mesh's baked atlas, exactly as today's whole-mesh live draw.
     const first_slot_start = mesh.slots[0].start;
+    // req_3428: a slotted glassy prop routes like the slotless one (the bong):
+    // glass texels must NEVER write depth in the opaque pass — the lamp's shell
+    // depth-occluded the region blob drawn behind it. Doors keep their own rules.
+    const textured_alpha_route = mesh.door == null and alpha == null and
+        live_mesh_doors.routeTexturedMeshTransparent(mesh.texture_has_translucency);
     if (first_slot_start > 0) {
         const key = liveSlotKey(self, mesh, r.hash, 0) orelse mesh.key;
-        appendMeshPropNode(self, mesh, inst, key, 0, first_slot_start, 0, alpha, null) catch {};
+        const base_alpha = if (textured_alpha_route) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else alpha;
+        appendMeshPropNode(self, mesh, inst, key, 0, first_slot_start, 0, base_alpha, null) catch {};
     }
     for (mesh.slots, 0..) |slot, si| {
         // Named Rig roles keep stable indices even before any face is assigned.
@@ -254,8 +261,15 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
             live_mesh_doors.routeSlotTransparent(si, door.leaf_slot, mesh.slots.len, mesh.texture_has_translucency)
         else
             false;
+        // req_3428: the one exception to the textured-alpha route is a slot
+        // carrying a LIVE MATERIAL REGION — it stays opaque so the region
+        // overlay wins at equal depth, and the transparent glass shell then
+        // blends over the lava exactly as the studio draws it.
+        const slot_routed = textured_alpha_route and override == null and !scene3d.regionsBoundForKey(key);
         const slot_alpha = if (live_door_glass)
             (if (mesh.tex_rgba != null or override != null) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
+        else if (slot_routed)
+            LIVE_TEXTURED_ALPHA_ROUTE_ALPHA
         else
             alpha;
         appendMeshPropNode(self, mesh, inst, key, slot.start, slot.count, 0, slot_alpha, override) catch {};

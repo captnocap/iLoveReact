@@ -7696,6 +7696,31 @@ pub fn restoreUvIslandShapesJournaled(island_indices: []const u32) bool {
     return applyUvCornerGeometryJournaled(corners, mesh_journal_log.UV_RESTORE_SHAPE_LABEL);
 }
 
+/// Auto UV (req_3427): resize selected islands to their faces' REAL physical footprint
+/// at the atlas's current texel density, keeping each island's centre. Same one-step
+/// journal boundary as every direct UV edit; the raster never moves.
+pub fn autoUvIslandSizesJournaled(island_indices: []const u32) bool {
+    if (g_edit_count == 0) return false;
+    const corners = std.heap.c_allocator.alloc(f32, @as(usize, g_edit_count) * 2) catch return false;
+    defer std.heap.c_allocator.free(corners);
+    if (!model_paint.writeAutoSizeIslandCorners(island_indices, corners)) return false;
+    return applyUvCornerGeometryJournaled(corners, mesh_journal_log.UV_AUTO_SIZE_LABEL);
+}
+
+/// Project From View (req_3427): rewrite the selected islands' UVs as the current 3D
+/// viewport's screen projection of their faces — one shared frame fitted into the
+/// selection's live UV footprint. Fails (refused, journal untouched) when a selected
+/// corner is behind the camera or there is no live paint viewport yet.
+pub fn projectUvFromViewJournaled(island_indices: []const u32) bool {
+    if (g_edit_count == 0) return false;
+    if (g_paint_vp_w <= 0 or g_paint_vp_h <= 0) return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const corners = std.heap.c_allocator.alloc(f32, @as(usize, g_edit_count) * 2) catch return false;
+    defer std.heap.c_allocator.free(corners);
+    if (!model_paint.writeViewProjectedCorners(island_indices, cam, g_paint_vp_w, g_paint_vp_h, corners)) return false;
+    return applyUvCornerGeometryJournaled(corners, mesh_journal_log.UV_PROJECT_VIEW_LABEL);
+}
+
 /// Replace the current atlas with an equal-sized externally edited raster. This
 /// is an explicit bake boundary: the imported PNG becomes the new undo baseline
 /// and subsequent strokes continue on the existing layer table.
@@ -8274,6 +8299,14 @@ pub fn clearRegions(key: []const u8, region_id: i32) void {
         if (s.ibuf) |b| b.release();
         s.* = .{};
     }
+}
+
+/// World-loader query (req_3428): does this geometry key carry live material
+/// regions? The loader keeps a region-bound slot node in the OPAQUE pass (the
+/// region overlay must win at equal depth) while routing its glassy siblings
+/// through the transparent pass.
+pub fn regionsBoundForKey(key: []const u8) bool {
+    return regionCountForKeyHash(hashKey(key)) > 0;
 }
 
 fn regionCountForKeyHash(kh: u64) u32 {
