@@ -30,12 +30,14 @@ pub const NO_GROUP: u32 = std.math.maxInt(u32);
 /// neighbour island across the boundary (the reference used padded gutters + bleed).
 pub const PAD_TEXELS: u32 = 2;
 
-/// Two authored faces become one UV island only when they share a real mesh edge and
-/// are effectively coplanar. This preserves editable triangle fans (a cylinder cap)
-/// in the 3D topology while presenting their continuous projection as one UV piece.
-/// Curved side walls deliberately stay separate until a developable-surface unwrap
-/// explicitly joins them; an angle threshold here would silently distort them.
-pub const COPLANAR_NORMAL_DOT: f32 = 0.9999;
+// Two authored faces become one UV island when they share a real mesh edge and
+// PROJECT the same way — same dominant normal axis, same sign (req_3426, the
+// Blockbench island rule; `sameProjectionBucket`). Coplanar fans (a cylinder cap)
+// merge as before, and curved walls now fold into per-axis-quadrant charts instead
+// of one loose strip per face: a 24-side cylinder wall becomes four contiguous arc
+// charts, a UV sphere six axis charts rather than hundreds of isolated quads.
+// Projection along the shared axis stays single-valued on a convex chart; glancing
+// faces compress by the projection cosine — the same distortion Blockbench accepts.
 
 /// Reconstructed layouts additionally require the two copies of a shared UV edge to
 /// coincide. Moving one fan wedge breaks that equality and therefore detaches it into
@@ -86,6 +88,16 @@ fn projectAxis(nx: f32, ny: f32, nz: f32) u8 {
     if (ax >= ay and ax >= az) return 0;
     if (ay >= az) return 1;
     return 2;
+}
+
+/// The island-merge criterion (req_3426): two face normals belong to the same
+/// projection bucket when they share the dominant axis AND the sign along it.
+/// See the doc block above `UV_EDGE_MATCH_EPSILON` for why this replaces the old
+/// strict-coplanarity rule.
+fn sameProjectionBucket(a: [3]f32, b: [3]f32) bool {
+    const axis = projectAxis(a[0], a[1], a[2]);
+    if (axis != projectAxis(b[0], b[1], b[2])) return false;
+    return (a[axis] < 0) == (b[axis] < 0);
 }
 
 /// Drop the dominant coordinate, then orient U so the projected triangle keeps
@@ -245,8 +257,7 @@ fn connectedComponents(
                 continue;
             };
             if (owner.raw == raw_of_face[face]) continue;
-            const dot = owner.normal[0] * normal[0] + owner.normal[1] * normal[1] + owner.normal[2] * normal[2];
-            if (dot < COPLANAR_NORMAL_DOT) continue;
+            if (!sameProjectionBucket(owner.normal, normal)) continue;
             if (normalized_uvs != null and !uvEdgeMatches(owner, uva, uvb)) continue;
             const other = raw_of_face[face];
             const pair: RawPair = if (owner.raw < other) .{ .a = owner.raw, .b = other } else .{ .a = other, .b = owner.raw };
@@ -838,6 +849,53 @@ test "triangle-fan caps become coherent radial islands without merging side wall
         try testing.expectEqual(top_island, layout.tri_island[segment * 4 + 2]);
         try testing.expectEqual(bottom_island, layout.tri_island[segment * 4 + 3]);
     }
+}
+
+test "curved walls fold into per-axis-quadrant charts, continuous across merged edges" {
+    // An 8-wall open cylinder (no caps). Wall normals sit at 22.5° + k·45°, which
+    // buckets them x+/z+/z+/x−/x−/z−/z−/x+ — so the Blockbench rule (req_3426)
+    // folds 8 walls into 4 two-wall arc charts instead of 8 loose strips.
+    const walls = 8;
+    var soup: [walls * 2 * 9]f32 = undefined;
+    var groups: [walls * 2]u32 = undefined;
+    // Precompute the ring so the wrap edge shares bit-identical positions — a real
+    // mesh's shared vertices lower to identical soup floats; cos(2π) ≠ cos(0) does not.
+    var ring: [walls][2]f32 = undefined;
+    for (&ring, 0..) |*point, index| {
+        const angle = @as(f32, @floatFromInt(index)) * std.math.pi * 2 / walls;
+        point.* = .{ @cos(angle), @sin(angle) };
+    }
+    var write: usize = 0;
+    var wall: usize = 0;
+    while (wall < walls) : (wall += 1) {
+        const next = (wall + 1) % walls;
+        const bottom_a = [3]f32{ ring[wall][0], -0.5, ring[wall][1] };
+        const top_a = [3]f32{ ring[wall][0], 0.5, ring[wall][1] };
+        const bottom_b = [3]f32{ ring[next][0], -0.5, ring[next][1] };
+        const top_b = [3]f32{ ring[next][0], 0.5, ring[next][1] };
+        for ([2][3][3]f32{ .{ bottom_a, top_a, top_b }, .{ bottom_a, top_b, bottom_b } }) |triangle| {
+            for (triangle) |point| for (point) |coordinate| {
+                soup[write] = coordinate;
+                write += 1;
+            };
+        }
+        groups[wall * 2 + 0] = @intCast(wall);
+        groups[wall * 2 + 1] = @intCast(wall);
+    }
+    var layout = build(testing.allocator, &soup, &groups, 16, 8192, 256 << 20).?;
+    defer layout.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), layout.islands.len);
+    // The quadrant pairs: (7,0) x+, (1,2) z+, (3,4) x−, (5,6) z−.
+    try testing.expectEqual(layout.tri_island[7 * 2], layout.tri_island[0]);
+    try testing.expectEqual(layout.tri_island[1 * 2], layout.tri_island[2 * 2]);
+    try testing.expectEqual(layout.tri_island[3 * 2], layout.tri_island[4 * 2]);
+    try testing.expectEqual(layout.tri_island[5 * 2], layout.tri_island[6 * 2]);
+    try testing.expect(layout.tri_island[0] != layout.tri_island[1 * 2]);
+    // The shared vertex top_0 (wall 7 face 14 corner 2, wall 0 face 0 corner 1) maps
+    // to ONE atlas texel — strokes travel the merged chart without a seam.
+    try testing.expectApproxEqAbs(layout.corner_uv[(14 * 3 + 2) * 2 + 0], layout.corner_uv[(0 * 3 + 1) * 2 + 0], 0.0001);
+    try testing.expectApproxEqAbs(layout.corner_uv[(14 * 3 + 2) * 2 + 1], layout.corner_uv[(0 * 3 + 1) * 2 + 1], 0.0001);
 }
 
 test "existing normalized UVs rebuild metadata without repacking" {

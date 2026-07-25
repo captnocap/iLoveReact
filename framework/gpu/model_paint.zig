@@ -38,8 +38,9 @@ var g_facecount: u32 = 0;
 var g_face_alpha: ?[]u8 = null;
 var g_atlas_w: u32 = 0;
 var g_atlas_h: u32 = 0;
-// The island layout (paint_islands.zig): one island per authored face, sized by its
-// physical footprint × density. corner_uv is the face→atlas map every paint op uses.
+// The island layout (paint_islands.zig): edge-connected faces that project the same
+// way (same dominant axis + sign, req_3426) share one island, sized by physical
+// footprint × density. corner_uv is the face→atlas map every paint op uses.
 var g_layout: ?paint_islands.Layout = null;
 // Monotonic identity of the atlas COORDINATE SPACE. A full island rebuild moves
 // UV rectangles and advances this value; setTargetPreservingAtlas deliberately
