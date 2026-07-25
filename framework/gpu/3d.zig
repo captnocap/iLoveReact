@@ -4655,30 +4655,36 @@ pub fn meshSetSelectionGlass() bool {
     return true;
 }
 
-/// Restore the saved glass partition on load (req_3402). Glass's durable truth
-/// is doc.blob's glass_first_vertex + the already-partitioned face order — the
+/// Restore the saved glass run on load (req_3402). Glass's durable truth is
+/// doc.blob's glass_first_vertex + the already-partitioned face order — the
 /// paint baseline/program are RGB-only BY DESIGN (req_2928), so hydration used
 /// to rebuild an all-opaque atlas and every restart silently dropped the glass.
-/// Re-applies GLASS_ALPHA to the trailing run; the stable re-partition is an
-/// order no-op on document geometry. This is a LOAD, not an edit: no journal.
+/// ALPHA ONLY, NO REBUILD (req_3412): the document guarantees the glass faces
+/// are already the trailing run, and running partitionGlassFaces' wholesale
+/// mesh replacement at mount blanked the entire viewport (the Lavalampsad
+/// repro). paintFaceAlpha is the sanctioned restore-time writer — it re-asserts
+/// the retained per-face opacity + texels and editGlassFirstVert derives the
+/// transparent split live from those alphas. The source colour table mirrors
+/// the run so the next save re-serializes the boundary. A LOAD, not an edit:
+/// nothing journals.
 pub fn meshRestoreGlass(glass_first_vertex: u32) bool {
     if (!model_paint.hasTarget()) return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
     const first_tri = glass_first_vertex / 3;
     if (first_tri >= tri_count) return true; // no glass run — nothing to restore
-    const colors = collectCurrentFaceColors() orelse return false;
-    defer jalloc.free(colors);
     var f: u32 = first_tri;
-    var changed = false;
     while (f < tri_count) : (f += 1) {
-        if (!model_paint.isGlassAlpha(colors[@as(usize, f) * 4 + 3])) {
-            colors[@as(usize, f) * 4 + 3] = model_paint.GLASS_ALPHA;
-            changed = true;
+        model_paint.paintFaceAlpha(f, model_paint.GLASS_ALPHA);
+    }
+    if (model_source.colors()) |src| {
+        var g: u32 = first_tri;
+        while (g < tri_count) : (g += 1) {
+            const at = @as(usize, g) * 4 + 3;
+            if (at < src.len) src[at] = model_paint.GLASS_ALPHA;
         }
     }
-    if (!changed) return true; // alpha already present (hot reload / re-run)
-    return partitionGlassFaces(colors);
+    return true;
 }
 
 /// Rebuild the mesh with a STABLE opaque-then-glass partition (face order otherwise
