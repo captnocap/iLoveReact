@@ -4,6 +4,7 @@
 // complex part follows its own shape instead of reverting to a whole-mesh AABB.
 import { duplicateNameStem } from '../data/modelOutliner';
 import type { MeshDocPartMeta, PackageMeshDoc } from '../data/meshDoc';
+import { bytesText, textBytes } from '../../../runtime/workspace/lumps';
 
 export type MeshCollisionBox = {
   minX: number; minY: number; minZ: number;
@@ -296,4 +297,85 @@ export function compileOutlinerCollisionBoxes(
   parts: readonly MeshDocPartMeta[] | null,
 ): MeshCollisionBox[] {
   return compileOutlinerCollision(vertices, doc, parts).boxes;
+}
+
+// ── Persisted package form: mesh/collision.blob (RJCB v1, req_3431) ──────────
+// FLOCKBOOK_DESIGN §10: every exported model carries its collision bake INSIDE
+// its package, so a consumer reading the folder gets player-exact collision
+// without the editor running. RJCB v1 stores the PLACEABLE-frame bake (the
+// compile over ground-rebased doc verts — bit-identical to what the live
+// resident push computes), stamped with the mesh-document revision it was
+// baked from. The live push keeps baking from its rendered verts — the surface
+// that stops the player must be the surface being drawn — so this record is
+// the package's durable declaration, not the /play hot path.
+
+export type PackageCollisionRecord = {
+  /** The doc revision this bake belongs to — the same `${size}:${mtimeMs}`
+   *  stamp painted.json and layout.stale.json key staleness on. */
+  docStamp: string;
+  boxes: MeshCollisionBox[];
+  triangles: Float32Array;
+};
+
+const RJCB_MAGIC = 0x42434a52; // 'RJCB' little-endian
+const RJCB_VERSION = 1;
+// magic, version, boxCount, triangleCount, stampByteLength
+const RJCB_HEADER_WORDS = 5;
+
+export function encodeCollisionBake(bake: MeshCollisionBake, docStamp: string): Uint8Array {
+  const stamp = textBytes(docStamp);
+  const stampPadded = (stamp.length + 3) & ~3; // keep the float block 4-aligned
+  const triangleCount = Math.floor(bake.triangles.length / 9);
+  const floatCount = bake.boxes.length * 6 + triangleCount * 9;
+  const bytes = new Uint8Array(RJCB_HEADER_WORDS * 4 + stampPadded + floatCount * 4);
+  const head = new Uint32Array(bytes.buffer, 0, RJCB_HEADER_WORDS);
+  head[0] = RJCB_MAGIC;
+  head[1] = RJCB_VERSION;
+  head[2] = bake.boxes.length;
+  head[3] = triangleCount;
+  head[4] = stamp.length;
+  bytes.set(stamp, RJCB_HEADER_WORDS * 4);
+  const floats = new Float32Array(bytes.buffer, RJCB_HEADER_WORDS * 4 + stampPadded, floatCount);
+  let at = 0;
+  for (const box of bake.boxes) {
+    floats[at++] = box.minX; floats[at++] = box.minY; floats[at++] = box.minZ;
+    floats[at++] = box.maxX; floats[at++] = box.maxY; floats[at++] = box.maxZ;
+  }
+  floats.set(bake.triangles.subarray(0, triangleCount * 9), at);
+  return bytes;
+}
+
+/** Strict decode: structural damage, a wrong magic/version, or non-finite
+ *  geometry all return null — a consumer never resolves a corrupt bake into
+ *  an apparently valid collider. */
+export function decodeCollisionBake(bytes: Uint8Array): PackageCollisionRecord | null {
+  if (bytes.length < RJCB_HEADER_WORDS * 4) return null;
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const head = new Uint32Array(buf, 0, RJCB_HEADER_WORDS);
+  const [magic, version, boxCount, triangleCount, stampLength] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!];
+  if (magic !== RJCB_MAGIC || version !== RJCB_VERSION) return null;
+  const stampPadded = (stampLength + 3) & ~3;
+  const floatsAt = RJCB_HEADER_WORDS * 4 + stampPadded;
+  const floatCount = boxCount * 6 + triangleCount * 9;
+  if (bytes.length < floatsAt + floatCount * 4) return null;
+  const docStamp = bytesText(new Uint8Array(buf, RJCB_HEADER_WORDS * 4, stampLength));
+  const floats = new Float32Array(buf, floatsAt, floatCount);
+  const boxes: MeshCollisionBox[] = [];
+  let at = 0;
+  for (let index = 0; index < boxCount; index += 1) {
+    const box: MeshCollisionBox = {
+      minX: floats[at]!, minY: floats[at + 1]!, minZ: floats[at + 2]!,
+      maxX: floats[at + 3]!, maxY: floats[at + 4]!, maxZ: floats[at + 5]!,
+    };
+    at += 6;
+    if (!(box.maxX > box.minX) || !(box.maxY > box.minY) || !(box.maxZ > box.minZ)
+      || !Number.isFinite(box.minX) || !Number.isFinite(box.minY) || !Number.isFinite(box.minZ)
+      || !Number.isFinite(box.maxX) || !Number.isFinite(box.maxY) || !Number.isFinite(box.maxZ)) return null;
+    boxes.push(box);
+  }
+  const triangles = floats.slice(at); // copy — detach the record from the file buffer
+  for (let index = 0; index < triangles.length; index += 1) {
+    if (!Number.isFinite(triangles[index]!)) return null;
+  }
+  return { docStamp, boxes, triangles };
 }

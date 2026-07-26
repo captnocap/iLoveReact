@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/model/meshCollision.test.ts --bundle --outfile=/tmp/editor-mesh-collision.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-mesh-collision.test.js
-import { compileOutlinerCollision, compileOutlinerCollisionBoxes, MESH_COLLISION_TUNING } from './meshCollision';
+import { compileOutlinerCollision, compileOutlinerCollisionBoxes, decodeCollisionBake, encodeCollisionBake, MESH_COLLISION_TUNING } from './meshCollision';
 import type { MeshDocPartMeta, PackageMeshDoc } from '../data/meshDoc';
 
 let passed = 0, failed = 0;
@@ -93,6 +93,42 @@ test('hidden Outliner members do not produce invisible collision', () => {
   const collision = compileOutlinerCollision(f.vertices, f.doc, f.parts);
   assert(collision.boxes.length === 2, 'hidden member still blocks the player');
   assert(collision.triangles.length === 2 * 9, 'hidden member reached the exact narrowphase payload');
+});
+
+test('RJCB round-trip preserves the bake and its doc stamp', () => {
+  const f = fixture(3, 2);
+  const bake = compileOutlinerCollision(f.vertices, f.doc, f.parts);
+  const stamp = '84736:1753500000000.123'; // deliberately not 4-byte aligned
+  const record = decodeCollisionBake(encodeCollisionBake(bake, stamp));
+  assert(record !== null, 'a freshly encoded record failed to decode');
+  assert(record!.docStamp === stamp, `stamp mangled: '${record!.docStamp}'`);
+  assert(record!.boxes.length === bake.boxes.length, 'box count drifted through the codec');
+  for (let i = 0; i < bake.boxes.length; i += 1) {
+    const a = bake.boxes[i]!, b = record!.boxes[i]!;
+    assert(Math.abs(a.minX - b.minX) < 1e-6 && Math.abs(a.maxY - b.maxY) < 1e-6, `box ${i} moved through the codec`);
+  }
+  assert(record!.triangles.length === bake.triangles.length, 'triangle payload truncated');
+  for (let i = 0; i < bake.triangles.length; i += 1) {
+    assert(Math.abs(record!.triangles[i]! - bake.triangles[i]!) < 1e-6, `triangle float ${i} drifted`);
+  }
+});
+
+test('RJCB encodes an empty bake as an honest no-collision declaration', () => {
+  const record = decodeCollisionBake(encodeCollisionBake({ boxes: [], triangles: new Float32Array() }, 'legacy:12:34'));
+  assert(record !== null, 'the empty record failed to decode');
+  assert(record!.boxes.length === 0 && record!.triangles.length === 0, 'an empty bake grew content');
+  assert(record!.docStamp === 'legacy:12:34', 'legacy stamp mangled');
+});
+
+test('RJCB refuses damaged bytes instead of resolving a corrupt collider', () => {
+  const f = fixture(2);
+  const bytes = encodeCollisionBake(compileOutlinerCollision(f.vertices, f.doc, f.parts), '1:2');
+  assert(decodeCollisionBake(bytes.subarray(0, bytes.length - 5)) === null, 'a truncated record decoded');
+  assert(decodeCollisionBake(bytes.subarray(0, 8)) === null, 'a header stub decoded');
+  const wrongMagic = bytes.slice();
+  wrongMagic[0] = 0x00;
+  assert(decodeCollisionBake(wrongMagic) === null, 'a wrong-magic record decoded');
+  assert(decodeCollisionBake(new Uint8Array(0)) === null, 'an empty file decoded');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

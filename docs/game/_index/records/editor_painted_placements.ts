@@ -6,7 +6,7 @@ export const editor_painted_placements: DocIndex = {
   cart: 'cart/editor/world/livePush.ts',
   purpose: ['building', 'texture_bake', 'rendering', 'persistence', 'physics'],
   summary:
-    'Which mesh, UV document, and collision shape a saved/placed authored model uses (req_2832/2833/2930/3133/3328/3329/3362): base.paint.json v4 cold-restores every exact face-corner UV; placement uses the full-res meshdoc with the painting\'s UVs rebound onto it except when painting a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles; painted.json stamps which doc revision owns a decimated exported look.',
+    'Which mesh, UV document, and collision shape a saved/placed authored model uses (req_2832/2833/2930/3133/3328/3329/3362/3431): base.paint.json v4 cold-restores every exact face-corner UV; placement uses the full-res meshdoc with the painting\'s UVs rebound onto it except when painting a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles; painted.json stamps which doc revision owns a decimated exported look; every save also persists the placeable-frame collision bake into the package as mesh/collision.blob (RJCB v1).',
   interfaces: [
     {
       name: 'base.paint.json v4 exact UV restart record',
@@ -39,6 +39,17 @@ export const editor_painted_placements: DocIndex = {
         'Bakes at most 24 local-frame broadphase/camera boxes plus every finite triangle owned by visible full-resolution RJMD Outliner ranges. Saved ranges remain hard box roots; one-row models refine too, over-budget multi-row models merge nearby same-family roots locally, and hidden rows emit nothing. livePush writes both views into MESH_PROPS v10. world_loader retains those coarse rows for the spring-arm camera, dynamic bodies, and whole-prop broadphase while player contact clips the immutable local triangles to the body band for exact side/top/ceiling response. This removes req_3329\'s sloped-face empty-corner wall without generating geometry per frame; older wire versions and semantic doors retain box collision.',
       dependsOn: ['cart/editor/data/meshDoc.ts PackageMeshDoc ranges', 'framework/world/constructor.zig MeshPropMesh.collision_boxes/collision_triangles', 'framework/game/mesh_collision.zig'],
       consumers: ['cart/editor/world/livePush.ts residentMeshFor', 'framework/world_loader/physics.zig meshPropIslands/resolveMeshPropPlayer'],
+      status: 'live',
+    },
+    {
+      name: 'writePackageCollision (mesh/collision.blob — the package carries its own bake, RJCB v1)',
+      purpose: ['building', 'physics', 'persistence'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/data/modelPackageStore.ts',
+      description:
+        'FLOCKBOOK §10 quick win (req_3431): every save/export persists compileOutlinerCollision over the ground-rebased doc vertices into mesh/collision.blob — placeable-frame box tree + exact player triangles, header-stamped with the doc revision (legacy: prefix off base.blob for pre-meshdoc packages). Stamp-gated idempotent; writeModelArtifacts lands it on every branch (paint-only saves self-heal), materializePackageArtifacts bakes GLB/OBJ imports at arrival, and file-backed viewerPath packages shed any stale blob instead. Codec (encodeCollisionBake/decodeCollisionBake, strict null-on-damage decode) lives in model/meshCollision.ts. residentMeshFor deliberately keeps baking live from rendered verts — the persisted record is the package\'s declaration for consumers reading the folder without the editor; when disk is current the two are bit-identical by construction.',
+      dependsOn: ['cart/editor/model/meshCollision.ts encodeCollisionBake/decodeCollisionBake', 'cart/editor/model/groundRebase.ts', 'cart/editor/data/meshDoc.ts readMeshDoc/readMeshDocParts'],
+      consumers: ['future package consumers (asset cook, direct host loads) — nothing reads it in the /play hot path by design'],
       status: 'live',
     },
   ],

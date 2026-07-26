@@ -29,8 +29,10 @@ import {
   type ModelPackageKind,
 } from './modelPackage';
 import type { ModelPackage } from './types';
-import { invalidateMeshDoc, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
-import { textBytes } from '../../../runtime/workspace/lumps';
+import { invalidateMeshDoc, readMeshDoc, readMeshDocParts, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
+import { base64ToBytes, textBytes } from '../../../runtime/workspace/lumps';
+import { compileOutlinerCollision, decodeCollisionBake, encodeCollisionBake } from '../model/meshCollision';
+import { groundRebase } from '../model/groundRebase';
 
 const host = globalThis as any;
 
@@ -183,6 +185,7 @@ export function materializePackageArtifacts(pkg: ModelPackage, blobs: PackageArt
       return { ok: false, id: pkg.id, dir, error: 'write mesh/base.blob failed' };
     }
     invalidateMeshDoc(dir); // base.blob is the meshdoc reader's legacy fallback
+    writePackageCollision(dir); // an imported model is placeable — bake at arrival, not first save
   }
   if (blobs.meshFile) {
     if (!writeFileBase64Atomic(`${dir}/mesh/${blobs.meshFile.name}`, blobs.meshFile.base64)) {
@@ -219,6 +222,34 @@ export function readManifest(kind: ModelPackageKind, id: string): ModelManifest 
 export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
   const manifest = readManifest(kind, id);
   return manifest !== null && manifest.id === id && manifest.kind === kind;
+}
+
+// REAL delete (req_3370, USER RULING: delete removes the package from disk —
+// the old hidden:true soft-delete left 112 "deleted" folders squatting the
+// tree). Leaves-first removal like movePackageDir's retirement pass; the
+// manifest goes LAST so an unexpected leftover (a stray nested dir the walk
+// can't remove) leaves a package that still reads as itself rather than a
+// husk with no identity. False = not materialized, or the home did not fully
+// come off disk (logged; nothing else destroyed).
+export function removeModelPackage(kind: ModelPackageKind, id: string): boolean {
+  const dir = resolvePackageDir(kind, id);
+  if (!dir) return false;
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!exists(`${dir}/${sub}`)) continue;
+    for (const name of listDir(`${dir}/${sub}`)) remove(`${dir}/${sub}/${name}`);
+    remove(`${dir}/${sub}`);
+  }
+  for (const name of listDir(dir)) {
+    if (name !== 'manifest.json') remove(`${dir}/${name}`);
+  }
+  remove(`${dir}/manifest.json`);
+  if (!remove(dir)) {
+    console.error(`[model-packages] delete left '${dir}' partially on disk — remove the leftovers by hand`);
+    return false;
+  }
+  dirById.delete(dirKey(kind, id));
+  invalidateMeshDoc(dir); // the meshdoc cache keys on the package DIR
+  return true;
 }
 
 /**
@@ -578,6 +609,52 @@ export function writeLiveModelAtlas(pkg: Pick<ModelPackage, 'kind' | 'id'>): Liv
   return { ok: true, path: absoluteDiskPath(path), width: atlas.w as number, height: atlas.h as number };
 }
 
+export const PACKAGE_COLLISION_FILE = 'mesh/collision.blob';
+
+// The stamp naming the geometry revision a collision bake belongs to. doc.blob's
+// stat is the same identity painted.json/layout.stale.json key on; a legacy
+// package that only ever saved base.blob stamps from that one durable file.
+function packageDocStamp(dir: string): string | null {
+  const doc = stat(`${dir}/mesh/doc.blob`);
+  if (doc) return `${doc.size}:${doc.mtimeMs}`;
+  const legacy = stat(`${dir}/mesh/base.blob`);
+  return legacy ? `legacy:${legacy.size}:${legacy.mtimeMs}` : null;
+}
+
+/** Persist the collision bake INTO the package (FLOCKBOOK §10, req_3431).
+ * mesh/collision.blob (RJCB v1) carries the placeable-frame box tree + exact
+ * player triangles — the same compile residentMeshFor runs live — stamped with
+ * the doc revision it was baked from, so any consumer reading the folder gets
+ * real collision without the editor running. No-op while the stored stamp is
+ * current; a package with no durable geometry sheds a stale bake instead of
+ * letting it outlive its mesh. */
+export function writePackageCollision(dir: string): boolean {
+  const path = `${dir}/${PACKAGE_COLLISION_FILE}`;
+  const stamp = packageDocStamp(dir);
+  if (!stamp) {
+    if (exists(path)) remove(path);
+    return false;
+  }
+  const priorB64 = readFileBase64(path);
+  if (priorB64) {
+    try {
+      if (decodeCollisionBake(base64ToBytes(priorB64))?.docStamp === stamp) return true;
+    } catch { /* unreadable prior bake — rewrite it below */ }
+  }
+  const doc = readMeshDoc(dir);
+  if (!doc) {
+    if (exists(path)) remove(path);
+    return false;
+  }
+  const bake = compileOutlinerCollision(groundRebase(doc.vertices), doc, readMeshDocParts(dir));
+  if (bake.triangles.length === 0) {
+    console.error(`[model-packages] collision bake for '${dir}' has NO triangles — placements get no player contact (all parts hidden, or the doc lost its ranges)`);
+  }
+  const ok = writeFileBytesAtomic(path, encodeCollisionBake(bake, stamp));
+  if (!ok) console.error(`[model-packages] ${PACKAGE_COLLISION_FILE} write FAILED for '${dir}'`);
+  return ok;
+}
+
 // Write the ACTIVE model's own geometry + atlas into its package, so the folders that back
 // its paintings aren't empty: a painting implies a mesh + an atlas, so mesh/ and atlases/
 // must populate too (req_2533). mesh/base.blob = durable interleaved verts (the current
@@ -605,6 +682,9 @@ export function writeModelArtifacts(
     ? writeMeshDoc(dir, parts, recoveryRanges, options)
     : exists(`${meshDir}/doc.blob`);
   if (parts && docWritten) host.__model_mesh_write?.(`${meshDir}/base.blob`);
+  // Every save re-anchors the package's persisted collision bake to the doc
+  // revision that just landed (paint-only saves self-heal a missing/stale one).
+  if (docWritten) writePackageCollision(dir);
   const stalePath = `${dir}/${PAINT_LAYOUT_STALE_FILE}`;
   const paintLayoutStale = host.__model_paint_layout_stale?.() === 1;
   if (paintLayoutStale) {

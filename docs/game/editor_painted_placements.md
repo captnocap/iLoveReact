@@ -98,6 +98,28 @@ and semantic door exports have no exact payload and retain their established box
 path. Doors intentionally keep authored jamb/header/leaf collision rather than
 treating their movable leaf as a static triangle soup.
 
+## The package carries its own bake: mesh/collision.blob (req_3431)
+
+FLOCKBOOK_DESIGN §10's quick win: every exported model persists its collision
+bake INSIDE its package. `modelPackageStore.ts writePackageCollision` runs the
+same `compileOutlinerCollision` over the ground-rebased doc vertices and writes
+`mesh/collision.blob` (RJCB v1, codec in `model/meshCollision.ts`): the
+placeable-frame box tree + exact player triangles, header-stamped with the doc
+revision (`"<size>:<mtimeMs>"` of doc.blob, `legacy:`-prefixed off base.blob for
+pre-meshdoc packages). Every save path lands it (`writeModelArtifacts`, both
+branches, including paint-only saves which self-heal a missing/stale blob), and
+the GLB/OBJ import flow bakes at arrival (`materializePackageArtifacts`). The
+write is stamp-gated idempotent; a package with no durable JS-readable geometry
+(file-backed .glb/.obj viewerPath models) sheds any stale blob instead.
+
+`residentMeshFor` deliberately KEEPS baking live from its rendered vertex form:
+the surface that stops the player must be the surface being drawn, and the live
+push can render an in-session export capture that predates/postdates disk. The
+persisted record is the package's durable declaration for consumers reading the
+folder without the editor running (asset cook, other machines, future host
+loaders) — when disk is current it is bit-identical to the live bake by
+construction (same inputs, same compile).
+
 ## Not yet covered
 
 - Paint SKINS (`paints/paint_N.blob`) painted at decimated quality still

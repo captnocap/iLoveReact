@@ -6,27 +6,18 @@
 // package lookup so the resident builder can resolve by (modelId, pkgId).
 import { modelPackageMeshData } from '../data/assetCatalog';
 import { modelPackageById } from '../data/content';
+// GROUND-REBASE lives in model/groundRebase (req_3431 moved it beside the
+// collision bake so the package store shares the exact same frame shift).
+// Re-exported here because placement consumers reach it through this module —
+// the one other geometry source placements accept, the current painted
+// DISPLAYED form (req_3133), enters world space through the same rebase.
+import { groundRebase } from '../model/groundRebase';
+
+export { groundRebase };
 
 const CACHE = new Map<string, Float32Array>();
 export type MeshBounds = { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number };
 const BOUNDS_CACHE = new Map<string, MeshBounds>();
-
-/** GROUND-REBASE (req_2751): a placeable's mesh is based at y=0 no matter where
- *  it sat in the studio editor — a wall picture authored 1.5m up is the same
- *  placeable as one authored on the floor. Placement y IS the base; vertical
- *  position in the WORLD comes from terrain + storey + the place-time lift,
- *  never from studio-space authoring. Copies before shifting (the source array
- *  belongs to the package resolver / live edit state). Exported for the one
- *  other geometry source placements accept — the current painted DISPLAYED
- *  form (req_3133) — so both enter world space through the same rebase. */
-export function groundRebase(vertices: Float32Array): Float32Array {
-  let minY = Infinity;
-  for (let i = 1; i + 1 < vertices.length; i += 8) if (vertices[i]! < minY) minY = vertices[i]!;
-  if (!Number.isFinite(minY) || Math.abs(minY) < 1e-4) return vertices;
-  const out = new Float32Array(vertices);
-  for (let i = 1; i + 1 < out.length; i += 8) out[i]! -= minY;
-  return out;
-}
 
 // Bumped on every mesh re-cache so derived caches elsewhere (the vertex-snap
 // sets, req_3378) can expire without a cross-module listener.
