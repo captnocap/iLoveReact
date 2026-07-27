@@ -1619,9 +1619,24 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
       }
       return false;
     };
+    // Back-to-back coincident sheets are NOT a surface continuation (req_3436):
+    // per-face cap extrusion mints one reversed interior wall pair per fan spoke,
+    // and entering one subdivides the coincident copies divergently. Skip the
+    // current face's own twin and any candidate sandwiched with its twin on this
+    // edge; the true manifold neighbor is whatever remains.
+    const sameVertexSet = (a: number[], b: number[]): boolean => a.length === b.length && a.every((v) => b.includes(v));
     for (let fi = 0; fi < faces.length; fi += 1) {
       if (fi === current || processed.has(fi) || faces[fi].loop.length < 3) continue;
-      if (hasEdge(faces[fi].loop)) return fi;
+      if (!hasEdge(faces[fi].loop)) continue;
+      if (sameVertexSet(faces[fi].loop, faces[current].loop)) continue;
+      let sandwiched = false;
+      for (let ti = 0; ti < faces.length; ti += 1) {
+        if (ti === fi || ti === current || faces[ti].loop.length < 3) continue;
+        if (!hasEdge(faces[ti].loop)) continue;
+        if (sameVertexSet(faces[fi].loop, faces[ti].loop)) sandwiched = true;
+      }
+      if (sandwiched) continue;
+      return fi;
     }
     return undefined;
   };

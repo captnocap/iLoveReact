@@ -1619,15 +1619,40 @@ pub const Mesh = struct {
     }
 
     fn findNeighbor(mesh: *const Mesh, processed: *const std.AutoHashMapUnmanaged(u32, void), current_face: u32, edge: [2]u32) ?u32 {
+        const current = &mesh.faces.items[current_face];
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.id == current_face or processed.contains(face.id)) continue;
             // The walk continues only across a REAL shared edge. Mere containment of
             // both vertices also matches a face where they sit diagonally (a cap
             // piece, a damaged panel) — splitting along that diagonal rebuilds the
             // loop as a bow-tie (req_3435).
-            if (faceHasUndirectedEdge(face, edge[0], edge[1])) return face.id;
+            if (!faceHasUndirectedEdge(face, edge[0], edge[1])) continue;
+            // Back-to-back coincident sheets are NOT a surface continuation
+            // (req_3436): per-face cap extrusion mints one reversed interior wall
+            // pair per fan spoke, and a loop that enters one subdivides the
+            // coincident copies divergently — the wreckage then compounds on every
+            // later cut. Skip the CURRENT face's own twin, and skip any candidate
+            // whose same-vertex-set twin is also incident on this edge (the
+            // sandwich); the true manifold neighbor is whatever remains.
+            if (sameVertexSet(face, current)) continue;
+            var sandwiched = false;
+            for (mesh.faces.items) |*twin| {
+                if (!twin.alive or twin.id == face.id or twin.id == current_face) continue;
+                if (!faceHasUndirectedEdge(twin, edge[0], edge[1])) continue;
+                if (sameVertexSet(face, twin)) sandwiched = true;
+            }
+            if (sandwiched) continue;
+            return face.id;
         }
         return null;
+    }
+
+    fn sameVertexSet(a: *const Face, b: *const Face) bool {
+        if (a.vertices.items.len != b.vertices.items.len) return false;
+        for (a.vertices.items) |vertex_id| {
+            if (indexOf(b.vertices.items, vertex_id) == null) return false;
+        }
+        return true;
     }
 
     fn faceHasUndirectedEdge(face: *const Face, a: u32, b: u32) bool {
@@ -2905,6 +2930,56 @@ test "cut vertices inside the weld tolerance count as degenerate" {
     defer poisoned.deinit();
     try std.testing.expect(try poisoned.loopCut(selected[0..], 0, 1, 0.0005));
     try std.testing.expect(poisoned.degenerateCutVertexCount() > 0);
+}
+
+test "the loop walk passes back-to-back twin sheets and continues on the surface" {
+    const allocator = std.testing.allocator;
+    const edge_bottom = Vec3{ 0, 0, 0 };
+    const edge_top = Vec3{ 0, 1, 0 };
+    // Panels A and B share the (edge_bottom, edge_top) edge; between them sits a
+    // reversed coincident interior pair T1/T2 that ALSO owns that edge — exactly
+    // what per-face cap extrusion leaves along each fan spoke (req_3436). T1/T2
+    // come BEFORE B in face order, so a naive walk would dive into the sandwich
+    // and subdivide the coincident copies divergently.
+    const quads = [_][4]Vec3{
+        .{ .{ -1, 0, 0 }, edge_bottom, edge_top, .{ -1, 1, 0 } },
+        .{ edge_bottom, edge_top, .{ 0.5, 1, 0.8 }, .{ 0.5, 0, 0.8 } },
+        .{ .{ 0.5, 0, 0.8 }, .{ 0.5, 1, 0.8 }, edge_top, edge_bottom },
+        .{ edge_bottom, .{ 1, 0, 0 }, .{ 1, 1, 0 }, edge_top },
+    };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 8, fixture.groups, null);
+    defer mesh.deinit();
+
+    const seed = &mesh.faces.items[0];
+    var left_edge_index: ?u32 = null;
+    for (seed.vertices.items, 0..) |vertex_id, index| {
+        const next_id = seed.vertices.items[(index + 1) % seed.vertices.items.len];
+        const a = mesh.vertices.items[vertex_id].position;
+        const b = mesh.vertices.items[next_id].position;
+        if (a[0] < -0.5 and b[0] < -0.5) left_edge_index = @intCast(index);
+    }
+    try std.testing.expect(left_edge_index != null);
+    const twin1_before = try mesh.faces.items[1].clone(allocator);
+    var twin1_copy = twin1_before;
+    defer twin1_copy.deinit(allocator);
+    const twin2_before = try mesh.faces.items[2].clone(allocator);
+    var twin2_copy = twin2_before;
+    defer twin2_copy.deinit(allocator);
+
+    const selected = [_]bool{ true, true, false, false, false, false, false, false };
+    try std.testing.expect(try mesh.loopCut(selected[0..], left_edge_index.?, 1, 0.5));
+
+    // both twins kept their exact loops; the true surface neighbor B was split
+    try std.testing.expectEqualSlices(u32, twin1_copy.vertices.items, mesh.faces.items[1].vertices.items);
+    try std.testing.expectEqualSlices(u32, twin2_copy.vertices.items, mesh.faces.items[2].vertices.items);
+    var alive: u32 = 0;
+    for (mesh.faces.items) |*face| {
+        if (face.alive) alive += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 6), alive);
 }
 
 test "the loop walk crosses only real shared edges, never diagonal containment" {
