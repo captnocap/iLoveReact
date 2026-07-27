@@ -1609,9 +1609,19 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
     return id;
   };
   const neighbor = (current: number, edge: [number, number]): number | undefined => {
+    // Parity with the native walk (req_3435): the loop continues only across a REAL
+    // shared edge. Containment alone also matches faces holding both verts
+    // diagonally, and splitting along a diagonal rebuilds the loop as a bow-tie.
+    const hasEdge = (loop: number[]): boolean => {
+      for (let i = 0; i < loop.length; i += 1) {
+        const a = loop[i], b = loop[(i + 1) % loop.length];
+        if ((a === edge[0] && b === edge[1]) || (a === edge[1] && b === edge[0])) return true;
+      }
+      return false;
+    };
     for (let fi = 0; fi < faces.length; fi += 1) {
       if (fi === current || processed.has(fi) || faces[fi].loop.length < 3) continue;
-      if (faces[fi].loop.includes(edge[0]) && faces[fi].loop.includes(edge[1])) return fi;
+      if (hasEdge(faces[fi].loop)) return fi;
     }
     return undefined;
   };

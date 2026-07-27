@@ -1023,10 +1023,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   }, [lc !== null]);
   // Offset stepping in the CURRENT unit: percent steps 5; size units step 0.1u converted
   // to the internal percent (clamped 0..100 and kept to 2dp so the cell reads clean).
+  // The unit step is CAPPED at 5% of the span: on a small face (the record player's
+  // 0.1u spindle, req_3435) a raw 0.1u step was a 100% jump that rammed the offset
+  // straight into the degenerate 0%/100% ends in one click.
   const lcSpan = lc ? (lc.sizes[lc.dir] || 0) : 0;
   const lcStepOffset = (dir: -1 | 1) => {
     if (!lc) return;
-    const stepPct = lc.unit === 'percent' ? 5 : (lcSpan > 0 ? Math.max(0.5, (0.1 / lcSpan) * 100) : 5);
+    const stepPct = lc.unit === 'percent' ? 5 : (lcSpan > 0 ? Math.max(0.5, Math.min((0.1 / lcSpan) * 100, 5)) : 5);
     const next = Math.max(0, Math.min(100, lc.offset + dir * stepPct));
     changeLoopCut({ offset: Math.round(next * 100) / 100 });
   };

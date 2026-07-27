@@ -2189,7 +2189,6 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         "Loop-cut preview could not be built";
     const d: usize = @min(dir, 1);
     const cut_count = @min(@max(cuts, 1), 64);
-    const fraction = std.math.clamp(offset_frac, 0.0, 1.0);
     const reuse_topology = s.last_mesh != null and s.last_dir == @as(u32, @intCast(d)) and s.last_cuts == cut_count;
 
     // Keep the popup overlay/read-back contract. These planes are display guides only;
@@ -2200,6 +2199,13 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.last_reason = "Selected face has no usable cut span";
         return false;
     }
+    // A cut at the exact span end mints vertices ON existing corners: invisible in
+    // the preview, but the next soup→indexed weld collapses them into degenerate
+    // faces (req_3435 — how the record player's spindle got poisoned). Keep the
+    // fraction far enough inside the span that no seed-edge cut can land within
+    // the weld tolerance; the walk-output check below backstops shorter edges.
+    const weld_guard = @min(0.45, (indexed_edit_mesh.IMPORT_WELD_EPS * 2.0) / span);
+    const fraction = std.math.clamp(offset_frac, weld_guard, 1.0 - weld_guard);
     const n_planes = lcPlanes(s.lo[d], s.hi[d], cut_count, fraction * span, &planes);
     s.last_dir = @intCast(d);
     s.last_planes = planes;
@@ -2225,6 +2231,13 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             "This authored face cannot be split by the selected cut"
         else
             "No quad or triangle loop crosses this authored face — split the n-gon into quads first";
+        return false;
+    }
+    // Backstop for edges shorter than the seed span (thin bands): if ANY minted
+    // cut vertex sits within the weld tolerance of its edge's end, this preview
+    // would not survive its own save/load — refuse it instead of poisoning the doc.
+    if (preview.degenerateCutVertexCount() > 0) {
+        s.last_reason = "Cut lands on an existing edge or corner — change the offset";
         return false;
     }
 

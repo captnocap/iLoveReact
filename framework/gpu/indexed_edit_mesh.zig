@@ -11,7 +11,11 @@ pub const NO_GROUP: u32 = std.math.maxInt(u32);
 pub const NO_PART: u32 = std.math.maxInt(u32);
 pub const NO_MATERIAL: u32 = std.math.maxInt(u32);
 const IMPORT_WELD_SCALE: f32 = 1024.0;
-const IMPORT_WELD_EPS: f32 = 1.0 / IMPORT_WELD_SCALE;
+/// Public because it is a durability contract, not just an import knob: any two
+/// vertices closer than this MERGE on the next soup→indexed rebuild, so an edit
+/// that mints geometry inside this distance is writing topology that cannot
+/// survive its own save/load cycle (req_3435 — loop cuts at a clamped offset).
+pub const IMPORT_WELD_EPS: f32 = 1.0 / IMPORT_WELD_SCALE;
 const MIRROR_MATCH_SCALE: f32 = 1000.0;
 // Merge Faces is a planar dissolve, not a general polygon stitch. A permissive
 // normal gate can turn a bent perimeter into a fan whose diagonals cut through the
@@ -400,7 +404,73 @@ pub const Mesh = struct {
             face.id = @intCast(mesh.faces.items.len);
             try mesh.faces.append(allocator, face);
         }
+        try mesh.collapseCoincidentDuplicateFaces();
         return mesh;
+    }
+
+    /// Drop exact same-winding duplicate faces at the import boundary (req_3435).
+    /// A poisoned save can carry several authored faces over ONE welded vertex
+    /// cycle; every loop-cut walk across such a pair multiplies it (the traversal
+    /// enters the duplicate instead of the true neighbor and the copies subdivide
+    /// divergently). The first face keeps the geometry and absorbs the duplicates'
+    /// source triangles so whole-face selection still finds it; REVERSED cycles
+    /// (back-to-back two-sided sheets) are deliberate authoring and are kept.
+    fn collapseCoincidentDuplicateFaces(mesh: *Mesh) !void {
+        const CycleKey = struct { part: u32, material: u32, hash: u64 };
+        var seen = std.AutoHashMapUnmanaged(CycleKey, u32).empty;
+        defer seen.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive or face.vertices.items.len < 3) continue;
+            const items = face.vertices.items;
+            // rotation-normalized directed cycle: start at the smallest vertex id
+            var start: usize = 0;
+            for (items, 0..) |vertex_id, index| {
+                if (vertex_id < items[start]) start = index;
+            }
+            var hash: u64 = 1469598103934665603;
+            for (0..items.len) |offset| {
+                const vertex_id = items[(start + offset) % items.len];
+                hash = (hash ^ vertex_id) *% 1099511628211;
+            }
+            const entry = try seen.getOrPut(mesh.allocator, .{ .part = face.part, .material = face.material, .hash = hash });
+            if (!entry.found_existing) {
+                entry.value_ptr.* = face.id;
+                continue;
+            }
+            const keeper = &mesh.faces.items[entry.value_ptr.*];
+            // Hash collisions must not destroy real faces: confirm the exact cycle.
+            if (keeper.vertices.items.len != items.len) continue;
+            const keeper_items = keeper.vertices.items;
+            var keeper_start: usize = 0;
+            for (keeper_items, 0..) |vertex_id, index| {
+                if (vertex_id < keeper_items[keeper_start]) keeper_start = index;
+            }
+            var same = true;
+            for (0..items.len) |offset| {
+                if (keeper_items[(keeper_start + offset) % keeper_items.len] != items[(start + offset) % items.len]) same = false;
+            }
+            if (!same) continue;
+            try keeper.source_triangles.appendSlice(mesh.allocator, face.source_triangles.items);
+            keeper.source_tessellation_valid = false;
+            face.source_triangles.clearRetainingCapacity();
+            face.alive = false;
+        }
+    }
+
+    /// Cut vertices minted closer than the import weld tolerance to either end of
+    /// their origin edge. Such a cut is invisible on screen but rewrites topology
+    /// that the NEXT soup→indexed rebuild welds into degenerate faces — the
+    /// loop-cut session refuses to preview or commit while any exist (req_3435).
+    pub fn degenerateCutVertexCount(mesh: *const Mesh) u32 {
+        var count: u32 = 0;
+        for (mesh.vertices.items) |*vertex| {
+            const origin = vertex.cut_origin orelse continue;
+            const a = mesh.vertices.items[origin.edge[0]].position;
+            const b = mesh.vertices.items[origin.edge[1]].position;
+            if (distanceSquared(vertex.position, a) <= IMPORT_WELD_EPS * IMPORT_WELD_EPS or
+                distanceSquared(vertex.position, b) <= IMPORT_WELD_EPS * IMPORT_WELD_EPS) count += 1;
+        }
+        return count;
     }
 
     const BoundaryEdge = struct {
@@ -1551,9 +1621,22 @@ pub const Mesh = struct {
     fn findNeighbor(mesh: *const Mesh, processed: *const std.AutoHashMapUnmanaged(u32, void), current_face: u32, edge: [2]u32) ?u32 {
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.id == current_face or processed.contains(face.id)) continue;
-            if (containsVertex(face, edge[0]) and containsVertex(face, edge[1])) return face.id;
+            // The walk continues only across a REAL shared edge. Mere containment of
+            // both vertices also matches a face where they sit diagonally (a cap
+            // piece, a damaged panel) — splitting along that diagonal rebuilds the
+            // loop as a bow-tie (req_3435).
+            if (faceHasUndirectedEdge(face, edge[0], edge[1])) return face.id;
         }
         return null;
+    }
+
+    fn faceHasUndirectedEdge(face: *const Face, a: u32, b: u32) bool {
+        const items = face.vertices.items;
+        for (items, 0..) |vertex_id, index| {
+            const next = items[(index + 1) % items.len];
+            if ((vertex_id == a and next == b) or (vertex_id == b and next == a)) return true;
+        }
+        return false;
     }
 
     fn containsVertex(face: *const Face, vertex_id: u32) bool {
@@ -2774,4 +2857,101 @@ test "concave guard compares ordered indexed face loops" {
     defer already_bad.deinit();
     bad.clearRetainingCapacity();
     try std.testing.expectEqual(@as(u32, 0), mesh.newlyConcaveComparedTo(&already_bad, &bad));
+}
+
+test "import collapses exact same-winding duplicate faces and keeps reversed sheets" {
+    const allocator = std.testing.allocator;
+    // one panel authored THREE times: twice with identical winding (the req_3435
+    // poison — the record player spindle carried 8 such pairs), once reversed
+    // (a legitimate back-to-back two-sided sheet).
+    const panel = [4]Vec3{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } };
+    const reversed = [4]Vec3{ .{ 0, 1, 0 }, .{ 1, 1, 0 }, .{ 1, 0, 0 }, .{ 0, 0, 0 } };
+    const quads = [_][4]Vec3{ panel, panel, reversed };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 6, fixture.groups, null);
+    defer mesh.deinit();
+    var alive: u32 = 0;
+    for (mesh.faces.items) |*face| {
+        if (face.alive) alive += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 2), alive);
+    // the keeper absorbed the duplicate's source triangles so selecting them
+    // still resolves to one whole authored face
+    try std.testing.expect(mesh.faces.items[0].alive);
+    try std.testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3 }, mesh.faces.items[0].source_triangles.items);
+    try std.testing.expect(!mesh.faces.items[1].alive);
+    try std.testing.expect(mesh.faces.items[2].alive);
+}
+
+test "cut vertices inside the weld tolerance count as degenerate" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    const selected = [_]bool{ true, true };
+
+    var healthy = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer healthy.deinit();
+    try std.testing.expect(try healthy.loopCut(selected[0..], 0, 1, 0.3));
+    try std.testing.expectEqual(@as(u32, 0), healthy.degenerateCutVertexCount());
+
+    // 0.05% of a 1-unit edge is inside IMPORT_WELD_EPS: the next soup rebuild
+    // would weld these cut vertices onto the corners. The session door refuses
+    // to preview/commit while this counter is non-zero.
+    var poisoned = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer poisoned.deinit();
+    try std.testing.expect(try poisoned.loopCut(selected[0..], 0, 1, 0.0005));
+    try std.testing.expect(poisoned.degenerateCutVertexCount() > 0);
+}
+
+test "the loop walk crosses only real shared edges, never diagonal containment" {
+    const allocator = std.testing.allocator;
+    const edge_bottom = Vec3{ 0, 0, 0 };
+    const edge_top = Vec3{ 0, 1, 0 };
+    // A (left panel) propagates across (edge_bottom, edge_top). B holds BOTH of
+    // those vertices but only diagonally (its authored diagonal is that edge); C
+    // is the true neighbor sharing the actual edge — and sits AFTER B in face
+    // order, so containment-based traversal would derail into B and rebuild it
+    // as a bow-tie.
+    const quads = [_][4]Vec3{
+        .{ .{ -1, 0, 0 }, edge_bottom, edge_top, .{ -1, 1, 0 } },
+        .{ edge_bottom, .{ 0.4, 0.5, 0.6 }, edge_top, .{ 0.4, 0.5, -0.6 } },
+        .{ edge_bottom, .{ 1, 0, 0 }, .{ 1, 1, 0 }, edge_top },
+    };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 6, fixture.groups, null);
+    defer mesh.deinit();
+
+    // find A's loop index whose edge is the LEFT edge, so `opposite` becomes the
+    // shared (edge_bottom, edge_top) edge
+    const seed = &mesh.faces.items[0];
+    var left_edge_index: ?u32 = null;
+    for (seed.vertices.items, 0..) |vertex_id, index| {
+        const next_id = seed.vertices.items[(index + 1) % seed.vertices.items.len];
+        const a = mesh.vertices.items[vertex_id].position;
+        const b = mesh.vertices.items[next_id].position;
+        if (a[0] < -0.5 and b[0] < -0.5) left_edge_index = @intCast(index);
+    }
+    try std.testing.expect(left_edge_index != null);
+    const diamond_before = try mesh.faces.items[1].clone(allocator);
+    defer {
+        var copy = diamond_before;
+        copy.deinit(allocator);
+    }
+
+    const selected = [_]bool{ true, true, false, false, false, false };
+    try std.testing.expect(try mesh.loopCut(selected[0..], left_edge_index.?, 1, 0.5));
+
+    // the diamond kept its exact loop; the true neighbor C was the one split
+    try std.testing.expectEqualSlices(u32, diamond_before.vertices.items, mesh.faces.items[1].vertices.items);
+    var alive: u32 = 0;
+    for (mesh.faces.items) |*face| {
+        if (face.alive) alive += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 5), alive);
 }
