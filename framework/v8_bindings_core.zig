@@ -289,7 +289,7 @@ fn hostScene3DPatchDyn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __mesh_load_file(path) → JSON {"key","count","radius"} | "" on failure.
+/// __mesh_load_file(path) → JSON {"key","count","radius","faces"} | "" on failure.
 /// The drop-to-view door: parse a GLB/OBJ ENTIRELY in the host (no geometry crosses
 /// the bridge), park its verts in the scene3d host stash under `key`, and seed the
 /// orbit camera to frame it. The cart renders a <Scene3D.Mesh scene3dGeomKey={key}>
@@ -326,6 +326,17 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
     // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
     scene3d.setPaintTarget(path, mesh.verts, mesh.vert_count);
+    // GLB carries render triangles, not its source quads. Recover only unambiguous
+    // coplanar triangle pairs here, before the editor builds its indexed topology.
+    // This keeps imported box-like meshes editable as quads without flattening caps
+    // or arbitrary scan topology into unsafe n-gons.
+    const groups = scene3d.meshEditInferQuadFaceGroups() orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(groups);
+    scene3d.meshEditSetFaceGroups(groups);
+    _ = scene3d.refreshPaintLayout();
     scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
     if (!scene3d.stashHostMesh(path, mesh.verts, mesh.vert_count)) {
         setReturnString(info, "");
@@ -350,7 +361,9 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
             else => w.writeByte(ch) catch return,
         }
     }
-    w.print("\",\"count\":{d},\"radius\":{d:.6}}}", .{ mesh.vert_count, mesh.radius }) catch {
+    var face_count: u32 = 0;
+    for (groups) |group| face_count = @max(face_count, group + 1);
+    w.print("\",\"count\":{d},\"radius\":{d:.6},\"faces\":{d}}}", .{ mesh.vert_count, mesh.radius, face_count }) catch {
         setReturnString(info, "");
         return;
     };

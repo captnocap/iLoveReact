@@ -1131,6 +1131,31 @@ test "a real face's edges never classify as pen wire" {
     try testing.expectEqual(@as(u32, 1), wire_edges);
 }
 
+test "raw import recovers isolated coplanar quad pairs but keeps triangle fans separate" {
+    // A square is emitted as two render triangles. Its shared diagonal is not an
+    // authored edge after import, while the three coplanar cap wedges remain
+    // independent because they do not form isolated four-corner quads.
+    var soup = [_]f32{0} ** (5 * 3 * 8);
+    const corners = [15][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+        .{ 3.5, 0.4, 0 }, .{ 4, 0, 0 }, .{ 3.5, 1, 0 },
+        .{ 3.5, 0.4, 0 }, .{ 3.5, 1, 0 }, .{ 3, 0, 0 },
+        .{ 3.5, 0.4, 0 }, .{ 3, 0, 0 }, .{ 4, 0, 0 },
+    };
+    for (corners, 0..) |corner, row| {
+        soup[row * 8 + 0] = corner[0];
+        soup[row * 8 + 1] = corner[1];
+        soup[row * 8 + 2] = corner[2];
+    }
+    const groups = try indexed_edit_mesh.inferQuadFaceGroups(testing.allocator, soup[0..], 5);
+    defer testing.allocator.free(groups);
+    try testing.expectEqual(groups[0], groups[1]);
+    try testing.expect(groups[2] != groups[3]);
+    try testing.expect(groups[3] != groups[4]);
+    try testing.expect(groups[2] != groups[4]);
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);

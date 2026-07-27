@@ -74,7 +74,7 @@ import { REGIONS } from '../shell/regions';
 
 const host = globalThis as any;
 
-type Loaded = { key: string; count: number; radius: number; name: string };
+type Loaded = { key: string; count: number; radius: number; faces?: number; name: string };
 export type ModelViewInitialMesh = {
   key: string;
   name: string;
@@ -307,7 +307,7 @@ function loadModelFile(path: string): Loaded | null {
     const o = JSON.parse(json);
     if (!o || typeof o.key !== 'string') return null;
     const name = path.split('/').pop() || path;
-    return { key: o.key, count: o.count | 0, radius: o.radius || 1, name };
+    return { key: o.key, count: o.count | 0, radius: o.radius || 1, faces: o.faces | 0, name };
   } catch {
     return null;
   }
@@ -2136,7 +2136,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
 
   // Mount a FILE-BACKED multi-part model: host-parse the imported file as the base part,
-  // give it per-triangle face groups + a part range over the whole import (so the outliner
+  // preserve its recovered authored-face groups + give it a part range over the whole import (so the outliner
   // can scope/hide/delete it and the weld keeps it separate), then replay the doc's other
   // parts as appends. Reports every part's landed range up so the shell stamps its outliner.
   const applyFileParts = (spec: ModelViewFileParts) => {
@@ -2145,16 +2145,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setError(`Could not load ${spec.path.split('/').pop()}`);
       return;
     }
-    const tris = Math.floor(loaded.count / 3);
-    // One authored group per triangle: imports have no n-gon grouping, so every edge stays
-    // a real (boundary) edge, and the group ids give the part machinery a range to own.
-    const groups = new Uint32Array(tris);
-    for (let i = 0; i < tris; i++) groups[i] = i;
-    host.__mesh_set_face_groups?.(groups);
+    const faces = loaded.faces && loaded.faces > 0 ? loaded.faces : Math.floor(loaded.count / 3);
     const [br, bg, bb] = hexToRgb01(spec.baseColor);
-    host.__model_paint_group_range?.(0, tris, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
-    const ranges: PartRange[] = [{ partId: spec.basePartId, lo: 0, hi: tris }];
-    partRangesRef.current = [{ lo: 0, hi: tris }];
+    host.__model_paint_group_range?.(0, faces, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
+    const ranges: PartRange[] = [{ partId: spec.basePartId, lo: 0, hi: faces }];
+    partRangesRef.current = [{ lo: 0, hi: faces }];
     // Establish the base ownership boundary before replaying appended parts;
     // each append now proves the resident host partition before it mutates.
     meshSetPartRanges(partRangesRef.current);
@@ -2169,15 +2164,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (typeof r.key === 'string' && typeof r.count === 'number') current = { ...current, key: r.key, count: r.count };
     }
     meshSetPartRanges(partRangesRef.current);
-    if (spec.baseHidden) meshSetGroupHidden(0, tris, true, false);
+    if (spec.baseHidden) meshSetGroupHidden(0, faces, true, false);
     setModel(current);
     setError(null);
     setQuality(1);
     setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
     freshModelPaintReset();
-    // The import's groups are per-TRIANGLE (no authored n-gons), so "faces" would just
-    // repeat the triangle count — the prompt talks triangles for these.
-    setAuthoredFaces(null);
+    setAuthoredFaces(faces);
     setBoundsCenter(null); // the base import's vertices are host-side only
     onPartRanges?.(ranges);
   };

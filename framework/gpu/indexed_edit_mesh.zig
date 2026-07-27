@@ -1832,6 +1832,108 @@ pub const Mesh = struct {
     }
 };
 
+/// Recover authored quads from a raw triangle import without turning broad flat
+/// surfaces (caps, floors, scans) into a single n-gon. Two source triangles share
+/// an authored face only when they have exactly one manifold shared edge, lie on the
+/// same plane with matching winding, and their four-point perimeter is convex.
+/// Everything else deliberately remains a one-triangle face.
+pub fn inferQuadFaceGroups(
+    allocator: std.mem.Allocator,
+    interleaved: []const f32,
+    tri_count: u32,
+) ![]u32 {
+    var mesh = try Mesh.fromSoup(allocator, interleaved, tri_count, null, null);
+    defer mesh.deinit();
+
+    const EdgeUse = struct { first: ?u32 = null, second: ?u32 = null, non_manifold: bool = false };
+    var uses = std.AutoHashMapUnmanaged(u64, EdgeUse).empty;
+    defer uses.deinit(allocator);
+    for (mesh.render_triangles.items, 0..) |triangle, triangle_index| {
+        for (0..3) |corner| {
+            const edge = undirectedEdgeKey(triangle[corner], triangle[(corner + 1) % 3]);
+            const entry = try uses.getOrPut(allocator, edge);
+            if (!entry.found_existing) entry.value_ptr.* = .{ .first = @intCast(triangle_index) }
+            else if (entry.value_ptr.second == null) entry.value_ptr.second = @intCast(triangle_index)
+            else entry.value_ptr.non_manifold = true;
+        }
+    }
+
+    const partners = try allocator.alloc(?u32, tri_count);
+    defer allocator.free(partners);
+    @memset(partners, null);
+    var iterator = uses.iterator();
+    while (iterator.next()) |entry| {
+        const use = entry.value_ptr.*;
+        const first = use.first orelse continue;
+        const second = use.second orelse continue;
+        if (use.non_manifold or partners[first] != null or partners[second] != null) continue;
+        if (trianglesFormConvexQuad(&mesh, first, second)) {
+            partners[first] = second;
+            partners[second] = first;
+        }
+    }
+
+    const groups = try allocator.alloc(u32, tri_count);
+    var next_group: u32 = 0;
+    var triangle: u32 = 0;
+    while (triangle < tri_count) : (triangle += 1) {
+        groups[triangle] = next_group;
+        if (partners[triangle]) |partner| groups[partner] = next_group;
+        next_group += 1;
+    }
+    return groups;
+}
+
+fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
+    const a = mesh.render_triangles.items[first];
+    const b = mesh.render_triangles.items[second];
+    var shared: [2]u32 = undefined;
+    var shared_count: usize = 0;
+    var first_tip: ?u32 = null;
+    for (a) |vertex| {
+        if (vertex == b[0] or vertex == b[1] or vertex == b[2]) {
+            if (shared_count == shared.len) return false;
+            shared[shared_count] = vertex;
+            shared_count += 1;
+        } else first_tip = vertex;
+    }
+    if (shared_count != 2 or first_tip == null) return false;
+    var second_tip: ?u32 = null;
+    for (b) |vertex| {
+        if (vertex != shared[0] and vertex != shared[1]) second_tip = vertex;
+    }
+    if (second_tip == null) return false;
+
+    const p0 = mesh.vertices.items[a[0]].position;
+    const p1 = mesh.vertices.items[a[1]].position;
+    const p2 = mesh.vertices.items[a[2]].position;
+    const q0 = mesh.vertices.items[b[0]].position;
+    const q1 = mesh.vertices.items[b[1]].position;
+    const q2 = mesh.vertices.items[b[2]].position;
+    const normal_a = norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
+    const normal_b = norm3(cross3(sub3(q1, q0), sub3(q2, q0)));
+    if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < MERGE_FACE_NORMAL_DOT_MIN) return false;
+
+    // The shared edge puts both triangles on one plane once their normals agree.
+    // Check the four-point boundary's turns so a concave pair never becomes a quad.
+    const loop = [4]u32{ first_tip.?, shared[0], second_tip.?, shared[1] };
+    var sign: f32 = 0;
+    for (0..4) |index| {
+        const here = mesh.vertices.items[loop[index]].position;
+        const next = mesh.vertices.items[loop[(index + 1) % 4]].position;
+        const after = mesh.vertices.items[loop[(index + 2) % 4]].position;
+        const turn = dot3(cross3(sub3(next, here), sub3(after, next)), normal_a);
+        if (@abs(turn) <= IMPORT_WELD_EPS) return false;
+        if (sign == 0) sign = if (turn > 0) 1 else -1
+        else if ((turn > 0 and sign < 0) or (turn < 0 and sign > 0)) return false;
+    }
+    return true;
+}
+
+fn undirectedEdgeKey(a: u32, b: u32) u64 {
+    return (@as(u64, @min(a, b)) << 32) | @as(u64, @max(a, b));
+}
+
 fn add3(a: Vec3, b: Vec3) Vec3 {
     return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
 }

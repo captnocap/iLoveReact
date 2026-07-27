@@ -6965,6 +6965,16 @@ pub fn meshEditSetFaceGroups(groups: []const u32) void {
     model_source.setFaceGroups(groups);
     mesh_edit.faceGroupsChanged();
 }
+/// Import-time topology recovery for external triangle meshes. This is intentionally
+/// limited to isolated coplanar triangle pairs, producing quads while preserving
+/// real triangles and avoiding a broad coplanar cap becoming one giant face.
+/// Caller owns the c_allocator result.
+pub fn meshEditInferQuadFaceGroups() ?[]u32 {
+    const verts = g_edit_verts orelse return null;
+    const triangles = g_edit_count / 3;
+    if (triangles == 0) return null;
+    return indexed_edit_mesh.inferQuadFaceGroups(jalloc, verts, triangles) catch null;
+}
 /// Restore the meshdoc's stable texture-role row (one index per render triangle).
 /// Like face groups, this is imported once into indexed topology and then follows
 /// face identity through cuts and splits.
