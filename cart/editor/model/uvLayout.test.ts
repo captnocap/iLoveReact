@@ -3,6 +3,8 @@ import {
   flattenUvFaceCorners,
   flattenUvIslandRects,
   flipUvSelection,
+  hitUvGridGuide,
+  hitUvGuide,
   hitUvFace,
   hitUvIsland,
   isUvDoubleClick,
@@ -21,6 +23,9 @@ import {
   shouldActivateUvDrag,
   shouldPanUvCanvas,
   stackUvIslands,
+  snapUvBoundsToGuides,
+  snapUvTranslationToGridAndGuides,
+  toggleUvGridGuide,
   uniformUvPack,
   uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
@@ -166,6 +171,49 @@ test('zoomed-out translation uses a perceptible grid and Alt bypasses it everywh
   assert(moveUvIsland(aligned, 0.4, 0.4, 32, 32, 4) === aligned, 'motion inside one snap cell still churned the preview');
   assert(moveUvFace(aligned, { face: 0, group: 1 }, 0.4, 0.4, 32, 32, 4) === aligned, 'isolated face churned inside one snap cell');
   assert(moveUvSelectionVertex(aligned, undefined, 0, 0.4, 0.4, 32, 32, false, 4) === aligned, 'vertex churned inside one snap cell');
+});
+
+test('visible UV grid lines toggle as magnetic alignment guides', () => {
+  const vertical = hitUvGridGuide({ x: 8.3, y: 19 }, 32, 32, 4, 0.5);
+  const horizontal = hitUvGridGuide({ x: 14, y: 11.8 }, 32, 32, 4, 0.5);
+  assert(vertical?.axis === 'vertical' && vertical.coordinate === 8, 'vertical grid line could not become a guide');
+  assert(horizontal?.axis === 'horizontal' && horizontal.coordinate === 12, 'horizontal grid line could not become a guide');
+  assert(hitUvGridGuide({ x: 10, y: 10 }, 32, 32, 4, 0.5) === null, 'blank grid cell selected a distant line');
+  assert(hitUvGridGuide({ x: 0.1, y: 8 }, 32, 32, 4, 0.5)?.axis === 'horizontal', 'atlas border was promoted instead of the interior line');
+  assert(hitUvGuide({ x: 6.2, y: 20 }, 32, 32, [{ axis: 'vertical', coordinate: 6 }], 0.5)?.coordinate === 6, 'selected guide became unclickable after its grid line disappeared');
+
+  const selected = toggleUvGridGuide(toggleUvGridGuide([], vertical!), horizontal!);
+  assert(selected.length === 2 && selected[0]?.axis === 'vertical', 'guide toggles lost deterministic axis order');
+  const removed = toggleUvGridGuide(selected, vertical!);
+  assert(removed.length === 1 && removed[0]?.axis === 'horizontal', 'clicking a selected guide did not remove it');
+
+  const snap = snapUvBoundsToGuides(
+    { x: 9, y: 17, w: 6, h: 5, cx: 12, cy: 19.5 },
+    [{ axis: 'vertical', coordinate: 16 }, { axis: 'horizontal', coordinate: 24 }],
+    2.1,
+  );
+  assert(snap.dx === 1 && snap.dy === 2, `selection missed guide edges: ${snap.dx},${snap.dy}`);
+  assert(snap.guides.length === 2, 'two-axis guide latch reported only one axis');
+
+  const translated = snapUvTranslationToGridAndGuides(
+    { x: 9, y: 4, w: 6, h: 4, cx: 12, cy: 6 },
+    2.2,
+    0,
+    4,
+    [{ axis: 'vertical', coordinate: 20 }],
+    2.1,
+  );
+  assert(translated.dx === 5 && translated.guides[0]?.coordinate === 20, 'grid-first movement did not latch the far edge to its guide');
+  const free = snapUvTranslationToGridAndGuides(
+    { x: 9, y: 4, w: 6, h: 4, cx: 12, cy: 6 },
+    2.2,
+    0.3,
+    4,
+    [{ axis: 'vertical', coordinate: 20 }],
+    10,
+    true,
+  );
+  assert(free.dx === 2.2 && free.dy === 0.3 && free.guides.length === 0, 'Alt-style free movement still latched a guide');
 });
 
 test('multi-island movement is rigid, grid-snapped, and clamped once as a group', () => {

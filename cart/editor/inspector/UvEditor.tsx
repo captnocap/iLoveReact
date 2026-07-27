@@ -11,6 +11,8 @@ import {
   chainUvIslands,
   flattenUvFaceCorners,
   flipUvSelection,
+  hitUvGridGuide,
+  hitUvGuide,
   hitUvFace,
   hitUvIsland,
   isUvDoubleClick,
@@ -25,7 +27,10 @@ import {
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
+  snapUvBoundsToGuides,
+  snapUvTranslationToGridAndGuides,
   stackUvIslands,
+  toggleUvGridGuide,
   uniformUvPack,
   uvContextMenuPosition,
   uvCornerIdentityColor,
@@ -76,12 +81,12 @@ const UV_CONTEXT_MENU_TUNING = {
   edgePx: 4,
   baseHeightPx: 304,
   rowHeightPx: 26,
-  expandedRows: { transform: 8, arrange: 6, snap: 5, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 4 } as Record<UvMenuGroup, number>,
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
-  | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
-  | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
+  | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; bounds: UvSelectionBounds; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
+  | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; origin: ScreenPoint; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
   | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; seed: UvIslandRect };
 
@@ -152,6 +157,17 @@ function repeatedPointSegments(points: readonly { x: number; y: number }[]): num
 
 function sameAxisGuide(a: UvAxisGuide | null, b: UvAxisGuide | null): boolean {
   return a === b || Boolean(a && b && a.axis === b.axis && a.coordinate === b.coordinate);
+}
+
+function uvRectFrame(rect: UvIslandRect): UvSelectionBounds {
+  return {
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+    cx: rect.x + rect.w * 0.5,
+    cy: rect.y + rect.h * 0.5,
+  };
 }
 
 function UvNumberField(props: {
@@ -284,6 +300,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const menuAtlasPointRef = useRef<ScreenPoint>({ x: 0, y: 0 });
   const uvMenu = useContextMenu();
   const [axisGuide, setAxisGuide] = useState<UvAxisGuide | null>(null);
+  const [selectedGuides, setSelectedGuides] = useState<UvAxisGuide[]>([]);
+  const selectedGuidesRef = useRef<UvAxisGuide[]>([]);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const panelRef = useRef<UvCanvasRect>({ x: 0, y: 0, width: 1, height: 1 });
   const surfaceRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
@@ -302,6 +320,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const viewKeyRef = useRef('');
   const fixedLineCacheRef = useRef<UvLineGeometryCache | null>(null);
   const activeLineCacheRef = useRef<UvLineGeometryCache | null>(null);
+
+  const publishGuides = (next: UvAxisGuide[]) => {
+    selectedGuidesRef.current = next;
+    setSelectedGuides(next);
+  };
+
+  useEffect(() => {
+    selectedGuidesRef.current = [];
+    setSelectedGuides([]);
+  }, [uv.key, uv.w, uv.h]);
 
   const setView = (next: UvCanvasView) => {
     viewGenerationRef.current += 1;
@@ -501,6 +529,37 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const selectedRect = selected >= 0 ? rects[selected] ?? null : null;
   const selectedTarget = selectionMode === 'face' ? selectedFace ?? undefined : undefined;
   const translationSnapStep = uvTranslationSnapStep(view.scale, snapBaseStep);
+  const toggleGridGuideAt = (point: ScreenPoint): boolean => {
+    const hitDistance = UV_LAYOUT_TUNING.guideHitPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale);
+    const guide = hitUvGuide(
+      point,
+      uv.w,
+      uv.h,
+      selectedGuidesRef.current,
+      hitDistance,
+    ) ?? hitUvGridGuide(
+      point,
+      uv.w,
+      uv.h,
+      translationSnapStep,
+      hitDistance,
+    );
+    if (!guide) return false;
+    const removing = selectedGuidesRef.current.some((item) => (
+      item.axis === guide.axis && item.coordinate === guide.coordinate
+    ));
+    const next = toggleUvGridGuide(selectedGuidesRef.current, guide);
+    publishGuides(next);
+    lastClickRef.current = null;
+    const coordinate = guide.axis === 'vertical' ? `U ${guide.coordinate}` : `V ${guide.coordinate}`;
+    setNote(`${removing ? 'removed' : 'selected'} ${guide.axis} guide at ${coordinate} · Alt bypasses guide snapping`);
+    return true;
+  };
+  const snapToSelectedGuides = (bounds: UvSelectionBounds) => snapUvBoundsToGuides(
+    bounds,
+    selectedGuidesRef.current,
+    UV_LAYOUT_TUNING.guideSnapPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
+  );
   const applyIslandSetEdit = (next: UvIslandRect[], label: string, action: UvHistoryAction) => {
     if (sameRectReferences(rectsRef.current, next)) {
       setNote(`${label} — selection was already there`);
@@ -716,6 +775,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       ? [0, axisGuide.coordinate, uv.w, axisGuide.coordinate]
       : [axisGuide.coordinate, 0, axisGuide.coordinate, uv.h]
     : [];
+  const selectedGuideSegments = useMemo(() => selectedGuides.flatMap((guide) => (
+    guide.axis === 'horizontal'
+      ? [0, guide.coordinate, uv.w, guide.coordinate]
+      : [guide.coordinate, 0, guide.coordinate, uv.h]
+  )), [selectedGuides, uv.w, uv.h]);
   const host = globalThis as any;
   const finishGesture = (event?: any) => {
     const gesture = gestureRef.current;
@@ -1020,8 +1084,19 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           }
           const vertex = hitHandle(screen);
           if (vertex >= 0 && selectedRect) {
+            const localVertex = localHandlePoints[vertex]!;
             lastClickRef.current = null;
-            gestureRef.current = { kind: 'vertex', index: selected, target: selectedTarget, vertex, start: atlasPoint(screen), screenStart: screen, activated: false, seed: selectedRect };
+            gestureRef.current = {
+              kind: 'vertex',
+              index: selected,
+              target: selectedTarget,
+              vertex,
+              origin: { x: selectedRect.x + localVertex.x, y: selectedRect.y + localVertex.y },
+              start: atlasPoint(screen),
+              screenStart: screen,
+              activated: false,
+              seed: selectedRect,
+            };
             return;
           }
           const point = atlasPoint(screen);
@@ -1043,7 +1118,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               } else {
                 setSelectedFace(faceHit.target);
                 bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-                gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: true, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
+                const seed = rectsRef.current[faceHit.island]!;
+                const bounds = uvSelectionBounds(seed, faceHit.target);
+                if (bounds) gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, bounds, start: point, screenStart: screen, activated: false, doubleClick: true, seed, seedRects: rectsRef.current };
                 setNote('isolated one authored UV face · double-click again to return');
               }
               return;
@@ -1051,6 +1128,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           }
           if (selectionMode === 'face') {
             const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+            if (!faceHit && toggleGridGuideAt(point)) return;
             const faceSelection = faceHit ? [faceHit.island] : [];
             selectedIndicesRef.current = faceSelection;
             setSelectedIndices(faceSelection);
@@ -1058,17 +1136,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             setSelectedFace(faceHit?.target ?? null);
             if (faceHit) {
               bridge.selectUvFace(faceHit.target.face, Boolean(event?.shiftKey));
-              gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[faceHit.island]!, seedRects: rectsRef.current };
+              const seed = rectsRef.current[faceHit.island]!;
+              const bounds = uvSelectionBounds(seed, faceHit.target);
+              if (bounds) gestureRef.current = { kind: 'move', index: faceHit.island, indices: [faceHit.island], target: faceHit.target, bounds, start: point, screenStart: screen, activated: false, doubleClick: false, seed, seedRects: rectsRef.current };
             }
             return;
           }
           const index = hitUvIsland(rectsRef.current, point.x, point.y);
+          if (index < 0 && toggleGridGuideAt(point)) return;
           const additive = Boolean(event?.shiftKey);
           const nextSelection = selectIslandAt(index, additive);
           if (index >= 0) {
             bridge.selectUvIsland(index, additive);
             if (nextSelection.includes(index)) {
-              gestureRef.current = { kind: 'move', index, indices: [...nextSelection], start: point, screenStart: screen, activated: false, doubleClick: false, seed: rectsRef.current[index]!, seedRects: rectsRef.current };
+              const seed = rectsRef.current[index]!;
+              const bounds = nextSelection.length > 1
+                ? uvIslandSetBounds(rectsRef.current, nextSelection)
+                : uvRectFrame(seed);
+              if (bounds) gestureRef.current = { kind: 'move', index, indices: [...nextSelection], bounds, start: point, screenStart: screen, activated: false, doubleClick: false, seed, seedRects: rectsRef.current };
               if (nextSelection.length > 1) setNote(`${nextSelection.length} UV islands selected · drag any member to move the set`);
             }
           }
@@ -1092,24 +1177,43 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             const dx = point.x - gesture.start.x;
             const dy = point.y - gesture.start.y;
             const freeMove = Boolean(event?.altKey);
+            const dragBounds = gesture.kind === 'vertex'
+              ? { x: gesture.origin.x, y: gesture.origin.y, w: 0, h: 0, cx: gesture.origin.x, cy: gesture.origin.y }
+              : gesture.bounds;
+            const snapped = snapUvTranslationToGridAndGuides(
+              dragBounds,
+              dx,
+              dy,
+              translationSnapStep,
+              selectedGuidesRef.current,
+              UV_LAYOUT_TUNING.guideSnapPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
+              freeMove,
+            );
+            guide = snapped.guides[0] ?? null;
             if (gesture.kind === 'move' && !gesture.target && gesture.indices.length > 1) {
-              const next = moveUvIslands(gesture.seedRects, gesture.indices, dx, dy, uv.w, uv.h, translationSnapStep, freeMove);
-              queueUvRectsPreview(next, null);
+              const next = moveUvIslands(gesture.seedRects, gesture.indices, snapped.dx, snapped.dy, uv.w, uv.h, translationSnapStep, true);
+              queueUvRectsPreview(next, guide);
               return;
             }
             changed = gesture.kind === 'vertex'
-              ? moveUvSelectionVertex(gesture.seed, gesture.target, gesture.vertex, dx, dy, uv.w, uv.h, freeMove, translationSnapStep)
+              ? moveUvSelectionVertex(gesture.seed, gesture.target, gesture.vertex, snapped.dx, snapped.dy, uv.w, uv.h, true, translationSnapStep)
               : gesture.target
-                ? moveUvFace(gesture.seed, gesture.target, dx, dy, uv.w, uv.h, translationSnapStep, freeMove)
-                : moveUvIsland(gesture.seed, dx, dy, uv.w, uv.h, translationSnapStep, freeMove);
+                ? moveUvFace(gesture.seed, gesture.target, snapped.dx, snapped.dy, uv.w, uv.h, translationSnapStep, true)
+                : moveUvIsland(gesture.seed, snapped.dx, snapped.dy, uv.w, uv.h, translationSnapStep, true);
           } else if (gesture.kind === 'rotate') {
             const angle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) - gesture.startAngle;
             const rotated = rotateUvSelection(gesture.seed, gesture.target, angle * 180 / Math.PI, uv.w, uv.h);
             changed = rotated.rect;
             guide = rotated.guide;
           } else if (gesture.kind === 'scale') {
-            let scaleX = (point.x - gesture.bounds.x) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.w);
-            let scaleY = (point.y - gesture.bounds.y) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.h);
+            let scalePoint = point;
+            if (!event?.altKey && selectedGuidesRef.current.length > 0) {
+              const snapped = snapToSelectedGuides({ x: point.x, y: point.y, w: 0, h: 0, cx: point.x, cy: point.y });
+              scalePoint = { x: point.x + snapped.dx, y: point.y + snapped.dy };
+              guide = snapped.guides[0] ?? null;
+            }
+            let scaleX = (scalePoint.x - gesture.bounds.x) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.w);
+            let scaleY = (scalePoint.y - gesture.bounds.y) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.h);
             if (aspectLocked) {
               const uniform = Math.max(UV_LAYOUT_TUNING.minimumSelectionScale, Math.min(scaleX, scaleY));
               scaleX = uniform;
@@ -1146,6 +1250,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           {secondarySelectedLines.faces.length ? <Graph.Polyline segments points={secondarySelectedLines.faces} stroke="#b5c3d8" strokeWidth={1.05 * inverseViewScale} /> : null}
           {secondarySelectedLines.boundary.length ? <Graph.Polyline segments points={secondarySelectedLines.boundary} stroke="#42d9e8" strokeWidth={2.1 * inverseViewScale} /> : null}
           {groupFrameSegments.length ? <Graph.Polyline segments points={groupFrameSegments} stroke="#42d9e8" strokeWidth={1.35 * inverseViewScale} /> : null}
+          {selectedGuideSegments.length ? <Graph.Polyline segments points={selectedGuideSegments} stroke="#080b10" strokeWidth={4 * inverseViewScale} /> : null}
+          {selectedGuideSegments.length ? <Graph.Polyline segments points={selectedGuideSegments} stroke="#f4c95d" strokeWidth={1.8 * inverseViewScale} /> : null}
         </Graph>
         {selectedRect ? (
           <Graph
@@ -1208,7 +1314,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       </Pressable>
 
       <Row style={{ height: 14, alignItems: 'center' }}>
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID GROUP SNAP ${translationSnapStep}px` : `VISIBLE GRID = SNAP ${translationSnapStep}px`}</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`${multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID SNAP ${translationSnapStep}px` : `GRID SNAP ${translationSnapStep}px`} · ${selectedGuides.length > 0 ? `${selectedGuides.length} GUIDE${selectedGuides.length === 1 ? '' : 'S'}` : 'CLICK GRID = GUIDE'}`}</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`ATLAS ${uv.w}×${uv.h}`}</Text>
       </Row>
@@ -1291,20 +1397,35 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           ) : null}
 
           <UvContextRow icon="Grid2x2" label="Snap Grid" detail={`${translationSnapStep}px ACTIVE`} expanded={menuGroup === 'snap'} onPress={() => toggleMenuGroup('snap')} />
-          {menuGroup === 'snap' ? UV_SNAP_STEPS.map((step) => (
-            <UvContextRow
-              key={`uv-context-snap-${step}`}
-              indented
-              icon="Grid2x2"
-              label={`${step} texel${step === 1 ? '' : 's'}`}
-              detail={snapBaseStep === step ? 'ACTIVE' : ''}
-              active={snapBaseStep === step}
-              onPress={() => runMenuAction(() => {
-                setSnapBaseStep(step);
-                setNote(`grid set to ${uvTranslationSnapStep(view.scale, step)} texels at this zoom · Alt moves freely`);
-              })}
-            />
-          )) : null}
+          {menuGroup === 'snap' ? (
+            <>
+              {UV_SNAP_STEPS.map((step) => (
+                <UvContextRow
+                  key={`uv-context-snap-${step}`}
+                  indented
+                  icon="Grid2x2"
+                  label={`${step} texel${step === 1 ? '' : 's'}`}
+                  detail={snapBaseStep === step ? 'ACTIVE' : ''}
+                  active={snapBaseStep === step}
+                  onPress={() => runMenuAction(() => {
+                    setSnapBaseStep(step);
+                    setNote(`grid set to ${uvTranslationSnapStep(view.scale, step)} texels at this zoom · Alt moves freely`);
+                  })}
+                />
+              ))}
+              <UvContextRow
+                indented
+                icon="Eraser"
+                label="Clear Guides"
+                detail={`${selectedGuides.length}`}
+                enabled={selectedGuides.length > 0}
+                onPress={() => runMenuAction(() => {
+                  publishGuides([]);
+                  setNote('cleared UV grid guides');
+                })}
+              />
+            </>
+          ) : null}
 
           <UvContextRow icon="History" label="Edit History" detail={`${history.undo} / ${history.redo}`} expanded={menuGroup === 'edit'} onPress={() => toggleMenuGroup('edit')} />
           {menuGroup === 'edit' ? (

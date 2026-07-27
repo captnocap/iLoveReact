@@ -23,6 +23,12 @@ export const UV_LAYOUT_TUNING = {
   dragPreviewIntervalMs: 4,
   /** Every fourth snap line is a stronger visual ruler. */
   majorGridEvery: 4,
+  /** Screen-space tolerance for promoting a visible grid line into a guide. */
+  guideHitPx: 6,
+  /** Preserve a small blank target between neighboring selectable grid lines. */
+  guideHitCellFraction: 0.45,
+  /** Screen-space magnetic radius for selection edges, centres, and vertices. */
+  guideSnapPx: 9,
   rotationHandleOffsetPx: 21,
   rotationHandleHitPx: 11,
   scaleHandleOffsetPx: 7,
@@ -69,6 +75,7 @@ export type UvFaceTarget = { face: number; group: number };
 export type UvFlipAxis = 'u' | 'v';
 export type UvSelectionBounds = { x: number; y: number; w: number; h: number; cx: number; cy: number };
 export type UvAxisGuide = { axis: 'horizontal' | 'vertical'; coordinate: number };
+export type UvGuideSnap = Readonly<{ dx: number; dy: number; guides: UvAxisGuide[] }>;
 export type UvRotationResult = { rect: UvIslandRect; angleDegrees: number; guide: UvAxisGuide | null };
 export type UvClickStamp = { at: number; x: number; y: number };
 
@@ -168,6 +175,141 @@ export function uvTranslationSnapStep(viewScale: number, minimumStep = UV_LAYOUT
   let step = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(minimumStep));
   while (step * scale < UV_LAYOUT_TUNING.minimumTranslationSnapPx) step *= 2;
   return step;
+}
+
+/**
+ * Hit-test only the grid lines currently visible at `step`. Atlas borders remain
+ * bounds, not selectable guides. The radius is capped below half a grid cell so
+ * one click can never ambiguously claim two parallel lines while zoomed out.
+ */
+export function hitUvGridGuide(
+  point: UvCanvasPoint,
+  atlasW: number,
+  atlasH: number,
+  step: number,
+  maxDistance: number,
+): UvAxisGuide | null {
+  if (atlasW <= 0 || atlasH <= 0 || point.x < 0 || point.y < 0 || point.x > atlasW || point.y > atlasH) return null;
+  const safeStep = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(step));
+  const radius = Math.min(
+    Math.max(0, Number.isFinite(maxDistance) ? maxDistance : 0),
+    safeStep * UV_LAYOUT_TUNING.guideHitCellFraction,
+  );
+  const verticalCoordinate = Math.round(point.x / safeStep) * safeStep;
+  const horizontalCoordinate = Math.round(point.y / safeStep) * safeStep;
+  const verticalDistance = verticalCoordinate > 0 && verticalCoordinate < atlasW
+    ? Math.abs(point.x - verticalCoordinate)
+    : Number.POSITIVE_INFINITY;
+  const horizontalDistance = horizontalCoordinate > 0 && horizontalCoordinate < atlasH
+    ? Math.abs(point.y - horizontalCoordinate)
+    : Number.POSITIVE_INFINITY;
+  return hitUvGuide(
+    point,
+    atlasW,
+    atlasH,
+    [
+      ...(Number.isFinite(verticalDistance) ? [{ axis: 'vertical' as const, coordinate: verticalCoordinate }] : []),
+      ...(Number.isFinite(horizontalDistance) ? [{ axis: 'horizontal' as const, coordinate: horizontalCoordinate }] : []),
+    ],
+    radius,
+  );
+}
+
+/** Hit-test already-promoted guides even if a zoom or grid-step change hid their source line. */
+export function hitUvGuide(
+  point: UvCanvasPoint,
+  atlasW: number,
+  atlasH: number,
+  guides: readonly UvAxisGuide[],
+  maxDistance: number,
+): UvAxisGuide | null {
+  if (point.x < 0 || point.y < 0 || point.x > atlasW || point.y > atlasH) return null;
+  const tolerance = Math.max(0, Number.isFinite(maxDistance) ? maxDistance : 0);
+  let best: { guide: UvAxisGuide; distance: number } | null = null;
+  for (const guide of guides) {
+    const distance = Math.abs((guide.axis === 'vertical' ? point.x : point.y) - guide.coordinate);
+    if (distance > tolerance || (best && distance >= best.distance)) continue;
+    best = { guide, distance };
+  }
+  return best?.guide ?? null;
+}
+
+/** Click once to promote a grid line, and click the same line again to remove it. */
+export function toggleUvGridGuide(guides: readonly UvAxisGuide[], guide: UvAxisGuide): UvAxisGuide[] {
+  const found = guides.some((item) => item.axis === guide.axis && item.coordinate === guide.coordinate);
+  if (found) return guides.filter((item) => item.axis !== guide.axis || item.coordinate !== guide.coordinate);
+  return [...guides, guide].sort((left, right) => (
+    (left.axis === right.axis ? 0 : left.axis === 'vertical' ? -1 : 1)
+    || left.coordinate - right.coordinate
+  ));
+}
+
+/**
+ * Find the smallest translation that magnetically aligns a selection boundary,
+ * centre, or point with the nearest selected guide on each axis.
+ */
+export function snapUvBoundsToGuides(
+  bounds: UvSelectionBounds,
+  guides: readonly UvAxisGuide[],
+  maxDistance: number,
+): UvGuideSnap {
+  const tolerance = Math.max(0, Number.isFinite(maxDistance) ? maxDistance : 0);
+  const xAnchors = [bounds.x, bounds.cx, bounds.x + bounds.w];
+  const yAnchors = [bounds.y, bounds.cy, bounds.y + bounds.h];
+  let bestX: { delta: number; guide: UvAxisGuide } | null = null;
+  let bestY: { delta: number; guide: UvAxisGuide } | null = null;
+  for (const guide of guides) {
+    const anchors = guide.axis === 'vertical' ? xAnchors : yAnchors;
+    for (const anchor of anchors) {
+      const delta = guide.coordinate - anchor;
+      if (Math.abs(delta) > tolerance) continue;
+      if (guide.axis === 'vertical') {
+        if (!bestX || Math.abs(delta) < Math.abs(bestX.delta)) bestX = { delta, guide };
+      } else if (!bestY || Math.abs(delta) < Math.abs(bestY.delta)) {
+        bestY = { delta, guide };
+      }
+    }
+  }
+  return {
+    dx: bestX?.delta ?? 0,
+    dy: bestY?.delta ?? 0,
+    guides: [
+      ...(bestX ? [bestX.guide] : []),
+      ...(bestY ? [bestY.guide] : []),
+    ],
+  };
+}
+
+/**
+ * Resolve one drag from its immutable seed: ordinary movement first lands on
+ * the active grid, then its moved bounds may magnetically nudge to selected
+ * guides. Alt-style free movement bypasses both in one boundary decision.
+ */
+export function snapUvTranslationToGridAndGuides(
+  bounds: UvSelectionBounds,
+  dx: number,
+  dy: number,
+  snapStep: number,
+  guides: readonly UvAxisGuide[],
+  guideDistance: number,
+  freeMove = false,
+): UvGuideSnap {
+  if (freeMove) return { dx, dy, guides: [] };
+  const gridDx = snapUvVertex(bounds.x + dx, snapStep) - bounds.x;
+  const gridDy = snapUvVertex(bounds.y + dy, snapStep) - bounds.y;
+  const movedBounds = {
+    ...bounds,
+    x: bounds.x + gridDx,
+    y: bounds.y + gridDy,
+    cx: bounds.cx + gridDx,
+    cy: bounds.cy + gridDy,
+  };
+  const guideSnap = snapUvBoundsToGuides(movedBounds, guides, guideDistance);
+  return {
+    dx: gridDx + guideSnap.dx,
+    dy: gridDy + guideSnap.dy,
+    guides: guideSnap.guides,
+  };
 }
 
 export function parseUvIslandRects(
