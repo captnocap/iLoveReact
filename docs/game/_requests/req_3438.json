@@ -1,0 +1,30 @@
+{
+  "id": "req_3438",
+  "at": "2026-07-27T21:29:52.731Z",
+  "origin": "codex:019f7e48",
+  "text": "in the uv editor on the grid lines, give me the ability to select a grid line to be able to use it as a guide",
+  "status": "review",
+  "sessionId": "019f7e48-6705-7221-a629-8a483fd950d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T21:30:04.791Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-27T21:41:06.047Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "UV grid lines can now be promoted into persistent gold authoring guides by clicking exposed line segments. Multiple guides can coexist; island, face, vertex, multi-selection, and scale drags magnetically align to guide edges/centers/points with blue latch feedback, Alt bypasses snapping, and Snap Grid > Clear Guides removes them. Guide hit-testing survives adaptive-grid changes, while drag snapping is resolved once from immutable gesture seeds to preserve dense-atlas performance.",
+  "shas": [
+    "6387cc959"
+  ],
+  "resolvedAt": "2026-07-27T21:41:06.047Z"
+}
