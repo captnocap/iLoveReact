@@ -9,8 +9,13 @@
 //     an authored fact on the instance — position, floor, yaw, prop height/
 //     scale, spin, material slots — is a live control writing through the same
 //     transaction commands as the viewport/hotkeys (req_2095 ruling: a field
-//     either actually edits or reads clearly immutable). Derived facts (mesh
-//     size, snap mode) stay read-only rows.
+//     either actually edits or reads clearly immutable).
+//
+// Density rule (req_3444): a row earns its place only by telling the user
+// something about THIS piece they don't already have. Rows that restate the
+// header tag, describe tool mechanics ("free (under cursor)", "click the map
+// to place"), or hold filler values ("material slot", "plain (no
+// capabilities)") are cut, not dimmed.
 import { Row } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
@@ -212,6 +217,10 @@ export default function PieceBody(props: {
       ? `${((bounds.maxX - bounds.minX) * scale).toFixed(1)}×${((bounds.maxZ - bounds.minZ) * scale).toFixed(1)}×${((bounds.maxY - bounds.minY) * scale).toFixed(1)}m`
       : 'mesh not resident';
     const skeleton = modelPackageById(authored.pkgId)?.skeleton;
+    // RIG shows only when the manifest actually carries capabilities — an empty
+    // projected rig ({}) would only render the 'plain (no capabilities)' filler.
+    const rig = skeleton ? skeletonToPropRig(skeleton) : null;
+    const rigSummary = rig && Object.keys(rig).length > 0 ? describePropRig(rig) : null;
     // The source model by its human name — the internal mesh key (e.g.
     // `primitive:cube:56::dup-…`) identified nothing a person recognises.
     const modelName = props.modelNameFor(authored.pkgId) ?? authored.label;
@@ -229,7 +238,7 @@ export default function PieceBody(props: {
             <C.HW_AccentBar />
             <C.HW_SectionTitle>{isInstance ? 'EXPORTED MODEL' : 'EXPORTED MODEL (armed)'}</C.HW_SectionTitle>
             <C.HW_Spacer />
-            <C.HW_KeyText>3</C.HW_KeyText>
+            <C.HW_KeyText>2</C.HW_KeyText>
           </C.HW_SectionHead>
           <C.HW_ReadRow>
             <C.HW_FormLabel>model</C.HW_FormLabel>
@@ -246,25 +255,11 @@ export default function PieceBody(props: {
             <C.HW_ReadValue>{scale !== 1 ? `${dims} (×${scale.toFixed(2)})` : dims}</C.HW_ReadValue>
             <C.HW_OvResetIdle />
           </C.HW_ReadRow>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>places</C.HW_FormLabel>
-            <C.HW_Spacer />
-            <C.HW_ReadValue>{authored.kind === 'prop' ? 'free (under cursor)' : `${authored.kind} snap`}</C.HW_ReadValue>
-            <C.HW_OvResetIdle />
-          </C.HW_ReadRow>
         </C.HW_Section>
-        {authored.kind === 'prop' ? (
-          <ReadOnlySection title="RIG" color="warning" rows={[
-            ['carries', skeleton ? describePropRig(skeletonToPropRig(skeleton)) : 'no rig on the manifest'],
-          ]} />
+        {authored.kind === 'prop' && rigSummary ? (
+          <ReadOnlySection title="RIG" color="warning" rows={[['carries', rigSummary]]} />
         ) : null}
-        {isInstance && sel ? (
-          <PlacementSection sel={sel} edit={props.edit} />
-        ) : (
-          <ReadOnlySection title="PLACE" color="textDim" rows={[
-            ['arm', 'click the map to place'],
-          ]} />
-        )}
+        {isInstance && sel ? <PlacementSection sel={sel} edit={props.edit} /> : null}
       </>
     );
   }
@@ -309,33 +304,12 @@ export default function PieceBody(props: {
         </C.HW_Metric>
       </C.HW_MetricRow>
 
-      <ReadOnlySection title={isInstance ? 'PIECE' : 'PIECE (armed)'} color="primary" rows={[
-        ['id', row.id],
-        ['kind', row.kind],
-        ['catalog', isInstance ? 'placed instance' : 'palette definition'],
-      ]} />
-
-      {isInstance && sel ? (
-        <PlacementSection sel={sel} edit={props.edit} />
-      ) : (
-        <C.HW_Section>
-          <C.HW_SectionHead>
-            <C.HW_AccentBar style={{ backgroundColor: accentFor('textDim') }} />
-            <C.HW_SectionTitle style={{ color: accentFor('textDim') }}>PLACE</C.HW_SectionTitle>
-          </C.HW_SectionHead>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>arm</C.HW_FormLabel>
-            <C.HW_Spacer />
-            {/* Sized to its fixed column (req_2626 II) — the row reserves space,
-                the readout fits it; no squeezing, no wrap. */}
-            <C.HW_ReadValue>click the map to place</C.HW_ReadValue>
-          </C.HW_ReadRow>
-        </C.HW_Section>
-      )}
+      {isInstance && sel ? <PlacementSection sel={sel} edit={props.edit} /> : null}
 
       {/* MATERIAL SLOTS — the "texture slots" the user asked for. Editable on a
           placed instance (click a slot to bind the browser's active material);
-          a read-only template preview on the armed definition. */}
+          armed definitions show nothing here (a template row per slot only
+          restated the word "material slot" — req_3444 density rule). */}
       {isInstance && sel ? (
         <C.HW_Section>
           <C.HW_SectionHead>
@@ -361,9 +335,7 @@ export default function PieceBody(props: {
             );
           })}
         </C.HW_Section>
-      ) : (
-        <ReadOnlySection title="SLOT TEMPLATE" color="accent" rows={roleEntries.map((role) => [role.label, 'material slot'])} />
-      )}
+      ) : null}
 
     </>
   );
