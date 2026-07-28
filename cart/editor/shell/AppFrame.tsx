@@ -50,7 +50,7 @@ import { pieceKindOf, PIECE_MODULE_METERS, PIECE_SPIN_RATE_DEG_PER_SEC } from '.
 import { stepPieceField } from '../world/pieceFieldStep';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, authoredPieceFor, paintSkinIdOf, preferredAuthoredPaletteId, skinnedPieceId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
-import { listPaintSkins } from '../data/paintVariants';
+import { basePaintingSkinId, listPaintSkins } from '../data/paintVariants';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
@@ -5663,11 +5663,14 @@ export default function AppFrame() {
     : [];
   // The model's stored PAINTINGS for the quick menu (req_3443): the palette lists
   // one entry per model; which painting a placed instance wears is chosen HERE.
+  // baseSkinId (req_3459): the saved painting the model's current base look IS,
+  // so the menu can collapse a "Current" chip that duplicates a named painting.
   const worldQuickPaintings = (() => {
-    if (!worldQuickPiece) return [];
+    if (!worldQuickPiece) return { skins: [], baseSkinId: null as string | null };
     const ap = authoredPieceFor(worldQuickPiece.pieceId);
     const pkg = ap ? modelPackageById(ap.pkgId) : null;
-    return pkg ? listPaintSkins(pkg) : [];
+    if (!pkg) return { skins: [], baseSkinId: null as string | null };
+    return { skins: listPaintSkins(pkg), baseSkinId: basePaintingSkinId(pkg) };
   })();
 
   const closeHostWindow = () => (globalThis as any).__window_close?.();
@@ -6238,7 +6241,8 @@ export default function AppFrame() {
             resolveMaterial={(ref) => resolveMaterialRef(ref, state.assetOverrides)}
             onAssignSlot={(id, role, assetId) => assignPieceSlotAsset(id, role, assetId, 'context')}
             onClearSlot={(id, role) => clearPieceSlot(id, role, 'context')}
-            paintings={worldQuickPaintings}
+            paintings={worldQuickPaintings.skins}
+            basePaintingId={worldQuickPaintings.baseSkinId}
             onSetPainting={(id, skinId) => invokeApplicationCommand(WORLD_PIECE_SKIN_COMMAND_ID, {
               documentId: stateRef.current.activeMapStem,
               pieceId: id,

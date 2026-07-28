@@ -18,7 +18,7 @@
 // (base.paint.json v4 parity): a raster base + the exact per-face UV geometry + the
 // stroke program on top. With strokes, the baseline BENEATH them persists as
 // paints/paint_<id>.base.png; with none, the composite .png doubles as the base.
-import { exists, listDir, mkdir, readFile, remove, stat, writeFile } from '../../../runtime/hooks/fs';
+import { exists, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile } from '../../../runtime/hooks/fs';
 import { claimPackageDir, parsedUvCornerGeometry } from './modelPackageStore';
 import type { ModelPackage } from './types';
 
@@ -299,4 +299,24 @@ export function listPaintSkins(pkg: PaintTarget): PaintSkin[] {
   out.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
   skinsCache.set(dir, { currentMeshStamp, skins: out });
   return out;
+}
+
+/** The saved painting the model's CURRENT base look IS, or null when it matches
+ *  none (a diverged/unsaved look). Save Painting writes atlases/base.png and
+ *  paint_<id>.png from the same atlas readback in the same call, so an
+ *  un-diverged look compares byte-identical; a false negative merely keeps the
+ *  fallback chip. The world quick menu collapses its redundant "Current" chip
+ *  with this (req_3459: "Current … is also the same thing as honey_crunch"). */
+export function basePaintingSkinId(pkg: PaintTarget): string | null {
+  const basePath = `${claimPackageDir(pkg)}/atlases/base.png`;
+  const base = stat(basePath);
+  if (!base) return null;
+  let baseB64: string | null | undefined;
+  for (const skin of listPaintSkins(pkg)) {
+    const skinPng = stat(pngPath(pkg, skin.id));
+    if (!skinPng || skinPng.size !== base.size) continue;
+    baseB64 ??= readFileBase64(basePath);
+    if (baseB64 && readFileBase64(pngPath(pkg, skin.id)) === baseB64) return skin.id;
+  }
+  return null;
 }

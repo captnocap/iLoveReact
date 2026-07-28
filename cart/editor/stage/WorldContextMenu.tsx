@@ -83,7 +83,7 @@ function SkinTile({ asset, active, onPick }: { asset: Asset; active: boolean; on
   );
 }
 
-export default function WorldContextMenu({ piece, materials, recentIds, resolveMaterial, onAssignSlot, onClearSlot, paintings = [], onSetPainting, onCommand, onClose }: {
+export default function WorldContextMenu({ piece, materials, recentIds, resolveMaterial, onAssignSlot, onClearSlot, paintings = [], basePaintingId = null, onSetPainting, onCommand, onClose }: {
   /** the LIVE selected piece from EditorState (yaw/slots update while the menu is open) */
   piece: PlacedPiece;
   /** the RANKED material catalog (Skins tab, overrides applied, rankAssets order) */
@@ -98,6 +98,10 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
   /** the model's STORED paintings (req_3443) — the palette lists one entry per
    *  model; which painting THIS instance wears is chosen here. Empty = no section. */
   paintings?: readonly PaintSkin[];
+  /** the painting the model's current BASE look IS (req_3459) — when set, the
+   *  redundant "Current" chip collapses into that named painting's chip, and a
+   *  base-wearing instance rings it as worn. */
+  basePaintingId?: string | null;
   /** dress the instance in a stored painting; null returns it to the base look */
   onSetPainting?: (id: string, skinId: string | null) => void;
   onCommand: (id: string, source: string) => void;
@@ -159,19 +163,27 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
 
       {paintings.length > 0 && onSetPainting && isAuthoredPiece(piece.pieceId) ? (
         <>
-          {/* PAINTINGS (req_3443) — the model's stored looks, one chip each plus
-              Current. The palette carries ONE entry per model; the placed instance
-              picks its look HERE. Swap keeps the menu open (like Rotate) so the
-              change is visible under the cursor. */}
+          {/* PAINTINGS (req_3443) — the model's stored looks, one chip each. The
+              palette carries ONE entry per model; the placed instance picks its
+              look HERE. Swap keeps the menu open (like Rotate) so the change is
+              visible under the cursor. req_3459: a "Current" chip appears ONLY
+              when the model's live base look matches no saved painting — when it
+              IS one (the common case right after Save Painting), that painting's
+              own chip carries it, and a base-wearing instance rings it as worn. */}
           <SectionHead>PAINTINGS</SectionHead>
           <Box style={{ flexDirection: 'row', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, flexWrap: 'wrap' }}>
-            {[{ id: null as string | null, name: 'Current' }, ...paintings].map((painting) => {
-              const worn = paintSkinIdOf(piece.pieceId) === painting.id;
+            {(basePaintingId ? [...paintings] : [{ id: null as string | null, name: 'Current' }, ...paintings]).map((painting) => {
+              const wornSkinId = paintSkinIdOf(piece.pieceId);
+              const worn = wornSkinId === painting.id
+                || (wornSkinId === null && painting.id !== null && painting.id === basePaintingId);
               const tip = painting.id === null
-                ? `the model's current base look${worn ? ' · worn now' : ''}`
+                ? `the model's current Studio look — not saved as a painting${worn ? ' · worn now' : ''}`
                 : `dress this ${label} in ${painting.name}${worn ? ' · worn now' : ''}`;
+              // Picking the painting the base look IS lands the canonical base id,
+              // so an instance never wears a #p alias of the identical look.
+              const pick = painting.id === basePaintingId ? null : painting.id;
               return (
-                <Pressable key={painting.id ?? 'current'} tooltip={tip} onPress={() => { if (!worn) onSetPainting(piece.id, painting.id); }}>
+                <Pressable key={painting.id ?? 'current'} tooltip={tip} onPress={() => { if (!worn) onSetPainting(piece.id, pick); }}>
                   <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: worn ? 2 : 1, borderColor: worn ? accentFor('primary') : '#2a3442', backgroundColor: EMPTY_SLOT_BG }}>
                     <C.HW_KeyText style={{ color: worn ? accentFor('primary') : undefined }}>{painting.name}</C.HW_KeyText>
                   </Box>
