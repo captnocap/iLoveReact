@@ -26,8 +26,8 @@ const IS_LIB = if (@hasDecl(build_options, "is_lib")) build_options.is_lib else 
 const HAS_GPU = if (@hasDecl(build_options, "has_gpu")) build_options.has_gpu else true;
 const HEADLESS = IS_LIB or !HAS_GPU;
 
-const layout = @import("framework/layout.zig");
-const HostContext = @import("framework/host_context.zig");
+const layout = @import("layout.zig");
+const HostContext = @import("host_context.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
@@ -38,11 +38,11 @@ const Color = layout.Color;
 const transition_mod = if (HEADLESS) struct {
     pub const TransitionConfig = struct { duration_ms: u32 = 0 };
     pub fn set(_: anytype, _: anytype, _: anytype, _: anytype) void {}
-} else @import("framework/gpu/transition.zig");
-const easing_mod = @import("framework/math/easing.zig");
+} else @import("gpu/transition.zig");
+const easing_mod = @import("math/easing.zig");
 const effect_ctx = if (HEADLESS) struct {
     pub const EffectContext = opaque {};
-} else @import("framework/gpu/effects_ctx.zig");
+} else @import("gpu/effects_ctx.zig");
 const input = if (HEADLESS) struct {
     pub const MAX_INPUTS: usize = 256;
     pub fn register(_: anytype) void {}
@@ -56,9 +56,9 @@ const input = if (HEADLESS) struct {
     pub fn setOnBlur(_: anytype, _: anytype) void {}
     pub fn setOnKey(_: anytype, _: anytype) void {}
     pub fn setCallbackContext(_: anytype, _: anytype) void {}
-} else @import("framework/primitive/input.zig");
-const state = @import("framework/state/dirty.zig");
-const events = @import("framework/events.zig");
+} else @import("primitive/input.zig");
+const state = @import("state/dirty.zig");
+const events = @import("events.zig");
 const context_menu = if (HEADLESS) struct {
     pub const MenuItem = struct {
         label: []const u8 = "",
@@ -67,7 +67,7 @@ const context_menu = if (HEADLESS) struct {
     pub fn activeNodeId() u32 {
         return 0;
     }
-} else @import("framework/primitive/context_menu.zig");
+} else @import("primitive/context_menu.zig");
 const engine = if (HEADLESS) struct {
     pub fn run(_: anytype) !void {
         unreachable;
@@ -77,13 +77,13 @@ const engine = if (HEADLESS) struct {
     pub fn windowClose() void {}
     pub fn dispatchScrollChanged(_: anytype, _: anytype) void {}
     pub fn setPanelRootProvider(_: anytype) void {}
-} else @import("framework/engine.zig");
+} else @import("engine.zig");
 const gpu = if (HEADLESS) struct {
     pub fn frameCounter() u64 {
         return 0;
     }
     pub fn scene3dResetForReload() void {}
-} else @import("framework/gpu/gpu.zig");
+} else @import("gpu/gpu.zig");
 // PANELWIN-0628: the editor-panel pop-out (2D React subtree → 2nd OS window).
 const panel_window = if (HEADLESS) struct {
     pub fn open(_: u32, _: u32) !void {}
@@ -91,8 +91,8 @@ const panel_window = if (HEADLESS) struct {
     pub fn isOpen() bool {
         return false;
     }
-} else @import("framework/gpu/panel_window.zig");
-const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("framework/game/camera.zig") else struct {
+} else @import("gpu/panel_window.zig");
+const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("game/camera.zig") else struct {
     pub const Solved = struct {};
     pub fn activeNodeId() u32 {
         return 0;
@@ -109,23 +109,23 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
         return;
     }
 };
-const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("framework/world_loader.zig") else struct {
+const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("world_loader.zig") else struct {
     pub fn unmount(_: std.Io, _: u32) void {}
 };
-const latches = @import("framework/state/latches.zig");
+const latches = @import("state/latches.zig");
 // Pure string assembly (no GPU deps) — the ONE Effect shader assembler, shared
 // with the no-V8 material path (framework/gpu/effects.renderShaderToTexture).
-const effect_assemble = @import("framework/gpu/effect_assemble.zig");
+const effect_assemble = @import("gpu/effect_assemble.zig");
 const animations = if (HEADLESS) struct {
     pub fn clearAll() void {}
     pub fn tickAll(_: anytype) void {}
-} else @import("framework/gpu/animations.zig");
+} else @import("gpu/animations.zig");
 const paintable = if (HEADLESS) struct {
     pub fn destroy(_: anytype) void {}
     pub fn ensure(_: anytype, _: anytype, _: anytype, _: anytype) bool {
         return false;
     }
-} else @import("framework/gpu/paintable.zig");
+} else @import("gpu/paintable.zig");
 const windows = if (HEADLESS) struct {
     pub const WindowKind = enum { window, notification };
     const Slot = opaque {};
@@ -140,10 +140,10 @@ const windows = if (HEADLESS) struct {
     pub fn setJsDispatchFn(_: anytype, _: anytype) void {}
     pub fn setRoot(_: anytype) void {}
     pub fn tickIndependent() void {}
-} else @import("framework/primitive/windows.zig");
-const ipc = @import("framework/net/ipc.zig");
-const prepared_input = @import("framework/state/prepared_input.zig");
-const v8_runtime = @import("framework/v8_runtime.zig");
+} else @import("primitive/windows.zig");
+const ipc = @import("net/ipc.zig");
+const prepared_input = @import("state/prepared_input.zig");
+const v8_runtime = @import("v8_runtime.zig");
 const v8_bindings_core = if (HEADLESS) struct {
     pub fn contentStoreGet(_: anytype) ?[]const u8 {
         return null;
@@ -151,9 +151,9 @@ const v8_bindings_core = if (HEADLESS) struct {
     pub fn contentStoreTake(_: anytype) ?[]u8 {
         return null;
     }
-} else @import("framework/v8_bindings_core.zig");
-const v8_bindings_reconciler = @import("framework/v8_bindings_reconciler.zig");
-const host_tree = @import("framework/host_tree.zig");
+} else @import("v8_bindings_core.zig");
+const v8_bindings_reconciler = @import("v8_bindings_reconciler.zig");
+const host_tree = @import("host_tree.zig");
 // All V8 host-fn binding registration goes through this catalog. v8_app
 // (GPU shell) and v8_tui_app (TUI shell) consume the same INGREDIENTS
 // table — register/tickDrain is the same loop on both substrates. See
@@ -162,9 +162,9 @@ const host_tree = @import("framework/host_tree.zig");
 // v8_bindings_reconciler are imported above for direct calls
 // (contentStoreGet, drainPending, etc.) that don't go through the
 // catalog; everything else lives behind `ingredients`.
-const ingredients = @import("framework/v8_ingredients.zig");
-const event_bus = @import("framework/diag/event_bus.zig");
-const diag_log = @import("framework/diag/log.zig");
+const ingredients = @import("v8_ingredients.zig");
+const event_bus = @import("diag/event_bus.zig");
+const diag_log = @import("diag/log.zig");
 
 // ── Headless shell imports ──────────────────────────────────────────
 // Used only by runHeadless() when HEADLESS=true (mirrors v8_tui_app's
@@ -173,10 +173,10 @@ const diag_log = @import("framework/diag/log.zig");
 // primitive/windows.zig; gate it on has_window the same way the
 // catalog gates `core` + `window` on has_gpu.
 const v8 = @import("v8");
-const cli_bindings = @import("framework/v8_bindings_cli.zig");
-const worker_bindings = @import("framework/assistant/worker_bindings.zig");
+const cli_bindings = @import("v8_bindings_cli.zig");
+const worker_bindings = @import("assistant/worker_bindings.zig");
 const host_window = if (@hasDecl(build_options, "has_window") and build_options.has_window)
-    @import("framework/v8_bindings_host_window.zig")
+    @import("v8_bindings_host_window.zig")
 else
     struct {
         pub fn register() void {}
@@ -193,20 +193,16 @@ pub const std_options: std.Options = .{
     .logFn = event_bus.fromStdLog,
 };
 
-const fs_mod = @import("framework/fs/fs.zig");
-const localstore = @import("framework/storage/localstore.zig");
+const fs_mod = @import("fs/fs.zig");
+const localstore = @import("storage/localstore.zig");
 
-// Per-cart bundle. Default path is `bundle-<app-name>.js` (relative to
-// v8_app.zig) so that two parallel ships don't race on a shared bundle.js.
-// When -Dbundle-path=<abs> is passed (rjit-driven builds where the user's
-// cart lives outside the SDK install), @embedFile uses that absolute path
-// instead — letting the bundle sit in CART_ROOT while build.zig and
-// v8_app.zig live in RJIT_HOME.
-const BUNDLE_FILE_NAME = if (@hasDecl(build_options, "bundle_path") and build_options.bundle_path.len > 0)
-    build_options.bundle_path
-else
-    std.fmt.comptimePrint("bundle-{s}.js", .{build_options.app_name});
-const BUNDLE_BYTES = @embedFile(BUNDLE_FILE_NAME);
+// Per-cart bundle, embedded via the "cart_bundle" module build.zig maps to
+// -Dbundle-path (default: bundle-<app-name>.js at the repo root, so two
+// parallel ships don't race on a shared bundle.js; rjit-driven builds map
+// CART_ROOT's own path). A module name is the only @embedFile form that can
+// reach the bundle from here — v8_app.zig lives in framework/, and path
+// embeds (absolute included) can't leave the module root.
+const BUNDLE_BYTES = @embedFile("cart_bundle");
 
 // Window title = the build's -Dapp-name (set by scripts/ship). Falls back to
 // "reactjit" for plain `zig build app` invocations that don't pass a name.
@@ -293,7 +289,7 @@ const DEV_BUNDLE_PATH = if (@hasDecl(build_options, "dev_bundle_path")) build_op
 var g_dev_bundle_buf: []u8 = &.{};
 var g_last_bundle_mtime: i128 = 0;
 var g_mtime_poll_counter: u32 = 0;
-const dev_reload_policy = @import("framework/dev_reload_policy.zig");
+const dev_reload_policy = @import("dev_reload_policy.zig");
 var g_dev_reload = dev_reload_policy.Controller{};
 var g_pending_push_tab: ?usize = null;
 var g_dev_reload_revision: u64 = 0;
@@ -315,7 +311,7 @@ pub fn devReloadRevision() u64 {
     return if (DEV_MODE) g_dev_reload_revision else 0;
 }
 
-const dev_ipc = @import("framework/diag/dev_ipc.zig");
+const dev_ipc = @import("diag/dev_ipc.zig");
 var g_dev_ipc = dev_ipc.Server.init(std.heap.page_allocator, DEV_BUILD_ID);
 
 /// A dev-mode tab. Each tab has a human-readable name (cart name) and a

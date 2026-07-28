@@ -205,7 +205,7 @@ function buildDevHost(rjitHome: string, cartRoot: string, binName: string, subst
     '-p',
     `${rjitHome}/zig-out`,
     `-Dapp-name=${binName}`,
-    '-Dapp-source=v8_app.zig',
+    '-Dapp-source=framework/v8_app.zig',
     `-Dbundle-path=${bundlePath}`,
     `-Ddev-build-id=${fingerprint.hash}`,
     ...devFlags,

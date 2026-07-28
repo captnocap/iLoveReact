@@ -10,12 +10,12 @@
 //! no node, no bun — just V8 and Zig.
 
 const std = @import("std");
-const v8rt = @import("framework/v8_runtime.zig");
-const HostContext = @import("framework/host_context.zig");
-const cli_bindings = @import("framework/v8_bindings_cli.zig");
-const fs_bindings = @import("framework/v8_bindings_fs.zig");
-const sqlite_bindings = @import("framework/v8_bindings_sqlite.zig");
-const localstore_bindings = @import("framework/v8_bindings_localstore.zig");
+const v8rt = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
+const cli_bindings = @import("v8_bindings_cli.zig");
+const fs_bindings = @import("v8_bindings_fs.zig");
+const sqlite_bindings = @import("v8_bindings_sqlite.zig");
+const localstore_bindings = @import("v8_bindings_localstore.zig");
 
 pub fn main(init: std.process.Init) !void {
     const host = HostContext.fromInit(init);

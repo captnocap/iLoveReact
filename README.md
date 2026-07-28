@@ -200,11 +200,9 @@ deps/                 zig-v8, wgpu_native_zig, vello_ffi, libfvad,
 vendor/               react, react-reconciler, scheduler, typescript
 build.zig             Root build
 
-v8_app.zig            Cart host. Embeds V8 via deps/zig-v8.
-qjs_app.zig           Legacy QuickJS host. Maintenance-only, not on ship path.
-v8_hello.zig          Minimal V8 smoke-test host.
-v8_cli.zig            Backing host for tools/v8cli.
-claude_runner.zig     Standalone Zig CLI around framework/claude_sdk/.
+framework/v8_app.zig  Cart host (the app root source). Embeds V8 via deps/zig-v8.
+framework/v8_hello.zig  Minimal V8 smoke-test host.
+framework/v8_cli.zig  Backing host for tools/v8cli.
 
 tsz/                  FROZEN. Smith-era AOT-compile-.tsz-to-Zig experiment.
 love2d/               FROZEN. Reconciler-on-Lua predecessor stack.

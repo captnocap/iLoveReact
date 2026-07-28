@@ -40,13 +40,11 @@ const ZIG_PATH_DEPS = [
   'deps/sysroot',
 ];
 
+// The app roots (v8_app/v8_cli/v8_hello.zig) live in framework/ and ride the
+// SOURCE_TREES copy; only true root files belong here.
 const TOP_LEVEL_FILES = [
   'build.zig',
   'build.zig.zon',
-  'v8_app.zig',
-  'qjs_app.zig',
-  'v8_cli.zig',
-  'v8_hello.zig',
 ];
 
 const SKIP_FAMILIES = [

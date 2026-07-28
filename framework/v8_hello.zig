@@ -2,12 +2,12 @@
 //! Builds standalone — no SDL, no framework. Proves the V8 link+init works.
 
 const std = @import("std");
-const v8rt = @import("framework/v8_runtime.zig");
-const HostContext = @import("framework/host_context.zig");
+const v8rt = @import("v8_runtime.zig");
+const HostContext = @import("host_context.zig");
 const v8 = @import("v8");
 
 comptime {
-    _ = @import("framework/v8_bindings_fs.zig");
+    _ = @import("v8_bindings_fs.zig");
 }
 
 fn hostLog(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

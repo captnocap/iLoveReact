@@ -71,7 +71,7 @@ export async function run(argv: string[]): Promise<number> {
     '-p',
     `${cartRoot}/zig-out`,
     `-Dapp-name=${parsed.name}`,
-    '-Dapp-source=v8_app.zig',
+    '-Dapp-source=framework/v8_app.zig',
     `-Dbundle-path=${embedBundle}`,
     '-Duse-v8=true',
     ...customChromeFlag,

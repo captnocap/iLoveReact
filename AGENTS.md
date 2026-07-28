@@ -135,7 +135,7 @@ Before changing any of these carts, read its nested `AGENTS.md` when present.
 
 ## Runtime: V8 Default
 
-- **V8** (`v8_app.zig`) is the default. `tools/rjit ship` builds V8 through the TypeScript CLI pipeline. Embedded via zig-v8. ~6MB binary overhead. Fast.
+- **V8** (`framework/v8_app.zig`) is the default. `tools/rjit ship` builds V8 through the TypeScript CLI pipeline. Embedded via zig-v8. ~6MB binary overhead. Fast.
 - **QJS** (`qjs_app.zig`) is maintenance-only legacy. Hit a 2000ms-per-click ceiling. `--qjs` flag is opt-in legacy. Do not add new features to QJS bindings.
 - **JSRT** (`framework/lua/jsrt/`) is the LuaJIT evaluator alternate path. 12/13 targets passing. Interesting but not the default.
 

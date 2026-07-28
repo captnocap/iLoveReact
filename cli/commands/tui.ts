@@ -117,7 +117,7 @@ function buildTuiBinary(rjitHome: string, cartRoot: string, name: string, bundle
     '-p',
     `${rjitHome}/zig-out`,
     `-Dapp-name=${name}`,
-    '-Dapp-source=v8_app.zig',
+    '-Dapp-source=framework/v8_app.zig',
     `-Dbundle-path=${bundlePath}`,
     ...legacyTuiFlags(),
     '-Dhas-gpu=false',

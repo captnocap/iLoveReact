@@ -192,7 +192,7 @@ fi
 OPT_FLAG="-Doptimize=ReleaseFast"
 
 echo "[ship] compiling native binary..."
-APP_SOURCE="v8_app.zig"
+APP_SOURCE="framework/v8_app.zig"
 V8_FLAG="-Duse-v8=true"
 
 # Cart-declared capabilities (cart/<name>/cart.json). The runtime reads

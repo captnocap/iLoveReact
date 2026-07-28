@@ -240,7 +240,7 @@ if [[ "$needs_build" -eq 1 ]]; then
     if [[ "$CART_ROOT" != "$RJIT_HOME" ]]; then
         export ZIG_GLOBAL_CACHE_DIR="$RJIT_HOME/tools/zig/cache"
     fi
-    "$ZIG" build app -p "$RJIT_HOME/zig-out" -Dapp-name="reactjit-dev" -Dapp-source=v8_app.zig "${DEV_FEATURE_ARGS[@]}" -Doptimize=ReleaseFast
+    "$ZIG" build app -p "$RJIT_HOME/zig-out" -Dapp-name="reactjit-dev" -Dapp-source=framework/v8_app.zig "${DEV_FEATURE_ARGS[@]}" -Doptimize=ReleaseFast
     # Record the source hash this binary was built from. Use SRC_HASH captured
     # at the top (decision point), NOT a fresh hash here: if a source edit
     # raced in during the build, a re-hash now could match the new source while

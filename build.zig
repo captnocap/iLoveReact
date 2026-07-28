@@ -172,6 +172,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_mod.addOptions("build_options", options);
+    // The cart bundle rides in as a named module: v8_app.zig lives in
+    // framework/ and @embedFile can't reach a file outside the module root,
+    // absolute path or not — a module name resolves like @import and has no
+    // such fence. Lazy: app roots that never @embedFile("cart_bundle")
+    // (world_loader, headless tools) never open the file, so a missing
+    // default bundle can't fail their builds.
+    root_mod.addAnonymousImport("cart_bundle", .{
+        .root_source_file = .{ .cwd_relative = bundle_path },
+    });
     // wgpu — GPU rasterization pipeline. Pulled in by every framework/gpu/*
     // and framework/render/* module. When has_gpu=false AND has_window=false,
     // v8_app.zig stubs all those imports and the named "wgpu" module is

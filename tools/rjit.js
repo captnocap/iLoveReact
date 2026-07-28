@@ -5378,7 +5378,7 @@ cd "$1"
   # another worker editing tests) force a needless full dev rebuild on every
   # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
   find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
-  printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
+  printf '%s\\n' build.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
 } | LC_ALL=C sort -u | while IFS= read -r f; do
   [ -f "$f" ] || continue
   sha256sum "$f"
@@ -5630,7 +5630,7 @@ done
       "-p",
       `${rjitHome}/zig-out`,
       `-Dapp-name=${binName}`,
-      "-Dapp-source=v8_app.zig",
+      "-Dapp-source=framework/v8_app.zig",
       `-Dbundle-path=${bundlePath}`,
       `-Ddev-build-id=${fingerprint.hash}`,
       ...devFlags,
@@ -6898,7 +6898,7 @@ ${digest.stderr || digest.stdout}`);
       "-p",
       `${rjitHome}/zig-out`,
       `-Dapp-name=${binName}`,
-      "-Dapp-source=v8_app.zig",
+      "-Dapp-source=framework/v8_app.zig",
       `-Dbundle-path=${bundlePath}`,
       `-Ddev-bundle-path=${bundlePath}`,
       `-Ddev-socket-path=${socket}`,
@@ -8052,11 +8052,7 @@ ${IMPORTS_MARKER}`).replace(
   ];
   var TOP_LEVEL_FILES = [
     "build.zig",
-    "build.zig.zon",
-    "v8_app.zig",
-    "qjs_app.zig",
-    "v8_cli.zig",
-    "v8_hello.zig"
+    "build.zig.zon"
   ];
   var SKIP_FAMILIES = [
     /^libc\.so\./,
@@ -8493,7 +8489,7 @@ ${IMPORTS_MARKER}`).replace(
       "-p",
       `${cartRoot}/zig-out`,
       `-Dapp-name=${parsed.name}`,
-      "-Dapp-source=v8_app.zig",
+      "-Dapp-source=framework/v8_app.zig",
       `-Dbundle-path=${embedBundle}`,
       "-Duse-v8=true",
       ...customChromeFlag,
@@ -9221,7 +9217,7 @@ __ARCHIVE__
       "-p",
       `${rjitHome}/zig-out`,
       `-Dapp-name=${name}`,
-      "-Dapp-source=v8_app.zig",
+      "-Dapp-source=framework/v8_app.zig",
       `-Dbundle-path=${bundlePath}`,
       ...legacyTuiFlags(),
       "-Dhas-gpu=false",

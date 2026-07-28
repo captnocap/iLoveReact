@@ -219,7 +219,7 @@ function buildGdevHost(
     '-p',
     `${rjitHome}/zig-out`,
     `-Dapp-name=${binName}`,
-    '-Dapp-source=v8_app.zig',
+    '-Dapp-source=framework/v8_app.zig',
     `-Dbundle-path=${bundlePath}`,
     `-Ddev-bundle-path=${bundlePath}`,
     `-Ddev-socket-path=${socket}`,
