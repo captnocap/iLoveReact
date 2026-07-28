@@ -16,21 +16,20 @@
 // header tag, describe tool mechanics ("free (under cursor)", "click the map
 // to place"), or hold filler values ("material slot", "plain (no
 // capabilities)") are cut, not dimmed.
+//
+// STALE-CLOSURE LAW (req_3449): a control here must never bake the piece id or
+// a value into its onPress — the renderer registers handlers at commit time and
+// re-registers only when CLEAN (visual) props change, so the Copy verb (whose
+// look never changes) kept acting on the first-ever selected piece. Every
+// handler therefore carries only a selection-relative INTENT ('step x by +1',
+// 'copy the selection', 'bind role front'); AppFrame resolves the actual piece
+// from live state at click time (world/pieceFieldStep.ts owns the step math).
 import { Row } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
-import {
-  PIECE_MODULE_METERS,
-  PIECE_SCALE_LIMITS,
-  pieceFloorOf,
-  pieceKindOf,
-  pieceScaleOf,
-  type MaterialRef,
-  type PlacedPiece,
-} from '../world/pieces';
-import { WORLD_PIECE_EDIT_LIMITS } from '../world/pieceEditCommand';
-import { METERS_PER_LEVEL } from '../world/isoStage';
+import { pieceFloorOf, pieceKindOf, pieceScaleOf, type MaterialRef, type PlacedPiece } from '../world/pieces';
+import type { PieceStepField } from '../world/pieceFieldStep';
 import { pieceSlotEntries } from '../world/pieceSlots';
 import { authoredPieceFor, isAuthoredPiece } from '../world/authoredRegistry';
 import { authoredMeshBounds } from '../world/authoredMesh';
@@ -42,41 +41,37 @@ function floorLabel(floor: number): string {
   return floor === 0 ? 'Ground' : floor > 0 ? `Floor ${floor}` : `Sub ${-floor}`;
 }
 
-/** Instance-edit handlers threaded from AppFrame — every control below lands in
- *  the world transaction commands (move/rotate/spin/delete), so panel edits get
- *  the identical undo, replacement policy, and live-world push as viewport ones. */
+/** Selection-relative instance-edit intents, resolved against LIVE state in
+ *  AppFrame (never against this render's snapshot — req_3449). Every intent
+ *  lands in the world transaction commands, so panel edits share undo, the
+ *  replacement policy, and the live-world push with viewport edits. */
 export type PieceEditHandlers = {
-  onMovePiece: (id: string, destination: PlacedPiece) => void;
-  onRotatePiece: (id: string, quarterTurns: -1 | 1) => void;
-  onSpinPiece: (id: string, spinDegPerSec: number) => void;
-  onDeletePiece: (id: string) => void;
-  onDuplicatePiece: (id: string) => void;
+  /** one [−]/[+] press on a placement field of the selected piece. */
+  onStepField: (field: PieceStepField, direction: -1 | 1) => void;
+  /** quarter-turn the selected grid/edge piece (footprint yaw is 90°-quantised). */
+  onRotateSelected: (quarterTurns: -1 | 1) => void;
+  onCopySelected: () => void;
+  onDeleteSelected: () => void;
   onOpenPieceModel: (pkgId: string) => void;
 };
 
 // One numeric field on the fixed control grid — the same [−] value [+] geometry
-// as OverrideField, minus the inherit/override semantics (a placement is always
-// a real authored value, never a kind default).
+// as OverrideField. Display-only value; the press reports (field, direction)
+// and the live piece supplies the step base at click time.
 function StepRow(props: {
   label: string;
-  value: number;
-  step: number;
-  min?: number;
-  max?: number;
-  fmt: (v: number) => string;
+  field: PieceStepField;
+  display: string;
   tip: string;
-  onSet: (v: number) => void;
+  onStep: (field: PieceStepField, direction: -1 | 1) => void;
 }) {
-  const lo = props.min ?? -Infinity;
-  const hi = props.max ?? Infinity;
-  const clamp = (v: number) => Math.max(lo, Math.min(hi, Math.round(v * 100) / 100));
   return (
     <C.HW_ReadRow>
       <C.HW_FormLabel>{props.label}</C.HW_FormLabel>
       <C.HW_Spacer />
-      <C.HW_OvBtn tooltip={props.tip} onPress={() => props.onSet(clamp(props.value - props.step))}><C.HW_OvBtnText>−</C.HW_OvBtnText></C.HW_OvBtn>
-      <C.HW_OvVal>{props.fmt(props.value)}</C.HW_OvVal>
-      <C.HW_OvBtn tooltip={props.tip} onPress={() => props.onSet(clamp(props.value + props.step))}><C.HW_OvBtnText>+</C.HW_OvBtnText></C.HW_OvBtn>
+      <C.HW_OvBtn tooltip={props.tip} onPress={() => props.onStep(props.field, -1)}><C.HW_OvBtnText>−</C.HW_OvBtnText></C.HW_OvBtn>
+      <C.HW_OvVal>{props.display}</C.HW_OvVal>
+      <C.HW_OvBtn tooltip={props.tip} onPress={() => props.onStep(props.field, 1)}><C.HW_OvBtnText>+</C.HW_OvBtnText></C.HW_OvBtn>
       <C.HW_OvResetIdle />
     </C.HW_ReadRow>
   );
@@ -90,10 +85,7 @@ function PlacementSection(props: { sel: PlacedPiece; edit: PieceEditHandlers }) 
   const kind = pieceKindOf(sel.pieceId);
   const isProp = kind === 'prop';
   const authored = isAuthoredPiece(sel.pieceId);
-  const floor = pieceFloorOf(sel);
-  const posStep = isProp ? 0.1 : PIECE_MODULE_METERS;
-  const maxHeight = WORLD_PIECE_EDIT_LIMITS.maxFloor * METERS_PER_LEVEL;
-  const move = (patch: Partial<PlacedPiece>) => props.edit.onMovePiece(sel.id, { ...sel, ...patch });
+  const onStep = props.edit.onStepField;
   const meters = (v: number) => `${v.toFixed(1)}m`;
   return (
     <C.HW_Section>
@@ -101,65 +93,31 @@ function PlacementSection(props: { sel: PlacedPiece; edit: PieceEditHandlers }) 
         <C.HW_AccentBar />
         <C.HW_SectionTitle>PLACEMENT</C.HW_SectionTitle>
       </C.HW_SectionHead>
-      <StepRow label="x" value={sel.x} step={posStep} fmt={meters} tip={isProp ? 'nudge 0.1m along x' : 'step one 3m cell along x'} onSet={(v) => move({ x: v })} />
-      <StepRow label="z" value={sel.z} step={posStep} fmt={meters} tip={isProp ? 'nudge 0.1m along z' : 'step one 3m cell along z'} onSet={(v) => move({ z: v })} />
+      <StepRow label="x" field="x" display={meters(sel.x)} tip={isProp ? 'nudge 0.1m along x' : 'step one 3m cell along x'} onStep={onStep} />
+      <StepRow label="z" field="z" display={meters(sel.z)} tip={isProp ? 'nudge 0.1m along z' : 'step one 3m cell along z'} onStep={onStep} />
       {isProp ? (
-        <StepRow label="height" value={sel.y} step={0.1} min={0} max={maxHeight} fmt={meters} tip="raise/lower the prop off its base" onSet={(v) => move({ y: v })} />
+        <StepRow label="height" field="height" display={meters(sel.y)} tip="raise/lower the prop off its base" onStep={onStep} />
       ) : null}
-      <StepRow
-        label="floor"
-        value={floor}
-        step={1}
-        min={0}
-        max={WORLD_PIECE_EDIT_LIMITS.maxFloor}
-        fmt={floorLabel}
-        tip="move the piece one storey (3m) up/down"
-        onSet={(v) => move({ floor: v, y: sel.y + (v - floor) * METERS_PER_LEVEL })}
-      />
+      <StepRow label="floor" field="floor" display={floorLabel(pieceFloorOf(sel))} tip="move the piece one storey (3m) up/down" onStep={onStep} />
       {isProp ? (
-        <StepRow
-          label="yaw"
-          value={sel.yawDegrees}
-          step={15}
-          fmt={(v) => `${Math.round(v)}°`}
-          tip="turn the prop 15° (free-placed props rotate freely)"
-          onSet={(v) => move({ yawDegrees: ((v % 360) + 360) % 360 })}
-        />
+        <StepRow label="yaw" field="yaw" display={`${Math.round(sel.yawDegrees)}°`} tip="turn the prop 15° (free-placed props rotate freely)" onStep={onStep} />
       ) : (
         // Grid/edge pieces turn in quarter steps only — their footprint identity
         // (the placement slot) is quantised to 90°, same as the R hotkey.
         <C.HW_ReadRow>
           <C.HW_FormLabel>yaw</C.HW_FormLabel>
           <C.HW_Spacer />
-          <C.HW_OvBtn tooltip="turn 90° counter-clockwise" onPress={() => props.edit.onRotatePiece(sel.id, -1)}><C.HW_OvBtnText>⟲</C.HW_OvBtnText></C.HW_OvBtn>
+          <C.HW_OvBtn tooltip="turn 90° counter-clockwise" onPress={() => props.edit.onRotateSelected(-1)}><C.HW_OvBtnText>⟲</C.HW_OvBtnText></C.HW_OvBtn>
           <C.HW_OvVal>{`${Math.round(sel.yawDegrees)}°`}</C.HW_OvVal>
-          <C.HW_OvBtn tooltip="turn 90° clockwise" onPress={() => props.edit.onRotatePiece(sel.id, 1)}><C.HW_OvBtnText>⟳</C.HW_OvBtnText></C.HW_OvBtn>
+          <C.HW_OvBtn tooltip="turn 90° clockwise" onPress={() => props.edit.onRotateSelected(1)}><C.HW_OvBtnText>⟳</C.HW_OvBtnText></C.HW_OvBtn>
           <C.HW_OvResetIdle />
         </C.HW_ReadRow>
       )}
       {isProp ? (
-        <StepRow
-          label="scale"
-          value={pieceScaleOf(sel)}
-          step={0.1}
-          min={PIECE_SCALE_LIMITS.min}
-          max={PIECE_SCALE_LIMITS.max}
-          fmt={(v) => `×${v.toFixed(2)}`}
-          tip="uniform instance scale — same as the viewport gizmo's scale handle"
-          onSet={(v) => move({ scale: v })}
-        />
+        <StepRow label="scale" field="scale" display={`×${pieceScaleOf(sel).toFixed(2)}`} tip="uniform instance scale — same as the viewport gizmo's scale handle" onStep={onStep} />
       ) : null}
       {authored ? (
-        <StepRow
-          label="spin"
-          value={sel.spinDegPerSec ?? 0}
-          step={15}
-          min={-180}
-          max={180}
-          fmt={(v) => `${Math.round(v)}°/s`}
-          tip="continuous visual spin — 0 is static, negative turns counter-clockwise"
-          onSet={(v) => props.edit.onSpinPiece(sel.id, v)}
-        />
+        <StepRow label="spin" field="spin" display={`${Math.round(sel.spinDegPerSec ?? 0)}°/s`} tip="continuous visual spin — 0 is static, negative turns counter-clockwise" onStep={onStep} />
       ) : null}
     </C.HW_Section>
   );
@@ -167,14 +125,16 @@ function PlacementSection(props: { sel: PlacedPiece; edit: PieceEditHandlers }) 
 
 // The focused instance's verb row (control law: rows carry VERBS) — the same
 // duplicate/delete the hotkeys and quick menu run, reachable from the panel.
-function InstanceVerbs(props: { sel: PlacedPiece; edit: PieceEditHandlers }) {
+// Argless intents on purpose: these verbs' looks never change, so their
+// handlers register once and must stay correct for every future selection.
+function InstanceVerbs(props: { edit: PieceEditHandlers }) {
   return (
     <Row style={{ alignItems: 'center', gap: 6, width: '100%' }}>
-      <C.HW_VerbFixed tooltip="copy this piece — arms Place with its exact look" onPress={() => props.edit.onDuplicatePiece(props.sel.id)}>
+      <C.HW_VerbFixed tooltip="copy this piece — arms Place with its exact look" onPress={props.edit.onCopySelected}>
         <Icon name="Copy" size={12} color={accentFor('textDim')} />
         <C.HW_VerbText>Copy</C.HW_VerbText>
       </C.HW_VerbFixed>
-      <C.HW_VerbFixed tooltip="delete this placed piece (undoable)" onPress={() => props.edit.onDeletePiece(props.sel.id)}>
+      <C.HW_VerbFixed tooltip="delete this placed piece (undoable)" onPress={props.edit.onDeleteSelected}>
         <Icon name="Trash2" size={12} color={accentFor('warning')} />
         <C.HW_VerbText>Delete</C.HW_VerbText>
       </C.HW_VerbFixed>
@@ -186,8 +146,10 @@ function InstanceVerbs(props: { sel: PlacedPiece; edit: PieceEditHandlers }) {
 export default function PieceBody(props: {
   armedPieceId: string | null;
   selected: PlacedPiece | null;
-  onAssignSlot: (id: string, role: string) => void;
-  onClearSlot: (id: string, role: string) => void;
+  /** bind the browser's active material to this role ON THE SELECTED piece —
+   *  the piece resolves from live state at click time (req_3449). */
+  onAssignSlot: (role: string) => void;
+  onClearSlot: (role: string) => void;
   /** resolve a slot's MaterialRef to a display label + swatch colour. */
   resolveMaterial: (ref: MaterialRef) => { label: string; color: string };
   /** the content browser's currently selected material (the one a slot click binds). */
@@ -195,7 +157,7 @@ export default function PieceBody(props: {
   /** open the left panel on the Materials library — where the selection is made
    *  (req_3446: the panel must POINT AT the picker, not just name its result). */
   onBrowseMaterials: () => void;
-  /** the instance-edit handler bundle (move/rotate/spin/delete/duplicate/open). */
+  /** the selection-relative instance-edit intents (step/rotate/copy/delete/open). */
   edit: PieceEditHandlers;
   /** resolve a model PACKAGE id to its current (session-renamed) display name. */
   modelNameFor: (pkgId: string) => string | null;
@@ -235,7 +197,7 @@ export default function PieceBody(props: {
           <C.HW_Spacer />
           <C.HW_Swatch style={{ backgroundColor: authored.hex }} />
         </C.HW_ObjectHead>
-        {isInstance && sel ? <InstanceVerbs sel={sel} edit={props.edit} /> : null}
+        {isInstance && sel ? <InstanceVerbs edit={props.edit} /> : null}
         <C.HW_Section>
           <C.HW_SectionHead>
             <C.HW_AccentBar />
@@ -291,7 +253,7 @@ export default function PieceBody(props: {
         <C.HW_Spacer />
         <C.HW_Swatch style={{ backgroundColor: rowHex(row) }} />
       </C.HW_ObjectHead>
-      {isInstance && sel ? <InstanceVerbs sel={sel} edit={props.edit} /> : null}
+      {isInstance && sel ? <InstanceVerbs edit={props.edit} /> : null}
       <C.HW_MetricRow>
         <C.HW_Metric>
           <C.HW_MetricValue>{row.material}</C.HW_MetricValue>
@@ -340,12 +302,12 @@ export default function PieceBody(props: {
             return (
               <C.HW_ReadRow key={role.id}>
                 <C.HW_FormLabel>{role.label}</C.HW_FormLabel>
-                <C.HW_SelectControl tooltip={`bind ${props.activeMaterial.name} to the ${role.label} slot`} onPress={() => props.onAssignSlot(sel.id, role.id)}>
+                <C.HW_SelectControl tooltip={`bind ${props.activeMaterial.name} to the ${role.label} slot`} onPress={() => props.onAssignSlot(role.id)}>
                   <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: mat ? mat.color : '#0a1118' }} />
                   <C.HW_ReadValue>{mat ? mat.label : `+ ${props.activeMaterial.name}`}</C.HW_ReadValue>
                 </C.HW_SelectControl>
                 {ref
-                  ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(sel.id, role.id)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>
+                  ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(role.id)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>
                   : <C.HW_OvResetIdle />}
               </C.HW_ReadRow>
             );

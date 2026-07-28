@@ -47,6 +47,7 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import { pieceKindOf, PIECE_MODULE_METERS, PIECE_SPIN_RATE_DEG_PER_SEC } from '../world/pieces';
+import { stepPieceField } from '../world/pieceFieldStep';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, authoredPieceFor, paintSkinIdOf, preferredAuthoredPaletteId, skinnedPieceId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { listPaintSkins } from '../data/paintVariants';
@@ -5889,29 +5890,55 @@ export default function AppFrame() {
             onSetModelLights={setModelLights}
             onModelTextureMembershipChanged={markModelTextureMembershipDirty}
             onOpenLiveMaterialPicker={(modelId, slotIndex) => setLiveMaterialPicker({ modelId, slotIndex })}
-            onAssignSlot={assignPieceSlot}
-            onClearSlot={clearPieceSlot}
+            // PIECE FOCUS material slots (req_3449): the panel names only the
+            // ROLE — the target piece is the live selection at click time.
+            onAssignSlot={(role) => { const id = stateRef.current.selectedPieceId; if (id) assignPieceSlot(id, role); }}
+            onClearSlot={(role) => { const id = stateRef.current.selectedPieceId; if (id) clearPieceSlot(id, role); }}
             onBrowseMaterials={browseMaterials}
-            // PIECE FOCUS instance editing (req_3442): every panel field writes
-            // through the same transaction commands as the viewport and hotkeys,
-            // so panel edits share their undo, replacement policy, and live push.
+            // PIECE FOCUS instance editing (req_3442, stale-proofed req_3449):
+            // Pressable handlers register once and re-register only on clean-prop
+            // diffs, so these intents carry NO piece identity — every click
+            // resolves the selected piece from stateRef, then lands in the same
+            // transaction commands as the viewport and hotkeys.
             pieceEdit={{
-              onMovePiece: movePiece,
-              onRotatePiece: (id, quarterTurns) => invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
-                documentId: stateRef.current.activeMapStem,
-                pieceId: id,
-                quarterTurns,
-              }, 'focus-panel'),
-              onSpinPiece: (id, spinDegPerSec) => invokeApplicationCommand(WORLD_PIECE_SPIN_COMMAND_ID, {
-                documentId: stateRef.current.activeMapStem,
-                pieceId: id,
-                spinDegPerSec,
-              }, 'focus-panel'),
-              onDeletePiece: (id) => invokeApplicationCommand(WORLD_PIECE_DELETE_COMMAND_ID, {
-                documentId: stateRef.current.activeMapStem,
-                pieceId: id,
-              }, 'focus-panel'),
-              onDuplicatePiece: copyPiece,
+              onStepField: (field, direction) => {
+                const current = stateRef.current;
+                const piece = current.worldPieces.find((p) => p.id === current.selectedPieceId);
+                if (!piece) return;
+                const step = stepPieceField(piece, field, direction);
+                if (!step) return;
+                if (step.kind === 'spin') {
+                  if (step.rate === (piece.spinDegPerSec ?? 0)) return;
+                  invokeApplicationCommand(WORLD_PIECE_SPIN_COMMAND_ID, {
+                    documentId: current.activeMapStem,
+                    pieceId: piece.id,
+                    spinDegPerSec: step.rate,
+                  }, 'focus-panel');
+                } else {
+                  movePiece(piece.id, step.destination);
+                }
+              },
+              onRotateSelected: (quarterTurns) => {
+                const current = stateRef.current;
+                if (!current.selectedPieceId) return;
+                invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
+                  documentId: current.activeMapStem,
+                  pieceId: current.selectedPieceId,
+                  quarterTurns,
+                }, 'focus-panel');
+              },
+              onCopySelected: () => {
+                const id = stateRef.current.selectedPieceId;
+                if (id) copyPiece(id);
+              },
+              onDeleteSelected: () => {
+                const current = stateRef.current;
+                if (!current.selectedPieceId) return;
+                invokeApplicationCommand(WORLD_PIECE_DELETE_COMMAND_ID, {
+                  documentId: current.activeMapStem,
+                  pieceId: current.selectedPieceId,
+                }, 'focus-panel');
+              },
               onOpenPieceModel: (pkgId) => {
                 const pkg = effectiveModelPackage(pkgId, stateRef.current.modelOverrides, stateRef.current.modelDupes);
                 if (pkg) openModelDocument(pkg);

@@ -248,9 +248,11 @@ export default function Inspector(props: {
   onModelTextureMembershipChanged: (pkgId: string, message: string, dirty?: boolean) => void;
   /** Open the app-root live-material thumbnail picker for a texture slot (req_3401). */
   onOpenLiveMaterialPicker: (pkgId: string, slotIndex: number) => void;
-  // World-piece focus-panel material edits.
-  onAssignSlot: (id: string, role: string) => void;
-  onClearSlot: (id: string, role: string) => void;
+  // World-piece focus-panel material edits — SELECTION-relative (req_3449):
+  // the target piece resolves from live state at click time, never from a
+  // render snapshot (the Pressable stale-closure law).
+  onAssignSlot: (role: string) => void;
+  onClearSlot: (role: string) => void;
   // World-piece instance edits (req_3442): the PIECE FOCUS placement/yaw/scale/
   // spin fields + verb row write through the same transaction commands as the
   // viewport gizmo and hotkeys — never a parallel mutation path.
