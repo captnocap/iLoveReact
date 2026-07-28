@@ -1909,7 +1909,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // ranges yet (first part op on an unparted mesh — the cart still authors the seed).
     appendPart: (positions, faceGroups, color, expectedPartCount) => {
       const r = meshAppendGroup(positions, faceGroups, expectedPartCount);
-      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) {
+        // The host's refusal reason previously died in the terminal log while the
+        // UI said only "could not add mesh" (req_3461). Read the host's own range
+        // truth and say EXACTLY what disagrees, where the user is looking.
+        const hostRanges = meshPartRangesRead();
+        setError(hostRanges && hostRanges.length !== expectedPartCount
+          ? `Add Part refused — the outliner lists ${expectedPartCount} part(s) but the live mesh carries ${hostRanges.length} range(s). Save + reopen the model to rebuild both from disk.`
+          : 'Add Part refused by the live mesh — save + reopen the model, then try again.');
+        return null;
+      }
       // The appended part's authored grouping IS cart-side here — keep the authored
       // face count true through Add Part (req_2618 G: the SHAPE strip must not keep
       // reading the load-time count after the model grew).

@@ -3488,7 +3488,9 @@ export default function AppFrame() {
       ? withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, part.color, parts.length))
       : null;
     if (!range) {
-      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
+      // The viewer's error line carries the host's SPECIFIC refusal (part-count
+      // mismatch etc., req_3461) — the status echoes so neither surface is silent.
+      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Add Part refused by the live mesh — see the viewer message; save + reopen rebuilds the outliner and mesh from disk.' }));
       return;
     }
     const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
