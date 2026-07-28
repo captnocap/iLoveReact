@@ -31,6 +31,10 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'uv-edit', label: 'edit UV', commandId: 'model.uv.edit' },
   { kind: 'uv-texture-import', label: 'import UV texture', commandId: 'model.uv.import-texture' },
   { kind: 'uv-texture-reload', label: 'reload UV texture', commandId: 'model.uv.reload-texture' },
+  // Not an authoring verb: the host's commit roll call (req_3484) proved a
+  // part-ledger fault after the preceding action. beforeParts/afterParts carry
+  // the declared counts around any host self-heal; the shell resyncs on receipt.
+  { kind: 'integrity-alert', label: 'integrity alert', commandId: 'model.mesh.integrity-alert' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

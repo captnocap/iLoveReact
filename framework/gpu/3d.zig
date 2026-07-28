@@ -3761,6 +3761,13 @@ pub fn meshActionDocumentSet(token: u32) void {
 }
 
 pub fn meshActionDrain(out: []MeshActionEvent) usize {
+    // Run any armed roll call now — every op's door has long returned, so the
+    // tables are settled, and the alert lands in this same drain right behind
+    // the op event that caused it.
+    if (g_integrity_pending) {
+        g_integrity_pending = false;
+        meshIntegrityRollCall(g_integrity_label_buf[0..g_integrity_label_len]);
+    }
     const n = @min(out.len, g_mesh_action_len);
     if (n == 0) return 0;
     @memcpy(out[0..n], g_mesh_action_events[0..n]);
@@ -3912,6 +3919,95 @@ fn journalSnapshotForNewAction(label: []const u8) ?JournalEntry {
     return journalSnapshotCurrentInner(label, true);
 }
 
+/// The commit roll call (req_3484). Every accepted topology transaction ARMS the
+/// check at journalCommit/journalStep; it RUNS at the next meshActionDrain — a
+/// point strictly after the op's door returned, because several ops (loop cut's
+/// renormalize) settle their range tables after committing the journal snapshot,
+/// and a commit-time check reads that half-settled state as a fault. Deferred, the
+/// invariants are still proven at the op that first breaks them — never N edits
+/// later at a refusal gate (req_3461's Add refusal, req_3465's atlas gate) — and
+/// the alert enqueues before the same drain hands the cart its events. The check
+/// generalizes the req_3032 overlap tripwire: overlapping spans renormalize
+/// through that exact repair, and declared ranges owning no face of the FULL
+/// displayed+hidden partition compact away (the compact-emptied-ranges
+/// precedent). Every other fault is reported WITHOUT a guess — a heal that
+/// invents ownership would launder corruption into a valid-looking partition.
+/// Loud on both surfaces: the terminal line carries the numbers, and the
+/// integrity_alert action event tells the cart to resync its mirrors and say so
+/// where the user is looking.
+var g_integrity_pending: bool = false;
+var g_integrity_label_buf: [48]u8 = undefined;
+var g_integrity_label_len: usize = 0;
+
+fn armIntegrityRollCall(label: []const u8) void {
+    const n = @min(label.len, g_integrity_label_buf.len);
+    @memcpy(g_integrity_label_buf[0..n], label[0..n]);
+    g_integrity_label_len = n;
+    g_integrity_pending = true;
+}
+
+fn meshIntegrityRollCall(context: []const u8) void {
+    const displayed_faces: usize = @intCast(g_edit_count / 3);
+    var total_faces: usize = displayed_faces;
+    for (g_hidden_groups.items) |hidden| total_faces += hidden.groups.len;
+    const declared_before = currentPartCount();
+    if (total_faces == 0 and declared_before == 0) return;
+    const alloc = std.heap.c_allocator;
+    const groups = alloc.alloc(u32, total_faces) catch return;
+    defer alloc.free(groups);
+    var face: u32 = 0;
+    while (face < displayed_faces) : (face += 1) groups[face] = model_source.faceGroupOf(face);
+    var write: usize = displayed_faces;
+    for (g_hidden_groups.items) |hidden| {
+        @memcpy(groups[write .. write + hidden.groups.len], hidden.groups);
+        write += hidden.groups.len;
+    }
+    const check = struct {
+        fn run(a: std.mem.Allocator, rows: []const u32) ?mesh_journal_log.StateSummary {
+            return mesh_journal_log.analyze(a, .{
+                .vertex_count = @intCast(rows.len * 3),
+                .groups = rows,
+                .part_ranges = model_source.partRanges(),
+            }) catch null;
+        }
+    };
+    var summary = check.run(alloc, groups) orelse return;
+    var faulted = false;
+    var healed = false;
+    if (!summary.ranges_valid) {
+        faulted = true;
+        healed = ensureDisjointPartRanges(context);
+        summary.deinit(alloc);
+        summary = check.run(alloc, groups) orelse return;
+    }
+    defer summary.deinit(alloc);
+    if (summary.ranges_valid and summary.unowned_faces == 0 and summary.multiply_owned_faces == 0) {
+        var empty_declarations: usize = 0;
+        for (summary.parts) |part| {
+            if (part.faces == 0) empty_declarations += 1;
+        }
+        if (empty_declarations > 0) {
+            faulted = true;
+            if (model_source.partRanges()) |ranges| {
+                if (mesh_journal_log.compactOccupiedPartRanges(alloc, groups, ranges)) |compacted| {
+                    model_source.setPartRanges(compacted);
+                    alloc.free(compacted);
+                    healed = true;
+                } else |_| {}
+            }
+        }
+    } else faulted = true;
+    if (!faulted) return;
+    const declared_after = currentPartCount();
+    std.log.err(
+        "[mesh-integrity] roll call after '{s}': ranges_valid={} unowned={d} multiply_owned={d} declared {d}->{d} healed={} (req_3484)",
+        .{ context, summary.ranges_valid, summary.unowned_faces, summary.multiply_owned_faces, declared_before, declared_after, healed },
+    );
+    g_mesh_action_seq +%= 1;
+    if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
+    enqueueMeshAction(g_mesh_action_seq, .integrity_alert, .applied, g_edit_count, g_edit_count, declared_before, declared_after);
+}
+
 /// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
 /// bounds the stack. Sets *snap to null so the op's discard defer no-ops.
 fn journalCommit(snap: *?JournalEntry) void {
@@ -3933,6 +4029,7 @@ fn journalCommit(snap: *?JournalEntry) void {
             currentPartCount(),
         );
     }
+    armIntegrityRollCall(e.label);
     journalFreeStack(&g_journal_redo);
     g_journal_undo.append(jalloc, e) catch {
         var x = e;
@@ -3977,6 +4074,7 @@ fn journalDropLast() void {
 
 /// Forget all history — a fresh model load is a new document.
 pub fn meshJournalClear() void {
+    g_integrity_pending = false; // an armed check must not audit the NEXT document
     journalFreeStack(&g_journal_undo);
     journalFreeStack(&g_journal_redo);
     journalDiscard(&g_gizmo_snap);
@@ -4323,6 +4421,7 @@ fn journalStep(from_undo: bool) bool {
         var c = current;
         journalFreeEntry(&c);
     };
+    armIntegrityRollCall(if (from_undo) "undo" else "redo");
     return true;
 }
 

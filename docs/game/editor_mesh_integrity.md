@@ -1,0 +1,74 @@
+# Editor Mesh Integrity — the commit roll call
+
+Active surface: `cart/editor/`. Last verified: 2026-07-28.
+
+## User contract — req_3484
+
+Three weeks of "random chain of events corrupts the model, restart heals it"
+(52 fix commits on the mesh/paint surface) share one structure: the mesh doc
+has many derived copies whose consistency was hand-written per operation,
+verified nowhere, with silent refusal as the only error policy — so the bug
+site and the crash site were always operations apart. The user's ruling: stop
+patching chains, fix the layer. Slice 1 is the roll call: **every accepted
+topology transaction proves the part-ledger invariants at commit, heals what
+it can prove, and reports loudly on both surfaces.** No corruption survives
+the op that caused it silently.
+
+## Host half — `framework/gpu/3d.zig` `meshIntegrityRollCall`
+
+ARMED at `journalCommit` (every accepted topology op, including gizmo commits
+and metadata checkpoints) and after a successful `journalStep` (undo/redo);
+RUNS at the next `meshActionDrain`. The deferral is load-bearing: several ops
+(loop cut's renormalize) settle their range tables AFTER committing the
+journal snapshot, so a commit-time check reads half-settled state as a fault
+(proven headlessly — the commit-time draft flagged `unowned=16/32` mid-loop-cut
+on a healthy chain). At drain time every door has returned, and the alert
+enqueues into the same drain, right behind the op event that caused it.
+`meshJournalClear` disarms so a pending check never audits the next document.
+
+The check gathers the FULL partition — displayed faces plus every
+host-stashed hidden part's groups — and runs `mesh_journal_log.analyze`
+(the same prover the right-click journal diagnostics use: `rangesValid`,
+`unownedFaces`, `multiplyOwnedFaces`).
+
+Heal ladder (only what can be proven, never a guess):
+
+- overlapping/inverted spans → the req_3032 repair (`ensureDisjointPartRanges`
+  → renormalize);
+- declared ranges owning no face of the full partition (a merge/delete
+  remainder) → `mesh_journal_log.compactOccupiedPartRanges` — the
+  compact-emptied-ranges precedent, hidden-part safe because the gather
+  includes stashed groups;
+- anything else (unowned faces, multiply-owned faces, group-table mismatch)
+  → reported intact. A heal that invents ownership would launder corruption
+  into a valid-looking partition.
+
+On any fault it logs `[mesh-integrity] roll call after '<op>' …` with the
+numbers AND enqueues an `integrity_alert` action event (`ActionKind` ordinal
+26, `model.mesh.integrity-alert`) carrying declared part counts before/after
+the heal. The alert rides the same ring as authoring events, so it drains in
+order right behind the op that caused it.
+
+## Cart half — resync + say so where the user is looking
+
+- `cart/editor/model/nativeMeshEvents.ts` — decodes the new `integrity-alert`
+  row (bridge ordinal 26; the `.test.ts` pins it).
+- `cart/editor/stage/ModelView.tsx` — `ModelToolApi.resyncFromHost()`:
+  re-adopts the host session key if the mirror drifted, re-reads selection
+  (`adoptHostSelection`) and part ranges (`resyncPartRanges`) from host truth.
+- `cart/editor/shell/AppFrame.tsx` — the action drain loop special-cases
+  `integrity-alert`: calls `resyncFromHost` and sets a visible
+  `⚠ mesh integrity: …` status naming what was healed. The event still boards
+  the editor bus like every native action.
+
+## Why commit-time, not gate-time
+
+The pre-existing guards (`ownsExactPartPartition` before an append, the
+range-stamp refusal, the save refusal) detect drift but refuse silently, ops
+after the cause. The roll call moves detection to the op that first breaks
+the invariant, so the terminal line and the status bar name the guilty
+operation — the "4 angles to chase" collapse into one line of output.
+
+Slices 2–3 (single commit epilogue for all derived-state fan-out; stable
+document handle so JS never adopts keys) are specced in the req_3469–3484
+thread and remain open.

@@ -185,6 +185,10 @@ export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
   scaleBy: (factor: number) => boolean;
+  // The cart half of the integrity roll call (req_3484): re-read key, selection,
+  // and part ranges from host truth after the host reports (or heals) a ledger
+  // fault. Returns false when the host carries no ranges to mirror.
+  resyncFromHost: () => boolean;
   paint: () => void;
   pathPlane: () => void;
   pathEdges: () => void;
@@ -1872,6 +1876,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     selMode: chooseSelMode,
     gizmo: chooseGizmoTool,
     scaleBy: meshScaleBy,
+    resyncFromHost: () => {
+      const session = readModelSession();
+      if (session?.key) setModel((m) => (m && m.key !== session.key ? { ...m, key: session.key, count: session.count } : m));
+      adoptHostSelection(selInfo);
+      return resyncPartRanges();
+    },
     paint: togglePaint,
     pathPlane: togglePathPlane,
     pathEdges: togglePathEdges,

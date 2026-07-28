@@ -41,6 +41,10 @@ pub const ActionKind = enum(u8) {
     uv_edit,
     uv_texture_import,
     uv_texture_reload,
+    // Not an authoring verb: the commit roll call (req_3484) proved a part-ledger
+    // fault after the preceding action. before_parts/after_parts carry declared
+    // counts around any host self-heal; the cart resyncs its mirrors on receipt.
+    integrity_alert,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -208,6 +212,7 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .uv_edit => "model.uv.edit",
         .uv_texture_import => "model.uv.import-texture",
         .uv_texture_reload => "model.uv.reload-texture",
+        .integrity_alert => "model.mesh.integrity-alert",
     };
 }
 
@@ -244,6 +249,7 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .uv_edit,
         .uv_texture_import,
         .uv_texture_reload,
+        .integrity_alert,
         => false,
     };
 }

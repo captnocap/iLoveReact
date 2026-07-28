@@ -4780,6 +4780,20 @@ export default function AppFrame() {
       for (const report of nativeMeshActionDrain()) {
         const mapped = modelIdByMeshTokenRef.current.get(report.documentToken);
         const modelId = mapped || `native-model-token:${report.documentToken}`;
+        if (report.kind === 'integrity-alert') {
+          // The host's commit roll call proved a part-ledger fault right after the
+          // op that caused it (req_3484). It healed what it could prove; the shell's
+          // half is re-reading every mirror from host truth and saying so HERE —
+          // never a terminal-only whisper that surfaces as a refused Add ten ops later.
+          const healed = report.beforeParts !== report.afterParts;
+          modelToolApiRef.current?.resyncFromHost?.();
+          setState((prev) => ({
+            ...prev,
+            status: healed
+              ? `⚠ mesh integrity: the last edit left ${report.beforeParts} declared part(s) against the live faces — host healed to ${report.afterParts}; mirrors resynced`
+              : '⚠ mesh integrity: part-ledger fault detected after the last edit — mirrors resynced from host truth; if the outliner disagrees, save + reopen the model',
+          }));
+        }
         dispatchNativeMeshAction(report, modelId);
       }
     };
