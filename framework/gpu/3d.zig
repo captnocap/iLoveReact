@@ -3261,6 +3261,13 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     // while the UV contract is stale, which is how Add Cube could turn a painted
     // model grey.  Existing corners now keep their exact UVs/raster; fresh corners
     // point at one neutral gutter texel until the explicit Remake Atlas decision.
+    //
+    // A NEVER-PAINTED model has no atlas raster or layout at all (atlas creation is
+    // the user's explicit Paint-entry choice), so demanding the placeholder there
+    // refused EVERY Add Part on an unpainted multi-edit model with nothing but a
+    // terminal log (req_3465). With no atlas there is nothing to preserve: take the
+    // plain install and re-assert the captured face colours after it.
+    const has_atlas = model_paint.atlas() != null;
     var exact_colors: ?[]u8 = null;
     defer if (exact_colors) |colors| std.heap.c_allocator.free(colors);
     if (cur_count > 0) {
@@ -3277,21 +3284,40 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
             colors[f * 4 + 2] = model_paint.DEFAULT_FACE[2];
             colors[f * 4 + 3] = model_paint.DEFAULT_FACE[3];
         }
-        const placeholder_uv = model_paint.reserveNeutralPlaceholderUv() orelse return fail;
-        var vertex: u32 = cur_count;
-        while (vertex < cur_count + new_count) : (vertex += 1) {
-            owned[vertex * 8 + 6] = placeholder_uv[0];
-            owned[vertex * 8 + 7] = placeholder_uv[1];
+        if (has_atlas) {
+            const placeholder_uv = model_paint.reserveNeutralPlaceholderUv() orelse return fail;
+            var vertex: u32 = cur_count;
+            while (vertex < cur_count + new_count) : (vertex += 1) {
+                owned[vertex * 8 + 6] = placeholder_uv[0];
+                owned[vertex * 8 + 7] = placeholder_uv[1];
+            }
+        } else if (g_hidden_groups.items.len > 0) {
+            // Hidden-part stashes are only proven through the atlas-preserving
+            // path; fail closed rather than risk orphaning them on a plain install.
+            return fail;
         }
     }
 
+    // The plain install may not carry the part-range table through; capture it now
+    // so the range growth below never derives from a post-replace reset.
+    const prior_ranges: ?[]u32 = if (model_source.partRanges()) |pr|
+        (std.heap.c_allocator.dupe(u32, pr) catch return fail)
+    else
+        null;
+    defer if (prior_ranges) |pr| std.heap.c_allocator.free(pr);
+
     // Appending onto an emptied document is the one fresh paint domain: there is no
     // atlas to preserve, so install normally and derive its first layout.
-    const ok = if (cur_count > 0)
+    const ok = if (cur_count > 0 and has_atlas)
         replaceActiveEditMeshPreservingAtlas(owned, cur_count + new_count, groups.items, exact_colors.?)
+    else if (cur_count > 0)
+        replaceActiveEditMesh(owned, cur_count + new_count)
     else
         replaceActiveEditMesh(owned, new_count);
     if (ok) {
+        if (cur_count > 0 and !has_atlas) {
+            if (exact_colors) |colors| _ = applyExactFaceColors(colors, (cur_count + new_count) / 3);
+        }
         model_source.setFaceGroups(groups.items);
         const materials = std.heap.c_allocator.alloc(u32, cur_faces + new_faces) catch return fail;
         defer std.heap.c_allocator.free(materials);
@@ -3299,9 +3325,11 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         @memset(materials[cur_faces..], indexed_edit_mesh.NO_MATERIAL);
         model_source.setFaceMaterials(materials);
         // The appended part joins the host's part-range truth (req_2644): grow the
-        // preserved ranges with its fresh pair so __mesh_part_ranges reads back the
-        // full partition without waiting for a cart push.
-        if (model_source.partRanges()) |pr| {
+        // PRE-REPLACE captured ranges with its fresh pair so __mesh_part_ranges reads
+        // back the full partition without waiting for a cart push. The capture matters
+        // on the plain-install (no-atlas) route, whose replace resets the table — a
+        // post-replace read would shrink the partition to just the new pair (req_3465).
+        if (prior_ranges) |pr| {
             var ranges: std.ArrayListUnmanaged(u32) = .empty;
             defer ranges.deinit(std.heap.c_allocator);
             var appended = true;
