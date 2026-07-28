@@ -233,6 +233,19 @@ pub fn writeColor(displayed_face: i32, r: u8, g: u8, b: u8) void {
     cols[sf * 4 + 2] = b;
 }
 
+/// writeColor's read twin: the durable source colour behind a DISPLAYED face,
+/// through the same displayed→source mapping. Null when no map/table is resident
+/// (callers fall back to their own default). Colour captures use this while the
+/// paint layout is STALE — the frozen atlas must not be sampled then (req_3468).
+pub fn colorOf(displayed_face: u32) ?[4]u8 {
+    const map = g_face_to_source orelse return null;
+    const cols = g_source_colors orelse return null;
+    if (@as(usize, displayed_face) >= map.len) return null;
+    const sf = map[displayed_face];
+    if (@as(usize, sf) * 4 + 3 >= cols.len) return null;
+    return .{ cols[sf * 4 + 0], cols[sf * 4 + 1], cols[sf * 4 + 2], cols[sf * 4 + 3] };
+}
+
 /// Copy changed DISPLAYED face positions back onto their mapped source faces. Full-res
 /// display is exact; decimated display follows the same representative-face rule paint
 /// already uses at low quality.

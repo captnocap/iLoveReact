@@ -949,8 +949,18 @@ fn appendQuadSplit(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: 
 /// A face's TRUE colour: the saved pre-tint base when the face is selection-tinted,
 /// else the live atlas centroid texel. Every colour snapshot/carry reads through this
 /// so the selection orange never bakes into carried or journaled colours.
+///
+/// While the paint layout is STALE the atlas is FROZEN against an older
+/// tessellation: reading its texels through the current face table can land in
+/// unowned padding and launder (0,0,0) into every colour capture — the spreading
+/// black bars (req_3468: each op inherited the zeros, so "it gets worse with
+/// every edit"). The durable source row is the only trustworthy colour then.
 fn trueFaceColor(f: u32) [4]u8 {
     if (mesh_edit.savedFaceBaseColor(f)) |c| return c;
+    if (g_paint_layout_stale) {
+        if (model_source.colorOf(f)) |c| return c;
+        return model_paint.DEFAULT_FACE;
+    }
     return model_paint.faceColor(f) orelse model_paint.DEFAULT_FACE;
 }
 
