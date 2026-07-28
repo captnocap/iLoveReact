@@ -15,7 +15,7 @@ import {
 } from '../../../runtime/game/map';
 import { exists } from '../../../runtime/hooks/fs';
 import {
-  EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf,
+  groundFormulaFor, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf,
   bindingsToFloats, floatsToBindings, type TileMaterialBinding,
 } from '../render3d/groundFormula';
 import { FLORA_BRUSH_DEFINITIONS, FLORA_DENSITY_TUNING, FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
@@ -164,8 +164,17 @@ export type GeneratedMapPaintingStream = {
   packChunk(index: number): Float32Array;
 };
 
+/** Compose + push the ground look for a binding table. The formula carries
+ *  ONLY the kind defaults plus these bindings' materials (req_3473); the host
+ *  hash-gates, so a re-push with an unchanged material set never recompiles. */
+function pushGroundLook(zones: readonly MapZoneDef[], bindings: readonly TileMaterialBinding[]): void {
+  mapSetGroundLook(groundFormulaFor(bindings), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
+}
+
 function configureMapContent(zones: readonly MapZoneDef[]): void {
-  mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
+  // The host table is the truth at this point — the RMAP just loaded (or reset
+  // to empty for a fresh seed) — so the composed set matches the real map.
+  pushGroundLook(zones, floatsToBindings(mapGetTileBindings()));
   mapRoadSetKinds(ROAD_KIND_INDICES);
   mapSetFloraSpecs(FLORA_SPECS);
 }
@@ -334,12 +343,14 @@ export function ensureMapSeeded(
 
 /** The one place chrome state reaches the host — AppFrame calls this on every
  *  mapPaint patch. Arming loads the saved painting (fresh seed chunk when none)
- *  and pushes the ground look (STATIC formula + palettes) + road kind mapping;
- *  a changed binding list re-pushes the table (pure data — the 10-15s per-pick
- *  shader rebuild is gone, req_2693); a changed zone list re-pushes just the
- *  zone palette; the armed tool always re-pushes. Returns a state patch when
- *  the HOST is the truth-holder (the loaded map's binding table on arm) —
- *  callers merge it into the next state. */
+ *  and pushes the ground look (per-used-set formula + palettes, req_3473) +
+ *  road kind mapping; a changed binding list re-pushes the table AND
+ *  recomposes the look (variant/palette moves stay pure data; only a NEW
+ *  material moves the formula source, and that small module compiles
+ *  sub-second — vs req_2693's 10-15s full-catalog stall); a changed zone list
+ *  re-pushes just the zone palette; the armed tool always re-pushes. Returns a
+ *  state patch when the HOST is the truth-holder (the loaded map's binding
+ *  table on arm) — callers merge it into the next state. */
 export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): Partial<MapPaintState> | null {
   if (!mapHostLive() || !next.active) return null;
   if (!prev.active) {
@@ -351,10 +362,19 @@ export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): 
       pushMapTool({ ...next, tileBindings: hostBindings });
       return { tileBindings: hostBindings };
     }
-    // A fresh map (or a chrome that already mirrors) — push the chrome's table.
-    if (next.tileBindings.length > 0) mapSetTileBindings(bindingsToFloats(next.tileBindings), false);
+    // A fresh map (or a chrome that already mirrors) — push the chrome's table,
+    // and recompose the ground look in case it names materials beyond the
+    // host-table set configureMapContent composed from.
+    if (next.tileBindings.length > 0) {
+      mapSetTileBindings(bindingsToFloats(next.tileBindings), false);
+      pushGroundLook(next.zones, next.tileBindings);
+    }
   } else if (prev.tileBindings !== next.tileBindings) {
+    // A pick changed the table. Variant/palette moves are pure data; a pick
+    // that introduces a NEW material recomposes the formula, and the host's
+    // hash gate recompiles the small module sub-second (req_3473).
     mapSetTileBindings(bindingsToFloats(next.tileBindings), true);
+    pushGroundLook(next.zones, next.tileBindings);
   } else if (prev.zones !== next.zones) {
     mapSetZonePalette(zonePaletteOf(next.zones));
   }

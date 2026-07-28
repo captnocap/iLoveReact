@@ -25,7 +25,7 @@ import { createTextureSlotFromSelection } from '../model/modelTextureSlotAuthori
 import { MODEL_LIGHT_TUNING, newModelLight, normalizeModelLights } from '../model/modelLights';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import ShaderThumb from '../shell/ShaderThumb';
-import { FILL_SHADER } from '../render3d/shaders/index';
+import { fillShaderFor } from '../render3d/shaders/compose';
 import { materialThumbData } from '../shell/MaterialPickerPopover';
 
 const host = globalThis as any;
@@ -248,7 +248,7 @@ export default function RigSection(props: {
             <C.HW_FormLabel>live</C.HW_FormLabel>
             {liveMaterialOf(slot) ? (
               <ShaderThumb
-                shader={FILL_SHADER}
+                shader={fillShaderFor([liveMaterialOf(slot)!.fn])}
                 data={materialThumbData(liveMaterialOf(slot)!.materialId, liveMaterialOf(slot)!.boardIndex, slot.liveMaterial!.variant ?? 0)}
                 size={22}
               />

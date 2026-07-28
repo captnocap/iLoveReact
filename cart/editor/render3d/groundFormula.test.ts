@@ -1,4 +1,6 @@
-import { EDITOR_GROUND_FORMULA, GROUND_STREAM_TUNING, tileBindingFor } from './groundFormula';
+import { EDITOR_GROUND_FORMULA, GROUND_STREAM_TUNING, groundFormulaFor, tileBindingFor } from './groundFormula';
+import { fillShaderFor } from './shaders/compose';
+import { FILL_SHADER } from './shaders/index';
 import { MATERIALS } from './shaders/_generated/registry';
 
 let passed = 0, failed = 0;
@@ -56,6 +58,40 @@ test('committed roads render as continuous curve ribbons over the gameplay raste
   assert(EDITOR_GROUND_FORMULA.includes('semanticKind =='), 'junction/crosswalk raster policy was discarded');
   assert(EDITOR_GROUND_FORMULA.includes('let crosswalkAlongM = select(p.y, p.x, (roadMark & 1) != 0)'), 'crosswalk phase no longer follows its semantic leg axis');
   assert(EDITOR_GROUND_FORMULA.includes('bestRoadAlong, crosswalkAlongM'), 'crosswalk phase can switch to the nearest crossing ribbon');
+});
+
+test('the default ground module is tree-shaken, not the 410-material catalog', () => {
+  assert(
+    EDITOR_GROUND_FORMULA.length < 200_000,
+    `default ground formula is ${EDITOR_GROUND_FORMULA.length}B — full-catalog composition is back (req_3473: ~90s boot compile)`,
+  );
+  for (const fn of ['road', 'water', 'grass', 'sand', 'mud', 'sidewalk', 'concrete', 'asphalt']) {
+    assert(EDITOR_GROUND_FORMULA.includes(`fn ${fn}(uv: vec2f`), `default material body '${fn}' missing from the composed module`);
+  }
+  assert(EDITOR_GROUND_FORMULA.includes('fn fill_pick('), 'composed fill_pick chain missing');
+  assert(EDITOR_GROUND_FORMULA.includes('fn quality_pass('), 'helpers prelude missing from the composed module');
+});
+
+test('a picked binding folds its material into the recomposed ground module', () => {
+  const lava = MATERIALS.find((material) => material.fn === 'lava_plasma');
+  assert(!!lava, 'lava_plasma disappeared from the generated registry');
+  assert(!EDITOR_GROUND_FORMULA.includes('fn lava_plasma('), 'default module already carries lava_plasma — the shaken-set probe is meaningless');
+  const withPick = groundFormulaFor([{ fn: 'lava_plasma', variant: 0 }]);
+  assert(withPick.includes('fn lava_plasma('), 'picked material body missing from the recomposed formula');
+  assert(
+    withPick.includes(`material == ${lava!.materialId} && i32(board + 0.5) == ${lava!.boardIndex}`),
+    'picked material is not dispatchable through the composed fill_pick chain',
+  );
+});
+
+test('per-material fill modules are small and keep the FILL_SHADER contract', () => {
+  const one = fillShaderFor(['water']);
+  assert(one.length < 200_000, `single-material fill module is ${one.length}B — tree-shake broke (req_3473)`);
+  assert(one.includes('fn fill_render('), 'FILL_MAIN fs_main missing — the D[] contract broke');
+  assert(one.includes('fn fill_grid('), 'packed thumbnail grid envelope missing');
+  assert(one.includes('fn water(uv: vec2f'), 'wanted material body missing');
+  assert(fillShaderFor(['water']) === one, 'per-set modules are not memoized');
+  assert(fillShaderFor(['no_such_material_fn']) === FILL_SHADER, 'unknown fn must fall back to the full catalog, not break rendering');
 });
 
 test('Road catalog variants name the yellow, white, and plain authored takes', () => {

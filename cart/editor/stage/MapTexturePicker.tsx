@@ -6,7 +6,9 @@
 // tile-binding table and arms its index — every stroke stamps that binding
 // per CELL, so neighboring sidewalks can wear different materials and already-
 // painted tiles never change under you. The table is pure DATA host-side
-// (mapSetTileBindings); no pick ever rebuilds the ground shader. "default"
+// (mapSetTileBindings); a pick that introduces a NEW material also recomposes
+// the per-used-set ground formula (req_3473 — a tens-of-KB module the host
+// recompiles sub-second; variant/palette moves stay pure data). "default"
 // re-arms the kind's curated look (binding -1).
 //
 // req_3401: the grid itself is the shared MaterialPickerPopover (one picker

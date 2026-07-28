@@ -29,57 +29,19 @@
 // Materials whose look depends on the [0,1] uv frame (edge vignettes, framed
 // compositions) will read differently here — pick surface materials that are
 // happy continuous (the lava_plasma four-wave sine is the reference case).
-import { FILL_FUNCS } from './shaders/_generated/dispatch';
+import { splitFillDispatch, resolveMaterialFns, D_DECL } from './shaders/compose';
 import { MATERIALS, type RegistryMaterial } from './shaders/_generated/registry';
 import type { ModelLiveMaterial } from '../data/types';
 
-// Drift guards, same discipline as groundFormula.composedFillFuncs: each edit
-// asserts its pattern so a build-shaders.ts output change fails LOUD.
-const D_DECL = '@group(0) @binding(1) var<storage, read> D: array<f32>;';
-// Every catalog material is generated with this exact signature (build-shaders
-// validates fn name == @material and the fill contract fixes the params).
-const MAT_FN_SIG = /fn ([A-Za-z0-9_]+)\(uv: vec2f, px: vec2f, variant: f32, seed: f32\) -> vec3f \{/g;
-
-/** FILL_FUNCS split once: the helpers prelude (helpers.wgsl + mat_pal reader —
- *  everything before the first material fn) and each material fn's body,
- *  brace-matched. fill_pick has a different signature, so it never lands in
- *  the map — regions dispatch through their own small if-chain instead. */
-let cachedSplit: { prelude: string; bodies: Map<string, string> } | null = null;
+/** The shared compose.ts split (req_3473), with the region harness's D
+ *  substitution applied — the region pipeline declares D itself
+ *  (framework/gpu/shaders.zig). */
 function splitDispatch(): { prelude: string; bodies: Map<string, string> } {
-  if (cachedSplit) return cachedSplit;
-  if (!FILL_FUNCS.includes(D_DECL)) {
-    throw new Error('[regionFormula] dispatch drift: D declaration not found — re-check build-shaders.ts output');
-  }
-  const bodies = new Map<string, string>();
-  let firstAt = -1;
-  MAT_FN_SIG.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = MAT_FN_SIG.exec(FILL_FUNCS))) {
-    const start = match.index;
-    if (firstAt < 0) firstAt = start;
-    let depth = 0;
-    let at = start + match[0].length - 1; // the opening brace
-    for (; at < FILL_FUNCS.length; at += 1) {
-      const ch = FILL_FUNCS[at];
-      if (ch === '{') depth += 1;
-      else if (ch === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          at += 1;
-          break;
-        }
-      }
-    }
-    bodies.set(match[1]!, FILL_FUNCS.slice(start, at));
-    MAT_FN_SIG.lastIndex = at;
-  }
-  if (firstAt < 0 || bodies.size === 0) {
-    throw new Error('[regionFormula] dispatch drift: no material fn bodies found — re-check build-shaders.ts output');
-  }
-  const prelude = FILL_FUNCS.slice(0, firstAt)
-    .replace(D_DECL, '// (D is declared by the region harness — framework/gpu/shaders.zig)');
-  cachedSplit = { prelude, bodies };
-  return cachedSplit;
+  const { prelude, bodies } = splitFillDispatch();
+  return {
+    prelude: prelude.replace(D_DECL, '// (D is declared by the region harness — framework/gpu/shaders.zig)'),
+    bodies,
+  };
 }
 
 const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
@@ -95,24 +57,10 @@ export function buildRegionFormula(fns: readonly string[]): string | null {
   const { prelude, bodies } = splitDispatch();
   const wanted = [...new Set(fns)].sort();
   if (wanted.length === 0) return null;
-  const need: string[] = [];
-  const queue = [...wanted];
-  while (queue.length > 0) {
-    const fn = queue.shift()!;
-    if (need.includes(fn)) continue;
-    const body = bodies.get(fn);
-    if (!body) {
-      console.error(`[regionFormula] material fn '${fn}' not found in the generated dispatch — region formula not composed`);
-      return null;
-    }
-    need.push(fn);
-    // Pull in material fns this body calls (compositions layering surfaces).
-    for (const other of bodies.keys()) {
-      if (other !== fn && !need.includes(other) && !queue.includes(other) && new RegExp(`\\b${other}\\s*\\(`).test(body)) {
-        queue.push(other);
-      }
-    }
-  }
+  // Shared transitive resolution (compose.ts): wanted fns plus every material
+  // fn their bodies call (compositions layering surfaces).
+  const need = resolveMaterialFns(wanted);
+  if (!need) return null;
   const dispatch = wanted
     .map((fn) => {
       const mat = MATERIAL_BY_FN.get(fn);

@@ -31,7 +31,9 @@ export const FILL_GRID_DATA = Object.freeze({
 // envelope. The branch is uniform for the whole Effect. Normal material views
 // pay one comparison; Paint's browser avoids compiling a second 409-material
 // shader and routes all standard thumbnails through one Effect instance.
-const FILL_MAIN_SRC = `
+// Exported for compose.ts, which appends this same fs_main to PER-SET modules
+// (req_3473) so shaken shaders keep the exact FILL_SHADER D[] contract.
+export const FILL_MAIN_SRC = `
 fn fill_render(data_base: u32, input_uv: vec2f, pixel_size: vec2f) -> vec4f {
   mat_data_base = data_base;
   let material = i32(D[data_base] + 0.5);

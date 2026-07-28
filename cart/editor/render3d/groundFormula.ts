@@ -9,12 +9,19 @@
 //
 // req_2494: the ground no longer dispatches to four hand-written fills (which
 // made sand and mud literally identical and water render as concrete). The
-// FULL material catalog (render3d/shaders — the same materials the paint
-// ink and Color Studio use) composes into the formula, and each TILE KIND
-// carries a REBINDABLE (material, variant) binding: the defaults below give
-// every kind a distinct real material, and the paint bar's texture picker can
-// point any kind at any surface material. Rebinding regenerates this formula
-// and re-pushes the ground look — pure cart-side, no engine change.
+// material catalog (render3d/shaders — the same materials the paint ink and
+// Color Studio use) composes into the formula, and each TILE KIND carries a
+// REBINDABLE (material, variant) binding: the defaults below give every kind
+// a distinct real material, and the paint bar's texture picker can point any
+// kind at any surface material.
+//
+// req_3473: composition is PER-USED-SET, not per-catalog. The full 410-material
+// module was ~747 KB of WGSL and stalled every BOOT ~90s in naga + the driver
+// (the driver's disk cache absorbing repeats was luck, not contract). The
+// formula now carries the kind DEFAULTS plus the map's hand-picked binding
+// table (compose.ts, the req_3400 region pattern); a pick that introduces a
+// NEW material recomposes + re-pushes, and the host's hash gate recompiles a
+// tens-of-KB module sub-second. Variant/seed/palette changes remain pure data.
 //
 // D[] layout v4 (the engine's encodeGroundData contract): [0]cols [1]rows
 // [2]tilePal [3]floraPal [4]zonePal [5]bindCount, then tilePal×3 + floraPal×3
@@ -30,6 +37,7 @@
 // (WGSL: no unary +, no backticks in comments.)
 import { hexToRgb01 } from '@reactjit/runtime/paint';
 import { FILL_FUNCS } from './shaders/_generated/dispatch';
+import { splitFillDispatch, resolveMaterialFns, fillPickFor, D_DECL } from './shaders/compose';
 import { MATERIALS, type RegistryMaterial } from './shaders/_generated/registry';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
@@ -120,26 +128,33 @@ const SLAB_JOINT_FNS = new Set([
 
 // ── Composing the catalog into the heightfield harness ───────────────────────
 // The harness already binds the ground D stream at binding(1) and the generated
-// dispatch declares its own D for the fill contract — strip the declaration so
-// the composed module has ONE. mat_pal reads D[5..] as a palette section, which
-// in the GROUND stream is palette/cell data, so neutralize it to always return
-// the baked constants (per-kind recoloring of the painted ground is a later
-// slice; it would ride a dedicated section of the ground stream, not the fill
-// contract). Both edits assert their pattern so generator drift fails LOUD.
-const D_DECL = '@group(0) @binding(1) var<storage, read> D: array<f32>;';
+// dispatch declares its own D for the fill contract — strip the declaration
+// (compose.ts owns the D_DECL pattern) so the composed module has ONE. mat_pal
+// reads D[5..] as a palette section, which in the GROUND stream is palette/cell
+// data, so neutralize it to always return the baked constants (per-kind
+// recoloring of the painted ground is a later slice; it would ride a dedicated
+// section of the ground stream, not the fill contract). Both edits assert
+// their pattern so generator drift fails LOUD.
 // mat_pal is row-relative so the same generated functions can serve one fill
 // or Paint's packed thumbnail grid. Ground owns a different D stream entirely,
 // therefore its composition must neutralize the row-relative palette count.
 // Keep this exact drift guard paired with build-shaders.ts's generated line.
 const MAT_PAL_COUNT_LINE = 'let n = i32(D[mat_data_base + 5u] + 0.5);';
 
-function composedFillFuncs(): string {
-  if (!FILL_FUNCS.includes(D_DECL)) {
-    throw new Error('[groundFormula] dispatch drift: D declaration not found — re-check build-shaders.ts output');
-  }
-  if (!FILL_FUNCS.includes(MAT_PAL_COUNT_LINE)) {
+function composedFillFuncsFor(fns: readonly string[]): string {
+  const { prelude, bodies } = splitFillDispatch();
+  if (!prelude.includes(MAT_PAL_COUNT_LINE)) {
     throw new Error('[groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output');
   }
+  // Per-used-set composition (req_3473): the helpers prelude + just the wanted
+  // material bodies (plus their transitive material calls) + a small fill_pick
+  // chain. An unknown binding fn falls back to the FULL catalog — the console
+  // error from resolveMaterialFns names the drift while every ground look
+  // stays correct.
+  const resolved = resolveMaterialFns(fns);
+  const src = resolved
+    ? [prelude, ...resolved.map((fn) => bodies.get(fn)!), fillPickFor(resolved)].join('\n')
+    : FILL_FUNCS;
   // Catalog fills are authored for the EFFECT pipeline, whose uniform struct is
   // bound as `U` (U.time drives water waves, neon flicker, CRT scan …). The
   // ground pipeline binds the shared SceneUniforms as `S` and exposes the same
@@ -147,18 +162,31 @@ function composedFillFuncs(): string {
   // fill (water and grass are in the DEFAULTS) makes the whole composed module
   // fail WGSL compile ("no definition in scope for identifier: U") and ALL
   // painted ground goes invisible (req_2651).
-  return FILL_FUNCS.replace(D_DECL, '// (D is declared by the heightfield harness)')
+  return src.replace(D_DECL, '// (D is declared by the heightfield harness)')
     .replace(MAT_PAL_COUNT_LINE, 'let n = 0; // ground stream carries cells, not a fill palette — baked colors only')
     .replace(/\bU\.time\b/g, 'S.time');
 }
 
-/** Build the STATIC ground formula. The kind→material tables baked here are
- *  the curated DEFAULTS only — they never change at runtime, so this WGSL
- *  compiles exactly once per app run. Hand-picked looks arrive as DATA: the
- *  binding table + per-cell material indices in the D stream (layout v4),
- *  pushed via mapSetTileBindings — a pick used to regenerate this source and
- *  stall 10-15s in the driver compile (req_2693). */
-export function editorGroundFormula(): string {
+// Every material the BASE formula needs regardless of picks: the kind
+// defaults, the fallback, and the analytic ribbon's hardcoded road + sidewalk
+// surfaces (they render even when no kind default names them).
+const GROUND_BASE_FNS: readonly string[] = [
+  ...new Set([
+    ...Object.values(DEFAULT_BINDINGS).map((b) => b.fn),
+    FALLBACK_BINDING.fn,
+    'road',
+    'sidewalk',
+  ]),
+];
+
+/** Build the ground formula over the kind DEFAULTS plus the map's hand-picked
+ *  binding table (req_3473 — the module carries ONLY those materials). Picked
+ *  looks still arrive as DATA (the binding table + per-cell indices in the D
+ *  stream, layout v4, pushed via mapSetTileBindings); the formula only changes
+ *  when the SET of bound materials does, and the host's hash gate then
+ *  recompiles a tens-of-KB module sub-second (vs req_2693's 10-15s full-catalog
+ *  stall, and vs the ~90s per-boot wall the full catalog grew into). */
+export function editorGroundFormula(extraBindings: readonly TileMaterialBinding[] = []): string {
   const bindings = TILE_KINDS.map((k) => {
     const b = tileBindingFor(k);
     const mat = MATERIAL_BY_FN.get(b.fn);
@@ -189,7 +217,7 @@ export function editorGroundFormula(): string {
   const arr = (vals: number[], fixed: number) => vals.map((v) => v.toFixed(fixed)).join(', ');
 
   return `
-${composedFillFuncs()}
+${composedFillFuncsFor([...GROUND_BASE_FNS, ...extraBindings.map((b) => b.fn)])}
 fn hf_tile_mat(k: i32) -> i32 {
   var m = array<f32, ${n}>(${arr(bindings.map((b) => b.mat.materialId), 1)});
   return i32(m[clamp(k, 0, ${n - 1})]);
@@ -427,8 +455,22 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
 `;
 }
 
-/** THE ground formula — static for the whole run; material picks are data. */
+/** The defaults-only ground formula — what a map with an empty binding table
+ *  wears (and the drift-guard surface the tests probe). */
 export const EDITOR_GROUND_FORMULA = editorGroundFormula();
+
+/** The ground formula for a map's CURRENT binding table, memoized by material
+ *  set — re-pushing on every chrome patch is free, and the source (therefore
+ *  the host's compile gate) only moves when a pick introduces a new material. */
+const composedGroundFormulas = new Map<string, string>();
+export function groundFormulaFor(bindings: readonly TileMaterialBinding[]): string {
+  const key = [...new Set(bindings.map((b) => b.fn))].sort().join(',');
+  const hit = composedGroundFormulas.get(key);
+  if (hit) return hit;
+  const src = editorGroundFormula(bindings);
+  composedGroundFormulas.set(key, src);
+  return src;
+}
 
 function paletteOf(colors: readonly string[]): Float32Array {
   const out = new Float32Array(colors.length * 3);

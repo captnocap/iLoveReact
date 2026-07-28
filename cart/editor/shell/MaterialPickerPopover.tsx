@@ -13,7 +13,7 @@ import { useState } from 'react';
 import { Box, Row, Col, Text, Pressable } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import ShaderThumb from './ShaderThumb';
-import { FILL_SHADER } from '../render3d/shaders/index';
+import { fillShaderFor } from '../render3d/shaders/compose';
 import type { RegistryMaterial } from '../render3d/shaders/_generated/registry';
 
 const POP = '#17181b', LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', ACCENT = '#6ea8fe';
@@ -77,7 +77,7 @@ export default function MaterialPickerPopover(props: {
             return (
               <Pressable key={m.fn} tooltip={`${m.name} (${m.board})`} onPress={() => props.onPick(m.fn, on ? props.boundVariant : 0)}
                 style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
-                <ShaderThumb shader={FILL_SHADER} data={materialThumbData(m.materialId, m.boardIndex, on ? props.boundVariant : 0)} size={48} />
+                <ShaderThumb shader={fillShaderFor([m.fn])} data={materialThumbData(m.materialId, m.boardIndex, on ? props.boundVariant : 0)} size={48} />
               </Pressable>
             );
           })}

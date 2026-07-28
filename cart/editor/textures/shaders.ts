@@ -22,7 +22,7 @@
 //     hand-edit it here; add/remove a material by adding/removing its .wgsl
 //     file, then rerun build-shaders.ts.
 import { ROAD_TILE_SHADER } from '../render3d/roadTileFill';
-import { FILL_SHADER } from '../render3d/shaders/index';
+import { fillShaderFor } from '../render3d/shaders/compose';
 import { FILL_BOARDS as GENERATED_FILL_BOARDS, MATERIALS, type FillBoard, type FillMaterial, type MaterialSlot } from '../render3d/shaders/_generated/registry';
 import { packMissionData } from './missionCode';
 
@@ -61,6 +61,10 @@ export interface ShaderSpec {
   // material's WGSL uses, extracted by build-shaders.ts in mat_pal() index
   // order. Recolor by appending a palette to the data[] via withPalette().
   slots?: MaterialSlot[];
+  // Standard fill-board material fn behind this spec (req_3473). Present ⇒
+  // `shader` is the per-material composed module and the spec is batchable in
+  // Paint's browser grid (the batch composes its own per-page module).
+  fillFn?: string;
 }
 
 /** Append a palette section to a fill-material data[]: D[5] = slot count,
@@ -369,7 +373,10 @@ function fillSpec(b: FillBoard, materialId: number, m: FillMaterial): ShaderSpec
     label: m.name,
     group: textureCategory(m.slug),
     blurb: `${m.name} — three authored takes, seed + detail grade tunable.`,
-    shader: FILL_SHADER,
+    // Per-material composed module (req_3473) — mounting one preview compiles
+    // tens of KB in milliseconds instead of the 410-material catalog.
+    shader: fillShaderFor([m.fn]),
+    fillFn: m.fn,
     base: [
       { key: 'seed', label: 'Seed', default: defaultSeed, min: 0, max: FILL_SEED_MAX, step: 1, integer: true },
       {

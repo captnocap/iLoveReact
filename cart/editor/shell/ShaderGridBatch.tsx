@@ -3,7 +3,8 @@
 // batching changes render cost without changing density, tooltips, or clicks.
 import { memo } from 'react';
 import { Effect } from '../../../runtime/primitives';
-import { FILL_GRID_DATA, FILL_SHADER } from '../render3d/shaders/index';
+import { FILL_GRID_DATA } from '../render3d/shaders/index';
+import { fillShaderFor, fnForMaterialRow } from '../render3d/shaders/compose';
 
 export const SHADER_GRID_TUNING = Object.freeze({
   columns: 8,
@@ -83,10 +84,26 @@ export function sameShaderGridBatchProps(a: ShaderGridBatchProps, b: ShaderGridB
   return true;
 }
 
+/** The material fns behind a packed grid's rows — each cell offset points at a
+ *  [materialId, variant, seed, quality, board, …] row. The composed page module
+ *  (req_3473) carries exactly these, so paging compiles tens of KB per page
+ *  instead of the 410-material catalog once. */
+export function fnsForPackedGrid(data: readonly number[]): string[] {
+  const count = Math.max(0, Math.floor(data[FILL_GRID_DATA.cellCountIndex] ?? 0));
+  const fns: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const offset = data[FILL_GRID_DATA.offsetStartIndex + index] ?? -1;
+    if (offset < 0) continue;
+    const fn = fnForMaterialRow(data[offset] ?? -1, data[offset + 4] ?? -1);
+    if (fn) fns.push(fn);
+  }
+  return fns;
+}
+
 function ShaderGridBatch(props: ShaderGridBatchProps) {
   return (
     <Effect
-      shader={FILL_SHADER}
+      shader={fillShaderFor(fnsForPackedGrid(props.data))}
       data={props.data}
       style={{ position: 'absolute', left: 0, top: 0, width: props.width, height: props.height }}
     />

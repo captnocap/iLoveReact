@@ -42,12 +42,15 @@ un-friendly color picking component" — six named defects, each now a mechanism
    fresh-but-equal arrays from unrelated parent renders do not force re-capture.
    The cold capture/page path is batched too (`req_3333`): all generated fill
    cells pack their variable-length material rows behind an offset table and one
-   grid-routed Effect renders them. Its data envelope is handled by the canonical
-   `FILL_SHADER`, so an active single-material preview and the grid reuse one
-   compiled 409-material pipeline. Slot-keyed transparent Pressables preserve all
-   48 independent targets instead of remounting them on every page. Only recipes
-   with genuinely different WGSL use the per-cell fallback (built-in pages 2–8:
-   one Effect total; page 1: batch + Road; last page: batch + two special recipes).
+   grid-routed Effect renders them. Since `req_3473` the batch composes a
+   PER-PAGE module (`shaders/compose.ts` — the page's material fns + a small
+   `fill_pick` chain + the same `FILL_MAIN` envelope) instead of the canonical
+   409-material `FILL_SHADER`, whose single ~730 KB module cost every boot a
+   ~90 s render-thread compile; a page module is ~20-40 KB and compiles in
+   milliseconds. Slot-keyed transparent Pressables preserve all 48 independent
+   targets instead of remounting them on every page. Only recipes with genuinely
+   different WGSL use the per-cell fallback (built-in pages 2–8: one Effect
+   total; page 1: batch + Road; last page: batch + two special recipes).
 
 ## Mechanism map
 
@@ -71,9 +74,13 @@ un-friendly color picking component" — six named defects, each now a mechanism
 - `cart/editor/shell/ShaderGridBatch.tsx` — validates/packs standard material
   rows, renders one canonical fill Effect, and value-compares packed buffers so
   unrelated parent renders do not dirty the cache.
-- `cart/editor/render3d/shaders/index.ts` — one `FILL_SHADER` entry for ordinary
-  material rows and the negative-id grid envelope, keeping both views on the
-  same compiled pipeline.
+- `cart/editor/render3d/shaders/index.ts` — the `FILL_MAIN` fs_main handling
+  ordinary material rows and the negative-id grid envelope; `FILL_SHADER` (the
+  full catalog) survives only as the unknown-fn fallback.
+- `cart/editor/render3d/shaders/compose.ts` — per-set module composition
+  (`req_3473`): splits the generated dispatch once, then builds
+  `fillShaderFor(fns)` / ground / region modules carrying only the materials a
+  surface actually renders.
 - `cart/editor/shell/ShaderThumb.tsx` — value-stable memo boundary for live
   shader previews; real shader/data/size changes still invalidate captures.
 

@@ -23,7 +23,6 @@ import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import { BrushDials, type ColorSpineHandlers } from '../inspector/ModelBrushDock';
 import { shaderGroups, shaderSpec, type ShaderSpec } from '../textures/shaders';
 import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
-import { FILL_SHADER } from '../render3d/shaders/index';
 import type { Rgb } from '../data/types';
 import ShaderThumb from './ShaderThumb';
 import ShaderGridBatch, {
@@ -278,7 +277,7 @@ function ShaderLibrary(props: {
     const active = item.spec.id === props.shaderInk?.surface;
     const variantIndex = active ? activeVariant : 0;
     const data = shaderVariantData(item.spec, variantIndex, props.paletteFor);
-    const batched = item.spec.shader === FILL_SHADER && isBatchableFillData(data);
+    const batched = item.spec.fillFn != null && isBatchableFillData(data);
     return { ...item, active, variantIndex, data, batched };
   });
   const gridRows: Array<typeof gridCells> = [];
