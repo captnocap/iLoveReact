@@ -1,9 +1,9 @@
-//! Root build.zig — builds v8_app.zig against framework/ into zig-out/bin/<name>.
+//! Root build.zig — builds framework/v8_app.zig into zig-out/bin/<name>.
 //!
 //! Usage:
-//!   zig build app                                       # default: v8_app.zig → zig-out/bin/app
+//!   zig build app                                       # default: framework/v8_app.zig → zig-out/bin/app
 //!   zig build app -Dapp-name=hello                      # → zig-out/bin/hello
-//!   zig build app -Dapp-name=hello -Dapp-source=foo.zig # different root source
+//!   zig build app -Dapp-name=hello -Dapp-source=framework/foo.zig # different root source
 //!
 //! Everything Smith-era lives in the frozen tsz/ directory and is not built here.
 //! The QJS / .tsz era runtime files were evicted to archive/qjs-stack/ on 2026-05-08
@@ -18,9 +18,11 @@ pub fn build(b: *std.Build) void {
     const app_name = b.option([]const u8, "app-name", "Output binary name") orelse "app";
     // QJS path archived (archive/qjs-stack/) — the use-v8 option survives only
     // as a build-options signal that other modules may read; the default root
-    // source is now v8_app.zig regardless.
+    // source is now framework/v8_app.zig regardless. App roots live INSIDE
+    // framework/ because a Zig module can't @import above its root source's
+    // directory — an app root outside framework/ couldn't import framework files.
     const use_v8 = b.option(bool, "use-v8", "(legacy: V8 is the only engine now)") orelse true;
-    const app_source = b.option([]const u8, "app-source", "Root Zig source file") orelse "v8_app.zig";
+    const app_source = b.option([]const u8, "app-source", "Root Zig source file") orelse "framework/v8_app.zig";
     const sysroot = b.option([]const u8, "sysroot", "Optional sysroot for cross-builds");
     const dev_mode = b.option(bool, "dev-mode", "Read bundle.js from disk and hot-reload on change") orelse false;
     const dev_build_id = b.option([]const u8, "dev-build-id", "Content fingerprint of native inputs embedded in dev-mode hosts") orelse "unknown";
@@ -111,13 +113,15 @@ pub fn build(b: *std.Build) void {
     // ANSI grid. See the `has_gpu_cli or has_window` link gates below.
     const has_window = b.option(bool, "has-window", "Cart uses <Window>/<Notification> (foundational on GPU shell; gates SDL3 + window-engine link on headless shell)") orelse false;
 
-    // Bundle path override. When unset, v8_app.zig falls back to embedding
-    // bundle-<app-name>.js relative to its own source directory (the
-    // in-repo case). When set (e.g. by rjit-driven builds where the user's
-    // cart lives outside the SDK install), this absolute path is used by
-    // @embedFile so the bundle can sit in CART_ROOT while build.zig and
-    // v8_app.zig live in RJIT_HOME.
-    const bundle_path = b.option([]const u8, "bundle-path", "Absolute path to the cart bundle (overrides default bundle-<app-name>.js lookup)") orelse "";
+    // Bundle path. When unset, defaults to bundle-<app-name>.js at the REPO
+    // ROOT (where the bundler writes; two parallel ships don't race on a
+    // shared bundle.js), resolved absolute here because v8_app.zig now lives
+    // in framework/ and a source-relative fallback would point inside it.
+    // rjit-driven builds where the user's cart lives outside the SDK install
+    // pass their own absolute path so the bundle can sit in CART_ROOT while
+    // build.zig and framework/v8_app.zig live in RJIT_HOME. Either way
+    // @embedFile receives an absolute path.
+    const bundle_path = b.option([]const u8, "bundle-path", "Absolute path to the cart bundle (overrides default bundle-<app-name>.js lookup)") orelse b.pathFromRoot(b.fmt("bundle-{s}.js", .{app_name}));
 
     const options = b.addOptions();
     options.addOption(bool, "is_lib", false);
@@ -726,7 +730,7 @@ pub fn build(b: *std.Build) void {
     const v8_mod = v8_hello_dep.module("v8");
 
     const v8_hello_mod = b.createModule(.{
-        .root_source_file = b.path("v8_hello.zig"),
+        .root_source_file = b.path("framework/v8_hello.zig"),
         .target = target,
         // Pin ReleaseFast like v8cli: a Debug-optimized V8 binary trips the Zig
         // 0.15 / lld CREL `.init_array` bug (NULL function pointers → crash at
@@ -769,7 +773,7 @@ pub fn build(b: *std.Build) void {
     // relocations that get applied normally. Pinning here makes v8cli
     // immune to the user's -Doptimize choice.
     const v8_cli_mod = b.createModule(.{
-        .root_source_file = b.path("v8_cli.zig"),
+        .root_source_file = b.path("framework/v8_cli.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
