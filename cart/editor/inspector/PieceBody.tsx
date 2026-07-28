@@ -191,7 +191,10 @@ export default function PieceBody(props: {
   /** resolve a slot's MaterialRef to a display label + swatch colour. */
   resolveMaterial: (ref: MaterialRef) => { label: string; color: string };
   /** the content browser's currently selected material (the one a slot click binds). */
-  activeMaterialName: string;
+  activeMaterial: { name: string; color: string };
+  /** open the left panel on the Materials library — where the selection is made
+   *  (req_3446: the panel must POINT AT the picker, not just name its result). */
+  onBrowseMaterials: () => void;
   /** the instance-edit handler bundle (move/rotate/spin/delete/duplicate/open). */
   edit: PieceEditHandlers;
   /** resolve a model PACKAGE id to its current (session-renamed) display name. */
@@ -309,7 +312,10 @@ export default function PieceBody(props: {
       {/* MATERIAL SLOTS — the "texture slots" the user asked for. Editable on a
           placed instance (click a slot to bind the browser's active material);
           armed definitions show nothing here (a template row per slot only
-          restated the word "material slot" — req_3444 density rule). */}
+          restated the word "material slot" — req_3444 density rule). The
+          `selected` row closes the loop the slot rows open (req_3446): it shows
+          WHICH material a slot click binds and pressing it opens the Materials
+          library — the place that selection is actually made. */}
       {isInstance && sel ? (
         <C.HW_Section>
           <C.HW_SectionHead>
@@ -318,15 +324,25 @@ export default function PieceBody(props: {
             <C.HW_Spacer />
             <C.HW_KeyText>{roles.length}</C.HW_KeyText>
           </C.HW_SectionHead>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>selected</C.HW_FormLabel>
+            <C.HW_SelectControl tooltip="the material a slot click binds — press to pick a different one in the Materials library" onPress={props.onBrowseMaterials}>
+              <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: props.activeMaterial.color }} />
+              <C.HW_ReadValue>{props.activeMaterial.name}</C.HW_ReadValue>
+              <C.HW_Spacer />
+              <Icon name="ExternalLink" size={10} color={accentFor('textDim')} />
+            </C.HW_SelectControl>
+            <C.HW_OvResetIdle />
+          </C.HW_ReadRow>
           {roleEntries.map((role) => {
             const ref = sel.slots?.[role.id];
             const mat = ref ? props.resolveMaterial(ref) : null;
             return (
               <C.HW_ReadRow key={role.id}>
                 <C.HW_FormLabel>{role.label}</C.HW_FormLabel>
-                <C.HW_SelectControl tooltip={`bind the selected material to the ${role.label} slot`} onPress={() => props.onAssignSlot(sel.id, role.id)}>
+                <C.HW_SelectControl tooltip={`bind ${props.activeMaterial.name} to the ${role.label} slot`} onPress={() => props.onAssignSlot(sel.id, role.id)}>
                   <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: mat ? mat.color : '#0a1118' }} />
-                  <C.HW_ReadValue>{mat ? mat.label : `+ ${props.activeMaterialName}`}</C.HW_ReadValue>
+                  <C.HW_ReadValue>{mat ? mat.label : `+ ${props.activeMaterial.name}`}</C.HW_ReadValue>
                 </C.HW_SelectControl>
                 {ref
                   ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(sel.id, role.id)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>

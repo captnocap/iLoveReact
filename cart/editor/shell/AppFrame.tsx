@@ -2989,6 +2989,20 @@ export default function AppFrame() {
     });
   };
 
+  // req_3446: the PIECE FOCUS `selected` material row jumps here. Unlike a rail
+  // press (which toggle-collapses an already-active pane), this always ENDS with
+  // the Materials library open — the row's promise is "show me the picker".
+  const browseMaterials = () => setState((prev) => ({
+    ...prev,
+    activeDomain: 'materials',
+    leftPanelCollapsed: false,
+    contentFolder: 'materials',
+    activeTab: tabForContentFolder('materials') ?? prev.activeTab,
+    assetPage: 0,
+    expandedFolders: { ...prev.expandedFolders, materials: true },
+    status: 'Materials library — click a material to make it the one slot clicks bind',
+  }));
+
   const pressRightPanel = (pressed: RightPanelId) => {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
@@ -5877,6 +5891,7 @@ export default function AppFrame() {
             onOpenLiveMaterialPicker={(modelId, slotIndex) => setLiveMaterialPicker({ modelId, slotIndex })}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
+            onBrowseMaterials={browseMaterials}
             // PIECE FOCUS instance editing (req_3442): every panel field writes
             // through the same transaction commands as the viewport and hotkeys,
             // so panel edits share their undo, replacement policy, and live push.

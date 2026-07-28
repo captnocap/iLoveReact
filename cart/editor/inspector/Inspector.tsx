@@ -255,6 +255,9 @@ export default function Inspector(props: {
   // spin fields + verb row write through the same transaction commands as the
   // viewport gizmo and hotkeys — never a parallel mutation path.
   pieceEdit: PieceEditHandlers;
+  // req_3446: the MATERIAL SLOTS `selected` row jumps the left panel to the
+  // Materials library — the place the slot-bind material is actually picked.
+  onBrowseMaterials: () => void;
   // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
   onSetGlobal: (field: string, value: number) => void;
   onResetGlobal: (field: string) => void;
@@ -430,6 +433,7 @@ export default function Inspector(props: {
   if (activeDocument?.kind === 'world') {
     const selectedPiece = props.state.worldPieces.find((p) => p.id === props.state.selectedPieceId) ?? null;
     const resolveMaterial = (ref: MaterialRef) => resolveMaterialRef(ref, props.state.assetOverrides);
+    const activeMaterialAsset = assetById(props.state.activeAssetId, props.state.assetOverrides);
     return (
       <C.HW_RightPanel>
         <C.HW_Inspector>
@@ -447,7 +451,8 @@ export default function Inspector(props: {
               onAssignSlot={props.onAssignSlot}
               onClearSlot={props.onClearSlot}
               resolveMaterial={resolveMaterial}
-              activeMaterialName={assetById(props.state.activeAssetId, props.state.assetOverrides).name}
+              activeMaterial={{ name: activeMaterialAsset.name, color: activeMaterialAsset.color }}
+              onBrowseMaterials={props.onBrowseMaterials}
               edit={props.pieceEdit}
               // Session renames/dupes resolve here so the model row names what
               // the library shows NOW, not a stale synthesized id.
