@@ -5945,6 +5945,19 @@ export default function AppFrame() {
                 if (pkg) openModelDocument(pkg);
                 else setState((prev) => ({ ...prev, status: `open model: no package '${pkgId}' in the library` }));
               },
+              // PAINTINGS chips (req_3458): the same world.piece.skin swap the
+              // quick menu runs, on the live selection. The worn check reads the
+              // CURRENT piece so an already-worn chip press stays silent.
+              onSetPaintingSelected: (skinId) => {
+                const current = stateRef.current;
+                const piece = current.worldPieces.find((p) => p.id === current.selectedPieceId);
+                if (!piece || paintSkinIdOf(piece.pieceId) === skinId) return;
+                invokeApplicationCommand(WORLD_PIECE_SKIN_COMMAND_ID, {
+                  documentId: current.activeMapStem,
+                  pieceId: piece.id,
+                  skinId,
+                }, 'focus-panel');
+              },
             }}
             // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
             onSetGlobal={guarded(setWorldGlobal)}

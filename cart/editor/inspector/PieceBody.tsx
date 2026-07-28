@@ -24,14 +24,15 @@
 // handler therefore carries only a selection-relative INTENT ('step x by +1',
 // 'copy the selection', 'bind role front'); AppFrame resolves the actual piece
 // from live state at click time (world/pieceFieldStep.ts owns the step math).
-import { Row } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Row } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
 import { pieceFloorOf, pieceKindOf, pieceScaleOf, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { PieceStepField } from '../world/pieceFieldStep';
 import { pieceSlotEntries } from '../world/pieceSlots';
-import { authoredPieceFor, isAuthoredPiece } from '../world/authoredRegistry';
+import { authoredPieceFor, isAuthoredPiece, paintSkinIdOf } from '../world/authoredRegistry';
+import { listPaintSkins } from '../data/paintVariants';
 import { authoredMeshBounds } from '../world/authoredMesh';
 import { modelPackageById } from '../data/content';
 import { skeletonToPropRig, describePropRig } from '../../../runtime/skeleton';
@@ -53,6 +54,9 @@ export type PieceEditHandlers = {
   onCopySelected: () => void;
   onDeleteSelected: () => void;
   onOpenPieceModel: (pkgId: string) => void;
+  /** dress the selected piece in a stored painting — null = the base look
+   *  (world.piece.skin, req_3443/req_3458; the skinId is the chip's identity). */
+  onSetPaintingSelected: (skinId: string | null) => void;
 };
 
 // One numeric field on the fixed control grid — the same [−] value [+] geometry
@@ -181,11 +185,16 @@ export default function PieceBody(props: {
     const dims = bounds
       ? `${((bounds.maxX - bounds.minX) * scale).toFixed(1)}×${((bounds.maxZ - bounds.minZ) * scale).toFixed(1)}×${((bounds.maxY - bounds.minY) * scale).toFixed(1)}m`
       : 'mesh not resident';
-    const skeleton = modelPackageById(authored.pkgId)?.skeleton;
+    const pkg = modelPackageById(authored.pkgId);
+    const skeleton = pkg?.skeleton;
     // RIG shows only when the manifest actually carries capabilities — an empty
     // projected rig ({}) would only render the 'plain (no capabilities)' filler.
     const rig = skeleton ? skeletonToPropRig(skeleton) : null;
     const rigSummary = rig && Object.keys(rig).length > 0 ? describePropRig(rig) : null;
+    // The model's stored PAINTINGS (req_3458 — the quick menu's wardrobe, here
+    // too): instance-only (skins dress the PLACED piece, req_3443) and only
+    // when the package actually stores looks (density rule — no empty section).
+    const paintings = isInstance && pkg ? listPaintSkins(pkg) : [];
     // The source model by its human name — the internal mesh key (e.g.
     // `primitive:cube:56::dup-…`) identified nothing a person recognises.
     const modelName = props.modelNameFor(authored.pkgId) ?? authored.label;
@@ -225,6 +234,35 @@ export default function PieceBody(props: {
           <ReadOnlySection title="RIG" color="warning" rows={[['carries', rigSummary]]} />
         ) : null}
         {isInstance && sel ? <PlacementSection sel={sel} edit={props.edit} /> : null}
+        {isInstance && sel && paintings.length > 0 ? (
+          <C.HW_Section>
+            <C.HW_SectionHead>
+              <C.HW_AccentBar style={{ backgroundColor: accentFor('accent') }} />
+              <C.HW_SectionTitle style={{ color: accentFor('accent') }}>PAINTINGS</C.HW_SectionTitle>
+              <C.HW_Spacer />
+              <C.HW_KeyText>{paintings.length}</C.HW_KeyText>
+            </C.HW_SectionHead>
+            {/* One chip per stored look + Current (the base atlas), the quick
+                menu's exact wardrobe (req_3443). The chip carries only its
+                skinId — the worn piece resolves live in AppFrame (stale-closure
+                law, req_3449). */}
+            <Row style={{ gap: 6, flexWrap: 'wrap', width: '100%', alignItems: 'center' }}>
+              {[{ id: null as string | null, name: 'Current' }, ...paintings].map((painting) => {
+                const worn = paintSkinIdOf(sel.pieceId) === painting.id;
+                const tip = painting.id === null
+                  ? `the model's current base look${worn ? ' · worn now' : ''}`
+                  : `dress this piece in ${painting.name}${worn ? ' · worn now' : ''}`;
+                return (
+                  <Pressable key={painting.id ?? 'current'} tooltip={tip} onPress={() => props.edit.onSetPaintingSelected(painting.id)}>
+                    <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: worn ? 2 : 1, borderColor: worn ? accentFor('primary') : '#2a3442', backgroundColor: '#0a1118' }}>
+                      <C.HW_KeyText style={{ color: worn ? accentFor('primary') : undefined }}>{painting.name}</C.HW_KeyText>
+                    </Box>
+                  </Pressable>
+                );
+              })}
+            </Row>
+          </C.HW_Section>
+        ) : null}
       </>
     );
   }
