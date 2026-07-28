@@ -149,6 +149,146 @@ test "flipping winding rejects an undersized boundary without partial writes" {
     try testing.expectEqualSlices(f32, original[0..], verts[0..]);
 }
 
+// ── Winding repair (req_3450) ─────────────────────────────────────────────────────────
+
+/// Write one quad (two CCW triangles on the quad's 0-2 diagonal) into interleaved rows.
+fn windingQuad(out: []f32, first_triangle: usize, corners: [4][3]f32, normal: [3]f32) void {
+    const triangles = [2][3][3]f32{
+        .{ corners[0], corners[1], corners[2] },
+        .{ corners[0], corners[2], corners[3] },
+    };
+    for (triangles, 0..) |triangle, t| {
+        for (triangle, 0..) |p, corner| {
+            const row = ((first_triangle + t) * 3 + corner) * 8;
+            out[row] = p[0];
+            out[row + 1] = p[1];
+            out[row + 2] = p[2];
+            out[row + 3] = normal[0];
+            out[row + 4] = normal[1];
+            out[row + 5] = normal[2];
+            out[row + 6] = 0.25 * @as(f32, @floatFromInt(corner));
+            out[row + 7] = 0.5;
+        }
+    }
+}
+
+/// The unit cube [0,1]³ as 12 outward-CCW triangles — winding a culled renderer accepts
+/// from every side. Offset from the origin matters in no test: the volume rule is
+/// translation-invariant only for CLOSED shells, which is exactly what it gates on.
+fn windingCube(out: *[12 * 24]f32) void {
+    windingQuad(out, 0, .{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 0, 1 }, .{ 0, 0, 1 } }, .{ 0, -1, 0 }); // bottom
+    windingQuad(out, 2, .{ .{ 0, 1, 0 }, .{ 0, 1, 1 }, .{ 1, 1, 1 }, .{ 1, 1, 0 } }, .{ 0, 1, 0 }); // top
+    windingQuad(out, 4, .{ .{ 0, 0, 1 }, .{ 1, 0, 1 }, .{ 1, 1, 1 }, .{ 0, 1, 1 } }, .{ 0, 0, 1 }); // front
+    windingQuad(out, 6, .{ .{ 0, 0, 0 }, .{ 0, 1, 0 }, .{ 1, 1, 0 }, .{ 1, 0, 0 } }, .{ 0, 0, -1 }); // back
+    windingQuad(out, 8, .{ .{ 0, 0, 0 }, .{ 0, 0, 1 }, .{ 0, 1, 1 }, .{ 0, 1, 0 } }, .{ -1, 0, 0 }); // left
+    windingQuad(out, 10, .{ .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 1, 1, 1 }, .{ 1, 0, 1 } }, .{ 1, 0, 0 }); // right
+}
+
+test "winding repair flips exactly the triangles wound against their neighbors" {
+    var verts: [12 * 24]f32 = undefined;
+    windingCube(&verts);
+    const pristine = verts;
+    // Sabotage two triangles on different faces — the imported-bookshelf defect.
+    var sabotage = [_]bool{false} ** 12;
+    sabotage[3] = true;
+    sabotage[9] = true;
+    try testing.expectEqual(@as(u32, 2), mesh_edit.flipSelectedTriangleWinding(verts[0..], 12, sabotage[0..]));
+
+    var mask = [_]bool{false} ** 12;
+    try testing.expectEqual(@as(u32, 2), mesh_edit.inconsistentWindingMask(verts[0..], 12, mask[0..]));
+    try testing.expectEqualSlices(bool, sabotage[0..], mask[0..]);
+
+    // Repair restores the pristine soup byte-for-byte (flip is an involution), and
+    // a repaired mesh detects clean.
+    try testing.expectEqual(@as(u32, 2), mesh_edit.normalizeTriangleWinding(verts[0..], 12));
+    try testing.expectEqualSlices(f32, pristine[0..], verts[0..]);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.inconsistentWindingMask(verts[0..], 12, mask[0..]));
+}
+
+test "a wholly inside-out closed shell is caught by its negative volume" {
+    var verts: [12 * 24]f32 = undefined;
+    windingCube(&verts);
+    const pristine = verts;
+    const all = [_]bool{true} ** 12;
+    try testing.expectEqual(@as(u32, 12), mesh_edit.flipSelectedTriangleWinding(verts[0..], 12, all[0..]));
+    // Fully inverted = locally CONSISTENT (no neighbor conflicts) — only the closed
+    // volume rule can see it.
+    try testing.expectEqual(@as(u32, 12), mesh_edit.normalizeTriangleWinding(verts[0..], 12));
+    try testing.expectEqualSlices(f32, pristine[0..], verts[0..]);
+}
+
+test "wire rows never join the winding graph and are never flipped" {
+    var verts: [13 * 24]f32 = undefined;
+    windingCube(verts[0 .. 12 * 24]);
+    // One Pen Edges wire row: a degenerate (a, b, b) triangle riding beside the cube.
+    const wire = [3][3]f32{ .{ 5, 0, 0 }, .{ 6, 0, 0 }, .{ 6, 0, 0 } };
+    for (wire, 0..) |p, corner| {
+        const row = (12 * 3 + corner) * 8;
+        verts[row] = p[0];
+        verts[row + 1] = p[1];
+        verts[row + 2] = p[2];
+        verts[row + 3] = 0;
+        verts[row + 4] = 1;
+        verts[row + 5] = 0;
+        verts[row + 6] = 0;
+        verts[row + 7] = 0;
+    }
+    const pristine = verts;
+    try testing.expectEqual(@as(u32, 0), mesh_edit.normalizeTriangleWinding(verts[0..], 13));
+    try testing.expectEqualSlices(f32, pristine[0..], verts[0..]);
+}
+
+test "an open sheet flips its minority, not the majority" {
+    var verts: [4 * 24]f32 = undefined;
+    windingQuad(verts[0 .. 2 * 24], 0, .{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } }, .{ 0, 0, -1 });
+    windingQuad(verts[0..], 2, .{ .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 1, 0 }, .{ 1, 1, 0 } }, .{ 0, 0, -1 });
+    var sabotage = [_]bool{ false, true, false, false };
+    try testing.expectEqual(@as(u32, 1), mesh_edit.flipSelectedTriangleWinding(verts[0..], 4, sabotage[0..]));
+    var mask = [_]bool{false} ** 4;
+    try testing.expectEqual(@as(u32, 1), mesh_edit.inconsistentWindingMask(verts[0..], 4, mask[0..]));
+    try testing.expectEqualSlices(bool, sabotage[0..], mask[0..]);
+}
+
+test "an inside-out box glued at a T-junction flips by its centered volume (the bookshelf_001 defect)" {
+    // Two stacked unit cubes sharing the y=1 face — the merged-boxes import shape.
+    // Cube B arrives fully inverted. Its shared-face edges carry 4 incidences, so
+    // orientation can never propagate across the joint; only the enclosed-volume
+    // rule can convict it. The coincident face pairs (A top / B bottom) sit in
+    // flat stacks, measure zero centered volume, and must stay untouched.
+    var verts: [24 * 24]f32 = undefined;
+    windingCube(verts[0 .. 12 * 24]);
+    windingCube(verts[12 * 24 .. 24 * 24]);
+    var tri: usize = 12;
+    while (tri < 24) : (tri += 1) {
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) verts[(tri * 3 + corner) * 8 + 1] += 1;
+    }
+    var invert_b = [_]bool{false} ** 24;
+    for (12..24) |t| invert_b[t] = true;
+    try testing.expectEqual(@as(u32, 12), mesh_edit.flipSelectedTriangleWinding(verts[0..], 24, invert_b[0..]));
+
+    var mask = [_]bool{false} ** 24;
+    try testing.expectEqual(@as(u32, 10), mesh_edit.inconsistentWindingMask(verts[0..], 24, mask[0..]));
+    // Cube A entirely untouched; B's bottom pair (triangles 12/13, hidden inside
+    // the joint) stays as authored; B's ten visible triangles all repair.
+    for (0..14) |t| try testing.expect(!mask[t]);
+    for (14..24) |t| try testing.expect(mask[t]);
+}
+
+test "a coincident two-sided sheet is deliberate authoring and stays untouched" {
+    var verts: [4 * 24]f32 = undefined;
+    const corners = [4][3]f32{ .{ 3, 0, 7 }, .{ 4, 0, 7 }, .{ 4, 1, 7 }, .{ 3, 1, 7 } };
+    windingQuad(verts[0 .. 2 * 24], 0, corners, .{ 0, 0, 1 });
+    // The reversed back side: same positions, opposite loop.
+    windingQuad(verts[0..], 2, .{ corners[0], corners[3], corners[2], corners[1] }, .{ 0, 0, -1 });
+    const pristine = verts;
+    // Every shared edge carries four incidences, so orientation never crosses and
+    // no isolated triangle may fall through to the closed-volume rule (deliberately
+    // placed away from the origin — a position-dependent flip would trip this).
+    try testing.expectEqual(@as(u32, 0), mesh_edit.normalizeTriangleWinding(verts[0..], 4));
+    try testing.expectEqualSlices(f32, pristine[0..], verts[0..]);
+}
+
 test "created grouped face becomes the one active face ready to flip" {
     var soup = [_]f32{0} ** (9 * 8); // one old triangle + a new split quad
     mesh_edit.test_support.loadGroupedSoup(2921, soup[0..], 9, &.{ 3, 8, 8 });

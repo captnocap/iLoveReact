@@ -94,5 +94,13 @@ export const editor_painted_placements: DocIndex = {
       evidence: ['docs/game/editor_painted_placements.md "Not yet covered"'],
       severity: 'medium',
     },
+    {
+      name: 'atlas alpha is glass in the world; the editor preview hides it (closed at import, req_3450)',
+      purpose: ['texture_bake', 'rendering'],
+      description:
+        'The world textured resident route renders ATLAS ALPHA through the transparent pass (LIVE_TEXTURED_ALPHA_ROUTE_ALPHA); the editor opaque preview ignores it. An imported PNG with transparent padding (38% of bookshelf_001\'s texture) turns any UV drift into invisible placed faces that look fine in the editor. CLOSED: scene3d.replacePaintAtlas/importPaintAtlas force alpha 255 on arrival (opaqueImportCopy) — glass is authored (req_2928) and re-applies from the doc trailing run (req_3402); legacy packages heal on open+save. Sibling repair: all four mesh import doors run scene3d.normalizeSoupWinding (mesh_edit.inconsistentWindingMask — 2-incidence orientation propagation + centroid-centered volume for boundary-free components), so mixed-winding GLB/OBJ sources can no longer enter with faces back-face culling eats. Residual (documented, open): a placed instance renders the SESSION export-time cached geometry bound to the painted form of the moment — topology edits/UV remaps after export mis-pair until the next export/save refreshes the push.',
+      evidence: ['docs/game/editor_painted_placements.md "Import boundary invariants"'],
+      severity: 'medium',
+    },
   ],
 };

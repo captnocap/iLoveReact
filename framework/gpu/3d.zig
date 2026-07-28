@@ -4487,6 +4487,15 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
     return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
 }
 
+/// Winding repair at the import boundary (req_3450): flip every triangle wound
+/// against its neighbors (and every wholly inside-out closed shell) so a
+/// mixed-winding GLB/OBJ enters the editor coherent under back-face culling.
+/// Pure data repair on a parsed soup BEFORE adoption — no journal, no resident
+/// state. Returns the number of triangles flipped (0 = the mesh was clean).
+pub fn normalizeSoupWinding(verts: []f32, vert_count: u32) u32 {
+    return mesh_edit.normalizeTriangleWinding(verts, vert_count / 3);
+}
+
 /// Reverse the selected authored face(s) so their normals point to the opposite side.
 /// This is the host-native port of Studio's `flipFace` (req_1182 / req_2883): every
 /// member triangle reverses winding with its interleaved UV row, while face groups,
@@ -7744,13 +7753,28 @@ pub fn projectUvFromViewJournaled(island_indices: []const u32) bool {
     return applyUvCornerGeometryJournaled(corners, mesh_journal_log.UV_PROJECT_VIEW_LABEL);
 }
 
+/// Imported images arrive OPAQUE (req_3450): glass is AUTHORED by the glass tool
+/// and re-applied from the doc's trailing run on load (req_3402/req_2928) — a
+/// source PNG's transparent padding must never silently become see-through faces.
+/// The world's textured resident-mesh route renders atlas alpha (transparent
+/// pass), while the editor's opaque preview hides it: exactly the "placed prop
+/// is invisible where I look at it" trap. Returns a caller-freed copy, alpha 255.
+fn opaqueImportCopy(rgba: []const u8) ?[]u8 {
+    const copy = std.heap.c_allocator.dupe(u8, rgba) catch return null;
+    var i: usize = 3;
+    while (i < copy.len) : (i += 4) copy[i] = 255;
+    return copy;
+}
+
 /// Replace the current atlas with an equal-sized externally edited raster. This
 /// is an explicit bake boundary: the imported PNG becomes the new undo baseline
 /// and subsequent strokes continue on the existing layer table.
 pub fn replacePaintAtlas(rgba: []const u8) bool {
+    const opaque_rgba = opaqueImportCopy(rgba) orelse return false;
+    defer std.heap.c_allocator.free(opaque_rgba);
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    if (!model_paint.setAtlas(rgba)) return false;
+    if (!model_paint.setAtlas(opaque_rgba)) return false;
     paint_program.adoptCurrentAtlasAsBaseline();
     return true;
 }
@@ -7774,11 +7798,16 @@ pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
 /// Import a texture at its native dimensions. The current UVs are preserved in
 /// normalized space, then their absolute atlas geometry is rebuilt against the new
 /// raster so the UV editor can remap directly over the imported artwork.
+/// The raster adopts OPAQUE (see opaqueImportCopy) — cold-load hydration re-imports
+/// atlases/base.png through here, so legacy packages carrying transparent import
+/// padding heal on their next open + save.
 pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
     const verts = g_edit_verts orelse return false;
+    const opaque_rgba = opaqueImportCopy(rgba) orelse return false;
+    defer std.heap.c_allocator.free(opaque_rgba);
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
-    if (!model_paint.importAtlasPreservingUvGeometry(rgba, width, height, verts, g_edit_count)) return false;
+    if (!model_paint.importAtlasPreservingUvGeometry(opaque_rgba, width, height, verts, g_edit_count)) return false;
     paint_program.adoptCurrentAtlasAsBaseline();
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
@@ -8430,7 +8459,15 @@ var g_sampler: ?*wgpu.Sampler = null;
 // dimensions. With the pipeline already serialized (each frame flushes
 // before the next begins), the previous frame's bind groups are no
 // longer in flight by the time we recycle the slots.
-const MAX_RT_POOL = 16;
+// The Build palette deliberately mounts one product-shot Scene3D per visible
+// placeable. Props alone currently has 47 exports, and the surrounding editor
+// can mount a viewport alongside it. Keep enough persistent targets for the
+// full palette plus that editor headroom; views beyond this boundary would
+// otherwise silently render blank.
+const RT_POOL_TUNING = struct {
+    const max_views = 64;
+};
+const MAX_RT_POOL = RT_POOL_TUNING.max_views;
 const Rt = struct {
     color_texture: ?*wgpu.Texture = null,
     color_view: ?*wgpu.TextureView = null,

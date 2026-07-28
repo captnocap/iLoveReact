@@ -86,6 +86,198 @@ pub fn flipSelectedTriangleWinding(verts: []f32, triangle_count: u32, selected: 
     return flipped;
 }
 
+// ── Winding repair (req_3450) ─────────────────────────────────────────────────────────
+// Imported meshes can carry MIXED winding — triangles wound against their neighbors —
+// which the editor's and world's back-face culling exposes as see-through faces ("every
+// part I am face on looking at is invisible"). Nothing in the GLB/OBJ path normalizes
+// orientation, so the defect survives save/placement verbatim.
+
+const WindingEdgeUse = struct {
+    tri: [2]u32 = .{ 0, 0 },
+    /// Whether the triangle traverses this undirected edge as (lo→hi).
+    forward: [2]bool = .{ false, false },
+    count: u32 = 0,
+};
+
+/// Mark every render triangle wound AGAINST its neighbors, plus every closed
+/// component that is wholly inside-out. Orientation propagates across each edge
+/// shared by exactly TWO real triangles (a consistent surface traverses a shared
+/// edge in opposite directions); each connected component then orients globally.
+/// Components with NO boundary edges make their CENTROID-CENTERED signed volume
+/// positive — this is what catches the real import defect (bookshelf_001): an
+/// inside-out panel box glued to the body at T-junction edges, internally
+/// consistent, so only its enclosed volume betrays it. Centering makes the test
+/// position-independent for the planar coincident stacks such junctions create
+/// (a flat sheet encloses exactly zero about its own centroid, so it never
+/// flips on volume noise). Open sheets (boundary edges present) keep whichever
+/// side needs fewer flips. Deliberate authoring stays untouched: degenerate wire
+/// rows (Pen Edges' (a,b,b) format) never join the graph, and ≥3-incidence
+/// edges are never crossed. Returns the number of triangles marked.
+pub fn inconsistentWindingMask(verts: []const f32, triangle_count: u32, out_flip: []bool) u32 {
+    const count: usize = @intCast(triangle_count);
+    if (out_flip.len < count or count == 0 or count > verts.len / TRIANGLE_FLOATS) return 0;
+    @memset(out_flip[0..count], false);
+
+    // Weld corner positions to logical ids (exact quantised 3-int keys — see weldKey).
+    const corner_vert = alloc.alloc(u32, count * 3) catch return 0;
+    defer alloc.free(corner_vert);
+    var weld = std.AutoHashMapUnmanaged([3]i32, u32).empty;
+    defer weld.deinit(alloc);
+    var next_vert: u32 = 0;
+    for (0..count * 3) |corner| {
+        const base = corner * EDIT_VERTEX_FLOATS;
+        const entry = weld.getOrPut(alloc, weldKey(.{ verts[base], verts[base + 1], verts[base + 2] })) catch return 0;
+        if (!entry.found_existing) {
+            entry.value_ptr.* = next_vert;
+            next_vert += 1;
+        }
+        corner_vert[corner] = entry.value_ptr.*;
+    }
+
+    // Undirected edge incidences. Degenerate triangles (repeated welded corner —
+    // the wire-edge format) contribute nothing and are never flipped.
+    const real = alloc.alloc(bool, count) catch return 0;
+    defer alloc.free(real);
+    var edges = std.AutoHashMapUnmanaged([2]u32, WindingEdgeUse).empty;
+    defer edges.deinit(alloc);
+    for (0..count) |tri| {
+        const a = corner_vert[tri * 3];
+        const b = corner_vert[tri * 3 + 1];
+        const c = corner_vert[tri * 3 + 2];
+        real[tri] = a != b and b != c and c != a;
+        if (!real[tri]) continue;
+        const tri_edges = [3][2]u32{ .{ a, b }, .{ b, c }, .{ c, a } };
+        for (tri_edges) |edge| {
+            const lo = @min(edge[0], edge[1]);
+            const hi = @max(edge[0], edge[1]);
+            const entry = edges.getOrPut(alloc, .{ lo, hi }) catch return 0;
+            if (!entry.found_existing) entry.value_ptr.* = .{};
+            const use = entry.value_ptr;
+            if (use.count < 2) {
+                use.tri[use.count] = @intCast(tri);
+                use.forward[use.count] = edge[0] == lo;
+            }
+            use.count += 1;
+        }
+    }
+
+    // Propagate orientation per component. parity: 0 = unvisited, 1 = keep, 2 = flip.
+    const parity = alloc.alloc(u8, count) catch return 0;
+    defer alloc.free(parity);
+    @memset(parity, 0);
+    var stack = std.ArrayListUnmanaged(u32).empty;
+    defer stack.deinit(alloc);
+    var component = std.ArrayListUnmanaged(u32).empty;
+    defer component.deinit(alloc);
+    var marked: u32 = 0;
+
+    for (0..count) |seed| {
+        if (!real[seed] or parity[seed] != 0) continue;
+        parity[seed] = 1;
+        component.clearRetainingCapacity();
+        stack.clearRetainingCapacity();
+        stack.append(alloc, @intCast(seed)) catch return 0;
+        component.append(alloc, @intCast(seed)) catch return 0;
+        var boundary_edges: u32 = 0;
+        while (stack.pop()) |tri| {
+            const flipped_here = parity[tri] == 2;
+            const a = corner_vert[tri * 3];
+            const b = corner_vert[tri * 3 + 1];
+            const c = corner_vert[tri * 3 + 2];
+            const tri_edges = [3][2]u32{ .{ a, b }, .{ b, c }, .{ c, a } };
+            for (tri_edges) |edge| {
+                const lo = @min(edge[0], edge[1]);
+                const hi = @max(edge[0], edge[1]);
+                const use = edges.get(.{ lo, hi }) orelse continue;
+                if (use.count == 1) {
+                    boundary_edges += 1;
+                    continue;
+                }
+                // Only a clean two-triangle edge carries orientation. Non-manifold
+                // stacks (T-junctions between merged boxes, coincident two-sided
+                // sheets) are never crossed.
+                if (use.count != 2) continue;
+                const self_slot: usize = if (use.tri[0] == tri) 0 else 1;
+                if (use.tri[self_slot] != tri) continue; // this tri overflowed the 2-slot record
+                const other = use.tri[1 - self_slot];
+                if (!real[other]) continue;
+                // Consistent neighbors traverse the shared edge in OPPOSITE directions.
+                const self_effective = use.forward[self_slot] != flipped_here;
+                const other_needs_flip = use.forward[1 - self_slot] == self_effective;
+                const wanted: u8 = if (other_needs_flip) 2 else 1;
+                if (parity[other] == 0) {
+                    parity[other] = wanted;
+                    stack.append(alloc, other) catch return 0;
+                    component.append(alloc, other) catch return 0;
+                }
+                // A contradicting already-set parity is a Möbius-like conflict; the
+                // seed orientation wins and the odd triangle stays as classified.
+            }
+        }
+
+        // Global orientation. No boundary edges → the component encloses space,
+        // even when it meets the rest of the mesh only at uncrossable junctions:
+        // its CENTROID-CENTERED signed volume (with parities applied) must be
+        // positive. Centering zeroes the measure for flat coincident stacks, so
+        // only genuinely enclosing shells can trip the rule. Open sheets flip
+        // their minority instead.
+        var centroid = [3]f64{ 0, 0, 0 };
+        for (component.items) |tri| {
+            const o = @as(usize, tri) * TRIANGLE_FLOATS;
+            var corner: usize = 0;
+            while (corner < TRIANGLE_VERTICES) : (corner += 1) {
+                const row = o + corner * EDIT_VERTEX_FLOATS;
+                centroid[0] += verts[row];
+                centroid[1] += verts[row + 1];
+                centroid[2] += verts[row + 2];
+            }
+        }
+        const corner_total: f64 = @floatFromInt(component.items.len * 3);
+        centroid[0] /= corner_total;
+        centroid[1] /= corner_total;
+        centroid[2] /= corner_total;
+        var volume: f64 = 0;
+        var flips: u32 = 0;
+        for (component.items) |tri| {
+            const o = @as(usize, tri) * TRIANGLE_FLOATS;
+            const sign: f64 = if (parity[tri] == 2) -1 else 1;
+            const ax: f64 = verts[o] - centroid[0];
+            const ay: f64 = verts[o + 1] - centroid[1];
+            const az: f64 = verts[o + 2] - centroid[2];
+            const bx: f64 = verts[o + 8] - centroid[0];
+            const by: f64 = verts[o + 9] - centroid[1];
+            const bz: f64 = verts[o + 10] - centroid[2];
+            const cx: f64 = verts[o + 16] - centroid[0];
+            const cy: f64 = verts[o + 17] - centroid[1];
+            const cz: f64 = verts[o + 18] - centroid[2];
+            volume += sign * (ax * (by * cz - bz * cy) + bx * (cy * az - cz * ay) + cx * (ay * bz - az * by)) / 6.0;
+            if (parity[tri] == 2) flips += 1;
+        }
+        const encloses = boundary_edges == 0;
+        const invert = if (encloses) volume < -1e-9 else flips * 2 > component.items.len;
+        for (component.items) |tri| {
+            const flip = (parity[tri] == 2) != invert;
+            if (flip) {
+                out_flip[tri] = true;
+                marked += 1;
+            }
+        }
+    }
+    return marked;
+}
+
+/// Detect and repair mixed winding in place — the import-boundary form (req_3450):
+/// every GLB/OBJ arrival runs through this so inconsistent source meshes enter the
+/// editor already coherent. Returns the number of triangles flipped (0 = clean).
+pub fn normalizeTriangleWinding(verts: []f32, triangle_count: u32) u32 {
+    const count: usize = @intCast(triangle_count);
+    if (count == 0 or count > verts.len / TRIANGLE_FLOATS) return 0;
+    const mask = alloc.alloc(bool, count) catch return 0;
+    defer alloc.free(mask);
+    if (inconsistentWindingMask(verts, triangle_count, mask) == 0) return 0;
+    return flipSelectedTriangleWinding(verts, triangle_count, mask);
+}
+
 /// Click radius (pixels) for screen-nearest vertex / edge picking.
 const VERT_PX: f32 = 12;
 const EDGE_PX: f32 = 9;

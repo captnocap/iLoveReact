@@ -316,6 +316,11 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     };
     defer mesh.deinit(std.heap.c_allocator);
 
+    // Winding repair BEFORE retain/adoption (req_3450): a mixed-winding source
+    // must never become the retained full-res truth.
+    const rewound = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
+    if (rewound > 0) std.log.warn("[mesh-load] {s}: repaired {d} inconsistently wound triangle(s)", .{ path, rewound });
+
     // Keep the pristine full-res mesh for the quality slider (before setPaintTarget
     // rewrites UVs — positions are untouched, but copy now to be unambiguous).
     model_source.retain(path, mesh.verts, mesh.vert_count);
@@ -394,6 +399,8 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         return;
     };
     defer mesh.deinit(std.heap.c_allocator);
+    // Previews show what an adoption WOULD show — same winding repair (req_3450).
+    _ = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
 
     const key = std.fmt.allocPrint(std.heap.c_allocator, "preview:{s}", .{path}) catch {
         setReturnString(info, "");
@@ -461,6 +468,9 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         return;
     };
     defer mesh.deinit(std.heap.c_allocator);
+    // Cooked arrivals are imports too — same winding repair before retention (req_3450).
+    const rewound = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
+    if (rewound > 0) std.log.warn("[mesh-load] cooked {s}: repaired {d} inconsistently wound triangle(s)", .{ key, rewound });
 
     // Keep the original cooked factor for quality/paint projection, then adopt a
     // paint-ready working copy into the resident host stash.
@@ -1481,6 +1491,9 @@ fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         return;
     };
     defer mesh.deinit(std.heap.c_allocator);
+    // Appended parts arrive through the same import boundary — same repair (req_3450).
+    const rewound = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
+    if (rewound > 0) std.log.warn("[mesh-append] {s}: repaired {d} inconsistently wound triangle(s)", .{ path, rewound });
     const expected_raw = argToI32(info, 1) orelse {
         setReturnString(info, "{\"ok\":0}");
         return;

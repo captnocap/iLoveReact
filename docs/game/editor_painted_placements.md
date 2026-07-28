@@ -2,7 +2,7 @@
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-27. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443.
+req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450.
 
 ## In one sentence
 
@@ -160,6 +160,36 @@ folder without the editor running (asset cook, other machines, future host
 loaders) — when disk is current it is bit-identical to the live bake by
 construction (same inputs, same compile).
 
+## Import boundary invariants (req_3450 — the invisible-bookshelf investigation)
+
+Two silent-source traps closed at the mesh/texture import doors. Background:
+placed bookshelf_001 panels rendered see-through in the world while the editor
+looked fine. Every durable channel measured CLEAN (winding consistent per
+component, painted.blob row-aligned with base.blob, UV footprints on opaque
+atlas content, empty glass run) — the artifact came from live-session pairing,
+not disk — but the investigation surfaced two real traps:
+
+- **Imported images adopt OPAQUE.** The world's textured resident route renders
+  ATLAS ALPHA through the transparent pass (`LIVE_TEXTURED_ALPHA_ROUTE_ALPHA`),
+  while the editor's opaque preview ignores it — so a source PNG's transparent
+  padding (38% of the bookshelf's imported texture) becomes invisible faces in
+  the world the moment any UV drifts onto it, and only in the world. Glass is
+  AUTHORED (req_2928) and re-applies from the doc's trailing run on load
+  (req_3402), so `scene3d.replacePaintAtlas`/`importPaintAtlas` now force
+  alpha 255 on arrival (`opaqueImportCopy`). Legacy packages heal on their next
+  open + save (cold hydration re-imports base.png through the same door).
+- **Imported meshes adopt CONSISTENT WINDING.** Nothing normalized triangle
+  orientation, so a mixed-winding GLB/OBJ survived verbatim into every blob and
+  back-face culling ate the flipped faces everywhere.
+  `mesh_edit.inconsistentWindingMask` propagates orientation across clean
+  2-incidence edges, volume-orients boundary-free components about their own
+  centroid (catches an inside-out panel box glued at T-junctions; flat
+  coincident stacks measure zero and never flip), minority-flips open sheets,
+  and skips wire rows + non-manifold junctions. All four import doors
+  (`__model_mesh_load`, preview, cooked/interleaved, `__mesh_append_file`) run
+  `scene3d.normalizeSoupWinding` before retention/adoption and warn loudly when
+  they repair.
+
 ## Not yet covered
 
 - Paint SKINS (`paints/paint_N.blob`) painted at decimated quality still
@@ -167,3 +197,8 @@ construction (same inputs, same compile).
   (the existing loud warn). They would need per-skin stamps.
 - Door exports never take the decimated path (`compileDoorMesh` needs doc
   topology) — save doors at full quality.
+- A placed instance renders the SESSION's export-time cached geometry
+  (`authoredMeshData`) bound to the painted form of the moment: editing
+  topology or remapping UVs after export can mis-pair until the next
+  export/save refreshes the resident push. The 18:27 bookshelf re-save is
+  why the defect stopped reproducing from disk.
