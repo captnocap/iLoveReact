@@ -14,9 +14,9 @@ export const editor_spin_props: DocIndex = {
       kind: 'utility',
       sourceFile: 'cart/editor/world/pieceEditCommand.ts',
       description:
-        'The undoable spin transaction: sets or (rate 0) deletes PlacedPiece.spinDegPerSec IN PLACE — no destination victims, no list churn; exact forward/inverse patches like move/rotate. Registered in data/applicationCommands.ts (icon Orbit) and routed as a toggle by AppFrame (current ≠ 0 → 0, else PIECE_SPIN_RATE_DEG_PER_SEC = 45 from world/pieces.ts). The WorldContextMenu shows Spin/Stop Spin for authored pieces only — catalog boxes render as instance rows, not mesh refs, and would ignore it.',
+        'The undoable spin transaction: sets or (rate 0) deletes PlacedPiece.spinDegPerSec IN PLACE — no destination victims, no list churn; exact forward/inverse patches like move/rotate. Registered in data/applicationCommands.ts (icon Orbit) and routed as a toggle by AppFrame (current ≠ 0 → 0, else PIECE_SPIN_RATE_DEG_PER_SEC = 45 from world/pieces.ts). The WorldContextMenu shows Spin/Stop Spin for authored pieces only — catalog boxes render as instance rows, not mesh refs, and would ignore it. The PIECE FOCUS panel (inspector/PieceBody.tsx PlacementSection, req_3442) adds a rate stepper (step 15, −180..180°/s) through the same command, so arbitrary rates are authorable.',
       dependsOn: ['cart/editor/world/pieces.ts PlacedPiece.spinDegPerSec', 'cart/editor/data/applicationCommands.ts'],
-      consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/stage/WorldContextMenu.tsx'],
+      consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/stage/WorldContextMenu.tsx', 'cart/editor/inspector/PieceBody.tsx'],
       status: 'live',
     },
     {

@@ -18,7 +18,7 @@ import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
 import RigSection from './RigSection';
 import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
-import PieceBody from './PieceBody';
+import PieceBody, { type PieceEditHandlers } from './PieceBody';
 import GlobalsSection from './GlobalsSection';
 import GcStressSection from './GcStressSection';
 import PresetSection from './PresetSection';
@@ -251,6 +251,10 @@ export default function Inspector(props: {
   // World-piece focus-panel material edits.
   onAssignSlot: (id: string, role: string) => void;
   onClearSlot: (id: string, role: string) => void;
+  // World-piece instance edits (req_3442): the PIECE FOCUS placement/yaw/scale/
+  // spin fields + verb row write through the same transaction commands as the
+  // viewport gizmo and hotkeys — never a parallel mutation path.
+  pieceEdit: PieceEditHandlers;
   // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
   onSetGlobal: (field: string, value: number) => void;
   onResetGlobal: (field: string) => void;
@@ -444,6 +448,10 @@ export default function Inspector(props: {
               onClearSlot={props.onClearSlot}
               resolveMaterial={resolveMaterial}
               activeMaterialName={assetById(props.state.activeAssetId, props.state.assetOverrides).name}
+              edit={props.pieceEdit}
+              // Session renames/dupes resolve here so the model row names what
+              // the library shows NOW, not a stale synthesized id.
+              modelNameFor={(pkgId) => effectiveModelPackage(pkgId, props.state.modelOverrides, props.state.modelDupes)?.name ?? null}
             />
           </C.HW_InspectorBody>
         </C.HW_Inspector>

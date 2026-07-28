@@ -38,6 +38,11 @@ baked-hide key all read the authored yaw; only the drawn transform animates.
   live instance rows, not mesh refs, and would ignore it); the header readout
   shows `yaw° · rate°/s` while spinning. `shell/AppFrame.tsx` routes the verb
   as a toggle: current rate ≠ 0 → 0, else the shared rate.
+- `cart/editor/inspector/PieceBody.tsx PlacementSection` (req_3442) — the
+  PIECE FOCUS panel carries a `spin` rate stepper for authored instances
+  (step 15, −180..180°/s, 0 = static) writing through the same
+  `world.piece.spin` command, so arbitrary rates are authorable, not just the
+  quick verb's shared 45.
 - `cart/editor/world/meshProps.ts encodeMeshRefsV2` — the v2 live-mesh wire:
   28-byte header per ref (u32 keyHash, f32 x,y,z,yaw,**spin**, u32 matCount).
   `world/livePush.ts` prefers the v2 door and falls back to the v1 24-byte

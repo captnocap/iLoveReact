@@ -5849,6 +5849,32 @@ export default function AppFrame() {
             onOpenLiveMaterialPicker={(modelId, slotIndex) => setLiveMaterialPicker({ modelId, slotIndex })}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
+            // PIECE FOCUS instance editing (req_3442): every panel field writes
+            // through the same transaction commands as the viewport and hotkeys,
+            // so panel edits share their undo, replacement policy, and live push.
+            pieceEdit={{
+              onMovePiece: movePiece,
+              onRotatePiece: (id, quarterTurns) => invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
+                documentId: stateRef.current.activeMapStem,
+                pieceId: id,
+                quarterTurns,
+              }, 'focus-panel'),
+              onSpinPiece: (id, spinDegPerSec) => invokeApplicationCommand(WORLD_PIECE_SPIN_COMMAND_ID, {
+                documentId: stateRef.current.activeMapStem,
+                pieceId: id,
+                spinDegPerSec,
+              }, 'focus-panel'),
+              onDeletePiece: (id) => invokeApplicationCommand(WORLD_PIECE_DELETE_COMMAND_ID, {
+                documentId: stateRef.current.activeMapStem,
+                pieceId: id,
+              }, 'focus-panel'),
+              onDuplicatePiece: copyPiece,
+              onOpenPieceModel: (pkgId) => {
+                const pkg = effectiveModelPackage(pkgId, stateRef.current.modelOverrides, stateRef.current.modelDupes);
+                if (pkg) openModelDocument(pkg);
+                else setState((prev) => ({ ...prev, status: `open model: no package '${pkgId}' in the library` }));
+              },
+            }}
             // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
             onSetGlobal={guarded(setWorldGlobal)}
             onResetGlobal={guarded(resetWorldGlobal)}
