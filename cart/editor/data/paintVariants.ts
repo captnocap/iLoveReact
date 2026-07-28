@@ -187,6 +187,23 @@ export function updatePaintVariant(
   return variant;
 }
 
+/** Rename a variant in place (req_3448) — identity, files, and the painting
+ *  itself are untouched; only the user-facing label changes. The build palette
+ *  and quick-menu chips read the same json, so the new name shows everywhere.
+ *  Returns the renamed variant, or null when the id is gone or the name empty. */
+export function renamePaintVariant(pkg: PaintTarget, id: string, name: string): PaintVariant | null {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const existing = listPaintVariants(pkg).find((x) => x.id === id);
+  if (!existing || existing.name === trimmed) return existing ?? null;
+  // Spread keeps the writer's property order (id, name first) — the skins list
+  // sniffs the name from the json HEAD without parsing the multi-MB program.
+  const variant: PaintVariant = { ...existing, name: trimmed };
+  writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
+  invalidatePaintSkins(pkg);
+  return variant;
+}
+
 export function removePaintVariant(pkg: PaintTarget, id: string): void {
   remove(jsonPath(pkg, id));
   remove(pngPath(pkg, id));

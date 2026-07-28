@@ -56,7 +56,10 @@ its own texture + UV layout intact. `listPaintVariants` strips a look claim
 whose raster file is missing on disk, and hydration fails loudly rather than
 half-restoring. Legacy program/atlas variants keep their historical replay
 paths. Skins still require `paint_N.png` + `paint_N.blob` on disk (atlas-only
-looks now produce both, so they place too).
+looks now produce both, so they place too). Variants rename in place
+(req_3448, `renamePaintVariant` + the panel's pencil verb): the label in the
+json head changes, nothing else — files keep their ids, placed instances keep
+their `#p<id>` references, and the quick-menu chips pick up the new name.
 
 ## Skins are instance wardrobe, never palette rows (req_3443)
 

@@ -9,10 +9,10 @@
 // Save-BACK (req_2531): loading a variant makes it the ACTIVE painting, and Save then writes
 // BACK to it (update-in-place) instead of forking a new one. A separate "New" always forks.
 import { useState } from 'react';
-import { ScrollView } from '../../../runtime/primitives';
+import { ScrollView, TextInput } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant, writePaintVariantMeshBlob } from '../data/paintVariants';
+import { listPaintVariants, renamePaintVariant, savePaintVariant, updatePaintVariant, removePaintVariant, writePaintVariantMeshBlob, type PaintVariant } from '../data/paintVariants';
 import { exactUvCornersFromAtlasTriangles, writeModelArtifacts } from '../data/modelPackageStore';
 import type { ModelPackage } from '../data/types';
 import type { ModelFocusBridge } from '../stage/ModelView';
@@ -118,6 +118,23 @@ export default function ModelPaintVariants({ model, bridge = null, hidden = fals
     refresh();
   };
 
+  // Inline rename (req_3448) — the Outliner's idiom: pencil opens a draft in the
+  // row, Enter/check commits, Escape cancels. Rename touches the LABEL only; the
+  // painting, its files, and any placed instances wearing it are untouched.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const startRename = (v: PaintVariant) => { setRenamingId(v.id); setRenameDraft(v.name); };
+  const cancelRename = () => { setRenamingId(null); setRenameDraft(''); };
+  const commitRename = (v: PaintVariant) => {
+    const name = renameDraft.trim();
+    if (name && name !== v.name) {
+      const renamed = renamePaintVariant(model, v.id, name);
+      setNote(renamed ? `Renamed ${v.name} → ${renamed.name}.` : `Couldn't rename ${v.name}.`);
+    }
+    cancelRename();
+    refresh();
+  };
+
   // The fixed-region grid layout (req_2627 / req_2626 II): the section header
   // row carries the TITLE only (single line, never wraps); the save verbs live
   // on their own VERB ROW below it — a primary action flexing to the section's
@@ -165,10 +182,25 @@ export default function ModelPaintVariants({ model, bridge = null, hidden = fals
             <C.HW_ModelAtlasCard key={v.id}>
               <C.HW_ModelCardMain>
                 <C.HW_MaterialTitleRow>
-                  <C.HW_ToolValue>{v.name}</C.HW_ToolValue>
-                  {v.id === activeId ? <C.HW_MaterialStat style={{ color: accentFor('primary') }}>editing</C.HW_MaterialStat> : null}
-                  <C.HW_Spacer />
-                  <C.HW_MaterialStat>{v.detail <= 1 ? 'fill' : `${v.detail}px`}</C.HW_MaterialStat>
+                  {renamingId === v.id ? (
+                    <TextInput
+                      value={renameDraft}
+                      onChange={setRenameDraft}
+                      onKeyDown={(event: any) => {
+                        if (event?.key === 'Enter') commitRename(v);
+                        if (event?.key === 'Escape') cancelRename();
+                      }}
+                      placeholder={v.name}
+                      style={{ flexGrow: 1, minWidth: 0, height: 18, paddingLeft: 4, paddingRight: 4, borderRadius: 3, borderWidth: 1, borderColor: accentFor('primary'), backgroundColor: '#111a29', color: accentFor('text'), fontSize: 11 }}
+                    />
+                  ) : (
+                    <>
+                      <C.HW_ToolValue>{v.name}</C.HW_ToolValue>
+                      {v.id === activeId ? <C.HW_MaterialStat style={{ color: accentFor('primary') }}>editing</C.HW_MaterialStat> : null}
+                      <C.HW_Spacer />
+                      <C.HW_MaterialStat>{v.detail <= 1 ? 'fill' : `${v.detail}px`}</C.HW_MaterialStat>
+                    </>
+                  )}
                 </C.HW_MaterialTitleRow>
                 <C.HW_ModelMetaRow>
                   <C.HW_MaterialStat>{`${v.w}×${v.h}`}</C.HW_MaterialStat>
@@ -177,6 +209,12 @@ export default function ModelPaintVariants({ model, bridge = null, hidden = fals
                   <C.HW_MaterialStat>{v.rasterBase && v.cornerUv?.length ? `texture + uv${v.data ? ' + strokes' : ''}` : v.format === 'program' ? 'strokes' : 'pixels'}</C.HW_MaterialStat>
                 </C.HW_ModelMetaRow>
               </C.HW_ModelCardMain>
+              <C.HW_IconMiniButton
+                tooltip={renamingId === v.id ? 'Save the new name (Enter) · Esc cancels' : `Rename ${v.name}`}
+                onPress={() => (renamingId === v.id ? commitRename(v) : startRename(v))}
+              >
+                <Icon name={renamingId === v.id ? 'Check' : 'Pencil'} size={13} color={accentFor(renamingId === v.id ? 'primary' : 'textDim')} />
+              </C.HW_IconMiniButton>
               <C.HW_IconMiniButton tooltip={`Load ${v.name} — restores its texture, UV layout, and strokes (Save then updates it)`} onPress={() => onLoad(v.id)}>
                 <Icon name="CornerDownLeft" size={13} color={accentFor('primary')} />
               </C.HW_IconMiniButton>
