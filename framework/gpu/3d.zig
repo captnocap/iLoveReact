@@ -3761,12 +3761,22 @@ pub fn meshActionDocumentSet(token: u32) void {
 }
 
 pub fn meshActionDrain(out: []MeshActionEvent) usize {
-    // Run any armed roll call now — every op's door has long returned, so the
-    // tables are settled, and the alert lands in this same drain right behind
-    // the op event that caused it.
+    // Run any armed roll call now — every op's door has long returned. Two-strike
+    // protocol: a first faulty pass stays SILENT and re-checks next drain, so a
+    // gesture whose bookkeeping settles a beat after its commit never false-alarms;
+    // a fault that survives both passes heals/reports, landing in this same drain
+    // right behind the op events that caused it.
     if (g_integrity_pending) {
-        g_integrity_pending = false;
-        meshIntegrityRollCall(g_integrity_label_buf[0..g_integrity_label_len]);
+        const label = g_integrity_label_buf[0..g_integrity_label_len];
+        if (meshIntegrityCheck(label, g_integrity_strikes >= 1)) {
+            if (g_integrity_strikes >= 1) {
+                g_integrity_pending = false;
+                g_integrity_strikes = 0;
+            } else g_integrity_strikes = 1;
+        } else {
+            g_integrity_pending = false;
+            g_integrity_strikes = 0;
+        }
     }
     const n = @min(out.len, g_mesh_action_len);
     if (n == 0) return 0;
@@ -3936,6 +3946,7 @@ fn journalSnapshotForNewAction(label: []const u8) ?JournalEntry {
 /// integrity_alert action event tells the cart to resync its mirrors and say so
 /// where the user is looking.
 var g_integrity_pending: bool = false;
+var g_integrity_strikes: u8 = 0;
 var g_integrity_label_buf: [48]u8 = undefined;
 var g_integrity_label_len: usize = 0;
 
@@ -3944,16 +3955,55 @@ fn armIntegrityRollCall(label: []const u8) void {
     @memcpy(g_integrity_label_buf[0..n], label[0..n]);
     g_integrity_label_len = n;
     g_integrity_pending = true;
+    g_integrity_strikes = 0; // a fresh op restarts the two-strike audit
 }
 
-fn meshIntegrityRollCall(context: []const u8) void {
+/// A face's three corner positions as exact bit patterns, rotated so the
+/// lexicographically-smallest corner leads WITHOUT changing winding — so
+/// (a,b,c) and (b,c,a) canonicalize identically but a reversed twin does not.
+/// Null for wire/degenerate faces (any two corners exactly coincident): those
+/// are deliberate (Pen Edges) and never audited.
+fn canonicalFaceBits(verts: []const f32, face: u32) ?[9]u32 {
+    var corners: [3][3]u32 = undefined;
+    for (0..3) |corner| {
+        const base = (@as(usize, face) * 3 + corner) * 8;
+        corners[corner] = .{
+            @bitCast(verts[base]),
+            @bitCast(verts[base + 1]),
+            @bitCast(verts[base + 2]),
+        };
+    }
+    if (std.mem.eql(u32, &corners[0], &corners[1]) or
+        std.mem.eql(u32, &corners[1], &corners[2]) or
+        std.mem.eql(u32, &corners[0], &corners[2])) return null;
+    var lead: usize = 0;
+    for (1..3) |corner| {
+        if (std.mem.order(u32, &corners[corner], &corners[lead]) == .lt) lead = corner;
+    }
+    var out: [9]u32 = undefined;
+    for (0..3) |slot| {
+        const corner = corners[(lead + slot) % 3];
+        @memcpy(out[slot * 3 .. slot * 3 + 3], &corner);
+    }
+    return out;
+}
+
+/// One audit pass over the document. Detect-only mode (act=false) heals and
+/// reports NOTHING — the two-strike drain protocol gives a gesture's own
+/// bookkeeping one drain cycle (~250ms) to finish: loop cut renormalizes its
+/// ranges after journalCommit inside the same door, but a single-part doc can
+/// skip that leg and settle through later machinery, and the drain timer can
+/// land inside that window (observed headlessly: transient unowned=8/16 on a
+/// healthy chain). A fault that survives TWO consecutive drains is real:
+/// then heal what is provable and go loud. Returns whether a fault was seen.
+fn meshIntegrityCheck(context: []const u8, act: bool) bool {
     const displayed_faces: usize = @intCast(g_edit_count / 3);
     var total_faces: usize = displayed_faces;
     for (g_hidden_groups.items) |hidden| total_faces += hidden.groups.len;
     const declared_before = currentPartCount();
-    if (total_faces == 0 and declared_before == 0) return;
+    if (total_faces == 0 and declared_before == 0) return false;
     const alloc = std.heap.c_allocator;
-    const groups = alloc.alloc(u32, total_faces) catch return;
+    const groups = alloc.alloc(u32, total_faces) catch return false;
     defer alloc.free(groups);
     var face: u32 = 0;
     while (face < displayed_faces) : (face += 1) groups[face] = model_source.faceGroupOf(face);
@@ -3971,14 +4021,16 @@ fn meshIntegrityRollCall(context: []const u8) void {
             }) catch null;
         }
     };
-    var summary = check.run(alloc, groups) orelse return;
+    var summary = check.run(alloc, groups) orelse return false;
     var faulted = false;
     var healed = false;
     if (!summary.ranges_valid) {
         faulted = true;
-        healed = ensureDisjointPartRanges(context);
-        summary.deinit(alloc);
-        summary = check.run(alloc, groups) orelse return;
+        if (act) {
+            healed = ensureDisjointPartRanges(context);
+            summary.deinit(alloc);
+            summary = check.run(alloc, groups) orelse return true;
+        }
     }
     defer summary.deinit(alloc);
     if (summary.ranges_valid and summary.unowned_faces == 0 and summary.multiply_owned_faces == 0) {
@@ -3988,24 +4040,52 @@ fn meshIntegrityRollCall(context: []const u8) void {
         }
         if (empty_declarations > 0) {
             faulted = true;
-            if (model_source.partRanges()) |ranges| {
-                if (mesh_journal_log.compactOccupiedPartRanges(alloc, groups, ranges)) |compacted| {
-                    model_source.setPartRanges(compacted);
-                    alloc.free(compacted);
-                    healed = true;
-                } else |_| {}
+            if (act) {
+                if (model_source.partRanges()) |ranges| {
+                    if (mesh_journal_log.compactOccupiedPartRanges(alloc, groups, ranges)) |compacted| {
+                        model_source.setPartRanges(compacted);
+                        alloc.free(compacted);
+                        healed = true;
+                    } else |_| {}
+                }
             }
         }
     } else faulted = true;
-    if (!faulted) return;
+    // Geometric tripwire (req_3486): an exact same-winding duplicate face is
+    // ALWAYS a fault — fromSoup collapses them at the import boundary, so any
+    // live one was minted by the op that just committed. Reversed twins
+    // (extrude's interior walls) are legal internal structure, and wire faces
+    // ((a,b,b) deliberate degenerates) are excluded by the coincident-corner
+    // skip. Report-only: the next indexed lowering collapses them anyway; the
+    // value here is naming the guilty op instead of shredding N cuts later.
+    var duplicate_faces: u32 = 0;
+    if (g_edit_verts) |verts| {
+        var seen = std.AutoHashMapUnmanaged(u64, u32).empty;
+        defer seen.deinit(alloc);
+        var probe: u32 = 0;
+        while (probe < displayed_faces) : (probe += 1) {
+            const canon = canonicalFaceBits(verts, probe) orelse continue;
+            const key = std.hash.Wyhash.hash(0, std.mem.asBytes(&canon));
+            const gop = seen.getOrPut(alloc, key) catch break;
+            if (gop.found_existing) {
+                const other = canonicalFaceBits(verts, gop.value_ptr.*) orelse continue;
+                if (std.mem.eql(u32, &canon, &other)) {
+                    duplicate_faces += 1;
+                    faulted = true;
+                }
+            } else gop.value_ptr.* = probe;
+        }
+    }
+    if (!faulted or !act) return faulted;
     const declared_after = currentPartCount();
     std.log.err(
-        "[mesh-integrity] roll call after '{s}': ranges_valid={} unowned={d} multiply_owned={d} declared {d}->{d} healed={} (req_3484)",
-        .{ context, summary.ranges_valid, summary.unowned_faces, summary.multiply_owned_faces, declared_before, declared_after, healed },
+        "[mesh-integrity] roll call after '{s}': ranges_valid={} unowned={d} multiply_owned={d} duplicate_faces={d} declared {d}->{d} healed={} (req_3484)",
+        .{ context, summary.ranges_valid, summary.unowned_faces, summary.multiply_owned_faces, duplicate_faces, declared_before, declared_after, healed },
     );
     g_mesh_action_seq +%= 1;
     if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
     enqueueMeshAction(g_mesh_action_seq, .integrity_alert, .applied, g_edit_count, g_edit_count, declared_before, declared_after);
+    return true;
 }
 
 /// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
@@ -4075,6 +4155,7 @@ fn journalDropLast() void {
 /// Forget all history — a fresh model load is a new document.
 pub fn meshJournalClear() void {
     g_integrity_pending = false; // an armed check must not audit the NEXT document
+    g_integrity_strikes = 0;
     journalFreeStack(&g_journal_undo);
     journalFreeStack(&g_journal_redo);
     journalDiscard(&g_gizmo_snap);

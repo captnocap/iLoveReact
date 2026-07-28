@@ -18,12 +18,16 @@ the op that caused it silently.
 
 ARMED at `journalCommit` (every accepted topology op, including gizmo commits
 and metadata checkpoints) and after a successful `journalStep` (undo/redo);
-RUNS at the next `meshActionDrain`. The deferral is load-bearing: several ops
-(loop cut's renormalize) settle their range tables AFTER committing the
-journal snapshot, so a commit-time check reads half-settled state as a fault
-(proven headlessly — the commit-time draft flagged `unowned=16/32` mid-loop-cut
-on a healthy chain). At drain time every door has returned, and the alert
-enqueues into the same drain, right behind the op event that caused it.
+RUNS at `meshActionDrain` under a TWO-STRIKE protocol: the first faulty pass
+is silent detect-only and re-checks at the next drain (~250ms); only a fault
+that survives both passes heals and reports. Both legs are load-bearing,
+proven headlessly: a commit-time check read loop cut's half-settled range
+table as `unowned=16/32`, and even at drain time the timer can land inside a
+gesture's own settle window (`unowned=8` once in three runs of a healthy
+chain — loop cut renormalizes after committing inside the same door, but a
+single-part doc can settle through later machinery). A real fault never
+self-resolves, so two strikes trade ~250ms of latency for zero false alarms.
+The alert enqueues into the drain right behind the op events that caused it.
 `meshJournalClear` disarms so a pending check never audits the next document.
 
 The check gathers the FULL partition — displayed faces plus every
@@ -42,6 +46,17 @@ Heal ladder (only what can be proven, never a guess):
 - anything else (unowned faces, multiply-owned faces, group-table mismatch)
   → reported intact. A heal that invents ownership would launder corruption
   into a valid-looking partition.
+
+Geometric tripwire (req_3486): the check also scans displayed faces for
+EXACT same-winding duplicate faces — `canonicalFaceBits` rotates each face so
+its smallest corner leads without changing winding, so `(a,b,c)` and
+`(b,c,a)` collide while a reversed twin does not. `fromSoup` collapses these
+at the import boundary, so any live one was minted by the op that just
+committed (the a196f3b class, caught at its origin instead of shredding N
+cuts later). Reversed twins (extrude's interior walls) are legal internal
+structure; wire faces (`(a,b,b)` deliberate degenerates) are excluded by the
+coincident-corner skip. Report-only — the next indexed lowering collapses
+them anyway.
 
 On any fault it logs `[mesh-integrity] roll call after '<op>' …` with the
 numbers AND enqueues an `integrity_alert` action event (`ActionKind` ordinal
