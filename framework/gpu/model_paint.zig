@@ -89,7 +89,10 @@ var g_has_dirty: bool = false;
 /// Unpainted faces read as this neutral light grey, so a freshly-loaded model looks
 /// the same as the plain shaded viewer until you paint it.
 pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
-pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ 0, 0, 0, 0 };
+/// Unowned packing space: zero ALPHA (the content/carry marker) over the neutral
+/// substrate COLOUR (req_3471) — anything that mis-samples padding renders clay,
+/// never black. See fillNeutralBackground.
+pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2], 0 };
 // Authored opacity has one shared classification boundary. The renderer, durable mesh
 // partition, and editor overlay must agree or a face can draw as glass while presenting
 // as opaque (or vice versa).
@@ -146,13 +149,27 @@ pub fn consumeDirtyRows() ?[2]u32 {
     return r;
 }
 
-/// Wipe the atlas back to transparent space plus the default substrate INSIDE each
-/// real UV face. This keeps unowned packing space visibly transparent while preserving
-/// per-face glass alpha (req_2928) across paint-program replay.
+/// Fill the WHOLE sheet with the neutral substrate COLOUR at zero alpha — the
+/// "infinite blob of the same colour" decree (req_3471). Alpha 0 remains the
+/// content/carry marker for unowned packing space, but its RGB is never black:
+/// a face that mis-samples padding (a stale-layout remap, a drifted UV) renders
+/// neutral clay in the editor's opaque pass instead of a black bar. The failure
+/// class keeps its bookkeeping signal and loses its pixels.
+fn fillNeutralBackground(buf: []u8) void {
+    var texel: usize = 0;
+    while (texel + 3 < buf.len) : (texel += 4) {
+        @memcpy(buf[texel .. texel + 4], &EMPTY_ATLAS_TEXEL);
+    }
+}
+
+/// Wipe the atlas back to the neutral background plus the default substrate INSIDE
+/// each real UV face. Unowned packing space keeps zero ALPHA (the content marker)
+/// over neutral RGB (req_3471), preserving per-face glass alpha (req_2928) across
+/// paint-program replay.
 pub fn clearAtlas() void {
     const buf = g_rgba orelse return;
     if (g_layout == null or g_facecount == 0) return;
-    @memset(buf, 0);
+    fillNeutralBackground(buf);
     var face: u32 = 0;
     while (face < g_facecount) : (face += 1) {
         paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, faceAlpha(face));
@@ -609,8 +626,9 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     g_isl_start = starts;
     g_isl_tris = tris;
 
-    // Atlas: unowned packing space is transparent. Only real triangle silhouettes
-    // receive the neutral substrate; pad gutters and shelf voids stay checkerboard.
+    // Atlas: unowned packing space keeps zero ALPHA (the content/carry marker) but
+    // wears the neutral substrate COLOUR (req_3471) — mis-sampled padding renders
+    // clay, never black. Real triangle silhouettes then get the full substrate.
     const need = @as(usize, g_atlas_w) * @as(usize, g_atlas_h) * 4;
     const rgba = alloc.alloc(u8, need) catch {
         alloc.free(starts);
@@ -620,7 +638,7 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
         freeLayoutState();
         return;
     };
-    @memset(rgba, 0);
+    fillNeutralBackground(rgba);
     g_rgba = rgba;
     f = 0;
     while (f < fc) : (f += 1) {
