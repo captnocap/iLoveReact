@@ -12,7 +12,9 @@ bundle.js
 bundle-*.js
 bundle-*.json
 *.metafile.json
-.cache/*
+# Any .cache/ dir at any depth (editor backdrop ref-image overflow lives in
+# cart/editor/.cache/ — machine-local, the referencing twig state never travels)
+.cache/
 pixel*.json
 cart/editor/data/models/props/Model_10_2/paints/paint_1.json
 # ── Vendored Zig toolchain ───────────────────────────────
@@ -164,6 +166,10 @@ app.o
 Empty File
 AGENT_ARCHITECTURE.md
 benchmark_*.csv
+# Leaked test-bundle temp outputs and root-level shot captures — root pngs
+# are never source; keep the 2am checkpoint sweep from re-committing them
+/_tmp_*
+/*.png
 
 # ── General ─────────────────────────────────────────────
 # Generated files
