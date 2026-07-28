@@ -2,6 +2,7 @@ import { EDITOR_GROUND_FORMULA, GROUND_STREAM_TUNING, groundFormulaFor, tileBind
 import { fillShaderFor } from './shaders/compose';
 import { FILL_SHADER } from './shaders/index';
 import { MATERIALS } from './shaders/_generated/registry';
+import { EDITOR_SHADERS } from '../textures/shaders';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -92,6 +93,18 @@ test('per-material fill modules are small and keep the FILL_SHADER contract', ()
   assert(one.includes('fn water(uv: vec2f'), 'wanted material body missing');
   assert(fillShaderFor(['water']) === one, 'per-set modules are not memoized');
   assert(fillShaderFor(['no_such_material_fn']) === FILL_SHADER, 'unknown fn must fall back to the full catalog, not break rendering');
+});
+
+test('every generated fill spec resolves its registry fn and composes shaken', () => {
+  // The regression this guards: FillMaterial carries no fn, so fillSpec must
+  // resolve it via fnForMaterialRow — a bad lookup made all 409 specs fall
+  // back to the full catalog (and spam one console error each, req_3485).
+  const fillSpecs = EDITOR_SHADERS.filter((spec) => spec.fillFn !== undefined);
+  assert(fillSpecs.length > 300, `only ${fillSpecs.length} fill specs carry fillFn — the registry fn lookup is broken again`);
+  for (const spec of fillSpecs) {
+    assert(spec.shader !== FILL_SHADER, `spec '${spec.id}' fell back to the full-catalog shader`);
+    assert(spec.shader.includes(`fn ${spec.fillFn}(uv: vec2f`), `spec '${spec.id}' module is missing its own material body '${spec.fillFn}'`);
+  }
 });
 
 test('Road catalog variants name the yellow, white, and plain authored takes', () => {

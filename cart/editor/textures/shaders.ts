@@ -22,7 +22,8 @@
 //     hand-edit it here; add/remove a material by adding/removing its .wgsl
 //     file, then rerun build-shaders.ts.
 import { ROAD_TILE_SHADER } from '../render3d/roadTileFill';
-import { fillShaderFor } from '../render3d/shaders/compose';
+import { fillShaderFor, fnForMaterialRow } from '../render3d/shaders/compose';
+import { FILL_SHADER } from '../render3d/shaders/index';
 import { FILL_BOARDS as GENERATED_FILL_BOARDS, MATERIALS, type FillBoard, type FillMaterial, type MaterialSlot } from '../render3d/shaders/_generated/registry';
 import { packMissionData } from './missionCode';
 
@@ -368,6 +369,10 @@ export function textureCategory(slug: string): TextureCategory {
 function fillSpec(b: FillBoard, materialId: number, m: FillMaterial): ShaderSpec {
   const [perMaterial, perVariant, offset] = b.seedCoef;
   const defaultSeed = perMaterial * materialId + offset; // variant-0 swatch seed
+  // FillMaterial carries no fn — the WGSL fn name comes from the MATERIALS
+  // registry keyed by this spec's exact (materialId, board) dispatch pair.
+  const fn = fnForMaterialRow(materialId, b.board);
+  if (!fn) console.error(`[shaders] no registry fn for board ${b.letter} material ${materialId} ('${m.slug}') — spec keeps the full-catalog shader`);
   return {
     id: `${b.letter.toLowerCase()}-${m.slug}`,
     label: m.name,
@@ -375,8 +380,8 @@ function fillSpec(b: FillBoard, materialId: number, m: FillMaterial): ShaderSpec
     blurb: `${m.name} — three authored takes, seed + detail grade tunable.`,
     // Per-material composed module (req_3473) — mounting one preview compiles
     // tens of KB in milliseconds instead of the 410-material catalog.
-    shader: fillShaderFor([m.fn]),
-    fillFn: m.fn,
+    shader: fn ? fillShaderFor([fn]) : FILL_SHADER,
+    fillFn: fn ?? undefined,
     base: [
       { key: 'seed', label: 'Seed', default: defaultSeed, min: 0, max: FILL_SEED_MAX, step: 1, integer: true },
       {

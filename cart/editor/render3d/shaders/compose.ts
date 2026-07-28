@@ -80,8 +80,11 @@ export function fnForMaterialRow(materialId: number, boardIndex: number): string
 
 /** Wanted fns plus every material fn their bodies call (compositions layering
  *  surfaces), deduped + sorted so equal sets compose byte-identical modules.
- *  Returns null (loudly) when a fn is missing from the generated dispatch, so
- *  callers never compose a module the shader would miscompile. */
+ *  Returns null (loudly, once per unknown name — a drifted caller can request
+ *  the same bad fn hundreds of times per boot) when a fn is missing from the
+ *  generated dispatch, so callers never compose a module the shader would
+ *  miscompile. */
+const reportedUnknownFns = new Set<string>();
 export function resolveMaterialFns(fns: readonly string[]): string[] | null {
   const { bodies } = splitFillDispatch();
   const wanted = [...new Set(fns)].sort();
@@ -92,7 +95,10 @@ export function resolveMaterialFns(fns: readonly string[]): string[] | null {
     if (need.includes(fn)) continue;
     const body = bodies.get(fn);
     if (!body) {
-      console.error(`[compose] material fn '${fn}' not found in the generated dispatch — module not composed`);
+      if (!reportedUnknownFns.has(fn)) {
+        reportedUnknownFns.add(fn);
+        console.error(`[compose] material fn '${fn}' not found in the generated dispatch — module not composed`);
+      }
       return null;
     }
     need.push(fn);
@@ -128,15 +134,20 @@ const composedFillShaders = new Map<string, string>();
  *  exact FILL_SHADER D[] contract) restricted to a material set. Memoized per
  *  set. An unknown fn falls back to the full-catalog module — a picker or
  *  registry drift renders correctly while the console error names it. */
-export function fillShaderFor(fns: readonly string[]): string {
-  const wanted = [...new Set(fns)].sort();
+export function fillShaderFor(fns: readonly (string | null | undefined)[]): string {
+  const wanted = [...new Set(fns.filter((fn): fn is string => typeof fn === 'string' && fn.length > 0))].sort();
   const key = wanted.join(',');
   const hit = composedFillShaders.get(key);
   if (hit) return hit;
   const resolved = resolveMaterialFns(wanted);
-  if (!resolved) return FILL_SHADER;
-  const { prelude, bodies } = splitFillDispatch();
-  const src = [prelude, ...resolved.map((fn) => bodies.get(fn)!), fillPickFor(resolved), FILL_MAIN_SRC].join('\n');
+  // The fallback memoizes too — a drifted set must not re-resolve (and re-log)
+  // on every mount of every consumer.
+  const src = resolved
+    ? (() => {
+      const { prelude, bodies } = splitFillDispatch();
+      return [prelude, ...resolved.map((fn) => bodies.get(fn)!), fillPickFor(resolved), FILL_MAIN_SRC].join('\n');
+    })()
+    : FILL_SHADER;
   composedFillShaders.set(key, src);
   return src;
 }
