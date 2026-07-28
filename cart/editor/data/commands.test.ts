@@ -65,6 +65,31 @@ test('bevel is contextual to exactly one vertex or edge', () => {
   assert(!edges.includes('mesh-bevel'), 'multi-edge selection still exposes Bevel');
 });
 
+test('B invokes Bevel in vertex and edge modes without stealing Face or Paint B', () => {
+  const base = {
+    workspaceDocuments: [{ id: 'model', kind: 'model', title: 'Model' }],
+    activeWorkspaceDocumentId: 'model',
+    materialFocused: false,
+    newMeshPrompt: null,
+    fileExplorerOpen: false,
+    mapDocumentOpen: false,
+    buildDialogOpen: false,
+    addChunkOpen: false,
+    worldUndo: [],
+    worldRedo: [],
+  } as unknown as EditorState;
+  const mods = { ctrl: false, shift: false, alt: false, meta: false };
+  const command = (modelTool: Partial<EditorState['modelTool']>) => commandForKeyEvent({
+    ...base,
+    modelTool: { blocking: null, paint: false, sel: 1, ...modelTool },
+  } as EditorState, 'b', mods);
+  assert(command({ selMode: 1 }) === 'mesh-bevel', 'Vertex B did not resolve Bevel');
+  assert(command({ selMode: 2 }) === 'mesh-bevel', 'Edge B did not resolve Bevel');
+  assert(command({ selMode: 3 }) === 'mesh-glass', 'Face B stopped resolving Glass');
+  assert(command({ selMode: 0, paint: true }) === 'mesh-paint-fill', 'Paint B stopped resolving Fill');
+  assert(commandById('mesh-bevel').key === 'B', 'Bevel does not advertise its live shortcut');
+});
+
 test('multi-part outliner selection cannot fall through to Merge Faces', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 12 }, 2));
   assert(!commands.includes('mesh-merge-faces'), 'Merge Faces is hidden while selected faces represent multiple parts');

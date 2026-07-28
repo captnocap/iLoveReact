@@ -255,7 +255,7 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-weld', menu: 'Edit', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
   // Studio bevel: one selected sharp manifold edge or 3+-edge corner opens the
   // shared live width popup; Apply is one native topology journal entry.
-  { id: 'mesh-bevel', menu: 'Edit', scope: 'model', name: 'Bevel', icon: 'Slice', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-bevel', menu: 'Edit', scope: 'model', name: 'Bevel', icon: 'Slice', key: 'B', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
   { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },

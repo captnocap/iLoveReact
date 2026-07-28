@@ -82,6 +82,10 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'm', commandId: 'mesh-weld', mode: 'vertex' },
   { key: 'm', commandId: 'mesh-weld', mode: 'edge' },
   { key: 'm', commandId: 'mesh-merge-faces' },
+  // B is likewise contextual: bevel one selected corner/edge, while Face and
+  // Paint retain their established Glass/Fill meanings below.
+  { key: 'b', commandId: 'mesh-bevel', mode: 'vertex' },
+  { key: 'b', commandId: 'mesh-bevel', mode: 'edge' },
   { key: 'b', commandId: 'mesh-paint-fill', mode: 'paint' },
   { key: 'b', commandId: 'mesh-glass', mode: 'face' },
   { key: 'n', commandId: 'mesh-paint-brush', mode: 'paint' },
