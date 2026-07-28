@@ -253,6 +253,9 @@ export const COMMANDS: Command[] = [
   // Weld (req_3382): merge the selected vertices at their center — Blender's
   // Merge-at-Center. Edge mode collapses the selected edges' endpoints.
   { id: 'mesh-weld', menu: 'Edit', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
+  // Studio bevel: one selected sharp manifold edge or 3+-edge corner opens the
+  // shared live width popup; Apply is one native topology journal entry.
+  { id: 'mesh-bevel', menu: 'Edit', scope: 'model', name: 'Bevel', icon: 'Slice', key: '', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
   { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
@@ -293,6 +296,7 @@ export const COMMANDS: Command[] = [
 export type BlockingOverlay = { id: string; label: string; closerCommandId?: string };
 export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   const mv = state.modelTool.blocking;
+  if (mv === 'bevel') return { id: 'bevel', label: 'Bevel' };
   if (mv === 'loop-cut') return { id: 'loop-cut', label: 'Loop Cut' };
   if (mv === 'paint-atlas') return { id: 'paint-atlas', label: 'Create Paint Atlas' };
   if (mv === 'face-guard') return { id: 'face-guard', label: 'Unsafe Face Edit' };
@@ -404,7 +408,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -471,14 +475,14 @@ export function meshToolCommands(): Command[] {
 // same way in the toolbar and context menu.
 export function meshTopoCommands(tool: { selMode: number; sel: number }, selectedPartCount = 0): Command[] {
   if (tool.sel < 1) return [];
-  // Vertex mode (req_3382): two or more selected verts weld at their center.
+  // Vertex mode: one real corner bevels; two or more selected verts weld at center.
   if (tool.selMode === 1) {
-    return tool.sel >= 2 ? [commandById('mesh-weld')] : [];
+    return tool.sel === 1 ? [commandById('mesh-bevel')] : [commandById('mesh-weld')];
   }
   if (tool.selMode === 2) {
     // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
     return tool.sel === 1
-      ? [commandById('mesh-extrude'), commandById('mesh-loopcut'), commandById('mesh-weld')]
+      ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-loopcut'), commandById('mesh-weld')]
       : [commandById('mesh-create-face'), commandById('mesh-weld')];
   }
   if (tool.selMode === 3) {

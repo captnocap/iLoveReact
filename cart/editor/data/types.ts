@@ -143,11 +143,11 @@ export type Command = {
 export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // A BLOCKING session the model viewer owns (req_2626 gap HH — modal discipline).
 // While one is live, every other input surface must be inert until it resolves:
-// 'loop-cut' = the host-side lc_begin…lc_end popup session (captured base mesh),
+// 'bevel' / 'loop-cut' = host-side captured-base topology popup sessions,
 // 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-
 // edit confirmation. Mirrored up through ModelToolSnapshot so the shell's central
 // gate (AppFrame) can see it without owning the session.
-export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
@@ -176,6 +176,8 @@ export type ModelToolApi = {
   // Merge the selected vertices at their center (req_3382); edge mode collapses
   // the selected edges' endpoints. Degenerated faces leave in the same undo step.
   weld: () => void;
+  // Chamfer exactly one selected vertex or edge through a host-owned live popup.
+  bevel: () => void;
   // Collect the UV islands projected from the same direction as the selected
   // authored face. Returns the resulting authored-face count.
   selectUvOrientation: () => number;

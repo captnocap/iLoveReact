@@ -110,10 +110,10 @@ export type ModelViewInitialMesh = {
 // right-click flyout can host + highlight them.
 export type LightId = 'flat' | 'key' | 'fill';
 // blocking: the viewer-owned BLOCKING session currently unresolved (req_2626 gap HH —
-// modal discipline): the loop-cut popup session (host-captured base mesh), the Create
-// Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
+// modal discipline): host-captured bevel/loop-cut popup sessions, the Create Paint
+// Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
-export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
@@ -179,8 +179,8 @@ export type ModelFocusBridge = {
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
-// extrudeEdge / extrudeFace / createFace are the contextual topology ops (valid on edge/face
-// selection); setQuality drives the live decimation knob.
+// extrude / createFace / weld / bevel are the contextual topology ops; setQuality
+// drives the live decimation knob.
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
@@ -201,6 +201,8 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
+  weld: () => void;
+  bevel: () => void;
   selectUvOrientation: () => number;
   flipSelection: () => boolean;
   loopCut: () => void;
@@ -462,6 +464,18 @@ const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
+// Bevel: a host-owned captured-base session shared by one vertex or one edge.
+type BevelInfo = { ok: number; kind?: 'edge' | 'vertex'; defaultWidth?: number; minimumWidth?: number; maxWidth?: number };
+const meshBevelBegin = (): BevelInfo | null => {
+  try {
+    const j = host.__mesh_bevel_begin?.();
+    return typeof j === 'string' && j ? (JSON.parse(j) as BevelInfo) : null;
+  } catch {
+    return null;
+  }
+};
+const meshBevelPreview = (width: number) => readTopoResult(host.__mesh_bevel_preview?.(width));
+const meshBevelEnd = (commit: boolean) => readTopoResult(host.__mesh_bevel_end?.(commit ? 1 : 0));
 // ── Face loop cut (the studio's Blockbench treatment): a host-owned popup session ──
 // begin captures the base mesh + the clicked face's two in-plane axes; preview installs
 // the cut live at (direction, cuts, offset); end commits ONE journal entry or restores
@@ -713,6 +727,14 @@ const LC_PAD = 12;
 const LC_CARD_W = LC_PAD * 2 + LC_LABEL_W + LC_GAP + LC_STEP_W; // content columns = the card
 // Compact axis-span readout for the direction toggle labels ("U 2.0u").
 const lcSpanLabel = (s: number) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}u`;
+const BEVEL_POPUP_TUNING = {
+  stepUnits: 0.5,
+  widthDecimals: 1,
+} as const;
+const roundBevelUnits = (value: number) => {
+  const scale = 10 ** BEVEL_POPUP_TUNING.widthDecimals;
+  return Math.round(value * scale) / scale;
+};
 // Create Paint Atlas size-picker grid (req_2643 NN): fixed columns — size label,
 // density, recommended-chip (ALWAYS reserved, empty for others), bytes right-aligned
 // to the row's one right edge. Single-line cells, loud truncation.
@@ -956,6 +978,44 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       resyncPartRanges();
       refreshUvIfLive();
     }
+  };
+
+  // ── Bevel popup: exactly one selected edge or vertex, one shared native session.
+  // Width is displayed in modeling units (16 u = 1 m), while the host keeps geometry
+  // and limits in metres. Every step rebuilds from the captured base; Apply commits
+  // one journal entry and Cancel restores the base plus its original selection.
+  const [bv, setBv] = useState<null | {
+    kind: 'edge' | 'vertex';
+    width: number;
+    min: number;
+    max: number;
+    fallbackReason: string | null;
+  }>(null);
+  const openBevel = () => {
+    const info = meshBevelBegin();
+    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex') ||
+        typeof info.defaultWidth !== 'number' || typeof info.minimumWidth !== 'number' || typeof info.maxWidth !== 'number') {
+      setError('Select one sharp manifold edge, or one corner with at least 3 edges');
+      return;
+    }
+    const min = roundBevelUnits(info.minimumWidth * U_PER_TILE);
+    const max = Math.max(min, roundBevelUnits(info.maxWidth * U_PER_TILE));
+    const width = Math.max(min, Math.min(max, roundBevelUnits(info.defaultWidth * U_PER_TILE)));
+    const preview = meshBevelPreview(width / U_PER_TILE);
+    setBv({ kind: info.kind, width, min, max, fallbackReason: preview?.fallbackReason ?? null });
+    adoptMesh(preview);
+  };
+  const changeBevel = (widthRaw: number) => {
+    if (!bv) return;
+    const width = Math.max(bv.min, Math.min(bv.max, roundBevelUnits(widthRaw)));
+    const preview = meshBevelPreview(width / U_PER_TILE);
+    setBv({ ...bv, width, fallbackReason: preview?.fallbackReason ?? null });
+    adoptMesh(preview);
+  };
+  const closeBevel = (commit: boolean) => {
+    if (!bv) return;
+    adoptMesh(meshBevelEnd(commit));
+    setBv(null);
   };
 
   // ── Face loop cut popup (the studio treatment): direction picks which of the clicked
@@ -1826,6 +1886,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     weld: () => applyTopo(meshWeld(), 'Select at least two vertices (or an edge) to weld'),
+    bevel: openBevel,
     selectUvOrientation,
     flipSelection: () => adoptMesh(meshFlipFaces()),
     // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
@@ -2018,7 +2079,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The viewer's unresolved BLOCKING session, mirrored up with the tool state so the
   // shell can enforce modal discipline (req_2626 HH): while one is live, the shell
   // holds every other input surface inert until the user resolves it HERE.
-  const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
+  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
   }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
@@ -2098,6 +2159,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // emits lowercase names, so the old 'Escape' binding never fired (dead Esc was
     // part of the req_2620 undo-path break; same normalization story as keymap.ts).
     escape: () => {
+      if (bv) { closeBevel(false); return; } // restore the captured pre-bevel mesh + selection
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
       if (atlasPrompt) { setAtlasPrompt(false); return; } // the atlas gate cancels next
       if (selMode !== 0) { meshClearSel(); adoptHostSelection(selInfo); }
@@ -2114,6 +2176,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setUvPanel(null);
     atlasReadyRef.current = false;
     atlasInvalidatedRef.current = false;
+    setBv(null); // the host drops a live bevel session with the old mesh's journal
     setLc(null); // the host drops a live loop-cut session with the old mesh's journal
   };
 
@@ -3068,6 +3131,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   </Pressable>
                 );
               })}
+              {selMode === 1 && selInfo.sel === 1 && (
+                <>
+                  <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+                  <Pressable
+                    onPress={openBevel}
+                    tooltip="Bevel selected corner — opens a live width preview (3+ incident edges)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Bevel</Text>
+                  </Pressable>
+                </>
+              )}
               {selMode === 2 && selInfo.sel > 0 && (
                 <>
                   <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
@@ -3081,6 +3159,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       }}
                     >
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
+                    </Pressable>
+                  )}
+                  {selInfo.sel === 1 && (
+                    <Pressable
+                      onPress={openBevel}
+                      tooltip="Bevel selected sharp manifold edge — opens a live width preview"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Bevel</Text>
                     </Pressable>
                   )}
                   {selInfo.sel === 1 && (
@@ -3176,6 +3266,65 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           onRemove={(id) => setBackdrops((list) => list.filter((b) => b.id !== id))}
           onClose={() => setBackdropPanel(false)}
         />
+      ) : null}
+
+      {/* Bevel sizing: the old Studio edge/vertex chamfer brought onto the current
+          host-native indexed mesh. Width is modeling u; every step is a fresh preview
+          from the captured base. Apply journals once, while ✕ / Esc restores the base
+          and the exact original selection. */}
+      {bv ? (
+        <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
+          <Col
+            style={{
+              width: LC_CARD_W, maxWidth: '100%', paddingLeft: LC_PAD, paddingRight: LC_PAD, paddingTop: 10, paddingBottom: 10,
+              backgroundColor: 'rgba(11,19,32,0.96)', borderWidth: 1, borderColor: '#2c4a6a',
+              borderRadius: 8, gap: 8,
+            }}
+          >
+            <Row style={{ alignItems: 'center' }}>
+              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
+                {`Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
+              </Text>
+              <Pressable
+                onPress={() => closeBevel(false)}
+                tooltip="Cancel (Esc) — restore the unbeveled mesh and selection"
+                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+              >
+                <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
+              </Pressable>
+            </Row>
+            {bv.fallbackReason ? (
+              <Text style={{ color: '#e7b96b', fontSize: 11 }}>{bv.fallbackReason}</Text>
+            ) : null}
+            <Row style={{ alignItems: 'center' }}>
+              <Text numberOfLines={1} noWrap style={{ color: '#8fa1b8', fontSize: 12, width: LC_LABEL_W }}>width u</Text>
+              <Box style={{ flexGrow: 1 }} />
+              <Pressable
+                onPress={() => changeBevel(bv.width - BEVEL_POPUP_TUNING.stepUnits)}
+                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+              >
+                <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
+              </Pressable>
+              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', width: LC_VAL_W, marginLeft: LC_GAP, marginRight: LC_GAP, textAlign: 'center' }}>
+                {bv.width.toFixed(BEVEL_POPUP_TUNING.widthDecimals)}
+              </Text>
+              <Pressable
+                onPress={() => changeBevel(bv.width + BEVEL_POPUP_TUNING.stepUnits)}
+                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+              >
+                <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>+</Text>
+              </Pressable>
+            </Row>
+            <Text style={{ color: '#7d899c', fontSize: 10, fontFamily: 'monospace' }}>{`max ${bv.max.toFixed(BEVEL_POPUP_TUNING.widthDecimals)}u`}</Text>
+            <Pressable
+              onPress={() => closeBevel(!bv.fallbackReason)}
+              tooltip={bv.fallbackReason ? 'Close without changing the mesh' : 'Commit the bevel as one undo step'}
+              style={{ marginTop: 2, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: bv.fallbackReason ? '#303747' : '#1c3a2a', borderWidth: 1, borderColor: bv.fallbackReason ? '#566176' : '#2f7a4f' }}
+            >
+              <Text style={{ color: bv.fallbackReason ? '#c8d1df' : '#7fd6a0', fontSize: 12, fontWeight: 700 }}>{bv.fallbackReason ? 'Close' : 'Apply'}</Text>
+            </Pressable>
+          </Col>
+        </Box>
       ) : null}
 
       {/* Loop-cut popup (the studio's Blockbench panel): direction (which in-plane axis),

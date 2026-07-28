@@ -181,6 +181,18 @@
           "zig": "hostMeshTopoLoopCut"
         },
         {
+          "js": "__mesh_bevel_begin",
+          "zig": "hostMeshBevelBegin"
+        },
+        {
+          "js": "__mesh_bevel_preview",
+          "zig": "hostMeshBevelPreview"
+        },
+        {
+          "js": "__mesh_bevel_end",
+          "zig": "hostMeshBevelEnd"
+        },
+        {
           "js": "__mesh_lc_begin",
           "zig": "hostMeshLcBegin"
         },

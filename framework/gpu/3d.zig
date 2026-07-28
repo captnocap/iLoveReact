@@ -2092,6 +2092,7 @@ pub const LcInfo = struct { size0: f32, size1: f32 };
 /// those two lengths for the popup, or null when not in face mode /
 /// nothing selected. A prior session (stale popup) is dropped, not committed.
 pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
+    if (g_bevel != null) return null;
     lcFree();
     if (!model_paint.hasTarget()) return null;
     if (mesh_edit.mode() != .face) return null;
@@ -2346,12 +2347,12 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     return ok;
 }
 
-/// A loop-cut popup session is LIVE. The engine's press routing treats a live session as
-/// MODAL: the drawn cut-plane handle is the only grabbable — nothing falls through to a
-/// face pick that would mutate the selection the captured base was built from (req_2625
-/// gap DD). The popup buttons and Esc are the exits.
+/// A host-captured topology popup session is LIVE. The engine's press routing treats
+/// it as MODAL: loop cut exposes its drawn handle; bevel consumes viewport presses so
+/// nothing can mutate the selection either session's captured base was built from.
+/// Popup buttons and Esc are the exits.
 pub fn meshLcActive() bool {
-    return g_lc != null;
+    return g_lc != null or g_bevel != null;
 }
 
 pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32, fallback_reason: ?[]const u8 };
@@ -2371,6 +2372,277 @@ pub fn meshLcState() ?LcState {
 pub fn meshLcFallbackReason() ?[]const u8 {
     const sp: *const LcSession = if (g_lc) |*p| p else return null;
     return sp.last_reason;
+}
+
+// ── Bevel: one selected indexed edge or vertex, host-owned live session ────────
+// The cart owns only popup values. Stable topology identity, preview installation,
+// part/material/UV provenance, exact cancel, and the one-entry journal transaction
+// stay behind this boundary.
+const BevelSession = struct {
+    kind: indexed_edit_mesh.BevelKind,
+    original_mode: mesh_edit.Mode,
+    selection_index: u32,
+    target: indexed_edit_mesh.BevelTarget,
+    max_width: f32,
+    base_mesh: indexed_edit_mesh.Mesh,
+    last_mesh: ?indexed_edit_mesh.Mesh,
+    base_paint_layout_stale: bool,
+    base_groups: ?[]u32,
+    base_colors: []u8,
+    base_face_part: ?[]u32,
+    last_face_part: ?[]u32,
+    part_count: u32,
+    snap: ?JournalEntry,
+    last_preview_ok: bool = false,
+    last_reason: ?[]const u8 = null,
+};
+var g_bevel: ?BevelSession = null;
+
+fn bevelFree() void {
+    var session = g_bevel orelse return;
+    session.base_mesh.deinit();
+    if (session.last_mesh) |*mesh| mesh.deinit();
+    if (session.base_groups) |groups| std.heap.c_allocator.free(groups);
+    std.heap.c_allocator.free(session.base_colors);
+    if (session.base_face_part) |parts| std.heap.c_allocator.free(parts);
+    if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
+    journalDiscard(&session.snap);
+    g_bevel = null;
+}
+
+pub const BevelInfo = struct {
+    kind: indexed_edit_mesh.BevelKind,
+    default_width: f32,
+    minimum_width: f32,
+    max_width: f32,
+};
+
+/// Capture the current single vertex/edge selection and resolve it into stable indexed
+/// identity. Returns the popup's complete sizing contract, or null when the selected
+/// element is not a bevelable manifold target.
+pub fn meshBevelBegin() ?BevelInfo {
+    if (g_lc != null) return null;
+    if (g_bevel != null) _ = meshBevelEnd(false);
+    if (!model_paint.hasTarget()) return null;
+    const original_mode = mesh_edit.mode();
+    if (original_mode != .vertex and original_mode != .edge) return null;
+    const verts = g_edit_verts orelse return null;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0 or model_paint.faceCount() < tri_count) return null;
+
+    var groups: ?[]u32 = null;
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
+        const rows = std.heap.c_allocator.alloc(u32, tri_count) catch return null;
+        var triangle: u32 = 0;
+        while (triangle < tri_count) : (triangle += 1) rows[triangle] = model_source.faceGroupOf(triangle);
+        groups = rows;
+    }
+    var ownership_adopted = false;
+    defer if (!ownership_adopted) {
+        if (groups) |rows| std.heap.c_allocator.free(rows);
+    };
+
+    const base_colors = collectCurrentFaceColors() orelse return null;
+    defer if (!ownership_adopted) std.heap.c_allocator.free(base_colors);
+    if (base_colors.len != @as(usize, tri_count) * 4) return null;
+    const base_face_part = capturePartOfFaces();
+    defer if (!ownership_adopted) {
+        if (base_face_part) |parts| std.heap.c_allocator.free(parts);
+    };
+
+    const groups_arg: ?[]const u32 = if (groups) |rows| rows else null;
+    const parts_arg: ?[]const u32 = if (base_face_part) |parts| parts else null;
+    var base_mesh = cloneIndexedEditMeshOrImport(
+        verts,
+        tri_count,
+        groups_arg,
+        parts_arg,
+        model_source.faceMaterials(),
+    ) orelse return null;
+    var mesh_adopted = false;
+    defer if (!mesh_adopted) base_mesh.deinit();
+
+    var selection_index: u32 = undefined;
+    const resolved: indexed_edit_mesh.BevelSelection = switch (original_mode) {
+        .vertex => vertex_target: {
+            const vertex = mesh_edit.selectedVertexIndexPub() orelse return null;
+            const part = mesh_edit.selectedVertexPartPub() orelse return null;
+            selection_index = vertex;
+            break :vertex_target base_mesh.resolveBevelVertex(mesh_edit.vertPosPub(vertex), part) orelse return null;
+        },
+        .edge => edge_target: {
+            const edge_index = mesh_edit.selectedEdgeIndexPub() orelse return null;
+            if (!mesh_edit.edgeInScopePub(edge_index)) return null;
+            const part = mesh_edit.selectedEdgePartPub() orelse return null;
+            const endpoints = mesh_edit.edgeEndpointsPub(edge_index);
+            selection_index = edge_index;
+            break :edge_target base_mesh.resolveBevelEdge(
+                mesh_edit.vertPosPub(endpoints[0]),
+                mesh_edit.vertPosPub(endpoints[1]),
+                part,
+            ) orelse return null;
+        },
+        else => return null,
+    };
+    const kind: indexed_edit_mesh.BevelKind = std.meta.activeTag(resolved.target);
+    const default_width = std.math.clamp(
+        indexed_edit_mesh.BevelTuning.default_width_m,
+        indexed_edit_mesh.BevelTuning.minimum_width_m,
+        resolved.max_width,
+    );
+    const label = if (kind == .edge) "bevel edge" else "bevel vertex";
+    g_bevel = .{
+        .kind = kind,
+        .original_mode = original_mode,
+        .selection_index = selection_index,
+        .target = resolved.target,
+        .max_width = resolved.max_width,
+        .base_mesh = base_mesh,
+        .last_mesh = null,
+        .base_paint_layout_stale = g_paint_layout_stale,
+        .base_groups = groups,
+        .base_colors = base_colors,
+        .base_face_part = base_face_part,
+        .last_face_part = null,
+        .part_count = hostPartCount(),
+        .snap = journalSnapshotCurrent(label),
+    };
+    mesh_adopted = true;
+    ownership_adopted = true;
+    return .{
+        .kind = kind,
+        .default_width = default_width,
+        .minimum_width = indexed_edit_mesh.BevelTuning.minimum_width_m,
+        .max_width = resolved.max_width,
+    };
+}
+
+/// Rebuild a bevel preview from the captured indexed base. Preview never touches the
+/// undo stack; all new render triangles inherit paint/material/part provenance through
+/// the indexed lowering map.
+pub fn meshBevelPreview(width_raw: f32) bool {
+    const session: *BevelSession = if (g_bevel) |*active| active else return false;
+    session.last_preview_ok = false;
+    session.last_reason = if (session.kind == .edge)
+        "This edge cannot produce a durable bevel at that width"
+    else
+        "This corner cannot produce a durable bevel at that width";
+    const width = std.math.clamp(
+        width_raw,
+        indexed_edit_mesh.BevelTuning.minimum_width_m,
+        session.max_width,
+    );
+    var preview = session.base_mesh.clone() catch return false;
+    defer preview.deinit();
+    if (!(preview.bevel(session.target, width) catch return false)) return false;
+
+    var lowered = preview.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(session.base_colors, lowered.source_triangles, colors)) return false;
+
+    if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
+    session.last_face_part = null;
+    if (session.base_face_part != null) {
+        session.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
+    }
+    const install_groups: ?[]const u32 = if (session.base_groups != null) lowered.groups else null;
+    if (!lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        install_groups,
+        lowered.materials,
+        colors,
+    )) return false;
+    mesh_edit.setMode(session.original_mode);
+    if (session.last_mesh) |*mesh| mesh.deinit();
+    session.last_mesh = preview;
+    preview = .{ .allocator = std.heap.c_allocator };
+    session.last_preview_ok = true;
+    session.last_reason = null;
+    return true;
+}
+
+/// Apply keeps the current preview as one journal entry and clears the consumed
+/// selection. Cancel reinstalls the exact base mesh and re-selects the original
+/// stable welded index.
+pub fn meshBevelEnd(commit: bool) bool {
+    const active: *const BevelSession = if (g_bevel) |*session| session else return false;
+    if (!active.last_preview_ok and active.last_mesh == null) {
+        bevelFree();
+        return false;
+    }
+    var session = g_bevel orelse return false;
+    var ok = true;
+    if (commit and session.last_preview_ok) {
+        journalCommit(&session.snap);
+        const face_parts: ?[]const u32 = if (session.last_face_part) |parts|
+            parts
+        else if (session.base_face_part) |parts|
+            parts
+        else
+            null;
+        if (face_parts) |parts| renormalizePartRanges(parts, session.part_count);
+        if (session.last_mesh) |*mesh| {
+            if (mesh.lower()) |lowered_value| {
+                var lowered = lowered_value;
+                defer lowered.deinit();
+                adoptIndexedEditMesh(mesh, &lowered);
+            } else |_| {}
+        }
+        mesh_edit.setMode(session.original_mode);
+        mesh_edit.clearSelection();
+    } else {
+        const groups_arg: ?[]const u32 = if (session.base_groups) |groups| groups else null;
+        if (session.base_mesh.lower()) |lowered_value| {
+            var lowered = lowered_value;
+            defer lowered.deinit();
+            ok = lcInstallLowered(
+                lowered.positions,
+                lowered.uvs,
+                lowered.tri_count,
+                groups_arg,
+                lowered.materials,
+                session.base_colors,
+            );
+        } else |_| {
+            ok = false;
+        }
+        if (ok) {
+            if (session.base_mesh.clone()) |restored_value| {
+                var restored = restored_value;
+                defer restored.deinit();
+                if (restored.lower()) |lowered_value| {
+                    var lowered = lowered_value;
+                    defer lowered.deinit();
+                    adoptIndexedEditMesh(&restored, &lowered);
+                } else |_| {}
+            } else |_| {}
+            g_paint_layout_stale = session.base_paint_layout_stale;
+            mesh_edit.setMode(session.original_mode);
+            _ = if (session.original_mode == .vertex)
+                mesh_edit.selectVertexByIndex(session.selection_index, false)
+            else
+                mesh_edit.selectEdgeByIndex(session.selection_index, false);
+        }
+        journalDiscard(&session.snap);
+    }
+    session.base_mesh.deinit();
+    if (session.last_mesh) |*mesh| mesh.deinit();
+    if (session.base_groups) |groups| std.heap.c_allocator.free(groups);
+    std.heap.c_allocator.free(session.base_colors);
+    if (session.base_face_part) |parts| std.heap.c_allocator.free(parts);
+    if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
+    journalDiscard(&session.snap);
+    g_bevel = null;
+    return ok;
+}
+
+pub fn meshBevelFallbackReason() ?[]const u8 {
+    const session: *const BevelSession = if (g_bevel) |*active| active else return null;
+    return session.last_reason;
 }
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
@@ -3671,6 +3943,7 @@ pub fn meshJournalClear() void {
     journalFreeStack(&g_journal_redo);
     journalDiscard(&g_gizmo_snap);
     lcFree(); // a live loop-cut popup can't outlive the mesh it captured
+    bevelFree(); // nor can a live bevel preview / captured base
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
     g_mesh_action_source = .native;

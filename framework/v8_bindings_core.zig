@@ -841,6 +841,32 @@ fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     });
 }
 
+fn setMeshBevelPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
+    if (!ok) {
+        var buf: [512]u8 = undefined;
+        const json = if (scene3d.meshBevelFallbackReason()) |reason|
+            std.fmt.bufPrint(&buf, "{{\"ok\":0,\"fallbackReason\":\"{s}\"}}", .{reason})
+        else
+            std.fmt.bufPrint(&buf, "{{\"ok\":0}}", .{});
+        setReturnString(info, json catch "{\"ok\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [512]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount() },
+    ) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 /// __mesh_topo_extrude_edge(distance) → JSON {"ok","key","count"}. Extrude exactly
 /// one selected welded edge, appending a bridged quad split into triangles.
 fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -899,6 +925,48 @@ fn hostMeshTopoWeld(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const ok = scene3d.meshTopoLoopCut();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth"}. Capture
+/// exactly one selected sharp manifold edge or 3+-edge corner as a host-owned live
+/// preview session. Widths are metres; the Studio popup converts them to modeling u.
+fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bevel = scene3d.meshBevelBegin() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const kind = if (bevel.kind == .edge) "edge" else "vertex";
+    var buf: [320]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d}}}",
+        .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width },
+    ) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_bevel_preview(width) → JSON {"ok","key","count","fallbackReason"?}.
+/// Rebuild from the captured indexed base and install a non-journaled live preview.
+fn hostMeshBevelPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const width: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const ok = scene3d.meshBevelPreview(width);
+    if (ok) state.markDirty();
+    setMeshBevelPreviewReturn(info, ok);
+}
+
+/// __mesh_bevel_end(commit) → JSON {"ok","key","count"}. Apply creates one
+/// bevel-edge/vertex journal entry; Cancel restores the base and original selection.
+fn hostMeshBevelEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const commit = (argToI32(info, 0) orelse 0) != 0;
+    const ok = scene3d.meshBevelEnd(commit);
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
 }
@@ -3700,6 +3768,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
+    v8_runtime.registerHostFn("__mesh_bevel_begin", hostMeshBevelBegin);
+    v8_runtime.registerHostFn("__mesh_bevel_preview", hostMeshBevelPreview);
+    v8_runtime.registerHostFn("__mesh_bevel_end", hostMeshBevelEnd);
     v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
     v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);
     v8_runtime.registerHostFn("__mesh_lc_end", hostMeshLcEnd);

@@ -27,6 +27,27 @@ const MERGE_FACE_PLANE_REL_EPS: f32 = 0.00001;
 pub const Vec2 = [2]f32;
 pub const Vec3 = [3]f32;
 
+/// One source of truth for the Studio bevel's behavior-affecting dimensions.
+/// Geometry is stored in metres; the popup presents these as modeling units
+/// (16 u = 1 m) without owning a second set of limits.
+pub const BevelTuning = struct {
+    pub const default_width_m: f32 = 2.0 / 16.0;
+    pub const minimum_width_m: f32 = 0.1 / 16.0;
+    pub const vertex_edge_fraction: f32 = 0.45;
+    pub const edge_reach_fraction: f32 = 0.9;
+    pub const coplanar_normal_dot: f32 = 0.999;
+};
+
+pub const BevelKind = enum { vertex, edge };
+pub const BevelTarget = union(BevelKind) {
+    vertex: u32,
+    edge: [2]u32,
+};
+pub const BevelSelection = struct {
+    target: BevelTarget,
+    max_width: f32,
+};
+
 const MirrorPositionKey = struct { part: u32, x: i32, y: i32, z: i32 };
 const MirrorQuadKey = struct { part: u32, a: u32, b: u32, c: u32, d: u32 };
 const MirrorPartBounds = struct { min: Vec3, max: Vec3 };
@@ -1678,6 +1699,446 @@ pub const Mesh = struct {
         return if (index < face.uvs.items.len) face.uvs.items[index] else .{ 0.5, 0.5 };
     }
 
+    const EdgeRecede = struct {
+        direction: Vec3,
+        reach: f32,
+    };
+
+    fn vertexBelongsToPart(mesh: *const Mesh, vertex_id: u32, part: u32) bool {
+        for (mesh.faces.items) |*face| {
+            if (face.alive and face.part == part and containsVertex(face, vertex_id)) return true;
+        }
+        return false;
+    }
+
+    fn vertexAt(mesh: *const Mesh, position: Vec3, part: ?u32) ?u32 {
+        for (mesh.vertices.items, 0..) |vertex, index| {
+            if (!vertex.alive or !samePoint(vertex.position, position)) continue;
+            if (part) |owner| {
+                if (!mesh.vertexBelongsToPart(@intCast(index), owner)) continue;
+            }
+            return @intCast(index);
+        }
+        return null;
+    }
+
+    /// Resolve the cart's selected welded edge once, at the soup→indexed boundary.
+    /// Preview clones then keep these stable ids; no later operation position-matches.
+    pub fn resolveBevelEdge(mesh: *const Mesh, a: Vec3, b: Vec3, part: ?u32) ?BevelSelection {
+        const va = mesh.vertexAt(a, part) orelse return null;
+        const vb = mesh.vertexAt(b, part) orelse return null;
+        if (va == vb) return null;
+        const target = BevelTarget{ .edge = .{ va, vb } };
+        return .{ .target = target, .max_width = mesh.bevelLimit(target) orelse return null };
+    }
+
+    /// Resolve one selected welded corner into the resident indexed topology.
+    pub fn resolveBevelVertex(mesh: *const Mesh, position: Vec3, part: ?u32) ?BevelSelection {
+        const vertex = mesh.vertexAt(position, part) orelse return null;
+        const target = BevelTarget{ .vertex = vertex };
+        return .{ .target = target, .max_width = mesh.bevelLimit(target) orelse return null };
+    }
+
+    fn edgeIncidentFaces(mesh: *const Mesh, edge: [2]u32, out: *[2]u32) bool {
+        var count: usize = 0;
+        for (mesh.faces.items) |*face| {
+            if (!face.alive or !faceHasUndirectedEdge(face, edge[0], edge[1])) continue;
+            if (count == out.len) return false;
+            out[count] = face.id;
+            count += 1;
+        }
+        return count == 2;
+    }
+
+    fn faceCentroid(mesh: *const Mesh, face: *const Face) Vec3 {
+        var center = Vec3{ 0, 0, 0 };
+        for (face.vertices.items) |vertex_id| center = add3(center, mesh.vertices.items[vertex_id].position);
+        const inverse = if (face.vertices.items.len > 0)
+            1.0 / @as(f32, @floatFromInt(face.vertices.items.len))
+        else
+            1.0;
+        return mul3(center, inverse);
+    }
+
+    fn edgeRecede(mesh: *const Mesh, face_id: u32, edge: [2]u32) ?EdgeRecede {
+        if (face_id >= mesh.faces.items.len) return null;
+        const face = &mesh.faces.items[face_id];
+        const a = mesh.vertices.items[edge[0]].position;
+        const b = mesh.vertices.items[edge[1]].position;
+        const edge_direction = norm3(sub3(b, a));
+        if (length3(edge_direction) < 0.5) return null;
+        const normal = faceNormal(mesh, face);
+        if (length3(normal) < 0.5) return null;
+        var direction = cross3(normal, edge_direction);
+        const midpoint = mul3(add3(a, b), 0.5);
+        if (dot3(direction, sub3(mesh.faceCentroid(face), midpoint)) < 0) direction = mul3(direction, -1);
+        direction = norm3(direction);
+        if (length3(direction) < 0.5) return null;
+        var reach: f32 = 0;
+        for (face.vertices.items) |vertex_id| {
+            reach = @max(reach, dot3(sub3(mesh.vertices.items[vertex_id].position, a), direction));
+        }
+        return .{ .direction = direction, .reach = reach };
+    }
+
+    fn appendUniqueVertex(list: *std.ArrayListUnmanaged(u32), allocator: std.mem.Allocator, vertex: u32) !void {
+        for (list.items) |existing| if (existing == vertex) return;
+        try list.append(allocator, vertex);
+    }
+
+    fn collectVertexNeighborhood(
+        mesh: *const Mesh,
+        vertex: u32,
+        faces: *std.ArrayListUnmanaged(u32),
+        neighbors: *std.ArrayListUnmanaged(u32),
+    ) !void {
+        for (mesh.faces.items) |*face| {
+            if (!face.alive or face.vertices.items.len < 3) continue;
+            const corner = indexOf(face.vertices.items, vertex) orelse continue;
+            try faces.append(mesh.allocator, face.id);
+            const previous = face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len];
+            const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            if (previous != vertex) try appendUniqueVertex(neighbors, mesh.allocator, previous);
+            if (next != vertex) try appendUniqueVertex(neighbors, mesh.allocator, next);
+        }
+    }
+
+    /// The widest meaningful bevel for this exact topology target. Null is the
+    /// strict boundary refusal: boundary/non-manifold/coplanar edge, or a corner
+    /// with fewer than three incident edges.
+    pub fn bevelLimit(mesh: *const Mesh, target: BevelTarget) ?f32 {
+        const limit = switch (target) {
+            .edge => |edge| edge_limit: {
+                if (edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len or
+                    !mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive)
+                {
+                    break :edge_limit 0;
+                }
+                var incident: [2]u32 = undefined;
+                if (!mesh.edgeIncidentFaces(edge, &incident)) break :edge_limit 0;
+                const normal0 = faceNormal(mesh, &mesh.faces.items[incident[0]]);
+                const normal1 = faceNormal(mesh, &mesh.faces.items[incident[1]]);
+                if (@abs(dot3(normal0, normal1)) > BevelTuning.coplanar_normal_dot) break :edge_limit 0;
+                const recede0 = mesh.edgeRecede(incident[0], edge) orelse break :edge_limit 0;
+                const recede1 = mesh.edgeRecede(incident[1], edge) orelse break :edge_limit 0;
+                const edge_length = length3(sub3(mesh.vertices.items[edge[1]].position, mesh.vertices.items[edge[0]].position));
+                break :edge_limit @min(
+                    edge_length * BevelTuning.vertex_edge_fraction,
+                    @min(recede0.reach, recede1.reach) * BevelTuning.edge_reach_fraction,
+                );
+            },
+            .vertex => |vertex| vertex_limit: {
+                if (vertex >= mesh.vertices.items.len or !mesh.vertices.items[vertex].alive) break :vertex_limit 0;
+                var incident = std.ArrayListUnmanaged(u32).empty;
+                defer incident.deinit(mesh.allocator);
+                var neighbors = std.ArrayListUnmanaged(u32).empty;
+                defer neighbors.deinit(mesh.allocator);
+                mesh.collectVertexNeighborhood(vertex, &incident, &neighbors) catch break :vertex_limit 0;
+                if (neighbors.items.len < 3) break :vertex_limit 0;
+                const origin = mesh.vertices.items[vertex].position;
+                var shortest = std.math.inf(f32);
+                for (neighbors.items) |neighbor| {
+                    shortest = @min(shortest, length3(sub3(mesh.vertices.items[neighbor].position, origin)));
+                }
+                break :vertex_limit shortest * BevelTuning.vertex_edge_fraction;
+            },
+        };
+        return if (std.math.isFinite(limit) and limit >= BevelTuning.minimum_width_m) limit else null;
+    }
+
+    fn replaceFaceVertex(mesh: *Mesh, face_id: u32, from: u32, replacements: []const u32) !bool {
+        if (face_id >= mesh.faces.items.len or replacements.len == 0) return false;
+        const face = &mesh.faces.items[face_id];
+        const replace_at = indexOf(face.vertices.items, from) orelse return false;
+        var vertices = std.ArrayListUnmanaged(u32).empty;
+        errdefer vertices.deinit(mesh.allocator);
+        var uvs = std.ArrayListUnmanaged(Vec2).empty;
+        errdefer uvs.deinit(mesh.allocator);
+        try vertices.ensureTotalCapacity(mesh.allocator, face.vertices.items.len - 1 + replacements.len);
+        try uvs.ensureTotalCapacity(mesh.allocator, face.vertices.items.len - 1 + replacements.len);
+        for (face.vertices.items, 0..) |vertex_id, corner| {
+            const uv = if (corner < face.uvs.items.len) face.uvs.items[corner] else Vec2{ 0.5, 0.5 };
+            if (corner == replace_at) {
+                for (replacements) |replacement| {
+                    vertices.appendAssumeCapacity(replacement);
+                    uvs.appendAssumeCapacity(uv);
+                }
+            } else {
+                vertices.appendAssumeCapacity(vertex_id);
+                uvs.appendAssumeCapacity(uv);
+            }
+        }
+        face.vertices.deinit(mesh.allocator);
+        face.uvs.deinit(mesh.allocator);
+        face.vertices = vertices;
+        face.uvs = uvs;
+        face.diagonal = if (face.vertices.items.len == 4) chosenQuadDiagonal(mesh, face) else null;
+        face.source_tessellation_valid = false;
+        return true;
+    }
+
+    fn loopNormal(mesh: *const Mesh, loop: []const u32) Vec3 {
+        var normal = Vec3{ 0, 0, 0 };
+        for (loop, 0..) |vertex_id, index| {
+            const current = mesh.vertices.items[vertex_id].position;
+            const next = mesh.vertices.items[loop[(index + 1) % loop.len]].position;
+            normal[0] += (current[1] - next[1]) * (current[2] + next[2]);
+            normal[1] += (current[2] - next[2]) * (current[0] + next[0]);
+            normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
+        }
+        return norm3(normal);
+    }
+
+    fn loopCentroid(mesh: *const Mesh, loop: []const u32) Vec3 {
+        var center = Vec3{ 0, 0, 0 };
+        for (loop) |vertex_id| center = add3(center, mesh.vertices.items[vertex_id].position);
+        return mul3(center, 1.0 / @as(f32, @floatFromInt(loop.len)));
+    }
+
+    fn meshCentroid(mesh: *const Mesh) Vec3 {
+        var center = Vec3{ 0, 0, 0 };
+        var count: u32 = 0;
+        for (mesh.vertices.items) |vertex| {
+            if (!vertex.alive) continue;
+            center = add3(center, vertex.position);
+            count += 1;
+        }
+        return if (count > 0) mul3(center, 1.0 / @as(f32, @floatFromInt(count))) else center;
+    }
+
+    fn orientLoopOutward(mesh: *const Mesh, loop: []u32, center: Vec3) void {
+        if (loop.len < 3) return;
+        const outward = sub3(mesh.loopCentroid(loop), center);
+        if (dot3(mesh.loopNormal(loop), outward) < 0) std.mem.reverse(u32, loop);
+    }
+
+    fn appendSquareUvs(mesh: *const Mesh, loop: []const u32, out: *std.ArrayListUnmanaged(Vec2)) !void {
+        const normal = mesh.loopNormal(loop);
+        const ax = @abs(normal[0]);
+        const ay = @abs(normal[1]);
+        const az = @abs(normal[2]);
+        const axis: u8 = if (ax >= ay and ax >= az) 0 else if (ay >= az) 1 else 2;
+        var min_u = std.math.inf(f32);
+        var min_v = std.math.inf(f32);
+        var max_u = -std.math.inf(f32);
+        var max_v = -std.math.inf(f32);
+        for (loop) |vertex_id| {
+            const p = mesh.vertices.items[vertex_id].position;
+            const uv = if (axis == 0) Vec2{ p[2], p[1] } else if (axis == 1) Vec2{ p[0], p[2] } else Vec2{ p[0], p[1] };
+            min_u = @min(min_u, uv[0]);
+            min_v = @min(min_v, uv[1]);
+            max_u = @max(max_u, uv[0]);
+            max_v = @max(max_v, uv[1]);
+        }
+        const width = if (max_u - min_u > 1e-8) max_u - min_u else 1;
+        const height = if (max_v - min_v > 1e-8) max_v - min_v else 1;
+        for (loop) |vertex_id| {
+            const p = mesh.vertices.items[vertex_id].position;
+            const uv = if (axis == 0) Vec2{ p[2], p[1] } else if (axis == 1) Vec2{ p[0], p[2] } else Vec2{ p[0], p[1] };
+            try out.append(mesh.allocator, .{ (uv[0] - min_u) / width, (uv[1] - min_v) / height });
+        }
+    }
+
+    fn appendBevelFace(mesh: *Mesh, source_face_id: u32, loop: []const u32) !u32 {
+        if (source_face_id >= mesh.faces.items.len or loop.len < 3) return error.InvalidBevelSource;
+        const source = &mesh.faces.items[source_face_id];
+        var face = Face{
+            .id = @intCast(mesh.faces.items.len),
+            .group = mesh.next_group,
+            .part = source.part,
+            .material = source.material,
+            .source_tessellation_valid = false,
+        };
+        mesh.next_group += 1;
+        errdefer face.deinit(mesh.allocator);
+        try face.vertices.appendSlice(mesh.allocator, loop);
+        try mesh.appendSquareUvs(loop, &face.uvs);
+        try face.source_triangles.appendSlice(mesh.allocator, source.source_triangles.items);
+        if (face.vertices.items.len == 4) face.diagonal = chosenQuadDiagonal(mesh, &face);
+        const id = face.id;
+        try mesh.faces.append(mesh.allocator, face);
+        return id;
+    }
+
+    fn pruneOrphanVertices(mesh: *Mesh) !void {
+        const used = try mesh.allocator.alloc(bool, mesh.vertices.items.len);
+        defer mesh.allocator.free(used);
+        @memset(used, false);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.vertices.items) |vertex_id| if (vertex_id < used.len) {
+                used[vertex_id] = true;
+            };
+        }
+        for (mesh.vertices.items, 0..) |*vertex, index| {
+            if (!used[index]) vertex.alive = false;
+        }
+    }
+
+    fn bevelEdge(mesh: *Mesh, edge: [2]u32, width: f32) !bool {
+        var incident: [2]u32 = undefined;
+        if (!mesh.edgeIncidentFaces(edge, &incident)) return false;
+        const recede0 = mesh.edgeRecede(incident[0], edge) orelse return false;
+        const recede1 = mesh.edgeRecede(incident[1], edge) orelse return false;
+        var source0 = try mesh.faces.items[incident[0]].clone(mesh.allocator);
+        defer source0.deinit(mesh.allocator);
+        var source1 = try mesh.faces.items[incident[1]].clone(mesh.allocator);
+        defer source1.deinit(mesh.allocator);
+        const center = mesh.meshCentroid();
+        const a = mesh.vertices.items[edge[0]].position;
+        const b = mesh.vertices.items[edge[1]].position;
+        const new_ids = [4]u32{
+            @intCast(mesh.vertices.items.len),
+            @intCast(mesh.vertices.items.len + 1),
+            @intCast(mesh.vertices.items.len + 2),
+            @intCast(mesh.vertices.items.len + 3),
+        };
+        try mesh.vertices.appendSlice(mesh.allocator, &.{
+            Vertex{ .position = add3(a, mul3(recede0.direction, width)) },
+            Vertex{ .position = add3(b, mul3(recede0.direction, width)) },
+            Vertex{ .position = add3(a, mul3(recede1.direction, width)) },
+            Vertex{ .position = add3(b, mul3(recede1.direction, width)) },
+        });
+        if (!try mesh.replaceFaceVertex(incident[0], edge[0], new_ids[0..1]) or
+            !try mesh.replaceFaceVertex(incident[0], edge[1], new_ids[1..2]) or
+            !try mesh.replaceFaceVertex(incident[1], edge[0], new_ids[2..3]) or
+            !try mesh.replaceFaceVertex(incident[1], edge[1], new_ids[3..4]))
+        {
+            return false;
+        }
+
+        const original_face_count = mesh.faces.items.len;
+        const Endpoint = struct {
+            fn absorb(
+                target_mesh: *Mesh,
+                original_count: usize,
+                incident_faces: [2]u32,
+                first_source: *const Face,
+                second_source: *const Face,
+                sharp: u32,
+                first_new: u32,
+                second_new: u32,
+                outward_center: Vec3,
+            ) !void {
+                var absorbed = false;
+                var face_index: usize = 0;
+                while (face_index < original_count) : (face_index += 1) {
+                    if (face_index == incident_faces[0] or face_index == incident_faces[1]) continue;
+                    const face = &target_mesh.faces.items[face_index];
+                    if (!face.alive) continue;
+                    const corner = indexOf(face.vertices.items, sharp) orelse continue;
+                    const previous = face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len];
+                    const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                    const left = if (faceHasUndirectedEdge(first_source, previous, sharp))
+                        first_new
+                    else if (faceHasUndirectedEdge(second_source, previous, sharp))
+                        second_new
+                    else
+                        sharp;
+                    const right = if (faceHasUndirectedEdge(first_source, next, sharp))
+                        first_new
+                    else if (faceHasUndirectedEdge(second_source, next, sharp))
+                        second_new
+                    else
+                        sharp;
+                    const replacements = if (left == right) [2]u32{ left, left } else [2]u32{ left, right };
+                    const replacement_slice = if (left == right) replacements[0..1] else replacements[0..2];
+                    _ = try target_mesh.replaceFaceVertex(@intCast(face_index), sharp, replacement_slice);
+                    absorbed = true;
+                }
+                var still_used = false;
+                for (target_mesh.faces.items) |*face| {
+                    if (face.alive and containsVertex(face, sharp)) {
+                        still_used = true;
+                        break;
+                    }
+                }
+                if (!absorbed or still_used) {
+                    var cap = [3]u32{ sharp, first_new, second_new };
+                    target_mesh.orientLoopOutward(cap[0..], outward_center);
+                    _ = try target_mesh.appendBevelFace(incident_faces[0], cap[0..]);
+                }
+            }
+        };
+        try Endpoint.absorb(mesh, original_face_count, incident, &source0, &source1, edge[0], new_ids[0], new_ids[2], center);
+        try Endpoint.absorb(mesh, original_face_count, incident, &source0, &source1, edge[1], new_ids[1], new_ids[3], center);
+        var chamfer = [4]u32{ new_ids[0], new_ids[1], new_ids[3], new_ids[2] };
+        mesh.orientLoopOutward(chamfer[0..], center);
+        _ = try mesh.appendBevelFace(incident[0], chamfer[0..]);
+        try mesh.pruneOrphanVertices();
+        return true;
+    }
+
+    fn bevelVertex(mesh: *Mesh, vertex: u32, width: f32) !bool {
+        var incident = std.ArrayListUnmanaged(u32).empty;
+        defer incident.deinit(mesh.allocator);
+        var neighbors = std.ArrayListUnmanaged(u32).empty;
+        defer neighbors.deinit(mesh.allocator);
+        try mesh.collectVertexNeighborhood(vertex, &incident, &neighbors);
+        if (neighbors.items.len < 3 or incident.items.len < 3) return false;
+
+        const origin = mesh.vertices.items[vertex].position;
+        const center = mesh.meshCentroid();
+        var normal = Vec3{ 0, 0, 0 };
+        for (incident.items) |face_id| normal = add3(normal, faceNormal(mesh, &mesh.faces.items[face_id]));
+        normal = norm3(normal);
+        if (length3(normal) < 0.5) return false;
+
+        var on_edge = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer on_edge.deinit(mesh.allocator);
+        for (neighbors.items) |neighbor| {
+            const direction = norm3(sub3(mesh.vertices.items[neighbor].position, origin));
+            const new_id: u32 = @intCast(mesh.vertices.items.len);
+            try mesh.vertices.append(mesh.allocator, .{ .position = add3(origin, mul3(direction, width)) });
+            try on_edge.put(mesh.allocator, neighbor, new_id);
+        }
+        for (incident.items) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            const corner = indexOf(face.vertices.items, vertex) orelse return false;
+            const previous = face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len];
+            const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            const replacements = [2]u32{ on_edge.get(previous) orelse return false, on_edge.get(next) orelse return false };
+            if (!try mesh.replaceFaceVertex(face_id, vertex, replacements[0..])) return false;
+        }
+
+        const reference = if (@abs(normal[1]) < 0.9) Vec3{ 0, 1, 0 } else Vec3{ 1, 0, 0 };
+        const u_axis = norm3(cross3(normal, reference));
+        const v_axis = cross3(normal, u_axis);
+        var ring = std.ArrayListUnmanaged(u32).empty;
+        defer ring.deinit(mesh.allocator);
+        for (neighbors.items) |neighbor| try ring.append(mesh.allocator, on_edge.get(neighbor).?);
+        const SortContext = struct {
+            target_mesh: *const Mesh,
+            pivot: Vec3,
+            u: Vec3,
+            v: Vec3,
+            fn lessThan(context: @This(), lhs: u32, rhs: u32) bool {
+                const left = sub3(context.target_mesh.vertices.items[lhs].position, context.pivot);
+                const right = sub3(context.target_mesh.vertices.items[rhs].position, context.pivot);
+                const left_angle = std.math.atan2(dot3(left, context.v), dot3(left, context.u));
+                const right_angle = std.math.atan2(dot3(right, context.v), dot3(right, context.u));
+                return if (left_angle == right_angle) lhs < rhs else left_angle < right_angle;
+            }
+        };
+        std.mem.sort(u32, ring.items, SortContext{ .target_mesh = mesh, .pivot = origin, .u = u_axis, .v = v_axis }, SortContext.lessThan);
+        mesh.orientLoopOutward(ring.items, center);
+        _ = try mesh.appendBevelFace(incident.items[0], ring.items);
+        try mesh.pruneOrphanVertices();
+        return true;
+    }
+
+    /// Chamfer one already-resolved target. Width is clamped to the topology's
+    /// strict limit, so popup and headless callers share the same durable boundary.
+    pub fn bevel(mesh: *Mesh, target: BevelTarget, width_raw: f32) !bool {
+        const limit = mesh.bevelLimit(target) orelse return false;
+        const width = @min(width_raw, limit);
+        if (!std.math.isFinite(width) or width < BevelTuning.minimum_width_m) return false;
+        return switch (target) {
+            .edge => |edge| mesh.bevelEdge(edge, width),
+            .vertex => |vertex| mesh.bevelVertex(vertex, width),
+        };
+    }
+
     pub fn lower(mesh: *const Mesh) !Lowered {
         var positions = std.ArrayListUnmanaged(f32).empty;
         defer positions.deinit(mesh.allocator);
@@ -1960,9 +2421,7 @@ pub fn inferQuadFaceGroups(
         for (0..3) |corner| {
             const edge = undirectedEdgeKey(triangle[corner], triangle[(corner + 1) % 3]);
             const entry = try uses.getOrPut(allocator, edge);
-            if (!entry.found_existing) entry.value_ptr.* = .{ .first = @intCast(triangle_index) }
-            else if (entry.value_ptr.second == null) entry.value_ptr.second = @intCast(triangle_index)
-            else entry.value_ptr.non_manifold = true;
+            if (!entry.found_existing) entry.value_ptr.* = .{ .first = @intCast(triangle_index) } else if (entry.value_ptr.second == null) entry.value_ptr.second = @intCast(triangle_index) else entry.value_ptr.non_manifold = true;
         }
     }
 
@@ -2032,8 +2491,7 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
         const after = mesh.vertices.items[loop[(index + 2) % 4]].position;
         const turn = dot3(cross3(sub3(next, here), sub3(after, next)), normal_a);
         if (@abs(turn) <= IMPORT_WELD_EPS) return false;
-        if (sign == 0) sign = if (turn > 0) 1 else -1
-        else if ((turn > 0 and sign < 0) or (turn < 0 and sign > 0)) return false;
+        if (sign == 0) sign = if (turn > 0) 1 else -1 else if ((turn > 0 and sign < 0) or (turn < 0 and sign > 0)) return false;
     }
     return true;
 }

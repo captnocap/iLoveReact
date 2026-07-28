@@ -467,7 +467,7 @@ export default function AppFrame() {
   const modelToolApiRef = useRef<ModelToolApi | null>(null);
 
   // ── Modal discipline (req_2626 gap HH, USER LAW) ────────────────────────────
-  // While ANY blocking session/dialog is unresolved — the viewer's loop-cut
+  // While ANY blocking session/dialog is unresolved — the viewer's bevel/loop-cut
   // session / atlas prompt / face guard (via state.modelTool.blocking), the
   // shell's newMeshPrompt / file explorer / build journal (via the shared
   // predicate in data/commands.ts), or the component-local import dialogs — every
@@ -2002,6 +2002,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-extrude-face') api.extrudeFace();
         else if (commandId === 'mesh-create-face') api.createFace();
         else if (commandId === 'mesh-weld') api.weld();
+        else if (commandId === 'mesh-bevel') api.bevel();
         else if (commandId === 'mesh-loopcut') api.loopCut();
         else if (commandId === 'mesh-cut') api.basicCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');

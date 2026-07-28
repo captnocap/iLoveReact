@@ -1296,6 +1296,168 @@ test "raw import recovers isolated coplanar quad pairs but keeps triangle fans s
     try testing.expect(groups[2] != groups[4]);
 }
 
+const bevel_cube_corners = [8][3]f32{
+    .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },
+    .{ -0.5, 0.5, -0.5 },  .{ 0.5, 0.5, -0.5 },  .{ 0.5, 0.5, 0.5 },  .{ -0.5, 0.5, 0.5 },
+};
+
+fn bevelCubeSoup(out: []f32) void {
+    const quads = [6][4]u32{
+        .{ 4, 7, 6, 5 }, .{ 0, 1, 2, 3 }, .{ 0, 4, 5, 1 },
+        .{ 3, 2, 6, 7 }, .{ 0, 3, 7, 4 }, .{ 1, 5, 6, 2 },
+    };
+    const quad_uvs = [4][2]f32{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
+    var triangle: usize = 0;
+    for (quads) |quad| {
+        const splits = [2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } };
+        for (splits) |split| {
+            for (split, 0..) |quad_corner, output_corner| {
+                const base = (triangle * 3 + output_corner) * 8;
+                const position = bevel_cube_corners[quad[quad_corner]];
+                @memcpy(out[base .. base + 3], position[0..]);
+                out[base + 6] = quad_uvs[quad_corner][0];
+                out[base + 7] = quad_uvs[quad_corner][1];
+            }
+            triangle += 1;
+        }
+    }
+}
+
+fn expectDurableBevelLowering(lowered: *const indexed_edit_mesh.Lowered, expected_triangles: u32) !void {
+    try testing.expectEqual(expected_triangles, lowered.tri_count);
+    try testing.expectEqual(@as(usize, expected_triangles) * 9, lowered.positions.len);
+    try testing.expectEqual(@as(usize, expected_triangles) * 6, lowered.uvs.len);
+    for (lowered.parts) |part| try testing.expectEqual(@as(u32, 7), part);
+    for (lowered.materials) |material| try testing.expectEqual(@as(u32, 3), material);
+    for (lowered.uvs) |uv| {
+        try testing.expect(std.math.isFinite(uv));
+        try testing.expect(uv >= 0 and uv <= 1);
+    }
+    var triangle: u32 = 0;
+    while (triangle < lowered.tri_count) : (triangle += 1) {
+        const base = @as(usize, triangle) * 9;
+        const a = [3]f32{ lowered.positions[base], lowered.positions[base + 1], lowered.positions[base + 2] };
+        const b = [3]f32{ lowered.positions[base + 3], lowered.positions[base + 4], lowered.positions[base + 5] };
+        const c = [3]f32{ lowered.positions[base + 6], lowered.positions[base + 7], lowered.positions[base + 8] };
+        const ab = [3]f32{ b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+        const ac = [3]f32{ c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+        const cross = [3]f32{
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        };
+        const area_squared = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
+        try testing.expect(area_squared > indexed_edit_mesh.IMPORT_WELD_EPS * indexed_edit_mesh.IMPORT_WELD_EPS);
+    }
+}
+
+test "bevel vertex selection boundary restores one part-owned welded index" {
+    var soup = [_]f32{0} ** (12 * 3 * 8);
+    bevelCubeSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    mesh_edit.test_support.loadGroupedSoup(3456, soup[0..], 36, groups[0..]);
+    defer mesh_edit.test_support.clear();
+    mesh_edit.test_support.setPartRanges(&.{ 0, 6 });
+
+    try testing.expect(mesh_edit.selectVertexByIndex(0, false));
+    try testing.expectEqual(@as(?u32, 0), mesh_edit.selectedVertexIndexPub());
+    try testing.expectEqual(@as(?u32, 0), mesh_edit.selectedVertexPartPub());
+    try testing.expect(mesh_edit.selectVertexByIndex(1, true));
+    try testing.expect(mesh_edit.selectedVertexIndexPub() == null);
+    mesh_edit.clearSelection();
+    try testing.expect(mesh_edit.selectVertexByIndex(0, false));
+    try testing.expectEqual(@as(?u32, 0), mesh_edit.selectedVertexIndexPub());
+}
+
+test "indexed edge bevel replaces a sharp cube edge with one durable chamfer face" {
+    var soup = [_]f32{0} ** (12 * 3 * 8);
+    bevelCubeSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const parts = [_]u32{7} ** 12;
+    const materials = [_]u32{3} ** 12;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        testing.allocator,
+        soup[0..],
+        12,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+    );
+    defer indexed.deinit();
+
+    const selection = indexed.resolveBevelEdge(bevel_cube_corners[1], bevel_cube_corners[5], 7) orelse
+        return error.ExpectedSharpManifoldEdge;
+    try testing.expectApproxEqAbs(indexed_edit_mesh.BevelTuning.vertex_edge_fraction, selection.max_width, 0.00001);
+    const edge = switch (selection.target) {
+        .edge => |value| value,
+        .vertex => return error.ExpectedEdgeTarget,
+    };
+    try testing.expect(try indexed.bevel(selection.target, indexed_edit_mesh.BevelTuning.default_width_m));
+    try testing.expectEqual(@as(usize, 12), indexed.vertices.items.len);
+    try testing.expect(!indexed.vertices.items[edge[0]].alive);
+    try testing.expect(!indexed.vertices.items[edge[1]].alive);
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try expectDurableBevelLowering(&lowered, 16);
+    var saw_fresh_group = false;
+    for (lowered.groups) |group| if (group >= 6) {
+        saw_fresh_group = true;
+    };
+    try testing.expect(saw_fresh_group);
+}
+
+test "indexed vertex bevel clips a cube corner and caps its three-edge ring" {
+    var soup = [_]f32{0} ** (12 * 3 * 8);
+    bevelCubeSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const parts = [_]u32{7} ** 12;
+    const materials = [_]u32{3} ** 12;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        testing.allocator,
+        soup[0..],
+        12,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+    );
+    defer indexed.deinit();
+
+    const selection = indexed.resolveBevelVertex(bevel_cube_corners[6], 7) orelse
+        return error.ExpectedThreeEdgeCorner;
+    try testing.expectApproxEqAbs(indexed_edit_mesh.BevelTuning.vertex_edge_fraction, selection.max_width, 0.00001);
+    const vertex = switch (selection.target) {
+        .vertex => |value| value,
+        .edge => return error.ExpectedVertexTarget,
+    };
+    try testing.expect(try indexed.bevel(selection.target, indexed_edit_mesh.BevelTuning.default_width_m));
+    try testing.expectEqual(@as(usize, 11), indexed.vertices.items.len);
+    try testing.expect(!indexed.vertices.items[vertex].alive);
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try expectDurableBevelLowering(&lowered, 16);
+}
+
+test "indexed bevel rejects boundary edges and flat triangulation seams" {
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const corners = [6][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    for (corners, 0..) |position, corner| {
+        const base = corner * 8;
+        @memcpy(soup[base .. base + 3], position[0..]);
+    }
+    const groups = [_]u32{ 0, 1 };
+    const parts = [_]u32{ 7, 7 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 2, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    try testing.expect(indexed.resolveBevelEdge(corners[0], corners[1], 7) == null);
+    try testing.expect(indexed.resolveBevelEdge(corners[0], corners[2], 7) == null);
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);

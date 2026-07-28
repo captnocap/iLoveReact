@@ -600,6 +600,40 @@ pub fn solidifyOffsets(
     return result;
 }
 
+/// Select one welded vertex by stable topology index. Popup sessions use this only
+/// to restore the exact pre-preview selection after Cancel.
+pub fn selectVertexByIndex(idx: u32, additive: bool) bool {
+    if (!ensureTopology()) return false;
+    const selected = g_sel_vert orelse return false;
+    if (idx >= selected.len or !vertInScopePub(idx)) return false;
+    g_mode = .vertex;
+    if (!additive) @memset(selected, false);
+    selected[idx] = true;
+    applyFaceHighlight();
+    return true;
+}
+
+/// Exactly one selected welded vertex, or null for an empty/ambiguous/out-of-scope
+/// set. This is the strict selection boundary for vertex bevel.
+pub fn selectedVertexIndexPub() ?u32 {
+    if (!ensureTopology()) return null;
+    const selected = g_sel_vert orelse return null;
+    var found: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < selected.len) : (vertex += 1) {
+        if (!selected[vertex]) continue;
+        if (!vertInScopePub(vertex) or found != null) return null;
+        found = vertex;
+    }
+    return found;
+}
+
+pub fn selectedVertexPartPub() ?u32 {
+    const vertex = selectedVertexIndexPub() orelse return null;
+    const parts = g_vert_part orelse return null;
+    return if (vertex < parts.len) parts[vertex] else null;
+}
+
 pub fn selectedEdgeCountPub() u32 {
     return countTrue(g_sel_edge);
 }

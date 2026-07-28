@@ -54,6 +54,17 @@ test('a single face exposes the winding correction beside face extrude', () => {
   assert(commands.includes('mesh-select-uv-orientation'), 'single-face UV orientation collection disappeared');
 });
 
+test('bevel is contextual to exactly one vertex or edge', () => {
+  const vertex = ids(meshTopoCommands({ selMode: 1, sel: 1 }));
+  const vertices = ids(meshTopoCommands({ selMode: 1, sel: 2 }));
+  const edge = ids(meshTopoCommands({ selMode: 2, sel: 1 }));
+  const edges = ids(meshTopoCommands({ selMode: 2, sel: 2 }));
+  assert(vertex.join('|') === 'mesh-bevel', 'single-vertex Bevel is not the strict contextual action');
+  assert(!vertices.includes('mesh-bevel') && vertices.includes('mesh-weld'), 'multi-vertex selection still exposes Bevel');
+  assert(edge.includes('mesh-bevel'), 'single-edge Bevel disappeared');
+  assert(!edges.includes('mesh-bevel'), 'multi-edge selection still exposes Bevel');
+});
+
 test('multi-part outliner selection cannot fall through to Merge Faces', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 12 }, 2));
   assert(!commands.includes('mesh-merge-faces'), 'Merge Faces is hidden while selected faces represent multiple parts');
