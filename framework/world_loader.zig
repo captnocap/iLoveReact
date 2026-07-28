@@ -16,7 +16,7 @@
 //! no flag to gate it.
 //!
 //! Build:
-//!   zig build app -Dapp-name=world_loader -Dapp-source=world_loader.zig \
+//!   zig build app -Dapp-name=world_loader -Dapp-source=framework/world_loader.zig \
 //!     -Duse-v8=false -Dhas-gpu=true -Doptimize=ReleaseFast
 //! Run (headless self-capture):
 //!   ZIGOS_HEADLESS=1 ZIGOS_SCREENSHOT=1 ZIGOS_SCREENSHOT_OUTPUT=out.png \
