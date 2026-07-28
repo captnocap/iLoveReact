@@ -12,6 +12,10 @@ export type PersistedPaintSources = {
   basePaint: ModelBasePaint | null;
   readRasterBase: () => DecodedPaintRaster | null;
   readLatestVariant: () => PaintVariant | null;
+  // Decode a variant's own raster base (basePng beneath strokes, else its composite
+  // png). Full-look variants (req_3439) restore through this exactly like v4 base
+  // paint; without it they can only fall back to the plain program/atlas paths.
+  readVariantRasterBase?: (variant: PaintVariant) => DecodedPaintRaster | null;
 };
 
 export type PaintHydrationPort = {
@@ -97,9 +101,22 @@ export function hydratePersistedModelPaint(
   if (variant) {
     foundPersistedPaint = true;
     port.setDetail(variant.detail > 1 ? variant.detail : 1);
-    const restored = variant.format === 'program'
-      ? port.applyProgram(variant.data)
-      : !!variant.data && port.applyAtlas(variant.detail, variant.data);
+    let restored = false;
+    if (variant.rasterBase && variant.cornerUv?.length) {
+      // Full-look variant (req_3439): the same restore order as v4 base paint —
+      // raster base in, exact UV geometry over it, then any strokes on top. An
+      // imported-texture look with zero strokes is a valid painting here.
+      const raster = sources.readVariantRasterBase?.(variant) ?? null;
+      const imported = !!raster && port.importAtlas(raster);
+      const geometryRestored = imported
+        && port.applyCornerUv(new Float32Array(variant.cornerUv));
+      restored = geometryRestored
+        && (!variant.data || port.applyProgramOverBase(variant.data));
+    } else {
+      restored = variant.format === 'program'
+        ? !!variant.data && port.applyProgram(variant.data)
+        : !!variant.data && port.applyAtlas(variant.detail, variant.data);
+    }
     if (restored) return { status: 'ready', source: 'variant' };
   }
 

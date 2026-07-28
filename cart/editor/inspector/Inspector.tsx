@@ -565,7 +565,7 @@ export default function Inspector(props: {
                   workspace={uvWorkspace}
                   onToggleFocus={() => setUvWorkspaceFocused((value) => !value)}
                 />
-                <ModelPaintVariants key={activeModel.id} model={activeModel} hidden={!uvWorkspace.showPaintVariants} />
+                <ModelPaintVariants key={activeModel.id} model={activeModel} bridge={focusBridge} hidden={!uvWorkspace.showPaintVariants} />
               </>
             ) : (
               <RigSection

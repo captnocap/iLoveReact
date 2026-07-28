@@ -87,6 +87,54 @@ test('a legacy named painting is a lazy fallback for packages without a base rec
   assert(h.calls.join('|') === 'detail:16|program:legacy', `wrong legacy sequence: ${h.calls.join('|')}`);
 });
 
+test('a full-look variant restores raster base, exact UV geometry, then strokes (req_3439)', () => {
+  const h = harness({
+    readLatestVariant: () => ({
+      id: '2', name: 'Painting 2', w: 128, h: 64, detail: 32, data: 'strokes', format: 'program',
+      rasterBase: true, cornerUv: [1, 2, 3, 4, 5, 6], basePng: 'paints/paint_2.base.png',
+    }),
+    readVariantRasterBase: (variant) => ({ width: variant.w, height: variant.h, rgba: new Uint8Array(variant.w * variant.h * 4) }),
+  });
+  const result = hydratePersistedModelPaint(h.sources, h.port);
+  assert(result.status === 'ready' && result.source === 'variant', 'full-look variant did not become ready');
+  assert(h.calls.join('|') === 'detail:32|raster:128x64|corners:1,2,3,4,5,6|over:strokes', `wrong full-look sequence: ${h.calls.join('|')}`);
+});
+
+test('an imported-texture look with ZERO strokes is a restorable variant (req_3439)', () => {
+  const h = harness({
+    readLatestVariant: () => ({
+      id: '1', name: 'Painting 1', w: 1024, h: 1024, detail: 1, data: '', format: 'program',
+      rasterBase: true, cornerUv: [0, 0, 10, 0, 10, 10],
+    }),
+    readVariantRasterBase: () => ({ width: 1024, height: 1024, rgba: new Uint8Array(4) }),
+  });
+  const result = hydratePersistedModelPaint(h.sources, h.port);
+  assert(result.status === 'ready' && result.source === 'variant', 'strokeless look did not become ready');
+  assert(h.calls.join('|') === 'detail:1|raster:1024x1024|corners:0,0,10,0,10,10', `strokeless look ran a program replay: ${h.calls.join('|')}`);
+});
+
+test('a full-look variant whose raster base cannot be read fails loudly instead of half-restoring', () => {
+  const h = harness({
+    readLatestVariant: () => ({
+      id: '3', name: 'Painting 3', w: 64, h: 64, detail: 8, data: 'strokes', format: 'program',
+      rasterBase: true, cornerUv: [1, 1, 2, 2, 3, 3],
+    }),
+    readVariantRasterBase: () => null,
+  });
+  const result = hydratePersistedModelPaint(h.sources, h.port);
+  assert(result.status === 'failed', 'unreadable raster base was not reported as failed');
+  assert(h.calls.join('|') === 'detail:8', `unreadable raster base still applied something: ${h.calls.join('|')}`);
+});
+
+test('a program variant with an empty program is not silently replayed', () => {
+  const h = harness({
+    readLatestVariant: () => ({ id: '4', name: 'Painting 4', w: 64, h: 64, detail: 8, data: '', format: 'program' }),
+  });
+  const result = hydratePersistedModelPaint(h.sources, h.port);
+  assert(result.status === 'failed', 'empty program variant was not reported as failed');
+  assert(!h.calls.some((c) => c.startsWith('program:')), 'an empty program reached applyProgram');
+});
+
 test('a stale topology refuses every persisted paint source', () => {
   let variantRead = false;
   const h = harness({

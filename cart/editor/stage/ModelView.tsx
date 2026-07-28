@@ -45,12 +45,12 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
-import { listPaintVariants, type PaintTarget } from '../data/paintVariants';
+import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
 import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
-import { hydratePersistedModelPaint, residentPaintResumeAction } from '../model/paintHydration';
+import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
 import { triangleWireframeVisible } from '../model/viewportPresentation';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
@@ -167,6 +167,9 @@ export type ModelFocusBridge = {
   saveUvAtlas: () => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
   reloadUvAtlas: () => string;
+  // Restore a saved paint variant's whole look onto the resident model (req_3439):
+  // texture + UV layout + strokes for full looks, program/atlas replay for legacy ones.
+  loadPaintVariant: (variant: PaintVariant) => boolean;
   shape: ModelFocusShape | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
@@ -1445,7 +1448,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     const name = path.replace(/\\/g, '/').split('/').pop() || 'texture';
     return persisted.ok
-      ? `Imported ${name} · ${decoded.width}×${decoded.height} — UV geometry fitted without stretching; remap it over the image.`
+      ? `Imported ${name} · ${decoded.width}×${decoded.height} — replaced the LIVE atlas only (saved paint variants keep theirs); remap UVs over the image.`
       : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
   };
 
@@ -1500,6 +1503,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintMode(true);
     buildUvPanel();
   };
+  // ONE hydration port for every path that restores persisted paint onto the resident
+  // model — cold load and variant load go through the same engine (paintHydration).
+  const paintHydrationPort: PaintHydrationPort = {
+    invalidateLayout: () => { host.__model_paint_layout_invalidate?.(); },
+    setDetail: (savedDetail) => { changeDetail(savedDetail); },
+    importAtlas: (raster) => host.__model_atlas_import?.(raster.rgba, raster.width, raster.height) === 1,
+    applyLayout: (layout) => host.__model_uv_layout_apply?.(layout) === 1,
+    // Hydration restores authored UV GEOMETRY, not only each island's bounding
+    // rectangle. Omit a history ordinal: loading disk truth is not a new undoable
+    // edit in this session.
+    applyCornerUv: (cornerUv) => host.__model_uv_geometry_apply?.(cornerUv) === 1,
+    applyProgram: (program) => host.__model_paint_program_apply?.(program) === 1,
+    applyProgramOverBase: (program) => host.__model_paint_program_apply_over_base?.(program) === 1,
+    applyAtlas: (savedDetail, data) => host.__model_atlas_apply?.(savedDetail, data) === 1,
+  };
+  // A full-look variant restores from its own raster base: the baseline png beneath
+  // its strokes when one exists, else its composite substrate png (req_3439).
+  const readVariantRasterBase = (variant: PaintVariant): DecodedPaintRaster | null => {
+    const path = variant.basePng ?? variant.png;
+    const encoded = path ? readFileBase64(path) : null;
+    const decoded = encoded ? imageOps(encoded).raw() : null;
+    return decoded ? { width: decoded.width, height: decoded.height, rgba: decoded.rgba } : null;
+  };
   // Hydrate authored paint as DOCUMENT state. This is deliberately independent of
   // Paint mode: opening a model must publish its existing UV atlas immediately, while
   // the Paint button only decides which tool owns viewport input (req_3349).
@@ -1517,19 +1543,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const saved = listPaintVariants(paintTarget);
         return saved.length > 0 ? saved[saved.length - 1]! : null;
       },
-    }, {
-      invalidateLayout: () => { host.__model_paint_layout_invalidate?.(); },
-      setDetail: (savedDetail) => { changeDetail(savedDetail); },
-      importAtlas: (raster) => host.__model_atlas_import?.(raster.rgba, raster.width, raster.height) === 1,
-      applyLayout: (layout) => host.__model_uv_layout_apply?.(layout) === 1,
-      // Cold hydration restores authored UV GEOMETRY, not only each island's
-      // bounding rectangle. Omit a history ordinal: loading disk truth is not a
-      // new undoable edit in this session.
-      applyCornerUv: (cornerUv) => host.__model_uv_geometry_apply?.(cornerUv) === 1,
-      applyProgram: (program) => host.__model_paint_program_apply?.(program) === 1,
-      applyProgramOverBase: (program) => host.__model_paint_program_apply_over_base?.(program) === 1,
-      applyAtlas: (savedDetail, data) => host.__model_atlas_apply?.(savedDetail, data) === 1,
-    });
+      readVariantRasterBase,
+    }, paintHydrationPort);
     if (result.status === 'ready') {
       atlasReadyRef.current = true;
       atlasInvalidatedRef.current = false;
@@ -1543,6 +1558,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       console.error(`[paint] persisted atlas for ${paintTarget.id} exists but could not be hydrated`);
     }
     return false;
+  };
+  // Restore one SAVED LOOK onto the resident model (req_3439): the PAINT VARIANTS
+  // panel's Load. Same hydration engine as cold load, pointed at the chosen variant —
+  // full looks bring back their texture + UV layout + strokes; legacy variants keep
+  // their program/atlas replay. Refuses while the package's paint layout is stale.
+  const loadPaintVariant = (variant: PaintVariant): boolean => {
+    if (!paintTarget) return false;
+    const result = hydratePersistedModelPaint({
+      stale: modelPaintLayoutIsStale(paintTarget),
+      basePaint: null,
+      readRasterBase: () => null,
+      readLatestVariant: () => variant,
+      readVariantRasterBase,
+    }, paintHydrationPort);
+    if (result.status !== 'ready') return false;
+    atlasReadyRef.current = true;
+    atlasInvalidatedRef.current = false;
+    buildUvPanel();
+    return true;
   };
 
   // Model adoption happens in the mount effect below. Once its host-resident key lands,
@@ -2016,6 +2050,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       saveUvAtlas,
       importUvAtlas,
       reloadUvAtlas,
+      loadPaintVariant,
       shape: model
         ? {
           verts: selInfo.verts,

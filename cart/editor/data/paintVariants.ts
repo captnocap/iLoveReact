@@ -11,8 +11,15 @@
 //                             on load via __model_paint_program_apply.
 //   paints/paint_<id>.png   — the rasterized atlas, the EDITING SUBSTRATE / preview (what
 //                             you see). Written from the live atlas via __image_write_png.
+//
+// FULL LOOKS (req_3439): a variant is the model's whole current LOOK, not only brush
+// strokes — an imported texture atlas plus the UV layout mapped over it is a look with
+// ZERO strokes, and it saves/loads the same way the package's base painting does
+// (base.paint.json v4 parity): a raster base + the exact per-face UV geometry + the
+// stroke program on top. With strokes, the baseline BENEATH them persists as
+// paints/paint_<id>.base.png; with none, the composite .png doubles as the base.
 import { exists, listDir, mkdir, readFile, remove, stat, writeFile } from '../../../runtime/hooks/fs';
-import { claimPackageDir } from './modelPackageStore';
+import { claimPackageDir, parsedUvCornerGeometry } from './modelPackageStore';
 import type { ModelPackage } from './types';
 
 const host = globalThis as any;
@@ -28,15 +35,64 @@ export type PaintVariant = {
   w: number;
   h: number;
   detail: number; // patch resolution the painting was made at
-  data: string; // 'program' → base64 stroke program; 'atlas'/absent → base64 RGBA atlas
+  data: string; // 'program' → base64 stroke program ('' when the look carries no strokes); 'atlas'/absent → base64 RGBA atlas
   format?: 'atlas' | 'program'; // absent = legacy atlas
   png?: string; // on-disk path of the rasterized substrate, when one was written
+  // Full-LOOK restore record (req_3439, base.paint.json v4 parity). When present the
+  // variant rebuilds an imported-texture look exactly: import the raster base, apply
+  // the exact UV geometry, then replay any strokes over that base.
+  cornerUv?: number[]; // six absolute-atlas floats per render face (__model_uv_geometry_apply)
+  rasterBase?: true; // a restore raster exists on disk: basePng when strokes ride on top, else png
+  basePng?: string; // the baseline BENEATH the strokes (paint_<id>.base.png); absent when data is ''
 };
 
 function paintsDir(pkg: PaintTarget): string { return `${claimPackageDir(pkg)}/paints`; }
 function jsonPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.json`; }
 function pngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.png`; }
 function blobPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.blob`; }
+function basePngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.base.png`; }
+
+/** What savers pass to capture the model's current look alongside the program. */
+type PaintLookInput = {
+  w: number;
+  h: number;
+  data: string;
+  cornerUv?: number[] | null; // exact UV geometry (exactUvCornersFromAtlasTriangles)
+  baselineRgba?: string; // base64 RGBA beneath the strokes (__model_paint_baseline_read)
+};
+
+/** Write/refresh the full-look fields for one variant. With strokes the baseline
+ *  gets its own paint_<id>.base.png; with none the composite .png doubles as the
+ *  raster base, so an atlas-only look never stores the same raster twice. An
+ *  update whose strokes are gone sheds its stale base file. */
+function writeLookFields(
+  pkg: PaintTarget,
+  id: string,
+  v: PaintLookInput,
+  compositePngLanded: boolean,
+): Pick<PaintVariant, 'cornerUv' | 'rasterBase' | 'basePng'> {
+  const path = basePngPath(pkg, id);
+  let basePng: string | undefined;
+  if (v.data && v.baselineRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(path, v.baselineRgba, v.w, v.h) === 1) {
+    basePng = path;
+  }
+  if (!basePng && exists(path)) remove(path);
+  const hasRasterBase = !!basePng || (!v.data && compositePngLanded);
+  if (!v.cornerUv?.length || !hasRasterBase) return {};
+  return { cornerUv: v.cornerUv.slice(), rasterBase: true, ...(basePng ? { basePng } : {}) };
+}
+
+/** A loaded variant only advertises a full look when the record is coherent AND its
+ *  raster base is actually on disk — a half-restorable look must fall back to the
+ *  plain program/atlas path instead of importing nothing. */
+function withValidatedLook(v: PaintVariant): PaintVariant {
+  if (v.rasterBase === undefined && v.cornerUv === undefined && v.basePng === undefined) return v;
+  const cornerUv = parsedUvCornerGeometry(v.cornerUv);
+  const raster = v.basePng ?? v.png;
+  if (v.rasterBase === true && cornerUv && raster && exists(raster)) return v;
+  const { cornerUv: _c, rasterBase: _r, basePng: _b, ...rest } = v;
+  return rest;
+}
 
 /** Persist the DISPLAYED paint-space mesh beside a variant (paints/paint_<id>.blob).
  *  The variant's .png maps through this blob's island-space UVs (req_2833). The
@@ -60,17 +116,18 @@ export function listPaintVariants(pkg: PaintTarget): PaintVariant[] {
     if (!text) continue;
     try {
       const v = JSON.parse(text) as PaintVariant;
-      if (v && typeof v.id === 'string') out.push(v);
+      if (v && typeof v.id === 'string') out.push(withValidatedLook(v));
     } catch { /* skip a malformed variant, keep the rest */ }
   }
   return out.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
 }
 
 /** Append a new variant (auto-named "Painting N" when unnamed), writing its stroke-program
- *  json and — when atlas pixels are supplied — its rasterized .png substrate. Returns it. */
+ *  json, its rasterized .png substrate, and — when the caller captured the current look —
+ *  the full-look restore record (cornerUv + raster base). Returns it. */
 export function savePaintVariant(
   pkg: PaintTarget,
-  v: { name?: string; w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string },
+  v: { name?: string; w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string } & Partial<PaintLookInput>,
 ): PaintVariant {
   const dir = paintsDir(pkg);
   mkdir(dir); // recursive: creates the package + paints/ dir if this is the first save
@@ -91,6 +148,7 @@ export function savePaintVariant(
     data: v.data,
     format: v.format ?? 'program',
     png,
+    ...writeLookFields(pkg, id, v, !!png),
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // save writes what you SEE — the paint-space mesh pairs with the .png
@@ -98,12 +156,12 @@ export function savePaintVariant(
 }
 
 /** Overwrite an EXISTING variant in place (Save-back), keeping its id + name and refreshing
- *  its stroke program + .png substrate. Returns the updated variant, or null if the id is
- *  gone (the caller can then fall back to a fresh save). */
+ *  its stroke program, .png substrate, and full-look record. Returns the updated variant,
+ *  or null if the id is gone (the caller can then fall back to a fresh save). */
 export function updatePaintVariant(
   pkg: PaintTarget,
   id: string,
-  v: { w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string },
+  v: { w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string } & Partial<PaintLookInput>,
 ): PaintVariant | null {
   const existing = listPaintVariants(pkg).find((x) => x.id === id);
   if (!existing) return null;
@@ -111,14 +169,18 @@ export function updatePaintVariant(
   if (v.atlasRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(pngPath(pkg, id), v.atlasRgba, v.w, v.h) === 1) {
     png = pngPath(pkg, id);
   }
+  // Strip the old look fields before spreading: an update that lost its look (or its
+  // strokes) must not inherit a stale cornerUv/raster-base claim from the previous save.
+  const { cornerUv: _c, rasterBase: _r, basePng: _b, ...kept } = existing;
   const variant: PaintVariant = {
-    ...existing,
+    ...kept,
     w: v.w,
     h: v.h,
     detail: v.detail,
     data: v.data,
     format: v.format ?? existing.format ?? 'program',
     png,
+    ...writeLookFields(pkg, id, v, !!png),
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // keep the paint-space mesh in step with the refreshed painting
@@ -128,6 +190,7 @@ export function updatePaintVariant(
 export function removePaintVariant(pkg: PaintTarget, id: string): void {
   remove(jsonPath(pkg, id));
   remove(pngPath(pkg, id));
+  remove(basePngPath(pkg, id));
   remove(blobPath(pkg, id));
   invalidatePaintSkins(pkg);
 }

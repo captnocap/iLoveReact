@@ -289,7 +289,7 @@ function parsedUvIslandLayout(value: unknown): number[] | null {
   return value.slice();
 }
 
-function parsedUvCornerGeometry(value: unknown): number[] | null {
+export function parsedUvCornerGeometry(value: unknown): number[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length % 6 !== 0) return null;
   if (!value.every((entry) => typeof entry === 'number' && Number.isFinite(entry) && entry >= 0)) return null;
   return value.slice();

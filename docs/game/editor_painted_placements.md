@@ -1,8 +1,8 @@
 # Painted placements: which mesh a placed model renders
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
-Last verified: 2026-07-22. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328 / req_3329 / req_3362.
+Last verified: 2026-07-27. USER ASK req_2832 / req_2833 / req_2930 /
+req_3133 / req_3328 / req_3329 / req_3362 / req_3439.
 
 ## In one sentence
 
@@ -37,6 +37,26 @@ remain readable for old packages, but they are transform bounds rather than UV
 geometry: they cannot reproduce a rotated island, a detached cylinder wedge, or
 one moved vertex. New saves therefore emit v4 whenever the host's complete
 triangle table is present.
+
+## Paint variants are full LOOKS (req_3439)
+
+A saved paint variant (`paints/paint_N.json`) carries the same v4 triple as the
+base painting, so one mesh stores many looks without duplicating the model: the
+exact `cornerUv` table, `rasterBase: true`, and the stroke program (which may be
+EMPTY — an imported texture atlas mapped over the mesh is a saveable look with
+zero brush strokes; the old panel refused to save exactly that case). With
+strokes, the baseline beneath them persists as `paints/paint_N.base.png`; with
+none, the composite `paint_N.png` doubles as the raster base (no second
+multi-MB raster). Loading goes through the viewer bridge
+(`ModelFocusBridge.loadPaintVariant`) into the SAME hydration engine as cold
+load (`model/paintHydration.ts`): set detail, import the variant's own raster
+base, apply its cornerUv, replay strokes over that base — so importing a new
+atlas or remapping UVs only changes the LIVE look; every saved variant reloads
+its own texture + UV layout intact. `listPaintVariants` strips a look claim
+whose raster file is missing on disk, and hydration fails loudly rather than
+half-restoring. Legacy program/atlas variants keep their historical replay
+paths. Placement is unchanged: skins still require `paint_N.png` +
+`paint_N.blob` (atlas-only looks now produce both, so they place too).
 
 ## The ambiguity and the stamp (req_3133)
 
