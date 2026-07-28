@@ -14,6 +14,7 @@ import {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
   type WorldPieceEditCommandId,
   type WorldPieceMaterialCommandId,
@@ -26,11 +27,12 @@ export {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
 } from './pieceCommandIds';
 export type { WorldPieceEditCommandId } from './pieceCommandIds';
 export type { WorldPieceMaterialCommandId } from './pieceCommandIds';
-export type WorldPieceEditAction = 'move' | 'rotate' | 'spin' | 'delete';
+export type WorldPieceEditAction = 'move' | 'rotate' | 'spin' | 'skin' | 'delete';
 
 export const WORLD_PIECE_EDIT_LIMITS = Object.freeze({ maxFloor: 128 });
 
@@ -42,6 +44,16 @@ export type PieceRotateArgs = { documentId: string; pieceId: string; quarterTurn
 /** spinDegPerSec 0 stops the spin (the field clears); any other finite rate spins.
  *  Negative = counter-clockwise. */
 export type PieceSpinArgs = { documentId: string; pieceId: string; spinDegPerSec: number };
+/** skinId names a stored paint skin of the instance's model; null returns the
+ *  instance to the model's current base look (req_3443). */
+export type PieceSkinArgs = { documentId: string; pieceId: string; skinId: string | null };
+/** The one capability the skin transaction needs from the catalog side: resolve
+ *  what the instance's placeable id becomes wearing `skinId` (null = base look).
+ *  Returns null when the piece is not an authored placeable or the skin does not
+ *  exist — keeping this module free of registry/package imports. */
+export type PieceSkinPolicy = {
+  skinnedPieceIdFor(currentPieceId: string, skinId: string | null): string | null;
+};
 export type PieceDeleteArgs = { documentId: string; pieceId: string };
 
 export type PieceEditWorld = {
@@ -313,6 +325,43 @@ export function planPieceSpin(world: PieceEditWorld, args: PieceSpinArgs): Piece
     world,
     WORLD_PIECE_SPIN_COMMAND_ID,
     'spin',
+    before,
+    after,
+    [],
+    {
+      removeIds: [before.piece.id],
+      insert: [{ index: before.index, piece: after }],
+      append: [],
+      selectedPieceId: after.id,
+    },
+    { removeIds: [after.id], insert: [before], append: [], selectedPieceId: world.selectedPieceId },
+  );
+}
+
+/** Paint-skin swap (req_3443): re-dress a placed authored piece in one of its
+ *  model's stored paintings (or back to the base look) by swapping its placeable
+ *  id between `prop:X` and `prop:X#p<skin>`. Footprint, transform, slots, and
+ *  overrides all stay — only the worn look changes; the row keeps its list
+ *  position, exactly like spin. */
+export function planPieceSkin(world: PieceEditWorld, args: PieceSkinArgs, policy: PieceSkinPolicy): PieceEditPlan {
+  const before = validateWorld(world, args.documentId, args.pieceId);
+  if (args.skinId !== null && (typeof args.skinId !== 'string' || !args.skinId)) {
+    reject('invalid-args', 'skinId must be a stored painting id, or null for the base look');
+  }
+  const nextPieceId = policy.skinnedPieceIdFor(before.piece.pieceId, args.skinId);
+  if (!nextPieceId) {
+    reject('invalid-args', args.skinId === null
+      ? `piece '${args.pieceId}' is not an authored placeable — it wears no paintings`
+      : `piece '${args.pieceId}' has no stored painting '${args.skinId}'`);
+  }
+  if (nextPieceId === before.piece.pieceId) {
+    reject('no-change', `piece '${args.pieceId}' already wears ${args.skinId === null ? 'the base look' : `painting '${args.skinId}'`}`);
+  }
+  const after = clonePiece({ ...before.piece, pieceId: nextPieceId });
+  return finish(
+    world,
+    WORLD_PIECE_SKIN_COMMAND_ID,
+    'skin',
     before,
     after,
     [],

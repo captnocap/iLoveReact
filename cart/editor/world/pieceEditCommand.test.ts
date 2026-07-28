@@ -15,6 +15,7 @@ import {
   planPieceMaterialClear,
   planPieceMove,
   planPieceRotate,
+  planPieceSkin,
   planPieceSpin,
   type PieceEditWorld,
   type PieceMaterialPolicy,
@@ -142,6 +143,42 @@ test('spin sets/clears only spinDegPerSec in place and round-trips exactly (req_
   try { planPieceSpin(before, { documentId: 'main', pieceId: 'sign', spinDegPerSec: Number.NaN }); }
   catch (e) { if (e instanceof PieceEditRejected && e.code === 'invalid-args') rejected += 1; }
   assert(rejected === 2, 'spin accepted a no-op or a non-finite rate');
+});
+
+test('skin swaps only the worn placeable id in place and round-trips exactly (req_3443)', () => {
+  const skinPolicy = {
+    skinnedPieceIdFor: (currentPieceId: string, skinId: string | null) => {
+      if (!currentPieceId.startsWith('prop:beercan_01')) return null;
+      if (skinId === null) return 'prop:beercan_01';
+      return skinId === '1' || skinId === '2' ? `prop:beercan_01#p${skinId}` : null;
+    },
+  };
+  const target = piece('can', 4.5, { pieceId: 'prop:beercan_01', slots: { top: { assetId: 'kept' } }, overrides: { walkable: true } });
+  const before = world([piece('head', 1.5), target, piece('tail', 7.5)], 'tail');
+  const plan = planPieceSkin(before, { documentId: 'main', pieceId: 'can', skinId: '2' }, skinPolicy);
+  assert(plan.transaction.commandId === 'world.piece.skin' && plan.transaction.action === 'skin', 'stable skin identity missing');
+  same(plan.next.pieces.map((p) => p.id), ['head', 'can', 'tail'], 'skin churned list order');
+  const dressed = plan.next.pieces[1]!;
+  assert(dressed.pieceId === 'prop:beercan_01#p2', `skinned placeable id did not land, got ${dressed.pieceId}`);
+  assert(dressed.x === target.x && dressed.yawDegrees === target.yawDegrees, 'skin changed the transform');
+  same(dressed.slots, target.slots, 'skin changed slots');
+  same(dressed.overrides, target.overrides, 'skin changed overrides');
+  assert(plan.transaction.replaced.length === 0, 'skin invented destination victims');
+  same(applyPieceEditInverse(plan.next, plan.transaction), before, 'skin undo drifted');
+
+  // null returns the instance to the base look.
+  const basePlan = planPieceSkin(plan.next, { documentId: 'main', pieceId: 'can', skinId: null }, skinPolicy);
+  assert(basePlan.next.pieces[1]?.pieceId === 'prop:beercan_01', 'base look did not restore');
+
+  // No-change, unknown skin, and non-authored pieces reject.
+  let rejected = 0;
+  try { planPieceSkin(plan.next, { documentId: 'main', pieceId: 'can', skinId: '2' }, skinPolicy); }
+  catch (e) { if (e instanceof PieceEditRejected && e.code === 'no-change') rejected += 1; }
+  try { planPieceSkin(before, { documentId: 'main', pieceId: 'can', skinId: '9' }, skinPolicy); }
+  catch (e) { if (e instanceof PieceEditRejected && e.code === 'invalid-args') rejected += 1; }
+  try { planPieceSkin(before, { documentId: 'main', pieceId: 'head', skinId: '1' }, skinPolicy); }
+  catch (e) { if (e instanceof PieceEditRejected && e.code === 'invalid-args') rejected += 1; }
+  assert(rejected === 3, 'skin accepted a no-op, an unknown painting, or a catalog piece');
 });
 
 test('delete captures the complete row and its original index', () => {

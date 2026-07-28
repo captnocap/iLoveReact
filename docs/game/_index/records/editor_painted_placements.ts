@@ -31,6 +31,17 @@ export const editor_painted_placements: DocIndex = {
       status: 'live',
     },
     {
+      name: 'world.piece.skin — paint skins are instance wardrobe, never palette rows',
+      purpose: ['building', 'texture_bake'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/world/pieceEditCommand.ts',
+      description:
+        'req_3443 (USER RULING: skins must not multiply build-menu entries — "the build menu will explode"): an exported model is exactly ONE palette tile (authoredRegistry authoredPaletteEntries); stored paintings dress the PLACED INSTANCE via the world quick menu\'s PAINTINGS section (Current + each placeable skin). planPieceSkin is a real undoable piece-edit transaction swapping the instance\'s placeable id between prop:X and prop:X#p<skin> in place — transform/slots/overrides/stickers/order stay; EditorPieceEditAdapter.skinPolicy (AppFrame: authoredPieceFor + listPaintSkins) rejects unknown paintings and catalog pieces before commit. Rendering rides the existing per-skin resident meshes livePush registers under <placeableId>#p<skinId>.',
+      dependsOn: ['cart/editor/world/authoredRegistry.ts skinnedPieceId/paintSkinIdOf', 'cart/editor/data/paintVariants.ts listPaintSkins', 'cart/editor/data/applicationCommands.ts WORLD_PIECE_SKIN_COMMAND_ID'],
+      consumers: ['cart/editor/stage/WorldContextMenu.tsx PAINTINGS section', 'cart/editor/shell/AppFrame.tsx pieceEdit adapter'],
+      status: 'live',
+    },
+    {
       name: 'painted.json doc-stamp (writeModelArtifacts ↔ paintedFormIsCurrent)',
       purpose: ['persistence', 'texture_bake'],
       kind: 'utility',

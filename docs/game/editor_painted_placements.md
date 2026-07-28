@@ -2,7 +2,7 @@
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-27. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328 / req_3329 / req_3362 / req_3439.
+req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443.
 
 ## In one sentence
 
@@ -55,8 +55,25 @@ atlas or remapping UVs only changes the LIVE look; every saved variant reloads
 its own texture + UV layout intact. `listPaintVariants` strips a look claim
 whose raster file is missing on disk, and hydration fails loudly rather than
 half-restoring. Legacy program/atlas variants keep their historical replay
-paths. Placement is unchanged: skins still require `paint_N.png` +
-`paint_N.blob` (atlas-only looks now produce both, so they place too).
+paths. Skins still require `paint_N.png` + `paint_N.blob` on disk (atlas-only
+looks now produce both, so they place too).
+
+## Skins are instance wardrobe, never palette rows (req_3443)
+
+USER RULING (verbatim concern: "the build menu will explode"): an exported
+model is exactly ONE build-palette tile — its current Studio look
+(`authoredRegistry.ts authoredPaletteEntries`). Stored paintings dress the
+PLACED INSTANCE instead: right-clicking a placed authored piece opens the world
+quick menu, whose PAINTINGS section lists Current + every placeable skin; a
+chip click runs `world.piece.skin` (`pieceEditCommand.ts planPieceSkin`), a
+real undoable piece-edit transaction that swaps the instance's placeable id
+between `prop:X` and `prop:X#p<skin>` in place — transform, slots, overrides,
+stickers, and list order all stay. The catalog side resolves through
+`EditorPieceEditAdapter.skinPolicy` (AppFrame: `authoredPieceFor` +
+`listPaintSkins`), so unknown paintings and catalog pieces reject before
+commit. Rendering needs no new plumbing: `livePush.ts` already registers one
+resident mesh per skin under the `<placeableId>#p<skinId>` key, which is
+exactly what the swapped id resolves to.
 
 ## The ambiguity and the stamp (req_3133)
 

@@ -30,7 +30,8 @@ import { pieceLook, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { Asset } from '../data/types';
 import AssetPreview from '../library/AssetPreview';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
-import { isAuthoredPiece } from '../world/authoredRegistry';
+import { isAuthoredPiece, paintSkinIdOf } from '../world/authoredRegistry';
+import type { PaintSkin } from '../data/paintVariants';
 
 // The quick verbs, in reach order. Labels are the quick-menu voice ("Copy", not
 // "Duplicate Selection"); ids are the SAME registry commands the menus/keymap run,
@@ -82,7 +83,7 @@ function SkinTile({ asset, active, onPick }: { asset: Asset; active: boolean; on
   );
 }
 
-export default function WorldContextMenu({ piece, materials, recentIds, resolveMaterial, onAssignSlot, onClearSlot, onCommand, onClose }: {
+export default function WorldContextMenu({ piece, materials, recentIds, resolveMaterial, onAssignSlot, onClearSlot, paintings = [], onSetPainting, onCommand, onClose }: {
   /** the LIVE selected piece from EditorState (yaw/slots update while the menu is open) */
   piece: PlacedPiece;
   /** the RANKED material catalog (Skins tab, overrides applied, rankAssets order) */
@@ -94,6 +95,11 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
   onAssignSlot: (id: string, role: string | null, assetId: string) => void;
   /** role null = clear EVERY face back to the kind default */
   onClearSlot: (id: string, role: string | null) => void;
+  /** the model's STORED paintings (req_3443) — the palette lists one entry per
+   *  model; which painting THIS instance wears is chosen here. Empty = no section. */
+  paintings?: readonly PaintSkin[];
+  /** dress the instance in a stored painting; null returns it to the base look */
+  onSetPainting?: (id: string, skinId: string | null) => void;
   onCommand: (id: string, source: string) => void;
   onClose: () => void;
 }) {
@@ -150,6 +156,31 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
           <C.HW_KeyText>{verb.keyHint}</C.HW_KeyText>
         </C.HW_ContextRow>
       ))}
+
+      {paintings.length > 0 && onSetPainting && isAuthoredPiece(piece.pieceId) ? (
+        <>
+          {/* PAINTINGS (req_3443) — the model's stored looks, one chip each plus
+              Current. The palette carries ONE entry per model; the placed instance
+              picks its look HERE. Swap keeps the menu open (like Rotate) so the
+              change is visible under the cursor. */}
+          <SectionHead>PAINTINGS</SectionHead>
+          <Box style={{ flexDirection: 'row', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, flexWrap: 'wrap' }}>
+            {[{ id: null as string | null, name: 'Current' }, ...paintings].map((painting) => {
+              const worn = paintSkinIdOf(piece.pieceId) === painting.id;
+              const tip = painting.id === null
+                ? `the model's current base look${worn ? ' · worn now' : ''}`
+                : `dress this ${label} in ${painting.name}${worn ? ' · worn now' : ''}`;
+              return (
+                <Pressable key={painting.id ?? 'current'} tooltip={tip} onPress={() => { if (!worn) onSetPainting(piece.id, painting.id); }}>
+                  <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: worn ? 2 : 1, borderColor: worn ? accentFor('primary') : '#2a3442', backgroundColor: EMPTY_SLOT_BG }}>
+                    <C.HW_KeyText style={{ color: worn ? accentFor('primary') : undefined }}>{painting.name}</C.HW_KeyText>
+                  </Box>
+                </Pressable>
+              );
+            })}
+          </Box>
+        </>
+      ) : null}
 
       {roles.length ? (
         <>

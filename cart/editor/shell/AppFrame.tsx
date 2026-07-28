@@ -48,7 +48,8 @@ import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import { pieceKindOf, PIECE_MODULE_METERS, PIECE_SPIN_RATE_DEG_PER_SEC } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
-import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
+import { setAuthoredPieces, authoredIdFor, authoredPieceFor, paintSkinIdOf, preferredAuthoredPaletteId, skinnedPieceId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
+import { listPaintSkins } from '../data/paintVariants';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
@@ -109,6 +110,7 @@ import {
   WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
   WORLD_PIECES_PLACE_COMMAND_ID,
   WORLD_PLACEMENT_ROTATE_COMMAND_ID,
@@ -663,6 +665,20 @@ export default function AppFrame() {
           pieces: stateRef.current.worldPieces,
           selectedPieceId: stateRef.current.selectedPieceId,
         }),
+        // Paint-skin swap resolution (req_3443): a placed authored piece may wear
+        // any of its model's STORED paintings. The base id strips the current
+        // skin suffix; the requested skin must exist in the package's placeable
+        // skin list (png + blob on disk, current-topology gate applied).
+        skinPolicy: {
+          skinnedPieceIdFor: (currentPieceId: string, skinId: string | null) => {
+            const ap = authoredPieceFor(currentPieceId);
+            if (!ap) return null;
+            if (skinId === null) return ap.id;
+            const pkg = modelPackageById(ap.pkgId);
+            if (!pkg || !listPaintSkins(pkg).some((skin) => skin.id === skinId)) return null;
+            return skinnedPieceId(ap.id, skinId);
+          },
+        },
         now: Date.now,
         commit: (plan, actionId, applyStartedAtMs) => {
           const previous = stateRef.current;
@@ -687,14 +703,18 @@ export default function AppFrame() {
                 ].filter(Boolean).join(' ')
               : transaction.action === 'spin' && after
                 ? `spin=${before.spinDegPerSec ?? 0}→${after.spinDegPerSec ?? 0}°/s apply=${applyMs.toFixed(1)}ms`
-                : `at=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)}) apply=${applyMs.toFixed(1)}ms`;
+                : transaction.action === 'skin' && after
+                  ? `look=${paintSkinIdOf(before.pieceId) ?? 'base'}→${paintSkinIdOf(after.pieceId) ?? 'base'} apply=${applyMs.toFixed(1)}ms`
+                  : `at=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)}) apply=${applyMs.toFixed(1)}ms`;
           const status = transaction.action === 'move'
             ? `moved ${before.pieceId}${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
             : transaction.action === 'rotate'
               ? `rotated ${before.pieceId} → ${after!.yawDegrees}°${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
               : transaction.action === 'spin'
                 ? ((after!.spinDegPerSec ?? 0) !== 0 ? `spinning ${before.pieceId} at ${after!.spinDegPerSec}°/s` : `stopped ${before.pieceId} spinning`)
-                : `deleted ${before.pieceId}`;
+                : transaction.action === 'skin'
+                  ? (paintSkinIdOf(after!.pieceId) ? `dressed ${authoredPieceFor(after!.pieceId)?.label ?? after!.pieceId} in a stored painting` : `returned ${authoredPieceFor(after!.pieceId)?.label ?? after!.pieceId} to its base look`)
+                  : `deleted ${before.pieceId}`;
           const nextBase: EditorState = {
             ...previous,
             history: [{
@@ -5625,6 +5645,14 @@ export default function AppFrame() {
   const worldQuickMaterials = worldQuickPiece
     ? applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins').sort(rankAssets)
     : [];
+  // The model's stored PAINTINGS for the quick menu (req_3443): the palette lists
+  // one entry per model; which painting a placed instance wears is chosen HERE.
+  const worldQuickPaintings = (() => {
+    if (!worldQuickPiece) return [];
+    const ap = authoredPieceFor(worldQuickPiece.pieceId);
+    const pkg = ap ? modelPackageById(ap.pkgId) : null;
+    return pkg ? listPaintSkins(pkg) : [];
+  })();
 
   const closeHostWindow = () => (globalThis as any).__window_close?.();
   const saveDirtyWorkspaceForClose = (): boolean => {
@@ -6154,6 +6182,12 @@ export default function AppFrame() {
             resolveMaterial={(ref) => resolveMaterialRef(ref, state.assetOverrides)}
             onAssignSlot={(id, role, assetId) => assignPieceSlotAsset(id, role, assetId, 'context')}
             onClearSlot={(id, role) => clearPieceSlot(id, role, 'context')}
+            paintings={worldQuickPaintings}
+            onSetPainting={(id, skinId) => invokeApplicationCommand(WORLD_PIECE_SKIN_COMMAND_ID, {
+              documentId: stateRef.current.activeMapStem,
+              pieceId: id,
+              skinId,
+            }, 'context')}
             onCommand={runCommand}
             onClose={worldMenu.close}
           />

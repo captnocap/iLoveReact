@@ -1,5 +1,6 @@
-// cart/editor/world/authoredRegistry.test.ts — exported models keep their current
-// Studio look as the default plus one stable palette tile per saved painting.
+// cart/editor/world/authoredRegistry.test.ts — an exported model is ONE palette
+// tile regardless of stored paintings (req_3443: skins are per-instance wardrobe
+// via the world quick menu, never build-menu multiplication).
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/authoredRegistry.test.ts --bundle \
@@ -34,21 +35,12 @@ test('an unpainted export keeps one base fallback', () => {
   assert(preferredAuthoredPaletteId(exported, []) === exported.id, 'export arms the base fallback');
 });
 
-test('one saved painting sits beside the current Studio look', () => {
-  const skins = [{ id: '1', name: 'Clean' }];
-  const entries = authoredPaletteEntries(exported, skins);
-  assert(entries.length === 2, `current + one painting should produce two entries, got ${entries.length}`);
-  assert(entries[0]?.id === exported.id && entries[0]?.label === 'Painted Model · Current', 'current base look is not first');
-  assert(entries[1]?.id === 'prop:painted-model#p1', `skin id carried, got ${entries[1]?.id}`);
-  assert(entries[1]?.label === 'Painted Model · Clean', `painting label carried, got ${entries[1]?.label}`);
-  assert(preferredAuthoredPaletteId(exported, skins) === exported.id, 'export silently armed a named painting instead of the current look');
-});
-
-test('multiple saved paintings remain independently placeable', () => {
+test('stored paintings never multiply palette tiles (req_3443)', () => {
   const skins = [{ id: '1', name: 'Clean' }, { id: '2', name: 'Tagged' }];
   const entries = authoredPaletteEntries(exported, skins);
-  assert(entries.length === 3, `current + two paintings should produce three entries, got ${entries.length}`);
-  assert(entries.map((entry) => entry.id).join(',') === 'prop:painted-model,prop:painted-model#p1,prop:painted-model#p2', 'current or saved skin ids are missing');
+  assert(entries.length === 1, `one tile per model regardless of paintings, got ${entries.length}`);
+  assert(entries[0]?.id === exported.id, `the one tile is the base placeable, got ${entries[0]?.id}`);
+  assert(entries[0]?.label === 'Painted Model', `the tile keeps the plain model label, got ${entries[0]?.label}`);
   assert(preferredAuthoredPaletteId(exported, skins) === exported.id, 'export did not preserve the current Studio look');
 });
 

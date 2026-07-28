@@ -94,7 +94,7 @@ export type PiecePlacementPayload = {
   transaction: WorldPiecesPlaceResult['plan']['transaction'];
 };
 export type PieceEditPayload = {
-  action: 'move' | 'rotate' | 'spin' | 'delete';
+  action: 'move' | 'rotate' | 'spin' | 'skin' | 'delete';
   documentId: string;
   instanceId: string;
   pieceId: string;

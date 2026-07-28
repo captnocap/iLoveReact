@@ -111,6 +111,14 @@ function harness(
     },
     pieceEdit: {
       read: () => placementWorld,
+      // Harness skin policy (req_3443): 'prop:can' wears paintings '1'/'2'.
+      skinPolicy: {
+        skinnedPieceIdFor: (currentPieceId, skinId) => {
+          if (!currentPieceId.startsWith('prop:can')) return null;
+          if (skinId === null) return 'prop:can';
+          return skinId === '1' || skinId === '2' ? `prop:can#p${skinId}` : null;
+        },
+      },
       now: () => now++,
       commit: (plan, actionId) => {
         placementWorld = { ...placementWorld, ...plan.next };
@@ -477,6 +485,32 @@ test('Delete is an authored action while placement-preview rotation is report-on
   const turned = ghost.commands.invoke({ commandId: WORLD_PLACEMENT_ROTATE_COMMAND_ID, args: {}, source: 'hotkey' });
   assert(turned.status === 'applied' && turned.effect === 'report-only' && !('actionId' in turned), 'preview turn became authored history');
   assert(ghost.ghostYaw() === 90 && ghost.commits() === 1, 'preview did not turn once');
+});
+
+test('the paint-skin swap re-dresses a placed prop and rejects unknown paintings (req_3443)', () => {
+  const canWorld: PiecePlacementWorld = {
+    documentId: 'main',
+    pieces: [{ id: 'can_1', pieceId: 'prop:can', x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 }],
+    selectedPieceId: 'can_1',
+    nextPieceId: 2,
+  };
+  const h = harness(0, 'world', null, null, 'select-tool', false, canWorld);
+  const dressed = h.commands.invoke<WorldPieceEditResult>({
+    invocationId: 'skin:context', actionId: 'piece-action:9', commandId: 'world.piece.skin',
+    args: { documentId: 'main', pieceId: 'can_1', skinId: '2' }, source: 'context-menu',
+  });
+  assert(dressed.status === 'applied' && dressed.actionId === 'piece-action:9' && dressed.effect === 'action', 'skin swap lost authored identity');
+  assert(h.pieces()[0]?.pieceId === 'prop:can#p2' && h.commits() === 1, 'skin swap did not land the skinned placeable id in one commit');
+  const undressed = h.commands.invoke({
+    commandId: 'world.piece.skin', args: { documentId: 'main', pieceId: 'can_1', skinId: null }, source: 'context-menu',
+  });
+  assert(undressed.status === 'applied' && h.pieces()[0]?.pieceId === 'prop:can', 'base look did not restore');
+  const rejects = [
+    h.commands.invoke({ commandId: 'world.piece.skin', args: { documentId: 'main', pieceId: 'can_1', skinId: '9' }, source: 'remote' }),
+    h.commands.invoke({ commandId: 'world.piece.skin', args: { documentId: 'main', pieceId: 'can_1', skinId: null }, source: 'remote' }),
+  ];
+  assert(rejects.every((outcome) => outcome.status === 'rejected' && outcome.code === 'invalid-args'), 'unknown painting or no-op swap crossed authority');
+  assert(h.commits() === 2, 'rejected skin swaps still committed');
 });
 
 test('stale, wrong-document, no-op, and malformed piece edits reject before commit', () => {

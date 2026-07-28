@@ -11,8 +11,7 @@
 // threading EditorState through every call — the same module-level pattern
 // buildCatalog uses.
 import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind, type WallEdit } from './buildCatalog';
-import { listPaintSkins, type PaintSkin } from '../data/paintVariants';
-import { modelPackageById } from '../data/content';
+import type { PaintSkin } from '../data/paintVariants';
 import type { PropExportRole } from '../data/propExports';
 import type { ModelTextureSlot } from '../data/types';
 
@@ -129,40 +128,30 @@ export function placeableKind(pieceId: string): PlaceableKind | undefined {
 export type PlaceableEntry = { id: string; label: string; hex: string; authored: boolean };
 export type PlaceableGroup = { kind: PlaceableKind; label: string; entries: PlaceableEntry[] };
 
-/** The palette entries for ONE exported model. The base entry is the model's
- *  CURRENT saved atlas — the look visible in Studio and therefore the look Export
- *  must arm. Named paintings remain stable, separately placeable variants beside
- *  it. Passing `skins` makes this boundary independently testable; production
- *  reads the package's placeable paint-skin pairs from disk. */
+/** The palette entries for ONE exported model: exactly ONE tile (req_3443 —
+ *  USER RULING: skins must not multiply build-menu entries; "the build menu
+ *  will explode"). The tile is the model's CURRENT saved atlas — the look
+ *  visible in Studio and therefore the look Export must arm and placement
+ *  drops. Stored paintings stay catalog variety on the INSTANCE: the world
+ *  quick menu's PAINTINGS section dresses a placed piece in any of them
+ *  (world.piece.skin), and skinned ids still resolve everywhere. Passing
+ *  `skins` keeps this boundary independently testable. */
 export function authoredPaletteEntries(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): PlaceableEntry[] {
-  const resolvedSkins = skins ?? (() => {
-    const pkg = modelPackageById(ap.pkgId);
-    return pkg ? listPaintSkins(pkg) : [];
-  })();
-  const current = {
-    id: ap.id,
-    label: resolvedSkins.length > 0 ? `${ap.label} · Current` : ap.label,
-    hex: ap.hex,
-    authored: true,
-  };
-  return [current, ...resolvedSkins.map((skin) => ({
-    id: skinnedPieceId(ap.id, skin.id),
-    label: `${ap.label} · ${skin.name}`,
-    hex: ap.hex,
-    authored: true,
-  }))];
+  void skins; // skins no longer shape the palette — they are per-instance wardrobe
+  return [{ id: ap.id, label: ap.label, hex: ap.hex, authored: true }];
 }
 
 /** Export arms the current saved atlas — exactly the look visible in Studio.
- *  Named paintings stay available in the tray but never silently replace it. */
+ *  Stored paintings never silently replace it. */
 export function preferredAuthoredPaletteId(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): string {
   return authoredPaletteEntries(ap, skins)[0]?.id ?? ap.id;
 }
 
 /** Every placeable grouped by kind: catalog rows first, then authored pieces of
  *  that same affinity (so an exported "wall piece" sits under Wall). An authored
- *  model contributes its current base look plus one tile per stored paint skin
- *  (req_2834); exported props occupy the trailing group. */
+ *  model contributes ONE tile — its current base look (stored paintings dress
+ *  placed instances via the quick menu, req_3443); exported props occupy the
+ *  trailing group. */
 export function placeablesByKind(): PlaceableGroup[] {
   const byKind = new Map<PlaceableKind, PlaceableEntry[]>();
   for (const g of catalogByKind()) {

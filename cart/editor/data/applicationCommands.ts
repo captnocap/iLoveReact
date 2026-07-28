@@ -30,12 +30,14 @@ import {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
   planPieceDelete,
   planPieceMaterialAssign,
   planPieceMaterialClear,
   planPieceMove,
   planPieceRotate,
+  planPieceSkin,
   planPieceSpin,
   type PieceDeleteArgs,
   type PieceEditPlan,
@@ -46,6 +48,8 @@ import {
   type PieceMaterialPlan,
   type PieceMaterialPolicy,
   type PieceRotateArgs,
+  type PieceSkinArgs,
+  type PieceSkinPolicy,
   type PieceSpinArgs,
   type WorldPieceEditCommandId,
   type WorldPieceMaterialCommandId,
@@ -147,6 +151,7 @@ export {
   WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
 } from '../world/pieceEditCommand';
 export {
@@ -244,6 +249,9 @@ export interface EditorPlacementAdapter {
 
 export interface EditorPieceEditAdapter {
   read(): PieceEditWorld;
+  /** Catalog-side resolution for the paint-skin swap (req_3443) — what a placed
+   * piece's placeable id becomes wearing a stored painting (null = invalid). */
+  skinPolicy: PieceSkinPolicy;
   now(): number;
   /** Atomically commit a validated forward/inverse transaction. */
   commit(plan: PieceEditPlan, actionId: string, applyStartedAtMs: number): number;
@@ -485,6 +493,18 @@ function spinArgs(adapter: EditorPieceEditAdapter, args: unknown) {
   }
 }
 
+function skinArgs(adapter: EditorPieceEditAdapter, args: unknown) {
+  const value = args as Partial<PieceSkinArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string' || value.skinId === undefined) {
+    return { ok: false as const, reason: 'documentId, pieceId, and skinId (null = base look) are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceSkin(adapter.read(), value as PieceSkinArgs, adapter.skinPolicy) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
 function deleteArgs(adapter: EditorPieceEditAdapter, args: unknown) {
   const value = args as Partial<PieceDeleteArgs> | null;
   if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string') {
@@ -685,6 +705,17 @@ export function createEditorApplicationCommands(
     undoScope: { kind: 'document', key: 'world' },
     projections: { menu: ['Build'], contextMenu: ['world-piece'], palette: true },
     validateArgs: (args) => spinArgs(adapter.pieceEdit, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
+
+  registry.register<PieceEditPlan, WorldPieceEditResult>({
+    id: WORLD_PIECE_SKIN_COMMAND_ID,
+    label: 'Set Piece Painting',
+    icon: 'Brush',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: { contextMenu: ['world-piece'], palette: true },
+    validateArgs: (args) => skinArgs(adapter.pieceEdit, args),
     isEnabled: pieceEditEnabled,
   }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
 
