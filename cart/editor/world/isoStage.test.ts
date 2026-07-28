@@ -1,5 +1,5 @@
-// cart/editor/world/isoStage.test.ts — active-storey selection is editing
-// context, not a camera command.
+// cart/editor/world/isoStage.test.ts — the active storey is one vertical
+// context shared by editing, picking, and the camera.
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/isoStage.test.ts --bundle \
@@ -17,53 +17,53 @@ function test(name: string, fn: () => void) {
   catch (error) { failed += 1; log(`FAIL  ${name}: ${(error as Error).message}`); }
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
+function assertClose(actual: number, expected: number, message: string) {
+  if (Math.abs(actual - expected) > 1e-9) throw new Error(`${message}: got ${actual}, expected ${expected}`);
+}
 
-test('changing the active storey leaves the solved camera exactly fixed', () => {
-  const stage = new IsoStage({ centerX: 8, centerZ: -3, yaw: 125, pitch: 42, zoom: 1.7 });
+test('changing the active storey lifts the editing plane and camera together', () => {
+  const stage = new IsoStage({ centerX: 8, centerZ: -3, level: 2, yaw: 125, pitch: 42, zoom: 1.7 });
   const before = stage.solve();
   stage.setLevel(12);
   const after = stage.solve();
-  assert(JSON.stringify(after) === JSON.stringify(before), 'floor selection moved the solved camera');
+  const rise = 10 * METERS_PER_LEVEL;
+  assertClose(after.target[1] - before.target[1], rise, 'camera target did not follow the active storey');
+  assertClose(after.pos[1] - before.pos[1], rise, 'camera eye did not follow the active storey');
+  assertClose(after.target[0], before.target[0], 'floor selection moved the camera target X');
+  assertClose(after.target[2], before.target[2], 'floor selection moved the camera target Z');
+  assertClose(after.pos[0], before.pos[0], 'floor selection changed the orbit X');
+  assertClose(after.pos[2], before.pos[2], 'floor selection changed the orbit Z');
   assert(stage.levelElevation() === 12 * METERS_PER_LEVEL, 'floor selection did not move the editing plane');
 });
 
-test('legacy hot camera height migrates independently from later floor choices', () => {
-  const stage = new IsoStage({ level: 4 });
-  const before = stage.solve();
-  stage.setLevel(9);
-  const after = stage.solve();
-  assert(before.target[1] === 4 * METERS_PER_LEVEL, 'legacy view height was not preserved');
-  assert(after.target[1] === before.target[1], 'later floor selection changed the migrated camera height');
-});
-
-test('camera orbit follows terrain while preserving its authored clearance', () => {
+test('camera orbit follows terrain while preserving its storey clearance', () => {
   const stage = new IsoStage(
-    { centerX: 8, centerZ: -3, viewY: 4, yaw: 125, pitch: 42, zoom: 1.7 },
+    { centerX: 8, centerZ: -3, level: 2, yaw: 125, pitch: 42, zoom: 1.7 },
     (x, z) => x * 2 - z,
   );
   stage.refreshTerrainElevation();
   const low = stage.solve();
-  assert(low.target[1] === 23, `terrain focus was ${low.target[1]}, expected 23`);
+  assert(low.target[1] === 25, `terrain focus was ${low.target[1]}, expected 25`);
   const lowOffset = low.pos[1] - low.target[1];
 
   stage.centerOn(18, -3);
   stage.refreshTerrainElevation();
   const high = stage.solve();
-  assert(high.target[1] === 43, `panned terrain focus was ${high.target[1]}, expected 43`);
+  assert(high.target[1] === 45, `panned terrain focus was ${high.target[1]}, expected 45`);
   assert(Math.abs((high.pos[1] - high.target[1]) - lowOffset) < 1e-9, 'terrain rise changed the authored orbit clearance');
 });
 
-test('terrain-following camera remains independent of the active storey', () => {
-  const stage = new IsoStage({ centerX: 12, centerZ: 5, viewY: 2 }, () => 70);
+test('terrain-following camera rises when the active storey rises', () => {
+  const stage = new IsoStage({ centerX: 12, centerZ: 5, level: 2 }, () => 70);
   stage.refreshTerrainElevation();
   const before = stage.solve();
   stage.setLevel(9);
   const after = stage.solve();
-  assert(JSON.stringify(after) === JSON.stringify(before), 'storey selection moved the terrain-following camera');
+  assert(after.target[1] - before.target[1] === 7 * METERS_PER_LEVEL, 'storey rise did not lift the terrain-following camera');
 });
 
 test('an invalid terrain sample degrades to flat ground', () => {
-  const stage = new IsoStage({ viewY: 3 }, () => Number.NaN);
+  const stage = new IsoStage({ level: 1 }, () => Number.NaN);
   stage.refreshTerrainElevation();
   assert(stage.solve().target[1] === 3, 'invalid terrain escaped the stage boundary');
 });
@@ -84,12 +84,12 @@ test('camera projections reuse one cached terrain sample', () => {
 
 test('elevated terrain keeps zoom and drag navigation on the camera focus plane', () => {
   const rect = { x: 0, y: 0, width: 1000, height: 800 };
-  const elevated = new IsoStage({ centerX: 10, centerZ: -6, viewY: 3, level: 8, yaw: 45, pitch: 40, zoom: 1 }, () => 70);
+  const elevated = new IsoStage({ centerX: 10, centerZ: -6, level: 8, yaw: 45, pitch: 40, zoom: 1 }, () => 70);
   elevated.refreshTerrainElevation();
   elevated.zoomToCursor(500, 400, 1.5, rect);
   assert(Math.abs(elevated.pose.centerX - 10) < 1e-9 && Math.abs(elevated.pose.centerZ + 6) < 1e-9, 'center-cursor zoom drifted off elevated focus');
 
-  const flat = new IsoStage({ centerX: 10, centerZ: -6, viewY: 3, level: 8, yaw: 45, pitch: 40, zoom: 1.5 }, () => 0);
+  const flat = new IsoStage({ centerX: 10, centerZ: -6, level: 8, yaw: 45, pitch: 40, zoom: 1.5 }, () => 0);
   flat.refreshTerrainElevation();
   elevated.dragPan(300, 350, 355, 390, rect);
   flat.dragPan(300, 350, 355, 390, rect);

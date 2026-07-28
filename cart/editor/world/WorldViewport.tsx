@@ -488,13 +488,15 @@ export default function WorldViewport(props: {
     reprojectOverlays();
   }), [pushCamera, reprojectOverlays, stage]);
 
-  // The active floor moves only the semantic placement/pick plane. Camera pose
-  // is independent: choosing a storey must never move the user's view or cross
-  // the camera host door.
+  // The active floor is one vertical authoring context: placement/picking and
+  // the camera target rise together so an upper storey never remains framed
+  // from ground level. One camera push applies the new solve at the host door.
   useEffect(() => {
     stage.setLevel(props.floor);
+    pushCamera();
+    reprojectOverlays();
     setSnap(null);
-  }, [props.floor, stage]);
+  }, [props.floor, stage, pushCamera, reprojectOverlays]);
 
   // WASD camera panning (req_2558) — it worked before the world surface moved to this viewport
   // and never got re-wired. Held keys slide the iso centre along the view's own forward/right
