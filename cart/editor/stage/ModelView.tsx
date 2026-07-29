@@ -187,6 +187,7 @@ export type ModelFocusBridge = {
   undoUvHistory: () => string;
   redoUvHistory: () => string;
   selectUvIsland: (index: number, additive: boolean) => boolean;
+  selectUvIslands: (indices: Uint32Array) => boolean;
   selectUvFace: (face: number, additive: boolean) => boolean;
   selectUvOrientation: () => number;
   saveUvAtlas: () => { path: string | null; note: string };
@@ -1591,6 +1592,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     syncUvSelection();
     return true;
   };
+  const selectUvIslands = (indices: Uint32Array): boolean => {
+    // Paint deliberately keeps UV selection panel-local; outside Paint, a
+    // marquee replaces the complete native face selection in one host call.
+    if (paintMode) return true;
+    host.__mesh_paint_session?.(0);
+    setPaintMode(false);
+    setPathPlaneMode(false);
+    setPathEdgesMode(false);
+    setFocusMode(false);
+    meshFocusTool(false);
+    const ok = host.__model_uv_islands_select?.(indices) === 1;
+    if (!ok) return false;
+    setSelMode(3);
+    adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: indices.length });
+    syncUvSelection();
+    return true;
+  };
   const selectUvFace = (face: number, additive: boolean): boolean => {
     if (!Number.isInteger(face) || face < 0) return false;
     if (paintMode) return true;
@@ -2449,6 +2467,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       undoUvHistory: () => stepUvHistory(false),
       redoUvHistory: () => stepUvHistory(true),
       selectUvIsland,
+      selectUvIslands,
       selectUvFace,
       selectUvOrientation,
       saveUvAtlas,

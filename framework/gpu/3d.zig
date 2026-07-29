@@ -8401,6 +8401,18 @@ pub fn paintFaceSelected(face: u32) bool {
     return mesh_edit.faceSelectedPub(face);
 }
 
+/// Replace the native authored-face selection from a complete UV-island set in
+/// one mask build and one highlight pass. This is the marquee path: its cost is
+/// linear in islands + faces, rather than replaying one whole-model selection
+/// operation per island.
+pub fn meshEditSelectPaintIslands(island_indices: []const u32) bool {
+    if (model_paint.faceCount() == 0) return false;
+    const mask = model_paint.buildIslandFaceSelectionMask(std.heap.c_allocator, island_indices) orelse return false;
+    defer std.heap.c_allocator.free(mask);
+    _ = mesh_edit.selectFacesByTriangleMask(mask);
+    return true;
+}
+
 /// Select one UV island through the native authored-face selection. This is the
 /// inverse of paintIslandSelected and keeps the viewport overlay, HUD count, and
 /// UV transform handles on one authoritative selection.

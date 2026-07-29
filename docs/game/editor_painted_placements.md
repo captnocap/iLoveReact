@@ -3,7 +3,8 @@
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
-req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528.
+req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
+req_3529.
 
 ## In one sentence
 
@@ -120,6 +121,18 @@ hit-test path instead of becoming an invisible canvas-wide shield. Each layer
 has a persisted lock button. A lock blocks canvas and numeric image movement
 but does not hide the source, remove it from Compile, increment the texture
 revision, or mark a current compile stale.
+
+Ctrl+primary-drag claims an area-selection gesture before either UV transforms
+or image movement (req_3529), so it works in both surface modes and may begin
+directly over a UV or unlocked image. After the shared four-pixel drag latch,
+the editor draws a cyan marquee and, on release, selects every island whose
+actual authored triangle silhouette intersects the signed-workspace box.
+Triangle-backed islands never select through empty bounding-box space; only
+legacy rows without triangles use their rectangle as a fallback. Ctrl replaces
+the island set, while Ctrl+Shift extends it and preserves the active island when
+that island remains inside the result. Selection is not a UV history edit. The
+complete result crosses the bridge as one typed island array, producing one
+native face mask and one 3D highlight pass even for a dense torso.
 
 `Compile` is explicit and shows progress while reading sources and composing.
 It takes the smallest integer union of visible images, leaves uncovered and

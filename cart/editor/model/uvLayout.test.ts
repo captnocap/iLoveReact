@@ -36,6 +36,7 @@ import {
   uvCornerIdentityColor,
   uvIslandBoundarySegments,
   uvIslandBoundaryPath,
+  uvIslandsIntersectingMarquee,
   uvIslandVertices,
   uvIslandSetBounds,
   uvSelectionBounds,
@@ -496,6 +497,46 @@ test('triangle hit testing rejects empty space inside a sliver bounding box', ()
   const rects = parseUvIslandRects([0, 0, 20, 20], [1], [0, 0, 0, 20, 0, 0, 2]);
   assert(hitUvIsland(rects, 10, 1) === 0, 'visible sliver was not selectable');
   assert(hitUvIsland(rects, 10, 15) === -1, 'empty bounding-box space masqueraded as UV geometry');
+});
+
+test('UV marquee crosses authored triangle silhouettes without selecting empty bounds', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 20, 20, -20, -12, 8, 8],
+    [1, 2],
+    [
+      0, 0, 0, 20, 0, 0, 2,
+      1, -20, -12, -12, -12, -16, -4,
+    ],
+  );
+  assert(
+    uvIslandsIntersectingMarquee(rects, { x: 11, y: 12 }, { x: 9, y: 10 }).length === 0,
+    'marquee selected empty space inside a narrow triangle bounding box',
+  );
+  assert(
+    uvIslandsIntersectingMarquee(rects, { x: 11, y: 1 }, { x: 9, y: -1 }).join(',') === '0',
+    'reverse-direction marquee missed a crossed triangle edge',
+  );
+  assert(
+    uvIslandsIntersectingMarquee(rects, { x: -18, y: -10 }, { x: -17, y: -9 }).join(',') === '1',
+    'signed-workspace marquee missed a region fully enclosed by a triangle',
+  );
+});
+
+test('UV marquee catches edge-only crossings and legacy rectangle rows', () => {
+  const triangle = parseUvIslandRects(
+    [0, 0, 10, 10],
+    [1],
+    [0, 0, 0, 10, 0, 5, 10],
+  )[0]!;
+  const rects = [triangle, { x: 20, y: 20, w: 5, h: 5, group: 2 }];
+  assert(
+    uvIslandsIntersectingMarquee(rects, { x: -1, y: 4.9 }, { x: 11, y: 5.1 }).join(',') === '0',
+    'marquee missed a triangle whose edges cross the box without enclosing a box corner',
+  );
+  assert(
+    uvIslandsIntersectingMarquee(rects, { x: 24, y: 24 }, { x: 26, y: 26 }).join(',') === '1',
+    'legacy rectangle-only UV island lost its marquee fallback',
+  );
 });
 
 test('island boundary removes an authored quad triangulation diagonal', () => {

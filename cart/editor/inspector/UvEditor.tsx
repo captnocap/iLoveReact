@@ -45,6 +45,7 @@ import {
   uvSelectionModeAfterDoubleClick,
   uvFaceEdgeSegments,
   uvIslandBoundarySegments,
+  uvIslandsIntersectingMarquee,
   uvIslandSetBounds,
   uvSelectionBounds,
   uvSelectionVertices,
@@ -93,6 +94,7 @@ type ScreenPoint = { x: number; y: number };
 type UvLineGeometry = { faces: number[]; boundary: number[] };
 type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeometry };
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
+type UvMarqueeFrame = Readonly<{ left: number; top: number; width: number; height: number }>;
 type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
 type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
 const UV_CONTEXT_MENU_TUNING = {
@@ -104,6 +106,7 @@ const UV_CONTEXT_MENU_TUNING = {
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
+  | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
   | { kind: 'image'; id: string; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; origin: ScreenPoint; seed: UvTextureWorkspaceDoc }
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; bounds: UvSelectionBounds; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
   | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; origin: ScreenPoint; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
@@ -336,6 +339,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const pendingViewRef = useRef<UvCanvasView | null>(null);
   const viewFramePendingRef = useRef(false);
   const viewGenerationRef = useRef(0);
+  const [marqueeFrame, setMarqueeFrame] = useState<UvMarqueeFrame | null>(null);
+  const pendingMarqueeRef = useRef<UvMarqueeFrame | null>(null);
+  const marqueeFramePendingRef = useRef(false);
+  const marqueeGenerationRef = useRef(0);
   const lastClickRef = useRef<{ at: number; x: number; y: number } | null>(null);
   const [view, setViewState] = useState<UvCanvasView>({ x: UV_LAYOUT_TUNING.canvasPaddingPx, y: UV_LAYOUT_TUNING.canvasPaddingPx, scale: 1 });
   const viewRef = useRef(view);
@@ -386,6 +393,34 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     pendingViewRef.current = null;
     viewFramePendingRef.current = false;
     setViewState(viewRef.current);
+  };
+  const queueMarqueePreview = (start: ScreenPoint, current: ScreenPoint) => {
+    pendingMarqueeRef.current = {
+      left: Math.min(start.x, current.x),
+      top: Math.min(start.y, current.y),
+      width: Math.abs(current.x - start.x),
+      height: Math.abs(current.y - start.y),
+    };
+    if (marqueeFramePendingRef.current) return;
+    marqueeFramePendingRef.current = true;
+    const generation = marqueeGenerationRef.current;
+    const hostGlobal = globalThis as any;
+    const schedule: (callback: () => void) => unknown = typeof hostGlobal.requestAnimationFrame === 'function'
+      ? hostGlobal.requestAnimationFrame.bind(hostGlobal)
+      : (callback) => setTimeout(callback, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
+    schedule(() => {
+      if (generation !== marqueeGenerationRef.current) return;
+      marqueeFramePendingRef.current = false;
+      const pending = pendingMarqueeRef.current;
+      pendingMarqueeRef.current = null;
+      if (pending) setMarqueeFrame(pending);
+    });
+  };
+  const clearMarqueePreview = () => {
+    marqueeGenerationRef.current += 1;
+    pendingMarqueeRef.current = null;
+    marqueeFramePendingRef.current = false;
+    setMarqueeFrame(null);
   };
   const fittedView = (nativeScale = false): UvCanvasView => {
     const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
@@ -451,6 +486,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     viewGenerationRef.current += 1;
     pendingViewRef.current = null;
     viewFramePendingRef.current = false;
+    marqueeGenerationRef.current += 1;
+    pendingMarqueeRef.current = null;
+    marqueeFramePendingRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -479,7 +517,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     const next = uv.selectedIslands.filter((index) => index >= 0 && index < rectsRef.current.length);
     selectedIndicesRef.current = next;
     setSelectedIndices(next);
-    setSelected(next[0] ?? -1);
+    setSelected((current) => next.includes(current) ? current : next[0] ?? -1);
   }, [synchronizedSelectionKey]);
 
   const publishIslandSelection = (indices: number[], primary: number) => {
@@ -851,6 +889,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     if (gesture?.kind === 'pan') {
       settleViewPreview();
       setAxisGuide(null);
+    } else if (gesture?.kind === 'marquee') {
+      clearMarqueePreview();
+      setAxisGuide(null);
     } else if (gesture?.kind === 'image') {
       const moved = workspaceDocRef.current?.layers.find((layer) => layer.id === gesture.id);
       const original = gesture.seed.layers.find((layer) => layer.id === gesture.id);
@@ -873,6 +914,35 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             ? `moved ${gesture.indices.length} UV islands as one group`
             : 'moved UV island over the fixed texture';
         commit(rectsRef.current, label, 'move');
+      }
+    }
+    if (gesture?.kind === 'marquee') {
+      const endScreen = event ? localScreenPoint(event) : null;
+      if (endScreen) {
+        gesture.current = atlasPoint(endScreen);
+        gesture.activated = gesture.activated || shouldActivateUvDrag(
+          endScreen.x - gesture.screenStart.x,
+          endScreen.y - gesture.screenStart.y,
+        );
+      }
+      if (gesture.activated) {
+        const hits = uvIslandsIntersectingMarquee(rectsRef.current, gesture.start, gesture.current);
+        const seeded = new Set(gesture.seedIndices);
+        const next = gesture.additive
+          ? [...gesture.seedIndices, ...hits.filter((index) => !seeded.has(index))]
+          : hits;
+        const primary = next.includes(gesture.seedPrimary)
+          ? gesture.seedPrimary
+          : hits[0] ?? next[0] ?? -1;
+        if (!bridge.selectUvIslands(new Uint32Array(next))) {
+          setNote('area selection could not synchronize with the model');
+        } else {
+          setSelectionMode('island');
+          publishIslandSelection(next, primary);
+          setNote(next.length > 0
+            ? `${next.length} UV island${next.length === 1 ? '' : 's'} selected by area`
+            : 'area selection cleared · no UV silhouettes crossed');
+        }
       }
     }
     if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture', 'vertex');
@@ -1182,6 +1252,21 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         onRightClick={(event: any) => openUvMenu(event, true)}
         onMouseDown={(event: any) => {
           const screen = localScreenPoint(event);
+          if (event?.ctrlKey || event?.metaKey) {
+            const seedIndices = [...selectedIndicesRef.current];
+            lastClickRef.current = null;
+            gestureRef.current = {
+              kind: 'marquee',
+              start: atlasPoint(screen),
+              current: atlasPoint(screen),
+              screenStart: screen,
+              activated: false,
+              additive: Boolean(event?.shiftKey),
+              seedIndices,
+              seedPrimary: seedIndices.includes(selected) ? selected : seedIndices[0] ?? -1,
+            };
+            return;
+          }
           if (surfaceMode === 'images' && workspaceDocRef.current) {
             const point = atlasPoint(screen);
             const route = resolveUvWorkspacePointer(workspaceDocRef.current.layers, point.x, point.y);
@@ -1305,6 +1390,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             return;
           }
           const point = atlasPoint(screen);
+          if (gesture.kind === 'marquee') {
+            if (!gesture.activated) {
+              if (!shouldActivateUvDrag(screen.x - gesture.screenStart.x, screen.y - gesture.screenStart.y)) return;
+              gesture.activated = true;
+              setSelectionMode('island');
+              setSelectedFace(null);
+              setNote(gesture.additive ? 'adding UV islands crossed by area…' : 'selecting UV islands crossed by area…');
+            }
+            gesture.current = point;
+            queueMarqueePreview(gesture.screenStart, screen);
+            return;
+          }
           if (gesture.kind === 'image') {
             if (!gesture.activated) {
               if (!shouldActivateUvDrag(screen.x - gesture.screenStart.x, screen.y - gesture.screenStart.y)) return;
@@ -1497,6 +1594,19 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Graph.Polyline segments points={guideSegments} stroke="#4c9dff" strokeWidth={1.5 * inverseViewScale} />
           </Graph>
         ) : null}
+        {marqueeFrame ? (
+          <Box style={{
+            position: 'absolute',
+            left: marqueeFrame.left,
+            top: marqueeFrame.top,
+            width: marqueeFrame.width,
+            height: marqueeFrame.height,
+            backgroundColor: '#42d9e824',
+            borderWidth: 1,
+            borderColor: '#72edf7',
+            pointerEvents: 'none',
+          }} />
+        ) : null}
         {cornerIdentityMarkers.map((marker, index) => {
           const size = UV_LAYOUT_TUNING.cornerIdentityHandlePx;
           return (
@@ -1526,7 +1636,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       </Pressable>
 
       <Row style={{ height: 14, alignItems: 'center' }}>
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`${multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID SNAP ${translationSnapStep}px` : `GRID SNAP ${translationSnapStep}px`} · ${selectedGuides.length > 0 ? `${selectedGuides.length} GUIDE${selectedGuides.length === 1 ? '' : 'S'}` : 'CLICK GRID = GUIDE'}`}</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`${multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID SNAP ${translationSnapStep}px` : `GRID SNAP ${translationSnapStep}px`} · CTRL DRAG = AREA SELECT · ${selectedGuides.length > 0 ? `${selectedGuides.length} GUIDE${selectedGuides.length === 1 ? '' : 'S'}` : 'CLICK GRID = GUIDE'}`}</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`INFINITE WORKSPACE · ATLAS ${uv.w}×${uv.h} @ ${uv.atlasOriginX},${uv.atlasOriginY}`}</Text>
       </Row>

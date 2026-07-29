@@ -2902,6 +2902,24 @@ fn hostModelUvIslandSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_uv_islands_select(Uint32Array[island,...]) → 1. Replace the full UV
+/// island selection in one native face-mask/highlight pass. Empty clears.
+fn hostModelUvIslandsSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const island_indices: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ok = scene3d.meshEditSelectPaintIslands(island_indices);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_atlas_replace(Uint8Array rgba, journal=0) → 1. External texture editors write
 /// atlases/base.png; this door reloads its decoded, equal-sized RGBA into the
 /// current atlas without repacking the authored UV rectangles.
@@ -4062,6 +4080,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_uv_project_view", hostModelUvProjectView);
     v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
     v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
+    v8_runtime.registerHostFn("__model_uv_islands_select", hostModelUvIslandsSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
     v8_runtime.registerHostFn("__model_atlas_import", hostModelAtlasImport);
     v8_runtime.registerHostFn("__model_atlas_workspace_apply", hostModelAtlasWorkspaceApply);

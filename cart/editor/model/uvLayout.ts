@@ -19,6 +19,8 @@ export const UV_LAYOUT_TUNING = {
   doubleClickMs: 350,
   doubleClickDistancePx: 6,
   dragActivationPx: 4,
+  /** Inclusive tolerance for authored UV silhouette hit/intersection tests. */
+  geometryEpsilon: 0.00001,
   /** Coalesce high-rate pointer samples without limiting a 240 Hz display to 60 Hz. */
   dragPreviewIntervalMs: 4,
   /** Every fourth snap line is a stronger visual ruler. */
@@ -1643,10 +1645,130 @@ function pointInTriangle(triangle: UvTrianglePoints, u: number, v: number): bool
   const d0 = edge(triangle[0], triangle[1], triangle[2], triangle[3]);
   const d1 = edge(triangle[2], triangle[3], triangle[4], triangle[5]);
   const d2 = edge(triangle[4], triangle[5], triangle[0], triangle[1]);
-  const epsilon = 1e-5;
+  const epsilon = UV_LAYOUT_TUNING.geometryEpsilon;
   const hasNegative = d0 < -epsilon || d1 < -epsilon || d2 < -epsilon;
   const hasPositive = d0 > epsilon || d1 > epsilon || d2 > epsilon;
   return !(hasNegative && hasPositive);
+}
+
+type UvMarqueeBounds = Readonly<{ left: number; top: number; right: number; bottom: number }>;
+
+const marqueeBounds = (start: UvCanvasPoint, end: UvCanvasPoint): UvMarqueeBounds => ({
+  left: Math.min(start.x, end.x),
+  top: Math.min(start.y, end.y),
+  right: Math.max(start.x, end.x),
+  bottom: Math.max(start.y, end.y),
+});
+
+const boundsOverlap = (a: UvMarqueeBounds, b: UvMarqueeBounds): boolean => (
+  a.left <= b.right + UV_LAYOUT_TUNING.geometryEpsilon
+  && a.right + UV_LAYOUT_TUNING.geometryEpsilon >= b.left
+  && a.top <= b.bottom + UV_LAYOUT_TUNING.geometryEpsilon
+  && a.bottom + UV_LAYOUT_TUNING.geometryEpsilon >= b.top
+);
+
+const pointInMarquee = (bounds: UvMarqueeBounds, x: number, y: number): boolean => (
+  x >= bounds.left - UV_LAYOUT_TUNING.geometryEpsilon
+  && x <= bounds.right + UV_LAYOUT_TUNING.geometryEpsilon
+  && y >= bounds.top - UV_LAYOUT_TUNING.geometryEpsilon
+  && y <= bounds.bottom + UV_LAYOUT_TUNING.geometryEpsilon
+);
+
+function uvSegmentsIntersect(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number,
+): boolean {
+  const firstBounds = marqueeBounds({ x: ax, y: ay }, { x: bx, y: by });
+  const secondBounds = marqueeBounds({ x: cx, y: cy }, { x: dx, y: dy });
+  if (!boundsOverlap(firstBounds, secondBounds)) return false;
+  const cross = (px: number, py: number, qx: number, qy: number, rx: number, ry: number): number => (
+    (qx - px) * (ry - py) - (qy - py) * (rx - px)
+  );
+  const abC = cross(ax, ay, bx, by, cx, cy);
+  const abD = cross(ax, ay, bx, by, dx, dy);
+  const cdA = cross(cx, cy, dx, dy, ax, ay);
+  const cdB = cross(cx, cy, dx, dy, bx, by);
+  const epsilon = UV_LAYOUT_TUNING.geometryEpsilon;
+  if ((abC > epsilon && abD > epsilon) || (abC < -epsilon && abD < -epsilon)) return false;
+  if ((cdA > epsilon && cdB > epsilon) || (cdA < -epsilon && cdB < -epsilon)) return false;
+  return true;
+}
+
+function triangleIntersectsMarquee(triangle: UvTrianglePoints, bounds: UvMarqueeBounds): boolean {
+  const triangleBounds: UvMarqueeBounds = {
+    left: Math.min(triangle[0], triangle[2], triangle[4]),
+    top: Math.min(triangle[1], triangle[3], triangle[5]),
+    right: Math.max(triangle[0], triangle[2], triangle[4]),
+    bottom: Math.max(triangle[1], triangle[3], triangle[5]),
+  };
+  if (!boundsOverlap(triangleBounds, bounds)) return false;
+  for (let corner = 0; corner < 3; corner += 1) {
+    if (pointInMarquee(bounds, triangle[corner * 2]!, triangle[corner * 2 + 1]!)) return true;
+  }
+  const marqueeCorners = [
+    bounds.left, bounds.top,
+    bounds.right, bounds.top,
+    bounds.right, bounds.bottom,
+    bounds.left, bounds.bottom,
+  ] as const;
+  for (let corner = 0; corner < 4; corner += 1) {
+    if (pointInTriangle(triangle, marqueeCorners[corner * 2]!, marqueeCorners[corner * 2 + 1]!)) return true;
+  }
+  const marqueeEdges = [
+    bounds.left, bounds.top, bounds.right, bounds.top,
+    bounds.right, bounds.top, bounds.right, bounds.bottom,
+    bounds.right, bounds.bottom, bounds.left, bounds.bottom,
+    bounds.left, bounds.bottom, bounds.left, bounds.top,
+  ] as const;
+  for (let triangleEdge = 0; triangleEdge < 3; triangleEdge += 1) {
+    const nextCorner = (triangleEdge + 1) % 3;
+    for (let marqueeEdge = 0; marqueeEdge < 4; marqueeEdge += 1) {
+      if (uvSegmentsIntersect(
+        triangle[triangleEdge * 2]!,
+        triangle[triangleEdge * 2 + 1]!,
+        triangle[nextCorner * 2]!,
+        triangle[nextCorner * 2 + 1]!,
+        marqueeEdges[marqueeEdge * 4]!,
+        marqueeEdges[marqueeEdge * 4 + 1]!,
+        marqueeEdges[marqueeEdge * 4 + 2]!,
+        marqueeEdges[marqueeEdge * 4 + 3]!,
+      )) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Return every UV island whose actual authored triangle silhouette crosses an
+ * inclusive signed-workspace marquee. Legacy rectangle-only rows retain a
+ * rectangular fallback, but triangle-backed islands never select through empty
+ * space inside a rotated or narrow bounding box.
+ */
+export function uvIslandsIntersectingMarquee(
+  rects: readonly UvIslandRect[],
+  start: UvCanvasPoint,
+  end: UvCanvasPoint,
+): number[] {
+  const bounds = marqueeBounds(start, end);
+  const hits: number[] = [];
+  rects.forEach((rect, index) => {
+    const rectBounds = marqueeBounds(
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.w, y: rect.y + rect.h },
+    );
+    if (!boundsOverlap(rectBounds, bounds)) return;
+    if (rect.triangles?.length) {
+      if (!rect.triangles.some((triangle) => triangleIntersectsMarquee(absoluteTrianglePoints(rect, triangle), bounds))) return;
+    }
+    hits.push(index);
+  });
+  return hits;
 }
 
 /** Smallest actual silhouette wins, so empty triangle bounds never masquerade as UVs. */

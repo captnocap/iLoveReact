@@ -142,6 +142,37 @@ test "moving one coplanar face breaks its UV edge without moving atlas pixels" {
     try testing.expectEqual(fixed_atlas, atlasHash(model_paint.atlas().?.rgba));
 }
 
+test "UV island sets become one validated face-selection mask" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(9081, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 1 }, &quad, 6);
+    defer model_paint.test_support.clearTargetAndSource();
+
+    var detached: [12]f32 = undefined;
+    for (0..2) |face| {
+        const triangle = model_paint.uvTriangle(@intCast(face)) orelse return error.TestUnexpectedResult;
+        @memcpy(detached[face * 6 ..][0..6], triangle.corners[0..]);
+    }
+    var coordinate: usize = 6;
+    while (coordinate < detached.len) : (coordinate += 2) detached[coordinate] += 1;
+    try testing.expect(model_paint.applyCornerUvs(&detached, &quad, 6));
+
+    const first_island = model_paint.islandIndexForFace(0) orelse return error.TestUnexpectedResult;
+    const second_island = model_paint.islandIndexForFace(1) orelse return error.TestUnexpectedResult;
+    try testing.expect(first_island != second_island);
+
+    const second_only = model_paint.buildIslandFaceSelectionMask(testing.allocator, &.{second_island}) orelse return error.TestUnexpectedResult;
+    defer testing.allocator.free(second_only);
+    try testing.expectEqualSlices(bool, &.{ false, true }, second_only);
+
+    const cleared = model_paint.buildIslandFaceSelectionMask(testing.allocator, &.{}) orelse return error.TestUnexpectedResult;
+    defer testing.allocator.free(cleared);
+    try testing.expectEqualSlices(bool, &.{ false, false }, cleared);
+
+    const invalid_island: u32 = @intCast(model_paint.layoutIslands().?.len);
+    try testing.expect(model_paint.buildIslandFaceSelectionMask(testing.allocator, &.{invalid_island}) == null);
+}
+
 test "texture import adopts native dimensions without stretching UV geometry" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(909, &quad, 6);

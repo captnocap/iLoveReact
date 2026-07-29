@@ -2010,6 +2010,29 @@ pub fn islandIndexForFace(face: u32) ?u32 {
     return lay.tri_island[face];
 }
 
+/// Build one complete displayed-triangle selection mask from a set of UV island
+/// ids. Validation happens before allocation/mutation, and an empty island set
+/// deliberately returns an all-false mask so a marquee can clear selection in
+/// the same single native highlight pass used for a large selection.
+pub fn buildIslandFaceSelectionMask(allocator: std.mem.Allocator, island_indices: []const u32) ?[]bool {
+    const lay = &(g_layout orelse return null);
+    if (lay.tri_island.len != @as(usize, g_facecount)) return null;
+    for (island_indices) |island_index| {
+        if (island_index >= lay.islands.len) return null;
+    }
+    const island_mask = allocator.alloc(bool, lay.islands.len) catch return null;
+    defer allocator.free(island_mask);
+    @memset(island_mask, false);
+    for (island_indices) |island_index| island_mask[island_index] = true;
+
+    const face_mask = allocator.alloc(bool, g_facecount) catch return null;
+    errdefer allocator.free(face_mask);
+    for (lay.tri_island, 0..) |island_index, face| {
+        face_mask[face] = island_index < island_mask.len and island_mask[island_index];
+    }
+    return face_mask;
+}
+
 /// A stable displayed-triangle representative for an authored UV island. The
 /// model and UV views use this to share one face selection instead of keeping a
 /// second panel-only selection state.
