@@ -144,10 +144,10 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // A BLOCKING session the model viewer owns (req_2626 gap HH — modal discipline).
 // While one is live, every other input surface must be inert until it resolves:
 // 'bevel' / 'loop-cut' = host-side captured-base topology popup sessions,
-// 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-
-// edit confirmation. Mirrored up through ModelToolSnapshot so the shell's central
-// gate (AppFrame) can see it without owning the session.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+// 'tris-to-quads' = the whole-topology dry run, 'paint-atlas' = the Create Paint
+// Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
+// through ModelToolSnapshot so the shell's central gate can see the session.
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
@@ -206,6 +206,8 @@ export type ModelToolApi = {
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   // Fuse the selected faces (2+ authored faces) into one authored face.
   mergeFaces: () => boolean;
+  // Open the whole-topology triangle→quad dry-run/confirmation session.
+  trisToQuads: () => boolean;
   // Toggle the selected faces as translucent glass (re-toggle to un-glass).
   glassSelection: () => boolean;
   // Thicken the selected faces in place (inner skin + rim walls).

@@ -110,10 +110,10 @@ export type ModelViewInitialMesh = {
 // right-click flyout can host + highlight them.
 export type LightId = 'flat' | 'key' | 'fill';
 // blocking: the viewer-owned BLOCKING session currently unresolved (req_2626 gap HH —
-// modal discipline): host-captured bevel/loop-cut popup sessions, the Create Paint
-// Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
+// modal discipline): host-captured bevel/loop-cut/quadify popup sessions, the Create
+// Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
@@ -230,7 +230,7 @@ export type ModelToolApi = {
   detachSelection: () => { lo: number; hi: number } | null;
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
-  trisToQuads: () => number;
+  trisToQuads: () => boolean;
   glassSelection: () => boolean;
   solidifySelection: () => boolean;
   appendModelFile: (path: string, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
@@ -389,6 +389,17 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
 type TopoResult = { ok: number; key?: string; count?: number; changed?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
+type QuadifyPlan = TopoResult & {
+  evaluation: number;
+  evaluationCount: number;
+  authoredBefore: number;
+  authoredAfter: number;
+  triangleFaces: number;
+  candidatePairs: number;
+  ambiguousTriangles: number;
+  quads: number;
+  planSignature: number;
+};
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
@@ -460,6 +471,20 @@ const readTopoResult = (json: any): TopoResult | null => {
   } catch {
     return null;
   }
+};
+const readQuadifyPlan = (json: any): QuadifyPlan | null => {
+  const plan = readTopoResult(json) as QuadifyPlan | null;
+  if (!plan || plan.ok !== 1 || typeof plan.key !== 'string' || !Number.isSafeInteger(plan.count) || (plan.count ?? -1) < 0) return null;
+  const counts = [
+    plan.evaluation, plan.evaluationCount, plan.authoredBefore, plan.authoredAfter,
+    plan.triangleFaces, plan.candidatePairs, plan.ambiguousTriangles, plan.quads,
+    plan.planSignature,
+  ];
+  if (counts.some((value) => !Number.isSafeInteger(value) || value < 0)) return null;
+  if (plan.evaluationCount < 1 || plan.evaluation >= plan.evaluationCount) return null;
+  if (plan.authoredAfter !== plan.authoredBefore - plan.quads) return null;
+  if (plan.quads * 2 > plan.triangleFaces || plan.candidatePairs < plan.quads || plan.ambiguousTriangles > plan.triangleFaces) return null;
+  return plan;
 };
 const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
 const meshExtrudeFace = (distance: number) => readTopoResult(host.__mesh_topo_extrude_face?.(distance));
@@ -566,6 +591,10 @@ const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) 
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
 const meshTrisToQuads = () => readTopoResult(host.__mesh_topo_tris_to_quads?.());
+const meshQuadifyBegin = () => readTopoResult(host.__mesh_quadify_begin?.());
+const meshQuadifyPreview = (evaluation: number): QuadifyPlan | null =>
+  readQuadifyPlan(host.__mesh_quadify_preview?.(evaluation));
+const meshQuadifyEnd = (commit: boolean) => readTopoResult(host.__mesh_quadify_end?.(commit ? 1 : 0));
 const meshGlass = () => readTopoResult(host.__mesh_topo_glass?.());
 const meshSolidify = () => readTopoResult(host.__mesh_topo_solidify?.(0));
 const meshAppendFile = (path: string, expectedPartCount: number) => readTopoResult(host.__mesh_append_file?.(path, expectedPartCount));
@@ -736,6 +765,17 @@ const lcSpanLabel = (s: number) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}u`;
 const BEVEL_POPUP_TUNING = {
   stepUnits: 0.5,
   widthDecimals: 1,
+} as const;
+const QUADIFY_PREVIEW_TUNING = {
+  scanStartDelayMs: 32,
+  loaderPulseMs: 140,
+  loaderSteps: [0, 1, 2, 3] as const,
+  cardExtraWidth: 104,
+  evaluations: [
+    { label: 'Balanced', note: 'regular corners and opposite edges first' },
+    { label: 'Short seams', note: 'prefer removing shorter shared edges' },
+    { label: 'Alternate flow', note: 'choose a different maximum through ambiguous runs' },
+  ],
 } as const;
 const roundBevelUnits = (value: number) => {
   const scale = 10 ** BEVEL_POPUP_TUNING.widthDecimals;
@@ -1090,6 +1130,84 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setTimeout(poll, 250);
     return () => { live = false; };
   }, [lc !== null]);
+
+  // ── Whole-topology Tris → Quads dry run ────────────────────────────────────
+  // Opening paints the scanning card first, then yields one frame before the host
+  // imports/welds the complete topology and solves an exact maximum matching.
+  // Preview changes only authored grouping, so the real wire overlay shows the
+  // proposed quads while Cancel still restores the base with no undo entry.
+  type QuadifyUi =
+    | { phase: 'scanning'; evaluation: number; pulse: number }
+    | { phase: 'preview'; evaluation: number; pulse: number; plan: QuadifyPlan };
+  const [quadify, setQuadify] = useState<QuadifyUi | null>(null);
+  const quadifyGeneration = useRef(0);
+  const scanQuadifyEvaluation = (evaluationRaw: number, begin: boolean) => {
+    const evaluationCount = QUADIFY_PREVIEW_TUNING.evaluations.length;
+    const evaluation = ((evaluationRaw % evaluationCount) + evaluationCount) % evaluationCount;
+    const generation = ++quadifyGeneration.current;
+    setQuadify({ phase: 'scanning', evaluation, pulse: 0 });
+    setTimeout(() => {
+      if (generation !== quadifyGeneration.current) return;
+      if (begin) {
+        const started = meshQuadifyBegin();
+        if (!started?.ok) {
+          setQuadify(null);
+          setError('Tris to Quads needs an open grouped model in Face mode');
+          return;
+        }
+      }
+      const plan = meshQuadifyPreview(evaluation);
+      if (generation !== quadifyGeneration.current) return;
+      if (!plan?.ok || plan.evaluationCount !== evaluationCount || !adoptMesh(plan)) {
+        adoptMesh(meshQuadifyEnd(false));
+        setQuadify(null);
+        setError('The topology scan returned an incompatible dry run; the model was restored');
+        return;
+      }
+      setError(null);
+      setQuadify({ phase: 'preview', evaluation, pulse: 0, plan });
+    }, QUADIFY_PREVIEW_TUNING.scanStartDelayMs);
+  };
+  const openQuadify = (): boolean => {
+    if (quadify || selMode !== 3 || !model) {
+      setError('Enter Face mode with a model open, then run Tris to Quads');
+      return false;
+    }
+    scanQuadifyEvaluation(0, true);
+    return true;
+  };
+  const changeQuadifyEvaluation = (delta: number) => {
+    if (!quadify || quadify.phase !== 'preview') return;
+    scanQuadifyEvaluation(quadify.evaluation + delta, false);
+  };
+  const closeQuadify = (commit: boolean) => {
+    if (!quadify) return;
+    const plan = quadify.phase === 'preview' ? quadify.plan : null;
+    ++quadifyGeneration.current;
+    const shouldCommit = commit && Boolean(plan && plan.quads > 0);
+    const result = meshQuadifyEnd(shouldCommit);
+    const adopted = result?.ok ? adoptMesh(result) : quadify.phase === 'scanning';
+    if (shouldCommit && adopted && plan) {
+      setAuthoredFaces(plan.authoredAfter);
+      onDocumentMutated?.();
+    }
+    setQuadify(null);
+    setError(adopted ? null : 'Could not close the Tris to Quads preview safely');
+  };
+  useEffect(() => {
+    if (quadify?.phase !== 'scanning') return;
+    let live = true;
+    const pulse = () => {
+      if (!live) return;
+      setQuadify((current) => current?.phase === 'scanning'
+        ? { ...current, pulse: (current.pulse + 1) % QUADIFY_PREVIEW_TUNING.loaderSteps.length }
+        : current);
+      setTimeout(pulse, QUADIFY_PREVIEW_TUNING.loaderPulseMs);
+    };
+    setTimeout(pulse, QUADIFY_PREVIEW_TUNING.loaderPulseMs);
+    return () => { live = false; };
+  }, [quadify?.phase]);
+
   // Offset stepping in the CURRENT unit: percent steps 5; size units step 0.1u converted
   // to the internal percent (clamped 0..100 and kept to 2dp so the cell reads clean).
   // The unit step is CAPPED at 5% of the span: on a small face (the record player's
@@ -2007,10 +2125,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
-    trisToQuads: () => {
-      const result = meshTrisToQuads();
-      return adoptMesh(result) ? Math.max(0, Math.floor(result?.changed ?? 0)) : 0;
-    },
+    trisToQuads: openQuadify,
     glassSelection: () => adoptMesh(meshGlass()),
     solidifySelection: () => adoptMesh(meshSolidify()),
     appendModelFile: (path, color, expectedPartCount) => {
@@ -2104,7 +2219,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The viewer's unresolved BLOCKING session, mirrored up with the tool state so the
   // shell can enforce modal discipline (req_2626 HH): while one is live, the shell
   // holds every other input surface inert until the user resolves it HERE.
-  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
+  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
   }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
@@ -2186,6 +2301,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     escape: () => {
       if (bv) { closeBevel(false); return; } // restore the captured pre-bevel mesh + selection
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
+      if (quadify) { closeQuadify(false); return; } // discard the dry run and restore grouping
       if (atlasPrompt) { setAtlasPrompt(false); return; } // the atlas gate cancels next
       if (selMode !== 0) { meshClearSel(); adoptHostSelection(selInfo); }
     },
@@ -2203,6 +2319,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     atlasInvalidatedRef.current = false;
     setBv(null); // the host drops a live bevel session with the old mesh's journal
     setLc(null); // the host drops a live loop-cut session with the old mesh's journal
+    setQuadify(null); // the host drops a whole-topology dry run with the old mesh
   };
 
   // One load path for every source (picker, drop, CLI): validate the extension, hand
@@ -2366,6 +2483,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const lcj = host.__mesh_lc_state?.();
         if (typeof lcj === 'string' && lcj && JSON.parse(lcj)?.ok === 1) host.__mesh_lc_end?.(0);
       } catch { /* no lc door / malformed state — nothing to cancel */ }
+      // Same orphan rule for the whole-topology dry run: its popup state lived in
+      // the old JS world, so the retained host base must be restored immediately.
+      host.__mesh_quadify_end?.(0);
       // The host atlas is document state, not Paint-tool state. A remount must
       // publish its UV preview even when the brush was inactive; otherwise the
       // model renders the retained texture while the inspector falsely says none.
@@ -2597,6 +2717,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'solidify') { const r = meshSolidify(); adoptMesh(r); console.error(`[meshops] solidify → ${JSON.stringify(r)}`); }
         else if (name === 'merge') { const r = meshMergeFaces(); adoptMesh(r); console.error(`[meshops] merge → ${JSON.stringify(r)}`); }
         else if (name === 'trisquads') { const r = meshTrisToQuads(); adoptMesh(r); console.error(`[meshops] trisquads → ${JSON.stringify(r)}`); }
+        else if (name === 'quadbegin') console.error(`[meshops] quadbegin → ${JSON.stringify(meshQuadifyBegin())}`);
+        else if (name === 'quadpreview') {
+          const r = meshQuadifyPreview(num(a[0]));
+          adoptMesh(r);
+          console.error(`[meshops] quadpreview:${a[0]} → ${JSON.stringify(r)}`);
+        }
+        else if (name === 'quadend') {
+          const r = meshQuadifyEnd(num(a[0]) === 1);
+          adoptMesh(r);
+          console.error(`[meshops] quadend:${a[0]} → ${JSON.stringify(r)}`);
+        }
         else if (name === 'extrudeface') { const r = meshExtrudeFace(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeface:${a[0]} → ${JSON.stringify(r)}`); }
         else if (name === 'extrudeedge') { const r = meshExtrudeEdge(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeedge:${a[0]} → ${JSON.stringify(r)}`); }
         else if (name === 'detach') { const r = meshDetach(); adoptMesh(r); console.error(`[meshops] detach → ${JSON.stringify(r)}`); }
@@ -3292,6 +3423,138 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           onRemove={(id) => setBackdrops((list) => list.filter((b) => b.id !== id))}
           onClose={() => setBackdropPanel(false)}
         />
+      ) : null}
+
+      {/* Whole-topology triangle→quad planner. The host preview changes authored
+          grouping only, so the viewport's real edge overlay is the visualization:
+          proposed source diagonals disappear while this card remains reversible. */}
+      {quadify ? (
+        <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
+          <Col
+            style={{
+              width: LC_CARD_W + QUADIFY_PREVIEW_TUNING.cardExtraWidth, maxWidth: '100%', paddingLeft: LC_PAD, paddingRight: LC_PAD, paddingTop: 12, paddingBottom: 12,
+              backgroundColor: 'rgba(11,19,32,0.97)', borderWidth: 1, borderColor: '#36597d',
+              borderRadius: 8, gap: 9,
+            }}
+          >
+            <Row style={{ alignItems: 'center' }}>
+              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
+                Tris to Quads · Whole Topology
+              </Text>
+              <Pressable
+                onPress={() => closeQuadify(false)}
+                tooltip="Cancel (Esc) — restore the exact pre-scan topology and selection"
+                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+              >
+                <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
+              </Pressable>
+            </Row>
+
+            {quadify.phase === 'scanning' ? (
+              <>
+                <Text style={{ color: '#b9c8dc', fontSize: 12 }}>
+                  {`Scanning adjacency and solving the maximum quad set${'.'.repeat(quadify.pulse + 1)}`}
+                </Text>
+                <Row style={{ gap: 5 }}>
+                  {QUADIFY_PREVIEW_TUNING.loaderSteps.map((step) => (
+                    <Box
+                      key={step}
+                      style={{
+                        height: 5, flexGrow: 1, borderRadius: 3,
+                        backgroundColor: step === quadify.pulse ? '#68a9e8' : '#203754',
+                      }}
+                    />
+                  ))}
+                </Row>
+                <Text style={{ color: '#7d899c', fontSize: 10, fontFamily: 'monospace' }}>
+                  {`evaluation ${quadify.evaluation + 1}/${QUADIFY_PREVIEW_TUNING.evaluations.length} · dry run only`}
+                </Text>
+                <Pressable
+                  onPress={() => closeQuadify(false)}
+                  style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+                >
+                  <Text style={{ color: '#d1d8e3', fontSize: 12, fontWeight: 700 }}>Cancel Scan</Text>
+                </Pressable>
+              </>
+            ) : (() => {
+              const plan = quadify.plan;
+              const evaluation = QUADIFY_PREVIEW_TUNING.evaluations[quadify.evaluation]!;
+              const pairedTriangles = plan.quads * 2;
+              const remainingTriangles = Math.max(0, plan.triangleFaces - pairedTriangles);
+              const hasPlan = plan.quads > 0;
+              return (
+                <>
+                  <Row style={{ alignItems: 'baseline' }}>
+                    <Text style={{ color: hasPlan ? '#7fd6a0' : '#e7b96b', fontSize: 24, fontWeight: 800 }}>
+                      {plan.quads.toLocaleString()}
+                    </Text>
+                    <Text style={{ color: '#c7d2e3', fontSize: 12, marginLeft: 7 }}>
+                      {`quad${plan.quads === 1 ? '' : 's'} in this maximum set`}
+                    </Text>
+                  </Row>
+                  <Text style={{ color: '#8fa1b8', fontSize: 11 }}>
+                    {hasPlan
+                      ? 'Live dry run: proposed triangle diagonals are hidden in the topology view. Nothing is committed yet.'
+                      : 'No safe adjacent triangle pairs were found. The model is unchanged.'}
+                  </Text>
+                  {([
+                    ['triangles paired', pairedTriangles.toLocaleString()],
+                    ['triangles left single', remainingTriangles.toLocaleString()],
+                    ['authored faces', `${plan.authoredBefore.toLocaleString()} → ${plan.authoredAfter.toLocaleString()}`],
+                    ['possible pairings', plan.candidatePairs.toLocaleString()],
+                    ['triangles with choices', plan.ambiguousTriangles.toLocaleString()],
+                  ] as const).map(([label, value]) => (
+                    <Row key={label} style={{ alignItems: 'center' }}>
+                      <Text style={{ color: '#8798ad', fontSize: 11, flexGrow: 1 }}>{label}</Text>
+                      <Text style={{ color: '#dce6f4', fontSize: 11, fontFamily: 'monospace' }}>{value}</Text>
+                    </Row>
+                  ))}
+                  <Row style={{ alignItems: 'center', gap: LC_GAP }}>
+                    <Pressable
+                      onPress={() => changeQuadifyEvaluation(-1)}
+                      tooltip="Preview the previous maximum-cardinality evaluation"
+                      style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                    >
+                      <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>‹</Text>
+                    </Pressable>
+                    <Col style={{ flexGrow: 1, minWidth: 0, alignItems: 'center' }}>
+                      <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 11, fontWeight: 700 }}>
+                        {`${evaluation.label} · ${quadify.evaluation + 1}/${plan.evaluationCount}`}
+                      </Text>
+                      <Text numberOfLines={1} noWrap style={{ color: '#75879e', fontSize: 9 }}>
+                        {`${evaluation.note} · plan ${Math.trunc(plan.planSignature).toString(16).padStart(8, '0')}`}
+                      </Text>
+                    </Col>
+                    <Pressable
+                      onPress={() => changeQuadifyEvaluation(1)}
+                      tooltip="Preview the next maximum-cardinality evaluation"
+                      style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 4, paddingBottom: 4, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                    >
+                      <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>›</Text>
+                    </Pressable>
+                  </Row>
+                  <Row style={{ gap: LC_GAP }}>
+                    <Pressable
+                      onPress={() => closeQuadify(false)}
+                      style={{ flexGrow: 1, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+                    >
+                      <Text style={{ color: '#d1d8e3', fontSize: 12, fontWeight: 700 }}>{hasPlan ? 'Cancel' : 'Close'}</Text>
+                    </Pressable>
+                    {hasPlan ? (
+                      <Pressable
+                        onPress={() => closeQuadify(true)}
+                        tooltip={`Commit ${plan.quads} quads as one undo step`}
+                        style={{ flexGrow: 1, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}
+                      >
+                        <Text style={{ color: '#7fd6a0', fontSize: 12, fontWeight: 700 }}>{`Apply ${plan.quads.toLocaleString()} Quads`}</Text>
+                      </Pressable>
+                    ) : null}
+                  </Row>
+                </>
+              );
+            })()}
+          </Col>
+        </Box>
       ) : null}
 
       {/* Bevel sizing: the old Studio edge/vertex chamfer brought onto the current

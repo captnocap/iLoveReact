@@ -4479,8 +4479,8 @@ export default function AppFrame() {
   };
 
   // Face-selection ops that don't change part structure: winding / glass / solidify /
-  // merge-faces / tris-to-quads. Each is a host-owned journaled mutation; the
-  // shell only reports its compact semantic result.
+  // merge-faces plus the whole-topology tris-to-quads dry-run session. Immediate
+  // verbs journal here; tris-to-quads opens the viewer-owned confirm/cancel preview.
   const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces' | 'tris-to-quads', source = 'dock') => {
     const api = modelToolApiRef.current;
     let ok = false;
@@ -4503,10 +4503,9 @@ export default function AppFrame() {
       okMsg = 'merged the selection into one face';
       failMsg = 'merge faces: select 2+ faces (face mode) first';
     } else {
-      const changed = withNativeMeshActionSource(source, () => api?.trisToQuads() ?? 0);
-      ok = changed > 0;
-      okMsg = `made ${changed} quad${changed === 1 ? '' : 's'} in one sweep; unmatched triangles left alone`;
-      failMsg = 'tris to quads: select 2+ compatible triangle faces (same plane, part, material, and alpha)';
+      ok = withNativeMeshActionSource(source, () => api?.trisToQuads() ?? false);
+      okMsg = 'scanning the whole topology for the maximum quad set — review the live dry run';
+      failMsg = 'tris to quads: open a model in Face mode first';
     }
     setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
   };

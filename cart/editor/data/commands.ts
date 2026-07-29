@@ -268,8 +268,8 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-glass', menu: 'Edit', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-solidify', menu: 'Edit', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-merge-faces', menu: 'Edit', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
-  // Bulk tris-to-quads topology recovery (req_3507): pair every compatible
-  // selected authored triangle, leaving non-pairs untouched in one undo step.
+  // Whole-topology tris-to-quads recovery (req_3511/3512): dry-run the exact
+  // maximum pairing, preview alternatives, then commit once on confirmation.
   { id: 'mesh-tris-to-quads', menu: 'Edit', scope: 'model', name: 'Tris to Quads', icon: 'Grid2x2', key: '', context: true, native: true, undoable: true, tool: true },
   // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge the
   // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
@@ -474,9 +474,25 @@ export function meshToolCommands(): Command[] {
 // The contextual topology ops that apply to the current selection: extrude/loop-cut on a single
 // edge, create-face on two or more, and the face-selection toolset (loop-cut/detach/glass/
 // solidify/merge) in face mode — loop cut on a FACE is the studio's Blockbench treatment
-// (popup: direction/cuts/offset, live preview). Empty when nothing applies. Surfaces the
-// same way in the toolbar and context menu.
+// (popup: direction/cuts/offset, live preview). Tris to Quads is the one whole-topology
+// verb: it remains available in Face mode with no selection and plans across parts
+// independently. Surfaces the same way in the toolbar and context menu.
 export function meshTopoCommands(tool: { selMode: number; sel: number }, selectedPartCount = 0): Command[] {
+  if (tool.selMode === 3) {
+    return [
+      ...(tool.sel < 1 ? [] : [
+        commandById('mesh-select-uv-orientation'),
+        ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
+        commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-cut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
+        // Outliner multi-select is represented host-side by selecting every authored face
+        // in those parts. Offering Merge Faces here would collapse all of those groups to
+        // one face and strand zero-face outliner rows (req_2870). The parts command below
+        // owns that gesture instead and preserves each pre-merge authored face.
+        ...(selectedPartCount >= 2 ? [] : [commandById('mesh-merge-faces')]),
+      ]),
+      commandById('mesh-tris-to-quads'),
+    ];
+  }
   if (tool.sel < 1) return [];
   // Vertex mode: one real corner bevels; two or more selected verts weld at center.
   if (tool.selMode === 1) {
@@ -487,21 +503,6 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
     return tool.sel === 1
       ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-loopcut'), commandById('mesh-weld')]
       : [commandById('mesh-create-face'), commandById('mesh-weld')];
-  }
-  if (tool.selMode === 3) {
-    return [
-      commandById('mesh-select-uv-orientation'),
-      ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
-      commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-cut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
-      // Outliner multi-select is represented host-side by selecting every authored face
-      // in those parts. Offering Merge Faces here would collapse all of those groups to
-      // one face and strand zero-face outliner rows (req_2870). The parts command below
-      // owns that gesture instead and preserves each pre-merge authored face.
-      ...(selectedPartCount >= 2 ? [] : [commandById('mesh-merge-faces')]),
-      // This is pairwise and part-safe internally, but an Outliner multi-selection is
-      // not an authored face gesture; keep that state owned by structural part verbs.
-      ...(tool.sel >= 2 && selectedPartCount < 2 ? [commandById('mesh-tris-to-quads')] : []),
-    ];
   }
   return [];
 }
