@@ -1,0 +1,18 @@
+{
+  "id": "req_3532",
+  "at": "2026-07-29T21:09:57.446Z",
+  "origin": "codex:019fafb5",
+  "text": "hey see ifu can solve this problem the camera feed is not rendering in the app but it detects the obs virt camera just fine, something is wrong [Image #1]",
+  "status": "doing",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T21:10:02.629Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

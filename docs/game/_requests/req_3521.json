@@ -1,0 +1,34 @@
+{
+  "id": "req_3521",
+  "at": "2026-07-29T10:14:21.839Z",
+  "origin": "codex:019fad5d",
+  "text": "take inventory of every feature inside of the editor cart, just get us a bulleted list. it may help to start at one file, read it, put into list, move to next. and that way you cover the basis but do as you do",
+  "status": "review",
+  "sessionId": "019fad5d-a47b-74a2-be03-26c11c78786f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T10:14:26.554Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T10:16:09.895Z",
+      "actor": "/root",
+      "kind": "note",
+      "text": "Completed a read-only file-by-file inventory of cart/editor: entry routes, six document surfaces, command registry, world/map authoring, model/UV/paint/rig tooling, asset pipeline, diagnostics, play overlays, World Bible, and Flockbook design scope. No code or tests changed."
+    },
+    {
+      "at": "2026-07-29T10:16:09.905Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only, code-grounded inventory of the active cart/editor surface. The review list groups every implemented user-facing capability across shell, assets, world/map, modeling, materials, play, World Bible, persistence, and diagnostics, while explicitly marking the Flockbook document as design/specification rather than a shipped interactive subsystem. No files changed and no commits were created.",
+  "shas": [],
+  "resolvedAt": "2026-07-29T10:16:09.905Z"
+}

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "revision": 18,
+  "nextLayer": 4,
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "paint baseline",
+      "source": "atlases/uv-sources/c94d977090e56d55f3c941e273b6af0c27e2971eabb2ffdb6561a4026026a1d5.png",
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 1024,
+      "visible": true,
+      "locked": false
+    },
+    {
+      "id": "layer-3",
+      "name": "zmoxyg1avdv11.jpg",
+      "source": "atlases/uv-sources/5cdc951c26a05876bea81a87c028531f3977bd4b1e5567c022a0d9433f2ad44d.png",
+      "x": 1510,
+      "y": 43,
+      "width": 640,
+      "height": 852,
+      "visible": true,
+      "locked": false
+    }
+  ],
+  "compiled": {
+    "revision": 13,
+    "originX": 0,
+    "originY": 0,
+    "width": 2168,
+    "height": 1024,
+    "atlasSha256": "76a8d7427f46e26a135a69de3c9c65652d7f0de786ea116bc9bd3ba184a7e75e"
+  }
+}
