@@ -93,7 +93,7 @@ React's reconciler emits CREATE/APPEND/UPDATE mutation commands; the Zig framewo
 - **`framework/`** — Zig runtime. Layout, engine, GPU, events, input, state, effects, text, windows.
 - **`runtime/`** — JS entry point, JSX shim, primitives, host globals, hooks.
 - **`renderer/`** — reconciler host config. Mutation command stream.
-- **`cart/`** — `.tsx` apps. `cart/sweatshop/` (was `cursor-ide`) is the active IDE cart.
+- **`cart/`** — `.tsx` apps. `cart/editor/` (+ its `/play` route) is the active surface (V32); `cart/sweatshop/` no longer exists.
 - **`scripts/cart-bundle.js`** — esbuild bundler. Run via `tools/v8cli` (no node, no bun).
 - **`tools/v8cli`** — standalone V8 script host. Replaces every former `node scripts/X.mjs` invocation. The repo has zero npm/node/bun dependencies; all build-time JS scripts live in `scripts/*.js` and run under `v8cli`.
 - **`tsz/`** — FROZEN. Smith compiler + Smith-era carts. Reference only.

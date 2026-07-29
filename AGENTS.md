@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Context for AI agents working in this repository. Last updated: 2026-07-10.
+Context for AI agents working in this repository. Last updated: 2026-07-28.
 
 ## The Two Failure Modes
 
@@ -12,7 +12,7 @@ There is no `document`, no `fetch`, no `window`, no `localStorage` (unless you i
 
 **2. Treating Zig as "can't do dynamic, use another language for that."**
 
-Dynamic content lives in `StringHashMap(Value)` or tagged unions. That's the pattern. The LuaJIT detour (JSRT at `framework/lua/jsrt/`) was a wrong turn from this reflex; it's being unwound. Don't suggest adding Lua for dynamism — Zig handles it fine.
+Dynamic content lives in `StringHashMap(Value)` or tagged unions. That's the pattern. The LuaJIT detour (JSRT) was a wrong turn from this reflex and has been deleted. Don't suggest adding Lua for dynamism — Zig handles it fine.
 
 ---
 
@@ -105,7 +105,7 @@ Bridge to the Zig runtime. Accessed via `globalThis.__fn_name` or hooks in `runt
 | `__registerDispatch(fn)` | Register JS callback for Zig events |
 | `__hostFlush()` | Flush pending mutations to Zig Node pool |
 | `__jsTick(now)` | Called by Zig each frame; fires due timers |
-| `__hot_get(key)` / `__hot_set(key, val)` | Hot-reload state (scaffolded, not working) |
+| `__hot_get(key)` / `__hot_set(key, val)` | Hot-reload state twigs — working since req_2898; prefer `useHotState` |
 
 See `runtime/hooks/README.md` for the full matrix and hook wrappers.
 
@@ -125,11 +125,10 @@ Or single-file: `cart/<name>.tsx`.
 Build: `./tools/rjit ship <name>` → self-extracting binary at `zig-out/bin/<name>`.
 Fast local verification build: `SHIP_RUN_PACKAGE=0 ./tools/rjit ship <name>` → raw app binary at `zig-out/bin/<name>` without self-extractor packaging.
 
-The active cart is `cart/sweatshop/` (evolved from `cursor-ide`). It contains the IDE surface: file tree, editor, git panel, search, command palette, agent chat, settings, theme editor.
-
-New game work currently lives in `cart/hmsc/`; internal map tooling lives in
-`cart/hmsc-int/`; `cart/scape3d/` is the learned prototype/reference fork.
-Before changing any of these carts, read its nested `AGENTS.md` when present.
+The active surface is `cart/editor/` (+ its `/play` route) — V32 SURFACE-0705.
+`cart/hmsc-int/` is previous-era reference; read its nested `AGENTS.md` before
+touching it. `cart/sweatshop/`, `cart/hmsc/`, and `cart/scape3d/` no longer
+exist — treat any pointer to them as historical.
 
 ---
 
@@ -137,7 +136,7 @@ Before changing any of these carts, read its nested `AGENTS.md` when present.
 
 - **V8** (`framework/v8_app.zig`) is the default. `tools/rjit ship` builds V8 through the TypeScript CLI pipeline. Embedded via zig-v8. ~6MB binary overhead. Fast.
 - **QJS** (`qjs_app.zig`) is maintenance-only legacy. Hit a 2000ms-per-click ceiling. `--qjs` flag is opt-in legacy. Do not add new features to QJS bindings.
-- **JSRT** (`framework/lua/jsrt/`) is the LuaJIT evaluator alternate path. 12/13 targets passing. Interesting but not the default.
+- **JSRT** (the LuaJIT evaluator alternate path) is deleted. Don't rebuild it.
 
 The "V8 has baggage" claim is false — the baggage is Chromium (200MB CEF), not V8 itself (~6MB standalone). We measured it.
 
