@@ -44,6 +44,8 @@ export const UV_LAYOUT_TUNING = {
   /** Reject numerically explosive seam fits instead of folding an island into noise. */
   stitchMinimumScale: 0.05,
   stitchMaximumScale: 20,
+  /** A model edge/point with more owners is non-manifold and not an automatic seam. */
+  stitchUnambiguousOwnerCount: 2,
 } as const;
 
 /** Explicit authoring precision. Zoom may raise the effective step so a snap
@@ -953,6 +955,8 @@ export type UvStitchResult = Readonly<{
   blocked: number;
   seamEdges: number;
   seamVertices: number;
+  /** Number of indexed island-pair fits evaluated by this sweep. */
+  evaluatedCandidates: number;
 }>;
 
 type UvStitchPoint = Readonly<{ vertex: number; x: number; y: number }>;
@@ -973,6 +977,10 @@ type UvStitchCandidate = Readonly<{
   seamEdges: number;
   seamVertices: number;
 }>;
+type UvStitchRelation = {
+  edges: Set<string>;
+  vertices: Set<number>;
+};
 
 const stitchCoordinateKey = (value: number): number => Math.round(value / UV_LAYOUT_TUNING.pointMatchEpsilon);
 const stitchPointKey = (point: UvStitchPoint): string => (
@@ -1073,12 +1081,16 @@ function stitchCandidate(
   fixed: number,
   source: UvBoundaryTopology,
   target: UvBoundaryTopology,
+  relation: UvStitchRelation,
 ): UvStitchCandidate | null {
   const pairs = new Map<string, UvStitchPair>();
   let seamEdges = 0;
-  const topologyKeys = [...source.edges.keys()].filter((key) => target.edges.has(key)).sort();
+  const topologyKeys = [...relation.edges].sort();
   for (const topologyKey of topologyKeys) {
-    const match = matchingEdgePair(source.edges.get(topologyKey)!, target.edges.get(topologyKey)!);
+    const sourceEdges = source.edges.get(topologyKey);
+    const targetEdges = target.edges.get(topologyKey);
+    if (!sourceEdges || !targetEdges) continue;
+    const match = matchingEdgePair(sourceEdges, targetEdges);
     if (!match) continue;
     seamEdges += 1;
     for (const sourcePoint of [match.source.a, match.source.b]) {
@@ -1096,10 +1108,11 @@ function stitchCandidate(
   // each island exposes exactly one copy of the welded boundary vertex, a pure
   // translation is still unambiguous and useful.
   if (pairs.size === 0) {
-    const sharedVertices = [...source.vertices.keys()].filter((vertex) => target.vertices.has(vertex)).sort((a, b) => a - b);
+    const sharedVertices = [...relation.vertices].sort((a, b) => a - b);
     for (const vertex of sharedVertices) {
-      const sourcePoints = source.vertices.get(vertex)!;
-      const targetPoints = target.vertices.get(vertex)!;
+      const sourcePoints = source.vertices.get(vertex);
+      const targetPoints = target.vertices.get(vertex);
+      if (!sourcePoints || !targetPoints) continue;
       if (sourcePoints.length !== 1 || targetPoints.length !== 1) continue;
       pairs.set(stitchPointKey(sourcePoints[0]!), { source: sourcePoints[0]!, target: targetPoints[0]! });
     }
@@ -1117,6 +1130,97 @@ function stitchCandidate(
     seamEdges,
     seamVertices: new Set(orderedPairs.map((pair) => pair.source.vertex)).size,
   };
+}
+
+function stitchRelations(
+  selected: readonly number[],
+  topologies: ReadonlyMap<number, UvBoundaryTopology>,
+): Map<number, Map<number, UvStitchRelation>> {
+  const edgeOwners = new Map<string, number[]>();
+  const vertexOwners = new Map<number, number[]>();
+  for (const index of selected) {
+    const topology = topologies.get(index);
+    if (!topology) continue;
+    for (const edge of topology.edges.keys()) {
+      const owners = edgeOwners.get(edge);
+      if (owners) owners.push(index);
+      else edgeOwners.set(edge, [index]);
+    }
+    for (const vertex of topology.vertices.keys()) {
+      const owners = vertexOwners.get(vertex);
+      if (owners) owners.push(index);
+      else vertexOwners.set(vertex, [index]);
+    }
+  }
+
+  const relations = new Map<number, Map<number, UvStitchRelation>>();
+  const relationFor = (left: number, right: number): UvStitchRelation => {
+    let neighbours = relations.get(left);
+    if (!neighbours) {
+      neighbours = new Map();
+      relations.set(left, neighbours);
+    }
+    const existing = neighbours.get(right);
+    if (existing) return existing;
+    const relation = { edges: new Set<string>(), vertices: new Set<number>() };
+    neighbours.set(right, relation);
+    let reverse = relations.get(right);
+    if (!reverse) {
+      reverse = new Map();
+      relations.set(right, reverse);
+    }
+    reverse.set(left, relation);
+    return relation;
+  };
+
+  for (const [edge, owners] of edgeOwners) {
+    if (owners.length !== UV_LAYOUT_TUNING.stitchUnambiguousOwnerCount) continue;
+    relationFor(owners[0]!, owners[1]!).edges.add(edge);
+  }
+  for (const [vertex, owners] of vertexOwners) {
+    if (owners.length !== UV_LAYOUT_TUNING.stitchUnambiguousOwnerCount) continue;
+    relationFor(owners[0]!, owners[1]!).vertices.add(vertex);
+  }
+  return relations;
+}
+
+function stitchCandidateHasPriority(left: UvStitchCandidate, right: UvStitchCandidate): boolean {
+  if (left.seamEdges !== right.seamEdges) return left.seamEdges > right.seamEdges;
+  if (left.seamVertices !== right.seamVertices) return left.seamVertices > right.seamVertices;
+  if (left.moving !== right.moving) return left.moving < right.moving;
+  return left.fixed < right.fixed;
+}
+
+function pushStitchCandidate(heap: UvStitchCandidate[], candidate: UvStitchCandidate): void {
+  heap.push(candidate);
+  let child = heap.length - 1;
+  while (child > 0) {
+    const parent = Math.floor((child - 1) / 2);
+    if (!stitchCandidateHasPriority(heap[child]!, heap[parent]!)) break;
+    [heap[parent], heap[child]] = [heap[child]!, heap[parent]!];
+    child = parent;
+  }
+}
+
+function popStitchCandidate(heap: UvStitchCandidate[]): UvStitchCandidate | null {
+  const first = heap[0];
+  const last = heap.pop();
+  if (!first || !last) return first ?? null;
+  if (heap.length === 0) return first;
+  heap[0] = last;
+  let parent = 0;
+  while (true) {
+    const left = parent * 2 + 1;
+    if (left >= heap.length) break;
+    const right = left + 1;
+    const child = right < heap.length && stitchCandidateHasPriority(heap[right]!, heap[left]!)
+      ? right
+      : left;
+    if (!stitchCandidateHasPriority(heap[child]!, heap[parent]!)) break;
+    [heap[parent], heap[child]] = [heap[child]!, heap[parent]!];
+    parent = child;
+  }
+  return first;
 }
 
 type UvSimilarity = Readonly<{ a: number; b: number; tx: number; ty: number }>;
@@ -1233,57 +1337,67 @@ export function stitchUvIslands(
 ): UvStitchResult {
   const selected = uniqueUvIslandIndices(rects, indices);
   if (selected.length < 2 || !selected.includes(activeIndex) || atlasW < 1 || atlasH < 1) {
-    return { rects: [...rects], stitched: 0, unmatched: Math.max(0, selected.length - 1), blocked: 0, seamEdges: 0, seamVertices: 0 };
+    return {
+      rects: [...rects],
+      stitched: 0,
+      unmatched: Math.max(0, selected.length - 1),
+      blocked: 0,
+      seamEdges: 0,
+      seamVertices: 0,
+      evaluatedCandidates: 0,
+    };
   }
   const next = [...rects];
+  const topologies = new Map<number, UvBoundaryTopology>();
+  for (const index of selected) topologies.set(index, uvBoundaryTopology(next[index]!));
+  const relations = stitchRelations(selected, topologies);
   const fixed = new Set<number>([activeIndex]);
   const remaining = new Set(selected.filter((index) => index !== activeIndex));
+  const matchedIdentity = new Set<number>();
+  const candidates: UvStitchCandidate[] = [];
   let stitched = 0;
   let seamEdges = 0;
   let seamVertices = 0;
+  let evaluatedCandidates = 0;
 
-  while (remaining.size > 0) {
-    const candidates: UvStitchCandidate[] = [];
-    for (const moving of remaining) {
-      const source = uvBoundaryTopology(next[moving]!);
-      for (const fixedIndex of fixed) {
-        const candidate = stitchCandidate(moving, fixedIndex, source, uvBoundaryTopology(next[fixedIndex]!));
-        if (candidate) candidates.push(candidate);
-      }
+  const enqueueNeighbours = (fixedIndex: number) => {
+    const target = topologies.get(fixedIndex);
+    if (!target) return;
+    for (const [moving, relation] of relations.get(fixedIndex) ?? []) {
+      if (!remaining.has(moving)) continue;
+      const source = topologies.get(moving);
+      if (!source) continue;
+      evaluatedCandidates += 1;
+      const candidate = stitchCandidate(moving, fixedIndex, source, target, relation);
+      if (!candidate) continue;
+      matchedIdentity.add(moving);
+      pushStitchCandidate(candidates, candidate);
     }
-    candidates.sort((left, right) => (
-      right.seamEdges - left.seamEdges
-      || right.seamVertices - left.seamVertices
-      || left.moving - right.moving
-      || left.fixed - right.fixed
-    ));
-    let adopted: UvStitchCandidate | null = null;
-    for (const candidate of candidates) {
-      const changed = stitchIslandToCandidate(next[candidate.moving]!, candidate, atlasW, atlasH);
-      if (!changed) continue;
-      next[candidate.moving] = changed;
-      adopted = candidate;
-      break;
-    }
-    if (!adopted) break;
-    fixed.add(adopted.moving);
-    remaining.delete(adopted.moving);
+  };
+
+  enqueueNeighbours(activeIndex);
+  while (candidates.length > 0) {
+    const candidate = popStitchCandidate(candidates);
+    if (!candidate || !fixed.has(candidate.fixed) || !remaining.has(candidate.moving)) continue;
+    const changed = stitchIslandToCandidate(next[candidate.moving]!, candidate, atlasW, atlasH);
+    if (!changed) continue;
+    next[candidate.moving] = changed;
+    topologies.set(candidate.moving, uvBoundaryTopology(changed));
+    fixed.add(candidate.moving);
+    remaining.delete(candidate.moving);
     stitched += 1;
-    seamEdges += adopted.seamEdges;
-    seamVertices += adopted.seamVertices;
+    seamEdges += candidate.seamEdges;
+    seamVertices += candidate.seamVertices;
+    enqueueNeighbours(candidate.moving);
   }
 
   let blocked = 0;
   let unmatched = 0;
   for (const moving of remaining) {
-    const source = uvBoundaryTopology(next[moving]!);
-    const hasMatchingIdentity = [...fixed].some((fixedIndex) => (
-      stitchCandidate(moving, fixedIndex, source, uvBoundaryTopology(next[fixedIndex]!)) !== null
-    ));
-    if (hasMatchingIdentity) blocked += 1;
+    if (matchedIdentity.has(moving)) blocked += 1;
     else unmatched += 1;
   }
-  return { rects: next, stitched, unmatched, blocked, seamEdges, seamVertices };
+  return { rects: next, stitched, unmatched, blocked, seamEdges, seamVertices, evaluatedCandidates };
 }
 
 export type UvTransformFrame = Readonly<{ x: number; y: number; w: number; h: number }>;

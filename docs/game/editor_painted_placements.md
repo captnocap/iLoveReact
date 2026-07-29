@@ -60,6 +60,16 @@ matching seam endpoints land exactly on the anchor copies, so
 selected pieces stay put; a fit that would leave the atlas is refused. The
 whole sweep is one `stitch UV seams` journal entry.
 
+The sweep is indexed, not pairwise (req_3519). Boundary topology is built once
+per selected island, model-edge and model-vertex owner tables admit only the
+two-owner relationships that are unambiguous, and a priority heap evaluates
+each reachable island pair once. This replaces the old repeated
+remaining-islands × fixed-islands rescans that could grow cubically after
+`Uniform Pack All Islands` → `Collect Same Orientation` and freeze the editor
+on a dense torso. A 6,831-island connected-chain regression pins the linear
+candidate bound; a many-island pole is refused instead of becoming a dense
+automatic stitch graph.
+
 `WIRE PNG` (also RMB → Texture Atlas → Export Transparent Wireframe) writes
 `atlases/uv-wireframe.png` at the live atlas dimensions and copies its absolute
 path. It is a derived image-generation guide: alpha remains zero everywhere

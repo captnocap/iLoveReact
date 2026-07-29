@@ -339,6 +339,59 @@ test('stitching sweeps a selected welded-edge chain beyond the active island', (
   assert(corners[16] === 25 && corners[17] === 5, 'second-hop island lost its handed similarity fit');
 });
 
+test('stitching indexes a production-sized seam chain instead of rescanning the selected graph', () => {
+  // Torso Female003 currently carries 6,831 render triangles. Treat the
+  // all-islands worst case as the regression scale for req_3519.
+  const islandCount = 6_831;
+  const rects = Array.from({ length: islandCount }, (_unused, index) => ({
+    x: 128 + index,
+    y: 128,
+    w: 2,
+    h: 1,
+    group: index,
+    triangles: [{
+      face: index,
+      group: index,
+      points: index % 2 === 0
+        ? [0, 0, 0.5, 1, 1, 0] as const
+        : [0, 1, 0.5, 0, 1, 1] as const,
+      vertices: [index, index + 1, index + 2] as const,
+    }],
+  }));
+  const result = stitchUvIslands(
+    rects,
+    rects.map((_rect, index) => index),
+    0,
+    islandCount + 512,
+    512,
+  );
+  assert(result.stitched === islandCount - 1, `large seam sweep stopped at ${result.stitched}/${islandCount - 1}`);
+  assert(result.unmatched === 0 && result.blocked === 0, 'large indexed seam sweep lost part of its connected component');
+  assert(result.evaluatedCandidates <= islandCount * 2, `large sweep regressed to repeated pair scans (${result.evaluatedCandidates} evaluations)`);
+});
+
+test('point-only stitching accepts one unambiguous pair but refuses a many-island pole', () => {
+  const rects = parseUvIslandRects(
+    [10, 10, 10, 10, 30, 30, 10, 10, 50, 50, 10, 10],
+    [100, 101, 102],
+    [
+      0, 100, 10, 10, 20, 10, 10, 20,
+      1, 101, 30, 30, 40, 30, 30, 40,
+      2, 102, 50, 50, 60, 50, 50, 60,
+    ],
+    [
+      1, 2, 3,
+      1, 4, 5,
+      1, 6, 7,
+    ],
+  );
+  const pair = stitchUvIslands(rects, [0, 1], 0, 64, 64);
+  assert(pair.stitched === 1 && pair.seamEdges === 0 && pair.seamVertices === 1, 'one unique point-cut pair did not stitch');
+  const pole = stitchUvIslands(rects, [0, 1, 2], 0, 64, 64);
+  assert(pole.stitched === 0 && pole.unmatched === 2, 'a many-island pole was arbitrarily folded into one UV blob');
+  assert(pole.evaluatedCandidates === 0, 'ambiguous pole entered the automatic fit queue');
+});
+
 test('stitching refuses an identity match whose joined island would leave the atlas', () => {
   const rects = parseUvIslandRects(
     [10, 0, 10, 10, 30, 30, 10, 20],
