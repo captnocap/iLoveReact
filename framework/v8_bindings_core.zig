@@ -2141,6 +2141,63 @@ fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnNumber(info, if (capture.writeRgbaPng(io, path, rgba, w, h)) 1 else 0);
 }
 
+/// __model_uv_coverage_write(compositePath, baselinePath?) → JSON report.
+/// Finalize the CURRENT atlas into package/variant PNGs without shipping a giant
+/// base64 raster through JS (req_3520). Exact UV triangles plus the packed-layout
+/// sampling gutter survive byte-for-byte; all other imported artwork becomes one
+/// opaque neutral texel. The resident atlas and baseline are never mutated.
+fn hostModelUvCoverageWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const alloc = std.heap.c_allocator;
+    const composite_path = argToStringAlloc(info, 0) orelse return setReturnString(info, "");
+    defer alloc.free(composite_path);
+    if (composite_path.len == 0) return setReturnString(info, "");
+    const baseline_path_owned = argToStringAlloc(info, 1);
+    defer if (baseline_path_owned) |path| alloc.free(path);
+    const baseline_path = baseline_path_owned orelse "";
+
+    // As every durable atlas read: strip the transient orange selection overlay while
+    // deriving pixels, then restore it over the unchanged live atlas.
+    scene3d.paintTintSuspend();
+    defer scene3d.paintTintResume();
+    const atlas = scene3d.paintAtlas() orelse return setReturnString(info, "");
+    var coverage = scene3d.paintVariantUvCoverage(alloc) orelse return setReturnString(info, "");
+    defer coverage.deinit(alloc);
+    if (coverage.w != atlas.w or coverage.h != atlas.h) return setReturnString(info, "");
+
+    const composite = coverage.croppedCopy(alloc, atlas.rgba) orelse return setReturnString(info, "");
+    const composite_ok = capture.writeRgbaPng(io, composite_path, composite, atlas.w, atlas.h);
+    alloc.free(composite);
+    var baseline_ok = false;
+    if (composite_ok and baseline_path.len > 0) {
+        if (scene3d.paintProgramBaseline()) |baseline| {
+            if (coverage.croppedCopy(alloc, baseline)) |cropped_baseline| {
+                defer alloc.free(cropped_baseline);
+                baseline_ok = capture.writeRgbaPng(io, baseline_path, cropped_baseline, atlas.w, atlas.h);
+            }
+        }
+    }
+
+    const total = coverage.totalPixels();
+    var report_buf: [256]u8 = undefined;
+    const report = std.fmt.bufPrint(
+        &report_buf,
+        "{{\"composite\":{d},\"baseline\":{d},\"w\":{d},\"h\":{d},\"totalPixels\":{d},\"keptPixels\":{d},\"clearedPixels\":{d},\"gutterTexels\":{d}}}",
+        .{
+            @intFromBool(composite_ok),
+            @intFromBool(baseline_ok),
+            atlas.w,
+            atlas.h,
+            total,
+            coverage.kept_pixels,
+            total - coverage.kept_pixels,
+            coverage.gutter_texels,
+        },
+    ) catch return setReturnString(info, "");
+    setReturnString(info, report);
+}
+
 /// __model_mesh_write(path) → 1 on success. Writes the active model's durable mesh
 /// (interleaved 8 f32/vert, raw little-endian) to `path`, so a model's package folder
 /// carries its own geometry instead of an empty dir. A live quality projection is the
@@ -2601,18 +2658,20 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     returnEstimateJson(info, est);
 }
 
-/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
+/// __model_atlas_read(includeData=1) → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
 /// "groups":[g,...],"triangles":[island,faceGroup,x0,y0,x1,y1,x2,y2,...],
 /// "cornerVertices":[v0,v1,v2,...],
-/// "data":"<base64 rgba>"} for the current painting, or "" if there's
-/// no paint target. `detail` is the applied density (texels/meter); `islands` is the
-/// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
-/// authored group id. Every island is emitted: the UV editor is an authoring surface,
-/// so silently dropping a large model's rectangles is not an acceptable optimization.
-/// The editor also persists this as a paint variant.
+/// and optionally "data":"<base64 rgba>"} for the current painting, or "" if there's
+/// no paint target. Passing 0 omits the multi-megabyte raster while retaining exact UV
+/// geometry; native coverage-aware package writers use that path (req_3520).
+/// `detail` is the applied density (texels/meter); `islands` is the packed island rects
+/// (flat quads, 4-stride) and `groups` the PARALLEL per-island authored group id. Every
+/// island is emitted: the UV editor is an authoring surface, so silently dropping a
+/// large model's rectangles is not an acceptable optimization.
 fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.c_allocator;
+    const include_data = (argToI32(info, 0) orelse 1) != 0;
     // This read gets PERSISTED (paint variants, model packages) — lift the selection
     // tint for the duration so the saved atlas holds true paint, never the orange.
     scene3d.paintTintSuspend();
@@ -2621,13 +2680,17 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "");
         return;
     };
-    const enc = std.base64.standard.Encoder;
-    const b64 = alloc.alloc(u8, enc.calcSize(pa.rgba.len)) catch {
-        setReturnString(info, "");
-        return;
-    };
-    defer alloc.free(b64);
-    _ = enc.encode(b64, pa.rgba);
+    var b64: ?[]u8 = null;
+    defer if (b64) |bytes| alloc.free(bytes);
+    if (include_data) {
+        const enc = std.base64.standard.Encoder;
+        const bytes = alloc.alloc(u8, enc.calcSize(pa.rgba.len)) catch {
+            setReturnString(info, "");
+            return;
+        };
+        _ = enc.encode(bytes, pa.rgba);
+        b64 = bytes;
+    }
 
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
@@ -2683,10 +2746,8 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         }
         w.writeAll("]") catch return setReturnString(info, "");
     }
-    w.print(",\"data\":\"{s}\"}}", .{b64}) catch {
-        setReturnString(info, "");
-        return;
-    };
+    if (b64) |bytes| w.print(",\"data\":\"{s}\"", .{bytes}) catch return setReturnString(info, "");
+    w.writeAll("}") catch return setReturnString(info, "");
     setReturnString(info, out.written());
 }
 
@@ -3979,6 +4040,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
     v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
+    v8_runtime.registerHostFn("__model_uv_coverage_write", hostModelUvCoverageWrite);
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
     v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
     v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);

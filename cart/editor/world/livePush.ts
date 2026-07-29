@@ -17,6 +17,7 @@ import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
+import { runtimeCompiledPaintAtlas } from '../data/paintAtlasCompiler';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
@@ -32,28 +33,37 @@ import { ensureRegionFormula } from '../render3d/liveRegions';
 
 const g: any = globalThis;
 
-function readPackageBytes(dir: string, rel: string): Uint8Array | undefined {
-  const path = `${dir}/${rel}`;
+function readPathBytes(path: string): Uint8Array | undefined {
   if (!exists(path)) return undefined;
   const b64 = readFileBase64(path);
   if (!b64) return undefined;
   try { return base64ToBytes(b64); } catch { return undefined; }
 }
 
+function readPackageBytes(dir: string, rel: string): Uint8Array | undefined {
+  return readPathBytes(`${dir}/${rel}`);
+}
+
 type PaintedForm = { vertices: Float32Array; png: Uint8Array };
+
+function readPaintedVertices(dir: string, blobRel: string): Float32Array | null {
+  const blob = readPackageBytes(dir, blobRel);
+  if (!blob) return null;
+  const vertCount = Math.floor(blob.length / PAINT_MESH_VERTEX_BYTES);
+  if (vertCount < 3 || blob.length !== vertCount * PAINT_MESH_VERTEX_BYTES) return null;
+  const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * PAINT_MESH_VERTEX_BYTES);
+  return new Float32Array(buf, 0, vertCount * PAINT_MESH_VERTEX_FLOATS);
+}
 
 /** Read a paint-space mesh blob + atlas png. The atlas maps through the blob's
  *  island-space UV channels — pairing it with source UVs scrambles the painting
  *  (req_2833). Callers rebind those UVs to current model geometry. */
 function readPaintedForm(dir: string, blobRel: string, pngRel: string): PaintedForm | null {
-  const blob = readPackageBytes(dir, blobRel);
-  if (!blob) return null;
-  const vertCount = Math.floor(blob.length / PAINT_MESH_VERTEX_BYTES);
-  if (vertCount < 3) return null;
+  const vertices = readPaintedVertices(dir, blobRel);
+  if (!vertices) return null;
   const png = readPackageBytes(dir, pngRel);
   if (!png) return null;
-  const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * PAINT_MESH_VERTEX_BYTES);
-  return { vertices: new Float32Array(buf, 0, vertCount * PAINT_MESH_VERTEX_FLOATS), png };
+  return { vertices, png };
 }
 
 /** The model's CURRENT painted form (mesh/painted.blob + atlases/base.png — the
@@ -319,10 +329,20 @@ export function pushResidentMeshes(
     const pkg = modelPackageById(ap.pkgId);
     const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
     const currentGeometry = authoredMeshData(ap.modelId, ap.pkgId);
+    // An explicit paint-atlas compile rewrites only UV copies and keeps every
+    // editable source file. All still-current compiled looks share this exact
+    // Uint8Array, so the live catalog reads ONE package PNG for the whole model.
+    const compiledPaint = pkg ? runtimeCompiledPaintAtlas(pkg) : null;
+    const compiledPng = compiledPaint ? readPathBytes(compiledPaint.atlasPath) : undefined;
     // Geometry comes from the CURRENT model resolver; the paint-space blob
     // contributes its UV layout only (req_2832/2833). This keeps the rendered
     // resident mesh and placement bounds on one model revision.
-    const paintedForm = dir ? packagePaintedForm(dir) : null;
+    const compiledBaseVertices = dir && compiledPng && compiledPaint?.base
+      ? readPaintedVertices(dir, compiledPaint.base.compiledMesh)
+      : null;
+    const paintedForm = compiledBaseVertices && compiledPng
+      ? { vertices: compiledBaseVertices, png: compiledPng }
+      : dir ? packagePaintedForm(dir) : null;
     const bound = currentGeometry && paintedForm
       ? bindPaintSkinToCurrentMesh(currentGeometry, paintedForm.vertices)
       : null;
@@ -351,7 +371,13 @@ export function pushResidentMeshes(
     // owns UVs, not historical positions: bind it onto currentGeometry.
     if (pkg && dir) {
       for (const skin of listPaintSkins(pkg)) {
-        const form = readPaintedForm(dir, `paints/paint_${skin.id}.blob`, `paints/paint_${skin.id}.png`);
+        const compiledEntry = compiledPaint?.variants.get(skin.id);
+        const compiledVertices = compiledPng && compiledEntry
+          ? readPaintedVertices(dir, compiledEntry.compiledMesh)
+          : null;
+        const form = compiledVertices && compiledPng
+          ? { vertices: compiledVertices, png: compiledPng }
+          : readPaintedForm(dir, `paints/paint_${skin.id}.blob`, `paints/paint_${skin.id}.png`);
         if (!form) continue;
         const skinVertices = currentGeometry
           ? bindPaintSkinToCurrentMesh(currentGeometry, form.vertices)

@@ -140,6 +140,7 @@ declare global {
   function __model_paint_sample(...args: unknown[]): unknown;
   function __model_atlas_palette(...args: unknown[]): unknown;
   function __image_write_png(...args: unknown[]): unknown;
+  function __model_uv_coverage_write(...args: unknown[]): unknown;
   function __model_mesh_write(...args: unknown[]): unknown;
   function __model_painted_mesh_write(...args: unknown[]): unknown;
   function __model_meshdoc_write(...args: unknown[]): unknown;

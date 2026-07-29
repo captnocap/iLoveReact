@@ -34,6 +34,7 @@ import { base64ToBytes, textBytes } from '../../../runtime/workspace/lumps';
 import { encode as encodeImage } from '../../../runtime/image';
 import { compileOutlinerCollision, decodeCollisionBake, encodeCollisionBake } from '../model/meshCollision';
 import { groundRebase } from '../model/groundRebase';
+import { hasUvCoverageRasterWriter, writeUvCoverageRasters } from './uvCoverageRaster';
 
 const host = globalThis as any;
 
@@ -690,8 +691,9 @@ export function writePackageCollision(dir: string): boolean {
 // quality projection when the user chose one, req_3315); mesh/doc.blob + mesh/parts.json = the editable model DOCUMENT (verts + face
 // groups + part ranges + row metadata, req_2753 — what makes a reopened package the same
 // multi-part document instead of its primitive seed); atlases/base.png = the current
-// atlas readback. Best-effort — each piece is skipped when its host door or data is
-// absent. Call on any save of the active model. Returns true when the meshdoc landed
+// atlas derived through exact UV coverage (req_3520). Best-effort — each piece is
+// skipped when its host door or data is absent. Call on any save of the active model.
+// Returns true when the meshdoc landed
 // (callers strip their seed geometry only then — disk truth must exist first).
 export function writeModelArtifacts(
   pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
@@ -736,9 +738,22 @@ export function writeModelArtifacts(
   if (exists(stalePath)) remove(stalePath);
   let paintProgramWritten = true;
   try {
-    const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
-    if (atlas.data && atlas.w > 0 && atlas.h > 0) {
-      host.__image_write_png?.(`${atlasDir}/base.png`, atlas.data, atlas.w, atlas.h);
+    const nativeCoverageWrite = hasUvCoverageRasterWriter();
+    let atlas = JSON.parse(host.__model_atlas_read?.(nativeCoverageWrite ? 0 : 1) || '{}');
+    const basePngPath = `${atlasDir}/base.png`;
+    const rasterBasePath = `${dir}/${PAINT_RASTER_BASE_FILE}`;
+    const coverageWrite = atlas.w > 0 && atlas.h > 0
+      ? writeUvCoverageRasters(basePngPath, rasterBasePath, atlas.w, atlas.h)
+      : null;
+    // A native failure falls back honestly. Fetch pixels only now; the normal path
+    // never creates the 4/3-size base64 copy of a multi-megapixel atlas in JS.
+    if (!coverageWrite && nativeCoverageWrite) {
+      atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
+    }
+    const basePngWritten = !!coverageWrite
+      || (!!atlas.data && atlas.w > 0 && atlas.h > 0
+        && host.__image_write_png?.(basePngPath, atlas.data, atlas.w, atlas.h) === 1);
+    if (basePngWritten) {
       // The atlas maps onto the DISPLAYED mesh's island-space UVs, not the source
       // UVs base.blob/doc.blob carry (req_2833: pairing them scrambles the painting)
       // — persist the paint-space verts beside the atlas so placement consumers
@@ -758,14 +773,17 @@ export function writeModelArtifacts(
     }
     const programValue = host.__model_paint_program_read?.();
     const program = typeof programValue === 'string' ? programValue : '';
-    const baselineValue = host.__model_paint_baseline_read?.();
-    const baseline = typeof baselineValue === 'string' ? baselineValue : '';
     const layout = Array.isArray(atlas.islands) && atlas.islands.length > 0 ? atlas.islands : null;
     const cornerUv = exactUvCornersFromAtlasTriangles(atlas.triangles, atlas.w, atlas.h);
     const basePaintPath = `${atlasDir}/base.paint.json`;
-    const rasterBasePath = `${dir}/${PAINT_RASTER_BASE_FILE}`;
-    if (baseline && (cornerUv || layout)) {
-      const rasterWritten = host.__image_write_png?.(rasterBasePath, baseline, atlas.w, atlas.h) === 1;
+    let rasterWritten = coverageWrite?.baselinePath === rasterBasePath;
+    if (!rasterWritten) {
+      const baselineValue = host.__model_paint_baseline_read?.();
+      const baseline = typeof baselineValue === 'string' ? baselineValue : '';
+      rasterWritten = !!baseline
+        && host.__image_write_png?.(rasterBasePath, baseline, atlas.w, atlas.h) === 1;
+    }
+    if (rasterWritten && (cornerUv || layout)) {
       const detail = typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1;
       const basePaint: ModelBasePaint = cornerUv
         ? {
@@ -783,7 +801,7 @@ export function writeModelArtifacts(
           layout: layout!,
           rasterBase: true,
         };
-      paintProgramWritten = rasterWritten && writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
+      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
     } else if (program.length > 0) {
       if (exists(rasterBasePath)) remove(rasterBasePath);
       const basePaint: ModelBasePaint = {

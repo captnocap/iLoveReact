@@ -93,6 +93,15 @@ pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
 /// substrate COLOUR (req_3471) — anything that mis-samples padding renders clay,
 /// never black. See fillNeutralBackground.
 pub const EMPTY_ATLAS_TEXEL: [4]u8 = .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2], 0 };
+/// Paint-variant raster finalization (req_3520). Keep the packed-layout gutter around
+/// every real UV triangle so texture filtering cannot pull the cleared field into a
+/// face. The cleared texel is deliberately OPAQUE: atlas alpha is material opacity in
+/// the world (req_3450), so transparent "empty" pixels would turn a slightly drifted
+/// UV into an invisible placed face even though the editor's opaque preview looked fine.
+pub const VariantRasterTuning = struct {
+    pub const sampling_gutter_texels: f32 = @floatFromInt(paint_islands.PAD_TEXELS);
+    pub const unused_texel: [4]u8 = .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2], 255 };
+};
 // Authored opacity has one shared classification boundary. The renderer, durable mesh
 // partition, and editor overlay must agree or a face can draw as glass while presenting
 // as opaque (or vice versa).
@@ -286,6 +295,122 @@ fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]
         @trunc(@max(0, @floor(min_y))),
         @trunc(@max(0, @floor(max_x))),
         @trunc(@max(0, @floor(max_y))),
+    };
+}
+
+/// A compact bit mask derived from the CURRENT exact face-corner UVs. It is a
+/// save-time derivative, never live atlas state: callers can throw away unused imported
+/// artwork without destroying the resident source texture a user may still remap.
+pub const VariantUvCoverage = struct {
+    bits: []u64,
+    w: u32,
+    h: u32,
+    kept_pixels: u64,
+    gutter_texels: u32,
+
+    pub fn deinit(self: *VariantUvCoverage, allocator: std.mem.Allocator) void {
+        allocator.free(self.bits);
+        self.* = undefined;
+    }
+
+    pub fn totalPixels(self: VariantUvCoverage) u64 {
+        return @as(u64, self.w) * @as(u64, self.h);
+    }
+
+    pub fn isCovered(self: VariantUvCoverage, pixel: usize) bool {
+        const total: usize = @intCast(self.totalPixels());
+        if (pixel >= total) return false;
+        const bit: u6 = @intCast(pixel & 63);
+        return (self.bits[pixel >> 6] & (@as(u64, 1) << bit)) != 0;
+    }
+
+    /// Copy one same-sized RGBA raster through the mask. Covered texels (including the
+    /// filter gutter) survive byte-for-byte, preserving authored glass. Everything else
+    /// becomes one opaque neutral colour, which PNG compresses efficiently.
+    pub fn croppedCopy(self: VariantUvCoverage, allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
+        const pixel_count = std.math.mul(usize, @as(usize, self.w), @as(usize, self.h)) catch return null;
+        const byte_count = std.math.mul(usize, pixel_count, 4) catch return null;
+        const word_count = (std.math.add(usize, pixel_count, 63) catch return null) / 64;
+        if (self.bits.len != word_count or source.len != byte_count) return null;
+        const out = allocator.alloc(u8, byte_count) catch return null;
+        var pixel: usize = 0;
+        while (pixel < pixel_count) : (pixel += 1) {
+            const byte = pixel * 4;
+            if (self.isCovered(pixel)) {
+                @memcpy(out[byte .. byte + 4], source[byte .. byte + 4]);
+            } else {
+                @memcpy(out[byte .. byte + 4], &VariantRasterTuning.unused_texel);
+            }
+        }
+        return out;
+    }
+};
+
+/// Build the save-time coverage mask for the active paint layout. Coverage is the exact
+/// union of its triangles expanded by the configured sampling gutter — not island
+/// bounding rectangles, so triangular corners and arbitrary holes become compressible.
+pub fn buildVariantUvCoverage(allocator: std.mem.Allocator) ?VariantUvCoverage {
+    const lay = &(g_layout orelse return null);
+    if (g_atlas_w == 0 or g_atlas_h == 0 or g_facecount == 0) return null;
+    if (lay.corner_uv.len != @as(usize, g_facecount) * 6) return null;
+    const pixel_count = std.math.mul(usize, @as(usize, g_atlas_w), @as(usize, g_atlas_h)) catch return null;
+    const word_count = (std.math.add(usize, pixel_count, 63) catch return null) / 64;
+    const bits = allocator.alloc(u64, word_count) catch return null;
+    var keep_bits = false;
+    defer if (!keep_bits) allocator.free(bits);
+    @memset(bits, 0);
+
+    const max_x_i: i64 = @intCast(g_atlas_w - 1);
+    const max_y_i: i64 = @intCast(g_atlas_h - 1);
+    const gutter = VariantRasterTuning.sampling_gutter_texels;
+    var kept: u64 = 0;
+    var face: u32 = 0;
+    while (face < g_facecount) : (face += 1) {
+        const corners = triTexelCorners(lay, face);
+        for (corners) |corner| {
+            if (!std.math.isFinite(corner[0]) or !std.math.isFinite(corner[1])) return null;
+        }
+        const low_x = @min(corners[0][0], @min(corners[1][0], corners[2][0]));
+        const low_y = @min(corners[0][1], @min(corners[1][1], corners[2][1]));
+        const high_x = @max(corners[0][0], @max(corners[1][0], corners[2][0]));
+        const high_y = @max(corners[0][1], @max(corners[1][1], corners[2][1]));
+        // One extra texel in the iteration window is harmless; pointInTri owns the
+        // exact signed-distance decision and keeps this bounds math conservative.
+        const raw_x0: i64 = @floor(low_x - gutter - 1.0);
+        const raw_y0: i64 = @floor(low_y - gutter - 1.0);
+        const raw_x1: i64 = @ceil(high_x + gutter + 1.0);
+        const raw_y1: i64 = @ceil(high_y + gutter + 1.0);
+        if (raw_x1 < 0 or raw_y1 < 0 or raw_x0 > max_x_i or raw_y0 > max_y_i) continue;
+        const x0: usize = @intCast(std.math.clamp(raw_x0, 0, max_x_i));
+        const y0: usize = @intCast(std.math.clamp(raw_y0, 0, max_y_i));
+        const x1: usize = @intCast(std.math.clamp(raw_x1, 0, max_x_i));
+        const y1: usize = @intCast(std.math.clamp(raw_y1, 0, max_y_i));
+        var y = y0;
+        while (y <= y1) : (y += 1) {
+            var x = x0;
+            while (x <= x1) : (x += 1) {
+                const px = @as(f32, @floatFromInt(x)) + 0.5;
+                const py = @as(f32, @floatFromInt(y)) + 0.5;
+                if (!pointInTri(corners, px, py, gutter)) continue;
+                const index = y * @as(usize, g_atlas_w) + x;
+                const bit: u6 = @intCast(index & 63);
+                const bit_mask = @as(u64, 1) << bit;
+                const word = index >> 6;
+                if ((bits[word] & bit_mask) == 0) {
+                    bits[word] |= bit_mask;
+                    kept += 1;
+                }
+            }
+        }
+    }
+    if (kept == 0) return null;
+    keep_bits = true;
+    return .{
+        .bits = bits,
+        .w = g_atlas_w,
+        .h = g_atlas_h,
+        .kept_pixels = kept,
+        .gutter_texels = paint_islands.PAD_TEXELS,
     };
 }
 
@@ -2836,6 +2961,71 @@ test "island UVs: a grouped quad is ONE island and every vertex UV lands inside 
         try std.testing.expect(x >= @as(f32, @floatFromInt(isls[0].x)) and x <= @as(f32, @floatFromInt(isls[0].x + isls[0].w)));
         try std.testing.expect(y >= @as(f32, @floatFromInt(isls[0].y)) and y <= @as(f32, @floatFromInt(isls[0].y + isls[0].h)));
     }
+}
+
+test "paint-variant crop preserves exact UV coverage and glass while clearing imported artwork" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6);
+        clear();
+        model_source.clear();
+    }
+
+    // Give the imported texture ample unrelated artwork, then place one 16×16 quad in
+    // its middle. The finalized derivative should retain the quad + filter gutter only.
+    var imported: [64 * 64 * 4]u8 = undefined;
+    for (0..64 * 64) |pixel| {
+        imported[pixel * 4 + 0] = 17;
+        imported[pixel * 4 + 1] = 43;
+        imported[pixel * 4 + 2] = 91;
+        imported[pixel * 4 + 3] = GLASS_ALPHA;
+    }
+    try std.testing.expect(importAtlasPreservingUvGeometry(&imported, 64, 64, &verts, 6));
+    const corners = [_]f32{
+        16, 16, 32, 16, 32, 32,
+        16, 16, 32, 32, 16, 32,
+    };
+    try std.testing.expect(applyCornerUvs(&corners, &verts, 6));
+
+    const live_before = try std.testing.allocator.dupe(u8, atlas().?.rgba);
+    defer std.testing.allocator.free(live_before);
+    var coverage = buildVariantUvCoverage(std.testing.allocator) orelse return error.TestUnexpectedResult;
+    defer coverage.deinit(std.testing.allocator);
+    const cropped = coverage.croppedCopy(std.testing.allocator, &imported) orelse return error.TestUnexpectedResult;
+    defer std.testing.allocator.free(cropped);
+
+    var counted_kept: u64 = 0;
+    var saw_gutter_only = false;
+    var saw_cleared = false;
+    const lay = &(g_layout.?);
+    const pixel_count: usize = @intCast(coverage.totalPixels());
+    for (0..pixel_count) |pixel| {
+        const covered = coverage.isCovered(pixel);
+        const byte = pixel * 4;
+        if (covered) {
+            counted_kept += 1;
+            try std.testing.expectEqualSlices(u8, imported[byte .. byte + 4], cropped[byte .. byte + 4]);
+            const x = @as(f32, @floatFromInt(pixel % 64)) + 0.5;
+            const y = @as(f32, @floatFromInt(pixel / 64)) + 0.5;
+            if (!pointInTri(triTexelCorners(lay, 0), x, y, 0) and
+                !pointInTri(triTexelCorners(lay, 1), x, y, 0))
+            {
+                saw_gutter_only = true;
+            }
+        } else {
+            saw_cleared = true;
+            try std.testing.expectEqualSlices(u8, &VariantRasterTuning.unused_texel, cropped[byte .. byte + 4]);
+        }
+    }
+    try std.testing.expectEqual(coverage.kept_pixels, counted_kept);
+    try std.testing.expect(coverage.kept_pixels < coverage.totalPixels());
+    try std.testing.expect(saw_gutter_only);
+    try std.testing.expect(saw_cleared);
+    // Covered authored glass stays glass; discarded source alpha becomes opaque.
+    try std.testing.expectEqual(@as(u8, GLASS_ALPHA), cropped[(24 * 64 + 24) * 4 + 3]);
+    try std.testing.expectEqual(@as(u8, 255), cropped[3]);
+    // Finalization is derived output only — the live imported source remains remappable.
+    try std.testing.expectEqualSlices(u8, live_before, atlas().?.rgba);
 }
 
 test "topology adoption preserves the live atlas bytes and supplied UVs" {

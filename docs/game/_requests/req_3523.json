@@ -1,0 +1,18 @@
+{
+  "id": "req_3523",
+  "at": "2026-07-29T10:33:43.075Z",
+  "origin": "codex:019fac74",
+  "text": "RIght, so i would, because there is going to be the time where i might come and add a new one, you need to store the individual and then we end up having a some sort of compile button approach that will take them and piece together so we can always keep adding more without it assuming its the final product",
+  "status": "doing",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T10:33:49.045Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

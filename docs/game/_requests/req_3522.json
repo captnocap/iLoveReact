@@ -1,0 +1,18 @@
+{
+  "id": "req_3522",
+  "at": "2026-07-29T10:31:36.184Z",
+  "origin": "codex:019fac74",
+  "text": "yeah so ideally the end goal is going to be to able to pack one model and all the variants it has into one image and each variant just has its assigned location, this would be best to get there where it finds the best fitting placement to keep the total image size at minimum while keeping full pixel retention of what a uv covers",
+  "status": "doing",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T10:33:59.214Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

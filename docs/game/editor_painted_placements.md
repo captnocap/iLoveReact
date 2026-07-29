@@ -3,7 +3,7 @@
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
-req_3515.
+req_3515 / req_3520.
 
 ## In one sentence
 
@@ -101,6 +101,79 @@ looks now produce both, so they place too). Variants rename in place
 (req_3448, `renamePaintVariant` + the panel's pencil verb): the label in the
 json head changes, nothing else — files keep their ids, placed instances keep
 their `#p<id>` references, and the quick-menu chips pick up the new name.
+
+## UV-coverage raster finalization (req_3520)
+
+Saving or updating a paint variant now removes imported image content that no
+UV can sample. This is a coverage crop, not a rectangular canvas crop:
+`paint_N.png` keeps the atlas dimensions and exact `cornerUv` coordinate system,
+but every texel outside the union of the current UV triangles becomes one
+constant neutral pixel. Arbitrary holes and triangular corners therefore
+compress instead of retaining unrelated source artwork. The same derived write
+lands `paint_N.base.png` when strokes need a baseline; `writeModelArtifacts`
+uses it for `atlases/base.png` and `raster-base.png` too, so the package does
+not retain a second untrimmed copy after a finalized save.
+
+`model_paint.buildVariantUvCoverage` rasterizes the exact live face-corner UVs
+with a two-texel signed-distance gutter (the packing/filtering pad) around every
+triangle. Covered texels survive byte-for-byte, including authored glass alpha.
+Discarded texels become opaque neutral clay, never transparent: atlas alpha is
+material opacity in the world while the editor preview hides it (req_3450), so
+transparent cleanup would reintroduce invisible placed faces at any filtering
+or UV-drift edge. The resident imported atlas is not mutated; the cleanup is a
+save derivative, so the user can continue remapping against the full source
+during the current session.
+
+`__model_uv_coverage_write` builds that mask once per write and PNG-encodes the
+resident composite/baseline natively. `__model_atlas_read(0)` supplies only UV
+metadata, avoiding a 4/3-size base64 raster in the JS heap (a 2000×3000 RGBA
+atlas would otherwise cross as roughly 32 MiB of text). The strict
+`data/uvCoverageRaster.ts` boundary accepts the result only when dimensions,
+pixel totals, and landed file stats agree; failure falls back to the historical
+base64 writer without claiming cleanup. Variant json records `uvCoverage`
+(kept/cleared/total texels, gutter, and output byte sizes), and the Paint
+Variants panel reports the discarded percentage and written size after Save or
+Update.
+
+## Explicit shared-atlas compile (req_3522/req_3523)
+
+Coverage-cleaned `atlases/base.*` and every `paints/paint_N.*` pair remain the
+editable source of truth. Saving, updating, renaming, or adding a variant never
+implicitly decides that the set is complete and never repacks another variant.
+The Paint Variants panel instead exposes `Compile Shared Atlas` /
+`Recompile Shared Atlas` as an explicit build step. Its progress label advances
+through source scan, best-fit planning, per-tile raster copy, and UV-mesh
+writes, yielding between expensive sources so a multi-megapixel compile has
+visible activity.
+
+`data/paintAtlasCompiler.ts` finds the UV-addressable bounding rectangle of the
+base look and each variant from its saved paint-space mesh. It retains the
+coverage/filter gutter, adds an extruded tile edge so moving a source away from
+the texture boundary preserves clamp/filter behavior, and searches multiple
+deterministic skyline orders and candidate widths for the smallest valid
+placement it finds. There is no resize, resample, or lossy transcode: source
+RGBA inside each assigned rectangle is copied byte-for-byte, including authored
+alpha, and only a translation changes each mesh's UVs. Byte-identical PNGs with
+the same crop share one tile (normally the current base look and the variant it
+was saved from).
+
+Compile writes content-addressed derived payloads plus one small commit manifest:
+
+- `paints/compiled-atlas-<sha256>.png` — the one shared lossless texture.
+- `paints/compiled-mesh-<sha256>.blob` — UV-remapped mesh copies; identical
+  outputs deduplicate by address.
+- `paints/compiled-atlas.json` — the small commit manifest mapping base/variant
+  ids from source rectangles to assigned atlas rectangles, with source
+  fingerprints and pixel/byte totals.
+
+The manifest lands last. A later source edit leaves the previous compiled
+artifact recoverable but marks the panel `out of date`; pressing Recompile
+creates a new immutable asset set and retires obsolete derived files. Individual
+PNG, JSON, baseline, and mesh files are never removed by Compile. `livePush.ts`
+reads the shared PNG once per model and uses a compiled mesh for every independently
+fingerprint-current entry. If one variant changed or a new one was added before
+Recompile, that entry alone falls back to its individual PNG/blob while the
+unchanged compiled entries remain usable.
 
 ## Skins are instance wardrobe, never palette rows (req_3443)
 

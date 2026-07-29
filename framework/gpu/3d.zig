@@ -8601,6 +8601,13 @@ pub fn paintAtlas() ?PaintAtlas {
     return .{ .rgba = a.rgba, .w = a.w, .h = a.h, .detail = model_paint.detail() };
 }
 
+/// Save-time UV coverage for a derived package/variant raster (req_3520). The mask
+/// belongs to the caller; the resident imported atlas remains byte-for-byte editable.
+pub const PaintVariantUvCoverage = model_paint.VariantUvCoverage;
+pub fn paintVariantUvCoverage(allocator: std.mem.Allocator) ?PaintVariantUvCoverage {
+    return model_paint.buildVariantUvCoverage(allocator);
+}
+
 /// Eyedropper: the painted colour under the viewport pixel — pickBary against the
 /// resident model, then the atlas texel at the hit. Null on a miss / no paint target.
 pub fn samplePaintAt(mx: f32, my: f32) ?[3]u8 {

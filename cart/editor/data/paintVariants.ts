@@ -10,7 +10,8 @@
 //                             GUIDING_LIGHT "store the strokes, not the pixels"), replayed
 //                             on load via __model_paint_program_apply.
 //   paints/paint_<id>.png   — the rasterized atlas, the EDITING SUBSTRATE / preview (what
-//                             you see). Written from the live atlas via __image_write_png.
+//                             you see). Native save finalization keeps only exact UV
+//                             coverage + its filter gutter (req_3520).
 //
 // FULL LOOKS (req_3439): a variant is the model's whole current LOOK, not only brush
 // strokes — an imported texture atlas plus the UV layout mapped over it is a look with
@@ -20,6 +21,7 @@
 // paints/paint_<id>.base.png; with none, the composite .png doubles as the base.
 import { exists, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile } from '../../../runtime/hooks/fs';
 import { claimPackageDir, parsedUvCornerGeometry } from './modelPackageStore';
+import { hasUvCoverageRasterWriter, writeUvCoverageRasters, type UvCoverageSummary } from './uvCoverageRaster';
 import type { ModelPackage } from './types';
 
 const host = globalThis as any;
@@ -44,6 +46,7 @@ export type PaintVariant = {
   cornerUv?: number[]; // six absolute-atlas floats per render face (__model_uv_geometry_apply)
   rasterBase?: true; // a restore raster exists on disk: basePng when strokes ride on top, else png
   basePng?: string; // the baseline BENEATH the strokes (paint_<id>.base.png); absent when data is ''
+  uvCoverage?: UvCoverageSummary; // save-time discarded-pixel proof (req_3520)
 };
 
 function paintsDir(pkg: PaintTarget): string { return `${claimPackageDir(pkg)}/paints`; }
@@ -61,31 +64,96 @@ type PaintLookInput = {
   baselineRgba?: string; // base64 RGBA beneath the strokes (__model_paint_baseline_read)
 };
 
-/** Write/refresh the full-look fields for one variant. With strokes the baseline
- *  gets its own paint_<id>.base.png; with none the composite .png doubles as the
- *  raster base, so an atlas-only look never stores the same raster twice. An
- *  update whose strokes are gone sheds its stale base file. */
-function writeLookFields(
+type PaintRasterWrite = {
+  png?: string;
+  basePng?: string;
+  uvCoverage?: UvCoverageSummary;
+};
+
+/** Finalize the resident raster through the native UV-coverage door. The old base64
+ * writer remains a lazy failure/back-compat path, but successful large-atlas saves
+ * never copy their pixels into the JS heap. */
+function writeVariantRasters(
   pkg: PaintTarget,
   id: string,
-  v: PaintLookInput,
-  compositePngLanded: boolean,
-): Pick<PaintVariant, 'cornerUv' | 'rasterBase' | 'basePng'> {
-  const path = basePngPath(pkg, id);
-  let basePng: string | undefined;
-  if (v.data && v.baselineRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(path, v.baselineRgba, v.w, v.h) === 1) {
-    basePng = path;
+  v: PaintLookInput & { atlasRgba?: string },
+): PaintRasterWrite {
+  const compositePath = pngPath(pkg, id);
+  const baselinePath = basePngPath(pkg, id);
+  const native = writeUvCoverageRasters(compositePath, v.data ? baselinePath : null, v.w, v.h);
+  if (native) {
+    if (!native.baselinePath && exists(baselinePath)) remove(baselinePath);
+    return {
+      png: native.compositePath,
+      ...(native.baselinePath ? { basePng: native.baselinePath } : {}),
+      uvCoverage: native.coverage,
+    };
   }
-  if (!basePng && exists(path)) remove(path);
-  const hasRasterBase = !!basePng || (!v.data && compositePngLanded);
+
+  // Only a failed native attempt needs to fetch the large raster. Older hosts already
+  // supplied these strings through readCurrentPaint, so their fallback remains unchanged.
+  let atlasRgba = v.atlasRgba;
+  let baselineRgba = v.baselineRgba;
+  if (!atlasRgba && hasUvCoverageRasterWriter()) {
+    try {
+      const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
+      if (atlas?.w === v.w && atlas?.h === v.h && typeof atlas.data === 'string') atlasRgba = atlas.data;
+    } catch { /* the caller will receive a raster-less save, as before */ }
+    if (v.data && !baselineRgba) {
+      const baseline = host.__model_paint_baseline_read?.();
+      if (typeof baseline === 'string') baselineRgba = baseline;
+    }
+  }
+
+  let png: string | undefined;
+  if (atlasRgba && v.w > 0 && v.h > 0
+    && host.__image_write_png?.(compositePath, atlasRgba, v.w, v.h) === 1) {
+    png = compositePath;
+  }
+  let basePng: string | undefined;
+  if (v.data && baselineRgba && v.w > 0 && v.h > 0
+    && host.__image_write_png?.(baselinePath, baselineRgba, v.w, v.h) === 1) {
+    basePng = baselinePath;
+  }
+  if (!basePng && exists(baselinePath)) remove(baselinePath);
+  return { png, basePng };
+}
+
+/** Full-look metadata follows only files proven to have landed. With strokes the
+ * baseline is distinct; without strokes the optimized composite doubles as the base. */
+function writeLookFields(
+  v: PaintLookInput,
+  rasters: PaintRasterWrite,
+): Pick<PaintVariant, 'cornerUv' | 'rasterBase' | 'basePng'> {
+  const hasRasterBase = !!rasters.basePng || (!v.data && !!rasters.png);
   if (!v.cornerUv?.length || !hasRasterBase) return {};
-  return { cornerUv: v.cornerUv.slice(), rasterBase: true, ...(basePng ? { basePng } : {}) };
+  return {
+    cornerUv: v.cornerUv.slice(),
+    rasterBase: true,
+    ...(rasters.basePng ? { basePng: rasters.basePng } : {}),
+  };
+}
+
+function withValidatedCoverage(v: PaintVariant): PaintVariant {
+  const c = v.uvCoverage;
+  const valid = !!c
+    && Number.isSafeInteger(c.totalPixels) && c.totalPixels === v.w * v.h
+    && Number.isSafeInteger(c.keptPixels) && c.keptPixels > 0
+    && Number.isSafeInteger(c.clearedPixels) && c.clearedPixels >= 0
+    && c.keptPixels + c.clearedPixels === c.totalPixels
+    && Number.isSafeInteger(c.gutterTexels) && c.gutterTexels >= 0
+    && Number.isSafeInteger(c.pngBytes) && c.pngBytes >= 0
+    && (c.basePngBytes === undefined || (Number.isSafeInteger(c.basePngBytes) && c.basePngBytes >= 0));
+  if (!c || valid) return v;
+  const { uvCoverage: _u, ...rest } = v;
+  return rest;
 }
 
 /** A loaded variant only advertises a full look when the record is coherent AND its
  *  raster base is actually on disk — a half-restorable look must fall back to the
  *  plain program/atlas path instead of importing nothing. */
-function withValidatedLook(v: PaintVariant): PaintVariant {
+function withValidatedLook(raw: PaintVariant): PaintVariant {
+  const v = withValidatedCoverage(raw);
   if (v.rasterBase === undefined && v.cornerUv === undefined && v.basePng === undefined) return v;
   const cornerUv = parsedUvCornerGeometry(v.cornerUv);
   const raster = v.basePng ?? v.png;
@@ -134,11 +202,7 @@ export function savePaintVariant(
   const list = listPaintVariants(pkg);
   const seq = list.reduce((max, x) => Math.max(max, Number(x.id) || 0), 0) + 1;
   const id = String(seq);
-  // The rasterized substrate (real PNG) — best-effort; the variant still works without it.
-  let png: string | undefined;
-  if (v.atlasRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(pngPath(pkg, id), v.atlasRgba, v.w, v.h) === 1) {
-    png = pngPath(pkg, id);
-  }
+  const rasters = writeVariantRasters(pkg, id, v);
   const variant: PaintVariant = {
     id,
     name: v.name?.trim() || `Painting ${seq}`,
@@ -147,8 +211,9 @@ export function savePaintVariant(
     detail: v.detail,
     data: v.data,
     format: v.format ?? 'program',
-    png,
-    ...writeLookFields(pkg, id, v, !!png),
+    png: rasters.png,
+    ...writeLookFields(v, rasters),
+    ...(rasters.uvCoverage ? { uvCoverage: rasters.uvCoverage } : {}),
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // save writes what you SEE — the paint-space mesh pairs with the .png
@@ -165,13 +230,11 @@ export function updatePaintVariant(
 ): PaintVariant | null {
   const existing = listPaintVariants(pkg).find((x) => x.id === id);
   if (!existing) return null;
-  let png = existing.png;
-  if (v.atlasRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(pngPath(pkg, id), v.atlasRgba, v.w, v.h) === 1) {
-    png = pngPath(pkg, id);
-  }
+  const rasters = writeVariantRasters(pkg, id, v);
+  const png = rasters.png ?? existing.png;
   // Strip the old look fields before spreading: an update that lost its look (or its
   // strokes) must not inherit a stale cornerUv/raster-base claim from the previous save.
-  const { cornerUv: _c, rasterBase: _r, basePng: _b, ...kept } = existing;
+  const { cornerUv: _c, rasterBase: _r, basePng: _b, uvCoverage: _u, ...kept } = existing;
   const variant: PaintVariant = {
     ...kept,
     w: v.w,
@@ -180,7 +243,8 @@ export function updatePaintVariant(
     data: v.data,
     format: v.format ?? existing.format ?? 'program',
     png,
-    ...writeLookFields(pkg, id, v, !!png),
+    ...writeLookFields(v, rasters),
+    ...(rasters.uvCoverage ? { uvCoverage: rasters.uvCoverage } : {}),
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // keep the paint-space mesh in step with the refreshed painting

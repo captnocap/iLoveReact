@@ -90,6 +90,85 @@ test('saving model artifacts commits exact UV geometry as the restart record', (
   }
 });
 
+test('model artifact save coverage-crops base and baseline without a base64 raster read', () => {
+  const host = globalThis as any;
+  const names = [
+    '__fs_exists', '__fs_read', '__fs_list_json', '__fs_mkdir', '__fs_remove',
+    '__fs_write_bytes_atomic', '__fs_stat_json', '__model_paint_layout_stale',
+    '__model_atlas_read', '__model_uv_coverage_write', '__image_write_png',
+    '__model_painted_mesh_write', '__model_paint_program_read', '__model_paint_baseline_read',
+  ];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  const files = new Map<string, { size: number; text?: string }>();
+  let atlasReadMode = -1;
+  let legacyPngWrites = 0;
+  let baselineReads = 0;
+  let savedBasePaint = '';
+  try {
+    host.__fs_exists = (path: string) => path.endsWith('/mesh/doc.blob') || files.has(path);
+    host.__fs_read = (path: string) => files.get(path)?.text ?? null;
+    host.__fs_list_json = () => '[]';
+    host.__fs_mkdir = () => true;
+    host.__fs_remove = (path: string) => files.delete(path);
+    host.__fs_stat_json = (path: string) => JSON.stringify({
+      size: files.get(path)?.size ?? 128,
+      mtimeMs: 10,
+      isDir: false,
+    });
+    host.__fs_write_bytes_atomic = (path: string, bytes: Uint8Array) => {
+      const text = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      files.set(path, { size: bytes.length, text });
+      if (path.endsWith('/atlases/base.paint.json')) savedBasePaint = text;
+      return true;
+    };
+    host.__model_paint_layout_stale = () => 0;
+    host.__model_atlas_read = (includeData: number) => {
+      atlasReadMode = includeData;
+      return JSON.stringify({
+        w: 8,
+        h: 8,
+        detail: 16,
+        islands: [1, 1, 6, 6],
+        triangles: [0, 7, 1, 1, 6, 1, 1, 6],
+      });
+    };
+    host.__model_uv_coverage_write = (composite: string, baseline: string) => {
+      files.set(composite, { size: 222 });
+      files.set(baseline, { size: 111 });
+      return JSON.stringify({
+        composite: 1,
+        baseline: 1,
+        w: 8,
+        h: 8,
+        totalPixels: 64,
+        keptPixels: 32,
+        clearedPixels: 32,
+        gutterTexels: 2,
+      });
+    };
+    host.__image_write_png = () => { legacyPngWrites += 1; return 1; };
+    host.__model_painted_mesh_write = (path: string) => {
+      files.set(path, { size: 3 * 8 * 4 });
+      return 1;
+    };
+    host.__model_paint_program_read = () => '';
+    host.__model_paint_baseline_read = () => { baselineReads += 1; return 'AAAA'; };
+
+    const ok = writeModelArtifacts({ kind: 'prop', id: 'test:coverage-base', name: 'Coverage Base' });
+    const record = parseModelBasePaintText(savedBasePaint);
+    assert(ok, 'native coverage artifact save failed');
+    assert(atlasReadMode === 0, `atlas pixels crossed JS despite native writer (mode ${atlasReadMode})`);
+    assert(legacyPngWrites === 0 && baselineReads === 0, 'native success touched the base64 fallback');
+    assert(record?.version === 4 && record.rasterBase === true, 'coverage baseline was not recorded as a full v4 look');
+  } finally {
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
+});
+
 test('base paint refuses empty or unknown records', () => {
   assert(parseModelBasePaintText('{"version":5,"detail":64,"program":"x"}') === null, 'unknown version was accepted');
   assert(parseModelBasePaintText('{"version":3,"detail":64,"program":"","layout":[0,0,1,1]}') === null, 'v3 without raster marker was accepted');

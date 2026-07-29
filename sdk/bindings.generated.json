@@ -557,6 +557,10 @@
           "zig": "hostImageWritePng"
         },
         {
+          "js": "__model_uv_coverage_write",
+          "zig": "hostModelUvCoverageWrite"
+        },
+        {
           "js": "__model_mesh_write",
           "zig": "hostModelMeshWrite"
         },
