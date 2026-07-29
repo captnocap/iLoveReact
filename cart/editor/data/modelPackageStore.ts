@@ -359,6 +359,18 @@ export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): Mode
   return parseModelBasePaintText(text);
 }
 
+/** Whether this package already owns any durable current/base paint artifact.
+ * Automatic source-texture capture uses this before writing: adding the pristine
+ * imported look as a variant must never overwrite a user's established base look. */
+export function hasStoredModelPaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): boolean {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  return !!dir && (
+    exists(`${dir}/atlases/base.paint.json`)
+    || exists(`${dir}/${PAINT_RASTER_BASE_FILE}`)
+    || exists(`${dir}/atlases/base.png`)
+  );
+}
+
 /** Encoded PNG for a v3 paint record's exact raster baseline. */
 export function readModelRasterBase(pkg: Pick<ModelPackage, 'kind' | 'id'>): string | null {
   const dir = resolvePackageDir(pkg.kind, pkg.id);

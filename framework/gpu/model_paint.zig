@@ -1080,9 +1080,9 @@ fn importAtlasWithUvTransform(
     const live_positions = g_positions orelse return false;
     if (g_rgba == null or vert_count != g_facecount * 3) return false;
     if (verts.len < @as(usize, vert_count) * 8) return false;
-    if (width == 0 or height == 0 or width > MAX_ATLAS_DIM or height > MAX_ATLAS_DIM) return false;
+    if (!canImportAtlasDimensions(width, height)) return false;
     const byte_count = @as(usize, width) * @as(usize, height) * 4;
-    if (byte_count > ATLAS_BUDGET or rgba.len != byte_count) return false;
+    if (rgba.len != byte_count) return false;
     if (old_layout.corner_uv.len != @as(usize, vert_count) * 2 or g_atlas_w == 0 or g_atlas_h == 0) return false;
     if (!std.math.isFinite(scale) or scale <= 0 or
         !std.math.isFinite(offset_x) or !std.math.isFinite(offset_y)) return false;
@@ -2601,6 +2601,15 @@ const ATLAS_BUDGET: usize = 256 * 1024 * 1024; // paint-atlas ceiling (bytes)
 // "imported a bus while in paint mode" crash). paint_islands.build clamps to this.
 const MAX_ATLAS_DIM: u32 = 8192;
 
+/// Cheap pre-decode guard for compressed image imports. Callers can reject an
+/// embedded image bomb from metadata before asking an image codec to allocate
+/// its RGBA form; importAtlasWithUvTransform enforces the same boundary again.
+pub fn canImportAtlasDimensions(width: u32, height: u32) bool {
+    if (width == 0 or height == 0 or width > MAX_ATLAS_DIM or height > MAX_ATLAS_DIM) return false;
+    const byte_count = @as(u64, width) * @as(u64, height) * 4;
+    return byte_count <= @as(u64, ATLAS_BUDGET);
+}
+
 /// The APPLIED density (texels/meter) — ≤ the request when the limits clamped it.
 pub fn detail() u32 {
     if (g_layout) |lay| return @max(1, @as(u32, @round(lay.density)));
@@ -3094,6 +3103,14 @@ test "paint-variant crop preserves exact UV coverage and glass while clearing im
     try std.testing.expectEqual(@as(u8, 255), cropped[3]);
     // Finalization is derived output only — the live imported source remains remappable.
     try std.testing.expectEqualSlices(u8, live_before, atlas().?.rgba);
+}
+
+test "embedded atlas dimensions are rejected before decode at the painter limits" {
+    try std.testing.expect(canImportAtlasDimensions(1, 1));
+    try std.testing.expect(canImportAtlasDimensions(MAX_ATLAS_DIM, MAX_ATLAS_DIM));
+    try std.testing.expect(!canImportAtlasDimensions(0, 1));
+    try std.testing.expect(!canImportAtlasDimensions(MAX_ATLAS_DIM + 1, 1));
+    try std.testing.expect(!canImportAtlasDimensions(MAX_ATLAS_DIM, MAX_ATLAS_DIM + 1));
 }
 
 test "topology adoption preserves the live atlas bytes and supplied UVs" {

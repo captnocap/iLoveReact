@@ -45,8 +45,8 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
-import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
+import { ensureImportedTexturePaintVariant, listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
+import { hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
@@ -88,7 +88,15 @@ import { REGIONS } from '../shell/regions';
 
 const host = globalThis as any;
 
-type Loaded = { key: string; count: number; radius: number; faces?: number; name: string };
+type LoadedTexture = { imageIndex: number; width: number; height: number };
+type Loaded = {
+  key: string;
+  count: number;
+  radius: number;
+  faces?: number;
+  name: string;
+  texture?: LoadedTexture;
+};
 export type ModelViewInitialMesh = {
   key: string;
   name: string;
@@ -347,7 +355,24 @@ function loadModelFile(path: string): Loaded | null {
     const o = JSON.parse(json);
     if (!o || typeof o.key !== 'string') return null;
     const name = path.split('/').pop() || path;
-    return { key: o.key, count: o.count | 0, radius: o.radius || 1, faces: o.faces | 0, name };
+    const texture = o.texture
+      && Number.isSafeInteger(o.texture.imageIndex) && o.texture.imageIndex >= 0
+      && Number.isSafeInteger(o.texture.width) && o.texture.width > 0
+      && Number.isSafeInteger(o.texture.height) && o.texture.height > 0
+      ? {
+        imageIndex: o.texture.imageIndex as number,
+        width: o.texture.width as number,
+        height: o.texture.height as number,
+      }
+      : null;
+    return {
+      key: o.key,
+      count: o.count | 0,
+      radius: o.radius || 1,
+      faces: o.faces | 0,
+      name,
+      ...(texture ? { texture } : {}),
+    };
   } catch {
     return null;
   }
@@ -2565,6 +2590,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setQuality(1); // a fresh model loads full-res
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // new mesh → selection cleared
       freshModelPaintReset();
+      // Standalone/session-only loads have nowhere durable to put a variant, but
+      // the native importer still installed an honest live atlas.
+      if (loaded.texture) atlasReadyRef.current = true;
       setAuthoredFaces(null); // a raw import carries no authored n-gon grouping
       setBoundsCenter(null); // the file's vertices never cross the bridge — no cart-side center
       partRangesRef.current = []; // a plain file import is one unstructured mesh, no parts
@@ -2604,6 +2632,57 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
   };
 
+  /** Persist the pristine embedded texture without disturbing an established
+   * package look. A brand-new import adopts it as both base + variant; an older
+   * package gets the original variant while its saved base/latest look remains
+   * the one hydrated for display. */
+  const registerImportedTextureLook = (
+    spec: ModelViewFileParts,
+    loaded: Loaded,
+  ): boolean => {
+    const texture = loaded.texture;
+    if (!texture) return false;
+    if (spec.appends.length > 0) {
+      // A base-only UV table cannot be advertised against a composed topology.
+      // The source image remains visible on its base rows until the explicit
+      // structural-atlas gate asks the user to remake the combined layout.
+      return false;
+    }
+    if (!paintTarget || !paintTargetOnDisk) return true;
+
+    const variantsBefore = listPaintVariants(paintTarget);
+    const storedPaintBefore = hasStoredModelPaint(paintTarget);
+    const sourceIdentity = fileSha(spec.path) || spec.path;
+    const captured = ensureImportedTexturePaintVariant(paintTarget, {
+      kind: 'model-import',
+      fingerprint: `${sourceIdentity}:${texture.imageIndex}`,
+      imageIndex: texture.imageIndex,
+    });
+    if (!captured.variant) {
+      console.error(`[paint-import] ${loaded.name}: embedded texture is live but its paint variant could not be written`);
+      return !storedPaintBefore && variantsBefore.length === 0;
+    }
+    if (captured.created) {
+      console.warn(
+        `[paint-import] ${loaded.name}: ${texture.width}×${texture.height} embedded texture saved as ${captured.variant.name}`,
+      );
+    }
+
+    if (!storedPaintBefore && variantsBefore.length === 0) {
+      // First import: this source look is also the model's current/base look.
+      writeModelArtifacts(paintTarget);
+      return true;
+    }
+    if (!storedPaintBefore && variantsBefore.length > 0) {
+      // Legacy package with variants but no base record: adding the pristine
+      // source variant must not make it the new implicit "latest" look.
+      const priorLatest = variantsBefore[variantsBefore.length - 1]!;
+      return loadPaintVariant(priorLatest);
+    }
+    // The model-key effect will hydrate the already-authored base after mount.
+    return false;
+  };
+
   // Mount a FILE-BACKED multi-part model: host-parse the imported file as the base part,
   // preserve its recovered authored-face groups + give it a part range over the whole import (so the outliner
   // can scope/hide/delete it and the weld keeps it separate), then replay the doc's other
@@ -2615,8 +2694,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return;
     }
     const faces = loaded.faces && loaded.faces > 0 ? loaded.faces : Math.floor(loaded.count / 3);
-    const [br, bg, bb] = hexToRgb01(spec.baseColor);
-    host.__model_paint_group_range?.(0, faces, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
+    // The outliner swatch is the fallback for an untextured file. Flooding a
+    // compatible embedded atlas here was the old seam that erased it immediately.
+    if (!loaded.texture) {
+      const [br, bg, bb] = hexToRgb01(spec.baseColor);
+      host.__model_paint_group_range?.(0, faces, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
+    }
     const ranges: PartRange[] = [{ partId: spec.basePartId, lo: 0, hi: faces }];
     partRangesRef.current = [{ lo: 0, hi: faces }];
     // Establish the base ownership boundary before replaying appended parts;
@@ -2634,11 +2717,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     meshSetPartRanges(partRangesRef.current);
     if (spec.baseHidden) meshSetGroupHidden(0, faces, true, false);
+    freshModelPaintReset();
+    if (registerImportedTextureLook(spec, loaded)) {
+      atlasReadyRef.current = true;
+      atlasInvalidatedRef.current = false;
+    }
     setModel(current);
     setError(null);
     setQuality(1);
     setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
-    freshModelPaintReset();
     setAuthoredFaces(faces);
     setBoundsCenter(null); // the base import's vertices are host-side only
     onPartRanges?.(ranges);

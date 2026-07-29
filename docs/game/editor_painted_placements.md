@@ -149,6 +149,27 @@ can always be added before another explicit compile.
 
 ## Paint variants are full LOOKS (req_3439)
 
+A compatible self-contained GLB now arrives with its original base-colour look
+already live (req_3530). `mesh_import.zig` accepts that shortcut only when every
+rendered triangle has `TEXCOORD_0`, every primitive resolves to the same embedded
+base-colour image and common colour factor, the UVs stay inside the finite image,
+and no vertex-colour, alternate coordinate set, or texture-transform contract
+would be lost. Mixed-material, untextured, externally referenced, transformed,
+or repeating-UV files still import their geometry normally and make no texture
+claim. The host rejects encoded images above the painter's 8192-pixel/256 MiB
+limits before decode, adopts image alpha as opaque under the existing import
+rule, restores the GLB's exact source UV corners, and stashes that final active
+mesh rather than the pre-layout parser copy.
+
+For a newly materialized model, `ModelView` skips the fallback Outliner-colour
+flood, persists the live source look as the package base, and automatically adds
+an `Imported Texture` full-look variant. The variant records a model-content
+hash plus glTF image index, so reopening the same file never duplicates it. An
+existing authored base remains the displayed/current look while the pristine
+source texture is added only as a variant. Save-back strips the import provenance
+because that row is no longer the untouched original; a later reopen can capture
+the source again instead of falsely treating the edited row as its backup.
+
 A saved paint variant (`paints/paint_N.json`) carries the same v4 triple as the
 base painting, so one mesh stores many looks without duplicating the model: the
 exact `cornerUv` table, `rasterBase: true`, and the stroke program (which may be

@@ -10,9 +10,11 @@
 
 import {
   bindPaintSkinToCurrentMesh,
+  ensureImportedTexturePaintVariant,
   paintSkinFitsCurrentMesh,
   PAINT_MESH_VERTEX_BYTES,
   savePaintVariant,
+  updatePaintVariant,
 } from './paintVariants';
 
 let passed = 0, failed = 0;
@@ -126,6 +128,90 @@ test('variant save uses native UV coverage and records the discarded texture are
     assert(variant.rasterBase === true && !!variant.basePng, 'full-look baseline was not recorded');
     assert(variant.uvCoverage?.clearedPixels === 44, 'discarded pixel count was not persisted');
     assert(variant.uvCoverage?.pngBytes === 321 && variant.uvCoverage?.basePngBytes === 123, 'landed PNG sizes were not recorded');
+  } finally {
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
+});
+
+test('an imported model texture is captured once per source fingerprint', () => {
+  const host = globalThis as any;
+  const names = [
+    '__fs_exists', '__fs_read', '__fs_list_json', '__fs_mkdir', '__fs_write',
+    '__fs_remove', '__fs_stat_json', '__model_uv_coverage_write',
+    '__model_painted_mesh_write', '__model_paint_program_read', '__model_atlas_read',
+    '__model_paint_baseline_read',
+  ];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  const dirs = new Set<string>();
+  const files = new Map<string, { size: number; text?: string; isDir?: boolean }>();
+  try {
+    host.__fs_exists = (path: string) => dirs.has(path) || files.has(path);
+    host.__fs_read = (path: string) => files.get(path)?.text ?? null;
+    host.__fs_list_json = (dir: string) => JSON.stringify(
+      [...files.keys()]
+        .filter((path) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes('/'))
+        .map((path) => path.slice(dir.length + 1)),
+    );
+    host.__fs_mkdir = (path: string) => { dirs.add(path); return true; };
+    host.__fs_write = (path: string, text: string) => {
+      files.set(path, { size: text.length, text, isDir: false });
+      return true;
+    };
+    host.__fs_remove = (path: string) => files.delete(path) || dirs.delete(path);
+    host.__fs_stat_json = (path: string) => {
+      const file = files.get(path);
+      return file ? JSON.stringify({ size: file.size, mtimeMs: 1, isDir: false }) : null;
+    };
+    host.__model_uv_coverage_write = (composite: string) => {
+      files.set(composite, { size: 64, isDir: false });
+      return JSON.stringify({
+        composite: 1,
+        baseline: 0,
+        w: 8,
+        h: 8,
+        totalPixels: 64,
+        keptPixels: 32,
+        clearedPixels: 32,
+        gutterTexels: 2,
+      });
+    };
+    host.__model_painted_mesh_write = (path: string) => {
+      files.set(path, { size: 96, isDir: false });
+      return 1;
+    };
+    host.__model_paint_program_read = () => '';
+    host.__model_atlas_read = () => JSON.stringify({
+      w: 8,
+      h: 8,
+      detail: 1,
+      triangles: [0, 0, 0, 0, 8, 0, 0, 8],
+    });
+    host.__model_paint_baseline_read = () => '';
+
+    const pkg = { kind: 'prop' as const, id: 'test:embedded-texture', name: 'Embedded Texture' };
+    const source = { kind: 'model-import' as const, fingerprint: 'sha256:0', imageIndex: 0 };
+    const first = ensureImportedTexturePaintVariant(pkg, source);
+    const second = ensureImportedTexturePaintVariant(pkg, source);
+    assert(first.created && first.variant?.name === 'Imported Texture', 'first source texture was not captured');
+    assert(first.variant?.rasterBase === true, 'strokeless source texture did not retain its raster base');
+    assert(first.variant?.importedTexture?.fingerprint === source.fingerprint, 'source provenance was not persisted');
+    assert(!second.created && second.variant?.id === first.variant?.id, 'same source texture created a duplicate variant');
+
+    const edited = updatePaintVariant(pkg, first.variant!.id, {
+      w: 8,
+      h: 8,
+      detail: 1,
+      data: '',
+      format: 'program',
+      cornerUv: [0, 0, 8, 0, 0, 8],
+    });
+    assert(edited?.importedTexture === undefined, 'save-back left edited paint claiming to be the pristine import');
+    const recaptured = ensureImportedTexturePaintVariant(pkg, source);
+    assert(recaptured.created && recaptured.variant?.id !== first.variant?.id, 'edited source row suppressed recapture of the original');
   } finally {
     for (const name of names) {
       const value = prior.get(name);

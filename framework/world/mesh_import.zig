@@ -15,8 +15,10 @@
 //!
 //! Supported: GLB v2 (TRIANGLES primitives, node TRS hierarchy, all meshes merged),
 //! and Wavefront OBJ (v/vt/vn/f, n-gon fan triangulation, 1-based + negative indices).
-//! Materials/textures are intentionally ignored — a viewer shades from a single
-//! material; the Studio import path is where texturing lives.
+//! A GLB's embedded base-colour image is also surfaced when every emitted primitive
+//! can honestly share one image/UV contract. The GPU/editor boundary decides whether
+//! to adopt those encoded bytes as a live paint atlas; this headless parser never
+//! decodes image formats.
 
 const std = @import("std");
 
@@ -24,6 +26,19 @@ const std = @import("std");
 /// local mirror so this module has no dependency on the GPU layer (it stays headless-
 /// testable). The compileError in 3d.zig guards the scene3d pipeline's matching stride.
 pub const FLOATS_PER_VERTEX = 8;
+
+/// One encoded base-colour image carried inside a GLB. This is deliberately the
+/// narrow single-atlas case the model painter can represent without flattening a
+/// multi-material model into the wrong image.
+pub const EmbeddedTexture = struct {
+    encoded: []u8,
+    image_index: u32,
+    color_factor: [3]f32,
+
+    fn deinit(self: *const EmbeddedTexture, alloc: std.mem.Allocator) void {
+        alloc.free(self.encoded);
+    }
+};
 
 pub const ParsedMesh = struct {
     /// Interleaved, non-indexed: FLOATS_PER_VERTEX * vert_count floats.
@@ -35,9 +50,13 @@ pub const ParsedMesh = struct {
     /// Bounding-sphere radius about `center`. The orbit camera frames the model from
     /// this, so an arbitrary-scale import always lands sensibly in view.
     radius: f32,
+    /// Present only when every emitted GLB triangle has TEXCOORD_0 and resolves to
+    /// the same embedded base-colour image with one common colour factor.
+    embedded_texture: ?EmbeddedTexture = null,
 
     pub fn deinit(self: *const ParsedMesh, alloc: std.mem.Allocator) void {
         alloc.free(self.verts);
+        if (self.embedded_texture) |*texture| texture.deinit(alloc);
     }
 };
 
@@ -129,6 +148,8 @@ const Builder = struct {
     lo: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) },
     hi: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) },
     count: u32 = 0,
+    texture_use: ?TextureUse = null,
+    texture_compatible: bool = true,
 
     fn vertex(self: *Builder, alloc: std.mem.Allocator, p: [3]f32, n: [3]f32, uv: [2]f32) !void {
         try self.out.appendSlice(alloc, &.{ p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1] });
@@ -150,6 +171,23 @@ const Builder = struct {
         try self.vertex(alloc, p[0], nrm[0], uv[0]);
         try self.vertex(alloc, p[1], nrm[1], uv[1]);
         try self.vertex(alloc, p[2], nrm[2], uv[2]);
+    }
+
+    fn noteTextureUse(self: *Builder, use: ?TextureUse, unit_uvs: bool) void {
+        if (!unit_uvs or use == null) {
+            self.texture_compatible = false;
+            return;
+        }
+        const incoming = use.?;
+        if (self.texture_use) |existing| {
+            if (existing.image_index != incoming.image_index or
+                !colorFactorsEqual(existing.color_factor, incoming.color_factor))
+            {
+                self.texture_compatible = false;
+            }
+        } else {
+            self.texture_use = incoming;
+        }
     }
 
     fn finish(self: *Builder, alloc: std.mem.Allocator) Error!ParsedMesh {
@@ -267,6 +305,80 @@ fn jArr(v: ?std.json.Value) ?std.json.Array {
         .array => |a| a,
         else => null,
     };
+}
+fn jString(v: ?std.json.Value) ?[]const u8 {
+    const val = v orelse return null;
+    return switch (val) {
+        .string => |s| s,
+        else => null,
+    };
+}
+
+const TextureUse = struct {
+    image_index: u32,
+    color_factor: [3]f32,
+};
+
+const TextureImportTuning = struct {
+    /// The finite paint atlas cannot reproduce sampler wrapping. Tiny exporter
+    /// round-off at an image boundary is accepted; genuinely tiled UVs are not.
+    const unit_uv_epsilon: f32 = 0.0001;
+};
+
+fn colorFactorsEqual(a: [3]f32, b: [3]f32) bool {
+    inline for (0..3) |channel| {
+        if (!std.math.approxEqAbs(f32, a[channel], b[channel], 0.000001)) return false;
+    }
+    return true;
+}
+
+fn textureSourceIndex(texture: std.json.Value) ?u32 {
+    if (jInt(jget(texture, "source"))) |source| {
+        if (source >= 0 and source <= std.math.maxInt(u32)) return @intCast(source);
+        return null;
+    }
+    const extensions = jget(texture, "extensions") orelse return null;
+    const webp = jget(extensions, "EXT_texture_webp") orelse return null;
+    const source = jInt(jget(webp, "source")) orelse return null;
+    if (source < 0 or source > std.math.maxInt(u32)) return null;
+    return @intCast(source);
+}
+
+/// Resolve the one base-colour sampling contract this primitive uses. Unsupported
+/// texture-coordinate sets/transforms and vertex colour modulation fail closed:
+/// geometry still imports, but no single paint look is advertised.
+fn primitiveTextureUse(root: std.json.Value, prim: std.json.Value, has_texcoord_0: bool) ?TextureUse {
+    if (!has_texcoord_0) return null;
+    const attrs = jget(prim, "attributes") orelse return null;
+    if (jget(attrs, "COLOR_0") != null) return null;
+
+    const material_index = jInt(jget(prim, "material")) orelse return null;
+    const materials = jArr(jget(root, "materials")) orelse return null;
+    if (material_index < 0 or material_index >= materials.items.len) return null;
+    const material = materials.items[@intCast(material_index)];
+    const pbr = jget(material, "pbrMetallicRoughness") orelse return null;
+    const base_texture = jget(pbr, "baseColorTexture") orelse return null;
+    if ((jInt(jget(base_texture, "texCoord")) orelse 0) != 0) return null;
+    if (jget(base_texture, "extensions")) |extensions| {
+        if (jget(extensions, "KHR_texture_transform") != null) return null;
+    }
+
+    const texture_index = jInt(jget(base_texture, "index")) orelse return null;
+    const textures = jArr(jget(root, "textures")) orelse return null;
+    if (texture_index < 0 or texture_index >= textures.items.len) return null;
+    const image_index = textureSourceIndex(textures.items[@intCast(texture_index)]) orelse return null;
+
+    var factor: [3]f32 = .{ 1, 1, 1 };
+    if (jget(pbr, "baseColorFactor") != null) {
+        const values = jArr(jget(pbr, "baseColorFactor")) orelse return null;
+        if (values.items.len < 3) return null;
+        inline for (0..3) |channel| {
+            const value = jFloat(values.items[channel]) orelse return null;
+            if (!std.math.isFinite(value) or value < 0 or value > 1) return null;
+            factor[channel] = value;
+        }
+    }
+    return .{ .image_index = image_index, .color_factor = factor };
 }
 
 const Accessor = struct {
@@ -455,7 +567,73 @@ pub fn parseGlb(alloc: std.mem.Allocator, bytes: []const u8) Error!ParsedMesh {
         for (meshes.items) |mesh| try emitMesh(alloc, root, chunks.bin, &b, mesh, mat4Identity());
     }
 
-    return b.finish(alloc);
+    var mesh = try b.finish(alloc);
+    errdefer mesh.deinit(alloc);
+    if (b.texture_compatible) {
+        if (b.texture_use) |use| {
+            if (try extractEmbeddedImage(alloc, root, chunks.bin, use.image_index)) |encoded| {
+                mesh.embedded_texture = .{
+                    .encoded = encoded,
+                    .image_index = use.image_index,
+                    .color_factor = use.color_factor,
+                };
+            }
+        }
+    }
+    return mesh;
+}
+
+fn embeddedBufferViewBytes(
+    alloc: std.mem.Allocator,
+    root: std.json.Value,
+    bin: []const u8,
+    view_index: i64,
+) Error!?[]u8 {
+    const views = jArr(jget(root, "bufferViews")) orelse return null;
+    if (view_index < 0 or view_index >= views.items.len) return null;
+    const view = views.items[@intCast(view_index)];
+    if ((jInt(jget(view, "buffer")) orelse 0) != 0) return null;
+    const offset_raw = jInt(jget(view, "byteOffset")) orelse 0;
+    const length_raw = jInt(jget(view, "byteLength")) orelse return null;
+    if (offset_raw < 0 or length_raw <= 0) return null;
+    const offset: usize = @intCast(offset_raw);
+    const length: usize = @intCast(length_raw);
+    if (offset > bin.len or length > bin.len - offset) return null;
+    return try alloc.dupe(u8, bin[offset .. offset + length]);
+}
+
+fn embeddedDataUriBytes(alloc: std.mem.Allocator, uri: []const u8) Error!?[]u8 {
+    if (!std.mem.startsWith(u8, uri, "data:")) return null;
+    const comma = std.mem.indexOfScalar(u8, uri, ',') orelse return null;
+    if (std.mem.indexOf(u8, uri[0..comma], ";base64") == null) return null;
+    const payload = uri[comma + 1 ..];
+    const decoder = std.base64.standard.Decoder;
+    const decoded_len = decoder.calcSizeForSlice(payload) catch return null;
+    if (decoded_len == 0) return null;
+    const decoded = try alloc.alloc(u8, decoded_len);
+    decoder.decode(decoded, payload) catch {
+        alloc.free(decoded);
+        return null;
+    };
+    return decoded;
+}
+
+fn extractEmbeddedImage(
+    alloc: std.mem.Allocator,
+    root: std.json.Value,
+    bin: []const u8,
+    image_index: u32,
+) Error!?[]u8 {
+    const images = jArr(jget(root, "images")) orelse return null;
+    if (image_index >= images.items.len) return null;
+    const image = images.items[image_index];
+    if (jInt(jget(image, "bufferView"))) |view_index| {
+        return embeddedBufferViewBytes(alloc, root, bin, view_index);
+    }
+    if (jString(jget(image, "uri"))) |uri| {
+        return embeddedDataUriBytes(alloc, uri);
+    }
+    return null;
 }
 
 fn visitNode(alloc: std.mem.Allocator, root: std.json.Value, bin: []const u8, b: *Builder, node_index: i64, parent: Mat4) Error!void {
@@ -508,6 +686,9 @@ fn emitPrimitive(alloc: std.mem.Allocator, root: std.json.Value, bin: []const u8
     defer if (uvs) |u| alloc.free(u);
 
     const vert_count = pos_acc.count;
+    const texture_use = primitiveTextureUse(root, prim, uvs != null);
+    var unit_uvs = true;
+    const count_before = b.count;
 
     // Index stream — explicit, or implicit 0,1,2,… when absent.
     var indices: ?[]u32 = null;
@@ -546,9 +727,19 @@ fn emitPrimitive(alloc: std.mem.Allocator, root: std.json.Value, bin: []const u8
                 n[k] = .{ 0, 0, 0 };
             }
             uv[k] = if (uvs) |src| .{ src[vi * 2], src[vi * 2 + 1] } else .{ 0, 0 };
+            inline for (0..2) |coordinate| {
+                const value = uv[k][coordinate];
+                if (!std.math.isFinite(value) or
+                    value < -TextureImportTuning.unit_uv_epsilon or
+                    value > 1 + TextureImportTuning.unit_uv_epsilon)
+                {
+                    unit_uvs = false;
+                }
+            }
         }
         try b.triangle(alloc, p, n, uv, normals == null);
     }
+    if (b.count > count_before) b.noteTextureUse(texture_use, unit_uvs);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -886,6 +1077,42 @@ test "glb: minimal single-triangle file round-trips" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.verts[2 * 8 + 1], 1e-5);
 }
 
+test "glb: one compatible embedded base-colour image is retained with source UVs" {
+    const alloc = std.testing.allocator;
+    const glb = try buildTexturedTestGlb(alloc, false);
+    defer alloc.free(glb);
+    var mesh = try parseGlb(alloc, glb);
+    defer mesh.deinit(alloc);
+
+    const texture = mesh.embedded_texture orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u32, 0), texture.image_index);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, texture.encoded);
+    try std.testing.expectEqualSlices(f32, &.{ 0.5, 0.75, 1.0 }, &texture.color_factor);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.verts[1 * 8 + 6], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.verts[2 * 8 + 7], 1e-5);
+}
+
+test "glb: an untextured emitted primitive refuses a misleading single-atlas claim" {
+    const alloc = std.testing.allocator;
+    const glb = try buildTexturedTestGlb(alloc, true);
+    defer alloc.free(glb);
+    var mesh = try parseGlb(alloc, glb);
+    defer mesh.deinit(alloc);
+
+    try std.testing.expectEqual(@as(u32, 6), mesh.vert_count);
+    try std.testing.expect(mesh.embedded_texture == null);
+}
+
+test "glb: embedded base64 data image bytes decode without involving image codecs" {
+    const alloc = std.testing.allocator;
+    const decoded = (try embeddedDataUriBytes(alloc, "data:image/png;base64,AQIDBA==")) orelse
+        return error.TestUnexpectedResult;
+    defer alloc.free(decoded);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, decoded);
+    try std.testing.expect((try embeddedDataUriBytes(alloc, "external.png")) == null);
+    try std.testing.expect((try embeddedDataUriBytes(alloc, "data:image/png;base64,not!base64")) == null);
+}
+
 test "glb: rejects non-glTF bytes" {
     const alloc = std.testing.allocator;
     try std.testing.expectError(Error.NotGlb, parseGlb(alloc, "not a glb at all!!"));
@@ -913,6 +1140,33 @@ test "interleaved cooked mesh rejects incomplete vertex layout" {
     try std.testing.expectError(Error.MalformedInterleavedMesh, fromInterleaved(alloc, &verts, 3));
 }
 
+fn assembleTestGlb(alloc: std.mem.Allocator, json: []const u8, bin: []const u8) ![]u8 {
+    // Pad JSON to a 4-byte boundary with spaces (the GLB spec's filler).
+    const json_pad = (4 - (json.len % 4)) % 4;
+    const json_len = json.len + json_pad;
+    const bin_pad = (4 - (bin.len % 4)) % 4;
+    const bin_len = bin.len + bin_pad;
+    const total = 12 + 8 + json_len + 8 + bin_len;
+
+    var out = try alloc.alloc(u8, total);
+    errdefer alloc.free(out);
+    @memcpy(out[0..4], "glTF");
+    std.mem.writeInt(u32, out[4..8], 2, .little);
+    std.mem.writeInt(u32, out[8..12], @intCast(total), .little);
+    // JSON chunk
+    std.mem.writeInt(u32, out[12..16], @intCast(json_len), .little);
+    std.mem.writeInt(u32, out[16..20], 0x4E4F534A, .little);
+    @memcpy(out[20 .. 20 + json.len], json);
+    for (0..json_pad) |i| out[20 + json.len + i] = ' ';
+    // BIN chunk
+    const bin_chunk = 20 + json_len;
+    std.mem.writeInt(u32, out[bin_chunk..][0..4], @intCast(bin_len), .little);
+    std.mem.writeInt(u32, out[bin_chunk + 4 ..][0..4], 0x004E4942, .little);
+    @memcpy(out[bin_chunk + 8 ..][0..bin.len], bin);
+    for (0..bin_pad) |i| out[bin_chunk + 8 + bin.len + i] = 0;
+    return out;
+}
+
 /// Assemble a tiny valid GLB v2: one mesh, one triangle, indexed, POSITION only.
 fn buildTestGlb(alloc: std.mem.Allocator) ![]u8 {
     // BIN: 3 vec3 positions (36 B) + 3 u16 indices (6 B), padded to 4 → 44 B.
@@ -935,25 +1189,56 @@ fn buildTestGlb(alloc: std.mem.Allocator) ![]u8 {
         \\ {"buffer":0,"byteOffset":36,"byteLength":6}],
         \\"buffers":[{"byteLength":44}]}
     ;
-    // Pad JSON to a 4-byte boundary with spaces (the GLB spec's filler).
-    const json_pad = (4 - (json.len % 4)) % 4;
-    const json_len = json.len + json_pad;
-    const total = 12 + 8 + json_len + 8 + bin.len;
+    return assembleTestGlb(alloc, json, &bin);
+}
 
-    var out = try alloc.alloc(u8, total);
-    errdefer alloc.free(out);
-    @memcpy(out[0..4], "glTF");
-    std.mem.writeInt(u32, out[4..8], 2, .little);
-    std.mem.writeInt(u32, out[8..12], @intCast(total), .little);
-    // JSON chunk
-    std.mem.writeInt(u32, out[12..16], @intCast(json_len), .little);
-    std.mem.writeInt(u32, out[16..20], 0x4E4F534A, .little);
-    @memcpy(out[20 .. 20 + json.len], json);
-    for (0..json_pad) |i| out[20 + json.len + i] = ' ';
-    // BIN chunk
-    const bin_chunk = 20 + json_len;
-    std.mem.writeInt(u32, out[bin_chunk..][0..4], @intCast(bin.len), .little);
-    std.mem.writeInt(u32, out[bin_chunk + 4 ..][0..4], 0x004E4942, .little);
-    @memcpy(out[bin_chunk + 8 ..][0..bin.len], &bin);
-    return out;
+fn buildTexturedTestGlb(alloc: std.mem.Allocator, include_untextured_primitive: bool) ![]u8 {
+    // BIN: positions 36 B, UVs 24 B, indices 6 B + 2 B pad, encoded image 4 B.
+    var bin: [72]u8 = [_]u8{0} ** 72;
+    const pos = [_]f32{ 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+    for (pos, 0..) |f, i| std.mem.writeInt(u32, bin[i * 4 ..][0..4], @bitCast(f), .little);
+    const uv = [_]f32{ 0, 0, 1, 0, 0, 1 };
+    for (uv, 0..) |f, i| std.mem.writeInt(u32, bin[36 + i * 4 ..][0..4], @bitCast(f), .little);
+    const idx = [_]u16{ 0, 1, 2 };
+    for (idx, 0..) |v, i| std.mem.writeInt(u16, bin[60 + i * 2 ..][0..2], v, .little);
+    @memcpy(bin[68..72], &[_]u8{ 1, 2, 3, 4 });
+
+    const one_primitive =
+        \\{"asset":{"version":"2.0"},"scene":0,
+        \\"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],
+        \\"meshes":[{"primitives":[
+        \\ {"attributes":{"POSITION":0,"TEXCOORD_0":1},"indices":2,"material":0,"mode":4}]}],
+        \\"materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0},"baseColorFactor":[0.5,0.75,1,1]}}],
+        \\"textures":[{"source":0}],"images":[{"bufferView":3,"mimeType":"image/png"}],
+        \\"accessors":[
+        \\ {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+        \\ {"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"},
+        \\ {"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}],
+        \\"bufferViews":[
+        \\ {"buffer":0,"byteOffset":0,"byteLength":36},
+        \\ {"buffer":0,"byteOffset":36,"byteLength":24},
+        \\ {"buffer":0,"byteOffset":60,"byteLength":6},
+        \\ {"buffer":0,"byteOffset":68,"byteLength":4}],
+        \\"buffers":[{"byteLength":72}]}
+    ;
+    const mixed_primitives =
+        \\{"asset":{"version":"2.0"},"scene":0,
+        \\"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],
+        \\"meshes":[{"primitives":[
+        \\ {"attributes":{"POSITION":0,"TEXCOORD_0":1},"indices":2,"material":0,"mode":4},
+        \\ {"attributes":{"POSITION":0,"TEXCOORD_0":1},"indices":2,"mode":4}]}],
+        \\"materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0},"baseColorFactor":[0.5,0.75,1,1]}}],
+        \\"textures":[{"source":0}],"images":[{"bufferView":3,"mimeType":"image/png"}],
+        \\"accessors":[
+        \\ {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+        \\ {"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"},
+        \\ {"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}],
+        \\"bufferViews":[
+        \\ {"buffer":0,"byteOffset":0,"byteLength":36},
+        \\ {"buffer":0,"byteOffset":36,"byteLength":24},
+        \\ {"buffer":0,"byteOffset":60,"byteLength":6},
+        \\ {"buffer":0,"byteOffset":68,"byteLength":4}],
+        \\"buffers":[{"byteLength":72}]}
+    ;
+    return assembleTestGlb(alloc, if (include_untextured_primitive) mixed_primitives else one_primitive, &bin);
 }

@@ -24,6 +24,7 @@ const scene3d = @import("gpu/3d.zig");
 const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");
 const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
 const mesh_import = @import("world/mesh_import.zig");
+const image_codec = @import("image/codec.zig");
 const model_source = @import("gpu/model_source.zig");
 const meshdoc_format = @import("gpu/meshdoc_format.zig");
 const material_tex = @import("gpu/material_tex.zig");
@@ -290,7 +291,58 @@ fn hostScene3DPatchDyn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
-/// __mesh_load_file(path) → JSON {"key","count","radius","faces"} | "" on failure.
+const ImportedModelTexture = struct {
+    image_index: u32,
+    width: u32,
+    height: u32,
+};
+
+fn applyEmbeddedModelTexture(mesh: *const mesh_import.ParsedMesh) ?ImportedModelTexture {
+    const texture = mesh.embedded_texture orelse return null;
+    const metadata = image_codec.info(texture.encoded) catch return null;
+    if (!scene3d.paintAtlasImportDimensionsFit(metadata.width, metadata.height)) return null;
+
+    var image = image_codec.decode(std.heap.c_allocator, texture.encoded) catch return null;
+    defer image.deinit();
+    if (image.width != metadata.width or image.height != metadata.height) return null;
+
+    // glTF's baseColorFactor multiplies the sampled image. Bake the one common
+    // factor accepted by mesh_import so the paint atlas matches the source look.
+    const pixels = image.data();
+    var pixel: usize = 0;
+    while (pixel < pixels.len) : (pixel += 4) {
+        inline for (0..3) |channel| {
+            const scaled = @as(f32, pixels[pixel + channel]) * texture.color_factor[channel];
+            pixels[pixel + channel] = @round(std.math.clamp(scaled, 0, 255));
+        }
+    }
+
+    const corner_count = @as(usize, mesh.vert_count) * 2;
+    const corners = std.heap.c_allocator.alloc(f32, corner_count) catch return null;
+    defer std.heap.c_allocator.free(corners);
+    const width: f32 = @floatFromInt(image.width);
+    const height: f32 = @floatFromInt(image.height);
+    var vertex: u32 = 0;
+    while (vertex < mesh.vert_count) : (vertex += 1) {
+        const source = @as(usize, vertex) * mesh_import.FLOATS_PER_VERTEX;
+        const target = @as(usize, vertex) * 2;
+        const u = mesh.verts[source + 6];
+        const v = mesh.verts[source + 7];
+        if (!std.math.isFinite(u) or !std.math.isFinite(v)) return null;
+        corners[target + 0] = u * width;
+        corners[target + 1] = v * height;
+    }
+
+    if (!scene3d.importPaintAtlas(image.data(), image.width, image.height)) return null;
+    if (!scene3d.applyUvCornerGeometry(corners)) return null;
+    return .{
+        .image_index = texture.image_index,
+        .width = image.width,
+        .height = image.height,
+    };
+}
+
+/// __mesh_load_file(path) → JSON {"key","count","radius","faces","texture"?} | "" on failure.
 /// The drop-to-view door: parse a GLB/OBJ ENTIRELY in the host (no geometry crosses
 /// the bridge), park its verts in the scene3d host stash under `key`, and seed the
 /// orbit camera to frame it. The cart renders a <Scene3D.Mesh scene3dGeomKey={key}>
@@ -343,8 +395,12 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     defer std.heap.c_allocator.free(groups);
     scene3d.meshEditSetFaceGroups(groups);
     _ = scene3d.refreshPaintLayout();
+    const imported_texture = applyEmbeddedModelTexture(&mesh);
+    if (mesh.embedded_texture != null and imported_texture == null) {
+        std.log.warn("[mesh-load] {s}: embedded base-colour texture could not become a paint atlas", .{path});
+    }
     scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
-    if (!scene3d.stashHostMesh(path, mesh.verts, mesh.vert_count)) {
+    if (!scene3d.stashActiveEditMesh()) {
         setReturnString(info, "");
         return;
     }
@@ -369,7 +425,21 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     }
     var face_count: u32 = 0;
     for (groups) |group| face_count = @max(face_count, group + 1);
-    w.print("\",\"count\":{d},\"radius\":{d:.6},\"faces\":{d}}}", .{ mesh.vert_count, mesh.radius, face_count }) catch {
+    w.print("\",\"count\":{d},\"radius\":{d:.6},\"faces\":{d}", .{ mesh.vert_count, mesh.radius, face_count }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    if (imported_texture) |texture| {
+        w.print(",\"texture\":{{\"imageIndex\":{d},\"width\":{d},\"height\":{d}}}", .{
+            texture.image_index,
+            texture.width,
+            texture.height,
+        }) catch {
+            setReturnString(info, "");
+            return;
+        };
+    }
+    w.writeByte('}') catch {
         setReturnString(info, "");
         return;
     };

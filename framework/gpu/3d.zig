@@ -820,6 +820,20 @@ pub fn meshEditActiveCount() u32 {
     return g_edit_count;
 }
 
+/// Park the authoritative active edit copy for first draw. Paint-layout rebuilds
+/// and imported UV adoption mutate this copy after setPaintTarget, so stashing the
+/// parser's earlier buffer would publish stale UVs.
+pub fn stashActiveEditMesh() bool {
+    const key = g_edit_key orelse return false;
+    const verts = g_edit_verts orelse return false;
+    return stashHostMesh(key, verts, g_edit_count);
+}
+
+/// Pre-decode guard shared by host image importers and the painter's commit path.
+pub fn paintAtlasImportDimensionsFit(width: u32, height: u32) bool {
+    return model_paint.canImportAtlasDimensions(width, height);
+}
+
 /// Start a genuinely new model document. Unlike an in-document topology replace or
 /// quality remesh, this drops the previous document's focused outliner range so it
 /// cannot filter the incoming mesh (req_2953).

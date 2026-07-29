@@ -20,7 +20,7 @@
 // stroke program on top. With strokes, the baseline BENEATH them persists as
 // paints/paint_<id>.base.png; with none, the composite .png doubles as the base.
 import { exists, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile } from '../../../runtime/hooks/fs';
-import { claimPackageDir, parsedUvCornerGeometry } from './modelPackageStore';
+import { claimPackageDir, exactUvCornersFromAtlasTriangles, parsedUvCornerGeometry } from './modelPackageStore';
 import { hasUvCoverageRasterWriter, writeUvCoverageRasters, type UvCoverageSummary } from './uvCoverageRaster';
 import type { ModelPackage } from './types';
 
@@ -30,6 +30,13 @@ const host = globalThis as any;
 // claims a name-slug dir for a model saved for the first time (req_2735), so
 // paints always land beside the manifest they belong to.
 export type PaintTarget = Pick<ModelPackage, 'kind' | 'id' | 'name'>;
+
+export type ImportedTextureVariantSource = {
+  kind: 'model-import';
+  /** Stable source-model content hash plus the glTF image index. */
+  fingerprint: string;
+  imageIndex: number;
+};
 
 export type PaintVariant = {
   id: string; // stable + unique within the model (a monotonic sequence)
@@ -47,6 +54,9 @@ export type PaintVariant = {
   rasterBase?: true; // a restore raster exists on disk: basePng when strokes ride on top, else png
   basePng?: string; // the baseline BENEATH the strokes (paint_<id>.base.png); absent when data is ''
   uvCoverage?: UvCoverageSummary; // save-time discarded-pixel proof (req_3520)
+  /** Present only while this variant remains the untouched texture adopted from
+   *  a model import. Save-back strips it so the original can be captured again. */
+  importedTexture?: ImportedTextureVariantSource;
 };
 
 function paintsDir(pkg: PaintTarget): string { return `${claimPackageDir(pkg)}/paints`; }
@@ -69,6 +79,51 @@ type PaintRasterWrite = {
   basePng?: string;
   uvCoverage?: UvCoverageSummary;
 };
+
+export type CapturedPaintLook = {
+  prog: string;
+  w: number;
+  h: number;
+  detail: number;
+  rgba?: string;
+  cornerUv: number[] | null;
+  baseline: string;
+};
+
+/** Read the resident model's complete current LOOK without making a persistence
+ * decision. UI saves and automatic model-texture adoption share this one bridge
+ * contract so a strokeless raster+UV look cannot diverge between the two paths. */
+export function captureCurrentPaintLook(): CapturedPaintLook | null {
+  const progValue = host.__model_paint_program_read?.();
+  const prog = typeof progValue === 'string' ? progValue : '';
+  const nativeCoverageWrite = hasUvCoverageRasterWriter();
+  let atlas: { w: number; h: number; detail: number; data?: string; triangles?: unknown } = {
+    w: 0,
+    h: 0,
+    detail: 1,
+  };
+  try {
+    atlas = {
+      ...atlas,
+      ...JSON.parse(host.__model_atlas_read?.(nativeCoverageWrite ? 0 : 1) || '{}'),
+    };
+  } catch { /* metadata is optional */ }
+  const cornerUv = exactUvCornersFromAtlasTriangles(atlas.triangles, atlas.w, atlas.h);
+  const baselineValue = nativeCoverageWrite ? '' : host.__model_paint_baseline_read?.();
+  const baseline = typeof baselineValue === 'string' ? baselineValue : '';
+  const hasLook = !!cornerUv && atlas.w > 0 && atlas.h > 0
+    && !!(nativeCoverageWrite || baseline || atlas.data);
+  if (!prog && !hasLook) return null;
+  return {
+    prog,
+    w: atlas.w,
+    h: atlas.h,
+    detail: atlas.detail,
+    rgba: atlas.data,
+    cornerUv,
+    baseline,
+  };
+}
 
 /** Finalize the resident raster through the native UV-coverage door. The old base64
  * writer remains a lazy failure/back-compat path, but successful large-atlas saves
@@ -149,11 +204,34 @@ function withValidatedCoverage(v: PaintVariant): PaintVariant {
   return rest;
 }
 
+function parsedImportedTextureSource(value: unknown): ImportedTextureVariantSource | null {
+  if (!value || typeof value !== 'object') return null;
+  const source = value as Partial<ImportedTextureVariantSource>;
+  if (source.kind !== 'model-import'
+    || typeof source.fingerprint !== 'string'
+    || source.fingerprint.length === 0
+    || !Number.isSafeInteger(source.imageIndex)
+    || (source.imageIndex as number) < 0) return null;
+  return {
+    kind: 'model-import',
+    fingerprint: source.fingerprint,
+    imageIndex: source.imageIndex as number,
+  };
+}
+
+function withValidatedImportedTexture(v: PaintVariant): PaintVariant {
+  if (v.importedTexture === undefined) return v;
+  const importedTexture = parsedImportedTextureSource(v.importedTexture);
+  if (importedTexture) return { ...v, importedTexture };
+  const { importedTexture: _source, ...rest } = v;
+  return rest;
+}
+
 /** A loaded variant only advertises a full look when the record is coherent AND its
  *  raster base is actually on disk — a half-restorable look must fall back to the
  *  plain program/atlas path instead of importing nothing. */
 function withValidatedLook(raw: PaintVariant): PaintVariant {
-  const v = withValidatedCoverage(raw);
+  const v = withValidatedCoverage(withValidatedImportedTexture(raw));
   if (v.rasterBase === undefined && v.cornerUv === undefined && v.basePng === undefined) return v;
   const cornerUv = parsedUvCornerGeometry(v.cornerUv);
   const raster = v.basePng ?? v.png;
@@ -195,7 +273,16 @@ export function listPaintVariants(pkg: PaintTarget): PaintVariant[] {
  *  the full-look restore record (cornerUv + raster base). Returns it. */
 export function savePaintVariant(
   pkg: PaintTarget,
-  v: { name?: string; w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string } & Partial<PaintLookInput>,
+  v: {
+    name?: string;
+    w: number;
+    h: number;
+    detail: number;
+    data: string;
+    format?: 'atlas' | 'program';
+    atlasRgba?: string;
+    importedTexture?: ImportedTextureVariantSource;
+  } & Partial<PaintLookInput>,
 ): PaintVariant {
   const dir = paintsDir(pkg);
   mkdir(dir); // recursive: creates the package + paints/ dir if this is the first save
@@ -203,6 +290,7 @@ export function savePaintVariant(
   const seq = list.reduce((max, x) => Math.max(max, Number(x.id) || 0), 0) + 1;
   const id = String(seq);
   const rasters = writeVariantRasters(pkg, id, v);
+  const importedTexture = parsedImportedTextureSource(v.importedTexture);
   const variant: PaintVariant = {
     id,
     name: v.name?.trim() || `Painting ${seq}`,
@@ -214,6 +302,7 @@ export function savePaintVariant(
     png: rasters.png,
     ...writeLookFields(v, rasters),
     ...(rasters.uvCoverage ? { uvCoverage: rasters.uvCoverage } : {}),
+    ...(importedTexture ? { importedTexture } : {}),
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // save writes what you SEE — the paint-space mesh pairs with the .png
@@ -234,7 +323,14 @@ export function updatePaintVariant(
   const png = rasters.png ?? existing.png;
   // Strip the old look fields before spreading: an update that lost its look (or its
   // strokes) must not inherit a stale cornerUv/raster-base claim from the previous save.
-  const { cornerUv: _c, rasterBase: _r, basePng: _b, uvCoverage: _u, ...kept } = existing;
+  const {
+    cornerUv: _c,
+    rasterBase: _r,
+    basePng: _b,
+    uvCoverage: _u,
+    importedTexture: _source,
+    ...kept
+  } = existing;
   const variant: PaintVariant = {
     ...kept,
     w: v.w,
@@ -249,6 +345,50 @@ export function updatePaintVariant(
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   writePaintVariantMeshBlob(pkg, id); // keep the paint-space mesh in step with the refreshed painting
   return variant;
+}
+
+export type EnsureImportedTextureVariantResult = {
+  variant: PaintVariant | null;
+  created: boolean;
+};
+
+/** Capture a compatible model file's embedded texture exactly once per source
+ * content/image pair. This owns provenance/deduplication; callers decide whether
+ * the captured original should also become the package's current base look. */
+export function ensureImportedTexturePaintVariant(
+  pkg: PaintTarget,
+  source: ImportedTextureVariantSource,
+): EnsureImportedTextureVariantResult {
+  const importedTexture = parsedImportedTextureSource(source);
+  if (!importedTexture) return { variant: null, created: false };
+  const existing = listPaintVariants(pkg).find((variant) =>
+    variant.importedTexture?.kind === 'model-import'
+    && variant.importedTexture.fingerprint === importedTexture.fingerprint
+    && variant.importedTexture.imageIndex === importedTexture.imageIndex);
+  if (existing) return { variant: existing, created: false };
+
+  const look = captureCurrentPaintLook();
+  if (!look) return { variant: null, created: false };
+  const names = new Set(listPaintVariants(pkg).map((variant) => variant.name));
+  let name = 'Imported Texture';
+  for (let suffix = 2; names.has(name); suffix += 1) name = `Imported Texture ${suffix}`;
+  const variant = savePaintVariant(pkg, {
+    name,
+    w: look.w,
+    h: look.h,
+    detail: look.detail,
+    data: look.prog,
+    format: 'program',
+    atlasRgba: look.rgba,
+    cornerUv: look.cornerUv,
+    baselineRgba: look.baseline,
+    importedTexture,
+  });
+  if (!variant.data && !variant.rasterBase) {
+    removePaintVariant(pkg, variant.id);
+    return { variant: null, created: false };
+  }
+  return { variant, created: true };
 }
 
 /** Rename a variant in place (req_3448) — identity, files, and the painting

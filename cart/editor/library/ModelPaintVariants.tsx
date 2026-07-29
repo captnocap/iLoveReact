@@ -12,14 +12,11 @@ import { useRef, useState } from 'react';
 import { ScrollView, TextInput } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { listPaintVariants, renamePaintVariant, savePaintVariant, updatePaintVariant, removePaintVariant, writePaintVariantMeshBlob, type PaintVariant } from '../data/paintVariants';
-import { exactUvCornersFromAtlasTriangles, writeModelArtifacts } from '../data/modelPackageStore';
-import { hasUvCoverageRasterWriter } from '../data/uvCoverageRaster';
+import { captureCurrentPaintLook, listPaintVariants, renamePaintVariant, savePaintVariant, updatePaintVariant, removePaintVariant, writePaintVariantMeshBlob, type PaintVariant } from '../data/paintVariants';
+import { writeModelArtifacts } from '../data/modelPackageStore';
 import { compilePaintAtlas, paintAtlasCompileStatus, type PaintAtlasCompileProgress } from '../data/paintAtlasCompiler';
 import type { ModelPackage } from '../data/types';
 import type { ModelFocusBridge } from '../stage/ModelView';
-
-const host = globalThis as any;
 
 // The section's space budget inside the FIXED focus panel (req_2627): the
 // variant list is a bounded nested scroll — at most this many rows tall, the
@@ -113,28 +110,13 @@ export default function ModelPaintVariants({ model, bridge = null, hidden = fals
     }
   };
 
-  // Read the model's current LOOK: the stroke PROGRAM (may be empty — an imported
-  // texture atlas mapped over the mesh is a look with zero strokes, req_3439), the
-  // atlas metadata + exact per-face UV geometry, and (on a legacy host) the composite
-  // RGBA/baseline. The native finalizer reads large rasters without crossing JS.
-  // null (with a note) only when there is genuinely nothing to keep.
-  const readCurrentPaint = (): { prog: string; w: number; h: number; detail: number; rgba?: string; cornerUv: number[] | null; baseline: string } | null => {
-    const progValue = host.__model_paint_program_read?.();
-    const prog = typeof progValue === 'string' ? progValue : '';
-    const nativeCoverageWrite = hasUvCoverageRasterWriter();
-    let atlas: { w: number; h: number; detail: number; data?: string; triangles?: unknown } = { w: 0, h: 0, detail: 1 };
-    // Native finalization reads resident pixels directly. Asking only for geometry avoids
-    // a ~32 MiB base64 string for a 2000×3000 import; old hosts retain the legacy read.
-    try { atlas = { ...atlas, ...JSON.parse(host.__model_atlas_read?.(nativeCoverageWrite ? 0 : 1) || '{}') }; } catch { /* metadata is optional */ }
-    const cornerUv = exactUvCornersFromAtlasTriangles(atlas.triangles, atlas.w, atlas.h);
-    const baselineValue = nativeCoverageWrite ? '' : host.__model_paint_baseline_read?.();
-    const baseline = typeof baselineValue === 'string' ? baselineValue : '';
-    const hasLook = !!cornerUv && atlas.w > 0 && atlas.h > 0 && !!(nativeCoverageWrite || baseline || atlas.data);
-    if (!prog && !hasLook) {
+  const readCurrentPaint = () => {
+    const look = captureCurrentPaintLook();
+    if (!look) {
       setNote('Nothing to keep yet — paint the model, or import a texture in the UV panel above, then Save.');
       return null;
     }
-    return { prog, w: atlas.w, h: atlas.h, detail: atlas.detail, rgba: atlas.data, cornerUv, baseline };
+    return look;
   };
 
   const saveNew = () => {
