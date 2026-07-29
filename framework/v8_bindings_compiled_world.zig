@@ -504,7 +504,11 @@ fn hostSetPlayerSkin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         setReturnString(info, "error:BadBones");
         return;
     };
-    world_loader.setPendingPlayerSkin(verts, bones);
+    // Phase-2 auto-weights run at staging unless RJIT_SKIN_SOLVE=0 (the
+    // debug escape back to rigid per-part weights).
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const solve = if (host.environ.get("RJIT_SKIN_SOLVE")) |v| !std.mem.eql(u8, v, "0") else true;
+    world_loader.setPendingPlayerSkin(verts, bones, solve);
     setReturnString(info, "ok");
 }
 

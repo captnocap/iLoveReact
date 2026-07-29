@@ -3,6 +3,7 @@
 //! Process-global ingress is isolated here; constructed scenes always receive owned copies.
 
 const std = @import("std");
+const autoweights = @import("../skeleton/autoweights.zig");
 const constructor = @import("../world/constructor.zig");
 const geometry = @import("geometry.zig");
 const log = std.debug;
@@ -165,7 +166,7 @@ pub fn pendingPlayerModelCopy(allocator: std.mem.Allocator) ?[]constructor.Playe
 // Two empty arrays clear the staging.
 var g_pending_player_skin: ?constructor.PlayerSkin = null;
 
-pub fn setPendingPlayerSkin(verts_bytes: []const u8, bones_bytes: []const u8) void {
+pub fn setPendingPlayerSkin(verts_bytes: []const u8, bones_bytes: []const u8, solve: bool) void {
     const alloc = std.heap.page_allocator;
     if (g_pending_player_skin) |skin| skin.deinit(alloc);
     g_pending_player_skin = null;
@@ -175,6 +176,17 @@ pub fn setPendingPlayerSkin(verts_bytes: []const u8, bones_bytes: []const u8) vo
     if (vert_count == 0 or bone_rows == 0) return;
     const verts = alloc.alloc(f32, vert_count * 16) catch return;
     @memcpy(std.mem.sliceAsBytes(verts), verts_bytes[0 .. vert_count * 16 * 4]);
+
+    // Phase-2 auto-weights (SKIN-3499): soften the rigid per-part prior into
+    // voxel-geodesic weights, in place, before staging. Failure keeps the
+    // rigid prior — the figure is never worse than the per-part path.
+    if (solve) {
+        if (autoweights.solveVoxelGeodesic(alloc, verts, vert_count, bone_rows, .{})) |stats| {
+            log.print("[skin-solve] voxel-geodesic weights — {d} bones × {d} verts, {d} voxels, {d} unreachable kept rigid (SKIN-3499)\n", .{ stats.bones, stats.verts, stats.voxels_non_exterior, stats.unreachable_verts });
+        } else |err| {
+            log.print("[skin-solve] solve failed ({s}) — keeping rigid weights\n", .{@errorName(err)});
+        }
+    }
     const rows = alloc.alloc(f32, bone_rows * 8) catch {
         alloc.free(verts);
         return;
