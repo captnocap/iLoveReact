@@ -70,7 +70,10 @@ export default function AnimationCaptureSurface() {
   const loaderRef = useRef<any>(null);
   // Stage the exported body + basic clips DURING FIRST RENDER (pre-construct,
   // same move as the playtest surface).
-  const playerModel = useMemo(() => pushPlayerModel(), []);
+  // This loader alone asks the skin payload for applied-pose markers. They are
+  // real 3D bone-origin spheres updated beside the palette, not a projected
+  // duplicate of the camera dots; ordinary playtest constructs none.
+  const playerModel = useMemo(() => pushPlayerModel({ poseMarkers: true }), []);
   const [keypoints, setKeypoints] = useState<PoseKeypoint[] | null>(null);
   const [trackError, setTrackError] = useState<string | null>(null);
   const [solveHz, setSolveHz] = useState(0);
@@ -132,7 +135,7 @@ export default function AnimationCaptureSurface() {
       }
       setTrackError(null);
       setKeypoints(res.keypoints);
-      if (playerModel && playerModel.nodes.length > 0) {
+      if (playerModel && playerModel.nodes.length > 0 && playerModel.trackedJoints > 0) {
         solveRef.current = solveFrontal(solveRef.current, res);
         const transforms = frontalPose(playerModel.nodes, solveRef.current.angles);
         const nodeId = Number(loaderRef.current?.id ?? 0);
@@ -244,9 +247,11 @@ export default function AnimationCaptureSurface() {
             style: { width: '100%', height: '100%' },
           })}
           <Row style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, backgroundColor: 'rgba(10,12,16,0.82)', borderRadius: 6 }}>
-            <Text style={{ color: '#9fc1ee', fontSize: 10, fontFamily: 'monospace' }}>
+            <Text style={{ color: playerModel && playerModel.trackedJoints === 0 ? '#e8b04c' : '#9fc1ee', fontSize: 10, fontFamily: 'monospace' }}>
               {playerModel
-                ? `player model: ${playerModel.name} · ${playerModel.groups} parts · live sync ${trackError ? 'waiting' : 'on'}`
+                ? playerModel.trackedJoints === 0
+                  ? `RIG UNAVAILABLE · ${playerModel.name} exposes ${playerModel.groups} bone(s), 0 tracked joints · camera points cannot drive this mesh`
+                  : `player model: ${playerModel.name} · ${playerModel.groups} bones · ${playerModel.trackedJoints} applied markers · live sync ${trackError ? 'waiting' : 'on'}${playerModel.recoveredRig ? ' · recovered range table' : ''}`
                 : 'no model declared as THE player — File → Export → Player Model first'}
             </Text>
           </Row>

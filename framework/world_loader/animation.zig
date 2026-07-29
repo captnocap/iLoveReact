@@ -102,7 +102,18 @@ pub fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constr
 /// TRS to the figure's world placement. Clip transforms stay model-local, so
 /// root = T(player) · Ry(yaw) reproduces the legacy per-part composition
 /// exactly under rigid weights.
-pub fn updatePlayerSkinnedNode(kids: []Node, first: usize, skin: constructor.PlayerSkin, palette: []f32, animation: constructor.PlayerAnimationSet, player: PlayerState, moving: bool, running: bool, airborne: bool) void {
+pub fn updatePlayerSkinnedNode(
+    kids: []Node,
+    first: usize,
+    marker_first: ?usize,
+    skin: constructor.PlayerSkin,
+    palette: []f32,
+    animation: constructor.PlayerAnimationSet,
+    player: PlayerState,
+    moving: bool,
+    running: bool,
+    airborne: bool,
+) void {
     const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
     const clip_id: u32 = switch (player.posture) {
         .sit => PLAYER_CLIP_SIT,
@@ -115,20 +126,51 @@ pub fn updatePlayerSkinnedNode(kids: []Node, first: usize, skin: constructor.Pla
         const rest = constructor.PlayerTransform{ .position = bone.center, .rotation = .{ 0, 0, 0 }, .scale = .{ 1, 1, 1 } };
         const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse rest else rest;
         pose.writeBonePalette(palette, i, t.position, t.rotation, t.scale, bone.center, bone.color);
+        updatePoseMarker(kids, marker_first, i, t.position, player, model_yaw_degrees);
     }
     setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
 }
 
 /// The skinned LIVE-POSE twin: per-bone transforms come straight from the
 /// capture push (n × 9, model-local like clip keys) instead of a clip.
-pub fn updatePlayerSkinnedNodeLive(kids: []Node, first: usize, skin: constructor.PlayerSkin, palette: []f32, transforms: []const f32, player: PlayerState) void {
+pub fn updatePlayerSkinnedNodeLive(
+    kids: []Node,
+    first: usize,
+    marker_first: ?usize,
+    skin: constructor.PlayerSkin,
+    palette: []f32,
+    transforms: []const f32,
+    player: PlayerState,
+) void {
     const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
     const count = @min(skin.bones.len, transforms.len / 9);
     for (skin.bones[0..count], 0..) |bone, i| {
         const t = transforms[i * 9 ..][0..9];
         pose.writeBonePalette(palette, i, .{ t[0], t[1], t[2] }, .{ t[3], t[4], t[5] }, .{ t[6], t[7], t[8] }, bone.center, bone.color);
+        updatePoseMarker(kids, marker_first, i, .{ t[0], t[1], t[2] }, player, model_yaw_degrees);
     }
     setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
+}
+
+/// Put one diagnostic sphere at the same posed bone origin used by the palette.
+/// A bone matrix maps its bind center exactly to `position`; applying the
+/// skinned root's player translation/yaw here therefore shows the renderer's
+/// actual applied joint, not a second camera-space approximation.
+fn updatePoseMarker(
+    kids: []Node,
+    marker_first: ?usize,
+    bone_index: usize,
+    position: [3]f32,
+    player: PlayerState,
+    model_yaw_degrees: f32,
+) void {
+    const first = marker_first orelse return;
+    if (first + bone_index >= kids.len) return;
+    const local = rotateYLocal(position, model_yaw_degrees);
+    const marker = &kids[first + bone_index];
+    marker.scene3d_pos_x = player.x + local.x;
+    marker.scene3d_pos_y = player.y + local.y;
+    marker.scene3d_pos_z = player.z + local.z;
 }
 
 fn setSkinnedRoot(node: *Node, x: f32, y: f32, z: f32, yaw_degrees: f32) void {

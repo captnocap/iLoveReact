@@ -15,8 +15,10 @@
 // from the rank-paired parts.json rows (the outliner tints).
 import { MODEL_PACKAGES } from '../data/catalog';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
-import { meshDocRangeCenters, type PackageMeshDoc, type MeshDocPartMeta } from '../data/meshDoc';
+import { type PackageMeshDoc, type MeshDocPartMeta } from '../data/meshDoc';
 import { buildBodyClips, encodeAnimationPayload, type AnimNode } from './playerAnimation';
+import { poseMarkerKindForBone } from './poseMarkers';
+import { playerRigSlices } from './playerRigSlices';
 import type { ModelPackage } from '../data/types';
 
 const g: any = globalThis;
@@ -33,29 +35,18 @@ function hexRgb(hex: string | undefined): [number, number, number] {
   return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
 }
 
-/** Bucket the meshdoc's vertex ROWS per outliner part: rank → the stride-8
- *  row indices of that part's triangle corners, in triangle order. Shared by
- *  the per-part payload (legacy door) and the skinned payload. */
-function bucketVertexRows(doc: PackageMeshDoc): number[][] {
-  const triCount = Math.floor(doc.vertices.length / 24);
-  const buckets: number[][] = doc.ranges.map(() => []);
-  for (let tri = 0; tri < triCount; tri += 1) {
-    const group = doc.faceGroups ? doc.faceGroups[tri]! : tri;
-    const rank = doc.ranges.findIndex((r) => group >= r.lo && group < r.hi);
-    if (rank < 0) continue;
-    buckets[rank]!.push(tri * 3, tri * 3 + 1, tri * 3 + 2);
-  }
-  return buckets;
-}
-
 /** Slice a meshdoc into the door payload: one group per part range, vertices
  *  LOCAL to the range's measured bounds center, color from the rank-paired
  *  parts row. Table rows: [vertStart, vertCount, cx, cy, cz, r, g, b].
  *  `nodes` mirrors the emitted groups one-for-one (name + center, rank order)
  *  — the clip generator MUST see the exact node order the loader will animate. */
-export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; table: Float32Array; nodes: AnimNode[] } {
-  const centers = meshDocRangeCenters(doc);
-  const buckets = bucketVertexRows(doc);
+export function playerModelPayload(
+  doc: PackageMeshDoc,
+  meta: MeshDocPartMeta[],
+  skeleton?: ModelPackage['skeleton'],
+): { verts: Float32Array; table: Float32Array; nodes: AnimNode[]; recoveredRig: boolean } {
+  const slices = playerRigSlices(doc, meta, skeleton);
+  const { centers, buckets, names } = slices;
   const totalRows = buckets.reduce((sum, b) => sum + b.length, 0);
   const verts = new Float32Array(totalRows * 8);
   const rows: number[] = [];
@@ -79,10 +70,10 @@ export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[])
       at += 8;
     }
     rows.push(vertStart, bucket.length, center[0], center[1], center[2], r, gg, b);
-    nodes.push({ name: meta[rank]?.name ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
+    nodes.push({ name: names[rank] ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
     vertStart += bucket.length;
   });
-  return { verts, table: new Float32Array(rows), nodes };
+  return { verts, table: new Float32Array(rows), nodes, recoveredRig: slices.recovered };
 }
 
 /** The SKINNED payload (SKIN-3499): the same part slicing, but ONE model-space
@@ -92,9 +83,14 @@ export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[])
  *  (== joint indices == the clip generator's node order). Rigid weights make
  *  the skinned draw reproduce the per-part path exactly; the auto-weight
  *  solver (phase 2) will soften seams into the same wire format. */
-export function playerSkinPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; bones: Float32Array; nodes: AnimNode[] } {
-  const centers = meshDocRangeCenters(doc);
-  const buckets = bucketVertexRows(doc);
+export function playerSkinPayload(
+  doc: PackageMeshDoc,
+  meta: MeshDocPartMeta[],
+  poseMarkers = false,
+  skeleton?: ModelPackage['skeleton'],
+): { verts: Float32Array; bones: Float32Array; nodes: AnimNode[]; recoveredRig: boolean; trackedJoints: number } {
+  const slices = playerRigSlices(doc, meta, skeleton);
+  const { centers, buckets, names } = slices;
   const totalRows = buckets.reduce((sum, b) => sum + b.length, 0);
   const verts = new Float32Array(totalRows * 16);
   const boneRows: number[] = [];
@@ -119,19 +115,33 @@ export function playerSkinPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]):
       verts[at + 12] = 1; // rigid: 100% the part's bone (j1..j3/w1..w3 stay 0)
       at += 16;
     }
-    boneRows.push(center[0], center[1], center[2], r, gg, b, 0, 0);
-    nodes.push({ name: meta[rank]?.name ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
+    const name = names[rank] ?? `part ${rank + 1}`;
+    boneRows.push(center[0], center[1], center[2], r, gg, b, poseMarkers ? poseMarkerKindForBone(name) : 0, 0);
+    nodes.push({ name, center: [center[0], center[1], center[2]] });
   });
-  return { verts, bones: new Float32Array(boneRows), nodes };
+  return {
+    verts,
+    bones: new Float32Array(boneRows),
+    nodes,
+    recoveredRig: slices.recovered,
+    trackedJoints: nodes.filter((node) => poseMarkerKindForBone(node.name) !== 0).length,
+  };
 }
 
-export type PlayerModelPush = { name: string; groups: number; animated: boolean; nodes: AnimNode[] };
+export type PlayerModelPush = {
+  name: string;
+  groups: number;
+  animated: boolean;
+  nodes: AnimNode[];
+  recoveredRig: boolean;
+  trackedJoints: number;
+};
 
 /** Resolve → slice → stage, model AND clips. Returns what was staged (the
  *  playtest readout), or null when there is no player-role export / no door /
  *  no readable meshdoc — in every null case the staging is CLEARED so the
  *  loader honestly falls back to the stand-in instead of wearing a stale body. */
-export function pushPlayerModel(): PlayerModelPush | null {
+export function pushPlayerModel(options: { poseMarkers?: boolean } = {}): PlayerModelPush | null {
   if (typeof g.__compiled_world_set_player_model !== 'function') return null;
   const skinDoor = typeof g.__compiled_world_set_player_skin === 'function';
   const clear = () => {
@@ -150,21 +160,30 @@ export function pushPlayerModel(): PlayerModelPush | null {
   const meta = packageMeshDocParts(pkg) ?? [];
   let nodes: AnimNode[];
   let groups: number;
+  let recoveredRig = false;
+  let trackedJoints = 0;
   if (skinDoor) {
     // SKIN-3499: hosts with the skin door get ONE palette-blended figure.
     // The per-part staging is cleared so a stale body can't win at construct.
-    const payload = playerSkinPayload(doc, meta);
+    const payload = playerSkinPayload(doc, meta, options.poseMarkers === true, pkg.skeleton);
     if (payload.nodes.length === 0) { clear(); return null; }
     g.__compiled_world_set_player_skin(payload.verts, payload.bones);
     g.__compiled_world_set_player_model(new Float32Array(0), new Float32Array(0));
     nodes = payload.nodes;
     groups = payload.nodes.length;
+    recoveredRig = payload.recoveredRig;
+    trackedJoints = payload.trackedJoints;
   } else {
-    const payload = playerModelPayload(doc, meta);
+    const payload = playerModelPayload(doc, meta, pkg.skeleton);
     if (payload.table.length === 0) { clear(); return null; }
     g.__compiled_world_set_player_model(payload.verts, payload.table);
     nodes = payload.nodes;
     groups = payload.table.length / 8;
+    recoveredRig = payload.recoveredRig;
+    trackedJoints = payload.nodes.filter((node) => poseMarkerKindForBone(node.name) !== 0).length;
+  }
+  if (recoveredRig) {
+    console.warn(`[playtest] recovered ${groups}-bone player rig from exported skeleton + exact mesh connectivity runs`);
   }
   // The basic animation shapes (req_2781), generated for THIS body's exact
   // node order — clips only engage when node_count matches the groups/bones.
@@ -174,5 +193,5 @@ export function pushPlayerModel(): PlayerModelPush | null {
     g.__compiled_world_set_player_animation(encodeAnimationPayload(nodes.length, clips));
     animated = true;
   }
-  return { name: pkg.name, groups, animated, nodes };
+  return { name: pkg.name, groups, animated, nodes, recoveredRig, trackedJoints };
 }

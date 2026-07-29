@@ -492,8 +492,9 @@ fn hostSetPlayerModel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 // SKINNED player figure (SKIN-3499) — same process-global staging discipline as the model
 // door, and it WINS over the per-part model at construct. Verts are stride-16 rows
 // [pos3, normal3, uv2, joint4, weight4] in MODEL space (not re-based); bone rows are 8
-// floats [cx, cy, cz, r, g, b, reserved, reserved] in the clips' node order. Two empty
-// arrays clear the staging.
+// floats [cx, cy, cz, r, g, b, poseMarkerKind, reserved] in the clips' node
+// order. poseMarkerKind is zero in ordinary play and opt-in on the Animation
+// diagnostic surface. Two empty arrays clear the staging.
 fn hostSetPlayerSkin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const verts = argView(info, 0) orelse {

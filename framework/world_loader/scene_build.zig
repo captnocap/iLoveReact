@@ -83,6 +83,7 @@ const pendingPlayerModelCopy = m_player_assets.pendingPlayerModelCopy;
 const pendingPlayerSkinCopy = m_player_assets.pendingPlayerSkinCopy;
 const pendingPlayerAnimationCopy = m_player_assets.pendingPlayerAnimationCopy;
 const m_pose = @import("../skeleton/pose.zig");
+const m_pose_markers = @import("../skeleton/pose_markers.zig");
 const extrudeTiles = m_instances.extrudeTiles;
 const buildShapeBatches = m_instances.buildShapeBatches;
 const whitenRows = m_instances.whitenRows;
@@ -493,6 +494,33 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
             .scene3d_color_b = 1,
             .scene3d_color_a = 1,
         });
+        // Globals → Animation asks for markers through the skin bone table.
+        // Keep one slot per bone so the palette index and marker index are
+        // identical; non-tracked helper/mesh bones are inert nodes. Ordinary
+        // play has no marked bones and constructs no nodes at all.
+        const has_pose_markers = for (skin.bones) |bone| {
+            if (bone.marker_kind != .none) break true;
+        } else false;
+        if (has_pose_markers) {
+            self.player_pose_marker_first = self.kid_list.items.len;
+            self.player_pose_marker_count = skin.bones.len;
+            for (skin.bones) |bone| {
+                const marker_color = m_pose_markers.color(bone.marker_kind);
+                try self.kid_list.append(self.allocator, .{
+                    .scene3d_mesh = bone.marker_kind != .none,
+                    .scene3d_geom_key = "sphere12x8",
+                    .scene3d_vertices = self.sphere[0..],
+                    .scene3d_vert_count = 12 * 8 * 6,
+                    .scene3d_color_r = marker_color[0],
+                    .scene3d_color_g = marker_color[1],
+                    .scene3d_color_b = marker_color[2],
+                    .scene3d_color_a = 1,
+                    .scene3d_scale_x = m_pose_markers.Tuning.diameter_meters,
+                    .scene3d_scale_y = m_pose_markers.Tuning.diameter_meters,
+                    .scene3d_scale_z = m_pose_markers.Tuning.diameter_meters,
+                });
+            }
+        }
     } else if (self.scene.player_model.len == 0) {
         if (pendingPlayerModelCopy(self.allocator)) |groups| {
             self.scene.player_model = groups;
@@ -1464,7 +1492,12 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     self.perm_node_count = self.kid_list.items.len; // before any streamed tail / live-mesh nodes
     self.root = .{ .children = self.kid_list.items };
     updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), 0);
-    updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+    if (self.scene.player_skin) |skin| {
+        const marker_first = if (self.player_pose_marker_count == skin.bones.len) self.player_pose_marker_first else null;
+        m_animation.updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, self.scene.player_animation, self.player, false, false, false);
+    } else {
+        updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+    }
     refreshNpcNodes(self);
     // Seed the bubble at spawn and assemble the first draw tail — the very
     // first rendered frame already streams (the camera was just solved).

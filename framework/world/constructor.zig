@@ -10,6 +10,7 @@
 //! world_loader.zig.
 
 const std = @import("std");
+const pose_markers = @import("../skeleton/pose_markers.zig");
 const gamefile = @import("gamefile.zig");
 const live_mesh_doors = @import("live_mesh_doors.zig");
 const terrain_grid = @import("../gpu/terrain_grid.zig");
@@ -134,6 +135,8 @@ pub const PlayerModelGroup = struct {
 pub const PlayerSkinBone = struct {
     center: [3]f32,
     color: [3]f32,
+    /// Animation-capture diagnostic only. `.none` means no marker node.
+    marker_kind: pose_markers.Kind = .none,
 };
 
 /// The skinned player figure (SKIN-3499): ONE model-space mesh with per-vertex

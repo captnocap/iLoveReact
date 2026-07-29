@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const autoweights = @import("../skeleton/autoweights.zig");
+const pose_markers = @import("../skeleton/pose_markers.zig");
 const constructor = @import("../world/constructor.zig");
 const geometry = @import("geometry.zig");
 const log = std.debug;
@@ -161,7 +162,7 @@ pub fn pendingPlayerModelCopy(allocator: std.mem.Allocator) ?[]constructor.Playe
 // weights, staged beside (and preferred over) the per-part model. Same
 // process-global staging discipline as the model door. Wire formats:
 //   verts — stride-16 f32 rows [px,py,pz, nx,ny,nz, u,v, j0,j1,j2,j3, w0,w1,w2,w3]
-//   bones — stride-8 f32 rows  [cx,cy,cz, r,g,b, reserved, reserved]
+//   bones — stride-8 f32 rows  [cx,cy,cz, r,g,b, poseMarkerKind, reserved]
 // Bone order == per-vertex joint indices == the animation clips' node order.
 // Two empty arrays clear the staging.
 var g_pending_player_skin: ?constructor.PlayerSkin = null;
@@ -202,6 +203,7 @@ pub fn setPendingPlayerSkin(verts_bytes: []const u8, bones_bytes: []const u8, so
         bone.* = .{
             .center = .{ row[0], row[1], row[2] },
             .color = .{ row[3], row[4], row[5] },
+            .marker_kind = pose_markers.decode(row[6]),
         };
     }
     g_pending_player_skin = .{

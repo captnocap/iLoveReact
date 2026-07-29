@@ -1988,6 +1988,24 @@ pub fn build(b: *std.Build) void {
     b.step("test-bones-loader", "Run the skeleton validator unit tests")
         .dependOn(&b.addRunArtifact(bones_loader_test).step);
 
+    // Applied-pose marker wire vocabulary (req_3538): fail-closed ids and the
+    // camera/model shared diagnostic colors. Rendering consumes this tiny pure
+    // module; the unit target pins the framework-side boundary.
+    const pose_markers_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/pose_markers.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const pose_markers_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/pose_markers.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pose_markers_test_mod.addImport("pose_markers", pose_markers_mod_t);
+    const pose_markers_test = b.addTest(.{ .name = "pose-markers-test", .root_module = pose_markers_test_mod });
+    b.step("test-pose-markers", "Run applied-pose marker contract tests")
+        .dependOn(&b.addRunArtifact(pose_markers_test).step);
+
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
     // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.

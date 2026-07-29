@@ -541,16 +541,17 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     // never freezes the body.
     var live_posed = false;
     if (self.scene.player_skin) |skin| {
+        const marker_first = if (self.player_pose_marker_count == skin.bones.len) self.player_pose_marker_first else null;
         // SKINNED figure (SKIN-3499): the same clip/live-pose discipline, but
         // the pose lands in the bone palette instead of N part nodes.
         if (pendingPoseFor(self.node_id)) |lp| {
             if (lp.count == skin.bones.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
-                updatePlayerSkinnedNodeLive(self.kid_list.items, self.player_first_child, skin, self.player_skin_palette, lp.transforms, self.player);
+                updatePlayerSkinnedNodeLive(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, lp.transforms, self.player);
                 live_posed = true;
             }
             lp.age_frames +%= 1;
         }
-        if (!live_posed) updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, skin, self.player_skin_palette, self.scene.player_animation, self.player, moving, run_down, airborne);
+        if (!live_posed) updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, self.scene.player_animation, self.player, moving, run_down, airborne);
     } else {
         if (pendingPoseFor(self.node_id)) |lp| {
             if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {

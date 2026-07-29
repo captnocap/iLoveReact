@@ -304,9 +304,19 @@ function groupSpanEnd(groups: Uint32Array | null, faceCount: number): number {
  * This recovers documents whose range header was cleared while refusing ambiguous
  * multi-shell parts (run count mismatch). No spatial tolerance or primitive guessing. */
 export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups'>, partCount: number): { lo: number; hi: number }[] | null {
+  const runs = meshDocConnectivityRuns(doc);
+  return runs.length === partCount ? runs : null;
+}
+
+/** Exact contiguous authored-group runs split by triangle edge-connectivity.
+ *  Unlike inferMeshDocPartRanges, this returns the evidence even when a single
+ *  semantic part has multiple shells (a five-finger part is the motivating
+ *  case). Character staging can then regroup those runs against exported bone
+ *  centers without inventing mesh boundaries. */
+export function meshDocConnectivityRuns(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups'>): { lo: number; hi: number }[] {
   const groups = doc.faceGroups;
   const triangleCount = Math.floor(doc.vertices.length / 24);
-  if (!groups || groups.length !== triangleCount || triangleCount === 0 || partCount < 2) return null;
+  if (!groups || groups.length !== triangleCount || triangleCount === 0) return [];
 
   const parent = new Int32Array(triangleCount);
   for (let i = 0; i < triangleCount; i += 1) parent[i] = i;
@@ -360,7 +370,7 @@ export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'f
     previousRoot = currentRoot;
   }
   runs.push({ lo, hi: previous + 1 });
-  return runs.length === partCount ? runs : null;
+  return runs;
 }
 
 /** Rank-order live outliner rows into meshdoc part metadata (ascending lo — the same

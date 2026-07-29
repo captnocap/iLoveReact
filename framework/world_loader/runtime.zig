@@ -128,6 +128,11 @@ pub const Runtime = struct {
     /// every frame by updatePlayerSkinnedNode while the skin node holds a read
     /// view. Runtime-owned; freed at teardown beside player_geom_keys.
     player_skin_palette: []f32 = &.{},
+    /// Animation-capture-only spheres at the exact posed bone origins. When
+    /// count is zero, ordinary play constructed no marker nodes and the frame
+    /// updater takes no marker branch.
+    player_pose_marker_first: usize = 0,
+    player_pose_marker_count: usize = 0,
     mesh_prop_vertex_buffers: std.ArrayList([]f32) = .empty,
     // LIVESKIN per-slot (req_2025): the live mesh-ref draw runs EVERY frame, so its per-slot
     // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)
