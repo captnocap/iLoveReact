@@ -6,7 +6,7 @@ export const editor_mesh_integrity: DocIndex = {
   cart: 'cart/editor/stage/ModelView.tsx',
   purpose: ['persistence', 'host_bridge', 'geometry', 'ui'],
   summary:
-    'req_3484 + req_3507: every topology transaction gets a commit-time part-ledger roll call, and selected triangulated surfaces now recover a compatible non-overlapping quad set in one guarded native journal transaction. The sweep preserves resident render rows/UV/paint/material/part ownership, quality-ranks competing shared edges, leaves unmatched triangles alone, and reports the exact converted count.',
+    'req_3484 + req_3507/3511–3513: every topology transaction gets a commit-time part-ledger roll call, and Tris to Quads now scans the whole model into a reversible live dry run before one confirmed journal transaction. An exact maximum matching preserves resident render rows/UV/paint/material/part ownership, leaves unmatched triangles alone, reports the projected counts, and offers three deterministic maximum-cardinality evaluations.',
   interfaces: [
     {
       name: 'meshIntegrityRollCall',
@@ -30,12 +30,12 @@ export const editor_mesh_integrity: DocIndex = {
       status: 'live',
     },
     {
-      name: 'meshTrianglesToQuads',
+      name: 'meshQuadifyBegin / meshQuadifyPreview / meshQuadifyEnd',
       purpose: ['geometry', 'host_bridge', 'ui'],
       kind: 'host_fn',
       sourceFile: 'framework/gpu/3d.zig',
       description:
-        'req_3507 bulk authored-topology recovery. Mesh.quadifySelected considers selected one-triangle faces only; candidate pairs share one manifold edge, part, texture-role material, plane, winding, and a convex four-corner boundary. It quality-ranks competing candidates (diagonal balance, opposite-edge balance, corner health), chooses a deterministic non-overlapping maximal set, and records each physical resident diagonal. The host partitions opaque/glass masks, then commits every pair through commitIndexedFaceGrouping as ONE “tris to quads” journal entry without rebuilding/reordering resident triangles. Returns changed count through __mesh_topo_tris_to_quads; Edit → Mesh → Topology and the contextual topology strip invoke it.',
+        'req_3507/3511–3513 whole-topology recovery. Begin captures indexed topology, groups, selection, alpha masks, paint-stale state, and an uncommitted journal snapshot. Preview rebuilds from that base, finds every compatible one-triangle pair (one manifold edge, same part/material/alpha, plane/winding, durable four-corner boundary; concave is legal like two-face Merge Faces), then uses Edmonds blossom to produce an exact maximum-cardinality matching. Balanced, Short seams, and Alternate flow reorder candidates to expose different maxima without reducing the count. The live group-only preview hides proposed diagonals while reporting full dry-run stats/signature. End(false) restores the exact base with no history; End(true) commits the chosen result as ONE “tris to quads” entry without rebuilding/reordering resident triangles. Torso_Female003 proof: 1,156 candidates, 292 ambiguous triangles, 925 quads, 6,783→5,858 authored faces; three distinct plans; cancel 0/0 history; apply/undo/redo atomic.',
       dependsOn: ['meshIntegrityRollCall'],
       consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/shell/AppFrame.tsx'],
       status: 'live',

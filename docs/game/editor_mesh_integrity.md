@@ -76,37 +76,61 @@ order right behind the op that caused it.
   `⚠ mesh integrity: …` status naming what was healed. The event still boards
   the editor bus like every native action.
 
-## Bulk triangle recovery — req_3507
+## Whole-topology triangle recovery — req_3507 + req_3511–3513
 
-`Tris to Quads` is the inverse cleanup operation for a triangulated selection.
-In Face mode, select two or more authored triangles and invoke
-**Edit → Mesh → Topology → Tris to Quads** (the same action is in the contextual
-topology strip). The host finds every compatible pair and commits the whole
-sweep as ONE `tris to quads` journal entry; Undo restores the complete prior
-group table. Unmatched triangles are deliberately left alone.
+`Tris to Quads` is a model-wide planner, not a selected-face mutation. Enter
+Face mode and invoke **Edit → Mesh → Topology → Tris to Quads** (also exposed
+by the contextual topology strip, including when no face is selected). The
+editor first paints a scanning card, then opens a reversible live dry run:
+proposed source diagonals disappear from the real topology overlay while the
+card reports quads recovered, paired/single triangles, authored faces
+before/after, compatible pairings, and triangles with competing choices.
+Nothing is journaled or dirtied as an authored operation until **Apply**.
+**Cancel**, the close button, and Esc restore the exact pre-scan face groups
+and selection with no undo entry.
 
-The operation is a group-only transaction on the resident indexed mesh:
+The host owns the complete `meshQuadifyBegin` → `meshQuadifyPreview` →
+`meshQuadifyEnd` session:
 
-- `indexed_edit_mesh.Mesh.quadifySelected` considers only one-triangle
-  authored faces, pairs across one manifold shared edge, and requires the
-  same Outliner part and texture-role material;
-- each candidate must be coplanar, same-winding, and form a convex
-  four-corner boundary;
-- competing candidates are quality-ranked (balanced physical diagonals,
-  balanced opposite edges, healthy corners) before a deterministic maximal
-  pairing, so a regular triangulated grid recovers its cell quads instead of
-  arbitrarily pairing across cell seams;
-- `meshTrianglesToQuads` separates opaque and glass candidates before
-  pairing, then funnels the result through the SAME
-  `commitIndexedFaceGrouping` guard as Merge Faces;
-- no resident render triangle is rebuilt or reordered. Exact winding,
-  physical diagonal, UV rows, atlas pixels, materials, colors, part
-  ownership, and Outliner ranges survive byte-stable. The authored paint
-  layout is marked stale because two face islands became one.
+- every live one-triangle authored face is considered; selection is preserved
+  only so Cancel can restore it;
+- candidate triangles must share exactly one manifold edge plus Outliner part,
+  texture-role material, alpha class, plane, and winding;
+- the resulting boundary must contain four durable non-collinear corners.
+  Concave pairs remain legal because two-face Merge Faces already accepts
+  them; the sweep intentionally uses the same useful pair contract instead of
+  the stricter convex-only raw-import heuristic;
+- opaque and glass candidate graphs are solved independently, preventing one
+  authored face from crossing render passes;
+- Edmonds' blossom algorithm computes an **exact maximum-cardinality
+  matching** over each complete compatibility graph. A locally attractive
+  middle seam can no longer strand two recoverable end pairs;
+- candidate ordering only chooses *which* maximum is shown. The popup cycles
+  deterministic **Balanced**, **Short seams**, and **Alternate flow**
+  evaluations; all retain the maximum quad count, and a plan signature makes
+  distinct alternatives visible;
+- each evaluation clones the captured base, so cycling never compounds the
+  previous preview. Apply adopts the current group-only result as one
+  `tris to quads` journal entry; Undo/Redo move the entire sweep atomically.
 
-The bridge returns `changed` (quads made), so the status line says exactly
-what the sweep did. The journal action is append-only ordinal 27
-(`model.mesh.tris-to-quads`); `integrity_alert` remains ordinal 26.
+No resident render triangle is rebuilt or reordered. Exact winding, physical
+diagonals, UV rows, atlas pixels, materials, colors, part ownership, and
+Outliner ranges survive byte-stable. Apply marks the authored paint layout
+stale because two face islands became one; preview and Cancel restore its
+prior state.
+
+Read-only fixture proof on `Torso_Female003` (req_3513): 6,831 resident
+triangles / 6,783 authored faces yielded 1,156 compatible pairings and 292
+triangles with competing choices. Every evaluation recovered the exact
+maximum of **925 quads**, projecting **6,783 → 5,858 authored faces**; the
+three plan signatures were distinct. Cancel left history at 0/0. Apply made
+one `tris to quads` undo entry; Undo and Redo restored/reapplied the complete
+925-quad grouping.
+
+The journal action remains append-only ordinal 27
+(`model.mesh.tris-to-quads`); `integrity_alert` remains ordinal 26. The legacy
+`__mesh_topo_tris_to_quads` bridge drives Balanced begin/preview/apply only for
+automation; the interactive editor always requires the dry-run confirmation.
 
 ## Why commit-time, not gate-time
 
