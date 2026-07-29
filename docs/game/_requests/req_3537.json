@@ -1,0 +1,30 @@
+{
+  "id": "req_3537",
+  "at": "2026-07-29T22:35:07.426Z",
+  "origin": "codex:019fac74",
+  "text": "here is what happens. this is the model being imported with texture. [Image #1] and this is how it lands [Image #2]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T22:35:44.439Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T22:39:56.500Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the embedded-GLB mapping regression shown on Bald Head: the loader was copying supposed source texture coordinates only after setPaintTarget had overwritten those UV lanes with its generated paint-atlas layout. Import now decodes the image and snapshots exact absolute TEXCOORD_0 corners before paint-target adoption, then applies that owned image/corner pair after quad grouping and paint-layout setup before stashing the final edit mesh. Added a native regression proving the source snapshot survives later in-place UV replacement; test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build pass.",
+  "shas": [
+    "310db3aa4"
+  ],
+  "resolvedAt": "2026-07-29T22:39:56.500Z"
+}
