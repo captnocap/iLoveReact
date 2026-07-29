@@ -1,0 +1,30 @@
+{
+  "id": "req_3519",
+  "at": "2026-07-29T09:49:27.131Z",
+  "origin": "codex:019fac74",
+  "text": "when i do this it causes program to freeze and need kill -9 to exit: texture atlas -> uniform pack all islands -> collect same orientation -> stitch; actually, it seems also after resetting it did the edit but it froze the app before so",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T09:50:17.255Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T09:56:34.267Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the freeze in Uniform Pack All Islands → Collect Same Orientation → Stitch. The old sweep repeatedly rebuilt topology and compared every remaining island against every fixed island, producing cubic growth. Stitch now builds boundary topology once, indexes only unambiguous two-owner seam relations, and evaluates reachable pairs once through a priority heap. Added a 6,831-island regression that completes in about 0.07 seconds plus a many-owner pole refusal, then passed the editor bundle and ReleaseFast build.",
+  "shas": [
+    "a4674c80b"
+  ],
+  "resolvedAt": "2026-07-29T09:56:34.267Z"
+}
