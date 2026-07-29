@@ -1076,16 +1076,6 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
         <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={12} color={accentFor('primary')} />
         <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
-        <Pressable
-          tooltip={multiIslandSelection
-            ? 'Stitch selected pieces to matching model vertices; the white active island stays fixed'
-            : `Stitch needs two complete UV islands; the editor currently sees ${selectedIndices.length}`}
-          onPress={multiIslandSelection ? stitchSelected : undefined}
-          style={{ height: 21, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary'), opacity: multiIslandSelection ? 1 : 0.38 }}
-        >
-          <Icon name="Link2" size={10} color={accentFor('primary')} />
-          <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.5 }}>STITCH</Text>
-        </Pressable>
         <Box style={{ flexGrow: 1 }} />
         <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
         <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
