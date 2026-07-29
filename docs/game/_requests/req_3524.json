@@ -1,0 +1,30 @@
+{
+  "id": "req_3524",
+  "at": "2026-07-29T12:43:21.640Z",
+  "origin": "codex:019fac74",
+  "text": "great here is another thing, so the uv editor where u map to the texture needs to let the uv be able to travel off the image because i keep having problems where i hit an edge during a linked mesh and it just wont move because its hitting the wall. its painful",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T12:43:29.136Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:21:02.421Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The UV editor now treats the texture rectangle as a sampling region inside a signed pannable workspace: islands, linked selections, faces, vertices, transforms, and stitches can cross every image edge. The native exact-corner boundary preserves those coordinates, and finite model-atlas samples outside the image alpha-discard in Scene3D while ordinary material sampling stays unchanged. Signed movement, off-image editing, grid, native paint, and shader-contract regressions cover the behavior.",
+  "shas": [
+    "2b0c1dfbb"
+  ],
+  "resolvedAt": "2026-07-29T13:21:02.421Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3525",
+  "at": "2026-07-29T12:45:19.554Z",
+  "origin": "codex:019fac74",
+  "text": "maybe there is some sense in doing this: make is effectively an infinite space canvas, and that will let us let a user put several images down anywhere, and that way they can make one texture without having to try and stuff a bunch of shit on one image alone",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T12:45:26.163Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:21:02.464Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The UV panel now owns a persistent multi-image workspace with immutable content-addressed PNG sources, native-resolution signed placement, visibility and stacking controls, and an explicit progress-reporting Compile action. Compile validates sources, composites the smallest visible transparent union without resampling, translates local UVs by the inverse atlas-origin change, and keeps every original layer editable so another image can be added and recompiled later.",
+  "shas": [
+    "2b0c1dfbb"
+  ],
+  "resolvedAt": "2026-07-29T13:21:02.464Z"
+}
