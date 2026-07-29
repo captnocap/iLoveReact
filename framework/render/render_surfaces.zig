@@ -32,6 +32,7 @@ const images = @import("../gpu/images.zig");
 const log = @import("../diag/log.zig");
 pub const vm = @import("render_surfaces_vm.zig");
 const transport = @import("../net/transport.zig");
+const child_teardown = @import("child_teardown.zig");
 
 const page_alloc = std.heap.page_allocator;
 
@@ -313,10 +314,13 @@ const ChildMonitor = struct {
         return self.state.pid;
     }
 
-    fn deinit(self: *ChildMonitor, io: std.Io) void {
+    fn deinit(self: *ChildMonitor, io: std.Io, environ: *const std.process.Environ.Map) void {
         const state = self.state;
         state.tasks.cancel(io);
-        if (state.child.id != null) state.child.kill(io);
+        // CAMFREEZE (req_3503): Child.kill = SIGTERM + an uncancelable
+        // blocking wait — never on the frame thread. If waitLoop already
+        // reaped the child, id is null and this no-ops.
+        child_teardown.terminateDetached(io, environ, state.child);
         page_alloc.destroy(state);
         self.* = undefined;
     }
@@ -330,6 +334,16 @@ pub const FeedStatus = enum { starting, connecting, ready, @"error", stopped };
 
 pub const MAX_FEEDS = 64; // perf-lab headroom: pile on capture surfaces til the GPU/CPU wall, not an array cap
 const UNLOAD_DEBOUNCE_FRAMES = 180; // ~3s at 60fps
+
+/// 10s at the 60Hz update cadence — how long a spawned capture child may
+/// produce ZERO complete frames before the feed fails LOUDLY instead of
+/// showing an eternal black square. OBS-style virtual cameras enumerate and
+/// open fine but produce nothing until "Start Virtual Camera" (req_3504).
+const FFMPEG_FIRST_FRAME_TIMEOUT_TICKS: u32 = 10 * 60;
+/// Same period: how long an errored camera feed rests before paint retries it
+/// from scratch — self-healing once the device starts streaming, without a
+/// per-frame respawn storm while it stays dead.
+const FFMPEG_RETRY_TICKS: u32 = FFMPEG_FIRST_FRAME_TIMEOUT_TICKS;
 
 pub const Feed = struct {
     source: []const u8 = "",
@@ -367,6 +381,14 @@ pub const Feed = struct {
     ffmpeg_reader: std.Io.File.MultiReader = undefined,
     ffmpeg_reader_active: bool = false,
     ffmpeg_read_offset: usize = 0, // partial frame read progress
+    // True once ONE complete frame has landed in pixel_buf. Gates the pose
+    // tracker (latestCpuFrame) so inference never runs on uninitialized
+    // bytes, and drives the first-frame watchdog below (req_3504).
+    ffmpeg_first_frame_seen: bool = false,
+    ffmpeg_no_frame_ticks: u32 = 0,
+    // Ticks spent in .error status — paint retries an errored ffmpeg feed
+    // after FFMPEG_RETRY_TICKS instead of staying dead until app restart.
+    error_ticks: u32 = 0,
 
     // VNC state
     vnc_pump: ?transport.StreamPump = null,
@@ -412,7 +434,7 @@ pub const Feed = struct {
     // pixel_buf stays canonical top-down across incremental updates.
     flip_buf: ?[]u8 = null,
 
-    fn deinit(self: *Feed, io: std.Io) void {
+    fn deinit(self: *Feed, io: std.Io, environ: *const std.process.Environ.Map) void {
         // Use release() (refcount drop) rather than destroy() — destroy()
         // marks the texture immediately destroyed so any queued draw call
         // referencing it via a bind_group fails wgpu validation. release()
@@ -438,8 +460,8 @@ pub const Feed = struct {
         self.display_dpy = null;
 
         self.closeVnc();
-        self.closeFFmpeg(io);
-        self.killSubprocesses(io);
+        self.closeFFmpeg(io, environ);
+        self.killSubprocesses(io, environ);
 
         // The source string was duped into feed-owned memory by createFeed
         // so the feed lifetime is independent of the cart-side allocation.
@@ -475,29 +497,39 @@ pub const Feed = struct {
         self.vnc_state = .not_connected;
     }
 
-    fn closeFFmpeg(self: *Feed, io: std.Io) void {
+    fn closeFFmpeg(self: *Feed, io: std.Io, environ: *const std.process.Environ.Map) void {
         if (self.ffmpeg_reader_active) {
             self.ffmpeg_reader.deinit();
             self.ffmpeg_reader_active = false;
         }
-        if (self.ffmpeg_child) |*child| {
-            child.kill(io);
+        // CAMFREEZE (req_3503 — THE webcam freeze): Child.kill here was ONE
+        // SIGTERM + an uncancelable wait4 on the FRAME thread, while the
+        // reader above had just stopped draining the pipe. ffmpeg, blocked
+        // mid-write on the full pipe (SA_RESTART swallows the lone SIGTERM),
+        // never exited — the whole app hard-froze until kill -9. Teardown is
+        // now SIGKILL + a detached reap; this thread never waits on a child.
+        if (self.ffmpeg_child) |child| {
+            child_teardown.terminateDetached(io, environ, child);
         }
         self.ffmpeg_child = null;
         self.ffmpeg_read_offset = 0;
+        self.ffmpeg_first_frame_seen = false;
+        self.ffmpeg_no_frame_ticks = 0;
     }
 
-    fn killSubprocesses(self: *Feed, io: std.Io) void {
-        if (self.qemu_child) |*child| {
-            child.kill(io);
+    fn killSubprocesses(self: *Feed, io: std.Io, environ: *const std.process.Environ.Map) void {
+        // Same non-parking rule as closeFFmpeg: a wedged qemu/app child must
+        // strand a detached reaper task, never the frame thread (req_3503).
+        if (self.qemu_child) |child| {
+            child_teardown.terminateDetached(io, environ, child);
         }
         self.qemu_child = null;
-        if (self.app_child) |*child| {
-            child.kill(io);
+        if (self.app_child) |child| {
+            child_teardown.terminateDetached(io, environ, child);
         }
         self.app_child = null;
         if (self.x_server_child) |*monitor| {
-            monitor.deinit(io);
+            monitor.deinit(io, environ);
         }
         self.x_server_child = null;
     }
@@ -861,16 +893,35 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     const fps_str = std.fmt.bufPrint(&fps_buf, "{d}", .{fps}) catch return false;
 
     // Build argv as slices for std.process.spawn's Zig 0.16 options.
-    var argv: [20][]const u8 = undefined;
+    var argv: [26][]const u8 = undefined;
     var argc: usize = 0;
 
+    // pdeathsig: if our process dies by ANY means mid-capture (including
+    // SIGKILL, where no cleanup handler runs), the kernel SIGKILLs ffmpeg so
+    // it can never orphan-hold the camera device ("camera busy" on relaunch).
+    // Same keystone as the Xvfb spawn below (req_3504).
+    if (hasSetpriv(io)) {
+        argv[argc] = "setpriv";
+        argc += 1;
+        argv[argc] = "--pdeathsig";
+        argc += 1;
+        argv[argc] = "KILL";
+        argc += 1;
+        argv[argc] = "--";
+        argc += 1;
+    }
     argv[argc] = "ffmpeg";
     argc += 1;
     argv[argc] = "-nostdin";
     argc += 1;
+    // error (not quiet) + inherited stderr: a camera that can't open says WHY
+    // in the terminal instead of failing into a silent black square. -nostats
+    // keeps the per-frame progress line off (stderr stays failure-only).
     argv[argc] = "-loglevel";
     argc += 1;
-    argv[argc] = "quiet";
+    argv[argc] = "error";
+    argc += 1;
+    argv[argc] = "-nostats";
     argc += 1;
 
     switch (parsed.source_type) {
@@ -939,11 +990,11 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     const child = std.process.spawn(io, .{
         .argv = argv[0..argc],
         .stdout = .pipe,
-        .stderr = .ignore,
+        .stderr = .inherit,
         .stdin = .ignore,
         .environ_map = environ,
     }) catch |err| {
-        log.info(.render, "FFmpeg spawn failed: {}", .{err});
+        log.print("[render] FFmpeg spawn failed for camera capture: {}\n", .{err});
         return false;
     };
 
@@ -954,10 +1005,15 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     feed.width = w;
     feed.height = h;
     feed.pixel_buf = page_alloc.alloc(u8, @as(usize, w) * @as(usize, h) * 4) catch {
-        feed.closeFFmpeg(io);
+        feed.closeFFmpeg(io, environ);
         return false;
     };
+    // Zero until the first real frame lands: paint uploads only on dirty, but
+    // nothing downstream may ever observe uninitialized bytes.
+    @memset(feed.pixel_buf.?, 0);
     feed.ffmpeg_read_offset = 0;
+    feed.ffmpeg_first_frame_seen = false;
+    feed.ffmpeg_no_frame_ticks = 0;
     feed.backend = .ffmpeg;
     feed.status = .ready;
 
@@ -965,13 +1021,35 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     return true;
 }
 
+/// LOUD one-shot camera-feed failure (req_3504): tear the child down without
+/// waiting on it, free the slot's resources, and leave the feed in .error so
+/// paint's cooldown retry (FFMPEG_RETRY_TICKS) can heal it once the device
+/// starts producing. The pose door reports `no live frame` meanwhile.
+fn failFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed, why: []const u8) void {
+    log.print("[render] camera feed \"{s}\" FAILED: {s}\n", .{ feed.source, why });
+    feed.closeFFmpeg(io, environ);
+    feed.status = .@"error";
+    feed.error_ticks = 0;
+}
+
 /// Read available data from FFmpeg stdout pipe. Non-blocking.
 /// When a full frame (w*h*4 bytes) is accumulated, marks dirty.
-fn updateFFmpeg(feed: *Feed) void {
+fn updateFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed) void {
     if (!feed.ffmpeg_reader_active) return;
     const buf = feed.pixel_buf orelse return;
     const frame_size = @as(usize, feed.width) * @as(usize, feed.height) * 4;
     if (frame_size == 0) return;
+
+    // First-frame watchdog: a device that opened but never streams (OBS
+    // virtual camera before "Start Virtual Camera", wedged driver) must fail
+    // loudly instead of showing an eternal black square (req_3504).
+    if (!feed.ffmpeg_first_frame_seen) {
+        feed.ffmpeg_no_frame_ticks +|= 1;
+        if (feed.ffmpeg_no_frame_ticks >= FFMPEG_FIRST_FRAME_TIMEOUT_TICKS) {
+            failFFmpeg(io, environ, feed, "no frames from the device within 10s — is the camera streaming? (OBS: Start Virtual Camera)");
+            return;
+        }
+    }
 
     // Poll the native Io reader without blocking the frame. MultiReader keeps
     // the pipe read scheduled between ticks; a zero-duration fill only harvests
@@ -984,11 +1062,11 @@ fn updateFFmpeg(feed: *Feed) void {
         } }) catch |err| switch (err) {
             error.Timeout => return,
             error.EndOfStream => {
-                feed.status = .@"error";
+                failFFmpeg(io, environ, feed, "capture stream ended (device closed or ffmpeg exited — its stderr above says why)");
                 return;
             },
             else => {
-                feed.status = .@"error";
+                failFFmpeg(io, environ, feed, "capture pipe read failed");
                 return;
             },
         };
@@ -1006,6 +1084,7 @@ fn updateFFmpeg(feed: *Feed) void {
     if (feed.ffmpeg_read_offset >= frame_size) {
         feed.ffmpeg_read_offset = 0;
         feed.dirty = true;
+        feed.ffmpeg_first_frame_seen = true;
     }
 }
 
@@ -1553,9 +1632,14 @@ pub fn init() void {
     // Backends init lazily on first createFeed().
 }
 
-pub fn deinit(io: std.Io) void {
-    for (feeds[0..feed_count]) |*f| f.deinit(io);
+pub fn deinit(io: std.Io, environ: *const std.process.Environ.Map) void {
+    for (feeds[0..feed_count]) |*f| f.deinit(io, environ);
     feed_count = 0;
+
+    // Detached child reaps: cancel (never await) so a wedged child can't
+    // block process exit — every child was already SIGKILLed at its feed's
+    // teardown, and stragglers die with the process (req_3503).
+    child_teardown.shutdown(io);
 
     if (x_display) |dpy| {
         _ = x11.XCloseDisplay(dpy);
@@ -1591,7 +1675,7 @@ pub fn update(io: std.Io, environ: *const std.process.Environ.Map) void {
                     if (feed.x_server_child) |*monitor| {
                         if (monitor.stopped()) {
                             log.info(.render, "Xvfb :{?d} exited — retiring feed", .{feed.display_num});
-                            feed.deinit(io);
+                            feed.deinit(io, environ);
                             feed.active = false;
                             continue;
                         }
@@ -1600,7 +1684,7 @@ pub fn update(io: std.Io, environ: *const std.process.Environ.Map) void {
 
                 switch (feed.backend) {
                     .xshm, .display_xshm => _ = captureXShm(feed),
-                    .ffmpeg => updateFFmpeg(feed),
+                    .ffmpeg => updateFFmpeg(io, environ, feed),
                     .vnc => vm.updateVnc(feed),
                 }
 
@@ -1621,7 +1705,7 @@ pub fn update(io: std.Io, environ: *const std.process.Environ.Map) void {
                 if (!feed.active) {
                     feed.inactive_frames += 1;
                     if (feed.inactive_frames > UNLOAD_DEBOUNCE_FRAMES) {
-                        feed.deinit(io);
+                        feed.deinit(io, environ);
                     }
                 }
                 feed.active = false;
@@ -1641,6 +1725,9 @@ pub fn update(io: std.Io, environ: *const std.process.Environ.Map) void {
                 vm.updateVnc(feed);
             },
 
+            // Errored camera feeds age toward paintSurface's cooldown retry.
+            .@"error" => feed.error_ticks +|= 1,
+
             else => {},
         }
     }
@@ -1655,6 +1742,16 @@ pub fn paintSurface(io: std.Io, environ: *const std.process.Environ.Map, src: []
     if (_dbg_frame % 60 == 1) log.info(.render, "paintSurface called src_len={d} rect=({d:.0},{d:.0},{d:.0},{d:.0})", .{ src.len, x, y, w, h });
 
     var feed = findFeed(src);
+    // Cooldown retry for errored camera feeds (req_3504): after the rest
+    // period, tear the slot down and recreate from scratch, so a camera that
+    // STARTS streaming later (OBS "Start Virtual Camera") heals on its own.
+    if (feed) |f| {
+        if (f.status == .@"error" and f.backend == .ffmpeg and f.error_ticks >= FFMPEG_RETRY_TICKS) {
+            log.print("[render] retrying errored camera feed \"{s}\"\n", .{f.source});
+            f.deinit(io, environ);
+            feed = null;
+        }
+    }
     if (feed == null) {
         log.info(.render, "no feed found, creating for src_len={d}", .{src.len});
         feed = createFeed(io, environ, src, w, h);
@@ -1758,48 +1855,32 @@ pub fn latestCpuFrame(src: []const u8) ?CpuFrame {
     const f = findFeed(src) orelse return null;
     const buf = f.pixel_buf orelse return null;
     if (f.width == 0 or f.height == 0 or f.status != .ready) return null;
+    // The pose tracker must never infer on a buffer no real frame reached —
+    // JS keeps receiving `no live frame` until the device truly streams.
+    if (f.backend == .ffmpeg and !f.ffmpeg_first_frame_seen) return null;
     const need = @as(usize, f.width) * @as(usize, f.height) * 4;
     if (buf.len < need) return null;
     return .{ .width = f.width, .height = f.height, .rgba = buf[0..need] };
 }
 
-/// Suspend / resume the feed's subprocesses via the platform `kill` utility.
-/// Zig's process capability intentionally exposes lifecycle termination but
-/// not arbitrary signals, so STOP/CONT stays inside an explicitly spawned,
-/// injected-Io process instead of reaching around Io with raw syscalls.
-fn signalChild(io: std.Io, environ: *const std.process.Environ.Map, pid: std.process.Child.Id, suspended: bool) bool {
-    var pid_buf: [32]u8 = undefined;
-    const pid_arg = std.fmt.bufPrint(&pid_buf, "{d}", .{pid}) catch return false;
-    const signal_arg = if (suspended) "-STOP" else "-CONT";
-    const argv = [_][]const u8{ "kill", signal_arg, pid_arg };
-    var child = std.process.spawn(io, .{
-        .argv = &argv,
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .environ_map = environ,
-    }) catch return false;
-    const term = child.wait(io) catch return false;
-    return switch (term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-}
-
 /// Suspend / resume the feed's subprocesses via SIGSTOP / SIGCONT. Idempotent
 /// — only acts on transitions. Skips no-op when feed doesn't exist yet.
+/// Signals travel through child_teardown.signalPid — the platform `kill`
+/// utility — because Zig's process capability intentionally exposes lifecycle
+/// termination but not arbitrary signals.
 pub fn setSuspended(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8, suspended: bool) void {
     const f = findFeed(src) orelse return;
     if (f.suspended == suspended) return;
+    const sig: []const u8 = if (suspended) "-STOP" else "-CONT";
     const children = [_]?std.process.Child{ f.qemu_child, f.app_child };
     for (children) |maybe_child| {
         const child = maybe_child orelse continue;
         const child_pid = child.id orelse continue;
-        if (!signalChild(io, environ, child_pid, suspended))
+        if (!child_teardown.signalPid(io, environ, child_pid, sig))
             log.print("[render] setSuspended pid={d} action={s} failed\n", .{ child_pid, if (suspended) "STOP" else "CONT" });
     }
     if (f.x_server_child) |*monitor| {
-        if (!monitor.stopped() and !signalChild(io, environ, monitor.pid(), suspended))
+        if (!monitor.stopped() and !child_teardown.signalPid(io, environ, monitor.pid(), sig))
             log.print("[render] setSuspended pid={d} action={s} failed\n", .{ monitor.pid(), if (suspended) "STOP" else "CONT" });
     }
     f.suspended = suspended;

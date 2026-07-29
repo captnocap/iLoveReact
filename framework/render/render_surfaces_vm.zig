@@ -9,6 +9,7 @@ const std = @import("std");
 const transport = @import("../net/transport.zig");
 const log = @import("../diag/log.zig");
 const c = @import("../c.zig").imports;
+const child_teardown = @import("child_teardown.zig");
 
 const parent = @import("render_surfaces.zig");
 const Feed = parent.Feed;
@@ -418,7 +419,7 @@ pub fn startVM(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
 
     // Inherit stderr so qemu's own error messages (missing /dev/kvm, bad ISO,
     // etc.) reach the user terminal — without this the VM path fails silently.
-    var child = std.process.spawn(io, .{
+    const child = std.process.spawn(io, .{
         .argv = argv[0..argc],
         .stdout = .ignore,
         .stderr = .inherit,
@@ -431,7 +432,9 @@ pub fn startVM(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     };
 
     const pixels = page_alloc.alloc(u8, @as(usize, 1024) * @as(usize, 768) * 4) catch {
-        child.kill(io);
+        // Never Child.kill (SIGTERM + uncancelable wait) on the frame thread
+        // — even this just-spawned qemu gets the detached teardown (req_3503).
+        child_teardown.terminateDetached(io, environ, child);
         return false;
     };
     feed.qemu_child = child;

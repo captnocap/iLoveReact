@@ -1175,6 +1175,32 @@ pub fn build(b: *std.Build) void {
         video_devices_test_step.dependOn(&run_video_devices_test.step);
     }
 
+    // Freeze tripwire (req_3503): capture-child teardown must never park the
+    // calling thread — not even for a SIGTERM-immune child blocked writing
+    // into a full pipe (the exact live-ffmpeg state that froze the app).
+    if (os_tag == .linux) {
+        const child_teardown_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/render/child_teardown.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        const child_teardown_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/child_teardown.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        child_teardown_test_mod.addImport("child_teardown", child_teardown_mod_for_tests);
+        const child_teardown_test = b.addTest(.{
+            .name = "child-teardown-test",
+            .root_module = child_teardown_test_mod,
+        });
+        const run_child_teardown_test = b.addRunArtifact(child_teardown_test);
+        const child_teardown_test_step = b.step("test-child-teardown", "Run capture child-teardown freeze-tripwire tests");
+        child_teardown_test_step.dependOn(&run_child_teardown_test.step);
+    }
+
     // ONNX-backed worker integration: explicit (not part of lean test steps),
     // because it links the vendored runtime and optionally loads the user's
     // MoveNet model. A missing model is a valid surfaced worker result.

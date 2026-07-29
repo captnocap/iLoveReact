@@ -4179,7 +4179,7 @@ pub fn run(config_in: AppConfig) !void {
     defer videos.deinit();
 
     render_surfaces.init();
-    defer render_surfaces.deinit(io);
+    defer render_surfaces.deinit(io, environ);
 
     capture.init(environ);
     defer capture.deinit(io);
