@@ -29,6 +29,9 @@ pub const NO_GROUP: u32 = std.math.maxInt(u32);
 /// Gutter between packed islands, in texels — stops linear filtering from pulling a
 /// neighbour island across the boundary (the reference used padded gutters + bleed).
 pub const PAD_TEXELS: u32 = 2;
+/// Signed UV editor workspace guard. f32 represents every integer through this
+/// value exactly; it is a corruption limit, not a finite canvas boundary.
+pub const MAX_SIGNED_UV_TEXELS: f32 = 16_777_216.0;
 
 // Two authored faces become one UV island when they share a real mesh edge and
 // PROJECT the same way — same dominant normal axis, same sign (req_3426, the
@@ -209,10 +212,7 @@ fn uvPoint(normalized_uvs: []const f32, face: u32, corner: u32) [2]f32 {
 }
 
 fn uvEdgeMatches(owner: EdgeOwner, a: [2]f32, b: [2]f32) bool {
-    return @abs(owner.uv_a[0] - a[0]) <= UV_EDGE_MATCH_EPSILON
-        and @abs(owner.uv_a[1] - a[1]) <= UV_EDGE_MATCH_EPSILON
-        and @abs(owner.uv_b[0] - b[0]) <= UV_EDGE_MATCH_EPSILON
-        and @abs(owner.uv_b[1] - b[1]) <= UV_EDGE_MATCH_EPSILON;
+    return @abs(owner.uv_a[0] - a[0]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_a[1] - a[1]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_b[0] - b[0]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_b[1] - b[1]) <= UV_EDGE_MATCH_EPSILON;
 }
 
 /// Coalesce initial authored-face buckets through real shared edges. When `uvs` is
@@ -416,9 +416,15 @@ pub fn buildFromNormalizedUv(
             const source = (@as(usize, face) * 3 + corner) * 2;
             const u = normalized_uvs[source + 0];
             const v = normalized_uvs[source + 1];
-            if (!std.math.isFinite(u) or !std.math.isFinite(v) or u < -0.0001 or u > 1.0001 or v < -0.0001 or v > 1.0001) return null;
-            const px = std.math.clamp(u, 0.0, 1.0) * @as(f32, @floatFromInt(atlas_w));
-            const py = std.math.clamp(v, 0.0, 1.0) * @as(f32, @floatFromInt(atlas_h));
+            if (!std.math.isFinite(u) or !std.math.isFinite(v)) return null;
+            // Exact authored corners live in a signed, unbounded UV workspace.
+            // Island rectangles remain finite u32 paint-clipping metadata, so
+            // their bounds are projected onto the nearest atlas texel without
+            // changing the real corner coordinates.
+            const px = u * @as(f32, @floatFromInt(atlas_w));
+            const py = v * @as(f32, @floatFromInt(atlas_h));
+            if (!std.math.isFinite(px) or !std.math.isFinite(py) or
+                @abs(px) > MAX_SIGNED_UV_TEXELS or @abs(py) > MAX_SIGNED_UV_TEXELS) return null;
             corner_uv[source + 0] = px;
             corner_uv[source + 1] = py;
 

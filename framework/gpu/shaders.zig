@@ -5,7 +5,14 @@
 //! Glyph atlas text rendering with per-glyph color tinting.
 //! SDF quadratic bezier curves with anti-aliased strokes.
 
+const std = @import("std");
 const terrain_grid = @import("terrain_grid.zig");
+
+test "scene3d finite atlases alpha-cut signed UV samples while materials can repeat" {
+    try std.testing.expect(std.mem.indexOf(u8, scene3d_wgsl, "@group(1) @binding(2) var<uniform> diffuse_sampling: vec4f;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scene3d_wgsl, "let uv_in_bounds = all(in.uv >= vec2f(0.0)) && all(in.uv <= vec2f(1.0));") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scene3d_wgsl, "uv_in_bounds || diffuse_sampling.x < 0.5") != null);
+}
 
 /// Rect pipeline: instanced fullscreen quads with SDF rounded-rect fragment shader.
 /// Each instance is one rectangle with position, size, colors, border-radius, border.
@@ -806,6 +813,9 @@ const scene3d_decls =
     \\@group(0) @binding(4) var shadow_smp: sampler_comparison;
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
+    \\// x == 1 means this diffuse is a finite model atlas: sampling beyond its
+    \\// rectangle contributes zero alpha. x == 0 preserves material tiling.
+    \\@group(1) @binding(2) var<uniform> diffuse_sampling: vec4f;
     \\
 ;
 
@@ -928,7 +938,10 @@ const scene3d_fs =
     \\    let diff = max(dot(N, L), 0.0);
     \\    let H = normalize(L + V);
     \\    let spec = pow(max(dot(N, H), 0.0), S.specular_power);
-    \\    let tex_sample = textureSample(diffuse_tex, diffuse_smp, in.uv);
+    \\    let raw_tex_sample = textureSample(diffuse_tex, diffuse_smp, in.uv);
+    \\    let uv_in_bounds = all(in.uv >= vec2f(0.0)) && all(in.uv <= vec2f(1.0));
+    \\    let sampled_alpha = select(0.0, raw_tex_sample.a, uv_in_bounds || diffuse_sampling.x < 0.5);
+    \\    let tex_sample = vec4f(raw_tex_sample.rgb, sampled_alpha);
     \\    let base = in.inst_color.rgb * tex_sample.rgb;
     \\    let ambient = S.ambient_color * base;
     \\    let diffuse = S.light_color * base * diff;

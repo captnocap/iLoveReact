@@ -782,6 +782,7 @@ fn resolve3D(key: []const u8) ?*wgpu.BindGroup {
     const entries = [_]wgpu.BindGroupEntry{
         .{ .binding = 0, .texture_view = view },
         .{ .binding = 1, .sampler = samp },
+        .{ .binding = 2, .buffer = gpu_core.scene3dUvSamplingUniform(false) orelse return null, .offset = 0, .size = 4 * @sizeOf(f32) },
     };
     e.bind_group_3d = device.createBindGroup(&.{
         .layout = layout,

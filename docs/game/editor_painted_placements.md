@@ -3,7 +3,7 @@
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
-req_3515 / req_3520.
+req_3515 / req_3520 / req_3524 / req_3525.
 
 ## In one sentence
 
@@ -26,7 +26,7 @@ exported look and renders as-is (collision still comes from the full-res doc).
 
 ## Cold-restart UV state (req_3362)
 
-`atlases/base.paint.json` v4 is the editable UV document paired with the raster
+`atlases/base.paint.json` v4 is the editable finite-atlas UV document paired with the raster
 baseline. `__model_atlas_read` publishes every render face as
 `[island, authoredGroup, x0, y0, x1, y1, x2, y2]`; Save strips the envelope and
 writes the six exact absolute-atlas corner coordinates per face as `cornerUv`.
@@ -57,7 +57,8 @@ unambiguous shared boundary vertex second, then walks the whole selected
 connected component. Each moving island gets a handed similarity fit and its
 matching seam endpoints land exactly on the anchor copies, so
 `__model_uv_geometry_apply` can reconstruct the joined island. Unrelated
-selected pieces stay put; a fit that would leave the atlas is refused. The
+selected pieces stay put; the signed workspace may place the result beyond the
+current image instead of refusing an otherwise valid seam. The
 whole sweep is one `stitch UV seams` journal entry.
 
 The sweep is indexed, not pairwise (req_3519). Boundary topology is built once
@@ -78,6 +79,50 @@ edge source is the authored UV view, so a resident triangle diagonal hidden by
 an authored quad stays absent from the export. Encoding uses the existing
 image codec and an atomic binary write. The guide is not loaded as texture
 state and can always be regenerated from `cornerUv`.
+
+## Infinite UV + image workspace (req_3524/req_3525)
+
+The atlas rectangle is no longer a movement wall. Whole islands, linked
+multi-island selections, isolated faces, individual vertices, rotation, scale,
+paste-transform, stitch, and signed X/Y entry all retain coordinates before
+zero or beyond the current texture dimensions. The Zig boundary accepts the
+same finite signed corner table and `paint_islands.buildFromNormalizedUv`
+retains exact out-of-range corners while clamping only its u32 paint-clipping
+metadata. This closes the old false preview where a drag could appear outside
+and then be rejected on commit.
+
+The UV surface draws a checkerboard and visible-grid slice across the entire
+pannable workspace, including negative coordinates. In the 3D scene, a third
+diffuse bind-group flag distinguishes a finite model atlas from an ordinary
+material texture: finite-atlas UVs outside `[0,1]` contribute zero alpha and
+discard, while StaticSurface/paintable material textures retain their existing
+sampling semantics. Ordinary texture import still forces incoming alpha opaque per
+req_3450; transparent empty space belongs only to this explicit workspace
+compile path.
+
+`atlases/uv-workspace.json` is the editable document. Its ordered layers store
+signed integer X/Y, immutable native dimensions, visibility, and a strict
+package-relative content address under
+`atlases/uv-sources/<sha256>.png`. `Add Image` snapshots the current
+paint raster baseline once as the bottom source, losslessly normalizes each later import
+to its own content-addressed PNG, and never deletes originals when a row is
+removed. `IMAGES` mode draws those sources directly and supports canvas drag,
+signed numeric placement, visibility, ordering, and removal. No layer scale is
+offered in this slice: every compile therefore retains one source pixel as one
+atlas pixel.
+
+`Compile` is explicit and shows progress while reading sources and composing.
+It takes the smallest integer union of visible images, leaves uncovered and
+source-transparent pixels alpha-zero, and composites bottom-to-top without
+resampling. The manifest records the compiled finite atlas's signed origin.
+Native apply translates local UVs by `oldOrigin - newOrigin`, so cropping or
+later expanding the image union never moves a UV in workspace coordinates.
+Every compile reconstructs that image baseline and preserves/replays the
+editable paint program over it, so strokes made before or after adding a layer
+are not double-applied or dropped.
+`base.png`, painted mesh artifacts, and the workspace origin commit after a
+successful live apply; layer edits only mark the compile stale, so more images
+can always be added before another explicit compile.
 
 ## Paint variants are full LOOKS (req_3439)
 

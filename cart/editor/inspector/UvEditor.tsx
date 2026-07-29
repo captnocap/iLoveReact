@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Effect, Graph, Paintable, Pressable, Row, Text, TextInput } from '../../../runtime/primitives';
+import { Box, Effect, Graph, Image, Paintable, Pressable, Row, ScrollView, Text, TextInput } from '../../../runtime/primitives';
 import { usePaintable } from '../../../runtime/hooks/usePaintable';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
 import { C, accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
+import {
+  UV_TEXTURE_WORKSPACE_TUNING,
+  uvTextureWorkspaceIsStale,
+  type UvTextureWorkspaceDoc,
+} from '../data/uvTextureWorkspace';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import {
   chainUvIslands,
@@ -43,6 +48,7 @@ import {
   uvSelectionBounds,
   uvSelectionVertices,
   uvTranslationSnapStep,
+  uvWorkspaceGridSegments,
   UV_LAYOUT_TUNING,
   UV_SNAP_STEPS,
   type UvAxisGuide,
@@ -71,6 +77,17 @@ const ATLAS_SHADER = `
   return vec4f(mix(checker, sheet.rgb, sheet.a), 1.0);
 }`;
 
+const WORKSPACE_CHECKER_SHADER = `
+@group(0) @binding(1) var<storage, read> P: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let px = in.uv * vec2f(P[0], P[1]);
+  let cell = max(P[2], 1.0);
+  let tile = floor(px / cell);
+  let parity = fract((tile.x + tile.y) * 0.5) * 2.0;
+  let rgb = mix(vec3f(0.0353, 0.0431, 0.0588), vec3f(0.0667, 0.0784, 0.1020), parity);
+  return vec4f(rgb, 1.0);
+}`;
+
 type ScreenPoint = { x: number; y: number };
 type UvLineGeometry = { faces: number[]; boundary: number[] };
 type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeometry };
@@ -82,10 +99,11 @@ const UV_CONTEXT_MENU_TUNING = {
   edgePx: 4,
   baseHeightPx: 330,
   rowHeightPx: 26,
-  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 5 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 7 } as Record<UvMenuGroup, number>,
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
+  | { kind: 'image'; id: string; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; origin: ScreenPoint; seed: UvTextureWorkspaceDoc }
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; bounds: UvSelectionBounds; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
   | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; origin: ScreenPoint; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
@@ -102,20 +120,6 @@ function sameHistory(a: ModelHistoryDepths, b: ModelHistoryDepths): boolean {
 
 function samePanelHistory(a: UvPanelHistory, b: UvPanelHistory): boolean {
   return sameHistory(a.uv, b.uv) && sameHistory(a.paint, b.paint);
-}
-
-function atlasGridSegments(atlasWidth: number, atlasHeight: number, step: number): { minor: number[]; major: number[] } {
-  const minor: number[] = [];
-  const major: number[] = [];
-  for (let x = step; x < atlasWidth; x += step) {
-    const segments = Math.round(x / step) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
-    segments.push(x, 0, x, atlasHeight);
-  }
-  for (let y = step; y < atlasHeight; y += step) {
-    const segments = Math.round(y / step) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
-    segments.push(0, y, atlasWidth, y);
-  }
-  return { minor, major };
 }
 
 function sameRectReferences(a: readonly UvIslandRect[], b: readonly UvIslandRect[]): boolean {
@@ -161,7 +165,7 @@ function sameAxisGuide(a: UvAxisGuide | null, b: UvAxisGuide | null): boolean {
 }
 
 function uvRectFrame(rect: UvIslandRect): UvSelectionBounds {
-  return {
+  return uvSelectionBounds(rect) ?? {
     x: rect.x,
     y: rect.y,
     w: rect.w,
@@ -295,6 +299,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [snapBaseStep, setSnapBaseStep] = useState<number>(UV_SNAP_STEPS[0]);
   const [aspectLocked, setAspectLocked] = useState(false);
   const [menuGroup, setMenuGroup] = useState<UvMenuGroup | null>(null);
+  const [surfaceMode, setSurfaceMode] = useState<'uv' | 'images'>('uv');
+  const [workspaceDoc, setWorkspaceDoc] = useState<UvTextureWorkspaceDoc | null>(uv.workspace);
+  const workspaceDocRef = useRef<UvTextureWorkspaceDoc | null>(uv.workspace);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(
+    uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null,
+  );
+  const [compileLabel, setCompileLabel] = useState<string | null>(null);
   // Copy/Paste Transform clipboard (req_3427) — one frame survives selection changes;
   // where the context menu opened, in atlas texels, so Move Here lands on the cursor.
   const [transformClipboard, setTransformClipboard] = useState<UvTransformFrame | null>(null);
@@ -373,9 +384,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       Math.max(1, surfaceSize.height - padding * 2) / Math.max(1, uv.h),
     );
     const scale = clamp(nativeScale ? Math.min(UV_LAYOUT_TUNING.defaultNativeScale, fit) : fit, UV_LAYOUT_TUNING.minimumZoom, UV_LAYOUT_TUNING.maximumZoom);
+    const atlasLeft = nativeScale ? padding : Math.round((surfaceSize.width - uv.w * scale) * 0.5);
+    const atlasTop = nativeScale ? padding : Math.round((surfaceSize.height - uv.h * scale) * 0.5);
     return {
-      x: nativeScale ? padding : Math.round((surfaceSize.width - uv.w * scale) * 0.5),
-      y: nativeScale ? padding : Math.round((surfaceSize.height - uv.h * scale) * 0.5),
+      x: atlasLeft - uv.atlasOriginX * scale,
+      y: atlasTop - uv.atlasOriginY * scale,
       scale,
     };
   };
@@ -443,6 +456,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setAxisGuide(null);
     setSelected((index) => validSelection.includes(index) ? index : validSelection[0] ?? Math.min(index, uv.islands.length - 1));
     setSelectedFace((target) => target && next.some((rect) => rect.triangles?.some((triangle) => triangle.face === target.face)) ? target : null);
+    workspaceDocRef.current = uv.workspace;
+    setWorkspaceDoc(uv.workspace);
+    setSelectedLayerId((current) => uv.workspace?.layers.some((layer) => layer.id === current)
+      ? current
+      : uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null);
     if (uv.rgba) texture.paint.upload(uv.rgba);
   }, [uv.key, uv.revision]);
 
@@ -613,7 +631,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     const result = stitchUvIslands(rectsRef.current, selectedIndicesRef.current, selected, uv.w, uv.h);
     if (result.stitched === 0) {
       setNote(result.blocked > 0
-        ? 'Matching seams were found, but their exact fit would leave the atlas.'
+        ? 'Matching seams were found, but no stable exact fit could be produced.'
         : 'Selected islands do not share a welded model edge or unambiguous boundary vertex.');
       return;
     }
@@ -621,7 +639,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       ? `${result.seamEdges} matching ${result.seamEdges === 1 ? 'edge' : 'edges'}`
       : `${result.seamVertices} matching ${result.seamVertices === 1 ? 'vertex' : 'vertices'}`;
     const unmatched = result.unmatched > 0 ? ` · ${result.unmatched} unrelated left in place` : '';
-    const blocked = result.blocked > 0 ? ` · ${result.blocked} atlas-blocked` : '';
+    const blocked = result.blocked > 0 ? ` · ${result.blocked} fit-blocked` : '';
     applyIslandSetEdit(
       result.rects,
       `stitched ${result.stitched} ${result.stitched === 1 ? 'island' : 'islands'} to the active UV across ${seams}${unmatched}${blocked}`,
@@ -767,13 +785,25 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
   const atlasW = uv.w * view.scale;
   const atlasH = uv.h * view.scale;
+  const atlasLeft = view.x + uv.atlasOriginX * view.scale;
+  const atlasTop = view.y + uv.atlasOriginY * view.scale;
   const atlasEffectData = useMemo(() => [atlasW, atlasH, UV_LAYOUT_TUNING.checkerPx, 0], [atlasW, atlasH]);
   const thumbnailEffectData = useMemo(() => [32, 32, UV_LAYOUT_TUNING.checkerPx, 0], []);
+  const workspaceCheckerData = useMemo(
+    () => [surfaceSize.width, surfaceSize.height, UV_LAYOUT_TUNING.checkerPx, 0],
+    [surfaceSize.width, surfaceSize.height],
+  );
   const gridSegments = useMemo(
-    () => atlasGridSegments(uv.w, uv.h, translationSnapStep),
-    [uv.w, uv.h, translationSnapStep],
+    () => uvWorkspaceGridSegments(view, surfaceSize.width, surfaceSize.height, translationSnapStep),
+    [view.x, view.y, view.scale, surfaceSize.width, surfaceSize.height, translationSnapStep],
   );
   const inverseViewScale = 1 / Math.max(UV_LAYOUT_TUNING.minimumZoom, view.scale);
+  const visibleWorkspace = {
+    left: -view.x * inverseViewScale,
+    top: -view.y * inverseViewScale,
+    right: (surfaceSize.width - view.x) * inverseViewScale,
+    bottom: (surfaceSize.height - view.y) * inverseViewScale,
+  };
   const selectionFrameSegments = selectedLocalBounds && !multiIslandSelection
     ? (() => {
       const x0 = selectedLocalBounds.x;
@@ -796,20 +826,27 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     : [];
   const guideSegments = axisGuide
     ? axisGuide.axis === 'horizontal'
-      ? [0, axisGuide.coordinate, uv.w, axisGuide.coordinate]
-      : [axisGuide.coordinate, 0, axisGuide.coordinate, uv.h]
+      ? [visibleWorkspace.left, axisGuide.coordinate, visibleWorkspace.right, axisGuide.coordinate]
+      : [axisGuide.coordinate, visibleWorkspace.top, axisGuide.coordinate, visibleWorkspace.bottom]
     : [];
   const selectedGuideSegments = useMemo(() => selectedGuides.flatMap((guide) => (
     guide.axis === 'horizontal'
-      ? [0, guide.coordinate, uv.w, guide.coordinate]
-      : [guide.coordinate, 0, guide.coordinate, uv.h]
-  )), [selectedGuides, uv.w, uv.h]);
+      ? [visibleWorkspace.left, guide.coordinate, visibleWorkspace.right, guide.coordinate]
+      : [guide.coordinate, visibleWorkspace.top, guide.coordinate, visibleWorkspace.bottom]
+  )), [selectedGuides, visibleWorkspace.left, visibleWorkspace.top, visibleWorkspace.right, visibleWorkspace.bottom]);
   const host = globalThis as any;
   const finishGesture = (event?: any) => {
     const gesture = gestureRef.current;
     gestureRef.current = null;
     if (gesture?.kind === 'pan') {
       settleViewPreview();
+      setAxisGuide(null);
+    } else if (gesture?.kind === 'image') {
+      const moved = workspaceDocRef.current?.layers.find((layer) => layer.id === gesture.id);
+      const original = gesture.seed.layers.find((layer) => layer.id === gesture.id);
+      if (moved && original && (moved.x !== original.x || moved.y !== original.y)) {
+        setNote(bridge.editUvTextureLayer(gesture.id, { kind: 'position', x: moved.x, y: moved.y }));
+      }
       setAxisGuide(null);
     } else if (gesture) settleUvPreview();
     else setAxisGuide(null);
@@ -874,7 +911,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setNote('face selection · double-click a face again to return to its island');
   };
   const packAtlas = () => {
-    const next = uniformUvPack(rectsRef.current, uv.w, uv.h);
+    const next = uniformUvPack(rectsRef.current, uv.w, uv.h, uv.atlasOriginX, uv.atlasOriginY);
     rectsRef.current = next;
     setRects(next);
     commit(next, `packed ${next.length} islands into uniform cells`, 'pack');
@@ -882,6 +919,27 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const importAtlas = () => {
     setNote('choosing a texture…');
     void bridge.importUvAtlas().then(setNote);
+  };
+  const addImageLayer = () => {
+    const center = atlasPoint({ x: surfaceSize.width * 0.5, y: surfaceSize.height * 0.5 });
+    setNote('choosing an image layer…');
+    void bridge.addUvTextureLayer(Math.round(center.x), Math.round(center.y)).then((message) => {
+      setSurfaceMode('images');
+      setNote(message);
+    });
+  };
+  const compileImageLayers = () => {
+    setCompileLabel('Preparing image layers');
+    setNote('compiling the visible image workspace…');
+    void bridge.compileUvTextureLayers((completed, total, label) => {
+      setCompileLabel(`${label} · ${Math.min(total, completed + 1)}/${total}`);
+    }).then((message) => {
+      setCompileLabel(null);
+      setNote(message);
+    });
+  };
+  const editImageLayer = (id: string, edit: Parameters<ModelFocusBridge['editUvTextureLayer']>[1]) => {
+    setNote(bridge.editUvTextureLayer(id, edit));
   };
   const saveAndCopyAtlasPath = () => {
     const saved = bridge.saveUvAtlas();
@@ -1074,8 +1132,22 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       style={{ flexGrow: 1, minHeight: 0, gap: 6, position: 'relative' }}
     >
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
-        <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={12} color={accentFor('primary')} />
-        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
+        <Pressable
+          onPress={() => setSurfaceMode('uv')}
+          style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'uv' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'uv' ? accentFor('primary') : accentFor('border') }}
+        >
+          <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={10} color={surfaceMode === 'uv' ? accentFor('primary') : accentFor('textDim')} />
+          <Text style={{ color: surfaceMode === 'uv' ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>UV</Text>
+        </Pressable>
+        <Pressable
+          tooltip={workspaceDoc ? 'Move original images in the signed UV workspace' : 'Add an image layer to create the editable workspace'}
+          onPress={() => workspaceDoc && setSurfaceMode('images')}
+          style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'images' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'images' ? accentFor('primary') : accentFor('border'), opacity: workspaceDoc ? 1 : 0.55 }}
+        >
+          <Icon name="Images" size={10} color={surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim')} />
+          <Text style={{ color: surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>IMAGES</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{surfaceMode === 'images' ? `${workspaceDoc?.layers.length ?? 0} LAYERS` : selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
         <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
@@ -1099,6 +1171,29 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         onRightClick={(event: any) => openUvMenu(event, true)}
         onMouseDown={(event: any) => {
           const screen = localScreenPoint(event);
+          if (surfaceMode === 'images' && workspaceDocRef.current) {
+            const point = atlasPoint(screen);
+            const layer = [...workspaceDocRef.current.layers].reverse().find((candidate) => (
+              candidate.visible
+              && point.x >= candidate.x
+              && point.y >= candidate.y
+              && point.x <= candidate.x + candidate.width
+              && point.y <= candidate.y + candidate.height
+            ));
+            setSelectedLayerId(layer?.id ?? null);
+            if (layer) {
+              gestureRef.current = {
+                kind: 'image',
+                id: layer.id,
+                start: point,
+                screenStart: screen,
+                activated: false,
+                origin: { x: layer.x, y: layer.y },
+                seed: workspaceDocRef.current,
+              };
+            }
+            return;
+          }
           if (selectedRect && selectionBounds && hitsControl(screen, rotationHandle, UV_LAYOUT_TUNING.rotationHandleHitPx)) {
             const point = atlasPoint(screen);
             gestureRef.current = {
@@ -1200,6 +1295,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             return;
           }
           const point = atlasPoint(screen);
+          if (gesture.kind === 'image') {
+            if (!gesture.activated) {
+              if (!shouldActivateUvDrag(screen.x - gesture.screenStart.x, screen.y - gesture.screenStart.y)) return;
+              gesture.activated = true;
+            }
+            const step = event?.altKey ? 1 : translationSnapStep;
+            const nextX = Math.round((gesture.origin.x + point.x - gesture.start.x) / step) * step;
+            const nextY = Math.round((gesture.origin.y + point.y - gesture.start.y) / step) * step;
+            const next = {
+              ...gesture.seed,
+              layers: gesture.seed.layers.map((layer) => layer.id === gesture.id
+                ? { ...layer, x: nextX, y: nextY }
+                : layer),
+            };
+            workspaceDocRef.current = next;
+            setWorkspaceDoc(next);
+            return;
+          }
           let changed = gesture.seed;
           let guide: UvAxisGuide | null = null;
           if (gesture.kind === 'move' || gesture.kind === 'vertex') {
@@ -1260,9 +1373,45 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         onMouseLeave={() => { if (!middlePanActiveRef.current) finishGesture(); }}
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#07090d' }}
       >
-        <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, backgroundColor: '#0d1118', pointerEvents: 'none' }} />
-        <Effect shader={ATLAS_SHADER} data={atlasEffectData} textures={[texture.id]} style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH }} />
-        <Box style={{ position: 'absolute', left: view.x, top: view.y, width: atlasW, height: atlasH, borderWidth: 2, borderColor: '#71839a', pointerEvents: 'none' }} />
+        <Effect shader={WORKSPACE_CHECKER_SHADER} data={workspaceCheckerData} style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height }} />
+        {surfaceMode === 'images' && workspaceDoc && uv.packageDir ? (
+          <>
+            {workspaceDoc.layers.filter((layer) => layer.visible).map((layer) => (
+              <Image
+                key={`uv-workspace-image-${layer.id}-${layer.source}`}
+                source={`${uv.packageDir}/${layer.source}`}
+                style={{
+                  position: 'absolute',
+                  left: view.x + layer.x * view.scale,
+                  top: view.y + layer.y * view.scale,
+                  width: layer.width * view.scale,
+                  height: layer.height * view.scale,
+                  pointerEvents: 'none',
+                }}
+              />
+            ))}
+            {(() => {
+              const layer = workspaceDoc.layers.find((candidate) => candidate.id === selectedLayerId);
+              return layer?.visible ? (
+                <Box style={{
+                  position: 'absolute',
+                  left: view.x + layer.x * view.scale,
+                  top: view.y + layer.y * view.scale,
+                  width: layer.width * view.scale,
+                  height: layer.height * view.scale,
+                  borderWidth: 2,
+                  borderColor: accentFor('primary'),
+                  pointerEvents: 'none',
+                }} />
+              ) : null;
+            })()}
+          </>
+        ) : (
+          <>
+            <Effect shader={ATLAS_SHADER} data={atlasEffectData} textures={[texture.id]} style={{ position: 'absolute', left: atlasLeft, top: atlasTop, width: atlasW, height: atlasH }} />
+            <Box style={{ position: 'absolute', left: atlasLeft, top: atlasTop, width: atlasW, height: atlasH, borderWidth: 2, borderColor: '#71839a', pointerEvents: 'none' }} />
+          </>
+        )}
         {/* Grid and mesh lines stay in native atlas-space and pan/zoom through
             Graph's native transform, so their point buffers remain immutable
             while the view or a complete island moves. */}
@@ -1349,17 +1498,32 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       <Row style={{ height: 14, alignItems: 'center' }}>
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`${multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID SNAP ${translationSnapStep}px` : `GRID SNAP ${translationSnapStep}px`} · ${selectedGuides.length > 0 ? `${selectedGuides.length} GUIDE${selectedGuides.length === 1 ? '' : 'S'}` : 'CLICK GRID = GUIDE'}`}</Text>
         <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`ATLAS ${uv.w}×${uv.h}`}</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`INFINITE WORKSPACE · ATLAS ${uv.w}×${uv.h} @ ${uv.atlasOriginX},${uv.atlasOriginY}`}</Text>
       </Row>
 
       <Row style={{ alignItems: 'center', gap: 4 }}>
-        <UvNumberField label="X" value={selectionBounds ? Math.round(selectionBounds.x) : null} min={0} max={selectionBounds ? Math.floor(uv.w - selectionBounds.w) : uv.w} onCommit={(value) => changeCoordinate('x', value)} />
-        <UvNumberField label="Y" value={selectionBounds ? Math.round(selectionBounds.y) : null} min={0} max={selectionBounds ? Math.floor(uv.h - selectionBounds.h) : uv.h} onCommit={(value) => changeCoordinate('y', value)} />
-        <UvNumberField label="W" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.w)) : null} min={1} max={selectionBounds ? Math.floor(uv.w - selectionBounds.x) : uv.w} onCommit={(value) => changeCoordinate('w', value)} />
-        <UvNumberField label="H" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.h)) : null} min={1} max={selectionBounds ? Math.floor(uv.h - selectionBounds.y) : uv.h} onCommit={(value) => changeCoordinate('h', value)} />
-        <Pressable tooltip={aspectLocked ? 'Unlock width and height' : 'Lock width/height aspect'} onPress={() => setAspectLocked((value) => !value)} style={{ width: 29, height: 29, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: aspectLocked ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: aspectLocked ? accentFor('primary') : accentFor('border') }}>
-          <Icon name={aspectLocked ? 'Link2' : 'Link2Off'} size={13} color={aspectLocked ? accentFor('primary') : accentFor('textDim')} />
-        </Pressable>
+        {surfaceMode === 'images' ? (() => {
+          const layer = workspaceDoc?.layers.find((candidate) => candidate.id === selectedLayerId) ?? null;
+          return (
+            <>
+              <UvNumberField label="X" value={layer?.x ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: value, y: layer.y })} />
+              <UvNumberField label="Y" value={layer?.y ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: layer.x, y: value })} />
+              <Box style={{ flexGrow: 2, height: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4 }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace' }}>{layer ? `${layer.width}×${layer.height} NATIVE PX` : 'SELECT AN IMAGE'}</Text>
+              </Box>
+            </>
+          );
+        })() : (
+          <>
+            <UvNumberField label="X" value={selectionBounds ? Math.round(selectionBounds.x) : null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => changeCoordinate('x', value)} />
+            <UvNumberField label="Y" value={selectionBounds ? Math.round(selectionBounds.y) : null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => changeCoordinate('y', value)} />
+            <UvNumberField label="W" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.w)) : null} min={1} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => changeCoordinate('w', value)} />
+            <UvNumberField label="H" value={selectionBounds && !multiIslandSelection ? Math.max(1, Math.round(selectionBounds.h)) : null} min={1} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => changeCoordinate('h', value)} />
+            <Pressable tooltip={aspectLocked ? 'Unlock width and height' : 'Lock width/height aspect'} onPress={() => setAspectLocked((value) => !value)} style={{ width: 29, height: 29, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: aspectLocked ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: aspectLocked ? accentFor('primary') : accentFor('border') }}>
+              <Icon name={aspectLocked ? 'Link2' : 'Link2Off'} size={13} color={aspectLocked ? accentFor('primary') : accentFor('textDim')} />
+            </Pressable>
+          </>
+        )}
       </Row>
 
       {note ? <Text numberOfLines={1} style={{ color: accentFor('textDim'), fontSize: 9 }}>{note}</Text> : null}
@@ -1368,7 +1532,22 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>TEXTURES</Text>
           <Box style={{ flexGrow: 1 }} />
-          <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>RMB CANVAS · TEXTURE ACTIONS</Text>
+          <Pressable
+            tooltip="Store another original image in this model and place it at native pixel resolution"
+            onPress={addImageLayer}
+            style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}
+          >
+            <Icon name="ImagePlus" size={10} color={accentFor('primary')} />
+            <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>ADD</Text>
+          </Pressable>
+          <Pressable
+            tooltip="Composite visible sources into the smallest transparent texture without resampling; originals remain editable"
+            onPress={() => workspaceDoc && !compileLabel && compileImageLayers()}
+            style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? accentFor('primary') : accentFor('border'), opacity: workspaceDoc ? 1 : 0.55 }}
+          >
+            <Icon name="PackageCheck" size={10} color={workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? accentFor('primary') : accentFor('textDim')} />
+            <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{compileLabel ? 'WORKING' : 'COMPILE'}</Text>
+          </Pressable>
           <Pressable
             tooltip="Export an atlas-sized UV wireframe PNG with a transparent background and copy its path"
             onPress={exportWireframeAndCopyPath}
@@ -1378,16 +1557,56 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>WIRE PNG</Text>
           </Pressable>
         </Row>
-        <Box style={{ height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 7, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}>
-          <Box style={{ width: 32, height: 32, position: 'relative', overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
-            <Effect shader={ATLAS_SHADER} data={thumbnailEffectData} textures={[texture.id]} style={{ position: 'absolute', left: 0, top: 0, width: 32, height: 32 }} />
+        {compileLabel ? <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace' }}>{compileLabel}</Text> : null}
+        {workspaceDoc && uv.packageDir ? (
+          <ScrollView style={{ maxHeight: 132 }} showScrollbar>
+            {[...workspaceDoc.layers].reverse().map((layer) => {
+              const index = workspaceDoc.layers.findIndex((candidate) => candidate.id === layer.id);
+              const active = layer.id === selectedLayerId;
+              return (
+                <Pressable
+                  key={`uv-layer-row-${layer.id}`}
+                  onPress={() => {
+                    setSelectedLayerId(layer.id);
+                    setSurfaceMode('images');
+                  }}
+                  style={{ height: 39, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 5, paddingRight: 5, backgroundColor: active ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('borderSoft') }}
+                >
+                  <Pressable tooltip={layer.visible ? 'Hide this source from preview and compile' : 'Show this source'} onPress={() => editImageLayer(layer.id, { kind: 'visible', visible: !layer.visible })} style={{ width: 22, height: 27, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={layer.visible ? 'Eye' : 'EyeOff'} size={11} color={layer.visible ? accentFor('primary') : accentFor('textFaint')} />
+                  </Pressable>
+                  <Box style={{ width: 29, height: 29, overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
+                    {layer.visible ? <Image source={`${uv.packageDir}/${layer.source}`} style={{ width: 29, height: 29 }} /> : null}
+                  </Box>
+                  <Box style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
+                    <Text numberOfLines={1} style={{ color: active ? accentFor('text') : accentFor('textDim'), fontSize: 9, fontWeight: '800' }}>{layer.name}</Text>
+                    <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`${layer.width}×${layer.height} · ${layer.x},${layer.y}`}</Text>
+                  </Box>
+                  <Pressable tooltip="Move layer up" onPress={() => editImageLayer(layer.id, { kind: 'raise' })} style={{ width: 18, height: 25, alignItems: 'center', justifyContent: 'center', opacity: index < workspaceDoc.layers.length - 1 ? 1 : 0.35 }}>
+                    <Icon name="ChevronUp" size={10} color={accentFor('textDim')} />
+                  </Pressable>
+                  <Pressable tooltip="Move layer down" onPress={() => editImageLayer(layer.id, { kind: 'lower' })} style={{ width: 18, height: 25, alignItems: 'center', justifyContent: 'center', opacity: index > 0 ? 1 : 0.35 }}>
+                    <Icon name="ChevronDown" size={10} color={accentFor('textDim')} />
+                  </Pressable>
+                  <Pressable tooltip="Remove layer from the document; its stored source remains recoverable in the package" onPress={() => editImageLayer(layer.id, { kind: 'remove' })} style={{ width: 18, height: 25, alignItems: 'center', justifyContent: 'center', opacity: workspaceDoc.layers.length > 1 ? 1 : 0.35 }}>
+                    <Icon name="Trash2" size={10} color="#ef6a6a" />
+                  </Pressable>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <Box style={{ height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 7, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}>
+            <Box style={{ width: 32, height: 32, position: 'relative', overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
+              <Effect shader={ATLAS_SHADER} data={thumbnailEffectData} textures={[texture.id]} style={{ position: 'absolute', left: 0, top: 0, width: 32, height: 32 }} />
+            </Box>
+            <Box style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
+              <Text style={{ color: accentFor('text'), fontSize: 10, fontWeight: '800' }}>base.png</Text>
+              <Text style={{ color: accentFor('textFaint'), fontSize: 9, fontFamily: 'ui-monospace' }}>{`${uv.w}×${uv.h}px · ${uv.detail} texels/m`}</Text>
+            </Box>
+            <Icon name="Save" size={13} color={accentFor('primary')} />
           </Box>
-          <Box style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
-            <Text style={{ color: accentFor('text'), fontSize: 10, fontWeight: '800' }}>base.png</Text>
-            <Text style={{ color: accentFor('textFaint'), fontSize: 9, fontFamily: 'ui-monospace' }}>{`${uv.w}×${uv.h}px · ${uv.detail} texels/m`}</Text>
-          </Box>
-          <Icon name="Save" size={13} color={accentFor('primary')} />
-        </Box>
+        )}
       </Box>
 
       <uvMenu.ContextMenu
@@ -1492,6 +1711,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           {menuGroup === 'texture' ? (
             <>
               <UvContextRow indented icon="Grid3x3" label="Uniform Pack All Islands" enabled={rects.length > 0} onPress={() => runMenuAction(packAtlas)} />
+              <UvContextRow indented icon="ImagePlus" label="Add Image Layer…" detail="NATIVE PX" onPress={() => runMenuAction(addImageLayer)} />
+              <UvContextRow indented icon="PackageCheck" label="Compile Image Layers" detail={workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? 'STALE' : workspaceDoc ? 'CURRENT' : 'EMPTY'} enabled={Boolean(workspaceDoc) && !compileLabel} tooltip="Crop the signed image workspace to its visible union and composite transparent gaps; originals stay separate" onPress={() => runMenuAction(compileImageLayers)} />
               <UvContextRow indented icon="ImagePlus" label="Import Texture…" onPress={() => runMenuAction(importAtlas)} />
               <UvContextRow indented icon="RefreshCw" label="Reload base.png" onPress={() => runMenuAction(() => setNote(bridge.reloadUvAtlas()))} />
               <UvContextRow indented icon="Copy" label="Save & Copy Atlas Path" enabled={Boolean(uv.diskPath)} onPress={() => runMenuAction(saveAndCopyAtlasPath)} />

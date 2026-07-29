@@ -137,6 +137,7 @@ declare global {
   function __model_uv_island_select(...args: unknown[]): unknown;
   function __model_atlas_replace(...args: unknown[]): unknown;
   function __model_atlas_import(...args: unknown[]): unknown;
+  function __model_atlas_workspace_apply(...args: unknown[]): unknown;
   function __model_paint_sample(...args: unknown[]): unknown;
   function __model_atlas_palette(...args: unknown[]): unknown;
   function __image_write_png(...args: unknown[]): unknown;

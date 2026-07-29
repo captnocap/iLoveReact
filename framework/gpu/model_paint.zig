@@ -102,6 +102,11 @@ pub const VariantRasterTuning = struct {
     pub const sampling_gutter_texels: f32 = @floatFromInt(paint_islands.PAD_TEXELS);
     pub const unused_texel: [4]u8 = .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2], 255 };
 };
+pub const UvWorkspaceTuning = struct {
+    // Large enough for practical image staging while retaining exact integer
+    // texel coordinates in f32. This is a corruption guard, not a canvas edge.
+    pub const max_abs_coordinate_texels: f32 = paint_islands.MAX_SIGNED_UV_TEXELS;
+};
 // Authored opacity has one shared classification boundary. The renderer, durable mesh
 // partition, and editor overlay must agree or a face can draw as glass while presenting
 // as opaque (or vice versa).
@@ -1061,13 +1066,16 @@ fn indexIslandTriangles(layout: *const paint_islands.Layout, face_count: u32) ?I
     return .{ .starts = starts, .triangles = triangles };
 }
 
-/// Adopt an external raster at its native dimensions while retaining the current UV
-/// geometry in square-texel space. Scaling normalized U and V independently turns a
-/// circle into an oval whenever the new image aspect differs, so the complete old
-/// atlas is uniformly fitted and centered inside the new one instead. The image is
-/// never resampled. All allocations and topology reconstruction complete before any
-/// live state changes.
-pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32, verts: []f32, vert_count: u32) bool {
+fn importAtlasWithUvTransform(
+    rgba: []const u8,
+    width: u32,
+    height: u32,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+    verts: []f32,
+    vert_count: u32,
+) bool {
     const old_layout = g_layout orelse return false;
     const live_positions = g_positions orelse return false;
     if (g_rgba == null or vert_count != g_facecount * 3) return false;
@@ -1076,20 +1084,17 @@ pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32
     const byte_count = @as(usize, width) * @as(usize, height) * 4;
     if (byte_count > ATLAS_BUDGET or rgba.len != byte_count) return false;
     if (old_layout.corner_uv.len != @as(usize, vert_count) * 2 or g_atlas_w == 0 or g_atlas_h == 0) return false;
+    if (!std.math.isFinite(scale) or scale <= 0 or
+        !std.math.isFinite(offset_x) or !std.math.isFinite(offset_y)) return false;
 
     const normalized = alloc.alloc(f32, old_layout.corner_uv.len) catch return false;
     defer alloc.free(normalized);
-    const old_width: f32 = @floatFromInt(g_atlas_w);
-    const old_height: f32 = @floatFromInt(g_atlas_h);
     const new_width: f32 = @floatFromInt(width);
     const new_height: f32 = @floatFromInt(height);
-    const uniform_scale = @min(new_width / old_width, new_height / old_height);
-    const offset_x = (new_width - old_width * uniform_scale) * 0.5;
-    const offset_y = (new_height - old_height * uniform_scale) * 0.5;
     var coordinate: usize = 0;
     while (coordinate < normalized.len) : (coordinate += 2) {
-        normalized[coordinate + 0] = (offset_x + old_layout.corner_uv[coordinate + 0] * uniform_scale) / new_width;
-        normalized[coordinate + 1] = (offset_y + old_layout.corner_uv[coordinate + 1] * uniform_scale) / new_height;
+        normalized[coordinate + 0] = (offset_x + old_layout.corner_uv[coordinate + 0] * scale) / new_width;
+        normalized[coordinate + 1] = (offset_y + old_layout.corner_uv[coordinate + 1] * scale) / new_height;
     }
 
     const groups = collectFaceGroups(g_facecount) orelse return false;
@@ -1138,6 +1143,47 @@ pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1);
     return true;
+}
+
+/// Adopt an external raster at its native dimensions while retaining the current UV
+/// geometry in square-texel space. Scaling normalized U and V independently turns a
+/// circle into an oval whenever the new image aspect differs, so the complete old
+/// atlas is uniformly fitted and centered inside the new one instead. The image is
+/// never resampled.
+pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32, verts: []f32, vert_count: u32) bool {
+    if (g_atlas_w == 0 or g_atlas_h == 0 or width == 0 or height == 0) return false;
+    const old_width: f32 = @floatFromInt(g_atlas_w);
+    const old_height: f32 = @floatFromInt(g_atlas_h);
+    const new_width: f32 = @floatFromInt(width);
+    const new_height: f32 = @floatFromInt(height);
+    const uniform_scale = @min(new_width / old_width, new_height / old_height);
+    return importAtlasWithUvTransform(
+        rgba,
+        width,
+        height,
+        uniform_scale,
+        (new_width - old_width * uniform_scale) * 0.5,
+        (new_height - old_height * uniform_scale) * 0.5,
+        verts,
+        vert_count,
+    );
+}
+
+/// Compile an infinite UV/image workspace back to a finite resident atlas. The
+/// caller supplies the signed local-coordinate translation caused by changing
+/// the compiled bounding-box origin. Raster alpha is retained exactly.
+pub fn importAtlasTranslatingUvGeometry(
+    rgba: []const u8,
+    width: u32,
+    height: u32,
+    shift_x: f32,
+    shift_y: f32,
+    verts: []f32,
+    vert_count: u32,
+) bool {
+    if (@abs(shift_x) > UvWorkspaceTuning.max_abs_coordinate_texels or
+        @abs(shift_y) > UvWorkspaceTuning.max_abs_coordinate_texels) return false;
+    return importAtlasWithUvTransform(rgba, width, height, 1, shift_x, shift_y, verts, vert_count);
 }
 
 /// Write a candidate corner table whose selected UV islands are reprojected from the
@@ -2710,14 +2756,13 @@ pub fn applyIslandRects(new_rects: []const u32, verts: []f32, vert_count: u32) b
 
 fn validCornerUvTable(corners: []const f32, face_count: u32, atlas_w: u32, atlas_h: u32) bool {
     if (face_count == 0 or corners.len != @as(usize, face_count) * 6 or atlas_w == 0 or atlas_h == 0) return false;
-    const atlas_w_f: f32 = @floatFromInt(atlas_w);
-    const atlas_h_f: f32 = @floatFromInt(atlas_h);
     var index: usize = 0;
     while (index < corners.len) : (index += 2) {
         const x = corners[index + 0];
         const y = corners[index + 1];
         if (!std.math.isFinite(x) or !std.math.isFinite(y)) return false;
-        if (x < 0.0 or x > atlas_w_f or y < 0.0 or y > atlas_h_f) return false;
+        if (@abs(x) > UvWorkspaceTuning.max_abs_coordinate_texels or
+            @abs(y) > UvWorkspaceTuning.max_abs_coordinate_texels) return false;
     }
     return true;
 }

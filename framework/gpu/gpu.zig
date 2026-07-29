@@ -1126,6 +1126,9 @@ pub fn scene3dTexLayout() ?*wgpu.BindGroupLayout {
 pub fn scene3dDiffuseSampler() ?*wgpu.Sampler {
     return scene3d.getDiffuseSampler();
 }
+pub fn scene3dUvSamplingUniform(finite_atlas: bool) ?*wgpu.Buffer {
+    return scene3d.getUvSamplingUniform(finite_atlas);
+}
 
 /// Drop the retained 3D-geometry intern caches on dev hot-reload (see
 /// scene3d.resetForReload). Without it the append-only bump caches accumulate
@@ -1154,6 +1157,7 @@ pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
     const entries = [_]wgpu.BindGroupEntry{
         .{ .binding = 0, .texture_view = entry.view.? },
         .{ .binding = 1, .sampler = samp_3d },
+        .{ .binding = 2, .buffer = scene3d.getUvSamplingUniform(false) orelse return null, .offset = 0, .size = 4 * @sizeOf(f32) },
     };
     entry.bind_group_3d = device.createBindGroup(&.{
         .layout = layout_,

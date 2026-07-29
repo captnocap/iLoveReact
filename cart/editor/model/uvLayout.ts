@@ -46,6 +46,8 @@ export const UV_LAYOUT_TUNING = {
   stitchMaximumScale: 20,
   /** A model edge/point with more owners is non-manifold and not an automatic seam. */
   stitchUnambiguousOwnerCount: 2,
+  /** Bound visible grid geometry under pathological zoom without bounding space. */
+  maximumVisibleGridLines: 4096,
 } as const;
 
 /** Explicit authoring precision. Zoom may raise the effective step so a snap
@@ -189,12 +191,11 @@ export function uvTranslationSnapStep(viewScale: number, minimumStep = UV_LAYOUT
  */
 export function hitUvGridGuide(
   point: UvCanvasPoint,
-  atlasW: number,
-  atlasH: number,
+  _atlasW: number,
+  _atlasH: number,
   step: number,
   maxDistance: number,
 ): UvAxisGuide | null {
-  if (atlasW <= 0 || atlasH <= 0 || point.x < 0 || point.y < 0 || point.x > atlasW || point.y > atlasH) return null;
   const safeStep = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(step));
   const radius = Math.min(
     Math.max(0, Number.isFinite(maxDistance) ? maxDistance : 0),
@@ -202,16 +203,12 @@ export function hitUvGridGuide(
   );
   const verticalCoordinate = Math.round(point.x / safeStep) * safeStep;
   const horizontalCoordinate = Math.round(point.y / safeStep) * safeStep;
-  const verticalDistance = verticalCoordinate > 0 && verticalCoordinate < atlasW
-    ? Math.abs(point.x - verticalCoordinate)
-    : Number.POSITIVE_INFINITY;
-  const horizontalDistance = horizontalCoordinate > 0 && horizontalCoordinate < atlasH
-    ? Math.abs(point.y - horizontalCoordinate)
-    : Number.POSITIVE_INFINITY;
+  const verticalDistance = Math.abs(point.x - verticalCoordinate);
+  const horizontalDistance = Math.abs(point.y - horizontalCoordinate);
   return hitUvGuide(
     point,
-    atlasW,
-    atlasH,
+    _atlasW,
+    _atlasH,
     [
       ...(Number.isFinite(verticalDistance) ? [{ axis: 'vertical' as const, coordinate: verticalCoordinate }] : []),
       ...(Number.isFinite(horizontalDistance) ? [{ axis: 'horizontal' as const, coordinate: horizontalCoordinate }] : []),
@@ -223,12 +220,11 @@ export function hitUvGridGuide(
 /** Hit-test already-promoted guides even if a zoom or grid-step change hid their source line. */
 export function hitUvGuide(
   point: UvCanvasPoint,
-  atlasW: number,
-  atlasH: number,
+  _atlasW: number,
+  _atlasH: number,
   guides: readonly UvAxisGuide[],
   maxDistance: number,
 ): UvAxisGuide | null {
-  if (point.x < 0 || point.y < 0 || point.x > atlasW || point.y > atlasH) return null;
   const tolerance = Math.max(0, Number.isFinite(maxDistance) ? maxDistance : 0);
   let best: { guide: UvAxisGuide; distance: number } | null = null;
   for (const guide of guides) {
@@ -237,6 +233,35 @@ export function hitUvGuide(
     best = { guide, distance };
   }
   return best?.guide ?? null;
+}
+
+/** Grid geometry for only the currently visible slice of the signed workspace. */
+export function uvWorkspaceGridSegments(
+  view: UvCanvasView,
+  surfaceWidth: number,
+  surfaceHeight: number,
+  step: number,
+): { minor: number[]; major: number[] } {
+  if (!(surfaceWidth > 0) || !(surfaceHeight > 0) || !(view.scale > 0)) return { minor: [], major: [] };
+  const safeStep = Math.max(UV_LAYOUT_TUNING.vertexSnapTexels, integer(step));
+  const left = -view.x / view.scale;
+  const top = -view.y / view.scale;
+  const right = (surfaceWidth - view.x) / view.scale;
+  const bottom = (surfaceHeight - view.y) / view.scale;
+  const minor: number[] = [];
+  const major: number[] = [];
+  let emitted = 0;
+  const firstX = Math.floor(left / safeStep) * safeStep;
+  for (let x = firstX; x <= right && emitted < UV_LAYOUT_TUNING.maximumVisibleGridLines; x += safeStep, emitted += 1) {
+    const target = Math.round(x / safeStep) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
+    target.push(x, top, x, bottom);
+  }
+  const firstY = Math.floor(top / safeStep) * safeStep;
+  for (let y = firstY; y <= bottom && emitted < UV_LAYOUT_TUNING.maximumVisibleGridLines; y += safeStep, emitted += 1) {
+    const target = Math.round(y / safeStep) % UV_LAYOUT_TUNING.majorGridEvery === 0 ? major : minor;
+    target.push(left, y, right, y);
+  }
+  return { minor, major };
 }
 
 /** Click once to promote a grid line, and click the same line again to remove it. */
@@ -420,15 +445,15 @@ export function moveUvIsland(
   rect: UvIslandRect,
   dx: number,
   dy: number,
-  atlasW: number,
-  atlasH: number,
+  _atlasW: number,
+  _atlasH: number,
   snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
   freeMove = false,
 ): UvIslandRect {
   const requestedX = rect.x + dx;
   const requestedY = rect.y + dy;
-  const x = clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), 0, Math.max(0, atlasW - rect.w));
-  const y = clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), 0, Math.max(0, atlasH - rect.h));
+  const x = freeMove ? requestedX : snapUvVertex(requestedX, snapStep);
+  const y = freeMove ? requestedY : snapUvVertex(requestedY, snapStep);
   if (x === rect.x && y === rect.y) return rect;
   return {
     ...rect,
@@ -460,24 +485,31 @@ export function uvIslandSetBounds(rects: readonly UvIslandRect[], indices: reado
   let bottom = Number.NEGATIVE_INFINITY;
   for (const index of selected) {
     const rect = rects[index]!;
-    x = Math.min(x, rect.x);
-    y = Math.min(y, rect.y);
-    right = Math.max(right, rect.x + rect.w);
-    bottom = Math.max(bottom, rect.y + rect.h);
+    const bounds = uvSelectionBounds(rect) ?? {
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
+      cx: rect.x + rect.w * 0.5,
+      cy: rect.y + rect.h * 0.5,
+    };
+    x = Math.min(x, bounds.x);
+    y = Math.min(y, bounds.y);
+    right = Math.max(right, bounds.x + bounds.w);
+    bottom = Math.max(bottom, bounds.y + bounds.h);
   }
   return { x, y, w: right - x, h: bottom - y, cx: (x + right) * 0.5, cy: (y + bottom) * 0.5 };
 }
 
-/** Translate a selected set as one rigid UV group. The aggregate frame is
- * clamped once, so members cannot compress or drift against one another at an
- * atlas edge. */
+/** Translate a selected set as one rigid UV group in the signed workspace.
+ * The texture rectangle is a sampling region, not a movement boundary. */
 export function moveUvIslands(
   rects: readonly UvIslandRect[],
   indices: readonly number[],
   dx: number,
   dy: number,
-  atlasW: number,
-  atlasH: number,
+  _atlasW: number,
+  _atlasH: number,
   snapStep = UV_LAYOUT_TUNING.vertexSnapTexels,
   freeMove = false,
 ): UvIslandRect[] {
@@ -488,12 +520,12 @@ export function moveUvIslands(
   const requestedY = bounds.y + dy;
   const targetX = freeMove ? requestedX : snapUvVertex(requestedX, snapStep);
   const targetY = freeMove ? requestedY : snapUvVertex(requestedY, snapStep);
-  const safeDx = clamp(targetX - bounds.x, -bounds.x, atlasW - bounds.x - bounds.w);
-  const safeDy = clamp(targetY - bounds.y, -bounds.y, atlasH - bounds.y - bounds.h);
-  if (Math.abs(safeDx) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(safeDy) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return [...rects];
+  const translatedX = targetX - bounds.x;
+  const translatedY = targetY - bounds.y;
+  if (Math.abs(translatedX) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(translatedY) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return [...rects];
   const selectedSet = new Set(selected);
   return rects.map((rect, index) => selectedSet.has(index)
-    ? { ...rect, x: rect.x + safeDx, y: rect.y + safeDy }
+    ? { ...rect, x: rect.x + translatedX, y: rect.y + translatedY }
     : rect);
 }
 
@@ -562,11 +594,11 @@ export function chainUvIslands(
   };
 }
 
-export function resizeUvIsland(rect: UvIslandRect, dw: number, dh: number, atlasW: number, atlasH: number): UvIslandRect {
+export function resizeUvIsland(rect: UvIslandRect, dw: number, dh: number, _atlasW: number, _atlasH: number): UvIslandRect {
   return {
     ...rect,
-    w: clamp(integer(rect.w + dw), UV_LAYOUT_TUNING.minimumIslandTexels, Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, atlasW - rect.x)),
-    h: clamp(integer(rect.h + dh), UV_LAYOUT_TUNING.minimumIslandTexels, Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, atlasH - rect.y)),
+    w: Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, integer(rect.w + dw)),
+    h: Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, integer(rect.h + dh)),
   };
 }
 
@@ -578,21 +610,21 @@ export function resizeUvIslandFromCorner(
   corner: UvResizeCorner,
   dx: number,
   dy: number,
-  atlasW: number,
-  atlasH: number,
+  _atlasW: number,
+  _atlasH: number,
 ): UvIslandRect {
   const minSize = UV_LAYOUT_TUNING.minimumIslandTexels;
   const left = corner === 'nw' || corner === 'sw'
-    ? clamp(integer(rect.x + dx), 0, rect.x + rect.w - minSize)
+    ? Math.min(integer(rect.x + dx), rect.x + rect.w - minSize)
     : rect.x;
   const top = corner === 'nw' || corner === 'ne'
-    ? clamp(integer(rect.y + dy), 0, rect.y + rect.h - minSize)
+    ? Math.min(integer(rect.y + dy), rect.y + rect.h - minSize)
     : rect.y;
   const right = corner === 'ne' || corner === 'se'
-    ? clamp(integer(rect.x + rect.w + dx), rect.x + minSize, atlasW)
+    ? Math.max(integer(rect.x + rect.w + dx), rect.x + minSize)
     : rect.x + rect.w;
   const bottom = corner === 'se' || corner === 'sw'
-    ? clamp(integer(rect.y + rect.h + dy), rect.y + minSize, atlasH)
+    ? Math.max(integer(rect.y + rect.h + dy), rect.y + minSize)
     : rect.y + rect.h;
   return { ...rect, x: left, y: top, w: right - left, h: bottom - top };
 }
@@ -642,10 +674,10 @@ function rebuildUvRect(rect: UvIslandRect, triangles: readonly AbsoluteUvTriangl
       highY = Math.max(highY, triangle.points[corner * 2 + 1]!);
     }
   }
-  const x = clamp(Math.floor(lowX), 0, atlasW - 1);
-  const y = clamp(Math.floor(lowY), 0, atlasH - 1);
-  const right = clamp(Math.max(x + 1, Math.ceil(highX)), x + 1, atlasW);
-  const bottom = clamp(Math.max(y + 1, Math.ceil(highY)), y + 1, atlasH);
+  const x = Math.floor(lowX);
+  const y = Math.floor(lowY);
+  const right = Math.max(x + 1, Math.ceil(highX));
+  const bottom = Math.max(y + 1, Math.ceil(highY));
   const w = right - x;
   const h = bottom - y;
   return {
@@ -745,13 +777,6 @@ export function uvFaceCornerIdentityMarkers(
   return markers;
 }
 
-function clampSelectionTranslation(bounds: UvSelectionBounds, dx: number, dy: number, atlasW: number, atlasH: number): [number, number] {
-  return [
-    clamp(dx, -bounds.x, atlasW - bounds.x - bounds.w),
-    clamp(dy, -bounds.y, atlasH - bounds.y - bounds.h),
-  ];
-}
-
 function translateAbsoluteSelection(
   triangles: AbsoluteUvTriangle[],
   target: UvFaceTarget | undefined,
@@ -783,10 +808,9 @@ export function moveUvFace(
   if (!bounds) return rect;
   const snappedDx = freeMove ? dx : snapUvVertex(bounds.x + dx, snapStep) - bounds.x;
   const snappedDy = freeMove ? dy : snapUvVertex(bounds.y + dy, snapStep) - bounds.y;
-  const [safeDx, safeDy] = clampSelectionTranslation(bounds, snappedDx, snappedDy, atlasW, atlasH);
-  if (Math.abs(safeDx) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(safeDy) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
+  if (Math.abs(snappedDx) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(snappedDy) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
   const triangles = absoluteTriangles(rect);
-  translateAbsoluteSelection(triangles, target, safeDx, safeDy);
+  translateAbsoluteSelection(triangles, target, snappedDx, snappedDy);
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
 }
 
@@ -812,11 +836,6 @@ export function scaleUvSelection(
       triangle.points[at] = bounds.x + (triangle.points[at]! - bounds.x) * sx;
       triangle.points[at + 1] = bounds.y + (triangle.points[at + 1]! - bounds.y) * sy;
     }
-  }
-  const transformedBounds = uvSelectionBounds(rebuildUvRect(rect, triangles, atlasW, atlasH), target);
-  if (transformedBounds) {
-    const [dx, dy] = clampSelectionTranslation(transformedBounds, 0, 0, atlasW, atlasH);
-    translateAbsoluteSelection(triangles, target, dx, dy);
   }
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
 }
@@ -858,12 +877,10 @@ export function matchUvIslandSize(
     const scaleY = mode === 'width' ? 1 : target.h / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.h);
     if (Math.abs(scaleX - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon && Math.abs(scaleY - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
     if (rect.triangles?.length) return scaleUvSelection(rect, undefined, scaleX, scaleY, atlasW, atlasH);
-    const width = clamp(rect.w * scaleX, UV_LAYOUT_TUNING.minimumIslandTexels, atlasW);
-    const height = clamp(rect.h * scaleY, UV_LAYOUT_TUNING.minimumIslandTexels, atlasH);
+    const width = Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, rect.w * scaleX);
+    const height = Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, rect.h * scaleY);
     return {
       ...rect,
-      x: clamp(rect.x, 0, atlasW - width),
-      y: clamp(rect.y, 0, atlasH - height),
       w: width,
       h: height,
     };
@@ -951,7 +968,7 @@ export type UvStitchResult = Readonly<{
   stitched: number;
   /** Selected islands with no welded boundary identity in the active component. */
   unmatched: number;
-  /** Matching islands whose exact seam fit would leave the atlas or explode in scale. */
+  /** Matching islands whose exact seam fit would be degenerate or explode in scale. */
   blocked: number;
   seamEdges: number;
   seamVertices: number;
@@ -1290,10 +1307,6 @@ function stitchIslandToCandidate(
   const overrides = new Map(candidate.pairs.map((pair) => [stitchPointKey(pair.source), pair.target] as const));
   const triangles = absoluteTriangles(rect);
   let changed = false;
-  let lowX = Number.POSITIVE_INFINITY;
-  let lowY = Number.POSITIVE_INFINITY;
-  let highX = Number.NEGATIVE_INFINITY;
-  let highY = Number.NEGATIVE_INFINITY;
   for (const triangle of triangles) {
     for (let corner = 0; corner < 3; corner += 1) {
       const at = corner * 2;
@@ -1308,16 +1321,8 @@ function stitchIslandToCandidate(
         || Math.abs(targetY - sourceY) > UV_LAYOUT_TUNING.pointMatchEpsilon;
       triangle.points[at] = targetX;
       triangle.points[at + 1] = targetY;
-      lowX = Math.min(lowX, targetX);
-      lowY = Math.min(lowY, targetY);
-      highX = Math.max(highX, targetX);
-      highY = Math.max(highY, targetY);
     }
   }
-  if (lowX < -UV_LAYOUT_TUNING.pointMatchEpsilon
-    || lowY < -UV_LAYOUT_TUNING.pointMatchEpsilon
-    || highX > atlasW + UV_LAYOUT_TUNING.pointMatchEpsilon
-    || highY > atlasH + UV_LAYOUT_TUNING.pointMatchEpsilon) return null;
   return changed ? rebuildUvRect(rect, triangles, atlasW, atlasH) : rect;
 }
 
@@ -1404,8 +1409,8 @@ export type UvTransformFrame = Readonly<{ x: number; y: number; w: number; h: nu
 
 /** Apply a copied transform frame (position + size) onto one island or one isolated
  * face (req_3427 Copy/Paste Transform): the selection scales to the frame's width and
- * height, then its north-west corner lands on the frame's origin, clamped inside the
- * atlas. Texture pixels never move — only sampling coordinates. */
+ * height, then its north-west corner lands on the frame's signed workspace origin.
+ * Texture pixels never move — only sampling coordinates. */
 export function pasteUvTransform(
   rect: UvIslandRect,
   target: UvFaceTarget | undefined,
@@ -1417,9 +1422,9 @@ export function pasteUvTransform(
   const bounds = target ? uvSelectionBounds(rect, target) : wholeIslandBounds(rect);
   if (!bounds) return rect;
   if (!target && !rect.triangles?.length) {
-    const width = clamp(frame.w, UV_LAYOUT_TUNING.minimumIslandTexels, atlasW);
-    const height = clamp(frame.h, UV_LAYOUT_TUNING.minimumIslandTexels, atlasH);
-    return { ...rect, x: clamp(frame.x, 0, atlasW - width), y: clamp(frame.y, 0, atlasH - height), w: width, h: height };
+    const width = Math.max(frame.w, UV_LAYOUT_TUNING.minimumIslandTexels);
+    const height = Math.max(frame.h, UV_LAYOUT_TUNING.minimumIslandTexels);
+    return { ...rect, x: frame.x, y: frame.y, w: width, h: height };
   }
   const scaleX = frame.w / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.w);
   const scaleY = frame.h / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, bounds.h);
@@ -1427,8 +1432,7 @@ export function pasteUvTransform(
   const scaledBounds = target ? uvSelectionBounds(scaled, target) : wholeIslandBounds(scaled);
   if (!scaledBounds) return scaled;
   const triangles = absoluteTriangles(scaled);
-  const [dx, dy] = clampSelectionTranslation(scaledBounds, frame.x - scaledBounds.x, frame.y - scaledBounds.y, atlasW, atlasH);
-  translateAbsoluteSelection(triangles, target, dx, dy);
+  translateAbsoluteSelection(triangles, target, frame.x - scaledBounds.x, frame.y - scaledBounds.y);
   return rebuildUvRect(scaled, triangles, atlasW, atlasH);
 }
 
@@ -1520,12 +1524,7 @@ export function rotateUvSelection(
   const triangles = absoluteTriangles(rect);
   rotateAbsoluteSelection(triangles, target, { x: bounds.cx, y: bounds.cy }, angleDegrees);
 
-  let rotatedBounds = uvSelectionBounds(rebuildUvRect(rect, triangles, atlasW, atlasH), target);
-  if (rotatedBounds) {
-    const [dx, dy] = clampSelectionTranslation(rotatedBounds, 0, 0, atlasW, atlasH);
-    translateAbsoluteSelection(triangles, target, dx, dy);
-    rotatedBounds = { ...rotatedBounds, x: rotatedBounds.x + dx, y: rotatedBounds.y + dy, cx: rotatedBounds.cx + dx, cy: rotatedBounds.cy + dy };
-  }
+  const rotatedBounds = uvSelectionBounds(rebuildUvRect(rect, triangles, atlasW, atlasH), target);
   const changed = rebuildUvRect(rect, triangles, atlasW, atlasH);
   const guide = correction && rotatedBounds
     ? { axis: correction.axis, coordinate: correction.axis === 'horizontal' ? rotatedBounds.cy : rotatedBounds.cx }
@@ -1604,12 +1603,10 @@ export function moveUvSelectionVertex(
   const vertices = uvSelectionVertices(rect, target);
   const selected = vertices[vertexIndex];
   if (!selected) return rect;
-  const minX = Math.min(0.5, atlasW * 0.5);
-  const minY = Math.min(0.5, atlasH * 0.5);
   const requestedX = selected.x + dx;
   const requestedY = selected.y + dy;
-  const targetX = clamp(freeMove ? requestedX : snapUvVertex(requestedX, snapStep), minX, atlasW - minX);
-  const targetY = clamp(freeMove ? requestedY : snapUvVertex(requestedY, snapStep), minY, atlasH - minY);
+  const targetX = freeMove ? requestedX : snapUvVertex(requestedX, snapStep);
+  const targetY = freeMove ? requestedY : snapUvVertex(requestedY, snapStep);
   if (sameUvPoint(targetX, targetY, selected.x, selected.y)) return rect;
 
   const absolute = rect.triangles.map((triangle) => {
@@ -1625,41 +1622,7 @@ export function moveUvSelectionVertex(
     return { face: triangle.face, group: triangle.group, points, ...identity };
   });
 
-  let lowX = Number.POSITIVE_INFINITY;
-  let lowY = Number.POSITIVE_INFINITY;
-  let highX = Number.NEGATIVE_INFINITY;
-  let highY = Number.NEGATIVE_INFINITY;
-  for (const triangle of absolute) {
-    for (let corner = 0; corner < 3; corner += 1) {
-      lowX = Math.min(lowX, triangle.points[corner * 2]!);
-      lowY = Math.min(lowY, triangle.points[corner * 2 + 1]!);
-      highX = Math.max(highX, triangle.points[corner * 2]!);
-      highY = Math.max(highY, triangle.points[corner * 2 + 1]!);
-    }
-  }
-  const x = clamp(Math.floor(lowX), 0, atlasW - 1);
-  const y = clamp(Math.floor(lowY), 0, atlasH - 1);
-  const right = clamp(Math.max(x + 1, Math.ceil(highX)), x + 1, atlasW);
-  const bottom = clamp(Math.max(y + 1, Math.ceil(highY)), y + 1, atlasH);
-  const w = right - x;
-  const h = bottom - y;
-  return {
-    ...rect,
-    x,
-    y,
-    w,
-    h,
-    triangles: absolute.map((triangle) => ({
-      face: triangle.face,
-      group: triangle.group,
-      points: [
-        (triangle.points[0] - x) / w, (triangle.points[1] - y) / h,
-        (triangle.points[2] - x) / w, (triangle.points[3] - y) / h,
-        (triangle.points[4] - x) / w, (triangle.points[5] - y) / h,
-      ],
-      ...(triangle.vertices ? { vertices: triangle.vertices } : {}),
-    })),
-  };
+  return rebuildUvRect(rect, absolute, atlasW, atlasH);
 }
 
 export function moveUvIslandVertex(
@@ -1691,13 +1654,13 @@ export function hitUvIsland(rects: readonly UvIslandRect[], x: number, y: number
   let hit = -1;
   let area = Number.POSITIVE_INFINITY;
   rects.forEach((rect, index) => {
-    if (x < rect.x || y < rect.y || x > rect.x + rect.w || y > rect.y + rect.h) return;
     if (rect.triangles?.length) {
-      const u = (x - rect.x) / Math.max(1, rect.w);
-      const v = (y - rect.y) / Math.max(1, rect.h);
-      if (!rect.triangles.some((triangle) => pointInTriangle(triangle.points, u, v))) return;
+      if (!rect.triangles.some((triangle) => pointInTriangle(absoluteTrianglePoints(rect, triangle), x, y))) return;
+    } else if (x < rect.x || y < rect.y || x > rect.x + rect.w || y > rect.y + rect.h) {
+      return;
     }
-    const nextArea = rect.w * rect.h;
+    const bounds = uvSelectionBounds(rect);
+    const nextArea = bounds ? bounds.w * bounds.h : rect.w * rect.h;
     if (nextArea <= area) { area = nextArea; hit = index; }
   });
   return hit;
@@ -1725,7 +1688,13 @@ export function hitUvFace(rects: readonly UvIslandRect[], x: number, y: number):
 }
 
 /** Repack every island into equal cells while preserving the current atlas size. */
-export function uniformUvPack(rects: readonly UvIslandRect[], atlasW: number, atlasH: number): UvIslandRect[] {
+export function uniformUvPack(
+  rects: readonly UvIslandRect[],
+  atlasW: number,
+  atlasH: number,
+  originX = 0,
+  originY = 0,
+): UvIslandRect[] {
   if (!rects.length || atlasW < 1 || atlasH < 1) return [];
   const aspect = atlasW / Math.max(1, atlasH);
   const columns = Math.max(1, Math.ceil(Math.sqrt(rects.length * aspect)));
@@ -1740,8 +1709,8 @@ export function uniformUvPack(rects: readonly UvIslandRect[], atlasW: number, at
     const row = Math.floor(index / columns);
     return {
       ...rect,
-      x: column * cellW,
-      y: row * cellH,
+      x: originX + column * cellW,
+      y: originY + row * cellH,
       w: Math.min(packedW, atlasW - column * cellW),
       h: Math.min(packedH, atlasH - row * cellH),
     };

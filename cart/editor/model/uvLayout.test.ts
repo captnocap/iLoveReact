@@ -40,6 +40,7 @@ import {
   uvIslandSetBounds,
   uvSelectionBounds,
   uvTranslationSnapStep,
+  uvWorkspaceGridSegments,
   zoomUvCanvasViewAt,
 } from './uvLayout';
 
@@ -180,7 +181,8 @@ test('visible UV grid lines toggle as magnetic alignment guides', () => {
   assert(vertical?.axis === 'vertical' && vertical.coordinate === 8, 'vertical grid line could not become a guide');
   assert(horizontal?.axis === 'horizontal' && horizontal.coordinate === 12, 'horizontal grid line could not become a guide');
   assert(hitUvGridGuide({ x: 10, y: 10 }, 32, 32, 4, 0.5) === null, 'blank grid cell selected a distant line');
-  assert(hitUvGridGuide({ x: 0.1, y: 8 }, 32, 32, 4, 0.5)?.axis === 'horizontal', 'atlas border was promoted instead of the interior line');
+  assert(hitUvGridGuide({ x: 0.1, y: 10 }, 32, 32, 4, 0.5)?.coordinate === 0, 'signed workspace origin was not selectable as a guide');
+  assert(hitUvGridGuide({ x: -8.2, y: -15 }, 32, 32, 4, 0.5)?.coordinate === -8, 'negative workspace grid line was not selectable');
   assert(hitUvGuide({ x: 6.2, y: 20 }, 32, 32, [{ axis: 'vertical', coordinate: 6 }], 0.5)?.coordinate === 6, 'selected guide became unclickable after its grid line disappeared');
 
   const selected = toggleUvGridGuide(toggleUvGridGuide([], vertical!), horizontal!);
@@ -217,13 +219,13 @@ test('visible UV grid lines toggle as magnetic alignment guides', () => {
   assert(free.dx === 2.2 && free.dy === 0.3 && free.guides.length === 0, 'Alt-style free movement still latched a guide');
 });
 
-test('multi-island movement is rigid, grid-snapped, and clamped once as a group', () => {
+test('multi-island movement is rigid, grid-snapped, and unbounded as a group', () => {
   const rects = parseUvIslandRects([1, 2, 4, 5, 8, 7, 3, 2, 20, 20, 2, 2], [1, 2, 3]);
   const bounds = uvIslandSetBounds(rects, [0, 1]);
   assert(bounds?.x === 1 && bounds.y === 2 && bounds.w === 10 && bounds.h === 7, 'multi-selection frame missed a member');
   const moved = moveUvIslands(rects, [0, 1], 100, 100, 16, 16, 4);
-  assert(moved[0]!.x === 6 && moved[0]!.y === 9, 'group did not clamp against its aggregate bounds');
-  assert(moved[1]!.x === 13 && moved[1]!.y === 14, 'second island drifted inside the group');
+  assert(moved[0]!.x === 100 && moved[0]!.y === 104, 'group did not cross the former atlas edge');
+  assert(moved[1]!.x === 107 && moved[1]!.y === 109, 'second island drifted inside the group');
   assert(moved[1]!.x - moved[0]!.x === 7 && moved[1]!.y - moved[0]!.y === 5, 'group offsets changed at the atlas edge');
   assert(moved[2] === rects[2], 'group movement rewrote an unselected island');
 });
@@ -392,7 +394,7 @@ test('point-only stitching accepts one unambiguous pair but refuses a many-islan
   assert(pole.evaluatedCandidates === 0, 'ambiguous pole entered the automatic fit queue');
 });
 
-test('stitching refuses an identity match whose joined island would leave the atlas', () => {
+test('stitching may join an identity match beyond the finite texture rectangle', () => {
   const rects = parseUvIslandRects(
     [10, 0, 10, 10, 30, 30, 10, 20],
     [100, 101],
@@ -403,8 +405,8 @@ test('stitching refuses an identity match whose joined island would leave the at
     [1, 2, 3, 1, 2, 4],
   );
   const result = stitchUvIslands(rects, [0, 1], 0, 64, 64);
-  assert(result.stitched === 0 && result.blocked === 1 && result.unmatched === 0, 'out-of-atlas seam fit was not reported as blocked');
-  assert(result.rects[1] === rects[1], 'blocked stitch partially moved its island');
+  assert(result.stitched === 1 && result.blocked === 0 && result.unmatched === 0, 'signed workspace seam fit was still atlas-blocked');
+  assert(result.rects[1] !== rects[1], 'accepted stitch did not move its island');
 });
 
 test('horizontal and vertical chains follow the snap grid and report atlas overflow', () => {
@@ -469,12 +471,12 @@ test('whole-island movement changes sampling coordinates, not triangle-local geo
   assert([...corners].join(',') === '30.5,35.5,39.5,35.5,30.5,44.5', 'moving the shape failed to move its exact texture-sampling coordinates');
 });
 
-test('move and resize stay inside the atlas without requiring text selection', () => {
+test('move and resize use the signed workspace without requiring text selection', () => {
   const rect = { x: 4, y: 5, w: 8, h: 9, group: 0 };
   const moved = moveUvIsland(rect, 100, -100, 32, 24);
-  assert(moved.x === 24 && moved.y === 0, 'move did not clamp to the atlas');
+  assert(moved.x === 104 && moved.y === -95, 'move did not cross the former atlas boundary');
   const resized = resizeUvIsland(moved, 100, -100, 32, 24);
-  assert(resized.w === 8 && resized.h === 1, 'resize did not clamp to remaining bounds');
+  assert(resized.w === 108 && resized.h === 1, 'resize did not retain unbounded width and minimum height');
 });
 
 test('four-corner resize keeps the opposite corner fixed', () => {
@@ -482,7 +484,7 @@ test('four-corner resize keeps the opposite corner fixed', () => {
   const northwest = resizeUvIslandFromCorner(rect, 'nw', 5, -4, 64, 64);
   assert(northwest.x === 15 && northwest.y === 8 && northwest.w === 15 && northwest.h === 20, 'northwest handle moved the fixed corner');
   const southeast = resizeUvIslandFromCorner(rect, 'se', 80, -80, 64, 64);
-  assert(southeast.x === 10 && southeast.y === 12 && southeast.w === 54 && southeast.h === 1, 'southeast handle escaped its bounds');
+  assert(southeast.x === 10 && southeast.y === 12 && southeast.w === 100 && southeast.h === 1, 'southeast handle did not cross the former atlas edge');
 });
 
 test('hit testing chooses the smallest overlapping island', () => {
@@ -596,7 +598,7 @@ test('uniform pack gives every island an equal, bounded cell', () => {
   assert(new Set(packed.map((rect) => `${rect.w}x${rect.h}`)).size === 1, 'pack did not normalize cell shapes');
 });
 
-test('paste transform scales and moves an island to the copied frame, clamped inside the atlas', () => {
+test('paste transform scales and moves an island to a signed workspace frame', () => {
   const rects = parseUvIslandRects(
     [4, 4, 10, 10],
     [7],
@@ -607,9 +609,26 @@ test('paste transform scales and moves an island to the copied frame, clamped in
   assert(Boolean(bounds), 'pasted island lost its silhouette');
   assert(Math.abs(bounds!.x - 30) < 0.001 && Math.abs(bounds!.y - 40) < 0.001, `pasted frame origin drifted (${bounds!.x},${bounds!.y})`);
   assert(Math.abs(bounds!.w - 20) < 0.001 && Math.abs(bounds!.h - 5) < 0.001, `pasted frame size drifted (${bounds!.w}×${bounds!.h})`);
-  const clamped = pasteUvTransform(rects[0]!, undefined, { x: 60, y: 60, w: 20, h: 5 }, 64, 64);
-  const clampedBounds = uvSelectionBounds(clamped)!;
-  assert(clampedBounds.x + clampedBounds.w <= 64.001 && clampedBounds.y + clampedBounds.h <= 64.001, 'pasted frame escaped the atlas');
+  const outside = pasteUvTransform(rects[0]!, undefined, { x: 60, y: -12, w: 20, h: 5 }, 64, 64);
+  const outsideBounds = uvSelectionBounds(outside)!;
+  assert(Math.abs(outsideBounds.x - 60) < 0.001 && Math.abs(outsideBounds.y + 12) < 0.001, 'pasted frame was clamped back into the atlas');
+});
+
+test('off-texture face and vertex edits preserve signed corner coordinates', () => {
+  const rect = parseUvIslandRects([0, 0, 10, 10], [1], [0, 1, 1, 9, 1, 1, 9])[0]!;
+  const face = moveUvFace(rect, { face: 0, group: 1 }, -20, 40, 10, 10, 1, true);
+  const faceCorners = flattenUvFaceCorners([face])!;
+  assert(faceCorners[0] === -19 && faceCorners[1] === 41, 'face translation lost its signed workspace coordinates');
+  const vertex = moveUvSelectionVertex(face, undefined, 0, -2, -3, 10, 10, true);
+  const vertexCorners = flattenUvFaceCorners([vertex])!;
+  assert(vertexCorners[0] === -21 && vertexCorners[1] === 38, 'vertex translation was clamped to the texture');
+});
+
+test('visible workspace grid follows pan across negative coordinates', () => {
+  const grid = uvWorkspaceGridSegments({ x: 20, y: 12, scale: 2 }, 40, 24, 4);
+  const starts = [...grid.minor, ...grid.major].filter((_value, index) => index % 4 === 0);
+  assert(starts.includes(-8), 'negative visible grid line was omitted');
+  assert(starts.includes(0), 'workspace origin grid line was omitted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

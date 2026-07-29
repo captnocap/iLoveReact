@@ -716,12 +716,67 @@ test "exact UV vertices deform face sampling while atlas pixels stay fixed" {
     const right_sample = model_paint.sampleTexel(0, 0.8, 0.1) orelse return error.TestUnexpectedResult;
     try testing.expect(left_sample[0] != right_sample[0]);
 
-    const before_reject = deformed.corners;
-    var invalid = corners;
-    invalid[0] = -1;
+    var outside = corners;
+    outside[0] = -7;
+    outside[1] = atlas_h_f + 11;
+    try testing.expect(model_paint.applyCornerUvs(&outside, &quad, 6));
+    try testing.expectEqualSlices(f32, outside[0..6], model_paint.uvTriangle(0).?.corners[0..]);
+    try testing.expect(quad[6] < 0 and quad[7] > 1);
+
+    const before_reject = model_paint.uvTriangle(0).?.corners;
+    var invalid = outside;
+    invalid[0] = std.math.nan(f32);
     try testing.expect(!model_paint.applyCornerUvs(&invalid, &quad, 6));
     try testing.expectEqualSlices(f32, before_reject[0..], model_paint.uvTriangle(0).?.corners[0..]);
     try testing.expectEqual(fixed_atlas_hash, atlasHash(model_paint.atlas().?.rgba));
+}
+
+test "workspace compile preserves alpha and translates UVs without resampling" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(913, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
+    model_paint.setDetail(16, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+
+    var corners_before: [12]f32 = undefined;
+    for (0..2) |face| {
+        const triangle = model_paint.uvTriangle(@intCast(face)) orelse return error.TestUnexpectedResult;
+        @memcpy(corners_before[face * 6 ..][0..6], triangle.corners[0..]);
+    }
+    const bounds = cornerBounds(&corners_before);
+    const shift_x = -bounds.high_x - 3;
+    const shift_y: f32 = 5;
+    const width: u32 = 17;
+    const height: u32 = 9;
+    var compiled: [width * height * 4]u8 = undefined;
+    for (0..width * height) |pixel| {
+        compiled[pixel * 4 + 0] = @intCast(pixel % 251);
+        compiled[pixel * 4 + 1] = 37;
+        compiled[pixel * 4 + 2] = 91;
+        compiled[pixel * 4 + 3] = if (pixel % 3 == 0) 0 else 173;
+    }
+
+    try testing.expect(model_paint.importAtlasTranslatingUvGeometry(
+        &compiled,
+        width,
+        height,
+        shift_x,
+        shift_y,
+        &quad,
+        6,
+    ));
+    try testing.expectEqualSlices(u8, &compiled, model_paint.atlas().?.rgba);
+    for (0..6) |vertex| {
+        const expected_x = corners_before[vertex * 2 + 0] + shift_x;
+        const expected_y = corners_before[vertex * 2 + 1] + shift_y;
+        try testing.expectApproxEqAbs(expected_x, model_paint.uvTriangle(@intCast(vertex / 3)).?.corners[(vertex % 3) * 2 + 0], 0.0001);
+        try testing.expectApproxEqAbs(expected_y, model_paint.uvTriangle(@intCast(vertex / 3)).?.corners[(vertex % 3) * 2 + 1], 0.0001);
+        try testing.expectApproxEqAbs(expected_x / @as(f32, @floatFromInt(width)), quad[vertex * 8 + 6], 0.0001);
+        try testing.expectApproxEqAbs(expected_y / @as(f32, @floatFromInt(height)), quad[vertex * 8 + 7], 0.0001);
+    }
 }
 
 test "painting a UV over transparent atlas space reveals ink and preserves glass opacity" {

@@ -8590,6 +8590,43 @@ pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool
     return true;
 }
 
+/// Explicit compile boundary for the editable infinite UV image workspace.
+/// Unlike ordinary texture import, alpha remains authored and UVs translate by
+/// the compiled bounding-box origin instead of being fitted or rescaled.
+pub fn compilePaintAtlasWorkspace(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    rgba: []const u8,
+    width: u32,
+    height: u32,
+    shift_x: f32,
+    shift_y: f32,
+    preserve_program: bool,
+) bool {
+    const verts = g_edit_verts orelse return false;
+    const program = if (preserve_program) paint_program.serialize() else null;
+    defer if (program) |blob| std.heap.c_allocator.free(blob);
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.importAtlasTranslatingUvGeometry(
+        rgba,
+        width,
+        height,
+        shift_x,
+        shift_y,
+        verts,
+        g_edit_count,
+    )) return false;
+    if (program) |blob| {
+        if (!paint_program.applyOverCurrentBaseline(io, environ, blob)) return false;
+    } else {
+        paint_program.adoptCurrentAtlasAsBaseline();
+    }
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
 // ── Paint variants (save / load a whole painting) ───────────────────────────────────
 // A saved variant is the model's entire paint atlas at a moment in time (DESIGN_INTAKE: a
 // model painted a million ways, each stored in its folder). Read gives the raw atlas + its
@@ -9204,6 +9241,10 @@ var g_default_tex_bind_group: ?*wgpu.BindGroup = null;
 // Nearest-filter sampler for the diffuse texture path. Block-face pixels
 // stay crisp; switch to linear later if smoother sampling is wanted.
 var g_diffuse_sampler: ?*wgpu.Sampler = null;
+// Binding 2 distinguishes finite model atlases (transparent beyond 0..1)
+// from ordinary material textures without changing their existing sampler.
+var g_uv_unbounded_uniform: ?*wgpu.Buffer = null;
+var g_uv_finite_uniform: ?*wgpu.Buffer = null;
 var g_initialized: bool = false;
 
 var g_sampler: ?*wgpu.Sampler = null;
@@ -9601,6 +9642,11 @@ pub fn init(environ: *const std.process.Environ.Map) void {
             // texel — no cross-slot blend — and flat paint loses nothing.
             .sampler = .{ .type = .non_filtering },
         },
+        .{
+            .binding = 2,
+            .visibility = wgpu.ShaderStages.fragment,
+            .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = 4 * @sizeOf(f32) },
+        },
     };
     g_tex_bind_group_layout = device.createBindGroupLayout(&.{
         .entry_count = tex_entries.len,
@@ -9617,6 +9663,24 @@ pub fn init(environ: *const std.process.Environ.Map) void {
         .mag_filter = .nearest,
         .min_filter = .nearest,
     });
+    g_uv_unbounded_uniform = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_uv_unbounded"),
+        .size = 4 * @sizeOf(f32),
+        .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    g_uv_finite_uniform = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_uv_finite"),
+        .size = 4 * @sizeOf(f32),
+        .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    if (core.getQueue()) |queue| {
+        const unbounded = [_]f32{ 0, 0, 0, 0 };
+        const finite = [_]f32{ 1, 0, 0, 0 };
+        if (g_uv_unbounded_uniform) |buffer| queue.writeBuffer(buffer, 0, @ptrCast(&unbounded), @sizeOf(@TypeOf(unbounded)));
+        if (g_uv_finite_uniform) |buffer| queue.writeBuffer(buffer, 0, @ptrCast(&finite), @sizeOf(@TypeOf(finite)));
+    }
 
     // 1×1 white default texture so untextured meshes sample white →
     // multiply with uniform color → unchanged visual.
@@ -9651,10 +9715,11 @@ pub fn init(environ: *const std.process.Environ.Map) void {
             .aspect = .all,
         });
     }
-    if (g_default_tex_view != null and g_diffuse_sampler != null) {
+    if (g_default_tex_view != null and g_diffuse_sampler != null and g_uv_unbounded_uniform != null) {
         const def_entries = [_]wgpu.BindGroupEntry{
             .{ .binding = 0, .texture_view = g_default_tex_view.? },
             .{ .binding = 1, .sampler = g_diffuse_sampler.? },
+            .{ .binding = 2, .buffer = g_uv_unbounded_uniform.?, .offset = 0, .size = 4 * @sizeOf(f32) },
         };
         g_default_tex_bind_group = device.createBindGroup(&.{
             .layout = g_tex_bind_group_layout.?,
@@ -10156,6 +10221,10 @@ pub fn getDiffuseSampler() ?*wgpu.Sampler {
     return g_diffuse_sampler;
 }
 
+pub fn getUvSamplingUniform(finite_atlas: bool) ?*wgpu.Buffer {
+    return if (finite_atlas) g_uv_finite_uniform else g_uv_unbounded_uniform;
+}
+
 pub fn deinit() void {
     // Release every pool slot's resources.
     for (0..MAX_RT_POOL) |i| {
@@ -10174,6 +10243,8 @@ pub fn deinit() void {
     if (g_default_tex_view) |v| v.release();
     if (g_default_tex) |t| t.destroy();
     if (g_diffuse_sampler) |s| s.release();
+    if (g_uv_unbounded_uniform) |b| b.release();
+    if (g_uv_finite_uniform) |b| b.release();
     if (g_tex_bind_group_layout) |l| l.release();
     if (g_bind_group) |bg| bg.release();
     if (g_bind_group_layout) |l| l.release();
@@ -10587,9 +10658,15 @@ fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
         tex.destroy();
         return null;
     };
+    const sampling = g_uv_finite_uniform orelse {
+        view.release();
+        tex.destroy();
+        return null;
+    };
     const entries = [_]wgpu.BindGroupEntry{
         .{ .binding = 0, .texture_view = view },
         .{ .binding = 1, .sampler = sampler },
+        .{ .binding = 2, .buffer = sampling, .offset = 0, .size = 4 * @sizeOf(f32) },
     };
     const bg = device.createBindGroup(&.{
         .layout = layout_,
@@ -10660,9 +10737,15 @@ fn paintBindGroup() ?*wgpu.BindGroup {
             tex.destroy();
             return null;
         };
+        const sampling = g_uv_finite_uniform orelse {
+            view.release();
+            tex.destroy();
+            return null;
+        };
         const entries = [_]wgpu.BindGroupEntry{
             .{ .binding = 0, .texture_view = view },
             .{ .binding = 1, .sampler = sampler },
+            .{ .binding = 2, .buffer = sampling, .offset = 0, .size = 4 * @sizeOf(f32) },
         };
         const bg = device.createBindGroup(&.{
             .layout = layout_,

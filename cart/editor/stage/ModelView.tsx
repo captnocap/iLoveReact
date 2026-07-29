@@ -50,6 +50,18 @@ import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resol
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import {
+  updateUvTextureWorkspace,
+  type UvTextureWorkspaceDoc,
+} from '../data/uvTextureWorkspace';
+import {
+  commitUvTextureWorkspaceCompile,
+  ensureUvTextureWorkspace,
+  importUvTextureWorkspaceLayer,
+  rasterizeUvTextureWorkspace,
+  readUvTextureWorkspace,
+  writeUvTextureWorkspace,
+} from '../data/uvTextureWorkspaceStore';
 import { rasterizeUvWireframe } from '../model/uvWireframe';
 import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
 import { triangleWireframeVisible } from '../model/viewportPresentation';
@@ -136,8 +148,18 @@ export type ModelFocusUv = {
   detail: number;
   note: string | null;
   scope: string;
+  atlasOriginX: number;
+  atlasOriginY: number;
+  workspace: UvTextureWorkspaceDoc | null;
+  packageDir?: string;
   diskPath?: string;
 };
+export type UvTextureLayerEdit =
+  | { kind: 'position'; x: number; y: number }
+  | { kind: 'visible'; visible: boolean }
+  | { kind: 'raise' }
+  | { kind: 'lower' }
+  | { kind: 'remove' };
 export type ModelFocusShape = {
   verts: number; // welded verts (0 until the host builds topology in vertex/edge mode — read '—')
   edges: number; // welded edges (same honesty rule)
@@ -168,6 +190,9 @@ export type ModelFocusBridge = {
   saveUvAtlas: () => { path: string | null; note: string };
   exportUvWireframe: () => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
+  addUvTextureLayer: (x: number, y: number) => Promise<string>;
+  editUvTextureLayer: (id: string, edit: UvTextureLayerEdit) => string;
+  compileUvTextureLayers: (onProgress?: (completed: number, total: number, label: string) => void) => Promise<string>;
   reloadUvAtlas: () => string;
   // Restore a saved paint variant's whole look onto the resident model (req_3439):
   // texture + UV layout + strokes for full looks, program/atlas replay for legacy ones.
@@ -1423,6 +1448,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       detail: d,
       note,
       scope: 'whole model',
+      atlasOriginX: 0,
+      atlasOriginY: 0,
+      workspace: null,
     });
     const j = host.__model_atlas_read?.();
     if (typeof j !== 'string' || !j) {
@@ -1445,11 +1473,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
-    const islands = parseUvIslandRects(o.islands, o.groups, o.triangles, o.cornerVertices);
     const selection = readUvSelection();
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
+    const workspace = packageDir ? readUvTextureWorkspace(packageDir) : null;
+    const compiled = workspace?.compiled;
+    const compiledMatchesAtlas = Boolean(compiled && compiled.width === o.w && compiled.height === o.h);
+    const atlasOriginX = compiledMatchesAtlas ? compiled!.originX : 0;
+    const atlasOriginY = compiledMatchesAtlas ? compiled!.originY : 0;
+    const islands = parseUvIslandRects(o.islands, o.groups, o.triangles, o.cornerVertices).map((rect) => (
+      atlasOriginX === 0 && atlasOriginY === 0
+        ? rect
+        : { ...rect, x: rect.x + atlasOriginX, y: rect.y + atlasOriginY }
+    ));
     setUvPanel({
-      key: `${model?.key ?? 'model'}-${o.w}x${o.h}`,
+      key: `${model?.key ?? 'model'}-${o.w}x${o.h}-${atlasOriginX},${atlasOriginY}`,
       revision: ++uvRevisionRef.current,
       rgba,
       islands,
@@ -1460,7 +1497,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       detail: o.detail,
       note: islands.length ? null : 'atlas has no editable island metadata',
       scope: `whole model · ${islands.length} islands`,
-      ...(packageDir ? { diskPath: `${packageDir}/atlases/base.png` } : {}),
+      atlasOriginX,
+      atlasOriginY,
+      workspace,
+      ...(packageDir ? { diskPath: `${packageDir}/atlases/base.png`, packageDir } : {}),
     });
   };
   const syncUvSelection = () => {
@@ -1486,7 +1526,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     return true;
   };
   const applyUvGeometry = (corners: Float32Array, action: UvHistoryAction): boolean => {
-    const ok = host.__model_uv_geometry_apply?.(corners, uvHistoryActionOrdinal(action)) === 1;
+    const originX = uvPanel?.atlasOriginX ?? 0;
+    const originY = uvPanel?.atlasOriginY ?? 0;
+    let localCorners = corners;
+    if (originX !== 0 || originY !== 0) {
+      localCorners = new Float32Array(corners);
+      for (let coordinate = 0; coordinate < localCorners.length; coordinate += 2) {
+        localCorners[coordinate + 0] -= originX;
+        localCorners[coordinate + 1] -= originY;
+      }
+    }
+    const ok = host.__model_uv_geometry_apply?.(localCorners, uvHistoryActionOrdinal(action)) === 1;
     if (!ok) return false;
     onDocumentMutated?.();
     buildUvPanel();
@@ -1603,7 +1653,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!atlas || atlas.islands.length === 0 || atlas.w < 1 || atlas.h < 1) {
       return { path: null, note: 'Export refused — there is no authored UV geometry to draw.' };
     }
-    const raster = rasterizeUvWireframe(atlas.islands, atlas.w, atlas.h);
+    const localIslands = atlas.atlasOriginX === 0 && atlas.atlasOriginY === 0
+      ? atlas.islands
+      : atlas.islands.map((rect) => ({
+        ...rect,
+        x: rect.x - atlas.atlasOriginX,
+        y: rect.y - atlas.atlasOriginY,
+      }));
+    const raster = rasterizeUvWireframe(localIslands, atlas.w, atlas.h);
     if (!raster) return { path: null, note: 'Export refused — the UV wireframe exceeded the live atlas limit.' };
     const result = writeModelUvWireframe(paintTarget, raster.rgba, raster.width, raster.height);
     return result.ok
@@ -1616,6 +1673,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const importUvAtlas = async (): Promise<string> => {
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Import refused — save the model package first.';
+    }
+    if (uvPanel?.workspace) {
+      return 'Import Texture would replace the compiled atlas behind an editable image workspace. Use Add Image Layer instead.';
     }
     const path = await pickFile({
       title: 'Import a texture for UV mapping',
@@ -1652,6 +1712,114 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     return persisted.ok
       ? `Imported ${name} · ${decoded.width}×${decoded.height} — replaced the LIVE atlas only (saved paint variants keep theirs); remap UVs over the image.`
       : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
+  };
+
+  const addUvTextureLayer = async (x: number, y: number): Promise<string> => {
+    if (!paintTarget) return 'Add Image refused — this viewer has no package-backed paint target.';
+    const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
+    const atlas = uvPanel;
+    if (!dir || !atlas) return 'Add Image refused — save and load the model package first.';
+    // The first workspace source is the durable raster beneath the editable
+    // paint program, never a transient JS preview. Persist before addressing it.
+    writeModelArtifacts(paintTarget);
+    const persisted = writeLiveModelAtlas(paintTarget);
+    if (!persisted.ok) return `Add Image refused — ${persisted.error}`;
+    const doc = ensureUvTextureWorkspace(dir, atlas.w, atlas.h);
+    if (!doc) return 'Add Image refused — the current base.png could not seed the editable workspace.';
+    const path = await pickFile({
+      title: 'Add an image layer to the UV workspace',
+      filters: [
+        { name: 'Texture images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp'] },
+        { name: 'All files', patterns: ['*'] },
+      ],
+    });
+    if (!path) return 'Add Image canceled.';
+    try {
+      const result = importUvTextureWorkspaceLayer(dir, doc, path, x, y);
+      onDocumentMutated?.();
+      buildUvPanel();
+      return `Added ${result.layer.name} at ${result.layer.x}, ${result.layer.y} · ${result.layer.width}×${result.layer.height} native pixels. Compile when the image layout is ready.`;
+    } catch (error) {
+      return `Add Image refused — ${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+
+  const editUvTextureLayer = (id: string, edit: UvTextureLayerEdit): string => {
+    const dir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
+    const doc = dir ? readUvTextureWorkspace(dir) : null;
+    if (!dir || !doc) return 'Image-layer edit refused — this model has no editable UV workspace yet.';
+    const index = doc.layers.findIndex((layer) => layer.id === id);
+    if (index < 0) return 'Image-layer edit refused — that source layer no longer exists.';
+    const layers = [...doc.layers];
+    if (edit.kind === 'position') {
+      layers[index] = { ...layers[index]!, x: Math.round(edit.x), y: Math.round(edit.y) };
+    } else if (edit.kind === 'visible') {
+      layers[index] = { ...layers[index]!, visible: edit.visible };
+    } else if (edit.kind === 'raise' && index < layers.length - 1) {
+      [layers[index], layers[index + 1]] = [layers[index + 1]!, layers[index]!];
+    } else if (edit.kind === 'lower' && index > 0) {
+      [layers[index], layers[index - 1]] = [layers[index - 1]!, layers[index]!];
+    } else if (edit.kind === 'remove') {
+      if (layers.length === 1) return 'The workspace must retain at least one source image.';
+      layers.splice(index, 1);
+    } else {
+      return 'Image layer is already at that boundary.';
+    }
+    try {
+      const next = updateUvTextureWorkspace(doc, layers);
+      if (!writeUvTextureWorkspace(dir, next)) return 'Image-layer edit could not be saved.';
+      onDocumentMutated?.();
+      buildUvPanel();
+      return edit.kind === 'position'
+        ? `Moved ${doc.layers[index]!.name} to ${Math.round(edit.x)}, ${Math.round(edit.y)} · texture compile is now stale.`
+        : `${doc.layers[index]!.name} updated · texture compile is now stale.`;
+    } catch (error) {
+      return `Image-layer edit refused — ${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+
+  const compileUvTextureLayers = async (
+    onProgress?: (completed: number, total: number, label: string) => void,
+  ): Promise<string> => {
+    if (!paintTarget) return 'Compile refused — this viewer has no package-backed paint target.';
+    const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
+    const doc = dir ? readUvTextureWorkspace(dir) : null;
+    if (!dir || !doc) return 'Compile refused — add an image layer to create the editable workspace first.';
+    if (typeof host.__model_atlas_workspace_apply !== 'function') {
+      return 'Compile refused — this editor host does not expose the UV workspace compiler.';
+    }
+    try {
+      const visibleLayerCount = doc.layers.filter((layer) => layer.visible).length;
+      const raster = await rasterizeUvTextureWorkspace(dir, doc, onProgress);
+      onProgress?.(visibleLayerCount + 1, visibleLayerCount + 2, 'Applying atlas and UV origin');
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (host.__model_atlas_workspace_apply(
+        raster.rgba,
+        raster.width,
+        raster.height,
+        raster.shiftX,
+        raster.shiftY,
+        1,
+      ) !== 1) return 'Compile refused by the live model or its UV geometry.';
+      atlasReadyRef.current = true;
+      writeModelArtifacts(paintTarget);
+      const persisted = writeLiveModelAtlas(paintTarget);
+      if (!persisted.ok || !persisted.path) {
+        buildUvPanel();
+        return `Compiled the live texture, but ${persisted.error.toLowerCase()}`;
+      }
+      const atlasSha256 = fileSha(persisted.path);
+      if (!/^[0-9a-f]{64}$/.test(atlasSha256)
+        || !commitUvTextureWorkspaceCompile(dir, doc, raster, atlasSha256)) {
+        buildUvPanel();
+        return 'Compiled and saved base.png, but the editable workspace could not commit its new origin.';
+      }
+      onDocumentMutated?.();
+      buildUvPanel();
+      return `Compiled ${doc.layers.filter((layer) => layer.visible).length} visible image layers to ${raster.width}×${raster.height} with transparent unused space · origin ${raster.x}, ${raster.y}. Sources remain editable.`;
+    } catch (error) {
+      return `Compile refused — ${error instanceof Error ? error.message : String(error)}`;
+    }
   };
 
   const adoptMeshHistoryResult = (result: TopoResult | null): boolean => {
@@ -2269,6 +2437,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       saveUvAtlas,
       exportUvWireframe,
       importUvAtlas,
+      addUvTextureLayer,
+      editUvTextureLayer,
+      compileUvTextureLayers,
       reloadUvAtlas,
       loadPaintVariant,
       shape: model
