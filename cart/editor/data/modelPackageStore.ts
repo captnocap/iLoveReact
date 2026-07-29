@@ -31,6 +31,7 @@ import {
 import type { ModelPackage } from './types';
 import { invalidateMeshDoc, readMeshDoc, readMeshDocParts, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
 import { base64ToBytes, textBytes } from '../../../runtime/workspace/lumps';
+import { encode as encodeImage } from '../../../runtime/image';
 import { compileOutlinerCollision, decodeCollisionBake, encodeCollisionBake } from '../model/meshCollision';
 import { groundRebase } from '../model/groundRebase';
 
@@ -607,6 +608,34 @@ export function writeLiveModelAtlas(pkg: Pick<ModelPackage, 'kind' | 'id'>): Liv
     return { ok: false, error: 'base.png could not be written to the model package.' };
   }
   return { ok: true, path: absoluteDiskPath(path), width: atlas.w as number, height: atlas.h as number };
+}
+
+export const MODEL_UV_WIREFRAME_FILE = 'atlases/uv-wireframe.png';
+
+/** Persist a derived transparent UV guide beside the model's source atlas.
+ * The caller supplies raw pixels produced from the current authored UV geometry;
+ * this boundary owns only validated PNG encoding and atomic package IO. */
+export function writeModelUvWireframe(
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+): LiveAtlasWriteResult {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return { ok: false, error: 'Save the model package before exporting its UV wireframe.' };
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
+    || rgba.length !== width * height * 4) {
+    return { ok: false, error: 'The transparent UV wireframe pixels were incomplete.' };
+  }
+  const atlasDir = `${dir}/atlases`;
+  if (!mkdir(atlasDir)) return { ok: false, error: 'Could not create the model atlas folder.' };
+  const png = encodeImage(rgba, width, height, { format: 'png' });
+  if (!png) return { ok: false, error: 'The transparent UV wireframe could not be encoded as PNG.' };
+  const path = `${dir}/${MODEL_UV_WIREFRAME_FILE}`;
+  if (!writeFileBytesAtomic(path, png) || !exists(path)) {
+    return { ok: false, error: 'uv-wireframe.png could not be written to the model package.' };
+  }
+  return { ok: true, path: absoluteDiskPath(path), width, height };
 }
 
 export const PACKAGE_COLLISION_FILE = 'mesh/collision.blob';

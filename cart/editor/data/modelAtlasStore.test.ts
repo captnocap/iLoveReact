@@ -6,7 +6,7 @@
 //     --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-model-atlas-store.test.js
-import { claimPackageDir, writeLiveModelAtlas } from './modelPackageStore';
+import { claimPackageDir, writeLiveModelAtlas, writeModelUvWireframe } from './modelPackageStore';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -40,6 +40,45 @@ test('copy-path persistence returns only a PNG proven to exist', () => {
     assert(result.path === '/workspace/cart/editor/data/models/props/Atlas_Copy/atlases/base.png', `unexpected copied path ${result.path}`);
     assert(result.width === 64 && result.height === 32, 'atlas dimensions were not carried with the proof');
     assert(pngExists, 'a path was returned before the PNG existed');
+  } finally {
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
+});
+
+test('transparent UV wireframe uses atomic package PNG persistence', () => {
+  const host = globalThis as any;
+  const names = ['__fs_exists', '__fs_read', '__fs_list_json', '__fs_mkdir', '__imageops_encode_raw', '__fs_write_bytes_atomic', '__cwd'];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  let manifestExists = false;
+  let writtenPath = '';
+  let writtenBytes: Uint8Array | null = null;
+  try {
+    host.__fs_exists = (path: string) => path.endsWith('/manifest.json') ? manifestExists : path === writtenPath && writtenBytes !== null;
+    host.__fs_read = () => null;
+    host.__fs_list_json = () => '[]';
+    host.__fs_mkdir = () => true;
+    host.__cwd = () => '/workspace';
+    claimPackageDir({ kind: 'prop', id: 'test:wireframe-copy', name: 'Wireframe Copy' });
+    manifestExists = true;
+    host.__imageops_encode_raw = () => new Uint8Array([137, 80, 78, 71]);
+    host.__fs_write_bytes_atomic = (path: string, bytes: Uint8Array) => {
+      writtenPath = path;
+      writtenBytes = bytes;
+      return true;
+    };
+
+    const rgba = new Uint8Array(4 * 2 * 4);
+    rgba[3] = 255;
+    const result = writeModelUvWireframe({ kind: 'prop', id: 'test:wireframe-copy' }, rgba, 4, 2);
+    assert(result.ok, `wireframe write failed: ${result.ok ? '' : result.error}`);
+    if (!result.ok) return;
+    assert(result.path === '/workspace/cart/editor/data/models/props/Wireframe_Copy/atlases/uv-wireframe.png', `unexpected wireframe path ${result.path}`);
+    assert(result.width === 4 && result.height === 2, 'wireframe dimensions were not carried with the proof');
+    assert(writtenBytes?.join(',') === '137,80,78,71', 'encoded PNG bytes did not use the atomic binary door');
   } finally {
     for (const name of names) {
       const value = prior.get(name);

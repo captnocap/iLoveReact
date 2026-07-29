@@ -72,6 +72,7 @@ pub const UvAction = enum(u8) {
     move_here,
     auto_size,
     project_view,
+    stitch,
 };
 
 pub const UV_TEXTURE_IMPORT_LABEL = "import UV texture";
@@ -79,6 +80,7 @@ pub const UV_TEXTURE_RELOAD_LABEL = "reload UV texture";
 pub const UV_RESTORE_SHAPE_LABEL = "restore UV shape";
 pub const UV_AUTO_SIZE_LABEL = "auto UV size";
 pub const UV_PROJECT_VIEW_LABEL = "project UV from view";
+pub const UV_STITCH_LABEL = "stitch UV seams";
 pub const UV_EQUIVALENCE_EPSILON: f32 = 0.0001;
 
 pub fn uvActionLabel(raw: i32) ?[]const u8 {
@@ -103,6 +105,7 @@ pub fn uvActionLabel(raw: i32) ?[]const u8 {
         .move_here => "move UV to cursor",
         .auto_size => UV_AUTO_SIZE_LABEL,
         .project_view => UV_PROJECT_VIEW_LABEL,
+        .stitch => UV_STITCH_LABEL,
     };
 }
 
@@ -180,6 +183,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "move UV to cursor", .uv_edit },
         .{ UV_AUTO_SIZE_LABEL, .uv_edit },
         .{ UV_PROJECT_VIEW_LABEL, .uv_edit },
+        .{ UV_STITCH_LABEL, .uv_edit },
         .{ UV_TEXTURE_IMPORT_LABEL, .uv_texture_import },
         .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
         .{ "tris to quads", .tris_to_quads },

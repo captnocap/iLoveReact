@@ -46,10 +46,11 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts } from '../data/modelPackageStore';
+import { modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import { rasterizeUvWireframe } from '../model/uvWireframe';
 import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
 import { triangleWireframeVisible } from '../model/viewportPresentation';
 import {
@@ -165,6 +166,7 @@ export type ModelFocusBridge = {
   selectUvFace: (face: number, additive: boolean) => boolean;
   selectUvOrientation: () => number;
   saveUvAtlas: () => { path: string | null; note: string };
+  exportUvWireframe: () => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
   reloadUvAtlas: () => string;
   // Restore a saved paint variant's whole look onto the resident model (req_3439):
@@ -1595,6 +1597,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       ? { path: result.path, note: `saved base.png · ${result.width}×${result.height}` }
       : { path: null, note: result.error };
   };
+  const exportUvWireframe = (): { path: string | null; note: string } => {
+    if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
+    const atlas = uvPanel;
+    if (!atlas || atlas.islands.length === 0 || atlas.w < 1 || atlas.h < 1) {
+      return { path: null, note: 'Export refused — there is no authored UV geometry to draw.' };
+    }
+    const raster = rasterizeUvWireframe(atlas.islands, atlas.w, atlas.h);
+    if (!raster) return { path: null, note: 'Export refused — the UV wireframe exceeded the live atlas limit.' };
+    const result = writeModelUvWireframe(paintTarget, raster.rgba, raster.width, raster.height);
+    return result.ok
+      ? {
+        path: result.path,
+        note: `exported transparent uv-wireframe.png · ${result.width}×${result.height} · ${raster.authoredEdges} authored edges`,
+      }
+      : { path: null, note: result.error };
+  };
   const importUvAtlas = async (): Promise<string> => {
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Import refused — save the model package first.';
@@ -2249,6 +2267,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       selectUvFace,
       selectUvOrientation,
       saveUvAtlas,
+      exportUvWireframe,
       importUvAtlas,
       reloadUvAtlas,
       loadPaintVariant,

@@ -21,6 +21,7 @@ export const UV_HISTORY_ACTIONS = [
   { id: 'move-here', label: 'move UV to cursor' },
   { id: 'auto-size', label: 'auto UV size' },
   { id: 'project-view', label: 'project UV from view' },
+  { id: 'stitch', label: 'stitch UV seams' },
 ] as const;
 
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';

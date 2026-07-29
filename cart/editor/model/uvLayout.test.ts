@@ -23,6 +23,7 @@ import {
   shouldActivateUvDrag,
   shouldPanUvCanvas,
   stackUvIslands,
+  stitchUvIslands,
   snapUvBoundsToGuides,
   snapUvTranslationToGridAndGuides,
   toggleUvGridGuide,
@@ -288,6 +289,69 @@ test('exact stacking refuses incompatible triangle counts instead of approximati
   const result = stackUvIslands(rects, [0, 1], 1);
   assert(result.compatible === 0 && result.skipped === 1, 'incompatible stack did not report its skipped island');
   assert(result.rects[0] === rects[0], 'incompatible source island was approximately rescaled');
+});
+
+test('stitching fits a broken UV edge by welded model identity while the active island stays fixed', () => {
+  const rects = parseUvIslandRects(
+    [10, 10, 10, 10, 30, 30, 10, 20, 50, 50, 4, 4],
+    [100, 101, 102],
+    [
+      0, 100, 10, 10, 20, 10, 10, 20,
+      1, 101, 40, 50, 40, 30, 30, 40,
+      2, 102, 50, 50, 54, 50, 50, 54,
+    ],
+    [
+      1, 2, 3,
+      1, 2, 4,
+      50, 51, 52,
+    ],
+  );
+  const result = stitchUvIslands(rects, [0, 1, 2], 0, 64, 64);
+  const corners = flattenUvFaceCorners(result.rects)!;
+  assert(result.rects[0] === rects[0], 'stitch moved the white active island');
+  assert(corners[6] === 10 && corners[7] === 10, 'first welded seam endpoint missed its active UV copy');
+  assert(corners[8] === 20 && corners[9] === 10, 'second welded seam endpoint missed its active UV copy');
+  assert(corners[10] === 15 && corners[11] === 5, 'moving island did not preserve its handed similarity fit');
+  assert(result.stitched === 1 && result.seamEdges === 1 && result.seamVertices === 2, 'stitch report lost the exact seam it joined');
+  assert(result.unmatched === 1 && result.blocked === 0, 'unrelated selected island was dragged into the seam component');
+});
+
+test('stitching sweeps a selected welded-edge chain beyond the active island', () => {
+  const rects = parseUvIslandRects(
+    [10, 10, 10, 10, 30, 30, 10, 20, 50, 50, 10, 10],
+    [100, 101, 102],
+    [
+      0, 100, 10, 10, 20, 10, 10, 20,
+      1, 101, 40, 50, 40, 30, 30, 40,
+      2, 102, 50, 50, 60, 50, 50, 60,
+    ],
+    [
+      1, 2, 3,
+      1, 2, 4,
+      2, 4, 5,
+    ],
+  );
+  const result = stitchUvIslands(rects, [0, 1, 2], 0, 64, 64);
+  const corners = flattenUvFaceCorners(result.rects)!;
+  assert(result.stitched === 2 && result.unmatched === 0 && result.blocked === 0, 'selected seam graph stopped after its first neighbour');
+  assert(corners[12] === corners[8] && corners[13] === corners[9], 'second-hop seam vertex 2 missed the first stitched island');
+  assert(corners[14] === corners[10] && corners[15] === corners[11], 'second-hop seam vertex 4 missed the first stitched island');
+  assert(corners[16] === 25 && corners[17] === 5, 'second-hop island lost its handed similarity fit');
+});
+
+test('stitching refuses an identity match whose joined island would leave the atlas', () => {
+  const rects = parseUvIslandRects(
+    [10, 0, 10, 10, 30, 30, 10, 20],
+    [100, 101],
+    [
+      0, 100, 10, 0, 20, 0, 10, 10,
+      1, 101, 40, 50, 40, 30, 30, 40,
+    ],
+    [1, 2, 3, 1, 2, 4],
+  );
+  const result = stitchUvIslands(rects, [0, 1], 0, 64, 64);
+  assert(result.stitched === 0 && result.blocked === 1 && result.unmatched === 0, 'out-of-atlas seam fit was not reported as blocked');
+  assert(result.rects[1] === rects[1], 'blocked stitch partially moved its island');
 });
 
 test('horizontal and vertical chains follow the snap grid and report atlas overflow', () => {
