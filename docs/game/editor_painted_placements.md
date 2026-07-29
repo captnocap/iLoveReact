@@ -46,8 +46,10 @@ vertex identity behind each UV face corner. The UV panel already uses those
 ids for its colored corner markers; `model/uvLayout.ts stitchUvIslands` now
 uses the same truth for a one-click seam operation. Shift-select two or more
 UV islands and make the intended anchor the white active island, then press
-`STITCH` (also available under RMB → Arrange Selected Islands). The active
-island never moves. The operation cancels internal triangle/connected-face
+the persistent `STITCH` control. The direct RMB row `Stitch Matching Seams`
+shows the island count the editor currently sees and enables at two or more,
+so selection-state problems cannot hide the action. The active island never
+moves. The operation cancels internal triangle/connected-face
 edges to recover each UV boundary, matches welded topology edges first and an
 unambiguous shared boundary vertex second, then walks the whole selected
 connected component. Each moving island gets a handed similarity fit and its

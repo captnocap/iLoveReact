@@ -80,9 +80,9 @@ type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
 const UV_CONTEXT_MENU_TUNING = {
   widthPx: 220,
   edgePx: 4,
-  baseHeightPx: 304,
+  baseHeightPx: 330,
   rowHeightPx: 26,
-  expandedRows: { transform: 8, arrange: 7, snap: 6, edit: 2, texture: 5 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 5 } as Record<UvMenuGroup, number>,
 } as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
@@ -1076,16 +1076,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
         <Icon name={selectionMode === 'face' ? 'Triangle' : 'MousePointer2'} size={12} color={accentFor('primary')} />
         <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
-        {multiIslandSelection ? (
-          <Pressable
-            tooltip="Stitch selected pieces to matching model vertices; the white active island stays fixed"
-            onPress={stitchSelected}
-            style={{ height: 21, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}
-          >
-            <Icon name="Link2" size={10} color={accentFor('primary')} />
-            <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.5 }}>STITCH</Text>
-          </Pressable>
-        ) : null}
+        <Pressable
+          tooltip={multiIslandSelection
+            ? 'Stitch selected pieces to matching model vertices; the white active island stays fixed'
+            : `Stitch needs two complete UV islands; the editor currently sees ${selectedIndices.length}`}
+          onPress={multiIslandSelection ? stitchSelected : undefined}
+          style={{ height: 21, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary'), opacity: multiIslandSelection ? 1 : 0.38 }}
+        >
+          <Icon name="Link2" size={10} color={accentFor('primary')} />
+          <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.5 }}>STITCH</Text>
+        </Pressable>
         <Box style={{ flexGrow: 1 }} />
         <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
         <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
@@ -1419,6 +1419,17 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <UvContextRow icon="Triangle" label="Face Isolation" detail={selectionMode === 'face' ? 'ACTIVE' : 'DOUBLE'} active={selectionMode === 'face'} onPress={() => runMenuAction(() => setSelectionScope('face'))} />
           <UvContextRow icon="Layers3" label="Collect Same Orientation" detail="FROM 3D FACE" enabled={!bridge.paintLive && selectedIndices.length > 0} tooltip="Select a face on the mesh, then collect every UV island projected from the same direction" onPress={() => runMenuAction(collectUvOrientation)} />
           <UvContextRow icon="Maximize2" label="Fit Complete Atlas" detail="VIEW" onPress={() => runMenuAction(() => setView(fittedView(false)))} />
+          <UvContextRow
+            icon="Link2"
+            label="Stitch Matching Seams"
+            detail={`${selectedIndices.length} ISL`}
+            active={multiIslandSelection}
+            enabled={multiIslandSelection}
+            tooltip={multiIslandSelection
+              ? 'Use welded model-vertex identity to join selected UV pieces while the white active island stays fixed'
+              : 'Select two or more complete UV islands first'}
+            onPress={() => runMenuAction(stitchSelected)}
+          />
 
           <UvContextDivider />
           <UvContextRow icon="RotateCw" label="Transform Selection" detail={selectionMode === 'face' ? 'FACE' : `${selectedIndices.length} ISL`} expanded={menuGroup === 'transform'} onPress={() => toggleMenuGroup('transform')} />
@@ -1438,7 +1449,6 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <UvContextRow icon="Rows3" label="Arrange Selected Islands" detail={`${selectedIndices.length} SELECTED`} expanded={menuGroup === 'arrange'} onPress={() => toggleMenuGroup('arrange')} />
           {menuGroup === 'arrange' ? (
             <>
-              <UvContextRow indented icon="Link2" label="Stitch Matching Seams" detail="ACTIVE FIXED" enabled={multiIslandSelection} tooltip="Use welded model-vertex identity to join selected UV pieces while the white active island stays fixed" onPress={() => runMenuAction(stitchSelected)} />
               <UvContextRow indented icon="Layers3" label="Stack Exactly on Active" detail={`${selectedIndices.length} → 1`} enabled={multiIslandSelection} tooltip="Copy the white active island's exact triangle corners onto every compatible selected island" onPress={() => runMenuAction(stackSelected)} />
               <UvContextRow indented icon="MoveHorizontal" label="Match Active Width" detail="W =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('width'))} />
               <UvContextRow indented icon="MoveVertical" label="Match Active Height" detail="H =" enabled={multiIslandSelection} onPress={() => runMenuAction(() => matchSelectedSize('height'))} />
