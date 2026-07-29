@@ -31,11 +31,18 @@ const host = globalThis as any;
 // paints always land beside the manifest they belong to.
 export type PaintTarget = Pick<ModelPackage, 'kind' | 'id' | 'name'>;
 
+const LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION = 1;
+export const IMPORTED_TEXTURE_UV_MAPPING_VERSION = 2;
+
 export type ImportedTextureVariantSource = {
   kind: 'model-import';
   /** Stable source-model content hash plus the glTF image index. */
   fingerprint: string;
   imageIndex: number;
+  /** Version of the native source-UV adoption contract that produced this look.
+   * Missing historical values parse as v1, whose post-setPaintTarget snapshot
+   * captured generated atlas UVs instead of TEXCOORD_0 (req_3537). */
+  uvMappingVersion: number;
 };
 
 export type PaintVariant = {
@@ -207,15 +214,21 @@ function withValidatedCoverage(v: PaintVariant): PaintVariant {
 function parsedImportedTextureSource(value: unknown): ImportedTextureVariantSource | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Partial<ImportedTextureVariantSource>;
+  const uvMappingVersion = source.uvMappingVersion === undefined
+    ? LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION
+    : source.uvMappingVersion;
   if (source.kind !== 'model-import'
     || typeof source.fingerprint !== 'string'
     || source.fingerprint.length === 0
     || !Number.isSafeInteger(source.imageIndex)
-    || (source.imageIndex as number) < 0) return null;
+    || (source.imageIndex as number) < 0
+    || !Number.isSafeInteger(uvMappingVersion)
+    || uvMappingVersion < LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION) return null;
   return {
     kind: 'model-import',
     fingerprint: source.fingerprint,
     imageIndex: source.imageIndex as number,
+    uvMappingVersion,
   };
 }
 
@@ -350,7 +363,55 @@ export function updatePaintVariant(
 export type EnsureImportedTextureVariantResult = {
   variant: PaintVariant | null;
   created: boolean;
+  upgraded: boolean;
 };
+
+/** Replace only a provenance-bearing automatic import. User Save-back strips
+ * importedTexture first, so this migration can never rewrite an authored row. */
+function refreshImportedTexturePaintVariant(
+  pkg: PaintTarget,
+  existing: PaintVariant,
+  look: CapturedPaintLook,
+  importedTexture: ImportedTextureVariantSource,
+): PaintVariant | null {
+  const input = {
+    w: look.w,
+    h: look.h,
+    detail: look.detail,
+    data: look.prog,
+    format: 'program' as const,
+    atlasRgba: look.rgba,
+    cornerUv: look.cornerUv,
+    baselineRgba: look.baseline,
+  };
+  const rasters = writeVariantRasters(pkg, existing.id, input);
+  const lookFields = writeLookFields(input, rasters);
+  if (!rasters.png || lookFields.rasterBase !== true || !lookFields.cornerUv) return null;
+
+  const {
+    cornerUv: _c,
+    rasterBase: _r,
+    basePng: _b,
+    uvCoverage: _u,
+    importedTexture: _source,
+    ...kept
+  } = existing;
+  const variant: PaintVariant = {
+    ...kept,
+    w: look.w,
+    h: look.h,
+    detail: look.detail,
+    data: look.prog,
+    format: 'program',
+    png: rasters.png,
+    ...lookFields,
+    ...(rasters.uvCoverage ? { uvCoverage: rasters.uvCoverage } : {}),
+    importedTexture,
+  };
+  writeFile(jsonPath(pkg, existing.id), JSON.stringify(variant, null, 2));
+  writePaintVariantMeshBlob(pkg, existing.id);
+  return variant;
+}
 
 /** Capture a compatible model file's embedded texture exactly once per source
  * content/image pair. This owns provenance/deduplication; callers decide whether
@@ -360,15 +421,24 @@ export function ensureImportedTexturePaintVariant(
   source: ImportedTextureVariantSource,
 ): EnsureImportedTextureVariantResult {
   const importedTexture = parsedImportedTextureSource(source);
-  if (!importedTexture) return { variant: null, created: false };
-  const existing = listPaintVariants(pkg).find((variant) =>
+  if (!importedTexture) return { variant: null, created: false, upgraded: false };
+  const sameSource = listPaintVariants(pkg).filter((variant) =>
     variant.importedTexture?.kind === 'model-import'
     && variant.importedTexture.fingerprint === importedTexture.fingerprint
     && variant.importedTexture.imageIndex === importedTexture.imageIndex);
-  if (existing) return { variant: existing, created: false };
+  const current = sameSource.find((variant) =>
+    (variant.importedTexture?.uvMappingVersion ?? LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION)
+      >= importedTexture.uvMappingVersion);
+  if (current) return { variant: current, created: false, upgraded: false };
 
   const look = captureCurrentPaintLook();
-  if (!look) return { variant: null, created: false };
+  if (!look) return { variant: null, created: false, upgraded: false };
+  const legacy = sameSource[sameSource.length - 1];
+  if (legacy) {
+    const refreshed = refreshImportedTexturePaintVariant(pkg, legacy, look, importedTexture);
+    if (refreshed) return { variant: refreshed, created: false, upgraded: true };
+  }
+
   const names = new Set(listPaintVariants(pkg).map((variant) => variant.name));
   let name = 'Imported Texture';
   for (let suffix = 2; names.has(name); suffix += 1) name = `Imported Texture ${suffix}`;
@@ -386,9 +456,9 @@ export function ensureImportedTexturePaintVariant(
   });
   if (!variant.data && !variant.rasterBase) {
     removePaintVariant(pkg, variant.id);
-    return { variant: null, created: false };
+    return { variant: null, created: false, upgraded: false };
   }
-  return { variant, created: true };
+  return { variant, created: true, upgraded: false };
 }
 
 /** Rename a variant in place (req_3448) — identity, files, and the painting

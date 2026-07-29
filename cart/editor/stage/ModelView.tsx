@@ -45,7 +45,13 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
-import { ensureImportedTexturePaintVariant, listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
+import {
+  ensureImportedTexturePaintVariant,
+  IMPORTED_TEXTURE_UV_MAPPING_VERSION,
+  listPaintVariants,
+  type PaintTarget,
+  type PaintVariant,
+} from '../data/paintVariants';
 import { hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
@@ -2657,6 +2663,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       kind: 'model-import',
       fingerprint: `${sourceIdentity}:${texture.imageIndex}`,
       imageIndex: texture.imageIndex,
+      uvMappingVersion: IMPORTED_TEXTURE_UV_MAPPING_VERSION,
     });
     if (!captured.variant) {
       console.error(`[paint-import] ${loaded.name}: embedded texture is live but its paint variant could not be written`);
@@ -2665,6 +2672,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (captured.created) {
       console.warn(
         `[paint-import] ${loaded.name}: ${texture.width}×${texture.height} embedded texture saved as ${captured.variant.name}`,
+      );
+    } else if (captured.upgraded) {
+      console.warn(
+        `[paint-import] ${loaded.name}: refreshed ${captured.variant.name} with the corrected source UV mapping`,
       );
     }
 

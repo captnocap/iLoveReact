@@ -173,6 +173,12 @@ existing authored base remains the displayed/current look while the pristine
 source texture is added only as a variant. Save-back strips the import provenance
 because that row is no longer the untouched original; a later reopen can capture
 the source again instead of falsely treating the edited row as its backup.
+Imported-texture provenance also carries the UV-adoption version. The first
+post-req_3530 records had no version and therefore identify the known-bad v1
+ordering; the next source load refreshes that untouched generated variant in
+place with v2 source UVs. Since any user Save-back already removed provenance,
+this repair cannot overwrite an authored variant or the package's established
+base look.
 
 A saved paint variant (`paints/paint_N.json`) carries the same v4 triple as the
 base painting, so one mesh stores many looks without duplicating the model: the

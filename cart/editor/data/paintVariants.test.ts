@@ -11,6 +11,7 @@
 import {
   bindPaintSkinToCurrentMesh,
   ensureImportedTexturePaintVariant,
+  IMPORTED_TEXTURE_UV_MAPPING_VERSION,
   paintSkinFitsCurrentMesh,
   PAINT_MESH_VERTEX_BYTES,
   savePaintVariant,
@@ -137,7 +138,7 @@ test('variant save uses native UV coverage and records the discarded texture are
   }
 });
 
-test('an imported model texture is captured once per source fingerprint', () => {
+test('an imported model texture is deduped and legacy source UV provenance upgrades in place', () => {
   const host = globalThis as any;
   const names = [
     '__fs_exists', '__fs_read', '__fs_list_json', '__fs_mkdir', '__fs_write',
@@ -184,24 +185,55 @@ test('an imported model texture is captured once per source fingerprint', () => 
       return 1;
     };
     host.__model_paint_program_read = () => '';
+    let sourceEdge = 8;
     host.__model_atlas_read = () => JSON.stringify({
       w: 8,
       h: 8,
       detail: 1,
-      triangles: [0, 0, 0, 0, 8, 0, 0, 8],
+      triangles: [0, 0, 0, 0, sourceEdge, 0, 0, sourceEdge],
     });
     host.__model_paint_baseline_read = () => '';
 
     const pkg = { kind: 'prop' as const, id: 'test:embedded-texture', name: 'Embedded Texture' };
-    const source = { kind: 'model-import' as const, fingerprint: 'sha256:0', imageIndex: 0 };
-    const first = ensureImportedTexturePaintVariant(pkg, source);
-    const second = ensureImportedTexturePaintVariant(pkg, source);
+    const legacySource = {
+      kind: 'model-import' as const,
+      fingerprint: 'sha256:0',
+      imageIndex: 0,
+      uvMappingVersion: 1,
+    };
+    const source = {
+      ...legacySource,
+      uvMappingVersion: IMPORTED_TEXTURE_UV_MAPPING_VERSION,
+    };
+    const first = ensureImportedTexturePaintVariant(pkg, legacySource);
     assert(first.created && first.variant?.name === 'Imported Texture', 'first source texture was not captured');
     assert(first.variant?.rasterBase === true, 'strokeless source texture did not retain its raster base');
     assert(first.variant?.importedTexture?.fingerprint === source.fingerprint, 'source provenance was not persisted');
-    assert(!second.created && second.variant?.id === first.variant?.id, 'same source texture created a duplicate variant');
 
-    const edited = updatePaintVariant(pkg, first.variant!.id, {
+    // Historical records had no version field. The parser must recognize that
+    // exact v1 shape, then refresh its known-incorrect generated UVs in place.
+    const firstJsonPath = [...files.keys()].find((path) => path.endsWith('/paints/paint_1.json'))!;
+    const legacyRecord = JSON.parse(files.get(firstJsonPath)!.text!);
+    delete legacyRecord.importedTexture.uvMappingVersion;
+    files.set(firstJsonPath, {
+      size: JSON.stringify(legacyRecord).length,
+      text: JSON.stringify(legacyRecord),
+      isDir: false,
+    });
+    sourceEdge = 6;
+    const upgraded = ensureImportedTexturePaintVariant(pkg, source);
+    assert(upgraded.upgraded && !upgraded.created, 'legacy imported texture was not upgraded in place');
+    assert(upgraded.variant?.id === first.variant?.id, 'legacy repair created a duplicate variant id');
+    assert(upgraded.variant?.cornerUv?.[2] === sourceEdge, 'legacy repair kept the stale generated UV table');
+    assert(
+      upgraded.variant?.importedTexture?.uvMappingVersion === IMPORTED_TEXTURE_UV_MAPPING_VERSION,
+      'legacy repair did not stamp the corrected UV mapping version',
+    );
+
+    const second = ensureImportedTexturePaintVariant(pkg, source);
+    assert(!second.created && !second.upgraded && second.variant?.id === first.variant?.id, 'same corrected source texture created a duplicate variant');
+
+    const edited = updatePaintVariant(pkg, upgraded.variant!.id, {
       w: 8,
       h: 8,
       detail: 1,
@@ -211,7 +243,7 @@ test('an imported model texture is captured once per source fingerprint', () => 
     });
     assert(edited?.importedTexture === undefined, 'save-back left edited paint claiming to be the pristine import');
     const recaptured = ensureImportedTexturePaintVariant(pkg, source);
-    assert(recaptured.created && recaptured.variant?.id !== first.variant?.id, 'edited source row suppressed recapture of the original');
+    assert(recaptured.created && recaptured.variant?.id !== upgraded.variant?.id, 'edited source row suppressed recapture of the original');
   } finally {
     for (const name of names) {
       const value = prior.get(name);
