@@ -20,11 +20,35 @@
       "kind": "state",
       "from": "doing",
       "to": "review"
+    },
+    {
+      "at": "2026-07-29T22:42:00.017Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Follow-through found the reported Bald Head package already persists the pre-fix auto-generated Imported Texture UV table. Add a provenance-versioned in-place refresh so the fix reaches that existing untouched generated variant without overwriting authored base paint."
+    },
+    {
+      "at": "2026-07-29T22:42:00.026Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T22:46:09.561Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Fixed the embedded-GLB mapping regression shown on Bald Head. Native import now snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites the mesh UV lanes, then applies the owned image/corner pair after quad grouping and paint-layout setup. Existing packages are covered too: imported-texture provenance now versions the UV contract, and a missing-version v1 automatic row is refreshed in place on the next source load while authored variants/base paint remain untouched because Save-back strips provenance. Native source-snapshot and TypeScript migration regressions pass, as do test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build."
     }
   ],
-  "resolution": "Fixed the embedded-GLB mapping regression shown on Bald Head: the loader was copying supposed source texture coordinates only after setPaintTarget had overwritten those UV lanes with its generated paint-atlas layout. Import now decodes the image and snapshots exact absolute TEXCOORD_0 corners before paint-target adoption, then applies that owned image/corner pair after quad grouping and paint-layout setup before stashing the final edit mesh. Added a native regression proving the source snapshot survives later in-place UV replacement; test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build pass.",
+  "resolution": "Fixed the embedded-GLB mapping regression shown on Bald Head. Native import now snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites the mesh UV lanes, then applies the owned image/corner pair after quad grouping and paint-layout setup. Existing packages are covered too: imported-texture provenance now versions the UV contract, and a missing-version v1 automatic row is refreshed in place on the next source load while authored variants/base paint remain untouched because Save-back strips provenance. Native source-snapshot and TypeScript migration regressions pass, as do test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build.",
   "shas": [
-    "310db3aa4"
+    "310db3aa4",
+    "f4ac03a48"
   ],
-  "resolvedAt": "2026-07-29T22:39:56.500Z"
+  "resolvedAt": "2026-07-29T22:46:09.561Z"
 }
