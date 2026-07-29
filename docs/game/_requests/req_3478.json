@@ -1,0 +1,28 @@
+{
+  "id": "req_3478",
+  "at": "2026-07-28T07:58:16.503Z",
+  "origin": "session:076afe31",
+  "text": "it needs to read them sure but ok so when i lets say just go and click on the buttons under the outliners that add a new outliner, like the add cylinder button, when pressing  that, what is the path taken, does the outliner get pushed into memory on the zig side first, or does react declare that and then zig follows after. because i dont know if reading the data is even the problem, its the writing of it at any one point, where it becomes a mismatch, technically, i dont htink you can mismatch when its just reading it right",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:58:33.649Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:59:42.182Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the Add Cylinder button path end to end for the user (AppFrame.tsx addPart/addPrimitivePart, ModelView.tsx appendPart, pushPartSetToHost). Answer: React goes first and literally manufactures the cylinder's triangles in JS (makePart + composeModelParts), pushes them into the host via meshAppendGroup (a topology op that re-keys), takes the range receipt back, writes its own outliner ledger, and then pushes scope/selection/ranges back into the host — about seven ledger-crossing writes per click, in both directions, including a fallback where JS hand-patches its own range mirror and pushes it INTO the host (meshSetPartRanges). Confirmed the user's thesis that reads cannot mismatch and writes are where drift is born: the code itself contains the trust ceremony (appendPart requires expectedPartCount, the host refuses on disagreement, and the req_3461 error message prescribes save+reopen as the remedy). Also noted the same button takes a DIFFERENT ordering on an empty document (seed-empty route: JS computes ranges itself, host seeded later at mount). No code changed — explanation only.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:59:42.182Z"
+}

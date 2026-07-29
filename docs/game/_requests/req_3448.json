@@ -1,0 +1,30 @@
+{
+  "id": "req_3448",
+  "at": "2026-07-28T01:20:41.922Z",
+  "origin": "session:d675d200",
+  "text": "ok so no re-exporting the prop or anything like that. can we set the variants to be renamed, since painting # is going to cascade into i dont know which one im looking for very quickly",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:21:03.459Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T01:23:37.243Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed no re-export is needed (skins ride the existing export — the palette and world read paints/ from the package on disk live), and built variant renaming: each PAINT VARIANTS row now has a pencil verb that opens an inline name field (Enter or the check commits, Esc cancels — the Outliner's rename idiom). renamePaintVariant rewrites only the label in paint_N.json: the id, the png/base.png/blob files, and any placed instances wearing prop:X#p<id> are untouched, and the skins cache invalidates so the world quick-menu chips show the new name immediately. Editor cart bundles clean; hot reload delivers it.",
+  "shas": [
+    "731a4a834"
+  ],
+  "resolvedAt": "2026-07-28T01:23:37.243Z"
+}

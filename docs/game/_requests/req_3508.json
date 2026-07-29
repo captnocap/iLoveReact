@@ -1,0 +1,30 @@
+{
+  "id": "req_3508",
+  "at": "2026-07-29T06:06:47.756Z",
+  "origin": "session:48647dba",
+  "text": "Great clean up any codex file to be inline also, the agentsmd file",
+  "status": "review",
+  "sessionId": "48647dba-d4ad-4ade-8f93-d4c5ebdd9921",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T06:07:05.382Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T06:09:54.987Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited AGENTS.md (the codex instruction file) plus .codex/hooks.json against disk truth, same treatment as the req_3505 CLAUDE.md audit. The Zig 0.16 line in AGENTS.md was already accurate; the false floating notes were elsewhere: JSRT described as live-and-being-unwound (framework/lua/jsrt is deleted from disk), __hot_get/__hot_set labeled scaffolded-not-working (hot state works since req_2898), and the Cart Structure section naming cart/sweatshop as the active cart and cart/hmsc + cart/scape3d as game-work homes — none of those three directories exist; oracle-confirmed V32 active surface is cart/editor + /play. Fixed all of it, and fixed the same stale cart/sweatshop active-cart claim in CLAUDE.md. .codex/hooks.json is just ledger hooks — nothing stale. Committed 5c213710a.",
+  "shas": [
+    "5c213710a"
+  ],
+  "resolvedAt": "2026-07-29T06:09:54.987Z"
+}

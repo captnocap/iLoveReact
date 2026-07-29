@@ -1,0 +1,17 @@
+{
+  "id": "req_3408",
+  "at": "2026-07-25T00:38:50.855Z",
+  "origin": "one-off",
+  "text": "sorry this dogshit agent harness claude code doesnt know how to properly render terminal text 3/4ths of ur last message dont exist i am not sure what u said",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:39:00.856Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

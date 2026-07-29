@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:head_girl001",
+  "name": "Head Girl001",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "props",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#6943a3",
+  "rig": "source model file",
+  "data": "file head_girl001.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Head_Girl001/mesh/head_girl001.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "imported-from:/home/siah/Desktop/head_girl001.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

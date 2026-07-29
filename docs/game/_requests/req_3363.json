@@ -1,0 +1,30 @@
+{
+  "id": "req_3363",
+  "at": "2026-07-22T23:45:54.665Z",
+  "origin": "session:65324bbb",
+  "text": "hey inside of the world editor in @cart/hmsc-int/ you can place a prop ontop of other props, but inside of the @cart/editor/ it doesnt seem to be the same. for example i have a table i am trying to place another item on, i can use the scroll wheel to lift the item but it always sits higher than nthe table top where before it would find the table top and place on it",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-22T23:45:59.571Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-22T23:52:18.750Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported hmsc-int's stacking snap rule into the editor's world viewport: placing a prop now raycasts the placed pieces (host catalog raycast + authored-mesh slab test) along the cursor ray, and a top-face hit nearer than the ground becomes the placement base — so a lamp lands exactly ON the table top where the ray touched it, no wheel fiddling. The scroll-wheel lift (req_2751) still works and now rides above the support surface instead of the terrain, so lift 0 = flush on the table. Root cause: resolveSnap only ever asked __compiled_world_ground_hit (painted terrain), so placed pieces were invisible to the placement ray. Changed cart/editor/world/pieces.ts (resolvePlacement supportY param), WorldViewport.tsx (supportUnder probe wired into resolveSnap — ghost, hover readout, and click all share it), pieces.test.ts (+1 test, 11/11 green).",
+  "shas": [
+    "db397e2bc"
+  ],
+  "resolvedAt": "2026-07-22T23:52:18.750Z"
+}

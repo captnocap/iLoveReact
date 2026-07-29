@@ -1,0 +1,30 @@
+{
+  "id": "req_3400",
+  "at": "2026-07-24T22:43:18.079Z",
+  "origin": "session:5443e504",
+  "text": "uh. hm. the type it in to the live path is horrible approach, reason i say that is i just got there and it has to compile shaders after the first letter i typed, and caused the entire app to go numb til it is done. if it wasnt for stdout anyone would think the app is frozen. Also. the app is totally frozen. or atleast it cant complete ion\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Lavalamp: durable document has 3 part(s), but the live outliner has 1 and no explicit Delete/Merge authorization\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Lavalamp: durable document has 3 part(s), but the live outliner has 1 and no explicit Delete/Merge authorization\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Lavalamp: durable document has 3 part(s), but the live outliner has 1 and no explicit Delete/Merge authorization\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Lavalamp: durable document has 3 part(s), but the live outliner has 1 and no explicit Delete/Merge authorization\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Lavalamp: durable document has 3 part(s), but the live outliner has 1 and no explicit Delete/Merge authorization\n[shaders] compiling shader (735 KB WGSL) — ~2% (2s)\n[shaders] compiling shader (735 KB WGSL) — ~5% (4s)\n[shaders] compiling shader (735 KB WGSL) — ~7% (6s)\n[shaders] compiling shader (735 KB WGSL) — ~10% (8s)\n[shaders] compiling shader (735 KB WGSL) — ~12% (10s)\n[shaders] compiling shader (735 KB WGSL) — ~15% (12s)\n[shaders] compiling shader (735 KB WGSL) — ~17% (14s)\n[shaders] compiling shader (735 KB WGSL) — ~20% (16s)\n[shaders] compiling shader (735 KB WGSL) — ~22% (18s)\n[shaders] compiling shader (735 KB WGSL) — ~25% (20s)\n[shaders] compiling shader (735 KB WGSL) — ~27% (22s)\n[shaders] compiling shader (735 KB WGSL) — ~30% (24s)\n[shaders] compiling shader (735 KB WGSL) — ~32% (26s)\n[shaders] compiling shader (735 KB WGSL) — ~35% (28s)\n[shaders] compiling shader (735 KB WGSL) — ~37% (30s)\n[shaders] compiling shader (735 KB WGSL) — ~40% (32s)\n[shaders] compiling shader (735 KB WGSL) — ~43% (34s)\n[shaders] compiling shader (735 KB WGSL) — ~45% (36s)\n[shaders] compiling shader (735 KB WGSL) — ~48% (38s)\n[shaders] compiling shader (735 KB WGSL) — ~50% (40s)\n[shaders] compiling shader (735 KB WGSL) — ~53% (42s)\n[shaders] compiling shader (735 KB WGSL) — ~55% (44s)\n[shaders] compiling shader (735 KB WGSL) — ~58% (46s)\n[shaders] compiling shader (735 KB WGSL) — ~60% (48s)\n[shaders] compiling shader (735 KB WGSL) — ~63% (50s)\n[shaders] compiling shader (735 KB WGSL) — ~65% (52s)\n[shaders] compiling shader (735 KB WGSL) — ~68% (54s)\n[shaders] compiling shader (735 KB WGSL) — ~70% (56s)\n[shaders] compiling shader (735 KB WGSL) — ~73% (58s)\n[shaders] compiling shader (735 KB WGSL) — ~75% (60s)\n[shaders] compiling shader (735 KB WGSL) — ~78% (62s)\n[shaders] compiling shader (735 KB WGSL) — ~80% (64s)\n[shaders] compiling shader (735 KB WGSL) — ~83% (66s)\n[shaders] compiling shader (735 KB WGSL) — ~86% (68s)\n[shaders] compiling shader (735 KB WGSL) — ~88% (70s)\n[shaders] compiling shader (735 KB WGSL) — ~91% (72s)\n[shaders] compiling shader (735 KB WGSL) — ~93% (74s)\n[shaders] compiling shader (735 KB WGSL) — ~96% (76s)\n[shaders] compiling shader (735 KB WGSL) — ~98% (78s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (80s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (82s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (84s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (86s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (88s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (90s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (92s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (94s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (96s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (98s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (100s)\n[shaders] compiling shader (735 KB WGSL) — ~99% (102s)",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T22:44:24.108Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T22:49:48.504Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both halves of the freeze (commits 98644a254 + docs). Root cause: the region formula composed the ENTIRE 410-material dispatch (~735 KB WGSL) and the live row bound on the FIRST KEYSTROKE — one typed letter fuzzy-matched a material (your manifest shows it grabbed autumn_leaves) and kicked a minutes-long naga compile on the render thread. Now buildRegionFormula(fns) composes ONLY the bound materials (lava_plasma module = 19.4 KB, sub-second, verified by harness) and the Rig row edits a DRAFT — binding happens on Enter or the bind verb only. Hot-reloads, no host rebuild. The meshdoc refusals were the req_3049/3226 save guard WORKING: it refused to overwrite the 3-part Lavalamp doc with a 1-row outliner (likely mid-hydration during the freeze); the package on disk (Lavalampsad) is intact with all 3 parts. Docs record gains the never-compose-the-catalog hazard.",
+  "shas": [
+    "98644a254"
+  ],
+  "resolvedAt": "2026-07-24T22:49:48.504Z"
+}

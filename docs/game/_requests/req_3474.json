@@ -1,0 +1,28 @@
+{
+  "id": "req_3474",
+  "at": "2026-07-28T07:32:50.975Z",
+  "origin": "session:076afe31",
+  "text": "so, im curious, what is the traced path an edit makes when it happens. it sounds like it goes da da -> da da -> da da -> da da -> da da for each edit, but at which step does it fuck up",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:33:27.141Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:33:59.366Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the follow-up on req_3469's assessment: traced the exact step-by-step path an edit takes through the host (drag path: 5-step in-place fan-out inside one Zig call, applyTransform through applyMeshMutation/patchActiveEditMesh — effectively safe; topology path: 4-step atomic rebuild inside replaceActiveEditMesh, then a 4-listener fan-out where every documented failure lives: JS key adoption, part-range mirror with silent refusal gates, doc-twig re-stamp, GPU re-intern into the never-evicting retained buffer). Conclusion delivered to user: the chain never breaks mid-mutation in Zig; it breaks in the notification leg after the op returns, because four independent consumers must each notice the new mesh generation and nothing verifies they all did. No code changed — explanation only.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:33:59.366Z"
+}

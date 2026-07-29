@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "primitive:plane:2",
+  "name": "HEAD_ONE",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_plane_2",
+  "semanticKind": "plane",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

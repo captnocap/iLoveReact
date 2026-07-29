@@ -1,0 +1,30 @@
+{
+  "id": "req_3444",
+  "at": "2026-07-28T00:26:32.448Z",
+  "origin": "session:9dc00c21",
+  "text": "can you deshittify it, there is text on here that is completely irrelevant to me, what the hell does places free (under cursor) tell me anything about what it is, it doesnt",
+  "status": "review",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:27:09.984Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:28:38.564Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deshittified the PIECE FOCUS panel by cutting every row that told the user nothing about their piece: 'places: free (under cursor)' described tool mechanics not the piece; the RIG section now renders only when the manifest actually carries capabilities (the 'plain (no capabilities)' filler line is gone); the catalog PIECE section (id/kind/'placed instance') restated the header tag and is cut whole; the armed-mode 'arm: click the map to place' instruction is gone (the status bar already says it); the armed SLOT TEMPLATE, whose every value was the literal string 'material slot', is gone — material slots appear only on a placed instance where they are editable. What remains: identity header, Copy/Delete verbs, model name (pressable, opens Studio) + measured size, real rig capabilities when present, the editable PLACEMENT card, and editable MATERIAL SLOTS. Codified as a density rule in the file header: a row earns its place only by informing about THIS piece. Bundle verified clean via esbuild; hot-reloadable .tsx only.",
+  "shas": [
+    "b07012814"
+  ],
+  "resolvedAt": "2026-07-28T00:28:38.564Z"
+}

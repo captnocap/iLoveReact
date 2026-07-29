@@ -1,0 +1,17 @@
+{
+  "id": "req_3455",
+  "at": "2026-07-28T01:44:34.409Z",
+  "origin": "one-off",
+  "text": "u were interupted by my machine resetting, you can pick back up where it left off",
+  "status": "new",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:44:53.984Z",
+      "actor": "fable-focus",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

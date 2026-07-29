@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Sphere 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "sphere",
+      "outlinerOrder": 0
+    }
+  ]
+}

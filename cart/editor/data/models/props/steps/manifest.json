@@ -19,5 +19,31 @@
     "palette:0"
   ],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "mdl-mqvavju8-wh4",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "mdl-mqvavju8-wh4"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  },
+  "textureSlots": [],
+  "lights": []
 }

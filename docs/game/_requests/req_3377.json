@@ -1,0 +1,30 @@
+{
+  "id": "req_3377",
+  "at": "2026-07-23T06:50:36.512Z",
+  "origin": "codex:019f883f",
+  "text": "also, this just happened. so, on the bookslef, i merged 3 faces on one side, it made them invisible but they exist. then i did t he same on the other side. and the outliner doesnt exist anymore same bug we literally just fixed",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T06:50:55.027Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:14:58.149Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reproduced the exact bookshelf sequence with three concave faces on one side followed by three on the opposite side. Both merges now retain all twelve render triangles and their UV pins, keep the single Outliner part and range intact, and preserve the indexed source tessellation for later edits instead of propagating a corrupted fan.",
+  "shas": [
+    "aa2252aac"
+  ],
+  "resolvedAt": "2026-07-23T07:14:58.149Z"
+}

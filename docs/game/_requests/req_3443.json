@@ -1,0 +1,30 @@
+{
+  "id": "req_3443",
+  "at": "2026-07-28T00:12:43.463Z",
+  "origin": "session:d675d200",
+  "text": "how exactly does it populate to the build menu, like for example, if i have a beercan_01 model, and it has two textures, do i end up with two beercan_01 models, or do i get 1 model, and there is then further nested the textures for it. the first is worse, the build menu will explode. the 2nd requires that you fundamentally deliver the capability without making it painful to use, something like right click the asset to select the texture on an already placed prop/whatever it is",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:12:55.910Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:26:26.911Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the question and fixed the design in the same pass. Before this, the build menu DID explode: authoredPaletteEntries emitted one palette tile per stored paint skin (beers_01 · Current, beers_01 · Painting 1, ...). Now an exported model is exactly ONE palette tile, and stored paintings are instance wardrobe: right-click a placed prop opens the existing world quick menu, whose new PAINTINGS section lists Current + every placeable skin as chips; clicking one runs world.piece.skin (new planPieceSkin transaction, same pure boundary as move/rotate/spin) which swaps the instance's placeable id between prop:X and prop:X#p<skin> in place — transform, face materials, overrides, stickers, and undo all preserved, and rendering rides livePush's existing per-skin resident meshes with zero new plumbing. Unknown paintings and catalog pieces reject before commit via the adapter skinPolicy. Tests: planPieceSkin round-trip + rejects, registry invoke-level swap/reject, palette-collapse expectations — all suites green; full editor cart bundles clean. Doc + index record updated (editor_painted_placements).",
+  "shas": [
+    "6db53aa5e"
+  ],
+  "resolvedAt": "2026-07-28T00:26:26.910Z"
+}

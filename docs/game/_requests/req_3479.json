@@ -1,0 +1,28 @@
+{
+  "id": "req_3479",
+  "at": "2026-07-28T08:02:57.981Z",
+  "origin": "session:076afe31",
+  "text": "ok this is good so then, who is to blame then when this occurs: \n\nstart from cube -> loop cut -> loop cut -> loop cut -> loop cut -> extrude face -> drag face -> bevel edge -> mirror edits on z -> mirror edits on x -> merge faces -> add cylinder outliner\n\nbecause this exact chain of events, does not let the cylinder add. the merge of faces causes a mismatch (erm, or it was like an hour or so ago, which started this whole thread of trying to figure out why it keeps occuring in these random chain of events)",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:03:56.457Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T08:05:23.491Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'who is to blame' for the cube→loop-cuts→extrude→bevel→mirror-z/x→merge→add-cylinder refusal chain. Verdict: the chain is innocent, including merge faces — this exact signature was root-caused and fixed last night as req_3465 (session d675, commit 77f5cee27): appendGroupInner in framework/gpu/3d.zig unconditionally demanded reserveNeutralPlaceholderUv() before any append onto non-empty geometry (a safety gate from the earlier add-turns-painted-model-grey fix), but a never-painted model has no atlas at all, so the demand failed and EVERY Add Part on an edited unpainted model was refused with only a terminal log. The chain-dependence was an illusion — the hidden variable was whether the document had an atlas, not which ops ran. Same commit also defused a real ledger landmine in the same door (plain install resets the host part-range table; ranges are now captured pre-replace). Told the user the fix is Zig-side so hot reload does not deliver it — their running editor needs a rebuild/restart to carry 77f5cee27, which likely explains the failure an hour ago. No new code — diagnosis relayed; req_3465 remains in review for the user's word.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T08:05:23.491Z"
+}

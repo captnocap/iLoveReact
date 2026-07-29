@@ -1,0 +1,30 @@
+{
+  "id": "req_3451",
+  "at": "2026-07-28T01:34:16.473Z",
+  "origin": "codex:019fa659",
+  "text": "in the editor there is these buttons for floor, [Image #1] and it affects where build pieces sit when placed, well, it also use to bump the camera up to the floor so that you could always clearly be on the same level, and it for some reason no longer does this. how i can show is that my camera on ground level is no different than level 128 [Image #2] also, im pretty damn sure the cap use to be 256 now 128 so it seems that it was cut in half somewhere along the lines, but you can clearly see that the 128 would make no sense still, how would i be able to see what is on floor 128 from the ground",
+  "status": "review",
+  "sessionId": "019fa659-449c-7342-b3ed-fbb5f4b374c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:34:26.057Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T01:46:33.744Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the active-floor camera regression. The July 12 decoupling left placement and picking on the selected storey while the isometric camera remained at ground level. Removed the independent camera-height source, made camera focus derive from terrain plus active floor elevation, and restored the viewport host-camera push and overlay reprojection on floor changes. Kept the intentional 128-floor cap unchanged. Camera tests pass 6/6, application-command tests pass 24/24, and the ReleaseFast editor build succeeds.",
+  "shas": [
+    "b2f99a247"
+  ],
+  "resolvedAt": "2026-07-28T01:46:33.744Z"
+}

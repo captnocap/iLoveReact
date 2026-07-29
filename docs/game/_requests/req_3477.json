@@ -1,0 +1,28 @@
+{
+  "id": "req_3477",
+  "at": "2026-07-28T07:49:42.969Z",
+  "origin": "session:076afe31",
+  "text": "well, i mean, if all the opperations are already happening outside of the context of react, then its hard to really see why it would be any other way technically. From what it seems, even if lets just say what was in place, worked with no problem, sounds like its just twice the work, right?",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:50:16.418Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:50:32.738Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's read on req_3476's thread: with all mesh operations already host-side, the React-side key relay and mirrors are duplicated bookkeeping even when everything works — enumerated the four standing costs (key adoption at every call site, part-range mirror with alias map and refusal gates, journal-note push, twig re-stamp) and drew the line between React legitimately READING display facts versus maintaining a second ledger with authority (today the JS mirror can veto saves). Explained the history: the editor was born fully in JS where React truly owned the doc; ops migrated host-side one at a time and the old React state stayed behind as mirrors — migration sediment, not a chosen design. Cited V23 (camera) as the in-house precedent of the finished form (JS = transport + params only, host owns all state) and V24's own invariant against separate representations. Conclusion: stable-handle redesign = finishing the same migration the camera already completed. No code changed — discussion; awaiting user go to spec.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:50:32.738Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3434",
+  "at": "2026-07-27T16:01:29.546Z",
+  "origin": "codex:019fa44e",
+  "text": "inside of the cart/editor when importing glb models all the quads turn into triangle soup",
+  "status": "review",
+  "sessionId": "019fa44e-db55-7f41-97bd-9d06309c219a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T16:01:32.254Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-27T16:04:52.389Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recovered safe authored quads at the native GLB/OBJ import boundary: only coplanar, convex, manifold triangle pairs share a face group; real triangles and fan caps stay distinct. File-backed editor parts now preserve those group ranges instead of overwriting them with per-triangle groups. Added Zig coverage for a quad pair and triangle fan. Verified: tools/zig/zig build test-mesh-edit; SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [
+    "9a1ebdd65"
+  ],
+  "resolvedAt": "2026-07-27T16:04:52.389Z"
+}

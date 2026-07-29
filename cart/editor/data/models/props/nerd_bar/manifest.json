@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "primitive:cube:4",
+  "name": "nerd_bar",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cube_4",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "primitive:cube:4",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cube:4"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
+}

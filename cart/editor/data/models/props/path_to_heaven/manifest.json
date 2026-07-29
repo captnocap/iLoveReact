@@ -17,7 +17,8 @@
   "atlases": [],
   "paints": [],
   "placeable": {
-    "as": "prop"
+    "as": "prop",
+    "role": "scenery"
   },
   "skeleton": {
     "id": "primitive:cube:21",
@@ -38,5 +39,7 @@
     },
     "contacts": [],
     "behaviors": []
-  }
+  },
+  "textureSlots": [],
+  "lights": []
 }

@@ -1,0 +1,30 @@
+{
+  "id": "req_3364",
+  "at": "2026-07-23T00:45:41.206Z",
+  "origin": "codex:019f883f",
+  "text": "another bug: new cube -> cube (x7) -> toggle visiblity for all of them but 1 -> delete 1 face -> toggle visiblility for another -> delete a face -> toggle visiblity for some others -> undo -> undo -> undo -> face that was deleted is restored, all the other faces then turn translucent",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T00:45:52.920Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T01:01:20.009Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed undo after hide/show repacks restoring stale UV coordinates over a newer atlas. Journal snapshots now record the atlas layout revision; incompatible restores rebuild and carry raster pixels by authored face group, while compatible snapshots keep the exact raster/UV fast path. Added model-paint coordinate-revision coverage. Verified focused Zig tests, ReleaseFast editor build, and the exact eight-cube hide/delete/show/undo replay: Cube 1 remains at 10 triangles, Cube 2 restores to 12, six cubes remain hidden, and all 22 visible UV centroids sample alpha 255 (0 transparent, 0 glass vertices).",
+  "shas": [
+    "43aa8af73"
+  ],
+  "resolvedAt": "2026-07-23T01:01:20.009Z"
+}

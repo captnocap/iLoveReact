@@ -1,0 +1,28 @@
+{
+  "id": "req_3445",
+  "at": "2026-07-28T00:28:44.722Z",
+  "origin": "session:d675d200",
+  "text": "ok cool now help me here what exactly do i do. [Image #8] here is a simple model/texture so if it fucks up its onnly 6 sides to fix. not a problem. what do i do to add a 2nd texture do i just add it or  what",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:29:20.174Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:29:42.714Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Usage guidance for the multi-texture flow on cereal_box_01 (no code change). Walked the exact steps: RETURN out of the focused UV workspace (PAINT VARIANTS is hidden there by design), Save Painting FIRST to lock the current imported-atlas look as Painting 1, then RMB canvas > Texture Atlas > Import Texture… for the second image, remap islands, then click New (not Update Painting 1) to fork Painting 2. Flagged the Update-vs-New footgun explicitly and the recovery paths (journaled undo / Load Painting 1). Also covered per-instance selection in the world via right-click > PAINTINGS.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T00:29:42.714Z"
+}

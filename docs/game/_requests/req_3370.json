@@ -1,0 +1,30 @@
+{
+  "id": "req_3370",
+  "at": "2026-07-23T04:32:51.034Z",
+  "origin": "session:65324bbb",
+  "text": "so then does deleting a prop not actually remove it then because this directory looks much more full than what i have and ive deleted a lot of junk",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T04:33:05.087Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T04:39:48.183Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's suspicion: Delete only wrote hidden:true into the manifest and left the whole package folder on disk — 112 of 230 packages (~half the 379MB models tree) were soft-deleted junk still present. User ruled real delete + purge now. Delete verb now calls removeModelPackage (new store fn: leaves-first removal, manifest last, loud non-destructive failure fallback to the old hide) so deleting a model removes its folder from disk; unmaterialized models still just hide. Purged all 112 hidden package directories (req_3371 ruling: no recovery snapshot needed). Verified against every saved map first: only three placements in 'nice' referenced purged models (primitive:cube:43/44/47) and will no longer draw; no build-piece placements affected. Editor cart bundles clean; commit c8652c501 records the purge + the rename-follow folder moves.",
+  "shas": [
+    "c8652c501"
+  ],
+  "resolvedAt": "2026-07-23T04:39:48.183Z"
+}

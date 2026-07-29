@@ -1,0 +1,18 @@
+{
+  "id": "req_3437",
+  "at": "2026-07-27T20:58:08.168Z",
+  "origin": "session:460c1a7d",
+  "text": "Great now lets step back to take a peek at the model package declarations we currently have and discuss what we want to cover",
+  "status": "doing",
+  "sessionId": "460c1a7d-33c7-4b3e-a4af-1539d717ef4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T20:58:25.596Z",
+      "actor": "fable-collision",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

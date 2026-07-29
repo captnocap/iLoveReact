@@ -1,0 +1,28 @@
+{
+  "id": "req_3441",
+  "at": "2026-07-28T00:04:05.091Z",
+  "origin": "codex:019fa607",
+  "text": "16 fixed but its only showing 14 so even that wasnt right",
+  "status": "review",
+  "sessionId": "019fa607-0bec-7ea1-9ac6-c6e412694556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:04:08.510Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:05:17.569Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the reported 14 previews were the 16-slot renderer limit minus two non-prop editor scenes. The same corrected 64-slot render-target pool change is built and ready to verify.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T00:05:17.569Z"
+}

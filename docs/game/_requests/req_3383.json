@@ -1,0 +1,28 @@
+{
+  "id": "req_3383",
+  "at": "2026-07-23T07:48:23.408Z",
+  "origin": "session:65324bbb",
+  "text": "hm. M already is for create face between two edges. so i assume that wont be a problem? or what",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:49:03.401Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:49:41.032Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the M-key conflict concern from req_3382's weld: there is no conflict — Create Face (bridge two edges / fill a loop) is and always was bound to C, untouched. M previously ran Merge Faces in every mesh mode; in vertex/edge mode that only produced a 'select faces' error, so Weld took over an empty slot via mode-scoped keymap rows, and face mode's M (Merge Faces / part merge on 2+ outliner rows) is byte-for-byte unchanged. Flagged the one real adjacency: in edge mode with two edges selected both verbs apply — C bridges, M collapses — and both appear labeled in the contextual toolbar, with single-step undo covering a mispress. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-23T07:49:41.031Z"
+}

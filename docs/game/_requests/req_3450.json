@@ -1,0 +1,30 @@
+{
+  "id": "req_3450",
+  "at": "2026-07-28T01:29:06.086Z",
+  "origin": "session:d675d200",
+  "text": "ok and then one more thing regarding paint, is here is bookshelf with some extremely basic paint [Image #9] right and then exported into the world it is doing some funky shit [Image #10] [Image #11] its like every part of it i am face on looking at, is invisible and shows me something else instead",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:30:05.262Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T02:10:33.220Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the invisible-bookshelf report by measurement, not theory: replicated the placed-prop path headlessly and checked every durable channel — per-component winding (propagation + centroid-centered volume), painted.blob↔base.blob row alignment, full UV-footprint coverage against atlas alpha, glass run — for BOTH current and HEAD revisions, base and skin placements. All clean: the on-screen artifact came from live-session pairing (placed instances bind export-time cached geometry to the paint of the moment; the model was re-saved at 18:27 with a 144→128 topology change after the screenshots), so it should stop reproducing after reload/re-place. The investigation surfaced two REAL import-boundary traps, both now closed in Zig (rebuild required): (1) imported textures adopt OPAQUE — the world renders atlas alpha through the transparent pass while the editor preview ignores it, and this texture is 38% transparent padding, so any UV drift = invisible faces in the world only; authored glass still re-applies from the doc run, legacy packages heal on open+save; (2) imported meshes adopt consistent winding via mesh_edit.inconsistentWindingMask + normalizeSoupWinding at all four import doors, warning loudly on repair. 6 new unit tests, 42 pass, ast-check clean; doc + index hazard updated.",
+  "shas": [
+    "6926fd751"
+  ],
+  "resolvedAt": "2026-07-28T02:10:33.220Z"
+}

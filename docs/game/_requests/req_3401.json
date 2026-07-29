@@ -1,0 +1,30 @@
+{
+  "id": "req_3401",
+  "at": "2026-07-24T23:23:18.753Z",
+  "origin": "session:5443e504",
+  "text": "yeah thats the problem though is i dont know the shaders by any formal name only by the way they look. and more specifically the difference between autumn_leaves and lava plasma already is screaming horrible idea to let it resolve by typing a string.",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T23:23:46.027Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T23:30:10.227Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Type-to-bind is DELETED per the ruling ('i dont know the shaders by any formal name only by the way they look') — no surface resolves a material from a typed string anymore. Commit a6b2f0d2c: extracted MapTexturePicker's paged live-thumbnail grid into the one shared picker organ (cart/editor/shell/MaterialPickerPopover.tsx: thumbs + variant chips + click-away scrim, rendered at the app root per the overlay law) and rewired MapTexturePicker as a thin adapter over it (identical map-paint UX incl. the default chip). The Rig panel's live row is now a thumbnail of the bound material + a 'pick' verb that opens the picker anchored by the inspector; a pick patches the slot's liveMaterial (keeping scale) and the popover STAYS OPEN so looks can be compared live on the mesh — each pick compiles only that material's ~19KB module (req_3400). Docs + memory updated with the picked-by-look law. Hot-reloads, no rebuild.",
+  "shas": [
+    "a6b2f0d2c"
+  ],
+  "resolvedAt": "2026-07-24T23:30:10.227Z"
+}

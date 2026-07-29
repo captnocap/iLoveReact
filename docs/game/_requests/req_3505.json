@@ -1,0 +1,28 @@
+{
+  "id": "req_3505",
+  "at": "2026-07-29T04:36:24.719Z",
+  "origin": "session:48647dba",
+  "text": "wipe up the false atrocities in the claude file, the parts about where the zig api is a firehose because that was enshitification from the zig update from 0.15.2 -> 0.16 that was complete ass cheeks that has been somehow floating that note in the claude file for a wile. audit that shit cuh",
+  "status": "review",
+  "sessionId": "48647dba-d4ad-4ade-8f93-d4c5ebdd9921",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T04:36:55.106Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T04:41:01.295Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited the Zig 0.16 hard-rule block in CLAUDE.md against disk truth: toolchain really is 0.16.0, host_context.zig takes std.process.Init, host_io/netx/sysx compat shims are deleted, net uses std.Io.net, all four verify gates exist, debt-audit grep is clean. Every claim in CLAUDE.md is TRUE and the block was user-ordered (req_3175), so it was NOT wiped. The actually-false floating notes were in Claude's persistent memory layer: project_zig016_landed.md still described the superseded first-landing architecture (host_io hub, never-migrate-net-to-std.Io.net — the opposite of the corrected repo), project_zig016_migration_prep.md claimed the migration had not started, behavior.md pinned the repo at 0.15.2. Rewrote the landed memory to the corrected architecture, deleted the prep memory, updated behavior.md and the MEMORY.md index. No repo files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-29T04:41:01.295Z"
+}

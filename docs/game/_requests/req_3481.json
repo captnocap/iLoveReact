@@ -1,0 +1,17 @@
+{
+  "id": "req_3481",
+  "at": "2026-07-28T08:13:41.947Z",
+  "origin": "one-off",
+  "text": "lmfaooo dude i literally typed out 60th and then was like, nah i dont want to oversell it, its annoying but probably not that bad. nope its that bad lmao",
+  "status": "new",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:13:55.664Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

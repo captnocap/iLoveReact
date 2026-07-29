@@ -1,0 +1,30 @@
+{
+  "id": "req_3468",
+  "at": "2026-07-28T06:43:51.822Z",
+  "origin": "session:d675d200",
+  "text": "huh, wait are you saying that before the last set, that the error was because of 'pen work' ? im not sure what that means, because i didnt technically use any pen that im aware of. i know there is a pen pathing tool but that was not what i had used in the time previous is why its a bit confusing. also, your saying that when it occurs, my option is to waste time and reset so it can self heal? or did i understand that wrong, because if not, that approach is buttcheeks",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T06:44:39.168Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T06:47:51.180Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the record and fixed the actual corruption loop. (1) Pen theory RETRACTED — the user never used the pen; the dotted marks in the first screenshots were misread, and the real mechanism needs no pen. (2) Root cause found and fixed (7c21f1c02, rides the pending rebuild): after any structural op sets the paint-layout STALE flag, the atlas is frozen against an older tessellation, but trueFaceColor kept reading centroid texels through the CURRENT face table — re-tessellated faces (merge-faces strips, bevel bands) land in unowned zeroed padding, the capture reads (0,0,0), and every later op inherits it, which is exactly why the bars compound with each edit while the saved package stays byte-clean. While stale, colour captures now read the durable source row via model_source.colorOf (writeColor's read twin, same displayed-to-source mapping), DEFAULT_FACE fallback. Honest residual: bars can still APPEAR transiently in-session where a merged face's UVs extend into frozen padding (display samples the atlas directly) — but they no longer bake into colour tables, no longer spread, and clear on reopen/atlas remake; rendering stale models from face colours instead of the frozen atlas is the follow-up design if the transient still annoys. Reopen-to-heal was a diagnostic, never the proposed fix — the user's pushback was right.",
+  "shas": [
+    "7c21f1c02"
+  ],
+  "resolvedAt": "2026-07-28T06:47:51.179Z"
+}

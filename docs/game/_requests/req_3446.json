@@ -1,0 +1,30 @@
+{
+  "id": "req_3446",
+  "at": "2026-07-28T00:30:28.957Z",
+  "origin": "session:9dc00c21",
+  "text": "I see the 'bind the selected material to N' texture slotting but where the hell is the texture it is pulling from. it says i have Abalone Shell selected but no where on my interface do i see where you can select it",
+  "status": "review",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:30:52.174Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:33:40.311Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the loop the MATERIAL SLOTS section left open: the slot rows offered to 'bind the selected material' but nothing showed where that selection is made. The picker has existed all along — the Materials pane on the left rail (Palette icon) opens the materials library, and clicking a card there sets the active material — but the focus panel never pointed at it. Now a 'selected' row heads MATERIAL SLOTS: swatch + name of the material a slot click will bind (Abalone Shell in the user's case), and pressing it jumps the left panel to the Materials library via a dedicated handler that always lands OPEN on the materials folder (a plain rail press would toggle-collapse an already-active pane). Slot-row tooltips now name the concrete material ('bind Abalone Shell to the front slot') instead of the abstract 'selected material'. Bundle verified via esbuild; hot-reloadable .tsx only.",
+  "shas": [
+    "a727e2ca8"
+  ],
+  "resolvedAt": "2026-07-28T00:33:40.310Z"
+}

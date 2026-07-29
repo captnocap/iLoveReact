@@ -1,0 +1,18 @@
+{
+  "id": "req_3407",
+  "at": "2026-07-25T00:32:18.737Z",
+  "origin": "session:5443e504",
+  "text": "siah@busiah ~/creative/reactjit $ tools/rjit dev editor\n[dev] bundling /home/siah/creative/reactjit/cart/editor/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-editor.js\n\n  .cache/bundle-editor.js  4.4mb ⚠️\n\n⚡ Done in 56ms\n[dev] host child=1 - run 'rjit dev <other>' from another terminal to add tabs\n[dev] watching /home/siah/creative/reactjit/cart/editor/index.tsx - edits rebuild + push automatically (ctrl-c to stop)\n[watch] build finished, watching for changes...\n[apptick-split] total=1307.9ms | jsTick(+microtasks)=1297.4 (of which GC=88.0ms x83) tickDrain=0.0 drainFlush=9.4 dirty(snap=0.0+rebuild=1.0)\n[loader] no game file at zig-out/game/editor/world.gamefile — BLANK world (paint-first canvas)\n[loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n[loader] resident catalog: 61 cooked mesh(es) ready (no rebake to place)\n[js.warn] [map-seed] ground seeded — 1 chunk(s) live\n[js.warn] [authored] resident catalog: 61 mesh(es) — 26 painted, 12 paint skin(s) -> loader node 1935\n[dev 5:31:06 PM] rebuilt - pushed 'editor'\n[apptick-split] total=1254.0ms | jsTick(+microtasks)=1244.8 (of which GC=82.5ms x65) tickDrain=0.0 drainFlush=8.9 dirty(snap=0.0+rebuild=0.3)\n[loader] no game file at zig-out/game/editor/world.gamefile — BLANK world (paint-first canvas)\n[loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n[loader] resident catalog: 61 cooked mesh(es) ready (no rebake to place)\n[js.warn] [map-seed] ground seeded — 1 chunk(s) live\n[js.warn] [authored] resident catalog: 61 mesh(es) — 26 painted, 12 paint skin(s) -> loader node 1935\n[apptick-split] total=85.1ms | jsTick(+microtasks)=78.7 (of which GC=1.5ms x4) tickDrain=0.0 drainFlush=5.8 dirty(snap=0.1+rebuild=0.5)\n[js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:78466:9) « at <anonymous>:78571:35 « at wrappedCreate (<anonymous>:26147:34)",
+  "status": "doing",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:32:47.513Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

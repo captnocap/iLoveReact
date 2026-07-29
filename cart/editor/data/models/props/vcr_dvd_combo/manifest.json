@@ -16,8 +16,6 @@
   "decompositions": [],
   "atlases": [],
   "paints": [],
-  "textureSlots": [],
-  "lights": [],
   "placeable": {
     "as": "prop",
     "role": "scenery"
@@ -41,5 +39,7 @@
     },
     "contacts": [],
     "behaviors": []
-  }
+  },
+  "textureSlots": [],
+  "lights": []
 }

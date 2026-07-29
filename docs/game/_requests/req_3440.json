@@ -1,0 +1,28 @@
+{
+  "id": "req_3440",
+  "at": "2026-07-28T00:02:33.142Z",
+  "origin": "codex:019fa607",
+  "text": "here is some exported props in the build menu [Image #1] you can see about 1/3rd or so have a preview and the others do not. lets make sure all of them have it",
+  "status": "review",
+  "sessionId": "019fa607-0bec-7ea1-9ac6-c6e412694556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:02:35.666Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:05:17.559Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Raised the framework Scene3D render-target pool from 16 to 64. The Props build category mounts 47 live 3D product shots, while two surrounding editor scenes consumed the remaining 2 slots, explaining the observed 14 previews. The larger bounded pool provides capacity for every prop tile plus editor headroom; editor ReleaseFast build completed.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T00:05:17.559Z"
+}

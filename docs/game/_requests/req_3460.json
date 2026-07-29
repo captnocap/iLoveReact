@@ -1,0 +1,30 @@
+{
+  "id": "req_3460",
+  "at": "2026-07-28T03:59:40.518Z",
+  "origin": "codex:019fa659",
+  "text": "i dont see the button/action for bevel, where is it located/what is the keybinding ?",
+  "status": "review",
+  "sessionId": "019fa659-449c-7342-b3ed-fbb5f4b374c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T03:59:46.971Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T04:04:34.151Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the vertex Bevel action is selection-contextual: it appears for exactly one selected vertex and becomes Weld for a multi-vertex selection. Added the missing live B binding for Bevel in both Vertex and Edge modes; Face B remains Glass and Paint B remains Fill. The 17-command keymap suite and a fresh ReleaseFast editor build pass.",
+  "shas": [
+    "789a6470d"
+  ],
+  "resolvedAt": "2026-07-28T04:04:34.151Z"
+}

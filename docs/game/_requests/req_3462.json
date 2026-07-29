@@ -1,0 +1,17 @@
+{
+  "id": "req_3462",
+  "at": "2026-07-28T04:08:41.982Z",
+  "origin": "one-off",
+  "text": "hm. first the v8_hello what even is that and second the v8_* other files should technically not be the outstanding files in the directory, seems very odd to have it live there when considering where everything else lives but maybe there is a reason for that im not seeing",
+  "status": "new",
+  "sessionId": "8185a686-e595-4144-870f-7ce9d89baddb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T04:08:54.236Z",
+      "actor": "fable-root-clean",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

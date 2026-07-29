@@ -1,0 +1,30 @@
+{
+  "id": "req_3484",
+  "at": "2026-07-28T08:29:24.726Z",
+  "origin": "session:076afe31",
+  "text": "alright well ive covered enough ground here without it getting preachy that there is a problem we clearly know there is one. And yes make the proper changes, the time spent to do it is far less than the amount of time that indefinitely comes if its never actually fixed.",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:30:06.667Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T08:47:05.749Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slice 1 of the user's green-lit fix program is BUILT, verified, and committed (ecde8c32c): the mesh integrity roll call. Every accepted topology transaction now arms an invariant check at journalCommit/journalStep that runs at the next meshActionDrain — deferred because loop cut settles its range table after committing; the commit-time draft false-alarmed unowned=16/32 on a healthy chain, caught headlessly. The check gathers the full displayed+hidden partition, runs the existing mesh_journal_log.analyze prover, heals only what is provable (req_3032 overlap renormalize, compactOccupiedPartRanges for stale empty declarations), and reports every fault on BOTH surfaces: a [mesh-integrity] stderr line naming the guilty op plus a new integrity_alert action event (append-only ordinal 26) that AppFrame's drain loop answers by resyncing all mirrors from host truth (new ModelToolApi.resyncFromHost) and setting a visible warning status. Verified on the user's exact repro chain (cube, 2-axis loop cuts, extrude, mirrored nudges, merge, add cylinder, undo/redo): zero false alarms, partition OK, Add works; nativeMeshEvents bridge test 5 assertions pass; docs/game/editor_mesh_integrity.md + _index record added. NOTE: the fix is Zig — the user's editor needs a rebuild to carry it. Slices 2 (single commit epilogue) and 3 (stable document handle) remain open on this thread.",
+  "shas": [
+    "ecde8c32c"
+  ],
+  "resolvedAt": "2026-07-28T08:47:05.749Z"
+}

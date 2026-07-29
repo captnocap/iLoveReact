@@ -1,0 +1,28 @@
+{
+  "id": "req_3483",
+  "at": "2026-07-28T08:27:15.293Z",
+  "origin": "session:076afe31",
+  "text": "and so you see now in that case, you have something like 4 angles to chase before even considering it might be one layer up from all of this",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:27:46.396Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T08:27:46.405Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closing synthesis of the whack-a-mole thread (req_3469, 3474-3482; oracle consulted throughout the thread, no new approach decided this turn): confirmed the user's point that every incident presents ~4 plausible lower layers to chase — the op's own algorithm, the mirror/sync relay, a silent refusal gate, and runtime staleness (pre-fix binary / hot-reload not covering Zig), plus the GPU cache family — and each of the 52 hunts found a REAL culprit in one of them, which is precisely what shielded the architecture layer from suspicion: every search ends at a satisfying local conviction, so nobody continues upward. Also noted the user is structurally the only continuous observer across incidents (sessions are ephemeral), which is why the meta-pattern was theirs to spot; the cross-incident diagnosis is now durably recorded in project memory (project_mesh_consistency_matrix) so future sessions inherit it instead of re-deriving from one incident. No code changed — discussion capstone.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T08:27:46.405Z"
+}

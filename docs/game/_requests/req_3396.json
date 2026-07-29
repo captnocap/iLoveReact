@@ -1,0 +1,28 @@
+{
+  "id": "req_3396",
+  "at": "2026-07-24T21:25:01.720Z",
+  "origin": "session:5443e504",
+  "text": "no but my next question is then we put lava in a lamp, how do we then make it so that lamp is actually projecting some area light that can match to its active texture. obviously this is far more advanced but we already do also have @cart/light_demo.tsx and so its not some entirely foreign concept",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T21:25:35.597Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T21:26:24.120Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design assessment (no code): light-matches-lava lands on the existing lighting arc (req_2032 pyramid data-row, req_2062 LightRig authored on the model, Phase 3 color animation already planned). Proposed: LightRig gains colorFrom:<regionId> binding. Tier 1 = host-stepped light color blended from the region material's extracted palette slots (palette-slot contract), no shader work. Tier 2 = the light row carries the materialId + lamp object-space transform and scene3d_wgsl modulates that light's contribution by evaluating the SAME material fn at the receiving fragment's position in lamp space — walls receive the actual moving plasma pattern, coherent with the glass by construction (one shared field, two consumers), zero readback/latency because materials are procedural programs not pixels. Caveat noted: /compiled has no lights yet (LIGHTS lump = existing Phase 2).",
+  "shas": [],
+  "resolvedAt": "2026-07-24T21:26:24.119Z"
+}

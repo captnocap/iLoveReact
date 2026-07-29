@@ -1,0 +1,30 @@
+{
+  "id": "req_3509",
+  "at": "2026-07-29T06:13:20.645Z",
+  "origin": "session:48647dba",
+  "text": "i updated the readme to be more on brand. it was severely dated, u can push that to gh",
+  "status": "review",
+  "sessionId": "48647dba-d4ad-4ade-8f93-d4c5ebdd9921",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T06:13:33.759Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T06:13:52.552Z",
+      "actor": "session-4864",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User rewrote README.md themselves — the dated 254-line readme replaced with a one-line on-brand pitch (desktop apps: React UI + Zig systems; proper readme findable in git history). Verified the truncation was deliberate by reading the new content before staging, then committed only README.md (847848652) and pushed to main on GitHub.",
+  "shas": [
+    "847848652"
+  ],
+  "resolvedAt": "2026-07-29T06:13:52.552Z"
+}

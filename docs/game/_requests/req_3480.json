@@ -1,0 +1,28 @@
+{
+  "id": "req_3480",
+  "at": "2026-07-28T08:09:07.752Z",
+  "origin": "session:076afe31",
+  "text": "RIght thats what i said and im saying tho is like it was fixed, but this is like the 30th time i have to say in the last 3 weeks where its some absolutely random chain of events where it eats shit and then that one chain of events gets some patch for it, and then the same corruption error occurs in some other chain of events. and itr just feels like all we are doing is a game of cat and mouse with these events which clearly means there is a bigger problem being completely overlooked.",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:09:56.133Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T08:10:36.636Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Validated the user's cat-and-mouse thesis with repo data: 52 fix commits in the last 3 weeks on the mesh/paint editor files alone (framework/gpu/3d.zig, mesh_edit, model_paint, paint_program, model_source, ModelView, cart/editor/model), and roughly 80 percent follow one sentence template — preserve/keep/align derived-state X through operation Y (paint through append, parts through face merge, undo UVs aligned with atlas, atlas through outliner deletion, symmetrize contained to parts, etc). Named the bigger problem: the editor maintains ~8 derived copies of the document whose pairwise consistency is hand-written per operation, verified nowhere, with silent refusal as the only error policy — a correctness matrix of ops x derived-states where every patch fills exactly one cell after a user falls through it; the random chains are conjunctions of hidden state selecting an unfilled cell. Proposed the three-slice program that ends the game: (1) run the ALREADY-EXISTING validators (rangesValid/ownershipValid/groupsMatchTriangles, currently diagnostics-only) at the end of every topology op with loud events + auto-resync from source — no corruption survives its own op; (2) one unconditional commit epilogue replacing per-op hand fan-out; (3) the stable-handle/single-ledger redesign already discussed in req_3476-3478. Awaiting user go; no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T08:10:36.636Z"
+}

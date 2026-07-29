@@ -1,0 +1,30 @@
+{
+  "id": "req_3464",
+  "at": "2026-07-28T04:14:49.432Z",
+  "origin": "session:8185a686",
+  "text": "ah that world_loader, i would check on that because to my understanding i was aware of the root-living version of it, and then it was rewritten into scoped files, inside of the framework directory, any lingering world_loader not in pieces would be considerably old news iirc",
+  "status": "review",
+  "sessionId": "8185a686-e595-4144-870f-7ce9d89baddb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T04:15:14.405Z",
+      "actor": "fable-root-clean",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T04:16:35.360Z",
+      "actor": "fable-root-clean",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked the world_loader two-copies concern: the current state is already correct. The Jul 11 split (84460c9cd) created framework/world_loader/ scoped pieces but left the root monolith live; the Jul 13 cutover (req_3041, 3e9ed7a69) deleted the root monolith and pointed every consumer plus rjit game's LOADER_SOURCE at framework/world_loader.zig, which is a 410-line facade over the split tree — one loader, in pieces, no lingering root copy. Fixed the facade's stale header comment that still cited the dead root -Dapp-source path (commit c3abb1f6d).",
+  "shas": [
+    "c3abb1f6d"
+  ],
+  "resolvedAt": "2026-07-28T04:16:35.360Z"
+}

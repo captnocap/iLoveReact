@@ -1,0 +1,30 @@
+{
+  "id": "req_3373",
+  "at": "2026-07-23T05:25:13.213Z",
+  "origin": "session:65324bbb",
+  "text": "ok and then for a model like /home/siah/creative/reactjit/cart/editor/data/models/props/08_Porschegt3rs it has a glb stored but do we need it still",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T05:25:23.735Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T05:27:01.612Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered whether stored .glb/.obj source files are still needed in model packages: no, once a package has a saved mesh/doc.blob — the saved meshdoc beats the source file everywhere (resolveViewer render path, Outliner import, part seeding); the stored source is only a fallback for never-saved packages. Audited the tree: 6 packages carried a source file alongside a saved doc (58MB dead weight, the Porsche glb alone 27MB) — removed them, committed 329fa6fe0. 5 packages (Bus, Desk, three Nug imports) have NO saved doc, so their glb IS their only geometry — left intact and flagged to the user; opening and saving each once would convert them to meshdoc form and free those too. Manifests keep an inert viewerPath pointing at the removed file — never read while a doc exists.",
+  "shas": [
+    "329fa6fe0"
+  ],
+  "resolvedAt": "2026-07-23T05:27:01.612Z"
+}

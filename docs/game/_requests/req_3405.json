@@ -1,0 +1,30 @@
+{
+  "id": "req_3405",
+  "at": "2026-07-25T00:17:33.990Z",
+  "origin": "session:5443e504",
+  "text": "there is only 1 part. so if the file on disk says there is 3 parts then its wrong, it had 3 parts that then all got remerged into one part by me intentionally",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:18:02.357Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T00:22:01.203Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The lamp was NOT broken — it was held hostage by a torn two-file save. Forensics: doc.blob on disk is already POST-merge (1 range (0,141), 654 verts, glass boundary 594 intact) but parts.json still lists the 3 pre-merge rows — the authorized merge save wrote doc.blob and the app died (req_3400 freeze) before parts.json followed. The shrink guard took max(docRanges=1, sidecarRows=3)=3 vs live 1 and refused every save since; the merge authorization is an in-memory ref that died with the restart, so there was no way out. Fix 2373b44de: the doc's own range table is the durable boundary authority when it exists — matching its count is allowed and the save REPAIRS the stale sidecar; rangeless legacy docs still defer to the sidecar so the reverse tear (collapsed parts.json vs rich doc) stays refused (existing test pinned + 2 new assertions, 10/10 pass). Recovery: hot reload picks this up — press Save on Lavalampsad once and parts.json heals to the merged single part.",
+  "shas": [
+    "2373b44de"
+  ],
+  "resolvedAt": "2026-07-25T00:22:01.203Z"
+}

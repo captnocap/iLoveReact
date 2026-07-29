@@ -1,0 +1,28 @@
+{
+  "id": "req_3421",
+  "at": "2026-07-25T19:00:01.714Z",
+  "origin": "session:5443e504",
+  "text": "huh. so can u paint over glass or something? just weird because i never painted it. but it could have predated intentional atlas creation and therefore it was always 'painted' anyways",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T19:00:21.341Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T19:00:21.350Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question answered, no code: (1) yes — painting over glass is stained glass by design (req_2928: every paint op writes RGB only and preserves the alpha channel, so a painted glass face stays translucent; only the glass toggle itself changes alpha). (2) The user's own guess is correct: bong_01 predates the explicit Create Paint Atlas gate — older models always carried a live per-face color atlas and every save wrote it to base.png, so the glass alpha rode along 'for free' without any intentional painting. The Lavalampsad was authored after the gate, so no atlas exists until Paint mode creates one — which is exactly why its glass has no world-side carrier yet.",
+  "shas": [],
+  "resolvedAt": "2026-07-25T19:00:21.350Z"
+}

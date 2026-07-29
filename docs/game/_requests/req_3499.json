@@ -1,0 +1,42 @@
+{
+  "id": "req_3499",
+  "at": "2026-07-29T01:18:44.857Z",
+  "origin": "session:28d9c959",
+  "text": "Nice thats awesome. uh, you got it chief ?",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T01:19:20.682Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T01:44:54.885Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "Phase 1 (skinned render substrate) written: scene3d_skinned_wgsl + shadow variant via shared shader chunks; SkinnedVertex 28B path + palette pool + skinned/shadow pipelines in gpu/3d.zig; skeleton/pose.zig palette math (col-major, matches rebuild_model); PlayerSkin through constructor/player_assets/scene_build/animation/runtime_stream; __compiled_world_set_player_skin door; playerModelPush.ts emits stride-16 skin payload with rigid per-part weights (presence-gated, legacy path intact). Verifying with SHIP_RUN_PACKAGE=0 ship editor."
+    },
+    {
+      "at": "2026-07-29T01:50:03.124Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-29T03:40:55.610Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "Phase 2 landed (voxel-geodesic solver in framework/skeleton/autoweights.zig, solve-at-staging with RJIT_SKIN_SOLVE=0 escape). Ship + headless shot PASS. Seam softening now engages on the next playtest push; console will log [skin-solve] with bone/vert/voxel counts."
+    }
+  ],
+  "resolution": "Phase 1 of the green-lit auto-skinning plan landed: the skinned figure substrate. The framework now has a matrix-palette LBS path — scene3d_skinned_wgsl (+ shadow variant) built from shared shader chunks so the fragment/instance math can never drift; a 28-byte SkinnedVertex retained path with palette pool (mat4+tint per bone) in gpu/3d.zig; skeleton/pose.zig composing palettes that mirror rebuild_model exactly; a __compiled_world_set_player_skin door; scene_build/animation/runtime_stream wiring so clips AND live capture pose drive the palette; and playerModelPush.ts emitting the stride-16 skin payload with rigid per-part weights, presence-gated with the legacy path intact. Rigid weights reproduce today's per-part transforms exactly, so the swap is visually invisible until the Phase-2 voxel-geodesic solver softens seams into the same wire format. Verified: ship compiles clean; rjit shot editor --route /play PASS twice (world + figure render headless; PNG in session scratchpad). Next slices: voxel-geodesic solver in Zig, mush/smoothing rescue, bind-time pose-sweep validator.",
+  "shas": [
+    "b1897782b"
+  ],
+  "resolvedAt": "2026-07-29T01:50:03.123Z"
+}

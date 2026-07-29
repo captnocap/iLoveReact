@@ -1,0 +1,30 @@
+{
+  "id": "req_3442",
+  "at": "2026-07-28T00:09:53.051Z",
+  "origin": "session:9dc00c21",
+  "text": "this panel here [Image #1] the focus panel needs to start becoming actually useful. it currently is useless in its entirety so much so i never look at it because i know there is nothing there of substance. also, for the data it is showing, doesnt make much sense at all. like for this for example [Image #2] what does telling me it is primitive:cube:4 do and what does t hat even mean. but further more things like size, placement location, yaw, and other properties should all be accessible through here, not some hard-coded value i can look at but values that are actually interfacable",
+  "status": "review",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T00:09:58.156Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:19:32.971Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the PIECE FOCUS panel actually interfaceable (req_2095 ruling: fields either edit or read clearly immutable). For a selected placed piece, PLACEMENT is now a live editor: x/z steppers (props nudge 0.1m, grid pieces step the 3m module so every step stays on its snap family), prop height, floor stepper (rebases y by 3m per storey), yaw (quarter-turn verbs for grid pieces matching the R-key slot semantics; free 15-degree steps for props), prop scale (gizmo-equivalent, 0.05-20), and a spin rate stepper for authored meshes. All fields write through the existing move/rotate/spin transaction commands, so panel edits get identical undo, footprint replacement, and live-world push as viewport edits — no parallel mutation path. Added a Copy/Delete verb row on the focused instance. Replaced the meaningless internal mesh key (primitive:cube:56::dup-18622) with the model's human library name, pressable to open that package in Studio. Verified the cart bundles clean via esbuild; changes are hot-reloadable .tsx only. Docs: editor_spin_props.md + its index record updated.",
+  "shas": [
+    "df08ef5a6"
+  ],
+  "resolvedAt": "2026-07-28T00:19:32.971Z"
+}

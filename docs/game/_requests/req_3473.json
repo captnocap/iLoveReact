@@ -1,0 +1,30 @@
+{
+  "id": "req_3473",
+  "at": "2026-07-28T07:20:21.206Z",
+  "origin": "session:8185a686",
+  "text": "hm. thats weird i have way more space than what u got reported back. and so further more looking at that i have 44.8gb, a rebuild is going to recompile the shaders, again, and again, and again, and again. Ive noticed it on every rebuild, ive only grown annoyed with it now. The fact its running twice at start up is the newest behavior, the one time yeah its fucking annoying but il put up with it, because a build takes ~3-4 minutes, + another 90s of shader compile. Fine il go touch grass for the moment. But its clearly just happening, with no regard of hitting a cache and not doing it",
+  "status": "review",
+  "sessionId": "8185a686-e595-4144-870f-7ce9d89baddb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:21:38.741Z",
+      "actor": "fable-shaderwall",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:38:14.751Z",
+      "actor": "fable-shaderwall",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the durable fix for the per-boot ~90s x2 shader wall instead of waiting on cache forensics (wgpu/naga pinned at v25.0.2.1 since March, so no repin regression; disk now has 444G free). New cart/editor/render3d/shaders/compose.ts composes every fill/ground WGSL module from the materials actually rendered (the req_3400 region pattern): ground formula 747KB->38KB, per-material fill previews 734KB->21KB, so compiles drop from ~90s to milliseconds and no driver cache is needed at all. Ground recomposes from the map's real binding table (a pick adding a NEW material recompiles a small module sub-second; variant/seed/palette stay pure data); Paint's browser batches per-page modules; FILL_SHADER survives only as unknown-fn fallback. 9/9 groundFormula suite green under v8cli; docs + index record updated. Lands via hot reload — next dev boot should show no [shaders] heartbeat at all.",
+  "shas": [
+    "6151f3b88"
+  ],
+  "resolvedAt": "2026-07-28T07:38:14.751Z"
+}

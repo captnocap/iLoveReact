@@ -1,0 +1,10 @@
+{
+  "id": "req_3418",
+  "at": "2026-07-25T18:47:11.649Z",
+  "origin": "session:5443e504",
+  "text": "so heres the thing. probe A and C i cant move the camera, the stage is frozen, the models also render at 436 tris, the probe B however, i can move around, make edits, etc. and it has 654 tris. all three are the same model. i dont know the diff between one or the others though",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": []
+}

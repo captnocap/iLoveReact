@@ -1,0 +1,30 @@
+{
+  "id": "req_3426",
+  "at": "2026-07-25T19:44:32.105Z",
+  "origin": "session:76d0e8cf",
+  "text": "here is a problem im having. The UV mapping on the models from the studio is not very smart. so much so its making my life a miserable pile of shit trying to map all these around. Lets look at the most simple form of what tf im talking about and then you can easily interpret how bad this compounds.\n\n\nhere is a cylinder. nothing changed on it were going to go straight into getting an atlas and looking at the uv. [Image #1] [Image #2] [Image #3] alright. now absorb that for a moment. and then lets compare to block bench. \n\n\n[Image #4]\n\n\nimmediately there is some problems. \n\n ours is a pile of spaghetti. Every single face is isolated for the side faces while the rounds are grouped. in blockbench, the rounds are grouped and then the side faces are grouped out into trios. ours is just free balling these. \n\n\nlets look at a sphere\n\nours: [Image #5]\ntheirs: [Image #6]\n\nnotice how on this sphere we basically just got butt fucked for trying to map jack for fucking shit \n\nnow think about what any actual modeling ends up becoming",
+  "status": "review",
+  "sessionId": "76d0e8cf-3189-44ea-b42d-37f76e2e1ad4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T19:44:47.865Z",
+      "actor": "fable-76d0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T19:53:00.936Z",
+      "actor": "fable-76d0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the UV spaghetti to framework/gpu/paint_islands.zig: the paint-atlas builder only merged edge-connected faces into one island when they were near-perfectly coplanar (dot >= 0.9999), so every curved wall quad became its own isolated island (24 strips on a cylinder, ~288 quads on a sphere) while only flat cap fans grouped. Replaced the merge criterion with the Blockbench rule: edge-connected faces that project the same way (same dominant normal axis AND sign) share one island. A 24-side cylinder wall now folds into four contiguous arc charts (Blockbench's trios at 12 sides), a UV sphere into six axis charts, cube/prism faces stay separate, and cap fans merge exactly as before. Saved atlases reconstruct unchanged because that path is additionally governed by UV-edge equality. New unit test proves the 8-wall cylinder folds into 4 seam-free charts; all 10 paint_islands tests pass. Needs a framework rebuild, then Create/Remake Paint Atlas to see the grouped layout.",
+  "shas": [
+    "664aa9826"
+  ],
+  "resolvedAt": "2026-07-25T19:53:00.935Z"
+}

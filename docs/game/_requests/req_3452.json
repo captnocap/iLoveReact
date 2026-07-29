@@ -1,0 +1,30 @@
+{
+  "id": "req_3452",
+  "at": "2026-07-28T01:39:33.805Z",
+  "origin": "codex:019fa659",
+  "text": "ok the 128 is fine then, 256 was a rounding error on my thinking lol the camera tho is a problem",
+  "status": "review",
+  "sessionId": "019fa659-449c-7342-b3ed-fbb5f4b374c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:39:43.256Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T01:46:33.739Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Applied the clarification exactly: retained the intentional 128-floor limit and fixed only the camera/storey regression. Selecting a floor now raises the editing plane, camera target, and camera eye together without changing horizontal orbit, angle, or zoom. Verified by focused camera and command-authority suites plus a ReleaseFast editor build.",
+  "shas": [
+    "b2f99a247"
+  ],
+  "resolvedAt": "2026-07-28T01:46:33.739Z"
+}

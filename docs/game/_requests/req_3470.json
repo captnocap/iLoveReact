@@ -1,0 +1,28 @@
+{
+  "id": "req_3470",
+  "at": "2026-07-28T07:09:46.101Z",
+  "origin": "session:d675d200",
+  "text": "i am curious of your thoughts, the amount of times we have had 'catastrophic' failures >99% of the time its in-memory and it self-heals by resetting. But all these problems never actually existed when the same tools were made first before in javascript. and so i have to believe, there is some actual benefit in some formal re-allocate and clean up between edits, rather than always just mutating in-memory and hoping it doesnt corrupt, and the only reason i say hope it doesnt corrupt, is i could have never have guessed the amount of times it would occur as it has, and for sure i have a feeling it wont be the last.",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:10:39.366Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:11:21.252Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Assessment ask — the user proposed that the recurring in-memory 'corruption' (always self-healing on reset) argues for formal re-derive/cleanup between edits instead of perpetual in-place mutation, noting the JS-era tools never had these failures. Verdict delivered: the user is correct, and it is architecture not language — the JS tools were derive-from-document (disposable derived views cannot drift), while the Zig mesh editor keeps ~a dozen hand-synced resident tables where every op updates its own subset; every recent failure (black bars, refused Add Part, stale mirrors) was bookkeeping divergence between such tables. The project constitution already validates the principle (V30 persistence-by-derivation, V29 bake-by-execution, V31 hash-validated rebuild-on-mismatch; the editor's DISK layer has the discipline via doc stamps — only the resident layer lives on mutate-and-hope). Cost math favors it: editor meshes are hundreds of tris, commit-boundary full re-derive is microseconds; incremental paths only justified inside live drags. Proposed shape: indexed mesh doc as the single revision-stamped authority, one shared adopt boundary re-deriving all tables, colors/materials moved onto document faces, revision-gated atlas reads, the existing journal validator as a commit tripwire in dev builds. Offered to write the full op-by-op migration plan on the user's word — no code changed for this entry.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:11:21.252Z"
+}

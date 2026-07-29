@@ -3,7 +3,7 @@
   "at": "2026-07-23T08:04:19.582Z",
   "origin": "session:8ff3c6e4",
   "text": "here is a tool to make in the studio editor: i need to basically have the pen tool that is already there, but i just need the edges retained from it and not the face it creates. Also, that pen tool needs love, it has no ability to really modify anything without accidently placing another point and it then getting all fucked up. also there is no clear depth and then all of a sudden u come out with a face that is completely off from what it looked like, i would treat the points like verts and give them a gizmo for pulling around",
-  "status": "doing",
+  "status": "review",
   "sessionId": "8ff3c6e4-7cbc-4637-9b58-87cb5e3d7ffd",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,18 @@
       "actor": "fable-pen",
       "kind": "note",
       "text": "Built the Pen Edges tool + pen overhaul. Zig: path_plane.buildWire commits the pen path as naked wire edges (one zero-area (a,b,b) triangle per segment — welding/gizmo/undo/save all ride the normal part transaction); mesh_edit ensureTopology dedupes per-face edge incidence so wire edges classify as real boundary edges, plus a new wire classification + view-mode overlay pass in 3d.zig so wires stay visible outside edit modes; new door __mesh_append_path_edges. TSX: mesh-path-edges command/tool, ModelView pathEdges mode (open OR closed paths commit), both pen tools now drop straight into vertex mode on commit so every pen point is a gizmo-draggable vert (the depth fix); PenPathOverlay gained an ADD/EDIT lock so grabbing a point can never mint a stray anchor, bigger hit radii. Unit tests: path_plane +2, mesh_edit +2, all green."
+    },
+    {
+      "at": "2026-07-23T08:28:46.734Z",
+      "actor": "fable-pen",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Built the requested Pen Edges tool and gave the pen tool the love it needed, all host-native. NEW TOOL: mesh-path-edges ('Pen Edges', Spline icon, in the model action bar next to Pen Plane) draws the same pen path but commits ONLY the edges — no face. Open paths are legal (CONFIRM without closing), closed paths add the return segment. Each segment lands as a zero-area triangle in the resident soup, so the wire's points are real welded verts: undo, save/load, outliner rows, delete, and the move gizmo all just work on them. A topology fix makes those edges classify as real selectable boundary edges (they were being hidden as 'diagonals'), and a new view-mode overlay pass keeps the wire visible outside edit modes. PEN LOVE: an ADD/EDIT toggle in the pen HUD locks out accidental point placement while grabbing anchors/handles (the 'accidentally placing another point' complaint), hit radii widened. DEPTH: exactly as you prescribed — pen points are treated like verts: BOTH pen tools (Plane and Edges) now drop you straight into vertex mode on commit, so every anchor is immediately draggable with the standard move gizmo to pull real depth. Zig rebuild required (framework changed): re-run your build/dev host to get it. Verified: zig test-mesh-edit/test-path-plane green (+4 new tests), paint path JS tests 5/5, raw editor build compiles clean.",
+  "shas": [
+    "0bd22785e"
+  ],
+  "resolvedAt": "2026-07-23T08:28:46.734Z"
 }

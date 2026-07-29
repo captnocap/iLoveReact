@@ -1,0 +1,36 @@
+{
+  "id": "req_3435",
+  "at": "2026-07-27T16:12:12.244Z",
+  "origin": "session:fb6b4bda",
+  "text": "hey here is yet another loop cut problem ;_; [Image #1] do u see what it is doing. here is if i increase more cuts [Image #2] [Image #3] lol it REALLY fucks up",
+  "status": "review",
+  "sessionId": "fb6b4bda-b4ca-4390-974d-98a5be22f493",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T16:12:27.284Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-27T16:55:23.481Z",
+      "actor": "fable-loopcut",
+      "kind": "note",
+      "text": "Root-caused via the saved recordplayer doc: tiny spindle (0.1u) + fixed 0.1u offset step = 100% jumps to frac 0/1 → corner-coincident cut verts → weld collapse on reload → degenerate faces + coincident duplicates that every later cut multiplied. Fixed at 4 layers (import dedup, weld-safe session guard, real-edge traversal, span-capped stepper), commit a196f3b37."
+    },
+    {
+      "at": "2026-07-27T16:55:36.438Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Loop cut on the 8-sided spindle was being wrecked by a poison chain, not by the walk itself: the popup's units-mode offset stepper stepped a FIXED 0.1u per click, which on the spindle's 0.1u face span is a 100% jump straight to the 0%/100% clamp — and the walk happily minted cut vertices exactly ON existing corners there. Those zero-width cuts are invisible in the preview, but the next soup→indexed rebuild welds them (IMPORT_WELD_EPS = 1/1024u) into degenerate/coincident faces — I reproduced the whole chain headlessly against the saved recordplayer doc.blob, which already carried 8 exactly-coincident face pairs on the spindle's top band, and showed every subsequent cut MULTIPLIES such duplicates (8→16→24→32) while the traversal derails through faces that merely CONTAIN both edge verts (diagonal containment → bow-tie rebuilds). Fixed at four layers, commit a196f3b37: (1) fromSoup now collapses exact same-winding coincident duplicate faces at the import boundary — poisoned saves self-heal on next load (reversed two-sided sheets are kept); (2) the lc session clamps the offset fraction to a weld-safe band of the seed span AND refuses any preview whose minted cut vertex sits within weld tolerance of an edge end (new degenerateCutVertexCount), so degenerate cuts can no longer be committed from popup, stepper, or handle drag; (3) findNeighbor (and the TS mirror's neighbor(), kept in parity) walk only REAL shared edges; (4) the units-mode offset step is capped at 5% of the span. 26/26 indexed_edit_mesh tests green incl. 3 new regressions; needs a rebuild (framework/) to land in the live editor, and the current in-session mangled spindle will still look wrong until the doc is reopened (the import dedup heals it on load).",
+  "shas": [
+    "a196f3b37"
+  ],
+  "resolvedAt": "2026-07-27T16:55:36.438Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3395",
+  "at": "2026-07-24T21:22:38.587Z",
+  "origin": "session:5443e504",
+  "text": "ya that makes sense the only problem is that the current anything that is 'select faces and ...' has a very horrible compounding failure in that lets say for a lavalamp, that you would want to have the lava across N faces, basically the way as everything is approached says every face = brand new, full instance paint. so you will end up with a horrible look if you follow that same idea",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T21:23:03.154Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T21:23:33.720Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design assessment (no code): agreed the per-face/per-group instancing is the fault — every face gets its own groupBasisFor planar frame, so an N-face material restarts N times with seams. Resolution proposed: live materials bind to a MATERIAL REGION (face set + spec + data + domain), and the default domain is object-space 3D position — all faces sample one continuous field, continuity comes from the domain not stitching; perFace/planar become explicit opt-in modes for signage-like cases. Plasma extends (u,v)->(x,y,z). Same shape the painted-ground FILL_FUNCS live dispatch already proved over world XZ; models never got their equivalent. Baked paint shares the disease and can adopt region domains later.",
+  "shas": [],
+  "resolvedAt": "2026-07-24T21:23:33.720Z"
+}

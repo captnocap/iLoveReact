@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "id": "import:glass_water_pipe_3d_model",
+  "name": "Glass Water Pipe 3d Model",
+  "kind": "build",
+  "stage": "ready",
+  "folderId": "model-import_glass_water_pipe_3d_model",
+  "semanticKind": "window",
+  "sourceKind": "source-file",
+  "color": "#a34643",
+  "rig": "source model file",
+  "data": "file glass water pipe 3d model.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/build/Glass_Water_Pipe_3d_Model/mesh/glass water pipe 3d model.glb"
+  },
+  "decompositions": [
+    "semantic:window",
+    "format:glb",
+    "imported-from:/home/siah/Downloads/glass water pipe 3d model.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "import:glass_water_pipe_3d_model",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "import:glass_water_pipe_3d_model"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  },
+  "textureSlots": [],
+  "lights": []
+}

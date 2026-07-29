@@ -1,0 +1,30 @@
+{
+  "id": "req_3425",
+  "at": "2026-07-25T19:33:23.077Z",
+  "origin": "session:5443e504",
+  "text": "b[Image #11] and then exported prop [Image #12] is just showing the atlas with none of the shader work. [Image #13] and i restarted to see if my changes saved [Image #14] and it seems as so.",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T19:34:41.861Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T20:00:45.742Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed why the exported prop showed only the atlas: the region bound correctly (narration proved 1/1 landed on prop:primitive:cylinder:2:slot-0) but runtime_live_scene line ~220 only splits a non-door prop into per-slot draw nodes when the placement ref carries a materials array — the unskinned lamp shipped none, so no ':slot-0' node ever existed for the region to draw on (census: bound=1 collected=0, then the key dump showed only the door's slot children). livePush now forces the per-slot split (zero-hash materials array) whenever any slot wears a liveMaterial. Verified headless on the user's own world via playtest shots: all four placed lamps render the animated plasma field, pipeline built, 240fps continuous (final-world.png). Also learned + encoded: log.print is info-level and INVISIBLE at runtime — bind/refuse narration uses console.warn; the debug census stays behind RJIT_R3D_CENSUS (which does NOT pass through rjit dev — use direct binary runs).",
+  "shas": [
+    "33962a89e"
+  ],
+  "resolvedAt": "2026-07-25T20:00:45.742Z"
+}

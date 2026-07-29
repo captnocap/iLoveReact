@@ -1,0 +1,30 @@
+{
+  "id": "req_3381",
+  "at": "2026-07-23T07:28:02.799Z",
+  "origin": "codex:019f883f",
+  "text": "uh. here is one ive never seen... so  here is an edge. and il extrude it [Image #1]and it breaks the whole wireframe [Image #2] [Image #3]",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:28:14.721Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:45:40.978Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the edge-extrusion corruption by replacing the old face-normal lift with an authored-face-aware in-plane continuation. The native host and pure editor reference now use the full adjacent face, retain consistent winding and ownership, and leave the new outer edge focused so repeated extrusion extends the same strip instead of rotating into slabs. Added grouped-quad, hidden-diagonal, and repeated-extrusion regressions and verified native topology ownership plus the full ReleaseFast editor build.",
+  "shas": [
+    "6ab7e1791"
+  ],
+  "resolvedAt": "2026-07-23T07:45:40.978Z"
+}

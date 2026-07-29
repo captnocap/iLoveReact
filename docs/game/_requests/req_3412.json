@@ -1,0 +1,30 @@
+{
+  "id": "req_3412",
+  "at": "2026-07-25T00:49:43.255Z",
+  "origin": "session:5443e504",
+  "text": "still empty. and its not glass either. its very clearly the problem of 1 part -> 3 part -> 1 part that it does not like.",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:50:45.964Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T00:59:08.411Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user's 3-to-1 merge history was a reasonable suspect but the bisection cleared it: a probe copy with identical merged-part history and the glass boundary CLEARED rendered fine, while any copy carrying the glass run blanked — the fault was the req_3402 glass restore's mount-time partition rebuild, fixed in d621c783e as alpha-only (details on req_3406). The user then confirmed from their side: 'ya its the glass'. The merged single-part document itself is healthy end to end (doc ranges, groups, materials, glass boundary 594 all intact).",
+  "shas": [
+    "d621c783e"
+  ],
+  "resolvedAt": "2026-07-25T00:59:08.411Z"
+}

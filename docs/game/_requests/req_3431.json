@@ -1,0 +1,30 @@
+{
+  "id": "req_3431",
+  "at": "2026-07-26T12:48:45.991Z",
+  "origin": "session:460c1a7d",
+  "text": "lets tackle the parts of this that are immediate wins, like specifically the physics rects on exported props, build a plan to execute on. if you have questions, do not ask me them through the harness question interface, it tends to be opinionated in the wrong direction and i have the opinions. @cart/editor/FLOCKBOOK_DESIGN.md",
+  "status": "review",
+  "sessionId": "460c1a7d-33c7-4b3e-a4af-1539d717ef4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-26T12:50:30.743Z",
+      "actor": "fable-collision",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-26T13:10:31.689Z",
+      "actor": "fable-collision",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Executed FLOCKBOOK_DESIGN §10's standalone quick win (the physics-rects-on-exported-props item). Exploration first confirmed the runtime is already triangles-final since req_3329 (boxes demoted to broadphase via EXACT_MESH_COARSE_SOLID_FLAG; player contact resolves in mesh_collision.zig) — the real gap was that the collision bake was never persisted: compileOutlinerCollision ran only transiently at live push, no package on disk carried collision, and all four save/export paths skipped it. Built the persistence: RJCB v1 codec (encode/decodeCollisionBake in model/meshCollision.ts, strict null-on-damage decode), writePackageCollision in modelPackageStore (placeable-frame bake over ground-rebased doc verts, doc-revision stamped, stamp-gated idempotent), wired into writeModelArtifacts (every save branch incl. paint-only self-heal) and materializePackageArtifacts (GLB/OBJ import bakes at arrival). groundRebase moved to model/groundRebase.ts to break the import cycle (authoredMesh re-exports). residentMeshFor deliberately keeps baking live from rendered verts — the surface that stops you is the surface drawn; the blob is the package's durable declaration for folder consumers. Backfilled all 137 existing packages headlessly (v8cli script; 3 file-backed .glb/.obj packages correctly decline — no JS-readable geometry), verified idempotent on second run, 7/7 meshCollision tests pass incl. 3 new codec tests. Docs + index record updated in the same commit.",
+  "shas": [
+    "2a7a95978"
+  ],
+  "resolvedAt": "2026-07-26T13:10:31.689Z"
+}

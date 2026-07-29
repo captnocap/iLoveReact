@@ -1,0 +1,17 @@
+{
+  "id": "req_3429",
+  "at": "2026-07-25T20:10:27.331Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bsc0qmufk</task-id>\n<tool-use-id>toolu_01614hAYpGX52REpifRvdkAM</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/65324bbb-3481-4de6-a92b-f44532e0bd35/tasks/bsc0qmufk.output</output-file>\n<status>completed</status>\n<summary>Background command \"Wait for other session, retry build\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T20:11:06.401Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

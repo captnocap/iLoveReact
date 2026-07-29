@@ -1,0 +1,30 @@
+{
+  "id": "req_3449",
+  "at": "2026-07-28T01:24:39.801Z",
+  "origin": "session:9dc00c21",
+  "text": "I think the prop copy button is fucking shit up royally. you click it, and it doesnt open the placement build tool, and then trying to then open any prop the proper way it never shows a skeleton of the model pre-placement",
+  "status": "review",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:25:09.725Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T01:45:36.324Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the broken Copy verb: the renderer registers a Pressable's onPress at commit time and re-registers only when clean (visual) props change — the Copy/Delete verbs look identical for every piece, so they kept the FIRST render's closure and acted on the first-ever selected piece forever. Clicking Copy ran copyPiece on a stale id (often gone — 'copy: that piece is gone'), so nothing armed and the placement tool never appeared; Delete could have hit an off-screen piece; the placement steppers and material-slot rows carried the same latent staleness whenever two pieces displayed identical values. Structural fix: every PIECE FOCUS control now emits a selection-relative INTENT only (step x +1, rotate +90, copy/delete the selection, bind role) with no piece id or value baked into any handler; AppFrame resolves the selected piece from live state at click time, and new world/pieceFieldStep.ts owns the step sizes/clamps/wraps (module vs 0.1m, floor y-rebase, yaw wrap, scale/spin clamps, prop-only and authored-only gating) — unit-tested (pieceFieldStep.test.ts, PASS) and the cart bundles clean. If the pre-placement ghost still fails after this lands on a reload, that is a separate issue to re-report — the copy path itself no longer poisons arming.",
+  "shas": [
+    "50330494d"
+  ],
+  "resolvedAt": "2026-07-28T01:45:36.324Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3490",
+  "at": "2026-07-29T00:58:04.083Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>afd8142545e14b3c0</task-id>\n<tool-use-id>toolu_01NJ4JdW3xridWJL1ZsKPKcu</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/28d9c959-c6e5-4a34-aebc-648b8853d1f6/tasks/afd8142545e14b3c0.output</output-file>\n<status>completed</status>\n<summary>Agent \"Research angle 05 neural skinning\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>DONE — /home/siah/creative/reactjit/research_runs/2026-07-28__auto-skinning-weights/angles/05_neural_skinning.md (2755 words, 43 sources)</result>\n<usage><subagent_tokens>106997</subagent_tokens><tool_uses>45</tool_uses><duration_ms>640638</duration_ms></usage>\n</task-notification>",
+  "status": "new",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T00:58:08.643Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

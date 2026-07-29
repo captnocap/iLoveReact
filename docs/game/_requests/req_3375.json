@@ -1,0 +1,30 @@
+{
+  "id": "req_3375",
+  "at": "2026-07-23T06:47:53.763Z",
+  "origin": "codex:019f883f",
+  "text": "ok lol man we are just going in circles it feels like now we have the inivisible face bug after merging",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T06:48:04.176Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:14:58.133Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed invisible faces after Merge Faces by stopping destructive polygon fan reconstruction. Authored faces now merge through group metadata while the exact resident winding, triangle order, UV coordinates, atlas raster, colors, materials, and part ranges remain unchanged; concave bookshelf coverage passes.",
+  "shas": [
+    "aa2252aac"
+  ],
+  "resolvedAt": "2026-07-23T07:14:58.133Z"
+}

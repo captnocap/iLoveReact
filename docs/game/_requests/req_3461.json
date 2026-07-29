@@ -1,0 +1,30 @@
+{
+  "id": "req_3461",
+  "at": "2026-07-28T04:01:40.198Z",
+  "origin": "session:d675d200",
+  "text": "here is one thing for you, kinda paint related, kinda not. idk where u call it. but look here. notice how this [Image #14] has this weird black spot in the mesh. its what i would call corruption, but the thing that makes 0 sense is this model doesnt even have a paint atlas yet, so where the hell is it getting the black bars from [Image #15]",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T04:02:35.930Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T04:07:29.564Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two symptoms, one sick model. (1) Black bars: identified the mechanism — the editor's paint substrate atlas zeroes all padding outside UV islands, and any triangle whose UVs sample that padding renders BLACK in the editor's opaque pass (and invisible in the world — the bookshelf class). Pen wire rows carry UV (0,0), the atlas corner padding, so wire (a,b,b) rows that gain real area draw exactly these bars along the wire paths; scanned every saved package for area-bearing zero-UV triangles and found none, so the corrupted doc is the unsaved live session — need the model saved (or its name) to pin how the wires gained area. (2) Add Cylinder refusing silently: found the swallow — meshAppendGroup's ownsExactPartPartition guard logs 'cart expects N parts, host has M ranges' only to the terminal (std.log.err, not even js console), and the UI collapsed it to 'could not add mesh' in the status bar. Fixed loud (013f2a5a8, hot-reloads): on refusal the viewer error line reads the host's own __mesh_part_ranges truth and states the exact mismatch + the unblock (save + reopen rebuilds outliner and mesh from disk); status echoes. Both symptoms consistent with cart-outliner vs host-range divergence on this doc — likely involving the pen wire part; awaiting the specific counts the new message will surface.",
+  "shas": [
+    "013f2a5a8"
+  ],
+  "resolvedAt": "2026-07-28T04:07:29.564Z"
+}

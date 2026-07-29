@@ -1,0 +1,28 @@
+{
+  "id": "req_3409",
+  "at": "2026-07-25T00:40:18.260Z",
+  "origin": "session:5443e504",
+  "text": "siah@busiah ~/creative/reactjit $ RJIT_R3D_CENSUS=1 tools/rjit dev editor\n[dev] bundling /home/siah/creative/reactjit/cart/editor/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-editor.js\n\n  .cache/bundle-editor.js  4.4mb ⚠️\n\n⚡ Done in 56ms\n[dev] host child=1 - run 'rjit dev <other>' from another terminal to add tabs\n[dev] watching /home/siah/creative/reactjit/cart/editor/index.tsx - edits rebuild + push automatically (ctrl-c to stop)\n[watch] build finished, watching for changes...\n[apptick-split] total=1260.4ms | jsTick(+microtasks)=1249.9 (of which GC=95.0ms x87) tickDrain=0.0 drainFlush=9.4 dirty(snap=0.0+rebuild=1.0)\n[loader] no game file at zig-out/game/editor/world.gamefile — BLANK world (paint-first canvas)\n[loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n[loader] resident catalog: 61 cooked mesh(es) ready (no rebake to place)\n[js.warn] [map-seed] ground seeded — 1 chunk(s) live\n[js.warn] [authored] resident catalog: 61 mesh(es) — 26 painted, 12 paint skin(s) -> loader node 1935\n[dev 5:39:41 PM] rebuilt - pushed 'editor'\n[apptick-split] total=1202.8ms | jsTick(+microtasks)=1193.3 (of which GC=75.2ms x72) tickDrain=0.0 drainFlush=9.1 dirty(snap=0.0+rebuild=0.4)\n[loader] no game file at zig-out/game/editor/world.gamefile — BLANK world (paint-first canvas)\n[loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n[loader] resident catalog: 61 cooked mesh(es) ready (no rebake to place)\n[js.warn] [map-seed] ground seeded — 1 chunk(s) live\n[js.warn] [authored] resident catalog: 61 mesh(es) — 26 painted, 12 paint skin(s) -> loader node 1935\n[apptick-split] total=85.1ms | jsTick(+microtasks)=79.1 (of which GC=4.1ms x3) tickDrain=0.0 drainFlush=5.4 dirty(snap=0.1+rebuild=0.5)\n[js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:78466:9) « at <anonymous>:78571:35 « at wrappedCreate (<anonymous>:26147:34)\n",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:41:05.817Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T00:59:08.418Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The census probe run: RJIT_R3D_CENSUS never reached the dev-host child through tools/rjit dev (no census lines even while couch_002 visibly rendered), so the env-probe route through the dev spawner is a dud — noted for future debugging; direct env on rjit shot works (used for the decisive bisection). The couch-vs-lamp fork this run provided narrowed the bug to lamp-only state and led to the glass-restore root cause fixed in d621c783e.",
+  "shas": [],
+  "resolvedAt": "2026-07-25T00:59:08.418Z"
+}

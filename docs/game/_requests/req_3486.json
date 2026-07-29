@@ -1,0 +1,29 @@
+{
+  "id": "req_3486",
+  "at": "2026-07-28T08:52:23.641Z",
+  "origin": "session-076afe31",
+  "text": "yeah go forward with it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-28T08:52:26.683Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T09:00:58.203Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The go-forward on slices 2-3 (continuing req_3484's program) is built and committed (5f4767fbb). Slice 2: verification exposed a real race — the drain timer can land inside a gesture's own settle window (loop cut renormalizes ranges AFTER journalCommit in the same door; single-part docs can settle through later machinery; observed transient unowned=8/16 on healthy chains) — so the roll call now runs a TWO-STRIKE protocol: first faulty pass is silent detect-only, and only a fault surviving two consecutive drains (~250ms) heals and reports, trading a quarter-second of latency for zero false alarms while still naming the guilty op. The audit also gained the geometric tripwire: exact same-winding duplicate faces via canonicalFaceBits (winding-preserving smallest-corner rotation; reversed extrude twins and deliberate wire (a,b,b) faces excluded), report-only — the a196f3b class caught at its origin. Verified headlessly 3x on the full repro chain: zero alarms, partition OK, add cylinder works, extrude twins never trip. Slice 3: the stable-document-handle design is written to docs/game/MESH_STABLE_HANDLE_DESIGN.md — handle minted at load, generation bumps only inside the two replace funnels, GPU intern slot rebind becomes the missing eviction path, doors stop returning keys, 5-step migration where every step ships green; estimated 2-3 agent-sessions, ready to build on the user's word or as the next work unit. Docs and index record updated in the same commit.",
+  "shas": [
+    "5f4767fbb"
+  ],
+  "resolvedAt": "2026-07-28T09:00:58.203Z"
+}

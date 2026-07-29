@@ -1,0 +1,28 @@
+{
+  "id": "req_3368",
+  "at": "2026-07-23T04:25:17.435Z",
+  "origin": "session:65324bbb",
+  "text": "when an asset is exported as a prop where does it go, its not the models/props directory",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T04:25:26.668Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T04:26:47.143Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered where prop exports land: File → Export → Prop creates no new artifact — it writes the placeable declaration (as:'prop', role, compiled rig skeleton, texture slots, lights) into the model's OWN package manifest at cart/editor/data/models/<category>/<name-slug>/manifest.json (AppFrame.tsx export handler, req_2718 'the manifest is the record'). The category folder comes from the package KIND, not the export — a prop-kind package lives in models/props/<name>/, but a build-kind package exported as a prop stays in models/build/<name>/; the palette scans manifests, not folders. Verified the user's recent prop exports are present under models/props (Model_59, pillz, speaker_001, vcr_dvd_combo_copy, Model_54/55/56). Offered a follow-up change if the folder should physically move under models/props on export. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-23T04:26:47.142Z"
+}

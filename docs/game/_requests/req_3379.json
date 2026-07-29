@@ -1,0 +1,30 @@
+{
+  "id": "req_3379",
+  "at": "2026-07-23T07:07:59.543Z",
+  "origin": "codex:019f8dcc",
+  "text": "inside of the cart/editor when i extrude from an edge it does not keep the next extrusions edge in focus, really annoying to have to go and click it again",
+  "status": "review",
+  "sessionId": "019f8dcc-bf53-7410-b147-5e517524f6dc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:08:02.336Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:11:21.193Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Edge extrusion now treats focusing the newly-created outer edge as a required transaction postcondition. The host resolves it through a tolerance-safe boundary-edge lookup, replaces any prior selection, and rolls back rather than leaving a successful extrusion unfocused. Added a native mesh-selection regression test.",
+  "shas": [
+    "ea5ea6b36"
+  ],
+  "resolvedAt": "2026-07-23T07:11:21.193Z"
+}

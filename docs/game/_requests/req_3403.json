@@ -1,0 +1,28 @@
+{
+  "id": "req_3403",
+  "at": "2026-07-24T23:53:12.984Z",
+  "origin": "session:5443e504",
+  "text": "hm.... so glass in the world use to work. I have screenshots from 2-3 weeks ago of us at a door that has a glass window and it was having problems where the world was invisible behind it, but it worked. How did it just end up away from there since that same door with the window no longer shows glass through it either",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T23:53:58.308Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T23:58:01.597Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the world-glass regression: it is the SAME hydration bug as req_3402, decaying models one save at a time. Glass lives in the atlas alpha; paint hydration rebuilt the atlas from the RGB-only baseline+program, so OPENING a glassy model wiped its live alpha, and the next SAVE wrote base.png fully opaque to disk while doc.blob's glass boundary survived. Proof on disk: vending_machine doc.blob says glass (2190/2208) but its base.png has ZERO translucent pixels (minAlpha=255). The world samples the ATLAS (pane translucency = tex alpha even on the transparent route), so each glassy model went opaque in the world after its first save inside the bug window — matching 'it worked 2-3 weeks ago'. Door_Wall_1's doc data is fully intact (4 leaf glass tris) and it has NO base.png (unpainted flat-tint path) — needs a post-rebuild look; if flat-tint doors are also dead it is a separate bug. HEAL: after rebuilding, open each glassy model (the c9dfa1c10 restore re-applies alpha from the doc boundary) and SAVE — base.png regains alpha and the world pane comes back. Glassy models on disk: vending_machine, ACTUALLY_A_CAR, bong_01, rhino_pill, Lavalampsad, Door_Wall_1.",
+  "shas": [],
+  "resolvedAt": "2026-07-24T23:58:01.597Z"
+}

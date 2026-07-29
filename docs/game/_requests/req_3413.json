@@ -1,0 +1,17 @@
+{
+  "id": "req_3413",
+  "at": "2026-07-25T00:53:39.343Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bgw9uqexm</task-id>\n<tool-use-id>toolu_01JbUqK66vedD5XA6uTwYE2r</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/65324bbb-3481-4de6-a92b-f44532e0bd35/tasks/bgw9uqexm.output</output-file>\n<status>completed</status>\n<summary>Background command \"Headless repro: shot the lamp open path\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:53:47.433Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

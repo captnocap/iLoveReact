@@ -1,0 +1,34 @@
+{
+  "id": "req_3469",
+  "at": "2026-07-28T07:05:56.226Z",
+  "origin": "session:076afe31",
+  "text": "hey when im editing a model in the studio, and i make edits to the model, i assume everything becomes in-memory mutations, right. like we dont have some sort of 'gc' made for reallocating edits to a new memory block right. The reason i ask is because the amount of times we have had errors that, at face value, are incredibly destructive from my PoV, they literally self-heal on resetting the app, which, i wont lie, is a buttcheeks way of solving it. I have to think that the 'cost' of some actual means of rewriting into a new allocation rather than mutating the existing solves this problem, and the reason why is that **faithfully** all the code for model editing, was already demonstrated to work as it should when written in javascript. Yet we hit these very strange and very annoying chain of events t hat cause catastropic failure, but the failure only exists in memory and never in the actual on-disk file",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:06:27.139Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:07:53.831Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Assessment in progress: mapping the mesh doc memory model (host-side mutation vs rebuild, undo journal, save path) to answer why in-memory corruption self-heals on restart. No code changes — this is an architecture question."
+    },
+    {
+      "at": "2026-07-28T07:16:06.057Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Architecture assessment, no code changed. Mapped the studio mesh doc memory model to answer why destructive-looking failures self-heal on app restart. Finding: position edits mutate ~5 parallel in-memory representations in place; topology ops ALREADY do the rewrite-into-new-allocation the user proposed (replaceActiveEditMesh mints a new mesh key + re-dupes every array), and undo is full deep snapshots. The self-healing failure class is not scribbled memory — it is identity/sync drift between the host doc and its mirrors (stale mesh key not adopted by JS, part-range mirror refusal gates, GPU intern cache that never evicts and silently drops meshes when saturated). Disk stays clean because save is an atomic serialization of the live doc with refusal gates that decline to write when mirrors disagree, and boot re-derives everything from disk. Recommended direction (pending user go-ahead): make the boot-time re-derivation runnable live — a post-commit resync/doctor pass that rebuilds mirrors from host truth and reports drift loudly, plus an eviction path for the append-only GPU retained buffer.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:16:06.057Z"
+}

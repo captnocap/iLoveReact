@@ -1,0 +1,36 @@
+{
+  "id": "req_3503",
+  "at": "2026-07-29T04:28:58.310Z",
+  "origin": "session:28d9c959",
+  "text": "ya so about that webcam animation setup, ive never seen it actually working, and the times attempted the app freezes, the process has to be terminated via kill -9, so there is something very wrong with the code there, thats worth putting a background agent on to handle so we dont derail but its very much nothing to just gloss over either. if u want to get that started that would be great, the problem is i dont have my webcam at this desk rn but i could just obs virtual camera",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T04:29:40.537Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T04:47:24.234Z",
+      "actor": "webcam-agent",
+      "kind": "note",
+      "text": "ROOT CAUSE FOUND: closeFFmpeg (render_surfaces.zig:478) deinits the pipe reader then calls std.process.Child.kill on the FRAME thread; Zig 0.16 childKillPosix = ONE SIGTERM + UNCANCELABLE wait4 retry loop. ffmpeg (signal()=SA_RESTART) blocked writing a 3.6MB raw frame into the undrained 64KB pipe (or restarting a V4L2 ioctl) never exits -> frame thread parks in wait4 forever. SDL's SIGTERM->SDL_QUIT needs that thread, so plain kill is ignored; only kill -9 works. Every teardown (camera switch, tab leave, quit) funnels here. Fix: detached SIGKILL+background-reap teardown, first-frame watchdog, loud ffmpeg stderr."
+    },
+    {
+      "at": "2026-07-29T04:57:10.997Z",
+      "actor": "webcam-agent",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "ROOT CAUSE: closeFFmpeg (render_surfaces.zig) deinitialized the pipe reader then called std.process.Child.kill on the FRAME thread; Zig 0.16 childKillPosix = ONE SIGTERM + an UNCANCELABLE wait4 retry loop. ffmpeg, blocked writing a raw frame into the now-undrained 64KB pipe (its signal() handlers use SA_RESTART, so the lone SIGTERM never interrupts the blocked write/V4L2 ioctl), never exits, so the frame thread parks in wait4 FOREVER. SDL turns SIGTERM into an SDL_QUIT event only that frozen thread could pump — hence plain kill ignored, kill -9 required. Every teardown (camera switch, tab leave, quit) hit it, with any camera. FIX: new framework/render/child_teardown.zig — frame thread NEVER waits on a child: synchronous SIGKILL via the platform kill utility (bounded), reap on a detached std.Io.Group task; applied to ffmpeg/qemu/app/Xvfb teardown. Plus first-frame watchdog (10s, loud, self-healing retry), pdeathsig on ffmpeg, loud stderr, and a pose-input gate so inference never reads uninitialized bytes. VERIFIED: standalone repro of the old path hangs (timeout 124) while the new path returns <2s; tripwire tests 2/2 (zig build test-child-teardown), pose-mailbox 3/3, video-devices 3/3, editor ships clean, shot /play PASS. User confirms by: open editor Globals->Animation with OBS virtual camera, switch cameras and quit — the app must stay responsive and exit on plain close; a non-streaming camera shows a loud 'camera feed FAILED: no frames from the device within 10s' line instead of freezing.",
+  "shas": [
+    "15368781b"
+  ],
+  "resolvedAt": "2026-07-29T04:57:10.997Z"
+}

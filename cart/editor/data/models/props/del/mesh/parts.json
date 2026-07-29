@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cone 1",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cone",
+      "outlinerOrder": 0
+    }
+  ]
+}

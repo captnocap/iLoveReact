@@ -1,0 +1,30 @@
+{
+  "id": "req_3427",
+  "at": "2026-07-25T19:59:10.909Z",
+  "origin": "session:76d0e8cf",
+  "text": "nice now can you give me: \n\ncopy transform -> paste transform\nmove uv outliner to mouse position\nauto uv: sets the uv size of this face to the real size of the face\nUV project from view: generate uv for the selected faces based on the viewport of the actual model",
+  "status": "review",
+  "sessionId": "76d0e8cf-3189-44ea-b42d-37f76e2e1ad4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T19:59:24.334Z",
+      "actor": "fable-76d0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T20:14:20.360Z",
+      "actor": "fable-76d0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built all four asks as Blockbench-parity UV tools in the Transform Selection context-menu group. (1) Copy Transform captures the active selection frame (x/y/w/h, island set or isolated face) into a panel clipboard; (2) Paste Transform scales+moves any later selection onto that frame via a new tested pure op (pasteUvTransform in uvLayout.ts), clamped inside the atlas; (3) Move Here centres the selection at the exact atlas point where the right-click menu opened; (4) Auto UV Real Size is a new host door __model_uv_auto_size that reprojects selected islands at their faces' REAL physical footprint x the atlas's texels/m (scale 1 canonical reprojection, centre kept, shrinks only if it cannot fit the atlas); (5) Project From View (__model_uv_project_view) rewrites selected islands as the live 3D paint camera's screen projection of their faces — one shared frame so relative sizes survive, fitted into the selection's current UV footprint, refused untouched if any corner is behind the camera. Every action journals as one undo unit through the append-only UV-action ABI (mesh_journal_log.zig + uvHistory.ts). uvLayout suite 31/31 green; Zig files ast-check clean. Needs a framework rebuild to expose the two new host doors.",
+  "shas": [
+    "1c3e95976"
+  ],
+  "resolvedAt": "2026-07-25T20:14:20.360Z"
+}

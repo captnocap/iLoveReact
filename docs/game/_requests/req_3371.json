@@ -1,0 +1,30 @@
+{
+  "id": "req_3371",
+  "at": "2026-07-23T04:37:02.484Z",
+  "origin": "session:65324bbb",
+  "text": "they dont need to be recoverable from git i wouldnt have deleted them if we dont need them",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T04:37:39.482Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T04:39:52.302Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user's ruling on the purge from req_3370: no git-snapshot ceremony for the soft-deleted packages — 'they dont need to be recoverable from git i wouldnt have deleted them if we dont need them.' Executed directly: rm'd all 112 hidden package directories and committed the deletions in one commit (c8652c501, 837 files, ~451k lines of blobs gone) along with the rename-follow folder moves from req_3369's self-heal, leaving the models tree git-clean and matching disk exactly. Tracked-content history still exists in prior commits as a side effect of git itself, but no snapshot commit was made for previously-untracked hidden packages. Flagged honestly: three 'nice'-map placements referenced purged models and will stop rendering.",
+  "shas": [
+    "c8652c501"
+  ],
+  "resolvedAt": "2026-07-23T04:39:52.302Z"
+}

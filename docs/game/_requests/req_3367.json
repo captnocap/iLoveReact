@@ -1,0 +1,30 @@
+{
+  "id": "req_3367",
+  "at": "2026-07-23T03:52:02.476Z",
+  "origin": "session:65324bbb",
+  "text": "yep though here is a better improvement to bring: after placing an item, i want to be able to click on it, and have a gizmo the same as the studio for moving around and rotating and scaling would be ideal since scaling from the studio to the world size is much harder than it looks",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T03:52:11.848Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T04:13:27.515Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the studio-parity transform gizmo for placed world props: with the Select tool and one prop selected, the studio gizmo (same fixed screen sizes and axis palette as the req_2827 host gizmo) appears at the prop's anchor — arrow arms move it along X/Z and lift on Y, the ring rotates yaw by tracking the cursor's world bearing, and the solid hub square is the studio's radial uniform-scale grab, clamped 0.05–20x with shift for fine steps. Drags preview locally (green outline + real translucent mesh ghost at the candidate transform) and commit once on release through the existing undoable world.piece.move command, extended to carry optional uniform scale. Scale is new end to end: PlacedPiece.scale persists in world.json, rides a new live mesh-ref v3 wire (__compiled_world_set_live_mesh_props3, presence-gated with fallback), scales the draw via scene3d_scale_*, and multiplies through island colliders, broadphase, and the exact triangle narrowphase so playtest collision matches the scaled prop; picking and prop stacking slab-test scaled bounds. Move/rotate work on the current dev host via hot reload; SEEING scale (and colliding with it) needs a framework rebuild — the editor warns and drops scale until then. Tests: pieces 12/12, pieceEditCommand 10/10, zig build test-game-mesh-collision green, full cart bundles clean.",
+  "shas": [
+    "2c3231136"
+  ],
+  "resolvedAt": "2026-07-23T04:13:27.515Z"
+}

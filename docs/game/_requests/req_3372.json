@@ -1,0 +1,30 @@
+{
+  "id": "req_3372",
+  "at": "2026-07-23T05:02:59.315Z",
+  "origin": "codex:019f883f",
+  "text": "ok here is a bug: build something -> create paint atlas -> move around uv -> delete a outliner -> uv will shift around -> undo -> texture image gets corrupted",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T05:03:07.425Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T05:11:46.853Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Outliner deletion after authored UV movement by treating a non-empty part delete as an indexed subset install. Surviving UV rows and the resident atlas now remain byte-for-byte unchanged, so delete no longer shifts UV islands and immediate undo restores against the same coordinate revision. Added an exact raster/UV/opacity regression and verified paint, paint-program, mesh-journal, mesh-edit, and ReleaseFast editor checks.",
+  "shas": [
+    "3762ed3a9"
+  ],
+  "resolvedAt": "2026-07-23T05:11:46.853Z"
+}

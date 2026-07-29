@@ -1,0 +1,28 @@
+{
+  "id": "req_3475",
+  "at": "2026-07-28T07:39:22.595Z",
+  "origin": "session:076afe31",
+  "text": "im curious, and likely isnt (but could be) the problem, but for what reason do we return values to the javascript? is there a reason why? or is it 'just because' ?",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:40:01.225Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:40:29.075Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the follow-up on why topology doors return values to JavaScript. Verified in v8_bindings_core.zig that every topology door returns {ok,key,count} JSON synchronously to its caller and the new key rides no push channel. Explanation delivered: there IS a principled reason JS holds the key — React declares the scene (<Scene3D.Mesh hostKey>) so it must hold the NAME of what to draw; that part is the framework's declarative contract, not incidental. But the returned string fuses two jobs: document identity (which React genuinely needs) and generation/cache-epoch (a host-internal cache concern that leaked into the JS contract), and the delivery is the natural-but-incidental shape of a function call — the one caller becomes the postman who must relay the new generation to every other consumer. Flagged that this IS plausibly the root of the adoption-failure class, and named the two structural fixes (stable per-document handle with host-internal generation rebinding, or broadcasting key changes on the existing event ring). No code changed — explanation only.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:40:29.075Z"
+}

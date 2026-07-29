@@ -1,0 +1,30 @@
+{
+  "id": "req_3471",
+  "at": "2026-07-28T07:12:55.307Z",
+  "origin": "session:d675d200",
+  "text": "you know either that or at least for the sake of something like the black bar situation we just faced, kinda seems fkn stupid to me that the un-declared atlas, somehow has blanks in it at all. why isnt it just an infinite blob of the same color so the possiblity of it occuring is literally 0 right ?",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:14:04.253Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:17:33.890Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the user's 'infinite blob of the same colour' decree for atlas padding (84d4920a6, rides the pending rebuild). Unowned packing space kept RGB(0,0,0) under zero alpha, so any mis-sample of padding rendered BLACK in the editor's opaque pass — the visible half of the black-bar class. Now EMPTY_ATLAS_TEXEL is the neutral substrate colour (200,200,205) with zero alpha, laid by one fillNeutralBackground helper at both atlas init sites (rebuildLayoutInner + clearAtlas). The one wrinkle honoured: alpha 0 is load-bearing as the paint-carry content marker, so alpha semantics are untouched — the class loses its pixels but keeps its bookkeeping (model-paint 21-test carry suite, paint-program-journal, and mesh-edit suites all green; the padding unit test passes through the updated constant). Residual documented: world-side alpha routing can still make a mis-sample invisible-not-black on legacy saved pngs until their next open+save cycles them through the req_3450 opaque import.",
+  "shas": [
+    "84d4920a6"
+  ],
+  "resolvedAt": "2026-07-28T07:17:33.890Z"
+}

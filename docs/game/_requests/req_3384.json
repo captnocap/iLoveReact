@@ -1,0 +1,30 @@
+{
+  "id": "req_3384",
+  "at": "2026-07-23T07:49:56.915Z",
+  "origin": "codex:019f883f",
+  "text": "still break it easy. Have plane -> click edge -> extrude -> undo -> extrude -> broken [Image #1]",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:50:05.944Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T08:05:47.263Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the plane edge-extrude → undo → edge-extrude corruption at its real transaction boundary. Part-range normalization now rebases the active native edit scope before rebuilding topology, repeated scope echoes no longer erase the freshly focused edge, and a valid extrusion is never rolled back merely because UI focus could not be restored. Added Zig regression coverage and verified the two extrusion results are byte-identical through the real headless editor journal.",
+  "shas": [
+    "615dc8a94"
+  ],
+  "resolvedAt": "2026-07-23T08:05:47.263Z"
+}

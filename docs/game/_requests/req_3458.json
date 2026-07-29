@@ -1,0 +1,30 @@
+{
+  "id": "req_3458",
+  "at": "2026-07-28T03:19:24.540Z",
+  "origin": "session:9dc00c21",
+  "text": "ok and then i do not see the paintings selection in the piece focus, though u could argue its literally made along side when you were just editing it, so technically didnt exist at that point. [Image #3] [Image #4] like this option here, could you add it to the focus panel",
+  "status": "review",
+  "sessionId": "9dc00c21-112b-4ebd-b564-51201a1b7f9e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T03:19:49.338Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T03:21:45.897Z",
+      "actor": "fable-focus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the PAINTINGS wardrobe to the PIECE FOCUS panel: selecting a placed authored piece whose model stores paintings now shows one chip per stored look plus Current (base atlas), with the worn look highlighted — the exact wardrobe the right-click quick menu carries (req_3443), running the same undoable world.piece.skin transaction. Per the req_3449 stale-closure law each chip bakes only its skinId (its identity); the target piece and the already-worn check resolve from live state at click time in AppFrame, so chips stay correct across selection changes. The section renders only when paintings exist (req_3444 density rule — no empty section), and only on instances since skins dress the placed piece, not the palette definition. Cart bundles clean via esbuild; hot-reloadable .tsx only.",
+  "shas": [
+    "4afd290e0"
+  ],
+  "resolvedAt": "2026-07-28T03:21:45.896Z"
+}

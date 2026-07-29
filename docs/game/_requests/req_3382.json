@@ -1,0 +1,30 @@
+{
+  "id": "req_3382",
+  "at": "2026-07-23T07:37:44.114Z",
+  "origin": "session:65324bbb",
+  "text": "Great and then can you give me welding of verts in the studio",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:38:19.602Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:47:03.947Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added vertex welding to the studio mesh editor as a host-native topo verb (Blender Merge-at-Center). New __mesh_topo_weld door → 3d.zig meshTopoWeldSelection: every vertex the active selection affects (selected verts in vertex mode, selected edges' endpoints in edge mode, so one selected edge is an edge collapse) moves to the selection centroid, and any face left with two coincident corners is dropped as degenerate — all in ONE transaction: deleteMaskedFaces was generalized into rebuildMaskedFaces taking optional per-corner position overrides, so collapse + cleanup is one 'weld' journal step (one undo), with groups/materials/part-range compaction carried exactly like Delete. mesh_edit gained affectedSelectionVertsPub (the transforms' own affected-verts mask, exposed). Cart side: 'Weld' command (Magnet icon) in the Edit→Topology menu, in the contextual toolset for vertex mode (2+ selected) and edge mode, dispatched through the model tool api; M is now mode-scoped — Weld in vertex/edge mode, Merge Faces keeps M in face mode (keymap grew vertex/edge binding scopes). ast-check green on all three Zig files, commands tests 15/15, full cart bundles clean. Host op needs a dev-host rebuild; alongside req_3378's studio vertex snap one rebuild lights up both.,",
+  "shas": [
+    "3fe877a65"
+  ],
+  "resolvedAt": "2026-07-23T07:47:03.947Z"
+}

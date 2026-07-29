@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cylinder 2",
+      "color": "#8fb6c9",
+      "visible": true,
+      "outlinerOrder": 0
+    }
+  ]
+}

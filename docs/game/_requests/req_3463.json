@@ -1,0 +1,17 @@
+{
+  "id": "req_3463",
+  "at": "2026-07-28T04:11:54.343Z",
+  "origin": "one-off",
+  "text": "makes sense. yes if its not going to cause a bunch of headache then do so, if it is going to cause a bunch of headache, then take an asprin and still do so",
+  "status": "new",
+  "sessionId": "8185a686-e595-4144-870f-7ce9d89baddb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T04:13:10.096Z",
+      "actor": "fable-root-clean",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

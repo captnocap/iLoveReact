@@ -1,0 +1,10 @@
+{
+  "id": "req_3415",
+  "at": "2026-07-25T18:38:11.763Z",
+  "origin": "session:5443e504",
+  "text": "the model loads now but the stage becomes frozen in time. I cant move the camera around, i cant do any changes. nothing. but i can see the model now",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": []
+}

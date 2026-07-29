@@ -1,0 +1,30 @@
+{
+  "id": "req_3436",
+  "at": "2026-07-27T19:48:29.905Z",
+  "origin": "session:fb6b4bda",
+  "text": "the 8 overlapping faces is just extrude, thats what it does, not my control there. and its still doing it. [Image #4] [Image #5]; also, doing a brand new cylinder, extrude the top, and then loop cut, does the same sort of corruption [Image #6]",
+  "status": "review",
+  "sessionId": "fb6b4bda-b4ca-4390-974d-98a5be22f493",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T19:49:50.244Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-27T19:57:11.774Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user gave the exact recipe (new cylinder → extrude the top → loop cut → corruption) and I reproduced it headlessly, byte-faithful to meshTopoExtrudeFace's emission: because the extrude door takes ONE authored face at a time, extruding a fan-capped top happens triangle by triangle, and every pair of adjacent extrusions leaves one exactly-coincident REVERSED wall quad pair along the shared fan spoke — 8 twin pairs on an 8-sided cylinder, matching the 8 pairs found in their saved recordplayer doc (so the 'overlapping faces' are indeed extrude's doing, as the user said, not theirs). Those spoke twins also own the shell's vertical rim edges, so every ring cut through the extrusion band walked INTO the twin sandwich, subdivided the coincident copies divergently (measured twins 8→16→24→32 as cuts rise, 32-64 interior faces cut), and the wreckage compounded on each further cut — the crisscross in their screenshots. Fix (commit 16f667c83): findNeighbor in the native walk (and the TS mirror's neighbor(), kept in parity) now refuses to continue into a back-to-back twin sheet — it skips the current face's own twin and any candidate whose same-vertex-set twin is also incident on the crossing edge, leaving the true manifold neighbor. The extrude+cut sweep went 24 broken combos → 0 and the in-file suite is 27/27 green with a new twin-sandwich regression. Needs a framework rebuild to reach the live editor. Caveats: geometry already mangled by earlier sessions stays mangled (the walk can't resurrect destroyed faces — undo or re-model those sections), and the deeper UX cause remains that extrude cannot take the whole cap as one region; a multi-face region extrude (walls only on the selection boundary, no interior twins at all) is the clean follow-up if wanted.",
+  "shas": [
+    "16f667c83"
+  ],
+  "resolvedAt": "2026-07-27T19:57:11.774Z"
+}

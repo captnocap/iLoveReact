@@ -1,0 +1,28 @@
+{
+  "id": "req_3482",
+  "at": "2026-07-28T08:25:29.744Z",
+  "origin": "session:076afe31",
+  "text": "LMAO yeah ok so here is why its also a problem, uh here is an example from earlier [Image #1] the thing that makes it hard from my pov to tell if its corruption or bad code is the matter of something like a loop cut, that ends up like this, you really start to question if the loop cut is even made correctly or what, because for doing 6 cuts on an extruded face, is quite hard to comprehend that data could go so wrong, and then you instintually say its loop cut, and thats where it gets iffy, its a loop cut on an extruded cylinder, and to extrude a cylinders end, you actually are extruding however many faces it is round, right. because the ends are segments to begin with.  which was funny, when that occured, claude had brought up to me that the topology was just bad topology, basically saying two faces were on the exact same verts, but from my point of view, i have 0 control of that, if i have no face, there is nothing to extrude, and if i extrude the face, now i have two faces overlapping so already when the model evaluates the mesh like that, they likely see it as 'dude is completely holding it wrong, has no idea what he is doing' but i promise 100% of the problems are completely out of my control. Lol",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T08:26:23.705Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T08:26:51.417Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Vindicated the user's claim that the shredded-cylinder topology (screenshot: extruded cylinder cap + 6 loop cuts = interior spiderweb fans) is 100 percent tool-made, not user error. Receipts: 16f667c83 (req_3436, fixed 2026-07-27) reproduced the exact scenario headlessly — the extrude door takes one authored face at a time, so extruding a segmented fan cap leaves an exactly-coincident REVERSED twin wall pair along every fan spoke (8 pairs on an 8-sided cylinder), and every ring cut walked INTO the sandwich and subdivided the twins divergently, 8→16→24→32 compounding per cut; a196f3b37 (req_3435) fixed the sibling crime (clamp-rammed cut verts minting degenerates that later welds collapse). Explained to the user: in this editor the user cannot author topology at all — every polygon is minted by an op, so 'bad topology' is always an op's confession, never a user diagnosis (doubly so since Pen Edges deliberately mints degenerate wire triangles as a FEATURE, making op-robustness to weird internal structure a standing contract). Also named the shared property with the sync-bug family: bug site and crash site are ops apart (extrude plants silently, loop cut detonates later), which is exactly what post-op invariant validation would collapse. Both fixes are Zig — the user's binary needs the rebuild to carry them. No code changed — explanation only.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T08:26:51.417Z"
+}

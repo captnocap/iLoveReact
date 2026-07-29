@@ -1,0 +1,30 @@
+{
+  "id": "req_3378",
+  "at": "2026-07-23T06:56:47.006Z",
+  "origin": "session:65324bbb",
+  "text": "nice everything is good so far, lets next add vertex snapping",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T06:57:08.580Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:19:13.576Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built vertex snapping on BOTH surfaces (user's pick). World editor: hold V while gizmo- or Move-dragging a prop and its cursor-nearest mesh vertex locks onto the nearest placed-piece vertex within 0.35m — full lock delta on the free Move drag, axis-projected on gizmo arms; a gold diamond marks the locked vertex; the preview and the release commit share one code path (applyMoveVertexSnap) so the drop matches the preview exactly. Snap sets are welded authored-mesh vertices (1mm weld, 4096 cap) cached per pieceId and expiring with the authored-mesh revision; catalog box pieces snap by their 8 semantic corners; pure math in cart/editor/world/vertexSnap.ts with 4 P4 tests (green; pieces 12/12 and pieceEditCommand 10/10 still green; full cart bundles clean). Studio: held V during a MOVE gizmo drag snaps the selection's reference vertex (nearest the pivot, frozen at grab) to the exact axis projection of the nearest unselected in-scope vertex within an 18px screen radius — flush instead of stepped, 'snap N.NNu' readout, gold overlay dot on the target; meshGizmoDrag gained a snap_vertex param and the engine reads held V from SDL keyboard state (no callers besides the engine). World side hot-reloads now; the studio side needs a dev-host rebuild. ast-check green on 3d.zig/engine.zig.",
+  "shas": [
+    "880e2c42b"
+  ],
+  "resolvedAt": "2026-07-23T07:19:13.576Z"
+}

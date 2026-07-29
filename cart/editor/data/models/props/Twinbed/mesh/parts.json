@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Twinbed",
+      "color": "#c9b48f",
+      "visible": true,
+      "outlinerOrder": 0
+    },
+    {
+      "name": "Detached 1",
+      "color": "#8fb6c9",
+      "visible": true,
+      "outlinerOrder": 1
+    },
+    {
+      "name": "Cube 1",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 2
+    },
+    {
+      "name": "Cube 2",
+      "color": "#9cc98f",
+      "visible": true,
+      "kind": "cube",
+      "outlinerOrder": 3
+    }
+  ]
+}

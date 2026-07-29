@@ -1,0 +1,30 @@
+{
+  "id": "req_3366",
+  "at": "2026-07-23T03:29:50.419Z",
+  "origin": "codex:019f883f",
+  "text": "[Image #1] still getting some faces getting corrupted with losing color or whatever it is",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T03:30:03.535Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T03:44:22.024Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the dark cylinder wedges were opaque black pixels baked from transparent atlas padding during topology carry, not missing faces. Atlas carry now copies RGB only across the old/new face-silhouette intersection and preserves current authored opacity. Added a Zig boundary regression for changed silhouettes and verified 42 paint tests, 45 mesh-edit tests, and the ReleaseFast editor build.",
+  "shas": [
+    "1644f90e2"
+  ],
+  "resolvedAt": "2026-07-23T03:44:22.024Z"
+}

@@ -16,6 +16,30 @@
   "decompositions": [],
   "atlases": [],
   "paints": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "primitive:cube:60",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cube:60"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  },
   "textureSlots": [],
   "lights": []
 }

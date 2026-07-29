@@ -1,0 +1,18 @@
+{
+  "id": "req_3417",
+  "at": "2026-07-25T18:43:05.253Z",
+  "origin": "session:5443e504",
+  "text": "also worth taking note that your probes that dont render anything at all show a different tris count on the global counter in the bottom right than the ones that do render, even if they are the same model.",
+  "status": "doing",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T18:43:38.082Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

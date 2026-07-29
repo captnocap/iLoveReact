@@ -1,0 +1,31 @@
+{
+  "id": "req_3428",
+  "at": "2026-07-25T20:05:02.307Z",
+  "origin": "session:5443e504",
+  "text": "the model is now visually blank where it should have it. [Image #15] u see that also right, here is in the studio to compare [Image #16]",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T20:06:17.283Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T20:19:50.755Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The hollow world lamp is fixed and verified headless: the glass shell drew through the OPAQUE pass on slotted props (transparent routing was door-gated), wrote depth, and the region blob drawn after opaque failed the depth test behind it — the exact studio/world difference visible in the user's screenshots. e521b184b routes a slotted glassy prop's draws through the textured-alpha transparent path (same as the slotless bong), EXCEPT the region-bound slot which stays opaque so the lava overlay wins at equal depth and the transparent shell blends over it, studio-identical. Also unblocked the tree: the parallel session's req_3427 UV work passed a Layout by value into *const params and every host build failed while two features landed on top — fixed by pointer at both call sites (0072bc343). Playtest shot confirms the placed lamps render goo-through-glass (scratchpad/glass-final.png). Needs the user's dev-host rebuild (framework change).",
+  "shas": [
+    "e521b184b",
+    "0072bc343"
+  ],
+  "resolvedAt": "2026-07-25T20:19:50.755Z"
+}

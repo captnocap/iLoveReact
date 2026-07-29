@@ -1,0 +1,30 @@
+{
+  "id": "req_3385",
+  "at": "2026-07-23T07:54:37.959Z",
+  "origin": "codex:019f883f",
+  "text": "so ok let me ask u how this is working. basically lets say i have a 4 sided plane. and so edges are 0 1 2 3, and so i click edge 3, and i extrude it. because this adds another 3 edges now, we get from edge 3, there is 4 5 6, now say i delete it. so from the way it sounds like, its going, even tho i deleted 4 5 6, they linger. and recreating another extrude anywhere, is going to try to take 4 5 6, but those are invalid now. what i dont understand tho is why are we acting like the id is sacred, if i delete it, and then i extrude again, the next one should be 7 8 9 with the other edge still 3, never try to regain deleted ids, just write new ones, and then when saving the model u can remove the ids that are invalid and then step back all the ids to clean it up. right? would that not just solve the problem",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T07:54:52.275Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T08:05:47.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the proposed monotonic-edge-ID theory against the live implementation and established that welded edge numbers are rebuilt cache indices, not persistent identities. The observed failure was instead a stale authored-part scope after undo; implemented scope rebasing and idempotent scope adoption so newly generated topology remains selectable without relying on reused or sacred edge numbers.",
+  "shas": [
+    "615dc8a94"
+  ],
+  "resolvedAt": "2026-07-23T08:05:47.311Z"
+}

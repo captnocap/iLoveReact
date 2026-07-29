@@ -1,0 +1,30 @@
+{
+  "id": "req_3369",
+  "at": "2026-07-23T04:28:08.669Z",
+  "origin": "session:65324bbb",
+  "text": "that doesnt make sense then i have a model named body and three is no folder named body",
+  "status": "review",
+  "sessionId": "65324bbb-3481-4de6-a92b-f44532e0bd35",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T04:28:16.263Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T04:31:51.074Z",
+      "actor": "fable-placement",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and fixed the 'model named body has no folder named body' report. The model lives at models/props/Model_26/ — a rename-follow bug, not an export quirk: the focus panel's name field renames through the deferred folder-move path (req_3246) but has no end-of-rename event, so the settle that moves the folder never ran; 47 of 230 packages had folder names drifted from their manifest names. Fixed twice over: loadMaterializedPackages now settles any drifted package as it walks the manifests (self-heals ALL existing drift — body, bed_king, vending_machine, etc. — at the next editor boot/reload, loud but non-destructive if a move fails), and renameModel now debounce-settles 1.2s after the last keystroke so panel-field renames move their folder going forward. Library rename bar behavior unchanged (still settles on finish). Editor cart bundles clean; changes are hot-reloadable JS.",
+  "shas": [
+    "f13a93301"
+  ],
+  "resolvedAt": "2026-07-23T04:31:51.074Z"
+}

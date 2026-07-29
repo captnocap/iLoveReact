@@ -1,0 +1,30 @@
+{
+  "id": "req_3456",
+  "at": "2026-07-28T01:59:01.434Z",
+  "origin": "codex:019fa659",
+  "text": "great now in the studio one feature that we use to have from cart/hmsc-int that never made it here was bevel on verts and edges. could use that now",
+  "status": "review",
+  "sessionId": "019fa659-449c-7342-b3ed-fbb5f4b374c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T01:59:12.874Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T02:29:22.591Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored Studio bevel for exactly one selected vertex or sharp manifold edge. Native indexed preview preserves UV/material/part provenance; Apply is one journal entry, Cancel restores the captured mesh and selection. Focused Zig mesh-edit tests, command coverage, and a ReleaseFast editor build pass. The aggregate Zig test sweep remains red only on the unrelated pre-existing UV journal ordinal assertion (expected 19, found 15). User visual verification and the 60-second spikewatch remain the review gate.",
+  "shas": [
+    "1d7a56467"
+  ],
+  "resolvedAt": "2026-07-28T02:29:22.591Z"
+}

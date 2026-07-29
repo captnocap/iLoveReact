@@ -1,0 +1,28 @@
+{
+  "id": "req_3476",
+  "at": "2026-07-28T07:43:31.820Z",
+  "origin": "session:076afe31",
+  "text": "right ok that makes sense. but it also doesnt, like uh, hmm... in the sense of the fact we have a primitive that can take a virtual machine -> render as a texture, and then therefore forever on forward, react doesnt know jack about shit for what is going on, it just knows i have to keep this rendering. so i guess my question is why isnt the hostKey={model.key} effectively treated the same. like here is something you point at, but all you need to know is where to look. and nothing past that",
+  "status": "review",
+  "sessionId": "076afe31-2683-4165-8b37-bb4fb1716cfa",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T07:44:15.092Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T07:44:41.100Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered why hostKey is not treated like the VM-to-texture surface (stable 'here is where to look' pointer). Explanation delivered: the framework runs two identity idioms — stable-location-with-mutable-content (textures/surfaces, dirty-band updates) and content-addressing (ruled house discipline for baked assets, V29/V31, invalidate-by-rename). The edit mesh is the system's one mutable live document but inherited the immutable-asset idiom for topology changes because renaming gave every downstream cache invalidation for free; the price is that every holder of the old name must be chased down, which is the adoption-failure class. Noted the same subsystem already proves the stable idiom works (drag path patches GPU vertices in place at the same offset; paint atlas texture is created once and updated by dirty row bands). Stated what a stable document handle requires: generation tracking inside the GPU intern and paint target (which also fixes the never-evicting retained buffer) and moving topology-changed news onto the existing push ring. No code changed — explanation only; offered to spec the stable-handle design on user go-ahead.",
+  "shas": [],
+  "resolvedAt": "2026-07-28T07:44:41.100Z"
+}

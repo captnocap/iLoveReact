@@ -1,0 +1,30 @@
+{
+  "id": "req_3459",
+  "at": "2026-07-28T03:21:21.457Z",
+  "origin": "session:d675d200",
+  "text": "hm. the thing that is weird is that source png literally came from me just painting in the studio. so its not like it was intentional in any way or even known about really. uh, regardless, this one thing is a bit annoying about the painting choice, [Image #13] is there is a 'Current' option, which doesnt really mean anything to me, since that current is also the same thing as honey_crunch in the set",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T03:22:23.675Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T03:25:35.952Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Collapsed the redundant Current chip in the world quick menu's PAINTINGS row. New basePaintingSkinId (data/paintVariants.ts) identifies which saved painting the model's current base look IS — atlases/base.png and paint_N.png are written from the same atlas readback in the same Save Painting call, so an un-diverged look compares byte-identical (size fast-path, then base64 equality; a false negative just keeps the fallback chip). When it matches: no Current chip, the named painting (honey_crunch) rings as worn on base-wearing instances, and clicking it lands the canonical base id so instances never wear a #p alias of an identical look. Current only appears when the Studio look genuinely matches no saved painting, tooltip now says exactly that. Also confirmed the user's alpha observation in code: fresh paint atlases memset to 0 and only island texels fill opaque, so gutters between UV islands are alpha-0 by design — the 38% transparency needed no import to exist; noted alongside the req_3450 hazard record. TSX-only, hot reload delivers it; editor cart bundles clean.",
+  "shas": [
+    "b4e56eb0b"
+  ],
+  "resolvedAt": "2026-07-28T03:25:35.952Z"
+}

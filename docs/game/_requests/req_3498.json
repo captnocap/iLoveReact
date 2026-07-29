@@ -1,0 +1,28 @@
+{
+  "id": "req_3498",
+  "at": "2026-07-29T01:13:56.632Z",
+  "origin": "session:28d9c959",
+  "text": "nice report, so uh what should we do, basically i would not like to think about it as much as i can while still getting some pretty strong capability to make any types of pose or emote whatever you want to call it.",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T01:14:57.795Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T01:16:18.672Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Direction recommendation (no code): keep rigid part→bone binding as the default (the Lego/MountPoints model already makes it correct for mounted parts), add ONE automatic solver in framework/skeleton/ for merged/organic meshes — voxel-geodesic binding per the req_3487 research (robust to our multi-part non-watertight meshes, seconds to bind, zero cleanup demands) — then bake weight-smoothing + delta mush on top so shoulders/hips look right with no weight-painting UI ever, plus a bind-time pose-sweep validator that flags bad binds loudly. Poses/emotes ride the ruled surfaces: joint-grab workbench (req_0576) + animationDsl action vocabulary (V6); schema joint limits clamp the pose editor for free. Deliberately skipped: joint inference (formation is fixed per req_2809), weight painting, BBW/neural/bone-heat. Build order when green-lit: LBS render path (1-2 sessions) → Zig voxel-geodesic solver + package weights + auto-classification (~2) → mush bake + validator (1-2).",
+  "shas": [],
+  "resolvedAt": "2026-07-29T01:16:18.672Z"
+}

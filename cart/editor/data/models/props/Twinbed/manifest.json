@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:twinbed",
+  "name": "Twinbed",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "props",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#a343a0",
+  "rig": "source model file",
+  "data": "file twinbed.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Twinbed/mesh/twinbed.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "imported-from:/home/siah/Downloads/twinbed.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

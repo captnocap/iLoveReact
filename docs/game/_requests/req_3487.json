@@ -1,0 +1,36 @@
+{
+  "id": "req_3487",
+  "at": "2026-07-29T00:41:26.628Z",
+  "origin": "session:28d9c959",
+  "text": "Deep research: automatic skinning weight computation for skeletal character rigging in 3D graphics.\n\nI'm building a custom 3D modeling and animation tool (own engine, not Blender/Maya) and need to implement automatic skin weight solving. I want a thorough technical survey covering:\n\n1. ALGORITHM SURVEY — the major approaches to computing per-vertex bone weights from a mesh plus a skeleton:\n   - Bone heat / harmonic diffusion (Baran & Popović \"Pinocchio\", 2007) — how it works, why it leaks across nearby-but-disconnected surfaces\n   - Bounded Biharmonic Weights (Jacobson et al., SIGGRAPH 2011) — formulation, constraints, computational cost\n   - Geodesic Voxel Binding (Dionne & de Lasa, 2013 — Maya's method) — voxelization approach, why geodesic distance beats Euclidean\n   - Delta Mush and post-smoothing techniques\n   - Any newer approaches (2020–present), including neural/learned skinning (e.g. NeuroSkinning, RigNet) and whether they're production-viable\n\n2. COMPARISON — for each: implementation complexity, runtime cost, quality at problem regions (shoulder, armpit, crotch, elbow, fingers), and behavior on non-watertight or multi-component meshes.\n\n3. THE HARD CASES — how each method handles: separate mesh pieces (clothing, hair, socketed parts), meshes with holes or non-manifold geometry, very low-poly meshes (under 1000 triangles), and characters with non-human proportions.\n\n4. SEMANTIC HEURISTICS — commercial auto-riggers (Reallusion AccuRIG, Mixamo, Character Creator) reportedly outperform generic solvers by applying joint-specific rules rather than one uniform algorithm. What is publicly known or credibly inferred about these region-specific techniques? What does a \"shoulder-aware\" weighting strategy actually do differently?\n\n5. JOINT PLACEMENT — separately from weighting, how do auto-riggers infer skeleton position from an unrigged mesh? Medial axis / skeleton extraction, template fitting, learned landmark detection.\n\n6. PRACTICAL IMPLEMENTATION — open source references I could read: Pinocchio, libigl's BBW implementation, Blender's bone heat source, Ozz-animation, anything else. Include repo links and language.\n\n7. VALIDATION — how do you automatically detect bad weights? Known metrics or tests for candy-wrapper twisting, volume loss, and vertices influenced by anatomically wrong bones.\n\nPrioritize primary sources: SIGGRAPH/EG papers, official documentation, engineering blog posts from studios. Include paper titles, authors, years, and links. Where something is proprietary and undocumented, say so explicitly rather than speculating.",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T00:42:04.847Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T00:49:57.239Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "Deep-research swarm launched: 10 agents on bespoke angles (bone heat/Pinocchio, BBW, geodesic voxel, delta mush, neural, hard cases, joint placement, commercial heuristics via browser, OSS repo deep-read via clones, validation metrics). Output: research_runs/2026-07-28__auto-skinning-weights/. Synthesis after all angles land."
+    },
+    {
+      "at": "2026-07-29T01:07:56.644Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran the full deep-research pipeline on automatic skin-weight computation: 10 parallel agents on bespoke angles matching the ask's seven sections (bone heat/Pinocchio, BBW, geodesic voxel binding, delta mush/DDM, neural skinning, hard cases, joint placement, commercial heuristics via real-browser patent/docs reads, open-source deep-read via cloned repos with licenses verified from LICENSE files, validation metrics). Everything landed in research_runs/2026-07-28__auto-skinning-weights/ — per-angle claim/evidence files, synthesis.md with cross-referenced conclusions and a recommended implementation stack (voxel-geodesic core, rigid-attach + weight-inpainting for multi-part meshes, delta-mush rescue, pose-sweep validation), sources.md (204 unique sources), runlog.json. Notable corrections found: inpainting paper is Epic not Roblox; Unreal ships classic DM not DDM; Pinocchio library is LGPL not MIT. Memory pointer saved for the animation-workbench era.",
+  "shas": [
+    "b76f5711f"
+  ],
+  "resolvedAt": "2026-07-29T01:07:56.644Z"
+}

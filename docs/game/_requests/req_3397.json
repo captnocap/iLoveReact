@@ -1,0 +1,32 @@
+{
+  "id": "req_3397",
+  "at": "2026-07-24T21:29:38.073Z",
+  "origin": "session:5443e504",
+  "text": "Compiled worlds dont exist yet either so i dont think that matters. the compile button is disabled and anything lingering as a compiled world is from the previous map compiler that is from the old editor anyways. Yeah so lets do it",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T21:29:54.428Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T22:05:51.210Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the live-material-region capability end to end (commits 09b0e7694, 3d7b3c177, 8f48e073a). Host: region pipeline (object-space domain + S.time, indexed overlay at depth less_equal between ground and transparent passes so glass blends over lava), doors __model_region_formula/_bind_slot/_set/_clear; slot-bound membership resolves host-side from model_source face materials (face_materials_gen), so assign/cut/undo never need a JS re-push. Light colorFrom lands as scene3d_light_region -> host-stepped palette blend (req_3396 tier 1). Editor: regionFormula.ts (triplanar fill_pick, mat_pal active, formula-static/picks-are-data), ModelTextureSlot.liveMaterial persisted+normalized, Rig panel live/motion/scale rows + glow-from on lights, ModelView pushes bindings. lava_plasma joined the catalog (id 58, 3 palette slots). Docs: docs/game/editor_live_materials.md + _index record. Zig ast-checks pass, editor bundle + slot tests pass; HOST REBUILD is the user's move, then author the lamp (glass shell + blob slot bound to lava plasma + light glow-from).",
+  "shas": [
+    "09b0e7694",
+    "3d7b3c177",
+    "8f48e073a"
+  ],
+  "resolvedAt": "2026-07-24T22:05:51.210Z"
+}

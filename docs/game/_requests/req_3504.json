@@ -1,0 +1,30 @@
+{
+  "id": "req_3504",
+  "at": "2026-07-29T04:31:02.368Z",
+  "origin": "session:28d9c959",
+  "text": "no i tested with 3 webcams. virtual, and actual hardware. the interface was specifically made to expose all of them connected, and no matter what it was, it would cause the process to freeze. its not some anomoly so i wouldnt treat it like it has some special use case. its likely broken in entirety even if a test currently says otherwise",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T04:31:52.090Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T04:57:11.005Z",
+      "actor": "webcam-agent",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same fix+verification as req_3503 (commit 15368781b): the webcam capture pipeline was audited end to end per the 'broken in entirety' instruction. The submit/poll pose mailbox, the MultiReader zero-timeout pipe poll, and enumeration were verified genuinely non-blocking against the real Zig 0.16 std source; the ONE hard-block was child teardown (SIGTERM + uncancelable wait4 on the frame thread — full analysis on req_3503). Beyond the freeze, the whole cam path got the mandated freeze-proof shape: device I/O stays in the ffmpeg subprocess drained by a non-blocking poll, teardown is SIGKILL + detached reap (start/stop non-blocking and idempotent), a 10s first-frame watchdog fails LOUDLY and self-heals on a 10s cooldown once the device streams (the OBS 'device exists but not streaming' case), ffmpeg runs under setpriv --pdeathsig KILL so no orphan can hold the camera, -loglevel error with inherited stderr surfaces WHY a camera fails, and latestCpuFrame gates pose inference until a real frame landed. Tripwire unit test test-child-teardown reproduces the exact freeze state (SIGTERM-immune child blocked on a full pipe) and pins teardown <2s; editor compiles and shot /play passes.",
+  "shas": [
+    "15368781b"
+  ],
+  "resolvedAt": "2026-07-29T04:57:11.005Z"
+}

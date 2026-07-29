@@ -1,0 +1,30 @@
+{
+  "id": "req_3439",
+  "at": "2026-07-27T23:46:01.933Z",
+  "origin": "session:d675d200",
+  "text": "there is, supposedly a means to store multiple paints for a mesh, so that i dont have to go and dupe the mesh over and over and etc. but, its not very clear how to do so, when the paint approach is using texture atlases that are imported. [Image #7] so i assume, if i go to import another atlas to use and move the uv mapping around, im going to lose this variant. can u make it more abundantly clear",
+  "status": "review",
+  "sessionId": "d675d200-1713-4a82-87e4-1739927c957e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-27T23:46:08.593Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-28T00:04:38.625Z",
+      "actor": "fable-paintvariants",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made multi-paint-per-mesh actually work for the imported-atlas flow and made the UI state it plainly. Root cause: Save Painting refused when the stroke program was empty, so a look made by importing a texture atlas + remapping UVs (the beers_01 case) could not be saved at all, and loading a variant never restored UV layout. Variants now store the same v4 triple as base.paint.json (exact cornerUv + raster base + optional strokes; paints/paint_N.base.png only when strokes exist), Load routes through the viewer bridge into the same hydration engine as cold load so each variant brings back its own texture + UV mapping + strokes, and importing a new atlas only replaces the LIVE look — panel copy, tooltips, per-row 'texture + uv (+ strokes)' badges, and the import note now say exactly that. Atlas-only looks also emit png+blob so they place as skins. 11 hydration tests pass incl. 4 new; editor cart bundles clean; docs/game/editor_painted_placements.md + index record updated.",
+  "shas": [
+    "3bd5e8250"
+  ],
+  "resolvedAt": "2026-07-28T00:04:38.625Z"
+}

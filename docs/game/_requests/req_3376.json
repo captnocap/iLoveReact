@@ -1,0 +1,30 @@
+{
+  "id": "req_3376",
+  "at": "2026-07-23T06:49:43.526Z",
+  "origin": "codex:019f883f",
+  "text": "and its worth noting all of this is clearly reset-able so then what needs to happen is that after every change need to reinforce the state of the model if its just bare, or textured, whatever it is.",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T06:49:55.882Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T07:14:58.141Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a resident model-state transaction guard for metadata-only face merges. It verifies bare or authored-atlas identity, geometry and UV buffers, atlas hash and dimensions, source projection, colors and alpha, materials, visible and hidden part ownership, Outliner ranges, and document identity before commit, rolling back a rejected group update.",
+  "shas": [
+    "aa2252aac"
+  ],
+  "resolvedAt": "2026-07-23T07:14:58.141Z"
+}

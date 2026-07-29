@@ -1,0 +1,37 @@
+{
+  "id": "req_3406",
+  "at": "2026-07-25T00:24:33.764Z",
+  "origin": "session:5443e504",
+  "text": "ok i did that but its still blank [Image #4]",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T00:25:19.018Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T00:29:17.965Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "Blank viewport persists on the rebuilt host with healed data. Static analysis exhausted: suspects are the mount-time glass restore (partitionGlassFaces does a wholesale replaceActiveEditMesh during adoption) and the region push. Landed RJIT_MODELDOC=open:<name> (de4744edf) so the exact open can repro headlessly; awaiting the user's shot run or stdout to go decisive."
+    },
+    {
+      "at": "2026-07-25T00:59:08.402Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Blank-viewport root cause found by headless bisection (the new RJIT_MODELDOC=open:<name> harness, de4744edf): probe copies of Lavalampsad proved textureSlots/liveMaterial and faceMaterials irrelevant — clearing the doc's glass boundary rendered, keeping it blanked. The killer was MY req_3402 glass restore calling partitionGlassFaces at mount: a wholesale replaceActiveEditMesh + refreshPaintLayout mid-adoption after which the scene rasterized nothing (pass ran — clear color only). Fixed d621c783e: restore is ALPHA-ONLY via paintFaceAlpha (the sanctioned req_2928 restore writer) + source-color mirror; the doc already guarantees the trailing-run order, no rebuild ever needed on a load. Verified headless: shot renders the lamp WITH translucent glass (blank 141KB before, 242KB TRI 654 after). Needs the user's dev-host rebuild to land.",
+  "shas": [
+    "d621c783e",
+    "de4744edf"
+  ],
+  "resolvedAt": "2026-07-25T00:59:08.402Z"
+}

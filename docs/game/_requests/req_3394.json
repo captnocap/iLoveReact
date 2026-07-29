@@ -1,0 +1,34 @@
+{
+  "id": "req_3394",
+  "at": "2026-07-24T21:17:03.936Z",
+  "origin": "session:5443e504",
+  "text": "hey i know we can do it but there is no real capability to do so, but the @cart/plasma.tsx effect here, want to put inside of a lavalamp mesh, what should we do",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T21:17:12.969Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T21:17:57.146Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "Assessed: model paint today BAKES materials to atlas pixels (frozen frame); ground look proves live WGSL dispatch works per-frame. Recommending a live-material channel per face group in the model renderer, Zig-first."
+    },
+    {
+      "at": "2026-07-24T21:18:05.304Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design question answered (no code): plasma-inside-a-lavalamp needs a LIVE material capability the model pipeline lacks — model paint bakes materials to static atlas pixels, so an animated shader freezes. Recommended the Zig-first path: a per-face-group live-material binding evaluated in the model's 3D fragment shader with a time uniform (same pattern the painted-ground look already uses via FILL_FUNCS composition), with Plasma joining the material catalog as a fill spec; lamp = glass shell via atlas alpha + inner blob mesh bound to the live material. Rejected the StaticSurface render-to-texture route as a React-side hack with the known freeze/tick problem.",
+  "shas": [],
+  "resolvedAt": "2026-07-24T21:18:05.304Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3501",
+  "at": "2026-07-29T01:46:30.998Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bfo31sbdu</task-id>\n<tool-use-id>toolu_01Sa9ynBF5Ui7c44xQpzerHw</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/28d9c959-c6e5-4a34-aebc-648b8853d1f6/tasks/bfo31sbdu.output</output-file>\n<status>completed</status>\n<summary>Background command \"Rebuild editor cart after shadowing fix\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T01:47:19.774Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

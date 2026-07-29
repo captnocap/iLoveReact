@@ -1,0 +1,42 @@
+{
+  "id": "req_3507",
+  "at": "2026-07-29T05:59:41.957Z",
+  "origin": "codex:019fac74",
+  "text": "hey in the editor lets get in there where there is opportunity to turn some triangles into a quad then we can do so with some means to handle doing so in one clean sweep",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T05:59:51.839Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T06:03:24.040Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Survey found the existing safe seam-dissolve substrate: Merge Faces already changes authored groups without rebuilding resident render triangles, and import has inferQuadFaceGroups for isolated convex coplanar pairs. Implementing one native Tris to Quads transaction over the selected authored triangles, reusing that indexed topology boundary, preserving UV/paint/material/part ownership, and leaving unmatched triangles untouched."
+    },
+    {
+      "at": "2026-07-29T06:19:43.423Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implementation complete: Tris to Quads is a Face-mode topology command backed by native indexed pairing, one group-only journal commit, exact changed-count reporting, and one Undo. It quality-ranks competing edges, preserves resident triangles/UV/paint/material/part ownership, partitions glass/opaque pairs, and leaves invalid/unmatched triangles alone. Zig mesh-edit + journal suites, TS command/event suites, editor typecheck, codegen check, oracle index, and full ReleaseFast editor ship are green."
+    },
+    {
+      "at": "2026-07-29T06:20:19.162Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a host-native Tris to Quads command to the active editor so a Face-mode selection can recover all compatible non-overlapping triangle pairs in one clean, undoable sweep. The indexed planner quality-ranks competing shared edges, rejects unsafe bent, concave, non-manifold, cross-part, cross-material, or mixed-alpha pairings, preserves resident geometry, UVs, paint, materials, and ownership, leaves unmatched triangles alone, and reports the exact quad count through the editor status line. Focused Zig and TypeScript suites, binding codegen/type checks, oracle indexing, and the full ReleaseFast editor build pass.",
+  "shas": [
+    "8cbee5cb0"
+  ],
+  "resolvedAt": "2026-07-29T06:20:19.162Z"
+}

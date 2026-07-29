@@ -1,0 +1,28 @@
+{
+  "id": "req_3423",
+  "at": "2026-07-25T19:02:05.791Z",
+  "origin": "session:5443e504",
+  "text": "lol dude i remember asking for stained glass and never seeing it deliver is why i ask. so then the last thing here before i just obviously fix my own problem is the live and active shader, that will appear under the glass after painting the model or no. and im asking about in the world placement not in the studio, its clearly doing so in here",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T19:02:41.836Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-25T19:04:21.128Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question answered honestly: NO — after paint+export the placed lamp gets GLASS (the atlas alpha rides the same route the all-glass bong_01 prop proves) but the live plasma does NOT animate on the placed prop yet; live material regions only draw in the studio render path. The world slice is scoped and tracked on req_3402: (1) JS pushes region bindings against the world's per-slot geometry keys ('<residentKey>:slot-N' — the loader already gives every texture slot its own node+key, so a binding covers exactly the slot's faces [0..count)); (2) a shared liveRegions module unions bound material fns so the studio and world pushes compose ONE formula instead of clobbering each other; (3) host: skip the base draw for region-bound slot nodes (the region overlay IS the look) and route slotted glassy props through the textured-alpha transparent path like slotless ones — today routeSlotTransparent is door-gated, so a slotted prop's glass texels draw in the opaque pass with depth artifacts. Building next.",
+  "shas": [],
+  "resolvedAt": "2026-07-25T19:04:21.128Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3419",
+  "at": "2026-07-25T18:51:17.549Z",
+  "origin": "one-off",
+  "text": "top left green hud line. where is that? there is no top left green hud line that reports this data. there is a bottom right space that reports this numbers but nothing in a top left area. i just want to make sure we are on the same page",
+  "status": "new",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T18:51:32.598Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

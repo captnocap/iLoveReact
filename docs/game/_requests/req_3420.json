@@ -1,0 +1,18 @@
+{
+  "id": "req_3420",
+  "at": "2026-07-25T18:57:10.965Z",
+  "origin": "session:5443e504",
+  "text": "3the green hud still does not exist with that command used. regardless, all 3 probes are gone, and the lamp stage now rotates and i see the model so idk what to tell u to be quite honest. OK whatever, could be a stale build that is no longer stale. still, the prop then exported and placed into the world is not showing glass. so we got glass in the studio, and glass on build pieces and props. also, i realized i told u earlier that glass on build pieces worked but now i can also validate it clearly worked on props also, look at the bong_01 model, its a prop, its literally ALL glass and it renders in the world as glass",
+  "status": "doing",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T18:57:57.449Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3457",
+  "at": "2026-07-28T02:21:06.589Z",
+  "origin": "one-off",
+  "text": "the git is tracking a bunch of worthless artifacts, largely in the root of the repo. fix it for us, effectively i dont know any code file inside of the root that is actually even used, all of them have their directories where they properly live, and root based code files are just artifacts as far as im concerned, you can verify that obviously",
+  "status": "new",
+  "sessionId": "8185a686-e595-4144-870f-7ce9d89baddb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-28T02:21:35.642Z",
+      "actor": "fable-root-clean",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

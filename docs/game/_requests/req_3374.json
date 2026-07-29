@@ -1,0 +1,30 @@
+{
+  "id": "req_3374",
+  "at": "2026-07-23T06:37:13.687Z",
+  "origin": "codex:019f883f",
+  "text": "[Image #1] [Image #2][Image #3][Image #4][Image #5] heres another one. multiple outliners -> merge to one part -> merge faces -> broke",
+  "status": "review",
+  "sessionId": "019f883f-a2d2-7551-9cb2-5401d44e5ce6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-23T06:37:32.262Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-23T06:45:58.631Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the multi-Outliner Merge Parts → Merge Faces corruption at both native boundaries. Structural part/group changes now invalidate stale indexed ownership, every indexed cache clone validates resident groups, parts, and materials before reuse, range normalization refuses impossible stale owners, and Merge Faces rejects bent/non-coplanar selections before generating a fan. Added focused regressions for the exact ownership chain and bent-face geometry; 47 mesh-edit, 43 model-paint, and 14 mesh-journal tests pass, and the ReleaseFast editor build succeeds.",
+  "shas": [
+    "843dfcdc9"
+  ],
+  "resolvedAt": "2026-07-23T06:45:58.631Z"
+}

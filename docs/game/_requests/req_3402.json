@@ -1,0 +1,45 @@
+{
+  "id": "req_3402",
+  "at": "2026-07-24T23:31:48.863Z",
+  "origin": "session:5443e504",
+  "text": "glass faces either dont export or they dont save or something. i saved the model with glass around the plasma, i exported t he prop, the prop is flat, no lava, restarting the app the model has no glass on its faces",
+  "status": "review",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-24T23:32:19.411Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-24T23:38:27.090Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "Glass restart-loss fixed (c9dfa1c10, needs host rebuild). Remaining from this report: placed-prop parity — the exported prop renders via the ResidentMesh path (livePush painted form + compileTextureSlotMesh) which carries neither live regions (lava) nor the glass transparent split yet. That is the next slice."
+    },
+    {
+      "at": "2026-07-25T19:04:21.137Z",
+      "actor": "fable-plasma",
+      "kind": "note",
+      "text": "World-slice technical plan (from req_3423 analysis): slot node keys are '<meshKey>:slot-N' (runtime_live_scene.liveSlotKey); region binds per slot node with faces 0..count/3; formula must be the UNION of studio+world bound fns (shared module, recompose on growth); host must (a) skip base slot draw when the slot key has regions (else the transparent textured route draws opaque lava texels OVER the region overlay) and (b) extend transparent routing to slotted non-door glassy meshes (currently door-gated — a painted slotted glass prop draws glass texels in the OPAQUE pass). compileTextureSlotMesh keeps glass trailing within bucket 0 (unslotted faces keep doc order)."
+    },
+    {
+      "at": "2026-07-25T19:15:47.893Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The placed-prop parity slice is BUILT (af363ef0a, JS-only, hot-reloads — no rebuild): pushLiveWorld binds live material regions against the loader's per-slot geometry keys ('<residentKey>:slot-N'; the slot node's interned geometry IS the slot bucket, so faces=[0..bucketTris) and instances share one bind), and render3d/liveRegions.ts now owns the ONE host formula as a session UNION of studio+world bound fns so pushers never clobber each other. Combined with the earlier fixes this closes the original report: glass survives restart (c9dfa1c10 + d621c783e alpha-only), stale sidecars can't block saves (2373b44de), and the lamp's world glass lands via the paint-atlas step (bong_01-proven route). Honest remainders noted on this req: slotted glassy props draw glass texels through the OPAQUE pass (transparent routing is door-gated — lump v11 glass boundary is the clean fix) and atlasless glass props still export glassless.",
+  "shas": [
+    "af363ef0a",
+    "c9dfa1c10",
+    "d621c783e",
+    "2373b44de"
+  ],
+  "resolvedAt": "2026-07-25T19:15:47.893Z"
+}

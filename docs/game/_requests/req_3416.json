@@ -1,0 +1,18 @@
+{
+  "id": "req_3416",
+  "at": "2026-07-25T18:39:08.745Z",
+  "origin": "session:5443e504",
+  "text": "the model loads now but the stage becomes frozen in time. I cant move the camera around, i cant do any changes. nothing. but i can see the model now. also the lamp probes show up but also say at the same time not on disk so that makes 0 sense",
+  "status": "doing",
+  "sessionId": "5443e504-19ff-46a3-8afe-1fef1d514718",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-25T18:40:25.184Z",
+      "actor": "fable-plasma",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

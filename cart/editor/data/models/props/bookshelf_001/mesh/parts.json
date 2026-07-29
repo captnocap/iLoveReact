@@ -2,60 +2,10 @@
   "version": 1,
   "parts": [
     {
-      "name": "Cube 1",
-      "color": "#c9b48f",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 0
-    },
-    {
       "name": "Cube 2",
       "color": "#8fb6c9",
       "visible": true,
-      "kind": "cube",
       "outlinerOrder": 1
-    },
-    {
-      "name": "Cube 2 mirror X",
-      "color": "#8fb6c9",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 2
-    },
-    {
-      "name": "Cube 4",
-      "color": "#9cc98f",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 3
-    },
-    {
-      "name": "Cube 4 (2)",
-      "color": "#9cc98f",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 4
-    },
-    {
-      "name": "Cube 4 (3)",
-      "color": "#9cc98f",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 5
-    },
-    {
-      "name": "Cube 7",
-      "color": "#8fc9bb",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 6
-    },
-    {
-      "name": "Cube 8",
-      "color": "#c9b48f",
-      "visible": true,
-      "kind": "cube",
-      "outlinerOrder": 7
     }
   ]
 }
