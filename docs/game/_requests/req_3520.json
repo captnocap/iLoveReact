@@ -3,7 +3,7 @@
   "at": "2026-07-29T10:08:18.112Z",
   "origin": "codex:019fac74",
   "text": "ok next piece is to pass in now the capability to be able to crop out anything that a uv isnt covering from any imported texture so that we can reduce as much as possible total size when a wrap is ready for the paint variant",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-29T10:54:25.848Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Implemented native exact UV-coverage cleanup for saved base and variant rasters. Covered RGBA remains byte-exact, a two-texel gutter is retained, uncovered import pixels become opaque neutral, and metadata-only bridge reads avoid base64 duplication. Covered by Zig and editor data tests.",
+  "shas": [
+    "a80416eb4"
+  ],
+  "resolvedAt": "2026-07-29T10:54:25.848Z"
 }

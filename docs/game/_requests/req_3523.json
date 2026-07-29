@@ -3,7 +3,7 @@
   "at": "2026-07-29T10:33:43.075Z",
   "origin": "codex:019fac74",
   "text": "RIght, so i would, because there is going to be the time where i might come and add a new one, you need to store the individual and then we end up having a some sort of compile button approach that will take them and piece together so we can always keep adding more without it assuming its the final product",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-29T10:54:25.864Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Preserved every individual base and variant PNG/mesh as editable source of truth and added an explicit Compile/Recompile Shared Atlas control with progress, result metrics, and fresh/stale status. Adding or updating a look marks the derived atlas stale without silently recompiling or destroying the previous output.",
+  "shas": [
+    "a80416eb4"
+  ],
+  "resolvedAt": "2026-07-29T10:54:25.864Z"
 }
