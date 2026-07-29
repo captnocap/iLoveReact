@@ -175,10 +175,12 @@ because that row is no longer the untouched original; a later reopen can capture
 the source again instead of falsely treating the edited row as its backup.
 Imported-texture provenance also carries the UV-adoption version. The first
 post-req_3530 records had no version and therefore identify the known-bad v1
-ordering; the next source load refreshes that untouched generated variant in
-place with v2 source UVs. Since any user Save-back already removed provenance,
-this repair cannot overwrite an authored variant or the package's established
-base look.
+ordering. A saved meshdoc normally bypasses its original GLB, so cold load first
+checks provenance: only a v1 row triggers a brief source-resident capture that
+refreshes the generated variant in place, after which the saved geometry and
+authored base are immediately restored. Current v2 rows skip the source probe.
+Since any user Save-back already removed provenance, this repair cannot
+overwrite an authored variant or the package's established base look.
 
 A saved paint variant (`paints/paint_N.json`) carries the same v4 triple as the
 base painting, so one mesh stores many looks without duplicating the model: the

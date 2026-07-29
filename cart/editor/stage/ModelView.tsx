@@ -47,6 +47,7 @@ import {
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import {
   ensureImportedTexturePaintVariant,
+  importedTextureVariantNeedsUvUpgrade,
   IMPORTED_TEXTURE_UV_MAPPING_VERSION,
   listPaintVariants,
   type PaintTarget,
@@ -311,6 +312,9 @@ export type ModelViewProps = {
   initialTitle?: string;
   initialMesh?: ModelViewInitialMesh;
   initialFileParts?: ModelViewFileParts;
+  /** Original GLB/OBJ retained beside a saved meshdoc. Used only for a one-time
+   * embedded-texture provenance repair before the saved document is restored. */
+  importedTextureSourcePath?: string;
   allowFilePicker?: boolean;
   trackAttribution?: boolean;
   // When the editor hosts the viewer, its toolbar + context menu own the tool
@@ -849,7 +853,7 @@ const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -2643,12 +2647,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
    * package gets the original variant while its saved base/latest look remains
    * the one hydrated for display. */
   const registerImportedTextureLook = (
-    spec: ModelViewFileParts,
+    sourcePath: string,
+    hasAppendedParts: boolean,
     loaded: Loaded,
+    options: { allowBaseAdoption?: boolean } = {},
   ): boolean => {
     const texture = loaded.texture;
     if (!texture) return false;
-    if (spec.appends.length > 0) {
+    if (hasAppendedParts) {
       // A base-only UV table cannot be advertised against a composed topology.
       // The source image remains visible on its base rows until the explicit
       // structural-atlas gate asks the user to remake the combined layout.
@@ -2658,7 +2664,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
     const variantsBefore = listPaintVariants(paintTarget);
     const storedPaintBefore = hasStoredModelPaint(paintTarget);
-    const sourceIdentity = fileSha(spec.path) || spec.path;
+    const sourceIdentity = fileSha(sourcePath) || sourcePath;
     const captured = ensureImportedTexturePaintVariant(paintTarget, {
       kind: 'model-import',
       fingerprint: `${sourceIdentity}:${texture.imageIndex}`,
@@ -2679,6 +2685,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       );
     }
 
+    if (options.allowBaseAdoption === false) return false;
     if (!storedPaintBefore && variantsBefore.length === 0) {
       // First import: this source look is also the model's current/base look.
       writeModelArtifacts(paintTarget);
@@ -2692,6 +2699,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     // The model-key effect will hydrate the already-authored base after mount.
     return false;
+  };
+
+  /** A saved meshdoc wins over its source file, but a still-provenance-bearing
+   * v1 Imported Texture row needs one last source-resident capture. Load the
+   * source only long enough to refresh that generated variant; applyMesh runs
+   * immediately afterward and restores the saved geometry/base as document
+   * truth. Current provenance skips both parsing and native state churn. */
+  const refreshLegacyImportedTextureLook = (sourcePath: string) => {
+    if (!paintTarget || !paintTargetOnDisk) return;
+    const sourceIdentity = fileSha(sourcePath) || sourcePath;
+    if (!importedTextureVariantNeedsUvUpgrade(paintTarget, sourceIdentity)) return;
+    const loaded = loadModelFile(sourcePath);
+    if (!loaded?.texture) {
+      console.error(`[paint-import] could not refresh legacy source UVs from ${sourcePath}`);
+      return;
+    }
+    registerImportedTextureLook(sourcePath, false, loaded, { allowBaseAdoption: false });
   };
 
   // Mount a FILE-BACKED multi-part model: host-parse the imported file as the base part,
@@ -2729,7 +2753,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     meshSetPartRanges(partRangesRef.current);
     if (spec.baseHidden) meshSetGroupHidden(0, faces, true, false);
     freshModelPaintReset();
-    if (registerImportedTextureLook(spec, loaded)) {
+    if (registerImportedTextureLook(spec.path, spec.appends.length > 0, loaded)) {
       atlasReadyRef.current = true;
       atlasInvalidatedRef.current = false;
     }
@@ -2826,7 +2850,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (initialFileParts) {
       if (!resumeHostSession()) applyFileParts(initialFileParts);
     } else if (initialMesh) {
-      if (!resumeHostSession()) applyMesh(initialMesh);
+      if (!resumeHostSession()) {
+        if (importedTextureSourcePath) refreshLegacyImportedTextureLook(importedTextureSourcePath);
+        applyMesh(initialMesh);
+      }
     } else {
       const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
       if (path && !resumeHostSession()) applyPath(path);

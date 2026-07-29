@@ -366,6 +366,26 @@ export type EnsureImportedTextureVariantResult = {
   upgraded: boolean;
 };
 
+/** Saved mesh documents normally bypass their original model file. Tell that
+ * load path when it must briefly probe the source to repair a known v1
+ * automatic variant; current or user-edited rows make the probe unnecessary. */
+export function importedTextureVariantNeedsUvUpgrade(
+  pkg: PaintTarget,
+  sourceIdentity: string,
+): boolean {
+  if (!sourceIdentity) return false;
+  const prefix = `${sourceIdentity}:`;
+  const sourceRows = listPaintVariants(pkg).filter((variant) =>
+    variant.importedTexture?.kind === 'model-import'
+    && variant.importedTexture.fingerprint.startsWith(prefix));
+  return sourceRows.some((variant) =>
+    (variant.importedTexture?.uvMappingVersion ?? LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION)
+      < IMPORTED_TEXTURE_UV_MAPPING_VERSION)
+    && !sourceRows.some((variant) =>
+      (variant.importedTexture?.uvMappingVersion ?? LEGACY_IMPORTED_TEXTURE_UV_MAPPING_VERSION)
+        >= IMPORTED_TEXTURE_UV_MAPPING_VERSION);
+}
+
 /** Replace only a provenance-bearing automatic import. User Save-back strips
  * importedTexture first, so this migration can never rewrite an authored row. */
 function refreshImportedTexturePaintVariant(

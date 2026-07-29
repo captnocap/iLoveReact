@@ -11,6 +11,7 @@
 import {
   bindPaintSkinToCurrentMesh,
   ensureImportedTexturePaintVariant,
+  importedTextureVariantNeedsUvUpgrade,
   IMPORTED_TEXTURE_UV_MAPPING_VERSION,
   paintSkinFitsCurrentMesh,
   PAINT_MESH_VERTEX_BYTES,
@@ -220,6 +221,10 @@ test('an imported model texture is deduped and legacy source UV provenance upgra
       text: JSON.stringify(legacyRecord),
       isDir: false,
     });
+    assert(
+      importedTextureVariantNeedsUvUpgrade(pkg, 'sha256'),
+      'saved meshdoc path did not request a source probe for legacy provenance',
+    );
     sourceEdge = 6;
     const upgraded = ensureImportedTexturePaintVariant(pkg, source);
     assert(upgraded.upgraded && !upgraded.created, 'legacy imported texture was not upgraded in place');
@@ -228,6 +233,10 @@ test('an imported model texture is deduped and legacy source UV provenance upgra
     assert(
       upgraded.variant?.importedTexture?.uvMappingVersion === IMPORTED_TEXTURE_UV_MAPPING_VERSION,
       'legacy repair did not stamp the corrected UV mapping version',
+    );
+    assert(
+      !importedTextureVariantNeedsUvUpgrade(pkg, 'sha256'),
+      'corrected provenance kept requesting the expensive source probe',
     );
 
     const second = ensureImportedTexturePaintVariant(pkg, source);
