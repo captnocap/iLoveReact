@@ -1,8 +1,9 @@
 # Painted placements: which mesh a placed model renders
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
-Last verified: 2026-07-27. USER ASK req_2832 / req_2833 / req_2930 /
-req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450.
+Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
+req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
+req_3515.
 
 ## In one sentence
 
@@ -37,6 +38,32 @@ remain readable for old packages, but they are transform bounds rather than UV
 geometry: they cannot reproduce a rotated island, a detached cylinder wedge, or
 one moved vertex. New saves therefore emit v4 whenever the host's complete
 triangle table is present.
+
+## Identity stitch + transparent UV guide (req_3515)
+
+`__model_atlas_read` also publishes `cornerVertices`: the welded 3D/model
+vertex identity behind each UV face corner. The UV panel already uses those
+ids for its colored corner markers; `model/uvLayout.ts stitchUvIslands` now
+uses the same truth for a one-click seam operation. Shift-select two or more
+UV islands and make the intended anchor the white active island, then press
+`STITCH` (also available under RMB → Arrange Selected Islands). The active
+island never moves. The operation cancels internal triangle/connected-face
+edges to recover each UV boundary, matches welded topology edges first and an
+unambiguous shared boundary vertex second, then walks the whole selected
+connected component. Each moving island gets a handed similarity fit and its
+matching seam endpoints land exactly on the anchor copies, so
+`__model_uv_geometry_apply` can reconstruct the joined island. Unrelated
+selected pieces stay put; a fit that would leave the atlas is refused. The
+whole sweep is one `stitch UV seams` journal entry.
+
+`WIRE PNG` (also RMB → Texture Atlas → Export Transparent Wireframe) writes
+`atlases/uv-wireframe.png` at the live atlas dimensions and copies its absolute
+path. It is a derived image-generation guide: alpha remains zero everywhere
+except neutral black antialiased lines, island boundaries are heavier, and the
+edge source is the authored UV view, so a resident triangle diagonal hidden by
+an authored quad stays absent from the export. Encoding uses the existing
+image codec and an atomic binary write. The guide is not loaded as texture
+state and can always be regenerated from `cornerUv`.
 
 ## Paint variants are full LOOKS (req_3439)
 

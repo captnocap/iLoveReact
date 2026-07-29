@@ -4,9 +4,9 @@ export const editor_painted_placements: DocIndex = {
   name: 'editor_painted_placements',
   file: 'editor_painted_placements.md',
   cart: 'cart/editor/world/livePush.ts',
-  purpose: ['building', 'texture_bake', 'rendering', 'persistence', 'physics'],
+  purpose: ['building', 'texture_bake', 'rendering', 'persistence', 'physics', 'geometry', 'ui'],
   summary:
-    'Which mesh, UV document, and collision shape a saved/placed authored model uses (req_2832/2833/2930/3133/3328/3329/3362/3431): base.paint.json v4 cold-restores every exact face-corner UV; placement uses the full-res meshdoc with the painting\'s UVs rebound onto it except when painting a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles; painted.json stamps which doc revision owns a decimated exported look; every save also persists the placeable-frame collision bake into the package as mesh/collision.blob (RJCB v1).',
+    'Which mesh, UV document, derived UV guide, and collision shape a saved/placed authored model uses (req_2832/2833/2930/3133/3328/3329/3362/3431/3515): base.paint.json v4 cold-restores every exact face-corner UV; welded corner identity now stitches selected broken islands to one fixed active island, and the authored quad-aware edges export as an atlas-sized transparent uv-wireframe.png. Placement uses the full-res meshdoc with the painting\'s UVs rebound onto it except when painting a quality-DECIMATED display. Visible full-res saved Outliner ranges bake both bounded coarse boxes and exact immutable player-collision triangles; painted.json stamps which doc revision owns a decimated exported look; every save also persists the placeable-frame collision bake into the package as mesh/collision.blob (RJCB v1).',
   interfaces: [
     {
       name: 'base.paint.json v4 exact UV restart record',
@@ -28,6 +28,17 @@ export const editor_painted_placements: DocIndex = {
         'req_3439: a variant stores the same v4 triple as base.paint.json — cornerUv + rasterBase + stroke program (may be EMPTY: an imported texture atlas mapped over the mesh saves as a look with zero strokes, which the panel previously refused). With strokes the baseline persists as paint_N.base.png; without, the composite paint_N.png doubles as the raster base. Load goes through ModelFocusBridge.loadPaintVariant into the same paintHydration engine as cold load (detail → import raster base → cornerUv → strokes over base), so importing a new atlas or remapping UVs only changes the LIVE look — saved variants reload their own texture + UV layout. listPaintVariants strips look claims whose raster is gone; hydration fails loudly over half-restoring. Atlas-only looks emit png + blob, so they are placeable skins too. Variants rename in place (req_3448, renamePaintVariant + the panel pencil verb): label-only, ids/files/placed #p references untouched, quick-menu chips pick up the new name.',
       dependsOn: ['cart/editor/model/paintHydration.ts hydratePersistedModelPaint', 'framework/v8_bindings_core.zig __model_paint_baseline_read / __model_atlas_import / __model_uv_geometry_apply / __model_paint_program_apply_over_base', 'cart/editor/data/modelPackageStore.ts exactUvCornersFromAtlasTriangles/parsedUvCornerGeometry'],
       consumers: ['cart/editor/library/ModelPaintVariants.tsx', 'cart/editor/stage/ModelView.tsx loadPaintVariant'],
+      status: 'live',
+    },
+    {
+      name: 'welded-identity UV stitch + transparent authored-edge guide',
+      purpose: ['geometry', 'ui', 'texture_bake', 'persistence'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/model/uvLayout.ts',
+      description:
+        'req_3515: stitchUvIslands consumes the cornerVertices ids already published for UV corner colors. It cancels internal edges to recover welded boundaries, keeps the white active island fixed, then walks every selected island reachable by a shared topology edge (or one unambiguous boundary vertex). A handed similarity fit preserves the moving island while exact seam endpoints make the host rebuild one connected island; unrelated selections stay put and out-of-atlas fits fail closed. UvEditor exposes the one-click STITCH chip and records the entire sweep as one append-only stitch UV seams history action. WIRE PNG rasterizes the same authored face edges plus heavier island boundaries onto alpha-zero RGBA, so authored quads do not regain resident triangle diagonals; writeModelUvWireframe atomically writes atlases/uv-wireframe.png and the UI copies the proven absolute path.',
+      dependsOn: ['framework/v8_bindings_core.zig __model_atlas_read / __model_uv_geometry_apply', 'cart/editor/model/uvWireframe.ts rasterizeUvWireframe', 'cart/editor/data/modelPackageStore.ts writeModelUvWireframe'],
+      consumers: ['cart/editor/inspector/UvEditor.tsx', 'cart/editor/stage/ModelView.tsx'],
       status: 'live',
     },
     {
