@@ -3,7 +3,7 @@
   "at": "2026-07-29T09:01:07.456Z",
   "origin": "codex:019fac74",
   "text": "great so heres two things you can do now, one, its very clear by the fact that we color the vertex of the uv to match the model, that a model shares a vert from one piece to another, but there is no way to just without even thinking about it snap the broken parts together and so that is a free win to take the next is give me the ability to export out the wireframe of the uv with a transparent background and we can attempt to use for image generations with gpt-image-2 on the api i use",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-29T09:17:42.327Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Added topology-aware UV stitching from the existing welded corner identities, keeping the active island fixed while sweeping selected connected seams and leaving unrelated pieces untouched. Added atlas-sized transparent authored-edge PNG export with quad diagonals omitted, atomic package persistence, copied output path, focused TypeScript and Zig tests, and a passing ReleaseFast editor build.",
+  "shas": [
+    "d4c97df23",
+    "72c141ea6"
+  ],
+  "resolvedAt": "2026-07-29T09:17:42.327Z"
 }
