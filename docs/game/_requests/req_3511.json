@@ -1,0 +1,38 @@
+{
+  "id": "req_3511",
+  "at": "2026-07-29T06:39:13.576Z",
+  "origin": "codex:019fac74",
+  "text": "didnt seem to make any edits at all, and i know there is opportunity because i can select two triangles next to one another and merge together on some and not others, meaning its possible",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T06:39:19.005Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T06:43:34.071Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "User clarified the failure: the operation must not depend on the current face selection. Folding the bug fix into a whole-topology dry-run planner that shares pairwise Merge Faces compatibility and only mutates on confirmation."
+    },
+    {
+      "at": "2026-07-29T07:38:47.561Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the selection-gated no-op by replacing the old immediate selected-face sweep with a Face-mode, whole-live-topology dry-run session. Candidate compatibility now matches the useful two-triangle Merge Faces contract, including legal concave four-corner boundaries, while retaining manifold, plane, winding, part, material, and alpha guards. The exact matcher leaves unmatched triangles intact and the operation mutates only after confirmation.",
+  "shas": [
+    "a137842d5",
+    "4bbf8fc92",
+    "166b8f957"
+  ],
+  "resolvedAt": "2026-07-29T07:38:47.561Z"
+}

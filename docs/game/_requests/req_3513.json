@@ -1,0 +1,38 @@
+{
+  "id": "req_3513",
+  "at": "2026-07-29T06:45:07.389Z",
+  "origin": "codex:019fac74",
+  "text": "a model u can test on is the torso_female003 and see what a dry run turns up",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T06:45:12.178Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T06:45:19.952Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Using cart/editor/data/models/props/Torso_Female003 as the real read-only fixture. The headless dry run will report candidate triangles, maximum quads, remaining triangles, and each evaluation's result."
+    },
+    {
+      "at": "2026-07-29T07:38:47.579Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran the non-mutating dry run against Torso_Female003 and restored its selected face/history on Cancel. The model reports 6,831 resident triangles, 6,783 authored faces, 1,156 compatible pairings, 292 triangles with competing choices, and an exact maximum of 925 quads for a projected 6,783 to 5,858 authored faces. All three evaluations retain 925 quads and produce distinct plan signatures; the fixture is left at its original functional topology with no stale-layout marker.",
+  "shas": [
+    "a137842d5",
+    "4bbf8fc92",
+    "166b8f957"
+  ],
+  "resolvedAt": "2026-07-29T07:38:47.578Z"
+}
