@@ -1,0 +1,30 @@
+{
+  "id": "req_3516",
+  "at": "2026-07-29T09:26:04.244Z",
+  "origin": "codex:019fac74",
+  "text": "where is the stitch button its not in the right click context menu or im blind",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T09:26:14.048Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T09:29:34.494Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the UV stitch action impossible to hide behind selection state or a submenu. STITCH now remains visible in the toolbar, while a direct top-level RMB row reports the exact island count the editor sees and enables at two or more. Updated menu sizing and the live game interface record, then passed the editor bundle and ReleaseFast build.",
+  "shas": [
+    "d620b9ff0"
+  ],
+  "resolvedAt": "2026-07-29T09:29:34.493Z"
+}

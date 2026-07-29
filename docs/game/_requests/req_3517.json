@@ -1,0 +1,30 @@
+{
+  "id": "req_3517",
+  "at": "2026-07-29T09:26:34.026Z",
+  "origin": "codex:019fac74",
+  "text": "right. i have two selected. so where does it appear as i dont see it",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T09:26:57.485Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T09:29:34.502Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the wireframe control proved the live bundle was current, then fixed the actual discoverability failure. The toolbar keeps STITCH visible even when disabled, and the context menu shows Stitch Matching Seams directly with a diagnostic island count instead of nesting it under Arrange. The shipped ReleaseFast editor now contains the change.",
+  "shas": [
+    "d620b9ff0"
+  ],
+  "resolvedAt": "2026-07-29T09:29:34.502Z"
+}
