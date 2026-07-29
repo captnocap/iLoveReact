@@ -1,0 +1,30 @@
+{
+  "id": "req_3529",
+  "at": "2026-07-29T13:39:45.836Z",
+  "origin": "codex:019fac74",
+  "text": "ok next give me tha ability to ctrl + click to drag an area of uv and select them this way so i can get segments",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T13:40:00.320Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:50:22.045Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented Ctrl-drag UV marquee selection on the active editor surface. The gesture overrides UV/image dragging, latches after four pixels, draws a cyan area box, and selects only islands whose authored triangle silhouettes cross the signed-workspace rectangle; Ctrl+Shift extends the current set and a click without a drag is inert. The completed island set crosses one typed-array bridge into one validated native face mask and one 3D highlight pass, including empty-selection clearing, so dense selections do not replay whole-model work per island. UV geometry tests pass 41/41, model-paint Zig tests pass 47/47 under Zig 0.16, and the full ReleaseFast editor ship succeeds. Interactive appearance and gesture feel remain for user review.",
+  "shas": [
+    "fbef117e8"
+  ],
+  "resolvedAt": "2026-07-29T13:50:22.045Z"
+}
