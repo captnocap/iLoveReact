@@ -27,6 +27,8 @@ export type UvTextureLayer = {
   width: number;
   height: number;
   visible: boolean;
+  /** Editor interaction state only; locking never changes compile output. */
+  locked: boolean;
 };
 
 export type UvTextureWorkspaceCompile = {
@@ -109,14 +111,18 @@ export function parseUvTextureWorkspace(text: string | null): UvTextureWorkspace
       const y = coordinate(layer?.y);
       const width = positiveInteger(layer?.width);
       const height = positiveInteger(layer?.height);
+      // v1 manifests written before req_3526 did not carry interaction locks.
+      // Missing means unlocked; any present non-boolean value is corruption.
+      const locked = layer?.locked === undefined ? false : layer.locked;
       if (!id || ids.has(id) || !name || x === null || y === null
         || width === null || height === null
         || width > UV_TEXTURE_WORKSPACE_TUNING.maxDimension
         || height > UV_TEXTURE_WORKSPACE_TUNING.maxDimension
         || !isUvTextureWorkspaceSource(layer?.source)
-        || typeof layer?.visible !== 'boolean') return null;
+        || typeof layer?.visible !== 'boolean'
+        || typeof locked !== 'boolean') return null;
       ids.add(id);
-      layers.push({ id, name, source: layer.source, x, y, width, height, visible: layer.visible });
+      layers.push({ id, name, source: layer.source, x, y, width, height, visible: layer.visible, locked });
     }
     let compiled: UvTextureWorkspaceCompile | undefined;
     if (raw.compiled !== undefined) {
@@ -160,7 +166,7 @@ export function createUvTextureWorkspace(
     version: UV_TEXTURE_WORKSPACE_VERSION,
     revision: 1,
     nextLayer: 2,
-    layers: [{ id: 'layer-1', name: 'paint baseline', source, x: 0, y: 0, width, height, visible: true }],
+    layers: [{ id: 'layer-1', name: 'paint baseline', source, x: 0, y: 0, width, height, visible: true, locked: false }],
   };
 }
 
@@ -191,6 +197,50 @@ export function appendUvTextureLayer(
     [...doc.layers, { ...input, id: `layer-${doc.nextLayer}` }],
     doc.nextLayer + 1,
   );
+}
+
+/** Lock is editor-only state, so it persists without invalidating a current compile. */
+export function setUvTextureLayerLocked(
+  doc: UvTextureWorkspaceDoc,
+  id: string,
+  locked: boolean,
+): UvTextureWorkspaceDoc {
+  const index = doc.layers.findIndex((layer) => layer.id === id);
+  if (index < 0) throw new Error('That image layer no longer exists.');
+  if (doc.layers[index]!.locked === locked) return doc;
+  const layers = doc.layers.map((layer, layerIndex) => (
+    layerIndex === index ? { ...layer, locked } : layer
+  ));
+  const parsed = parseUvTextureWorkspace(JSON.stringify({ ...doc, layers }));
+  if (!parsed) throw new Error('The image-layer lock would create an invalid UV workspace.');
+  return parsed;
+}
+
+/** Topmost visible image under one signed workspace point, locked or not. */
+export function hitUvTextureLayer(
+  layers: readonly UvTextureLayer[],
+  x: number,
+  y: number,
+): UvTextureLayer | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]!;
+    if (layer.visible
+      && x >= layer.x
+      && y >= layer.y
+      && x < layer.x + layer.width
+      && y < layer.y + layer.height) return layer;
+  }
+  return null;
+}
+
+export function resolveUvWorkspacePointer(
+  layers: readonly UvTextureLayer[],
+  x: number,
+  y: number,
+): { layer: UvTextureLayer | null; owner: 'image' | 'uv' } {
+  const layer = hitUvTextureLayer(layers, x, y);
+  return { layer, owner: layer && !layer.locked ? 'image' : 'uv' };
 }
 
 export function uvTextureWorkspaceBounds(layers: readonly UvTextureLayer[]): UvTextureWorkspaceBounds {

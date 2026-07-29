@@ -1,7 +1,10 @@
 import {
   compileUvTextureWorkspace,
   createUvTextureWorkspace,
+  hitUvTextureLayer,
   parseUvTextureWorkspace,
+  resolveUvWorkspacePointer,
+  setUvTextureLayerLocked,
   updateUvTextureWorkspace,
   uvTextureWorkspaceBounds,
   uvTextureWorkspaceIsStale,
@@ -30,10 +33,49 @@ test('workspace validation accepts only strict package-relative content addresse
   assert(parseUvTextureWorkspace(JSON.stringify(duplicate)) === null, 'duplicate layer identity was accepted');
 });
 
+test('legacy layers default unlocked and interaction locks do not stale a compile', () => {
+  const original = createUvTextureWorkspace(source(HASH_A), 2, 3);
+  const legacy = JSON.parse(JSON.stringify(original));
+  delete legacy.layers[0].locked;
+  const parsed = parseUvTextureWorkspace(JSON.stringify(legacy));
+  assert(parsed?.layers[0]?.locked === false, 'pre-lock v1 workspace did not migrate to unlocked');
+  const compiled = {
+    ...parsed!,
+    compiled: {
+      revision: parsed!.revision,
+      originX: 0,
+      originY: 0,
+      width: 2,
+      height: 3,
+      atlasSha256: HASH_A,
+    },
+  };
+  const locked = setUvTextureLayerLocked(compiled, 'layer-1', true);
+  assert(locked.layers[0]?.locked === true, 'layer lock was not persisted');
+  assert(locked.revision === compiled.revision && !uvTextureWorkspaceIsStale(locked), 'interaction-only lock invalidated the compiled atlas');
+  const corrupt = JSON.parse(JSON.stringify(locked));
+  corrupt.layers[0].locked = 'yes';
+  assert(parseUvTextureWorkspace(JSON.stringify(corrupt)) === null, 'non-boolean lock state was accepted');
+});
+
+test('image hit testing returns the top visible layer and exposes its lock for UV fallthrough', () => {
+  const layers: UvTextureLayer[] = [
+    { id: 'a', name: 'A', source: source(HASH_A), x: 0, y: 0, width: 4, height: 4, visible: true, locked: false },
+    { id: 'b', name: 'B', source: source(HASH_B), x: 1, y: 1, width: 2, height: 2, visible: true, locked: true },
+  ];
+  assert(hitUvTextureLayer(layers, 1.5, 1.5)?.id === 'b', 'top locked layer was not the pointer owner');
+  assert(hitUvTextureLayer(layers, 1.5, 1.5)?.locked === true, 'lock state was lost at the hit-test boundary');
+  assert(hitUvTextureLayer(layers, 3.5, 3.5)?.id === 'a', 'uncovered lower layer was not hittable');
+  assert(hitUvTextureLayer(layers, 4, 2) === null, 'right edge leaked into the next texel');
+  assert(resolveUvWorkspacePointer(layers, 1.5, 1.5).owner === 'uv', 'locked image did not pass the pointer through to UV editing');
+  assert(resolveUvWorkspacePointer(layers, 3.5, 3.5).owner === 'image', 'unlocked image did not retain image-drag ownership');
+  assert(resolveUvWorkspacePointer(layers, 20, 20).owner === 'uv', 'empty workspace blocked UV editing');
+});
+
 test('visible bounds retain negative positions and crop transparent workspace space', () => {
   const layers: UvTextureLayer[] = [
-    { id: 'a', name: 'A', source: source(HASH_A), x: -7, y: 4, width: 3, height: 2, visible: true },
-    { id: 'b', name: 'B', source: source(HASH_B), x: 5, y: -3, width: 4, height: 5, visible: true },
+    { id: 'a', name: 'A', source: source(HASH_A), x: -7, y: 4, width: 3, height: 2, visible: true, locked: false },
+    { id: 'b', name: 'B', source: source(HASH_B), x: 5, y: -3, width: 4, height: 5, visible: true, locked: false },
   ];
   const bounds = uvTextureWorkspaceBounds(layers);
   assert(bounds.x === -7 && bounds.y === -3 && bounds.width === 16 && bounds.height === 9, 'signed visible union was wrong');
@@ -43,7 +85,7 @@ test('compile preserves native pixels, transparent gaps, paint order, and origin
   let doc = createUvTextureWorkspace(source(HASH_A), 1, 1);
   doc = updateUvTextureWorkspace(doc, [
     { ...doc.layers[0]!, x: -2, y: 1 },
-    { id: 'layer-2', name: 'top', source: source(HASH_B), x: 1, y: 1, width: 1, height: 1, visible: true },
+    { id: 'layer-2', name: 'top', source: source(HASH_B), x: 1, y: 1, width: 1, height: 1, visible: true, locked: false },
   ], 3);
   const rows: DecodedUvTextureLayer[] = [
     { layer: doc.layers[1]!, rgba: pixel(0, 0, 255, 128), width: 1, height: 1 },
@@ -78,7 +120,7 @@ test('later layers source-over earlier layers in document order', () => {
   let doc = createUvTextureWorkspace(source(HASH_A), 1, 1);
   doc = updateUvTextureWorkspace(doc, [
     doc.layers[0]!,
-    { id: 'layer-2', name: 'top', source: source(HASH_B), x: 0, y: 0, width: 1, height: 1, visible: true },
+    { id: 'layer-2', name: 'top', source: source(HASH_B), x: 0, y: 0, width: 1, height: 1, visible: true, locked: false },
   ], 3);
   const raster = compileUvTextureWorkspace(doc, [
     { layer: doc.layers[1]!, rgba: pixel(0, 0, 255, 128), width: 1, height: 1 },

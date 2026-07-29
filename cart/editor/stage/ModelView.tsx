@@ -51,6 +51,7 @@ import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
 import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
 import {
+  setUvTextureLayerLocked,
   updateUvTextureWorkspace,
   type UvTextureWorkspaceDoc,
 } from '../data/uvTextureWorkspace';
@@ -157,6 +158,7 @@ export type ModelFocusUv = {
 export type UvTextureLayerEdit =
   | { kind: 'position'; x: number; y: number }
   | { kind: 'visible'; visible: boolean }
+  | { kind: 'locked'; locked: boolean }
   | { kind: 'raise' }
   | { kind: 'lower' }
   | { kind: 'remove' };
@@ -1750,6 +1752,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!dir || !doc) return 'Image-layer edit refused — this model has no editable UV workspace yet.';
     const index = doc.layers.findIndex((layer) => layer.id === id);
     if (index < 0) return 'Image-layer edit refused — that source layer no longer exists.';
+    const current = doc.layers[index]!;
+    if (edit.kind === 'position' && current.locked) {
+      return `${current.name} is locked — unlock its layer before moving the image.`;
+    }
+    if (edit.kind === 'locked') {
+      try {
+        const next = setUvTextureLayerLocked(doc, id, edit.locked);
+        if (!writeUvTextureWorkspace(dir, next)) return 'Image-layer lock could not be saved.';
+        onDocumentMutated?.();
+        buildUvPanel();
+        return `${current.name} ${edit.locked ? 'locked against canvas movement' : 'unlocked for image placement'} · the compiled texture remains current.`;
+      } catch (error) {
+        return `Image-layer lock refused — ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
     const layers = [...doc.layers];
     if (edit.kind === 'position') {
       layers[index] = { ...layers[index]!, x: Math.round(edit.x), y: Math.round(edit.y) };

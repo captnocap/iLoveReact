@@ -3,7 +3,7 @@
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
-req_3515 / req_3520 / req_3524 / req_3525.
+req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528.
 
 ## In one sentence
 
@@ -110,6 +110,16 @@ removed. `IMAGES` mode draws those sources directly and supports canvas drag,
 signed numeric placement, visibility, ordering, and removal. No layer scale is
 offered in this slice: every compile therefore retains one source pixel as one
 atlas pixel.
+
+UV and image placement are two gesture owners over the same visible source
+stack (req_3526–3528). `UV` mode keeps every visible workspace image drawn
+under the UV graph while reserving all primary drags for UV selection and
+transforms. `IMAGES` mode lets only the top unlocked image under the pointer
+own an image drag; empty space and a locked image fall through to the same UV
+hit-test path instead of becoming an invisible canvas-wide shield. Each layer
+has a persisted lock button. A lock blocks canvas and numeric image movement
+but does not hide the source, remove it from Compile, increment the texture
+revision, or mark a current compile stale.
 
 `Compile` is explicit and shows progress while reading sources and composing.
 It takes the smallest integer union of visible images, leaves uncovered and

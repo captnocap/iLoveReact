@@ -105,6 +105,7 @@ export function importUvTextureWorkspaceLayer(
     width: decoded.width,
     height: decoded.height,
     visible: true,
+    locked: false,
   });
   if (!writeUvTextureWorkspace(dir, next)) throw new Error('The UV workspace manifest could not be saved.');
   return { doc: next, layer: next.layers[next.layers.length - 1]! };

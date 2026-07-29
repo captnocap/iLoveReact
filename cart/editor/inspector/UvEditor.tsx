@@ -7,6 +7,7 @@ import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../ru
 import { C, accentFor } from '../workspace.cls';
 import type { ModelFocusBridge, ModelFocusUv } from '../stage/ModelView';
 import {
+  resolveUvWorkspacePointer,
   UV_TEXTURE_WORKSPACE_TUNING,
   uvTextureWorkspaceIsStale,
   type UvTextureWorkspaceDoc,
@@ -180,6 +181,7 @@ function UvNumberField(props: {
   value: number | null;
   min: number;
   max: number;
+  disabled?: boolean;
   onCommit: (value: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -188,8 +190,14 @@ function UvNumberField(props: {
   useEffect(() => {
     if (!editing) setDraft(props.value == null ? '' : String(props.value));
   }, [props.value, editing]);
+  useEffect(() => {
+    if (!props.disabled) return;
+    replaceBaselineRef.current = null;
+    setEditing(false);
+    setDraft(props.value == null ? '' : String(props.value));
+  }, [props.disabled]);
   const commit = (submitted?: unknown) => {
-    if (props.value == null) return;
+    if (props.value == null || props.disabled) return;
     const raw = typeof submitted === 'string' ? submitted : draft;
     const parsed = parseClampedNumericDraft(raw, props.min, props.max);
     replaceBaselineRef.current = null;
@@ -203,10 +211,12 @@ function UvNumberField(props: {
     props.onCommit(value);
   };
   return (
-    <Box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: 29, flexDirection: 'row', alignItems: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4, overflow: 'hidden' }}>
+    <Box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: 29, flexDirection: 'row', alignItems: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4, overflow: 'hidden', opacity: props.disabled ? 0.5 : 1 }}>
       <Text style={{ width: 19, textAlign: 'center', color: accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>{props.label}</Text>
       {props.value == null ? (
         <Text style={{ flexGrow: 1, color: accentFor('textFaint'), fontSize: 10, fontFamily: 'ui-monospace', textAlign: 'center' }}>—</Text>
+      ) : props.disabled ? (
+        <Text style={{ flexGrow: 1, color: accentFor('textDim'), fontSize: 10, fontFamily: 'ui-monospace', textAlign: 'center' }}>{props.value}</Text>
       ) : (
         <TextInput
           value={editing ? draft : String(props.value)}
@@ -1133,6 +1143,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     >
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
         <Pressable
+          tooltip={workspaceDoc ? 'Edit UVs over the visible source images; image placement is fixed in this mode' : 'Edit UV islands over the current atlas'}
           onPress={() => setSurfaceMode('uv')}
           style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'uv' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'uv' ? accentFor('primary') : accentFor('border') }}
         >
@@ -1140,7 +1151,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <Text style={{ color: surfaceMode === 'uv' ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>UV</Text>
         </Pressable>
         <Pressable
-          tooltip={workspaceDoc ? 'Move original images in the signed UV workspace' : 'Add an image layer to create the editable workspace'}
+          tooltip={workspaceDoc ? 'Move unlocked images; locked-image and empty-space drags pass through to UVs' : 'Add an image layer to create the editable workspace'}
           onPress={() => workspaceDoc && setSurfaceMode('images')}
           style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'images' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'images' ? accentFor('primary') : accentFor('border'), opacity: workspaceDoc ? 1 : 0.55 }}
         >
@@ -1173,15 +1184,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const screen = localScreenPoint(event);
           if (surfaceMode === 'images' && workspaceDocRef.current) {
             const point = atlasPoint(screen);
-            const layer = [...workspaceDocRef.current.layers].reverse().find((candidate) => (
-              candidate.visible
-              && point.x >= candidate.x
-              && point.y >= candidate.y
-              && point.x <= candidate.x + candidate.width
-              && point.y <= candidate.y + candidate.height
-            ));
+            const route = resolveUvWorkspacePointer(workspaceDocRef.current.layers, point.x, point.y);
+            const layer = route.layer;
             setSelectedLayerId(layer?.id ?? null);
-            if (layer) {
+            if (route.owner === 'image' && layer) {
               gestureRef.current = {
                 kind: 'image',
                 id: layer.id,
@@ -1191,8 +1197,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 origin: { x: layer.x, y: layer.y },
                 seed: workspaceDocRef.current,
               };
+              return;
             }
-            return;
+            // Empty workspace and locked-image hits deliberately continue into
+            // the UV path below. This lets image placement and UV alignment
+            // coexist without an invisible full-canvas interaction shield.
+            if (layer?.locked) setNote(`${layer.name} is locked · editing UVs through it`);
           }
           if (selectedRect && selectionBounds && hitsControl(screen, rotationHandle, UV_LAYOUT_TUNING.rotationHandleHitPx)) {
             const point = atlasPoint(screen);
@@ -1374,7 +1384,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#07090d' }}
       >
         <Effect shader={WORKSPACE_CHECKER_SHADER} data={workspaceCheckerData} style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height }} />
-        {surfaceMode === 'images' && workspaceDoc && uv.packageDir ? (
+        {workspaceDoc && uv.packageDir ? (
           <>
             {workspaceDoc.layers.filter((layer) => layer.visible).map((layer) => (
               <Image
@@ -1392,17 +1402,37 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             ))}
             {(() => {
               const layer = workspaceDoc.layers.find((candidate) => candidate.id === selectedLayerId);
-              return layer?.visible ? (
-                <Box style={{
-                  position: 'absolute',
-                  left: view.x + layer.x * view.scale,
-                  top: view.y + layer.y * view.scale,
-                  width: layer.width * view.scale,
-                  height: layer.height * view.scale,
-                  borderWidth: 2,
-                  borderColor: accentFor('primary'),
-                  pointerEvents: 'none',
-                }} />
+              return surfaceMode === 'images' && layer?.visible ? (
+                <>
+                  <Box style={{
+                    position: 'absolute',
+                    left: view.x + layer.x * view.scale,
+                    top: view.y + layer.y * view.scale,
+                    width: layer.width * view.scale,
+                    height: layer.height * view.scale,
+                    borderWidth: 2,
+                    borderColor: layer.locked ? '#d5aa69' : accentFor('primary'),
+                    pointerEvents: 'none',
+                  }} />
+                  {layer.locked ? (
+                    <Box style={{
+                      position: 'absolute',
+                      left: view.x + layer.x * view.scale + 4,
+                      top: view.y + layer.y * view.scale + 4,
+                      width: 20,
+                      height: 20,
+                      borderRadius: 4,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: '#17130ddd',
+                      borderWidth: 1,
+                      borderColor: '#d5aa69',
+                      pointerEvents: 'none',
+                    }}>
+                      <Icon name="Lock" size={11} color="#d5aa69" />
+                    </Box>
+                  ) : null}
+                </>
               ) : null;
             })()}
           </>
@@ -1506,10 +1536,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const layer = workspaceDoc?.layers.find((candidate) => candidate.id === selectedLayerId) ?? null;
           return (
             <>
-              <UvNumberField label="X" value={layer?.x ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: value, y: layer.y })} />
-              <UvNumberField label="Y" value={layer?.y ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: layer.x, y: value })} />
+              <UvNumberField label="X" value={layer?.x ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} disabled={layer?.locked} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: value, y: layer.y })} />
+              <UvNumberField label="Y" value={layer?.y ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} disabled={layer?.locked} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: layer.x, y: value })} />
               <Box style={{ flexGrow: 2, height: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4 }}>
-                <Text style={{ color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace' }}>{layer ? `${layer.width}×${layer.height} NATIVE PX` : 'SELECT AN IMAGE'}</Text>
+                <Text style={{ color: layer?.locked ? '#d5aa69' : accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace' }}>{layer ? `${layer.width}×${layer.height} NATIVE PX${layer.locked ? ' · LOCKED' : ''}` : 'SELECT AN IMAGE'}</Text>
               </Box>
             </>
           );
@@ -1566,14 +1596,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               return (
                 <Pressable
                   key={`uv-layer-row-${layer.id}`}
-                  onPress={() => {
-                    setSelectedLayerId(layer.id);
-                    setSurfaceMode('images');
-                  }}
+                  onPress={() => setSelectedLayerId(layer.id)}
                   style={{ height: 39, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 5, paddingRight: 5, backgroundColor: active ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('borderSoft') }}
                 >
                   <Pressable tooltip={layer.visible ? 'Hide this source from preview and compile' : 'Show this source'} onPress={() => editImageLayer(layer.id, { kind: 'visible', visible: !layer.visible })} style={{ width: 22, height: 27, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name={layer.visible ? 'Eye' : 'EyeOff'} size={11} color={layer.visible ? accentFor('primary') : accentFor('textFaint')} />
+                  </Pressable>
+                  <Pressable tooltip={layer.locked ? 'Unlock this image for canvas and numeric movement' : 'Lock this image in place while editing UVs'} onPress={() => editImageLayer(layer.id, { kind: 'locked', locked: !layer.locked })} style={{ width: 20, height: 27, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={layer.locked ? 'Lock' : 'LockOpen'} size={11} color={layer.locked ? '#d5aa69' : accentFor('textFaint')} />
                   </Pressable>
                   <Box style={{ width: 29, height: 29, overflow: 'hidden', backgroundColor: '#11151d', borderWidth: 1, borderColor: accentFor('border') }}>
                     {layer.visible ? <Image source={`${uv.packageDir}/${layer.source}`} style={{ width: 29, height: 29 }} /> : null}
