@@ -58,8 +58,11 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ "move UV islands", .uv_edit, "model.uv.edit" },
         .{ journal_log.UV_TEXTURE_IMPORT_LABEL, .uv_texture_import, "model.uv.import-texture" },
         .{ journal_log.UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload, "model.uv.reload-texture" },
+        .{ "tris to quads", .tris_to_quads, "model.mesh.tris-to-quads" },
     };
-    try testing.expectEqual(@typeInfo(journal_log.ActionKind).@"enum".fields.len, cases.len);
+    // integrity_alert is the one action-ring diagnostic that is not minted from
+    // a journal label; every actual mutation kind must appear above.
+    try testing.expectEqual(@typeInfo(journal_log.ActionKind).@"enum".fields.len - 1, cases.len);
     for (cases) |case| {
         const kind = journal_log.actionKindForLabel(case[0]) orelse return error.MissingActionKind;
         try testing.expectEqual(case[1], kind);
@@ -75,6 +78,7 @@ test "only UV-structural mesh actions invalidate an authored paint layout" {
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.delete_part));
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.split_quads));
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.symmetrize));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.tris_to_quads));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.transform));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.nudge));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.hide_part));
@@ -100,6 +104,10 @@ test "UV action ordinals labels and restore domains stay bridge exact" {
         "pack UV islands",
         journal_log.UV_RESTORE_SHAPE_LABEL,
         "stack UV islands",
+        "paste UV transform",
+        "move UV to cursor",
+        journal_log.UV_AUTO_SIZE_LABEL,
+        journal_log.UV_PROJECT_VIEW_LABEL,
     };
     try testing.expectEqual(@typeInfo(journal_log.UvAction).@"enum".fields.len, expected.len);
     for (expected, 0..) |label, ordinal| {

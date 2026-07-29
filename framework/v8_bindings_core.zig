@@ -816,6 +816,27 @@ fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     setReturnString(info, json);
 }
 
+fn setMeshTopoChangedReturn(info: v8.FunctionCallbackInfo, changed: u32) void {
+    if (changed == 0) {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    var buf: [256]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"changed\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), changed },
+    ) catch {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     if (!ok) {
         var buf: [512]u8 = undefined;
@@ -1509,6 +1530,15 @@ fn hostMeshTopoMergeFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const ok = scene3d.meshMergeSelectedFaces();
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_tris_to_quads() → JSON {"ok","key","count","changed"}. Convert
+/// every compatible pair in the selected authored triangles in one journal entry.
+fn hostMeshTopoTrisToQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const changed = scene3d.meshTrianglesToQuads();
+    if (changed > 0) state.markDirty();
+    setMeshTopoChangedReturn(info, changed);
 }
 
 /// __mesh_topo_glass() → JSON {"ok","key","count"}. Toggle the selected faces as GLASS
@@ -3798,6 +3828,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
     v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
+    v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
     v8_runtime.registerHostFn("__mesh_topo_glass", hostMeshTopoGlass);
     v8_runtime.registerHostFn("__model_glass_restore", hostModelGlassRestore);
     v8_runtime.registerHostFn("__mesh_topo_solidify", hostMeshTopoSolidify);

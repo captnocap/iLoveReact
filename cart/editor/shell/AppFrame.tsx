@@ -1938,6 +1938,7 @@ export default function AppFrame() {
       else runFaceOp('merge-faces', source);
       return;
     }
+    if (commandId === 'mesh-tris-to-quads') { runFaceOp('tris-to-quads', source); return; }
     if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1, source); return; }
     if (commandId === 'mesh-path-array') { pathArraySourceRef.current = source; openPathArrayPrompt(); return; }
     if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0, source); return; }
@@ -4478,8 +4479,9 @@ export default function AppFrame() {
   };
 
   // Face-selection ops that don't change part structure: winding / glass / solidify /
-  // merge-faces. Each is a host-owned journaled mutation; the shell only reports it.
-  const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces', source = 'dock') => {
+  // merge-faces / tris-to-quads. Each is a host-owned journaled mutation; the
+  // shell only reports its compact semantic result.
+  const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces' | 'tris-to-quads', source = 'dock') => {
     const api = modelToolApiRef.current;
     let ok = false;
     let okMsg = '';
@@ -4496,10 +4498,15 @@ export default function AppFrame() {
       ok = withNativeMeshActionSource(source, () => api?.solidifySelection() ?? false);
       okMsg = 'solidified the selected faces (inner skin + rim walls)';
       failMsg = 'solidify: select faces first (face mode)';
-    } else {
+    } else if (kind === 'merge-faces') {
       ok = withNativeMeshActionSource(source, () => api?.mergeFaces() ?? false);
       okMsg = 'merged the selection into one face';
       failMsg = 'merge faces: select 2+ faces (face mode) first';
+    } else {
+      const changed = withNativeMeshActionSource(source, () => api?.trisToQuads() ?? 0);
+      ok = changed > 0;
+      okMsg = `made ${changed} quad${changed === 1 ? '' : 's'} in one sweep; unmatched triangles left alone`;
+      failMsg = 'tris to quads: select 2+ compatible triangle faces (same plane, part, material, and alpha)';
     }
     setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
   };

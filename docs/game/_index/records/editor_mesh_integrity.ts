@@ -4,9 +4,9 @@ export const editor_mesh_integrity: DocIndex = {
   name: 'editor_mesh_integrity',
   file: 'editor_mesh_integrity.md',
   cart: 'cart/editor/stage/ModelView.tsx',
-  purpose: ['persistence', 'host_bridge', 'ui'],
+  purpose: ['persistence', 'host_bridge', 'geometry', 'ui'],
   summary:
-    'req_3484: the commit roll call. Every accepted topology transaction proves the part-ledger invariants at journalCommit/journalStep, heals what it can prove (overlap renormalize, stale empty-range compaction over the full displayed+hidden partition), and reports every fault loudly — a terminal line naming the guilty op plus an integrity_alert action event the shell resyncs and surfaces on. Ends the bug-site-vs-crash-site gap behind three weeks of chain-of-events corruption patches.',
+    'req_3484 + req_3507: every topology transaction gets a commit-time part-ledger roll call, and selected triangulated surfaces now recover a compatible non-overlapping quad set in one guarded native journal transaction. The sweep preserves resident render rows/UV/paint/material/part ownership, quality-ranks competing shared edges, leaves unmatched triangles alone, and reports the exact converted count.',
   interfaces: [
     {
       name: 'meshIntegrityRollCall',
@@ -29,6 +29,17 @@ export const editor_mesh_integrity: DocIndex = {
       consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/stage/ModelView.tsx'],
       status: 'live',
     },
+    {
+      name: 'meshTrianglesToQuads',
+      purpose: ['geometry', 'host_bridge', 'ui'],
+      kind: 'host_fn',
+      sourceFile: 'framework/gpu/3d.zig',
+      description:
+        'req_3507 bulk authored-topology recovery. Mesh.quadifySelected considers selected one-triangle faces only; candidate pairs share one manifold edge, part, texture-role material, plane, winding, and a convex four-corner boundary. It quality-ranks competing candidates (diagonal balance, opposite-edge balance, corner health), chooses a deterministic non-overlapping maximal set, and records each physical resident diagonal. The host partitions opaque/glass masks, then commits every pair through commitIndexedFaceGrouping as ONE “tris to quads” journal entry without rebuilding/reordering resident triangles. Returns changed count through __mesh_topo_tris_to_quads; Edit → Mesh → Topology and the contextual topology strip invoke it.',
+      dependsOn: ['meshIntegrityRollCall'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/shell/AppFrame.tsx'],
+      status: 'live',
+    },
   ],
   patterns: [
     {
@@ -46,7 +57,7 @@ export const editor_mesh_integrity: DocIndex = {
       severity: 'medium',
       purpose: ['host_bridge'],
       description:
-        'ActionKind and NATIVE_MESH_ACTIONS are one append-only ordinal contract (integrity_alert = 26). Inserting or reordering either side silently re-labels every native event the cart decodes. Add new kinds at the END of both tables and extend the .test.ts pin in the same commit.',
+        'ActionKind and NATIVE_MESH_ACTIONS are one append-only ordinal contract (integrity_alert = 26; tris_to_quads = 27). Inserting or reordering either side silently re-labels every native event the cart decodes. Add new kinds at the END of both tables and extend the .test.ts pin in the same commit.',
       evidence: ['framework/gpu/mesh_journal_log.zig ActionKind', 'cart/editor/model/nativeMeshEvents.test.ts ordinal pins'],
     },
     {

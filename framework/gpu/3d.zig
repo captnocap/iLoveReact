@@ -5036,6 +5036,67 @@ pub fn meshFlipSelectionWinding() bool {
     return true;
 }
 
+/// Commit a group-only indexed topology change against the resident triangle rows.
+/// This is the single strict boundary used by Merge Faces and Tris to Quads: geometry,
+/// UVs, material identity, paint, and part ownership must all remain byte-stable.
+fn commitIndexedFaceGrouping(
+    indexed: *indexed_edit_mesh.Mesh,
+    verts: []const f32,
+    tri_count: u32,
+    parts: ?[]const u32,
+    materials: []const u32,
+    label: []const u8,
+) bool {
+    const merged_groups = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_groups);
+    const merged_parts = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_parts);
+    const merged_materials = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(merged_materials);
+    if (!indexed.writeResidentMetadata(merged_groups, merged_parts, merged_materials)) return false;
+
+    // Group-only operations are not allowed to re-parent or re-material a resident
+    // triangle; that would turn a seam dissolve into a structural Outliner mutation.
+    if (parts) |base_parts| {
+        if (!std.mem.eql(u32, base_parts, merged_parts)) return false;
+    } else {
+        for (merged_parts) |part| if (part != indexed_edit_mesh.NO_PART) return false;
+    }
+    if (!std.mem.eql(u32, materials, merged_materials)) return false;
+
+    // Selection tint is presentation state. Restore the true atlas first, then guard
+    // the complete durable model state and commit only the requested group delta.
+    mesh_edit.clearSelection();
+    var guard = ResidentMetadataGuard.capture() orelse return false;
+    defer guard.deinit();
+    var snap: ?JournalEntry = journalSnapshotCurrent(label) orelse return false;
+
+    model_source.setFaceGroups(merged_groups);
+    mesh_edit.faceGroupsChanged();
+    const live_parts: ?[]const u32 = if (parts) |rows| rows else null;
+    const committed = guard.matchesGroupOnly(merged_groups) and
+        indexed.residentMetadataMatches(tri_count, merged_groups, live_parts, model_source.faceMaterials()) and
+        indexed.residentUvsMatch(verts, tri_count);
+    if (!committed) {
+        const old_groups = guard.groups orelse {
+            journalDiscard(&snap);
+            return false;
+        };
+        model_source.setFaceGroups(old_groups);
+        mesh_edit.faceGroupsChanged();
+        journalDiscard(&snap);
+        log.print("[mesh] {s} rolled back: resident model-state invariant rejected the group commit\n", .{label});
+        return false;
+    }
+
+    indexed.clearCutOrigins();
+    clearIndexedEditMesh();
+    g_indexed_edit_mesh = indexed.*;
+    indexed.* = .{ .allocator = std.heap.c_allocator };
+    journalCommit(&snap);
+    return true;
+}
+
 /// Fuse selected faces into one authored face without rewriting the resident render
 /// mesh. Shared seams disappear from edit topology because the selected triangles now
 /// share one group, while their exact winding, UVs, atlas pixels, materials, colours,
@@ -5073,54 +5134,51 @@ pub fn meshMergeSelectedFaces() bool {
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.mergeSelected(mask) catch return false)) return false;
+    return commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces");
+}
 
-    const merged_groups = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
-    defer std.heap.c_allocator.free(merged_groups);
-    const merged_parts = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
-    defer std.heap.c_allocator.free(merged_parts);
-    const merged_materials = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
-    defer std.heap.c_allocator.free(merged_materials);
-    if (!indexed.writeResidentMetadata(merged_groups, merged_parts, merged_materials)) return false;
+/// Convert every compatible pair of selected authored triangles to quads in one
+/// undoable transaction. Pairing is native, deterministic, and conservative:
+/// triangles must share one manifold edge, part, texture role, alpha class, plane,
+/// and winding; the four-corner boundary must be convex. Unmatched triangles remain.
+pub fn meshTrianglesToQuads() u32 {
+    if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
+    const verts = g_edit_verts orelse return 0;
+    const tri_count = g_edit_count / 3;
+    if (tri_count < 2 or model_source.faceGroups() == null) return 0;
+    const selected = jalloc.alloc(bool, tri_count) catch return 0;
+    defer jalloc.free(selected);
+    if (mesh_edit.buildDeleteMask(selected) < 2) return 0;
+    const groups = captureFaceGroups() orelse return 0;
+    defer std.heap.c_allocator.free(groups);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const materials = captureFaceMaterials(tri_count) orelse return 0;
+    defer std.heap.c_allocator.free(materials);
+    const base_colors = collectCurrentFaceColors() orelse return 0;
+    defer std.heap.c_allocator.free(base_colors);
+    if (base_colors.len != @as(usize, tri_count) * 4) return 0;
 
-    // Merge Faces is not allowed to re-parent or re-material any resident triangle.
-    if (parts) |base_parts| {
-        if (!std.mem.eql(u32, base_parts, merged_parts)) return false;
-    } else {
-        for (merged_parts) |part| if (part != indexed_edit_mesh.NO_PART) return false;
-    }
-    if (!std.mem.eql(u32, materials, merged_materials)) return false;
-
-    // Selection tint is presentation state. Restore the true atlas first, then guard
-    // the complete durable model state and commit only the requested group delta.
-    mesh_edit.clearSelection();
-    var guard = ResidentMetadataGuard.capture() orelse return false;
-    defer guard.deinit();
-    var snap: ?JournalEntry = journalSnapshotCurrent("merge faces") orelse return false;
-
-    model_source.setFaceGroups(merged_groups);
-    mesh_edit.faceGroupsChanged();
-    const live_parts: ?[]const u32 = if (parts) |rows| rows else null;
-    const committed = guard.matchesGroupOnly(merged_groups) and
-        indexed.residentMetadataMatches(tri_count, merged_groups, live_parts, model_source.faceMaterials()) and
-        indexed.residentUvsMatch(verts, tri_count);
-    if (!committed) {
-        const old_groups = guard.groups orelse {
-            journalDiscard(&snap);
-            return false;
-        };
-        model_source.setFaceGroups(old_groups);
-        mesh_edit.faceGroupsChanged();
-        journalDiscard(&snap);
-        log.print("[mesh] Merge Faces rolled back: resident model-state invariant rejected the group commit\n", .{});
-        return false;
+    // Glass and opaque triangles may both be converted in this one sweep, but never
+    // into the SAME authored face: each alpha class gets an independent pairing mask.
+    const opaque_mask = jalloc.alloc(bool, tri_count) catch return 0;
+    defer jalloc.free(opaque_mask);
+    const glass_mask = jalloc.alloc(bool, tri_count) catch return 0;
+    defer jalloc.free(glass_mask);
+    for (selected, 0..) |is_selected, triangle| {
+        const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
+        opaque_mask[triangle] = is_selected and !is_glass;
+        glass_mask[triangle] = is_selected and is_glass;
     }
 
-    indexed.clearCutOrigins();
-    clearIndexedEditMesh();
-    g_indexed_edit_mesh = indexed;
-    indexed = .{ .allocator = std.heap.c_allocator };
-    journalCommit(&snap);
-    return true;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return 0;
+    defer indexed.deinit();
+    const opaque_quads = indexed.quadifySelected(opaque_mask) catch return 0;
+    const glass_quads = indexed.quadifySelected(glass_mask) catch return 0;
+    const changed = opaque_quads + glass_quads;
+    if (changed == 0) return 0;
+    if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "tris to quads")) return 0;
+    return changed;
 }
 
 /// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent

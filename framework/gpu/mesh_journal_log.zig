@@ -45,6 +45,9 @@ pub const ActionKind = enum(u8) {
     // fault after the preceding action. before_parts/after_parts carry declared
     // counts around any host self-heal; the cart resyncs its mirrors on receipt.
     integrity_alert,
+    // Append-only ordinal 27 (req_3507): selected compatible triangle pairs
+    // become authored quads in one group-only native transaction.
+    tris_to_quads,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -179,6 +182,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ UV_PROJECT_VIEW_LABEL, .uv_edit },
         .{ UV_TEXTURE_IMPORT_LABEL, .uv_texture_import },
         .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
+        .{ "tris to quads", .tris_to_quads },
     };
     for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
     return null;
@@ -213,6 +217,7 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .uv_texture_import => "model.uv.import-texture",
         .uv_texture_reload => "model.uv.reload-texture",
         .integrity_alert => "model.mesh.integrity-alert",
+        .tris_to_quads => "model.mesh.tris-to-quads",
     };
 }
 
@@ -238,6 +243,7 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .solidify_faces,
         .split_quads,
         .symmetrize,
+        .tris_to_quads,
         => true,
         .hide_part,
         .show_part,

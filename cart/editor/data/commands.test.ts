@@ -44,6 +44,7 @@ test('wide menu panels center on their chrome trigger before edge clamping', () 
 test('ordinary face selection still offers authored-face merge', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 2 }, 1));
   assert(commands.includes('mesh-merge-faces'), 'Merge Faces remains available for a real face selection');
+  assert(commands.includes('mesh-tris-to-quads'), 'Tris to Quads is available for a real multi-face selection');
   assert(commands.includes('mesh-flip-face'), 'Flip Face is available for any real face selection');
 });
 
@@ -52,6 +53,7 @@ test('a single face exposes the winding correction beside face extrude', () => {
   assert(commands.includes('mesh-extrude-face'), 'single-face Extrude disappeared');
   assert(commands.includes('mesh-flip-face'), 'single-face Flip disappeared');
   assert(commands.includes('mesh-select-uv-orientation'), 'single-face UV orientation collection disappeared');
+  assert(!commands.includes('mesh-tris-to-quads'), 'one face cannot expose pairwise Tris to Quads');
 });
 
 test('bevel is contextual to exactly one vertex or edge', () => {
@@ -93,6 +95,7 @@ test('B invokes Bevel in vertex and edge modes without stealing Face or Paint B'
 test('multi-part outliner selection cannot fall through to Merge Faces', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 12 }, 2));
   assert(!commands.includes('mesh-merge-faces'), 'Merge Faces is hidden while selected faces represent multiple parts');
+  assert(!commands.includes('mesh-tris-to-quads'), 'Tris to Quads is hidden while selected faces represent multiple parts');
 });
 
 test('structural merge requires the explicit selected set, not list adjacency', () => {

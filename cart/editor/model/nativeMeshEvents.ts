@@ -35,6 +35,8 @@ export const NATIVE_MESH_ACTIONS = [
   // part-ledger fault after the preceding action. beforeParts/afterParts carry
   // the declared counts around any host self-heal; the shell resyncs on receipt.
   { kind: 'integrity-alert', label: 'integrity alert', commandId: 'model.mesh.integrity-alert' },
+  // Append-only ordinal 27 (req_3507): the native bulk triangle-pairing action.
+  { kind: 'tris-to-quads', label: 'tris to quads', commandId: 'model.mesh.tris-to-quads' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

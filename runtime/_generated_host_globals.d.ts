@@ -45,6 +45,7 @@ declare global {
   function __mesh_topo_extrude_face(...args: unknown[]): unknown;
   function __mesh_topo_create_face(...args: unknown[]): unknown;
   function __mesh_topo_flip_faces(...args: unknown[]): unknown;
+  function __mesh_topo_weld(...args: unknown[]): unknown;
   function __mesh_topo_loop_cut(...args: unknown[]): unknown;
   function __mesh_bevel_begin(...args: unknown[]): unknown;
   function __mesh_bevel_preview(...args: unknown[]): unknown;
@@ -58,6 +59,7 @@ declare global {
   function __mesh_group_face_count(...args: unknown[]): unknown;
   function __mesh_append_group(...args: unknown[]): unknown;
   function __mesh_append_path_plane(...args: unknown[]): unknown;
+  function __mesh_append_path_edges(...args: unknown[]): unknown;
   function __mesh_set_group_hidden(...args: unknown[]): unknown;
   function __mesh_undo(...args: unknown[]): unknown;
   function __mesh_redo(...args: unknown[]): unknown;
@@ -75,7 +77,9 @@ declare global {
   function __mesh_topo_detach(...args: unknown[]): unknown;
   function __mesh_merge_parts(...args: unknown[]): unknown;
   function __mesh_topo_merge_faces(...args: unknown[]): unknown;
+  function __mesh_topo_tris_to_quads(...args: unknown[]): unknown;
   function __mesh_topo_glass(...args: unknown[]): unknown;
+  function __model_glass_restore(...args: unknown[]): unknown;
   function __mesh_topo_solidify(...args: unknown[]): unknown;
   function __mesh_append_file(...args: unknown[]): unknown;
   function __mesh_surviving_groups(...args: unknown[]): unknown;
@@ -112,6 +116,10 @@ declare global {
   function __model_paint_polygon(...args: unknown[]): unknown;
   function __model_paint_material(...args: unknown[]): unknown;
   function __model_paint_material_clear(...args: unknown[]): unknown;
+  function __model_region_formula(...args: unknown[]): unknown;
+  function __model_region_set(...args: unknown[]): unknown;
+  function __model_region_bind_slot(...args: unknown[]): unknown;
+  function __model_region_clear(...args: unknown[]): unknown;
   function __model_set_paint_detail(...args: unknown[]): unknown;
   function __model_set_paint_fit(...args: unknown[]): unknown;
   function __model_paint_atlas_estimate(...args: unknown[]): unknown;
@@ -120,6 +128,8 @@ declare global {
   function __model_uv_layout_apply(...args: unknown[]): unknown;
   function __model_uv_geometry_apply(...args: unknown[]): unknown;
   function __model_uv_restore_shape(...args: unknown[]): unknown;
+  function __model_uv_auto_size(...args: unknown[]): unknown;
+  function __model_uv_project_view(...args: unknown[]): unknown;
   function __model_uv_selection_read(...args: unknown[]): unknown;
   function __model_uv_island_select(...args: unknown[]): unknown;
   function __model_atlas_replace(...args: unknown[]): unknown;
@@ -827,6 +837,7 @@ declare global {
   function __map_path_delete(...args: unknown[]): unknown;
   function __map_path_control_delete(...args: unknown[]): unknown;
   function __map_path_stats(...args: unknown[]): unknown;
+  function __map_path_snapshot(...args: unknown[]): unknown;
   function __map_history(...args: unknown[]): unknown;
   function __map_undo(...args: unknown[]): unknown;
   function __map_redo(...args: unknown[]): unknown;
@@ -903,6 +914,7 @@ declare global {
   function __compiled_world_clear_physics(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_props(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_props2(...args: unknown[]): unknown;
+  function __compiled_world_set_live_mesh_props3(...args: unknown[]): unknown;
   function __compiled_world_clear_live_mesh_props(...args: unknown[]): unknown;
   function __compiled_world_set_live_mesh_ghost(...args: unknown[]): unknown;
   function __compiled_world_clear_live_mesh_ghost(...args: unknown[]): unknown;
@@ -914,6 +926,7 @@ declare global {
   function __compiled_world_set_paint_mode(...args: unknown[]): unknown;
   function __compiled_world_set_resident_meshes(...args: unknown[]): unknown;
   function __compiled_world_set_player_model(...args: unknown[]): unknown;
+  function __compiled_world_set_player_skin(...args: unknown[]): unknown;
   function __compiled_world_set_player_animation(...args: unknown[]): unknown;
   function __compiled_world_set_player_live_pose(...args: unknown[]): unknown;
   function __compiled_world_clear_player_live_pose(...args: unknown[]): unknown;

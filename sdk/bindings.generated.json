@@ -177,6 +177,10 @@
           "zig": "hostMeshTopoFlipFaces"
         },
         {
+          "js": "__mesh_topo_weld",
+          "zig": "hostMeshTopoWeld"
+        },
+        {
           "js": "__mesh_topo_loop_cut",
           "zig": "hostMeshTopoLoopCut"
         },
@@ -227,6 +231,10 @@
         {
           "js": "__mesh_append_path_plane",
           "zig": "hostMeshAppendPathPlane"
+        },
+        {
+          "js": "__mesh_append_path_edges",
+          "zig": "hostMeshAppendPathEdges"
         },
         {
           "js": "__mesh_set_group_hidden",
@@ -297,8 +305,16 @@
           "zig": "hostMeshTopoMergeFaces"
         },
         {
+          "js": "__mesh_topo_tris_to_quads",
+          "zig": "hostMeshTopoTrisToQuads"
+        },
+        {
           "js": "__mesh_topo_glass",
           "zig": "hostMeshTopoGlass"
+        },
+        {
+          "js": "__model_glass_restore",
+          "zig": "hostModelGlassRestore"
         },
         {
           "js": "__mesh_topo_solidify",
@@ -445,6 +461,22 @@
           "zig": "hostModelPaintMaterialClear"
         },
         {
+          "js": "__model_region_formula",
+          "zig": "hostModelRegionFormula"
+        },
+        {
+          "js": "__model_region_set",
+          "zig": "hostModelRegionSet"
+        },
+        {
+          "js": "__model_region_bind_slot",
+          "zig": "hostModelRegionBindSlot"
+        },
+        {
+          "js": "__model_region_clear",
+          "zig": "hostModelRegionClear"
+        },
+        {
           "js": "__model_set_paint_detail",
           "zig": "hostModelSetPaintDetail"
         },
@@ -475,6 +507,14 @@
         {
           "js": "__model_uv_restore_shape",
           "zig": "hostModelUvRestoreShape"
+        },
+        {
+          "js": "__model_uv_auto_size",
+          "zig": "hostModelUvAutoSize"
+        },
+        {
+          "js": "__model_uv_project_view",
+          "zig": "hostModelUvProjectView"
         },
         {
           "js": "__model_uv_selection_read",
@@ -3343,6 +3383,10 @@
           "zig": "hostPathStats"
         },
         {
+          "js": "__map_path_snapshot",
+          "zig": "hostPathSnapshot"
+        },
+        {
           "js": "__map_history",
           "zig": "hostMapHistory"
         },
@@ -3650,6 +3694,10 @@
           "zig": "hostSetLiveMeshProps2"
         },
         {
+          "js": "__compiled_world_set_live_mesh_props3",
+          "zig": "hostSetLiveMeshProps3"
+        },
+        {
           "js": "__compiled_world_clear_live_mesh_props",
           "zig": "hostClearLiveMeshProps"
         },
@@ -3692,6 +3740,10 @@
         {
           "js": "__compiled_world_set_player_model",
           "zig": "hostSetPlayerModel"
+        },
+        {
+          "js": "__compiled_world_set_player_skin",
+          "zig": "hostSetPlayerSkin"
         },
         {
           "js": "__compiled_world_set_player_animation",

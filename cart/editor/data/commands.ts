@@ -268,6 +268,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-glass', menu: 'Edit', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-solidify', menu: 'Edit', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-merge-faces', menu: 'Edit', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
+  // Bulk tris-to-quads topology recovery (req_3507): pair every compatible
+  // selected authored triangle, leaving non-pairs untouched in one undo step.
+  { id: 'mesh-tris-to-quads', menu: 'Edit', scope: 'model', name: 'Tris to Quads', icon: 'Grid2x2', key: '', context: true, native: true, undoable: true, tool: true },
   // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge the
   // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
   // the operation is NEVER based on outliner order (req_2811 / req_2870).
@@ -408,7 +411,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -495,6 +498,9 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
       // one face and strand zero-face outliner rows (req_2870). The parts command below
       // owns that gesture instead and preserves each pre-merge authored face.
       ...(selectedPartCount >= 2 ? [] : [commandById('mesh-merge-faces')]),
+      // This is pairwise and part-safe internally, but an Outliner multi-selection is
+      // not an authored face gesture; keep that state owned by structural part verbs.
+      ...(tool.sel >= 2 && selectedPartCount < 2 ? [commandById('mesh-tris-to-quads')] : []),
     ];
   }
   return [];

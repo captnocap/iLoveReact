@@ -230,6 +230,7 @@ export type ModelToolApi = {
   detachSelection: () => { lo: number; hi: number } | null;
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
+  trisToQuads: () => number;
   glassSelection: () => boolean;
   solidifySelection: () => boolean;
   appendModelFile: (path: string, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
@@ -387,7 +388,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
+type TopoResult = { ok: number; key?: string; count?: number; changed?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
@@ -564,6 +565,7 @@ const meshDetach = () => readTopoResult(host.__mesh_topo_detach?.());
 const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) =>
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
+const meshTrisToQuads = () => readTopoResult(host.__mesh_topo_tris_to_quads?.());
 const meshGlass = () => readTopoResult(host.__mesh_topo_glass?.());
 const meshSolidify = () => readTopoResult(host.__mesh_topo_solidify?.(0));
 const meshAppendFile = (path: string, expectedPartCount: number) => readTopoResult(host.__mesh_append_file?.(path, expectedPartCount));
@@ -2005,6 +2007,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
+    trisToQuads: () => {
+      const result = meshTrisToQuads();
+      return adoptMesh(result) ? Math.max(0, Math.floor(result?.changed ?? 0)) : 0;
+    },
     glassSelection: () => adoptMesh(meshGlass()),
     solidifySelection: () => adoptMesh(meshSolidify()),
     appendModelFile: (path, color, expectedPartCount) => {
@@ -2492,7 +2498,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   progapply  (stroke journal + paint layers, req_2672)
     //   patharc:lo,hi,axis,bays,turnDeg,riseModel
     //   patharcmulti:axis,bays,turnDeg,riseModel,lo,hi[,lo,hi…]
-    //   pathpoints:lo,hi,axis,x,y,z,... solidify merge extrudeface:distance extrudeedge:distance
+    //   pathpoints:lo,hi,axis,x,y,z,... solidify merge trisquads extrudeface:distance extrudeedge:distance
     //   detach contract:/absolute/output-prefix (port-parity fixture dump)
     // `RJIT_MESHOPS=@/path/ops.txt` reads the script from a FILE — re-read on every
     // eval, so a reload-torture run (req_2914) can rewrite the file between reloads
@@ -2590,6 +2596,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // observable mesh document + journal topology without a screenshot.
         else if (name === 'solidify') { const r = meshSolidify(); adoptMesh(r); console.error(`[meshops] solidify → ${JSON.stringify(r)}`); }
         else if (name === 'merge') { const r = meshMergeFaces(); adoptMesh(r); console.error(`[meshops] merge → ${JSON.stringify(r)}`); }
+        else if (name === 'trisquads') { const r = meshTrisToQuads(); adoptMesh(r); console.error(`[meshops] trisquads → ${JSON.stringify(r)}`); }
         else if (name === 'extrudeface') { const r = meshExtrudeFace(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeface:${a[0]} → ${JSON.stringify(r)}`); }
         else if (name === 'extrudeedge') { const r = meshExtrudeEdge(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeedge:${a[0]} → ${JSON.stringify(r)}`); }
         else if (name === 'detach') { const r = meshDetach(); adoptMesh(r); console.error(`[meshops] detach → ${JSON.stringify(r)}`); }

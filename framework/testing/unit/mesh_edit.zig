@@ -530,6 +530,117 @@ test "dissolving an irregular four-quad grid cleans authored boundary without re
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
 }
 
+test "tris to quads recovers every selected cell instead of pairing across grid seams" {
+    // Two adjacent squares arrive as four independent triangles. The middle vertical
+    // edge is also a legal triangle adjacency, so an arbitrary first-match walk can
+    // make one diagonal parallelogram and strand both intended cell mates. The bulk
+    // transaction scores all candidates first and recovers both authored squares.
+    const points = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 },
+        .{ 0, 1, 0 }, .{ 1, 1, 0 }, .{ 2, 1, 0 },
+    };
+    const triangles = [_][3]usize{
+        .{ 0, 1, 4 }, .{ 0, 4, 3 },
+        .{ 1, 2, 5 }, .{ 1, 5, 4 },
+    };
+    const triangle_count: u32 = triangles.len;
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], points[point][0..]);
+            soup[base + 6] = @as(f32, @floatFromInt(point)) * 0.1;
+            soup[base + 7] = @as(f32, @floatFromInt(triangle_index)) * 0.1;
+        }
+    }
+    const groups = [_]u32{ 0, 1, 2, 3 };
+    const parts = [_]u32{7} ** triangles.len;
+    const materials = [_]u32{3} ** triangles.len;
+    const selected = [_]bool{true} ** triangles.len;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        testing.allocator,
+        soup[0..],
+        triangle_count,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+    );
+    defer indexed.deinit();
+
+    try testing.expectEqual(@as(u32, 2), try indexed.quadifySelected(selected[0..]));
+    var resident_groups: [triangles.len]u32 = undefined;
+    var resident_parts: [triangles.len]u32 = undefined;
+    var resident_materials: [triangles.len]u32 = undefined;
+    try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 2, 2 }, resident_groups[0..]);
+    try testing.expectEqualSlices(u32, parts[0..], resident_parts[0..]);
+    try testing.expectEqualSlices(u32, materials[0..], resident_materials[0..]);
+    try testing.expect(indexed.residentUvsMatch(soup[0..], triangle_count));
+
+    var live_quads: u32 = 0;
+    for (indexed.faces.items) |face| {
+        if (!face.alive) continue;
+        try testing.expectEqual(@as(usize, 4), face.vertices.items.len);
+        try testing.expectEqual(@as(usize, 2), face.source_triangles.items.len);
+        try testing.expect(face.diagonal != null);
+        live_quads += 1;
+    }
+    try testing.expectEqual(@as(u32, 2), live_quads);
+}
+
+test "tris to quads leaves selected material mismatches and unmatched triangles alone" {
+    var soup = [_]f32{0} ** (3 * 3 * 8);
+    const corners = [9][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+        .{ 3, 0, 0 }, .{ 4, 0, 0 }, .{ 3, 1, 0 },
+    };
+    for (corners, 0..) |corner, row| @memcpy(soup[row * 8 .. row * 8 + 3], corner[0..]);
+    const groups = [_]u32{ 0, 1, 2 };
+    const parts = [_]u32{ 4, 4, 4 };
+    const materials = [_]u32{ 8, 9, 8 };
+    const selected = [_]bool{ true, true, true };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+        testing.allocator,
+        soup[0..],
+        3,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+    );
+    defer indexed.deinit();
+
+    try testing.expectEqual(@as(u32, 0), try indexed.quadifySelected(selected[0..]));
+    var resident_groups: [3]u32 = undefined;
+    var resident_parts: [3]u32 = undefined;
+    var resident_materials: [3]u32 = undefined;
+    try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+    try testing.expectEqualSlices(u32, groups[0..], resident_groups[0..]);
+    try testing.expectEqualSlices(u32, parts[0..], resident_parts[0..]);
+    try testing.expectEqualSlices(u32, materials[0..], resident_materials[0..]);
+}
+
+test "tris to quads rejects a shared edge made non-manifold by an unselected face" {
+    var soup = [_]f32{0} ** (3 * 3 * 8);
+    const corners = [9][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 1, 0, 0 }, .{ 0, 0, 0 }, .{ 1, -1, 0 },
+        .{ 1, 0, 0 }, .{ 0, 0, 0 }, .{ 0, -1, 0 },
+    };
+    for (corners, 0..) |corner, row| @memcpy(soup[row * 8 .. row * 8 + 3], corner[0..]);
+    const groups = [_]u32{ 0, 1, 2 };
+    const selected = [_]bool{ true, true, false };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 3, groups[0..], null);
+    defer indexed.deinit();
+
+    try testing.expectEqual(@as(u32, 0), try indexed.quadifySelected(selected[0..]));
+    var resident_groups: [3]u32 = undefined;
+    var resident_parts: [3]u32 = undefined;
+    var resident_materials: [3]u32 = undefined;
+    try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+    try testing.expectEqualSlices(u32, groups[0..], resident_groups[0..]);
+}
+
 test "sequential concave face merges preserve resident triangles uv and part ownership" {
     // Bookshelf sides are not one convex rectangle: shelf offsets leave an inward
     // corner along the three-face perimeter. Merging one side and then its opposite
@@ -1277,11 +1388,11 @@ test "raw import recovers isolated coplanar quad pairs but keeps triangle fans s
     // independent because they do not form isolated four-corner quads.
     var soup = [_]f32{0} ** (5 * 3 * 8);
     const corners = [15][3]f32{
-        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
-        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
-        .{ 3.5, 0.4, 0 }, .{ 4, 0, 0 }, .{ 3.5, 1, 0 },
+        .{ 0, 0, 0 },     .{ 1, 0, 0 },   .{ 1, 1, 0 },
+        .{ 0, 0, 0 },     .{ 1, 1, 0 },   .{ 0, 1, 0 },
+        .{ 3.5, 0.4, 0 }, .{ 4, 0, 0 },   .{ 3.5, 1, 0 },
         .{ 3.5, 0.4, 0 }, .{ 3.5, 1, 0 }, .{ 3, 0, 0 },
-        .{ 3.5, 0.4, 0 }, .{ 3, 0, 0 }, .{ 4, 0, 0 },
+        .{ 3.5, 0.4, 0 }, .{ 3, 0, 0 },   .{ 4, 0, 0 },
     };
     for (corners, 0..) |corner, row| {
         soup[row * 8 + 0] = corner[0];
