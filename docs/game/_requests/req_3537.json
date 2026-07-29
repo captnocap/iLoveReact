@@ -43,12 +43,36 @@
       "from": "doing",
       "to": "review",
       "text": "Fixed the embedded-GLB mapping regression shown on Bald Head. Native import now snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites the mesh UV lanes, then applies the owned image/corner pair after quad grouping and paint-layout setup. Existing packages are covered too: imported-texture provenance now versions the UV contract, and a missing-version v1 automatic row is refreshed in place on the next source load while authored variants/base paint remain untouched because Save-back strips provenance. Native source-snapshot and TypeScript migration regressions pass, as do test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build."
+    },
+    {
+      "at": "2026-07-29T22:47:46.657Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Saved meshdoc packages bypass the source loader on cold open, so the provenance upgrade needs a guarded one-time source preflight before restoring the edited document."
+    },
+    {
+      "at": "2026-07-29T22:47:46.665Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T22:51:16.128Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Fixed the Bald Head embedded-texture mapping end to end. Native import snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites mesh UV lanes, then installs the owned image/corner pair after face grouping and layout. Imported Texture provenance v2 upgrades an untouched pre-fix v1 row in place; saved-meshdoc packages now detect that legacy row, briefly load the retained source for a correct source-resident capture with base adoption disabled, and immediately restore the edited mesh and authored base. Current or Save-back-edited rows skip the probe. Source-snapshot, provenance migration/dedupe, full editor bundle, test-mesh-import, test-model-paint, all five paint-variant tests, and ReleaseFast editor ship pass."
     }
   ],
-  "resolution": "Fixed the embedded-GLB mapping regression shown on Bald Head. Native import now snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites the mesh UV lanes, then applies the owned image/corner pair after quad grouping and paint-layout setup. Existing packages are covered too: imported-texture provenance now versions the UV contract, and a missing-version v1 automatic row is refreshed in place on the next source load while authored variants/base paint remain untouched because Save-back strips provenance. Native source-snapshot and TypeScript migration regressions pass, as do test-mesh-import, test-model-paint, all five paint-variant tests, and the ReleaseFast editor build.",
+  "resolution": "Fixed the Bald Head embedded-texture mapping end to end. Native import snapshots exact absolute TEXCOORD_0 corners before setPaintTarget overwrites mesh UV lanes, then installs the owned image/corner pair after face grouping and layout. Imported Texture provenance v2 upgrades an untouched pre-fix v1 row in place; saved-meshdoc packages now detect that legacy row, briefly load the retained source for a correct source-resident capture with base adoption disabled, and immediately restore the edited mesh and authored base. Current or Save-back-edited rows skip the probe. Source-snapshot, provenance migration/dedupe, full editor bundle, test-mesh-import, test-model-paint, all five paint-variant tests, and ReleaseFast editor ship pass.",
   "shas": [
     "310db3aa4",
-    "f4ac03a48"
+    "f4ac03a48",
+    "4de04c53c"
   ],
-  "resolvedAt": "2026-07-29T22:46:09.561Z"
+  "resolvedAt": "2026-07-29T22:51:16.128Z"
 }
