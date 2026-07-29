@@ -1,0 +1,30 @@
+{
+  "id": "req_3518",
+  "at": "2026-07-29T09:30:45.703Z",
+  "origin": "codex:019fac74",
+  "text": "ok now its clear but you should just put it in the right click context menu because ultimately if any one thing thinks its more important to live out in this part of the ui it better be the most used function around",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T09:30:53.891Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T09:32:47.809Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the persistent STITCH chip from the UV toolbar in accordance with the toolbar-priority rule. Stitch Matching Seams remains a direct top-level right-click action with the editor-detected island count and enables for two or more full islands. Updated the live interface record, passed the editor bundle, and completed a ReleaseFast native build.",
+  "shas": [
+    "a0c6e41cf"
+  ],
+  "resolvedAt": "2026-07-29T09:32:47.809Z"
+}
