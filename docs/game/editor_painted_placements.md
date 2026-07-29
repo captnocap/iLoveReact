@@ -159,7 +159,11 @@ or repeating-UV files still import their geometry normally and make no texture
 claim. The host rejects encoded images above the painter's 8192-pixel/256 MiB
 limits before decode, adopts image alpha as opaque under the existing import
 rule, restores the GLB's exact source UV corners, and stashes that final active
-mesh rather than the pre-layout parser copy.
+mesh rather than the pre-layout parser copy. Those source corners are
+snapshotted after winding repair but before `setPaintTarget` mutates the parser
+buffer's UV lanes (req_3537); only after face grouping and paint-layout setup
+does the host apply the owned image/corner pair. Generated paint-atlas UVs can
+therefore never be mistaken for the embedded image's `TEXCOORD_0` mapping.
 
 For a newly materialized model, `ModelView` skips the fallback Outliner-colour
 flood, persists the live source look as the package base, and automatically adds

@@ -297,14 +297,41 @@ const ImportedModelTexture = struct {
     height: u32,
 };
 
-fn applyEmbeddedModelTexture(mesh: *const mesh_import.ParsedMesh) ?ImportedModelTexture {
+const PreparedModelTexture = struct {
+    image_index: u32,
+    image: image_codec.Image,
+    source_corners: []f32,
+
+    fn deinit(self: *PreparedModelTexture) void {
+        self.image.deinit();
+        std.heap.c_allocator.free(self.source_corners);
+    }
+
+    fn apply(self: *const PreparedModelTexture) ?ImportedModelTexture {
+        if (!scene3d.importPaintAtlas(self.image.data(), self.image.width, self.image.height)) return null;
+        if (!scene3d.applyUvCornerGeometry(self.source_corners)) return null;
+        return .{
+            .image_index = self.image_index,
+            .width = self.image.width,
+            .height = self.image.height,
+        };
+    }
+};
+
+/// Decode the embedded raster and, critically, snapshot its GLB source UVs while
+/// `mesh.verts` still contains them. setPaintTarget rewrites those UV lanes in
+/// place, so delaying this copy maps the source image through the generated
+/// per-face paint layout instead of through TEXCOORD_0.
+fn prepareEmbeddedModelTexture(mesh: *const mesh_import.ParsedMesh) ?PreparedModelTexture {
     const texture = mesh.embedded_texture orelse return null;
     const metadata = image_codec.info(texture.encoded) catch return null;
     if (!scene3d.paintAtlasImportDimensionsFit(metadata.width, metadata.height)) return null;
 
     var image = image_codec.decode(std.heap.c_allocator, texture.encoded) catch return null;
-    defer image.deinit();
-    if (image.width != metadata.width or image.height != metadata.height) return null;
+    if (image.width != metadata.width or image.height != metadata.height) {
+        image.deinit();
+        return null;
+    }
 
     // glTF's baseColorFactor multiplies the sampled image. Bake the one common
     // factor accepted by mesh_import so the paint atlas matches the source look.
@@ -318,27 +345,20 @@ fn applyEmbeddedModelTexture(mesh: *const mesh_import.ParsedMesh) ?ImportedModel
     }
 
     const corner_count = @as(usize, mesh.vert_count) * 2;
-    const corners = std.heap.c_allocator.alloc(f32, corner_count) catch return null;
-    defer std.heap.c_allocator.free(corners);
-    const width: f32 = @floatFromInt(image.width);
-    const height: f32 = @floatFromInt(image.height);
-    var vertex: u32 = 0;
-    while (vertex < mesh.vert_count) : (vertex += 1) {
-        const source = @as(usize, vertex) * mesh_import.FLOATS_PER_VERTEX;
-        const target = @as(usize, vertex) * 2;
-        const u = mesh.verts[source + 6];
-        const v = mesh.verts[source + 7];
-        if (!std.math.isFinite(u) or !std.math.isFinite(v)) return null;
-        corners[target + 0] = u * width;
-        corners[target + 1] = v * height;
+    const source_corners = std.heap.c_allocator.alloc(f32, corner_count) catch {
+        image.deinit();
+        return null;
+    };
+    if (!mesh_import.writeAbsoluteUvCorners(mesh, image.width, image.height, source_corners)) {
+        std.heap.c_allocator.free(source_corners);
+        image.deinit();
+        return null;
     }
 
-    if (!scene3d.importPaintAtlas(image.data(), image.width, image.height)) return null;
-    if (!scene3d.applyUvCornerGeometry(corners)) return null;
     return .{
         .image_index = texture.image_index,
-        .width = image.width,
-        .height = image.height,
+        .image = image,
+        .source_corners = source_corners,
     };
 }
 
@@ -378,6 +398,12 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     // rewrites UVs — positions are untouched, but copy now to be unambiguous).
     model_source.retain(path, mesh.verts, mesh.vert_count);
 
+    // Capture TEXCOORD_0 before setPaintTarget replaces the same UV lanes with its
+    // generated paint layout. The decoded raster remains owned until the final
+    // groups/layout are ready to receive both image and exact source corners.
+    var prepared_texture = prepareEmbeddedModelTexture(&mesh);
+    defer if (prepared_texture) |*texture| texture.deinit();
+
     // New document boundary: discard any focused part range carried by the previous
     // model before the incoming topology is installed (req_2953).
     scene3d.meshEditBeginModel();
@@ -395,7 +421,7 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     defer std.heap.c_allocator.free(groups);
     scene3d.meshEditSetFaceGroups(groups);
     _ = scene3d.refreshPaintLayout();
-    const imported_texture = applyEmbeddedModelTexture(&mesh);
+    const imported_texture = if (prepared_texture) |*texture| texture.apply() else null;
     if (mesh.embedded_texture != null and imported_texture == null) {
         std.log.warn("[mesh-load] {s}: embedded base-colour texture could not become a paint atlas", .{path});
     }

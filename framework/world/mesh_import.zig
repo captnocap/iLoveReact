@@ -103,6 +103,35 @@ pub fn fromInterleaved(alloc: std.mem.Allocator, verts: []const f32, vert_count:
     };
 }
 
+/// Copy the mesh's current normalized UVs into absolute paint-atlas corner
+/// coordinates. Callers use this as a snapshot boundary before handing `verts`
+/// to an editor subsystem that may rewrite its UV lanes in place.
+pub fn writeAbsoluteUvCorners(
+    mesh: *const ParsedMesh,
+    width: u32,
+    height: u32,
+    out: []f32,
+) bool {
+    if (width == 0 or height == 0) return false;
+    const source_count = @as(usize, mesh.vert_count) * FLOATS_PER_VERTEX;
+    const corner_count = @as(usize, mesh.vert_count) * 2;
+    if (source_count > mesh.verts.len or corner_count > out.len) return false;
+
+    const width_f: f32 = @floatFromInt(width);
+    const height_f: f32 = @floatFromInt(height);
+    var vertex: u32 = 0;
+    while (vertex < mesh.vert_count) : (vertex += 1) {
+        const source = @as(usize, vertex) * FLOATS_PER_VERTEX;
+        const target = @as(usize, vertex) * 2;
+        const u = mesh.verts[source + 6];
+        const v = mesh.verts[source + 7];
+        if (!std.math.isFinite(u) or !std.math.isFinite(v)) return false;
+        out[target + 0] = u * width_f;
+        out[target + 1] = v * height_f;
+    }
+    return true;
+}
+
 const MeshBounds = struct {
     center: [3]f32,
     radius: f32,
@@ -1090,6 +1119,29 @@ test "glb: one compatible embedded base-colour image is retained with source UVs
     try std.testing.expectEqualSlices(f32, &.{ 0.5, 0.75, 1.0 }, &texture.color_factor);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.verts[1 * 8 + 6], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.verts[2 * 8 + 7], 1e-5);
+}
+
+test "glb: source UV snapshot survives later in-place paint UV replacement" {
+    const alloc = std.testing.allocator;
+    const glb = try buildTexturedTestGlb(alloc, false);
+    defer alloc.free(glb);
+    var mesh = try parseGlb(alloc, glb);
+    defer mesh.deinit(alloc);
+
+    var source_corners: [6]f32 = undefined;
+    try std.testing.expect(writeAbsoluteUvCorners(&mesh, 256, 128, &source_corners));
+
+    // setPaintTarget owns this kind of in-place replacement. The imported
+    // texture must keep sampling the source GLB coordinates captured above.
+    var vertex: u32 = 0;
+    while (vertex < mesh.vert_count) : (vertex += 1) {
+        const base = @as(usize, vertex) * FLOATS_PER_VERTEX;
+        mesh.verts[base + 6] = 0.5;
+        mesh.verts[base + 7] = 0.5;
+    }
+
+    try std.testing.expectEqualSlices(f32, &.{ 0, 0, 256, 0, 0, 128 }, &source_corners);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), mesh.verts[1 * FLOATS_PER_VERTEX + 6], 1e-5);
 }
 
 test "glb: an untextured emitted primitive refuses a misleading single-atlas claim" {
