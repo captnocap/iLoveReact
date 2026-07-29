@@ -28,13 +28,37 @@ pub const Vec2 = [2]f32;
 pub const Vec3 = [3]f32;
 
 /// One source of truth for choosing between competing triangle pairings.
-/// A valid pair is already coplanar and convex; these weights only decide which
-/// shared edge most plausibly represents the authored quad's hidden diagonal.
+/// Cardinality is always maximized first. These values only order the augmenting
+/// paths inside that exact maximum, giving the preview popup three useful,
+/// deterministic evaluations without changing how many quads are recovered.
 const QuadifyTuning = struct {
     const diagonal_balance_weight: f32 = 0.50;
     const opposite_edge_balance_weight: f32 = 0.30;
     const corner_quality_weight: f32 = 0.20;
     const score_tie_epsilon: f32 = 0.000001;
+    const boundary_corner_epsilon: f32 = 0.00001;
+};
+
+pub const QuadEvaluation = enum(u8) {
+    balanced = 0,
+    short_seams = 1,
+    alternate_flow = 2,
+
+    pub const count: u32 = 3;
+
+    pub fn fromIndex(index: u32) QuadEvaluation {
+        return @enumFromInt(index % count);
+    }
+};
+
+pub const QuadifyStats = struct {
+    authored_faces_before: u32 = 0,
+    authored_faces_after: u32 = 0,
+    triangle_faces: u32 = 0,
+    candidate_pairs: u32 = 0,
+    ambiguous_triangles: u32 = 0,
+    quads: u32 = 0,
+    plan_signature: u32 = 2166136261,
 };
 
 const QuadPair = struct {
@@ -46,12 +70,207 @@ const QuadPair = struct {
 const QuadCandidate = struct {
     pair: QuadPair,
     score: f32,
+    diagonal_length: f32,
 };
 
-const QuadEdgeUse = struct {
-    first: ?u32 = null,
-    second: ?u32 = null,
-    non_manifold: bool = false,
+const QuadFaceEdge = struct {
+    key: u64,
+    face: u32,
+};
+
+/// Edmonds' blossom search over the sparse triangle-adjacency graph. Every face
+/// can belong to at most one result, and every augmenting path increases the
+/// result by one, so the final pairing is maximum-cardinality rather than a
+/// locally-good greedy packing. Candidate order only chooses WHICH maximum the
+/// user previews.
+const MaximumQuadMatcher = struct {
+    allocator: std.mem.Allocator,
+    candidates: []const QuadCandidate,
+    adjacency: []const std.ArrayListUnmanaged(u32),
+    mate: []i32,
+    parent: []i32,
+    base: []u32,
+    used: []bool,
+    blossom: []bool,
+    lca_seen: []bool,
+    queue: []u32,
+    queue_head: usize = 0,
+    queue_tail: usize = 0,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        candidates: []const QuadCandidate,
+        adjacency: []const std.ArrayListUnmanaged(u32),
+    ) !MaximumQuadMatcher {
+        const count = adjacency.len;
+        const mate = try allocator.alloc(i32, count);
+        errdefer allocator.free(mate);
+        const parent = try allocator.alloc(i32, count);
+        errdefer allocator.free(parent);
+        const base = try allocator.alloc(u32, count);
+        errdefer allocator.free(base);
+        const used = try allocator.alloc(bool, count);
+        errdefer allocator.free(used);
+        const blossom = try allocator.alloc(bool, count);
+        errdefer allocator.free(blossom);
+        const lca_seen = try allocator.alloc(bool, count);
+        errdefer allocator.free(lca_seen);
+        const queue = try allocator.alloc(u32, count);
+        @memset(mate, -1);
+        return .{
+            .allocator = allocator,
+            .candidates = candidates,
+            .adjacency = adjacency,
+            .mate = mate,
+            .parent = parent,
+            .base = base,
+            .used = used,
+            .blossom = blossom,
+            .lca_seen = lca_seen,
+            .queue = queue,
+        };
+    }
+
+    fn deinit(matcher: *MaximumQuadMatcher) void {
+        matcher.allocator.free(matcher.mate);
+        matcher.allocator.free(matcher.parent);
+        matcher.allocator.free(matcher.base);
+        matcher.allocator.free(matcher.used);
+        matcher.allocator.free(matcher.blossom);
+        matcher.allocator.free(matcher.lca_seen);
+        matcher.allocator.free(matcher.queue);
+        matcher.* = undefined;
+    }
+
+    fn other(matcher: *const MaximumQuadMatcher, candidate_index: u32, face: u32) u32 {
+        const pair = matcher.candidates[candidate_index].pair;
+        return if (pair.first_face == face) pair.second_face else pair.first_face;
+    }
+
+    fn leastCommonAncestor(matcher: *MaximumQuadMatcher, first_raw: u32, second_raw: u32) u32 {
+        @memset(matcher.lca_seen, false);
+        var first = first_raw;
+        while (true) {
+            first = matcher.base[first];
+            matcher.lca_seen[first] = true;
+            const first_mate = matcher.mate[first];
+            if (first_mate < 0) break;
+            const next = matcher.parent[@intCast(first_mate)];
+            if (next < 0) break;
+            first = @intCast(next);
+        }
+        var second = second_raw;
+        while (true) {
+            second = matcher.base[second];
+            if (matcher.lca_seen[second]) return second;
+            const second_mate = matcher.mate[second];
+            if (second_mate < 0) return second;
+            const next = matcher.parent[@intCast(second_mate)];
+            if (next < 0) return second;
+            second = @intCast(next);
+        }
+    }
+
+    fn markBlossomPath(matcher: *MaximumQuadMatcher, start_raw: u32, root_base: u32, child_raw: u32) void {
+        var start = start_raw;
+        var child = child_raw;
+        while (matcher.base[start] != root_base) {
+            const start_mate_i = matcher.mate[start];
+            if (start_mate_i < 0) break;
+            const start_mate: u32 = @intCast(start_mate_i);
+            matcher.blossom[matcher.base[start]] = true;
+            matcher.blossom[matcher.base[start_mate]] = true;
+            matcher.parent[start] = @intCast(child);
+            child = start_mate;
+            const next = matcher.parent[start_mate];
+            if (next < 0) break;
+            start = @intCast(next);
+        }
+    }
+
+    fn augmentFrom(matcher: *MaximumQuadMatcher, finish_raw: u32) void {
+        var finish: i32 = @intCast(finish_raw);
+        while (finish >= 0) {
+            const previous = matcher.parent[@intCast(finish)];
+            const next = if (previous >= 0) matcher.mate[@intCast(previous)] else -1;
+            matcher.mate[@intCast(finish)] = previous;
+            if (previous >= 0) matcher.mate[@intCast(previous)] = finish;
+            finish = next;
+        }
+    }
+
+    fn findAugmentingPath(matcher: *MaximumQuadMatcher, root: u32) bool {
+        @memset(matcher.used, false);
+        @memset(matcher.parent, -1);
+        for (matcher.base, 0..) |*slot, index| slot.* = @intCast(index);
+        matcher.queue_head = 0;
+        matcher.queue_tail = 0;
+        matcher.queue[matcher.queue_tail] = root;
+        matcher.queue_tail += 1;
+        matcher.used[root] = true;
+
+        while (matcher.queue_head < matcher.queue_tail) {
+            const face = matcher.queue[matcher.queue_head];
+            matcher.queue_head += 1;
+            for (matcher.adjacency[face].items) |candidate_index| {
+                const neighbor = matcher.other(candidate_index, face);
+                if (matcher.base[face] == matcher.base[neighbor] or
+                    matcher.mate[face] == @as(i32, @intCast(neighbor)))
+                {
+                    continue;
+                }
+                const neighbor_mate = matcher.mate[neighbor];
+                if (neighbor == root or
+                    (neighbor_mate >= 0 and matcher.parent[@intCast(neighbor_mate)] >= 0))
+                {
+                    const common = matcher.leastCommonAncestor(face, neighbor);
+                    @memset(matcher.blossom, false);
+                    matcher.markBlossomPath(face, common, neighbor);
+                    matcher.markBlossomPath(neighbor, common, face);
+                    for (matcher.base, 0..) |*slot, index| {
+                        if (!matcher.blossom[slot.*]) continue;
+                        slot.* = common;
+                        if (!matcher.used[index]) {
+                            matcher.used[index] = true;
+                            matcher.queue[matcher.queue_tail] = @intCast(index);
+                            matcher.queue_tail += 1;
+                        }
+                    }
+                } else if (matcher.parent[neighbor] < 0) {
+                    matcher.parent[neighbor] = @intCast(face);
+                    if (neighbor_mate < 0) {
+                        matcher.augmentFrom(neighbor);
+                        return true;
+                    }
+                    const matched_neighbor: u32 = @intCast(neighbor_mate);
+                    if (!matcher.used[matched_neighbor]) {
+                        matcher.used[matched_neighbor] = true;
+                        matcher.queue[matcher.queue_tail] = matched_neighbor;
+                        matcher.queue_tail += 1;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    fn solve(matcher: *MaximumQuadMatcher, pairs: *std.ArrayListUnmanaged(QuadPair)) !void {
+        for (matcher.adjacency, 0..) |edges, face| {
+            if (edges.items.len == 0 or matcher.mate[face] >= 0) continue;
+            _ = matcher.findAugmentingPath(@intCast(face));
+        }
+        for (matcher.mate, 0..) |mate_i, face| {
+            if (mate_i < 0) continue;
+            const mate: u32 = @intCast(mate_i);
+            if (face >= mate) continue;
+            for (matcher.adjacency[face].items) |candidate_index| {
+                const candidate = matcher.candidates[candidate_index];
+                if (matcher.other(candidate_index, @intCast(face)) != mate) continue;
+                try pairs.append(matcher.allocator, candidate.pair);
+                break;
+            }
+        }
+    }
 };
 
 /// One source of truth for the Studio bevel's behavior-affecting dimensions.
@@ -1310,6 +1529,46 @@ pub const Mesh = struct {
         return if (shared_count == 2) tip else null;
     }
 
+    fn directedDiagonalUse(face: *const Face, diagonal: [2]u32) i8 {
+        for (face.vertices.items, 0..) |from, corner| {
+            const to = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            if (from == diagonal[0] and to == diagonal[1]) return 1;
+            if (from == diagonal[1] and to == diagonal[0]) return -1;
+        }
+        return 0;
+    }
+
+    /// The bulk planner deliberately accepts exactly the useful two-triangle
+    /// subset of Merge Faces: same plane/winding, one shared edge, and a durable
+    /// four-corner boundary after the merge's own collinear-drop rule. Concave
+    /// authored quads remain legal because pairwise Merge Faces already supports
+    /// them; this sweep must not silently impose a stricter second definition.
+    fn trianglePairCanMergeAsQuad(mesh: *const Mesh, first_face: u32, second_face: u32, diagonal: [2]u32) bool {
+        const first = &mesh.faces.items[first_face];
+        const second = &mesh.faces.items[second_face];
+        const first_tip = triangleTip(first, diagonal) orelse return false;
+        const second_tip = triangleTip(second, diagonal) orelse return false;
+        if (first_tip == second_tip) return false;
+        const first_direction = directedDiagonalUse(first, diagonal);
+        const second_direction = directedDiagonalUse(second, diagonal);
+        if (first_direction == 0 or second_direction == 0 or first_direction == second_direction) return false;
+        const selected = [2]u32{ first_face, second_face };
+        if (!mesh.selectedFacesAreCoplanar(selected[0..])) return false;
+
+        const loop = [4]u32{ first_tip, diagonal[0], second_tip, diagonal[1] };
+        for (0..loop.len) |corner| {
+            const previous = mesh.vertices.items[loop[(corner + loop.len - 1) % loop.len]].position;
+            const current = mesh.vertices.items[loop[corner]].position;
+            const next = mesh.vertices.items[loop[(corner + 1) % loop.len]].position;
+            const incoming = sub3(current, previous);
+            const outgoing = sub3(next, current);
+            const scale = length3(incoming) * length3(outgoing);
+            if (!std.math.isFinite(scale) or scale <= 1e-12) return false;
+            if (length3(cross3(incoming, outgoing)) / scale < QuadifyTuning.boundary_corner_epsilon) return false;
+        }
+        return true;
+    }
+
     fn lengthBalance(first: f32, second: f32) f32 {
         const longest = @max(first, second);
         if (!std.math.isFinite(longest) or longest <= 1e-12) return 0;
@@ -1353,108 +1612,205 @@ pub const Mesh = struct {
         return if (std.math.isFinite(score)) score else null;
     }
 
-    /// Resolve every compatible selected authored triangle into a deterministic,
-    /// non-overlapping pairing. Sorting by quad quality before the greedy match makes
-    /// a regular triangulated grid recover its cell diagonals instead of pairing
-    /// arbitrarily across the seams between neighboring cells.
-    fn collectSelectedTriangleQuadPairs(
-        mesh: *const Mesh,
-        selected_triangles: []const bool,
-        pairs: *std.ArrayListUnmanaged(QuadPair),
-    ) !void {
-        var edge_uses = std.AutoHashMapUnmanaged(u64, QuadEdgeUse).empty;
-        defer edge_uses.deinit(mesh.allocator);
-        for (mesh.faces.items) |*face| {
-            // Count the complete live topology, not only the selection. A third
-            // unselected face still makes an edge non-manifold and therefore unsafe
-            // to dissolve between the two selected triangles.
-            if (!face.alive or face.vertices.items.len < 2) continue;
-            for (face.vertices.items, 0..) |from, corner| {
-                const to = face.vertices.items[(corner + 1) % face.vertices.items.len];
-                const entry = try edge_uses.getOrPut(mesh.allocator, edgeKey(from, to));
-                if (!entry.found_existing) {
-                    entry.value_ptr.* = .{ .first = face.id };
-                } else if (entry.value_ptr.second == null) {
-                    entry.value_ptr.second = face.id;
-                } else {
-                    entry.value_ptr.non_manifold = true;
-                }
-            }
-        }
-
-        var candidates = std.ArrayListUnmanaged(QuadCandidate).empty;
-        defer candidates.deinit(mesh.allocator);
-        var iterator = edge_uses.iterator();
-        while (iterator.next()) |entry| {
-            const use = entry.value_ptr.*;
-            const raw_first = use.first orelse continue;
-            const raw_second = use.second orelse continue;
-            if (use.non_manifold or raw_first == raw_second) continue;
-            const first = @min(raw_first, raw_second);
-            const second = @max(raw_first, raw_second);
-            const first_face = &mesh.faces.items[first];
-            const second_face = &mesh.faces.items[second];
-            if (!faceFullySelected(first_face, selected_triangles) or
-                !faceFullySelected(second_face, selected_triangles) or
-                first_face.vertices.items.len != 3 or second_face.vertices.items.len != 3 or
-                first_face.source_triangles.items.len != 1 or second_face.source_triangles.items.len != 1)
-            {
-                continue;
-            }
-            if (first_face.part != second_face.part or first_face.material != second_face.material) continue;
-            const first_triangle = first_face.source_triangles.items[0];
-            const second_triangle = second_face.source_triangles.items[0];
-            if (!trianglesFormConvexQuad(mesh, first_triangle, second_triangle)) continue;
-            const key = entry.key_ptr.*;
-            const diagonal = [2]u32{ @intCast(key >> 32), @intCast(key & 0xffffffff) };
-            const score = quadCandidateScore(mesh, first, second, diagonal) orelse continue;
-            try candidates.append(mesh.allocator, .{
-                .pair = .{ .first_face = first, .second_face = second, .diagonal = diagonal },
-                .score = score,
-            });
-        }
-
-        std.mem.sort(QuadCandidate, candidates.items, {}, struct {
-            fn lessThan(_: void, first: QuadCandidate, second: QuadCandidate) bool {
+    fn quadCandidateBefore(evaluation: QuadEvaluation, first: QuadCandidate, second: QuadCandidate) bool {
+        switch (evaluation) {
+            .balanced => {
                 if (@abs(first.score - second.score) > QuadifyTuning.score_tie_epsilon) {
                     return first.score > second.score;
                 }
-                if (first.pair.first_face != second.pair.first_face) {
-                    return first.pair.first_face < second.pair.first_face;
+            },
+            .short_seams => {
+                if (@abs(first.diagonal_length - second.diagonal_length) > QuadifyTuning.score_tie_epsilon) {
+                    return first.diagonal_length < second.diagonal_length;
                 }
-                if (first.pair.second_face != second.pair.second_face) {
-                    return first.pair.second_face < second.pair.second_face;
+                if (@abs(first.score - second.score) > QuadifyTuning.score_tie_epsilon) {
+                    return first.score > second.score;
                 }
-                return edgeKey(first.pair.diagonal[0], first.pair.diagonal[1]) <
-                    edgeKey(second.pair.diagonal[0], second.pair.diagonal[1]);
+            },
+            .alternate_flow => {
+                const first_key = quadCandidateFlowKey(first);
+                const second_key = quadCandidateFlowKey(second);
+                if (first_key != second_key) {
+                    return first_key < second_key;
+                }
+                if (@abs(first.score - second.score) > QuadifyTuning.score_tie_epsilon) {
+                    return first.score > second.score;
+                }
+            },
+        }
+        if (first.pair.first_face != second.pair.first_face) {
+            return first.pair.first_face < second.pair.first_face;
+        }
+        if (first.pair.second_face != second.pair.second_face) {
+            return first.pair.second_face < second.pair.second_face;
+        }
+        return edgeKey(first.pair.diagonal[0], first.pair.diagonal[1]) <
+            edgeKey(second.pair.diagonal[0], second.pair.diagonal[1]);
+    }
+
+    fn quadCandidateFlowKey(candidate: QuadCandidate) u32 {
+        var key: u32 = 2166136261;
+        for ([_]u32{
+            candidate.pair.first_face,
+            candidate.pair.second_face,
+            candidate.pair.diagonal[0],
+            candidate.pair.diagonal[1],
+        }) |value| {
+            key = (key ^ value) *% 16777619;
+        }
+        return key;
+    }
+
+    /// Build the complete compatible-pair graph. This counts only authored triangle
+    /// faces selected by the caller's class mask (opaque and glass are planned
+    /// independently). A source seam still has to be manifold: a third face on the
+    /// exact same edge is not one unambiguous diagonal to remove.
+    fn collectSelectedTriangleQuadCandidates(
+        mesh: *const Mesh,
+        selected_triangles: []const bool,
+        candidates: *std.ArrayListUnmanaged(QuadCandidate),
+        stats: *QuadifyStats,
+    ) !void {
+        var face_edges = std.ArrayListUnmanaged(QuadFaceEdge).empty;
+        defer face_edges.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            stats.authored_faces_before += 1;
+            const eligible = faceFullySelected(face, selected_triangles) and
+                face.vertices.items.len == 3 and face.source_triangles.items.len == 1;
+            if (eligible) stats.triangle_faces += 1;
+            for (face.vertices.items, 0..) |from, corner| {
+                const to = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                if (from == to) continue;
+                try face_edges.append(mesh.allocator, .{ .key = edgeKey(from, to), .face = face.id });
+            }
+        }
+        stats.authored_faces_after = stats.authored_faces_before;
+        std.mem.sort(QuadFaceEdge, face_edges.items, {}, struct {
+            fn lessThan(_: void, first: QuadFaceEdge, second: QuadFaceEdge) bool {
+                if (first.key != second.key) return first.key < second.key;
+                return first.face < second.face;
             }
         }.lessThan);
 
-        const paired = try mesh.allocator.alloc(bool, mesh.faces.items.len);
-        defer mesh.allocator.free(paired);
-        @memset(paired, false);
-        for (candidates.items) |candidate| {
-            const pair = candidate.pair;
-            if (paired[pair.first_face] or paired[pair.second_face]) continue;
-            paired[pair.first_face] = true;
-            paired[pair.second_face] = true;
-            try pairs.append(mesh.allocator, pair);
+        var seen_pairs = std.AutoHashMapUnmanaged(u64, void).empty;
+        defer seen_pairs.deinit(mesh.allocator);
+        var run_start: usize = 0;
+        while (run_start < face_edges.items.len) {
+            var run_end = run_start + 1;
+            while (run_end < face_edges.items.len and face_edges.items[run_end].key == face_edges.items[run_start].key) {
+                run_end += 1;
+            }
+            if (run_end - run_start != 2) {
+                run_start = run_end;
+                continue;
+            }
+            const diagonal = [2]u32{
+                @intCast(face_edges.items[run_start].key >> 32),
+                @intCast(face_edges.items[run_start].key & 0xffffffff),
+            };
+            var first_index = run_start;
+            while (first_index < run_end) : (first_index += 1) {
+                var second_index = first_index + 1;
+                while (second_index < run_end) : (second_index += 1) {
+                    const raw_first = face_edges.items[first_index].face;
+                    const raw_second = face_edges.items[second_index].face;
+                    if (raw_first == raw_second) continue;
+                    const first = @min(raw_first, raw_second);
+                    const second = @max(raw_first, raw_second);
+                    const pair_key = (@as(u64, first) << 32) | @as(u64, second);
+                    if (seen_pairs.contains(pair_key)) continue;
+                    const first_face = &mesh.faces.items[first];
+                    const second_face = &mesh.faces.items[second];
+                    if (!faceFullySelected(first_face, selected_triangles) or
+                        !faceFullySelected(second_face, selected_triangles) or
+                        first_face.vertices.items.len != 3 or second_face.vertices.items.len != 3 or
+                        first_face.source_triangles.items.len != 1 or second_face.source_triangles.items.len != 1)
+                    {
+                        continue;
+                    }
+                    if (first_face.part != second_face.part or first_face.material != second_face.material) continue;
+                    if (!mesh.trianglePairCanMergeAsQuad(first, second, diagonal)) continue;
+                    const score = mesh.quadCandidateScore(first, second, diagonal) orelse continue;
+                    const diagonal_length = length3(sub3(
+                        mesh.vertices.items[diagonal[0]].position,
+                        mesh.vertices.items[diagonal[1]].position,
+                    ));
+                    if (!std.math.isFinite(diagonal_length) or diagonal_length <= 1e-12) continue;
+                    try seen_pairs.put(mesh.allocator, pair_key, {});
+                    try candidates.append(mesh.allocator, .{
+                        .pair = .{ .first_face = first, .second_face = second, .diagonal = diagonal },
+                        .score = score,
+                        .diagonal_length = diagonal_length,
+                    });
+                }
+            }
+            run_start = run_end;
         }
+        stats.candidate_pairs = @intCast(candidates.items.len);
     }
 
-    /// Convert every compatible pair in the selected authored triangles to quads.
-    /// This is one indexed topology transaction: unmatched triangles stay untouched,
-    /// and each accepted pair keeps its exact resident render diagonal/provenance.
-    pub fn quadifySelected(mesh: *Mesh, selected_triangles: []const bool) !u32 {
+    /// Convert the compatible triangle graph to an exact maximum matching. A high
+    /// quality middle edge can no longer strand two end pairs: augmenting paths
+    /// rearrange earlier choices until no plan with more quads exists.
+    pub fn quadifySelectedWithEvaluation(
+        mesh: *Mesh,
+        selected_triangles: []const bool,
+        evaluation: QuadEvaluation,
+    ) !QuadifyStats {
+        var stats = QuadifyStats{};
+        var candidates = std.ArrayListUnmanaged(QuadCandidate).empty;
+        defer candidates.deinit(mesh.allocator);
+        try mesh.collectSelectedTriangleQuadCandidates(selected_triangles, &candidates, &stats);
+        if (candidates.items.len == 0) return stats;
+
+        std.mem.sort(QuadCandidate, candidates.items, evaluation, struct {
+            fn lessThan(order: QuadEvaluation, first: QuadCandidate, second: QuadCandidate) bool {
+                return quadCandidateBefore(order, first, second);
+            }
+        }.lessThan);
+
+        const adjacency = try mesh.allocator.alloc(std.ArrayListUnmanaged(u32), mesh.faces.items.len);
+        defer {
+            for (adjacency) |*list| list.deinit(mesh.allocator);
+            mesh.allocator.free(adjacency);
+        }
+        for (adjacency) |*list| list.* = .empty;
+        const degree = try mesh.allocator.alloc(u32, mesh.faces.items.len);
+        defer mesh.allocator.free(degree);
+        @memset(degree, 0);
+        for (candidates.items, 0..) |candidate, candidate_index| {
+            try adjacency[candidate.pair.first_face].append(mesh.allocator, @intCast(candidate_index));
+            try adjacency[candidate.pair.second_face].append(mesh.allocator, @intCast(candidate_index));
+            degree[candidate.pair.first_face] += 1;
+            degree[candidate.pair.second_face] += 1;
+        }
+        for (degree) |candidate_count| {
+            if (candidate_count > 1) stats.ambiguous_triangles += 1;
+        }
         var pairs = std.ArrayListUnmanaged(QuadPair).empty;
         defer pairs.deinit(mesh.allocator);
-        try mesh.collectSelectedTriangleQuadPairs(selected_triangles, &pairs);
+        var matcher = try MaximumQuadMatcher.init(mesh.allocator, candidates.items, adjacency);
+        defer matcher.deinit();
+        try matcher.solve(&pairs);
+
         var changed: u32 = 0;
         for (pairs.items) |pair| {
+            for ([_]u32{ pair.first_face, pair.second_face, pair.diagonal[0], pair.diagonal[1] }) |value| {
+                stats.plan_signature = (stats.plan_signature ^ value) *% 16777619;
+            }
             const face_ids = [2]u32{ pair.first_face, pair.second_face };
             if (try mesh.mergeFaceIds(face_ids[0..], pair.diagonal)) changed += 1;
         }
-        return changed;
+        stats.quads = changed;
+        stats.authored_faces_after = stats.authored_faces_before - changed;
+        return stats;
+    }
+
+    /// Compatibility wrapper for callers that do not expose the preview's
+    /// evaluation choice.
+    pub fn quadifySelected(mesh: *Mesh, selected_triangles: []const bool) !u32 {
+        return (try mesh.quadifySelectedWithEvaluation(selected_triangles, .balanced)).quads;
     }
 
     fn dropCollinearFaceLoop(mesh: *const Mesh, vertices: *std.ArrayListUnmanaged(u32), uvs: *std.ArrayListUnmanaged(Vec2)) void {
@@ -2639,18 +2995,37 @@ pub fn inferQuadFaceGroups(
     const selected = try allocator.alloc(bool, tri_count);
     defer allocator.free(selected);
     @memset(selected, true);
-    var pairs = std.ArrayListUnmanaged(QuadPair).empty;
-    defer pairs.deinit(allocator);
-    try mesh.collectSelectedTriangleQuadPairs(selected, &pairs);
+
+    const EdgeUse = struct { first: ?u32 = null, second: ?u32 = null, non_manifold: bool = false };
+    var uses = std.AutoHashMapUnmanaged(u64, EdgeUse).empty;
+    defer uses.deinit(allocator);
+    for (mesh.render_triangles.items, 0..) |triangle, triangle_index| {
+        for (0..3) |corner| {
+            const edge = undirectedEdgeKey(triangle[corner], triangle[(corner + 1) % 3]);
+            const entry = try uses.getOrPut(allocator, edge);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = .{ .first = @intCast(triangle_index) };
+            } else if (entry.value_ptr.second == null) {
+                entry.value_ptr.second = @intCast(triangle_index);
+            } else {
+                entry.value_ptr.non_manifold = true;
+            }
+        }
+    }
 
     const partners = try allocator.alloc(?u32, tri_count);
     defer allocator.free(partners);
     @memset(partners, null);
-    for (pairs.items) |pair| {
-        const first = mesh.faces.items[pair.first_face].source_triangles.items[0];
-        const second = mesh.faces.items[pair.second_face].source_triangles.items[0];
-        partners[first] = second;
-        partners[second] = first;
+    var iterator = uses.iterator();
+    while (iterator.next()) |entry| {
+        const use = entry.value_ptr.*;
+        const first = use.first orelse continue;
+        const second = use.second orelse continue;
+        if (use.non_manifold or partners[first] != null or partners[second] != null) continue;
+        if (trianglesFormConvexQuad(&mesh, first, second)) {
+            partners[first] = second;
+            partners[second] = first;
+        }
     }
 
     const groups = try allocator.alloc(u32, tri_count);
@@ -2698,8 +3073,6 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
     const normal_b = norm3(cross3(sub3(q1, q0), sub3(q2, q0)));
     if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < MERGE_FACE_NORMAL_DOT_MIN) return false;
 
-    // The shared edge puts both triangles on one plane once their normals agree.
-    // Check the four-point boundary's turns so a concave pair never becomes a quad.
     const loop = [4]u32{ first_tip.?, shared[0], second_tip.?, shared[1] };
     var sign: f32 = 0;
     for (0..4) |index| {
@@ -2708,9 +3081,17 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
         const after = mesh.vertices.items[loop[(index + 2) % 4]].position;
         const turn = dot3(cross3(sub3(next, here), sub3(after, next)), normal_a);
         if (@abs(turn) <= IMPORT_WELD_EPS) return false;
-        if (sign == 0) sign = if (turn > 0) 1 else -1 else if ((turn > 0 and sign < 0) or (turn < 0 and sign > 0)) return false;
+        if (sign == 0) {
+            sign = if (turn > 0) 1 else -1;
+        } else if ((turn > 0 and sign < 0) or (turn < 0 and sign > 0)) {
+            return false;
+        }
     }
     return true;
+}
+
+fn undirectedEdgeKey(a: u32, b: u32) u64 {
+    return (@as(u64, @min(a, b)) << 32) | @as(u64, @max(a, b));
 }
 
 fn add3(a: Vec3, b: Vec3) Vec3 {

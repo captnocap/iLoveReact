@@ -21,6 +21,7 @@ const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
+const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");
 const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
 const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
@@ -1533,12 +1534,99 @@ fn hostMeshTopoMergeFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 }
 
 /// __mesh_topo_tris_to_quads() → JSON {"ok","key","count","changed"}. Convert
-/// every compatible pair in the selected authored triangles in one journal entry.
+/// every compatible pair through the balanced whole-topology plan in one journal
+/// entry. Kept for headless automation; the editor UI uses begin/preview/end.
 fn hostMeshTopoTrisToQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const changed = scene3d.meshTrianglesToQuads();
     if (changed > 0) state.markDirty();
     setMeshTopoChangedReturn(info, changed);
+}
+
+/// __mesh_quadify_begin() → JSON {"ok","residentTriangles"}. Capture the exact
+/// whole-model base for a non-journaled triangle→quad dry run.
+fn hostMeshQuadifyBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const begin = scene3d.meshQuadifyBegin() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"residentTriangles\":{d}}}",
+        .{begin.resident_triangles},
+    ) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_quadify_preview(evaluation) → the exact maximum plan summary plus the
+/// unchanged resident key/count. The live authored-edge overlay reads the proposed
+/// grouping, but no undo entry or durable dirty event exists yet.
+fn hostMeshQuadifyPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const evaluation: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const stats = scene3d.meshQuadifyPreview(evaluation) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [512]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"evaluation\":{d},\"evaluationCount\":{d},\"authoredBefore\":{d},\"authoredAfter\":{d},\"triangleFaces\":{d},\"candidatePairs\":{d},\"ambiguousTriangles\":{d},\"quads\":{d},\"planSignature\":{d}}}",
+        .{
+            key,
+            scene3d.meshEditActiveCount(),
+            evaluation % indexed_edit_mesh.QuadEvaluation.count,
+            indexed_edit_mesh.QuadEvaluation.count,
+            stats.authored_faces_before,
+            stats.authored_faces_after,
+            stats.triangle_faces,
+            stats.candidate_pairs,
+            stats.ambiguous_triangles,
+            stats.quads,
+            stats.plan_signature,
+        },
+    ) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    state.markDirty();
+    setReturnString(info, json);
+}
+
+/// __mesh_quadify_end(commit) → JSON {"ok","key","count","changed"}. Apply
+/// journals the preview once; Cancel restores the captured grouping and selection.
+fn hostMeshQuadifyEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const commit = (argToI32(info, 0) orelse 0) != 0;
+    const ended = scene3d.meshQuadifyEnd(commit);
+    if (!ended.ok) {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    var buf: [256]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"changed\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), ended.changed },
+    ) catch {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    state.markDirty();
+    setReturnString(info, json);
 }
 
 /// __mesh_topo_glass() → JSON {"ok","key","count"}. Toggle the selected faces as GLASS
@@ -3829,6 +3917,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
     v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
+    v8_runtime.registerHostFn("__mesh_quadify_begin", hostMeshQuadifyBegin);
+    v8_runtime.registerHostFn("__mesh_quadify_preview", hostMeshQuadifyPreview);
+    v8_runtime.registerHostFn("__mesh_quadify_end", hostMeshQuadifyEnd);
     v8_runtime.registerHostFn("__mesh_topo_glass", hostMeshTopoGlass);
     v8_runtime.registerHostFn("__model_glass_restore", hostModelGlassRestore);
     v8_runtime.registerHostFn("__mesh_topo_solidify", hostMeshTopoSolidify);

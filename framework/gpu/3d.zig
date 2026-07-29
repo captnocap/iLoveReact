@@ -2362,7 +2362,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
 /// nothing can mutate the selection either session's captured base was built from.
 /// Popup buttons and Esc are the exits.
 pub fn meshLcActive() bool {
-    return g_lc != null or g_bevel != null;
+    return g_lc != null or g_bevel != null or g_quadify != null;
 }
 
 pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32, fallback_reason: ?[]const u8 };
@@ -4161,6 +4161,7 @@ pub fn meshJournalClear() void {
     journalDiscard(&g_gizmo_snap);
     lcFree(); // a live loop-cut popup can't outlive the mesh it captured
     bevelFree(); // nor can a live bevel preview / captured base
+    quadifyDrop(); // nor can a dry-run topology plan outlive its document
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
     g_mesh_action_source = .native;
@@ -5137,48 +5138,257 @@ pub fn meshMergeSelectedFaces() bool {
     return commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces");
 }
 
-/// Convert every compatible pair of selected authored triangles to quads in one
-/// undoable transaction. Pairing is native, deterministic, and conservative:
-/// triangles must share one manifold edge, part, texture role, alpha class, plane,
-/// and winding; the four-corner boundary must be convex. Unmatched triangles remain.
-pub fn meshTrianglesToQuads() u32 {
-    if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
-    const verts = g_edit_verts orelse return 0;
-    const tri_count = g_edit_count / 3;
-    if (tri_count < 2 or model_source.faceGroups() == null) return 0;
-    const selected = jalloc.alloc(bool, tri_count) catch return 0;
-    defer jalloc.free(selected);
-    if (mesh_edit.buildDeleteMask(selected) < 2) return 0;
-    const groups = captureFaceGroups() orelse return 0;
-    defer std.heap.c_allocator.free(groups);
-    const parts = capturePartOfFaces();
-    defer if (parts) |rows| std.heap.c_allocator.free(rows);
-    const materials = captureFaceMaterials(tri_count) orelse return 0;
-    defer std.heap.c_allocator.free(materials);
-    const base_colors = collectCurrentFaceColors() orelse return 0;
-    defer std.heap.c_allocator.free(base_colors);
-    if (base_colors.len != @as(usize, tri_count) * 4) return 0;
+// ── Whole-topology triangle → quad dry-run session ────────────────────────────
+// The popup owns only phase/evaluation controls. The captured base, exact maximum
+// matching, live authored-edge preview, cancel restore, and one-entry commit stay
+// host-native so a dry run can never leak into the durable model.
+const QuadifySession = struct {
+    base_mesh: indexed_edit_mesh.Mesh,
+    guard: ResidentMetadataGuard,
+    base_groups: []u32,
+    base_parts: ?[]u32,
+    base_materials: []u32,
+    base_selection: []bool,
+    opaque_mask: []bool,
+    glass_mask: []bool,
+    base_paint_layout_stale: bool,
+    snap: ?JournalEntry,
+    last_stats: indexed_edit_mesh.QuadifyStats = .{},
+    last_evaluation: indexed_edit_mesh.QuadEvaluation = .balanced,
+    last_preview_ok: bool = false,
+};
+var g_quadify: ?QuadifySession = null;
 
-    // Glass and opaque triangles may both be converted in this one sweep, but never
-    // into the SAME authored face: each alpha class gets an independent pairing mask.
-    const opaque_mask = jalloc.alloc(bool, tri_count) catch return 0;
-    defer jalloc.free(opaque_mask);
-    const glass_mask = jalloc.alloc(bool, tri_count) catch return 0;
-    defer jalloc.free(glass_mask);
-    for (selected, 0..) |is_selected, triangle| {
-        const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
-        opaque_mask[triangle] = is_selected and !is_glass;
-        glass_mask[triangle] = is_selected and is_glass;
+pub const QuadifyBeginInfo = struct {
+    resident_triangles: u32,
+};
+
+pub const QuadifyEndInfo = struct {
+    ok: bool,
+    changed: u32,
+};
+
+fn quadifyRelease(session: *QuadifySession) void {
+    session.base_mesh.deinit();
+    session.guard.deinit();
+    std.heap.c_allocator.free(session.base_groups);
+    if (session.base_parts) |parts| std.heap.c_allocator.free(parts);
+    std.heap.c_allocator.free(session.base_materials);
+    std.heap.c_allocator.free(session.base_selection);
+    std.heap.c_allocator.free(session.opaque_mask);
+    std.heap.c_allocator.free(session.glass_mask);
+    journalDiscard(&session.snap);
+}
+
+fn quadifyDrop() void {
+    var session = g_quadify orelse return;
+    quadifyRelease(&session);
+    g_quadify = null;
+}
+
+fn quadifyRestoreBase(session: *const QuadifySession, restore_selection: bool) bool {
+    var restored = session.base_mesh.clone() catch return false;
+    mesh_edit.clearSelection();
+    model_source.setFaceGroups(session.base_groups);
+    mesh_edit.faceGroupsChanged();
+    clearIndexedEditMesh();
+    g_indexed_edit_mesh = restored;
+    restored = .{ .allocator = std.heap.c_allocator };
+    g_paint_layout_stale = session.base_paint_layout_stale;
+    mesh_edit.setMode(.face);
+    if (restore_selection) _ = mesh_edit.selectFacesByTriangleMask(session.base_selection);
+    return true;
+}
+
+fn quadifyInstallPreview(session: *const QuadifySession, preview: *indexed_edit_mesh.Mesh) bool {
+    const tri_count = g_edit_count / 3;
+    const verts = g_edit_verts orelse return false;
+    const groups = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(groups);
+    const parts = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(parts);
+    const materials = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+    defer std.heap.c_allocator.free(materials);
+    if (!preview.writeResidentMetadata(groups, parts, materials)) return false;
+    if (session.base_parts) |base_parts| {
+        if (!std.mem.eql(u32, base_parts, parts)) return false;
+    } else {
+        for (parts) |part| if (part != indexed_edit_mesh.NO_PART) return false;
+    }
+    if (!std.mem.eql(u32, session.base_materials, materials) or
+        !preview.residentUvsMatch(verts, tri_count))
+    {
+        return false;
     }
 
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return 0;
-    defer indexed.deinit();
-    const opaque_quads = indexed.quadifySelected(opaque_mask) catch return 0;
-    const glass_quads = indexed.quadifySelected(glass_mask) catch return 0;
-    const changed = opaque_quads + glass_quads;
-    if (changed == 0) return 0;
-    if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "tris to quads")) return 0;
-    return changed;
+    // The render triangles never move. Only the authored grouping changes, which
+    // makes the real topology overlay hide each proposed source diagonal. This is
+    // a reversible visual preview: no journal event and no paint-layout invalidation.
+    mesh_edit.clearSelection();
+    model_source.setFaceGroups(groups);
+    mesh_edit.faceGroupsChanged();
+    clearIndexedEditMesh();
+    g_indexed_edit_mesh = preview.*;
+    preview.* = .{ .allocator = std.heap.c_allocator };
+    g_paint_layout_stale = session.base_paint_layout_stale;
+    mesh_edit.setMode(.face);
+    return true;
+}
+
+/// Capture the complete live model as the dry-run base. No triangle is selected or
+/// changed here; the cart can paint its scanning card before requesting evaluation 0.
+pub fn meshQuadifyBegin() ?QuadifyBeginInfo {
+    if (g_lc != null or g_bevel != null or g_quadify != null) return null;
+    if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return null;
+    const verts = g_edit_verts orelse return null;
+    const tri_count = g_edit_count / 3;
+    if (tri_count < 2 or model_source.faceGroups() == null) return null;
+
+    const base_groups = captureFaceGroups() orelse return null;
+    var adopted = false;
+    defer if (!adopted) std.heap.c_allocator.free(base_groups);
+    const base_parts = capturePartOfFaces();
+    defer if (!adopted) if (base_parts) |parts| std.heap.c_allocator.free(parts);
+    const base_materials = captureFaceMaterials(tri_count) orelse return null;
+    defer if (!adopted) std.heap.c_allocator.free(base_materials);
+    const base_selection = std.heap.c_allocator.alloc(bool, tri_count) catch return null;
+    defer if (!adopted) std.heap.c_allocator.free(base_selection);
+    _ = mesh_edit.buildDeleteMask(base_selection);
+    const base_colors = collectCurrentFaceColors() orelse return null;
+    defer std.heap.c_allocator.free(base_colors);
+    if (base_colors.len != @as(usize, tri_count) * 4) return null;
+    const opaque_mask = std.heap.c_allocator.alloc(bool, tri_count) catch return null;
+    defer if (!adopted) std.heap.c_allocator.free(opaque_mask);
+    const glass_mask = std.heap.c_allocator.alloc(bool, tri_count) catch return null;
+    defer if (!adopted) std.heap.c_allocator.free(glass_mask);
+    for (opaque_mask, glass_mask, 0..) |*opaque_slot, *glass_slot, triangle| {
+        const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
+        opaque_slot.* = !is_glass;
+        glass_slot.* = is_glass;
+    }
+
+    var base_mesh = cloneIndexedEditMeshOrImport(
+        verts,
+        tri_count,
+        base_groups,
+        base_parts,
+        model_source.faceMaterials(),
+    ) orelse return null;
+    defer if (!adopted) base_mesh.deinit();
+    var guard = ResidentMetadataGuard.capture() orelse return null;
+    defer if (!adopted) guard.deinit();
+    const snap = journalSnapshotCurrent("tris to quads") orelse return null;
+    defer if (!adopted) {
+        var pending: ?JournalEntry = snap;
+        journalDiscard(&pending);
+    };
+
+    g_quadify = .{
+        .base_mesh = base_mesh,
+        .guard = guard,
+        .base_groups = base_groups,
+        .base_parts = base_parts,
+        .base_materials = base_materials,
+        .base_selection = base_selection,
+        .opaque_mask = opaque_mask,
+        .glass_mask = glass_mask,
+        .base_paint_layout_stale = g_paint_layout_stale,
+        .snap = snap,
+    };
+    adopted = true;
+    return .{ .resident_triangles = tri_count };
+}
+
+/// Evaluate one deterministic ordering, always returning an exact maximum-cardinality
+/// plan. Re-evaluation starts from the captured base, never from the prior preview.
+pub fn meshQuadifyPreview(evaluation_index: u32) ?indexed_edit_mesh.QuadifyStats {
+    const session: *QuadifySession = if (g_quadify) |*active| active else return null;
+    session.last_preview_ok = false;
+    const evaluation = indexed_edit_mesh.QuadEvaluation.fromIndex(evaluation_index);
+    var preview = session.base_mesh.clone() catch return null;
+    defer preview.deinit();
+    const opaque_stats = preview.quadifySelectedWithEvaluation(session.opaque_mask, evaluation) catch return null;
+    const glass_stats = preview.quadifySelectedWithEvaluation(session.glass_mask, evaluation) catch return null;
+    const quads = opaque_stats.quads + glass_stats.quads;
+    const combined = indexed_edit_mesh.QuadifyStats{
+        .authored_faces_before = opaque_stats.authored_faces_before,
+        .authored_faces_after = opaque_stats.authored_faces_before - quads,
+        .triangle_faces = opaque_stats.triangle_faces + glass_stats.triangle_faces,
+        .candidate_pairs = opaque_stats.candidate_pairs + glass_stats.candidate_pairs,
+        .ambiguous_triangles = opaque_stats.ambiguous_triangles + glass_stats.ambiguous_triangles,
+        .quads = quads,
+        .plan_signature = (opaque_stats.plan_signature *% 16777619) ^ glass_stats.plan_signature,
+    };
+    if (quads > 0) {
+        if (!quadifyInstallPreview(session, &preview)) return null;
+    } else if (!quadifyRestoreBase(session, false)) {
+        return null;
+    }
+    session.last_stats = combined;
+    session.last_evaluation = evaluation;
+    session.last_preview_ok = true;
+    return combined;
+}
+
+/// Apply keeps the current preview as one `tris to quads` undo entry. Cancel restores
+/// the exact authored groups and face selection captured before the scan.
+pub fn meshQuadifyEnd(commit: bool) QuadifyEndInfo {
+    var session = g_quadify orelse return .{ .ok = false, .changed = 0 };
+    g_quadify = null;
+    var ok = true;
+    var changed: u32 = 0;
+    if (commit and session.last_preview_ok and session.last_stats.quads > 0) {
+        const tri_count = g_edit_count / 3;
+        const verts = g_edit_verts orelse {
+            quadifyRelease(&session);
+            return .{ .ok = false, .changed = 0 };
+        };
+        const groups = captureFaceGroups() orelse {
+            quadifyRelease(&session);
+            return .{ .ok = false, .changed = 0 };
+        };
+        defer std.heap.c_allocator.free(groups);
+        const indexed = if (g_indexed_edit_mesh) |*mesh| mesh else {
+            quadifyRelease(&session);
+            return .{ .ok = false, .changed = 0 };
+        };
+        const valid = session.guard.matchesGroupOnly(groups) and
+            indexed.residentMetadataMatches(
+                tri_count,
+                groups,
+                session.base_parts,
+                session.base_materials,
+            ) and indexed.residentUvsMatch(verts, tri_count);
+        if (valid) {
+            changed = session.last_stats.quads;
+            journalCommit(&session.snap);
+            mesh_edit.clearSelection();
+            mesh_edit.setMode(.face);
+        } else {
+            ok = quadifyRestoreBase(&session, true);
+        }
+    } else {
+        ok = quadifyRestoreBase(&session, true);
+    }
+    quadifyRelease(&session);
+    return .{ .ok = ok, .changed = changed };
+}
+
+/// Legacy automation convenience: run the new whole-topology session through its
+/// balanced preview and immediately apply. The interactive editor never uses this
+/// shortcut; it always presents the dry-run confirmation.
+pub fn meshTrianglesToQuads() u32 {
+    _ = meshQuadifyBegin() orelse return 0;
+    const stats = meshQuadifyPreview(0) orelse {
+        _ = meshQuadifyEnd(false);
+        return 0;
+    };
+    if (stats.quads == 0) {
+        _ = meshQuadifyEnd(false);
+        return 0;
+    }
+    const ended = meshQuadifyEnd(true);
+    return if (ended.ok) ended.changed else 0;
 }
 
 /// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent

@@ -309,6 +309,18 @@
           "zig": "hostMeshTopoTrisToQuads"
         },
         {
+          "js": "__mesh_quadify_begin",
+          "zig": "hostMeshQuadifyBegin"
+        },
+        {
+          "js": "__mesh_quadify_preview",
+          "zig": "hostMeshQuadifyPreview"
+        },
+        {
+          "js": "__mesh_quadify_end",
+          "zig": "hostMeshQuadifyEnd"
+        },
+        {
           "js": "__mesh_topo_glass",
           "zig": "hostMeshTopoGlass"
         },

@@ -588,6 +588,144 @@ test "tris to quads recovers every selected cell instead of pairing across grid 
     try testing.expectEqual(@as(u32, 2), live_quads);
 }
 
+test "tris to quads maximizes the total across an ambiguous four-triangle chain" {
+    // A convex hexagon fan produces candidate graph 0—1—2—3. Taking the tempting
+    // middle seam first strands both ends (one quad); the exact augmenting-path
+    // planner must rearrange that local choice into (0,1) + (2,3), for two.
+    const points = [_][3]f32{
+        .{ 0, 0, 0 },
+        .{ 2, 0, 0 },
+        .{ 3, 1, 0 },
+        .{ 2.5, 2, 0 },
+        .{ 1, 3, 0 },
+        .{ 0, 2, 0 },
+    };
+    const triangles = [_][3]usize{
+        .{ 0, 1, 2 },
+        .{ 0, 2, 3 },
+        .{ 0, 3, 4 },
+        .{ 0, 4, 5 },
+    };
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], points[point][0..]);
+        }
+    }
+    const groups = [_]u32{ 0, 1, 2, 3 };
+    const selected = [_]bool{true} ** triangles.len;
+    for ([_]indexed_edit_mesh.QuadEvaluation{ .balanced, .short_seams, .alternate_flow }) |evaluation| {
+        var indexed = try indexed_edit_mesh.Mesh.fromSoup(
+            testing.allocator,
+            soup[0..],
+            triangles.len,
+            groups[0..],
+            null,
+        );
+        defer indexed.deinit();
+        const stats = try indexed.quadifySelectedWithEvaluation(selected[0..], evaluation);
+        try testing.expectEqual(@as(u32, 4), stats.authored_faces_before);
+        try testing.expectEqual(@as(u32, 3), stats.candidate_pairs);
+        try testing.expectEqual(@as(u32, 2), stats.ambiguous_triangles);
+        try testing.expectEqual(@as(u32, 2), stats.quads);
+        try testing.expectEqual(@as(u32, 2), stats.authored_faces_after);
+
+        var resident_groups: [triangles.len]u32 = undefined;
+        var resident_parts: [triangles.len]u32 = undefined;
+        var resident_materials: [triangles.len]u32 = undefined;
+        try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+        try testing.expectEqualSlices(u32, &.{ 0, 0, 2, 2 }, resident_groups[0..]);
+    }
+}
+
+test "tris to quads solves an odd ambiguous fan without losing the tail pair" {
+    // The first three faces form an odd candidate cycle; face 2 also owns the
+    // only edge to face 3. The maximum therefore has to reserve (2,3) and pair
+    // (0,1). This is the blossom case that a plain bipartite/path matcher misses.
+    const points = [_][3]f32{
+        .{ 0, 0, 0 },   // center
+        .{ -2, -1, 0 }, // outer A
+        .{ 2, -1, 0 },  // outer B
+        .{ 0, 2, 0 },   // outer C
+        .{ -3, 2, 0 },  // tail
+    };
+    const triangles = [_][3]usize{
+        .{ 0, 1, 2 },
+        .{ 0, 2, 3 },
+        .{ 0, 3, 1 },
+        .{ 1, 3, 4 },
+    };
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], points[point][0..]);
+        }
+    }
+    const groups = [_]u32{ 0, 1, 2, 3 };
+    const selected = [_]bool{true} ** triangles.len;
+    for ([_]indexed_edit_mesh.QuadEvaluation{ .balanced, .short_seams, .alternate_flow }) |evaluation| {
+        var indexed = try indexed_edit_mesh.Mesh.fromSoup(
+            testing.allocator,
+            soup[0..],
+            triangles.len,
+            groups[0..],
+            null,
+        );
+        defer indexed.deinit();
+        const stats = try indexed.quadifySelectedWithEvaluation(selected[0..], evaluation);
+        try testing.expectEqual(@as(u32, 4), stats.candidate_pairs);
+        try testing.expectEqual(@as(u32, 3), stats.ambiguous_triangles);
+        try testing.expectEqual(@as(u32, 2), stats.quads);
+
+        var resident_groups: [triangles.len]u32 = undefined;
+        var resident_parts: [triangles.len]u32 = undefined;
+        var resident_materials: [triangles.len]u32 = undefined;
+        try testing.expect(indexed.writeResidentMetadata(&resident_groups, &resident_parts, &resident_materials));
+        try testing.expectEqualSlices(u32, &.{ 0, 0, 2, 2 }, resident_groups[0..]);
+    }
+}
+
+test "tris to quads accepts the same concave pair as two-face merge" {
+    // Manual Merge Faces supports a concave authored boundary. The whole-topology
+    // sweep must use that same pairwise contract instead of silently applying the
+    // stricter convex-only import heuristic.
+    const points = [_][3]f32{
+        .{ 0, 0, 0 },
+        .{ 2, 0, 0 },
+        .{ 1, 0.5, 0 },
+        .{ 0, 2, 0 },
+    };
+    const triangles = [_][3]usize{
+        .{ 0, 1, 2 },
+        .{ 0, 2, 3 },
+    };
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], points[point][0..]);
+        }
+    }
+    const groups = [_]u32{ 0, 1 };
+    const selected = [_]bool{ true, true };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(
+        testing.allocator,
+        soup[0..],
+        triangles.len,
+        groups[0..],
+        null,
+    );
+    defer indexed.deinit();
+
+    const stats = try indexed.quadifySelectedWithEvaluation(selected[0..], .balanced);
+    try testing.expectEqual(@as(u32, 1), stats.candidate_pairs);
+    try testing.expectEqual(@as(u32, 1), stats.quads);
+    try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
+    try testing.expect(!indexed.faces.items[1].alive);
+}
+
 test "tris to quads leaves selected material mismatches and unmatched triangles alone" {
     var soup = [_]f32{0} ** (3 * 3 * 8);
     const corners = [9][3]f32{
