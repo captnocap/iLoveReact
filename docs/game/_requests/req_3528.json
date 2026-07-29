@@ -1,0 +1,30 @@
+{
+  "id": "req_3528",
+  "at": "2026-07-29T13:29:17.043Z",
+  "origin": "codex:019fac74",
+  "text": "oh but the images go invisible when u switch to uv rip lmao",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T13:29:26.871Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:35:13.431Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "UV mode now renders the full visible editable source-image stack beneath the UV graph instead of swapping it out for the old finite atlas preview. Image transforms stay reserved in UV mode, layer-row selection no longer forces a mode change, and the user can align islands against positioned sources without making those references disappear.",
+  "shas": [
+    "50801cd3e"
+  ],
+  "resolvedAt": "2026-07-29T13:35:13.431Z"
+}

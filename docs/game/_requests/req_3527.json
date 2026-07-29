@@ -1,0 +1,30 @@
+{
+  "id": "req_3527",
+  "at": "2026-07-29T13:28:23.852Z",
+  "origin": "codex:019fac74",
+  "text": "huh, it actually might be that i cant actually just do this at all. im trying to pull on the uv when not on an image and it is not doing it",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T13:28:32.618Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:35:13.386Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Repaired mixed workspace pointer ownership: IMAGES mode now gives a drag only to the top visible unlocked image beneath the cursor. Empty workspace and locked-image hits continue into the existing UV selection and transform path, with a pure routing boundary and regression coverage proving they cannot become an invisible full-canvas shield.",
+  "shas": [
+    "50801cd3e"
+  ],
+  "resolvedAt": "2026-07-29T13:35:13.386Z"
+}

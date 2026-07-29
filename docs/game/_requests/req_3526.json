@@ -1,0 +1,30 @@
+{
+  "id": "req_3526",
+  "at": "2026-07-29T13:27:30.097Z",
+  "origin": "codex:019fac74",
+  "text": "you need a way to lock down an image i keep dragging the image not the uv",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T13:27:36.990Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T13:35:13.342Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a persistent per-image transform lock to the UV workspace layer document and a visible lock control in every image row. Locked layers remain visible and compilable, reject both canvas and numeric image movement, show an amber locked frame, and do not change the texture revision or make a current compile stale.",
+  "shas": [
+    "50801cd3e"
+  ],
+  "resolvedAt": "2026-07-29T13:35:13.342Z"
+}
