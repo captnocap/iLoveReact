@@ -128,6 +128,28 @@ pub const PlayerModelGroup = struct {
     }
 };
 
+/// One bone of a skinned figure (SKIN-3499): its bind-pose center (the
+/// inverse-bind translation) and its authored tint. Bone order matches the
+/// per-vertex joint indices AND the animation clips' node order.
+pub const PlayerSkinBone = struct {
+    center: [3]f32,
+    color: [3]f32,
+};
+
+/// The skinned player figure (SKIN-3499): ONE model-space mesh with per-vertex
+/// bone indices/weights, drawn palette-blended instead of as N part nodes.
+/// Vertices are stride-16 f32 [pos3, normal3, uv2, joint4, weight4].
+pub const PlayerSkin = struct {
+    vertices: []f32,
+    vertex_count: u32,
+    bones: []PlayerSkinBone,
+
+    pub fn deinit(self: PlayerSkin, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+        allocator.free(self.bones);
+    }
+};
+
 /// One baked NPC spawn (req_0935). model_index selects a Scene.npc_models entry;
 /// kind/faction are reserved for the Stage-2 Zig combat AI (the Stage-1 loader
 /// renders + animates only). y is NOT stored — the loader grounds each NPC on
@@ -738,6 +760,10 @@ pub const Scene = struct {
     /// The compiled player model: local-coordinate mesh groups, moved by the
     /// runtime player transform in world_loader.zig.
     player_model: []PlayerModelGroup,
+    /// The SKINNED player figure (SKIN-3499): when present it wins over
+    /// player_model — one palette-blended node instead of N part nodes.
+    /// Defaults null; only the live skin push populates it today.
+    player_skin: ?PlayerSkin = null,
     /// Baked transform clips for the compiled player model.
     player_animation: PlayerAnimationSet,
     /// The NPC figure models (req_0935): each entry is one figure's mesh groups
@@ -799,6 +825,7 @@ pub const Scene = struct {
         allocator.free(self.instances);
         for (self.player_model) |group| group.deinit(allocator);
         allocator.free(self.player_model);
+        if (self.player_skin) |skin| skin.deinit(allocator);
         self.player_animation.deinit(allocator);
         for (self.npc_models) |model| {
             for (model) |group| group.deinit(allocator);

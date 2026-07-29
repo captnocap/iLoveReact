@@ -33,47 +33,96 @@ function hexRgb(hex: string | undefined): [number, number, number] {
   return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
 }
 
+/** Bucket the meshdoc's vertex ROWS per outliner part: rank → the stride-8
+ *  row indices of that part's triangle corners, in triangle order. Shared by
+ *  the per-part payload (legacy door) and the skinned payload. */
+function bucketVertexRows(doc: PackageMeshDoc): number[][] {
+  const triCount = Math.floor(doc.vertices.length / 24);
+  const buckets: number[][] = doc.ranges.map(() => []);
+  for (let tri = 0; tri < triCount; tri += 1) {
+    const group = doc.faceGroups ? doc.faceGroups[tri]! : tri;
+    const rank = doc.ranges.findIndex((r) => group >= r.lo && group < r.hi);
+    if (rank < 0) continue;
+    buckets[rank]!.push(tri * 3, tri * 3 + 1, tri * 3 + 2);
+  }
+  return buckets;
+}
+
 /** Slice a meshdoc into the door payload: one group per part range, vertices
  *  LOCAL to the range's measured bounds center, color from the rank-paired
  *  parts row. Table rows: [vertStart, vertCount, cx, cy, cz, r, g, b].
  *  `nodes` mirrors the emitted groups one-for-one (name + center, rank order)
  *  — the clip generator MUST see the exact node order the loader will animate. */
 export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; table: Float32Array; nodes: AnimNode[] } {
-  const triCount = Math.floor(doc.vertices.length / 24);
   const centers = meshDocRangeCenters(doc);
-  const buckets: number[][] = doc.ranges.map(() => []);
-  for (let tri = 0; tri < triCount; tri += 1) {
-    const group = doc.faceGroups ? doc.faceGroups[tri]! : tri;
-    const rank = doc.ranges.findIndex((r) => group >= r.lo && group < r.hi);
-    if (rank < 0) continue;
-    const center = centers[rank] ?? [0, 0, 0];
-    const bucket = buckets[rank]!;
-    for (let corner = 0; corner < 3; corner += 1) {
-      const at = (tri * 3 + corner) * 8;
-      bucket.push(
-        doc.vertices[at]! - center[0],
-        doc.vertices[at + 1]! - center[1],
-        doc.vertices[at + 2]! - center[2],
-        doc.vertices[at + 3]!, doc.vertices[at + 4]!, doc.vertices[at + 5]!,
-        doc.vertices[at + 6]!, doc.vertices[at + 7]!,
-      );
-    }
-  }
-  const totalFloats = buckets.reduce((sum, b) => sum + b.length, 0);
-  const verts = new Float32Array(totalFloats);
+  const buckets = bucketVertexRows(doc);
+  const totalRows = buckets.reduce((sum, b) => sum + b.length, 0);
+  const verts = new Float32Array(totalRows * 8);
   const rows: number[] = [];
   const nodes: AnimNode[] = [];
   let vertStart = 0;
   buckets.forEach((bucket, rank) => {
     if (bucket.length === 0) return;
-    verts.set(bucket, vertStart * 8);
     const center = centers[rank] ?? [0, 0, 0];
     const [r, gg, b] = hexRgb(meta[rank]?.color);
-    rows.push(vertStart, bucket.length / 8, center[0], center[1], center[2], r, gg, b);
+    let at = vertStart * 8;
+    for (const row of bucket) {
+      const src = row * 8;
+      verts[at] = doc.vertices[src]! - center[0];
+      verts[at + 1] = doc.vertices[src + 1]! - center[1];
+      verts[at + 2] = doc.vertices[src + 2]! - center[2];
+      verts[at + 3] = doc.vertices[src + 3]!;
+      verts[at + 4] = doc.vertices[src + 4]!;
+      verts[at + 5] = doc.vertices[src + 5]!;
+      verts[at + 6] = doc.vertices[src + 6]!;
+      verts[at + 7] = doc.vertices[src + 7]!;
+      at += 8;
+    }
+    rows.push(vertStart, bucket.length, center[0], center[1], center[2], r, gg, b);
     nodes.push({ name: meta[rank]?.name ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
-    vertStart += bucket.length / 8;
+    vertStart += bucket.length;
   });
   return { verts, table: new Float32Array(rows), nodes };
+}
+
+/** The SKINNED payload (SKIN-3499): the same part slicing, but ONE model-space
+ *  mesh — vertices are NOT re-based, and every vertex carries its part's bone
+ *  index with a rigid weight. Wire: stride-16 rows [pos3, normal3, uv2,
+ *  j0..j3, w0..w3]; bone rows [cx, cy, cz, r, g, b, 0, 0] in emit order
+ *  (== joint indices == the clip generator's node order). Rigid weights make
+ *  the skinned draw reproduce the per-part path exactly; the auto-weight
+ *  solver (phase 2) will soften seams into the same wire format. */
+export function playerSkinPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; bones: Float32Array; nodes: AnimNode[] } {
+  const centers = meshDocRangeCenters(doc);
+  const buckets = bucketVertexRows(doc);
+  const totalRows = buckets.reduce((sum, b) => sum + b.length, 0);
+  const verts = new Float32Array(totalRows * 16);
+  const boneRows: number[] = [];
+  const nodes: AnimNode[] = [];
+  let at = 0;
+  buckets.forEach((bucket, rank) => {
+    if (bucket.length === 0) return;
+    const bone = nodes.length;
+    const center = centers[rank] ?? [0, 0, 0];
+    const [r, gg, b] = hexRgb(meta[rank]?.color);
+    for (const row of bucket) {
+      const src = row * 8;
+      verts[at] = doc.vertices[src]!;
+      verts[at + 1] = doc.vertices[src + 1]!;
+      verts[at + 2] = doc.vertices[src + 2]!;
+      verts[at + 3] = doc.vertices[src + 3]!;
+      verts[at + 4] = doc.vertices[src + 4]!;
+      verts[at + 5] = doc.vertices[src + 5]!;
+      verts[at + 6] = doc.vertices[src + 6]!;
+      verts[at + 7] = doc.vertices[src + 7]!;
+      verts[at + 8] = bone;
+      verts[at + 12] = 1; // rigid: 100% the part's bone (j1..j3/w1..w3 stay 0)
+      at += 16;
+    }
+    boneRows.push(center[0], center[1], center[2], r, gg, b, 0, 0);
+    nodes.push({ name: meta[rank]?.name ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
+  });
+  return { verts, bones: new Float32Array(boneRows), nodes };
 }
 
 export type PlayerModelPush = { name: string; groups: number; animated: boolean; nodes: AnimNode[] };
@@ -84,8 +133,10 @@ export type PlayerModelPush = { name: string; groups: number; animated: boolean;
  *  loader honestly falls back to the stand-in instead of wearing a stale body. */
 export function pushPlayerModel(): PlayerModelPush | null {
   if (typeof g.__compiled_world_set_player_model !== 'function') return null;
+  const skinDoor = typeof g.__compiled_world_set_player_skin === 'function';
   const clear = () => {
     g.__compiled_world_set_player_model(new Float32Array(0), new Float32Array(0));
+    g.__compiled_world_set_player_skin?.(new Float32Array(0), new Float32Array(0));
     g.__compiled_world_set_player_animation?.(new Float32Array(0));
   };
   const pkg = playerCharacterPackage();
@@ -97,16 +148,31 @@ export function pushPlayerModel(): PlayerModelPush | null {
     return null;
   }
   const meta = packageMeshDocParts(pkg) ?? [];
-  const payload = playerModelPayload(doc, meta);
-  if (payload.table.length === 0) { clear(); return null; }
-  g.__compiled_world_set_player_model(payload.verts, payload.table);
+  let nodes: AnimNode[];
+  let groups: number;
+  if (skinDoor) {
+    // SKIN-3499: hosts with the skin door get ONE palette-blended figure.
+    // The per-part staging is cleared so a stale body can't win at construct.
+    const payload = playerSkinPayload(doc, meta);
+    if (payload.nodes.length === 0) { clear(); return null; }
+    g.__compiled_world_set_player_skin(payload.verts, payload.bones);
+    g.__compiled_world_set_player_model(new Float32Array(0), new Float32Array(0));
+    nodes = payload.nodes;
+    groups = payload.nodes.length;
+  } else {
+    const payload = playerModelPayload(doc, meta);
+    if (payload.table.length === 0) { clear(); return null; }
+    g.__compiled_world_set_player_model(payload.verts, payload.table);
+    nodes = payload.nodes;
+    groups = payload.table.length / 8;
+  }
   // The basic animation shapes (req_2781), generated for THIS body's exact
-  // node order — clips only engage when node_count matches the groups.
+  // node order — clips only engage when node_count matches the groups/bones.
   let animated = false;
   if (typeof g.__compiled_world_set_player_animation === 'function') {
-    const clips = buildBodyClips(payload.nodes);
-    g.__compiled_world_set_player_animation(encodeAnimationPayload(payload.nodes.length, clips));
+    const clips = buildBodyClips(nodes);
+    g.__compiled_world_set_player_animation(encodeAnimationPayload(nodes.length, clips));
     animated = true;
   }
-  return { name: pkg.name, groups: payload.table.length / 8, animated, nodes: payload.nodes };
+  return { name: pkg.name, groups, animated, nodes };
 }

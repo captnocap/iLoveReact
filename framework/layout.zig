@@ -559,6 +559,17 @@ pub const Node = struct {
     scene3d_vertices: ?[]const f32 = null, // interleaved verts, read once on cache miss
     scene3d_vert_count: u32 = 0,
     scene3d_bounds_radius: f32 = 0, // unscaled bounding radius from the generator (culling)
+    // Skinned mesh (SKIN-3499): a figure drawn as ONE matrix-palette-blended
+    // draw instead of N per-part nodes. Wire verts are stride-16 f32
+    // [pos3, normal3, uv2, joint4, weight4] in MODEL space; the palette is
+    // bone_count × 20 floats (column-major model-space mat4 + rgba tint per
+    // bone, inverse-bind folded in — skeleton/pose.zig), rewritten by the
+    // world loader every frame. The node's own TRS is the figure's world root.
+    scene3d_skin_geom_key: ?[]const u8 = null, // skinned intern key
+    scene3d_skin_vertices: ?[]const f32 = null, // stride-16 wire verts, read once on cache miss
+    scene3d_skin_vert_count: u32 = 0,
+    scene3d_skin_palette: ?[]const f32 = null, // bone_count × 20 floats, live-posed
+    scene3d_skin_bone_count: u32 = 0,
     // Host-generated heightfield (live-sculpted terrain). A regular grid's topology
     // (x/z, UVs, triangulation) is fixed; only the heights move as you paint. So
     // instead of shipping ~86k baked verts every sculpt, ship just the cols×rows

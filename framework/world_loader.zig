@@ -53,6 +53,10 @@ pub fn setPendingPlayerAnimation(bytes: []const u8) void {
     player_assets.setPendingPlayerAnimation(bytes);
 }
 
+pub fn setPendingPlayerSkin(verts_bytes: []const u8, bones_bytes: []const u8) void {
+    player_assets.setPendingPlayerSkin(verts_bytes, bones_bytes);
+}
+
 pub fn setPlayerLivePose(node_id: u32, bytes: []const u8) void {
     player_assets.setPlayerLivePose(node_id, bytes);
 }

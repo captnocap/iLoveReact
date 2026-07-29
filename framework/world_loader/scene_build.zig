@@ -80,7 +80,9 @@ const buildBrushDome = m_geometry.buildBrushDome;
 const fallbackPlayerModel = m_player_assets.fallbackPlayerModel;
 const geomContentHash = m_player_assets.geomContentHash;
 const pendingPlayerModelCopy = m_player_assets.pendingPlayerModelCopy;
+const pendingPlayerSkinCopy = m_player_assets.pendingPlayerSkinCopy;
 const pendingPlayerAnimationCopy = m_player_assets.pendingPlayerAnimationCopy;
+const m_pose = @import("../skeleton/pose.zig");
 const extrudeTiles = m_instances.extrudeTiles;
 const buildShapeBatches = m_instances.buildShapeBatches;
 const whitenRows = m_instances.whitenRows;
@@ -452,7 +454,46 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     // player model when one is staged (__compiled_world_set_player_model);
     // only when nothing is staged does the stand-in figure mount. The scene
     // owns the groups exactly like a decoded lump (Scene.deinit frees them).
-    if (self.scene.player_model.len == 0) {
+    // SKINNED figure (SKIN-3499): a staged skin WINS over the per-part model —
+    // ONE palette-blended node instead of N part nodes. The palette buffer is
+    // runtime-owned (freed at teardown) because animation.zig rewrites it every
+    // frame while the node holds a read view. When a skin is present the
+    // per-part staging/fallback below is skipped entirely (player_model stays
+    // empty, so the group loop emits nothing).
+    if (self.scene.player_skin == null) {
+        if (pendingPlayerSkinCopy(self.allocator)) |skin| {
+            self.scene.player_skin = skin;
+            log.print("[loader] player skin from live push — {d} verts × {d} bones (SKIN-3499)\n", .{ skin.vertex_count, skin.bones.len });
+        }
+    }
+    if (self.scene.player_skin) |skin| {
+        if (self.scene.player_animation.clips.len == 0) {
+            if (pendingPlayerAnimationCopy(self.allocator, skin.bones.len)) |animation| {
+                self.scene.player_animation = animation;
+                log.print("[loader] player animation from live push — {d} clips (req_2781)\n", .{animation.clips.len});
+            }
+        }
+        if (self.player_skin_palette.len > 0) self.allocator.free(self.player_skin_palette);
+        self.player_skin_palette = try self.allocator.alloc(f32, skin.bones.len * m_pose.BONE_FLOATS);
+        for (skin.bones, 0..) |bone, i| m_pose.writeRestPalette(self.player_skin_palette, i, bone.center, bone.color);
+        const skin_key = try std.fmt.allocPrint(self.allocator, "player-skin-{x}", .{geomContentHash(skin.vertices)});
+        self.player_geom_keys.append(self.allocator, skin_key) catch |err| {
+            self.allocator.free(skin_key);
+            return err;
+        };
+        self.player_first_child = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_skin_geom_key = skin_key,
+            .scene3d_skin_vertices = skin.vertices,
+            .scene3d_skin_vert_count = skin.vertex_count,
+            .scene3d_skin_palette = self.player_skin_palette,
+            .scene3d_skin_bone_count = @intCast(skin.bones.len),
+            .scene3d_color_r = 1,
+            .scene3d_color_g = 1,
+            .scene3d_color_b = 1,
+            .scene3d_color_a = 1,
+        });
+    } else if (self.scene.player_model.len == 0) {
         if (pendingPlayerModelCopy(self.allocator)) |groups| {
             self.scene.player_model = groups;
             log.print("[loader] player model from live push — {d} groups (req_2780)\n", .{groups.len});
@@ -464,14 +505,15 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         }
     }
     // Staged basic-shape clips ride in the same way (req_2781) — only when
-    // the gamefile brought none, and only when the node count matches.
-    if (self.scene.player_animation.clips.len == 0) {
+    // the gamefile brought none, and only when the node count matches. The
+    // skinned branch above consumed them against its bone count already.
+    if (self.scene.player_skin == null and self.scene.player_animation.clips.len == 0) {
         if (pendingPlayerAnimationCopy(self.allocator, self.scene.player_model.len)) |animation| {
             self.scene.player_animation = animation;
             log.print("[loader] player animation from live push — {d} clips (req_2781)\n", .{animation.clips.len});
         }
     }
-    self.player_first_child = self.kid_list.items.len;
+    if (self.scene.player_skin == null) self.player_first_child = self.kid_list.items.len;
     for (self.scene.player_model, 0..) |group, i| {
         const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}-{x}", .{ i, geomContentHash(group.vertices) });
         self.player_geom_keys.append(self.allocator, key) catch |err| {
@@ -492,7 +534,7 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
             .scene3d_tex_rgba = group.tex_rgba,
         });
     }
-    if (self.scene.player_model.len == 0) log.print("[loader] no player model lump and stand-in failed — camera target only\n", .{});
+    if (self.scene.player_skin == null and self.scene.player_model.len == 0) log.print("[loader] no player model lump and stand-in failed — camera target only\n", .{});
 
     // NPC figures (req_0935): one child node per spawn × model group, posed
     // every frame by updateNpcModelNodes. Each (spawn, group) gets a unique

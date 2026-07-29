@@ -488,6 +488,26 @@ fn hostSetPlayerModel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_player_skin(Float32Array verts, Float32Array boneTable) stages the
+// SKINNED player figure (SKIN-3499) — same process-global staging discipline as the model
+// door, and it WINS over the per-part model at construct. Verts are stride-16 rows
+// [pos3, normal3, uv2, joint4, weight4] in MODEL space (not re-based); bone rows are 8
+// floats [cx, cy, cz, r, g, b, reserved, reserved] in the clips' node order. Two empty
+// arrays clear the staging.
+fn hostSetPlayerSkin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const verts = argView(info, 0) orelse {
+        setReturnString(info, "error:BadVerts");
+        return;
+    };
+    const bones = argView(info, 1) orelse {
+        setReturnString(info, "error:BadBones");
+        return;
+    };
+    world_loader.setPendingPlayerSkin(verts, bones);
+    setReturnString(info, "ok");
+}
+
 // __compiled_world_set_player_animation(Float32Array payload) stages the basic animation
 // shapes generated for the pushed body (req_2781) — same staging discipline as the model
 // door: process-global, consumed at construct when the gamefile carries no animation and
@@ -605,6 +625,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_set_player_model", hostSetPlayerModel);
+    v8_runtime.registerHostFn("__compiled_world_set_player_skin", hostSetPlayerSkin);
     v8_runtime.registerHostFn("__compiled_world_set_player_animation", hostSetPlayerAnimation);
     v8_runtime.registerHostFn("__compiled_world_set_player_live_pose", hostSetPlayerLivePose);
     v8_runtime.registerHostFn("__compiled_world_clear_player_live_pose", hostClearPlayerLivePose);

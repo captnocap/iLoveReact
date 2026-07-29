@@ -123,6 +123,11 @@ pub const Runtime = struct {
     material_batches: []MaterialBatch = &.{},
     materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .empty,
+    /// The skinned figure's live bone palette (SKIN-3499): bone_count × 20
+    /// floats (column-major model-space mat4 + rgba tint per bone), rewritten
+    /// every frame by updatePlayerSkinnedNode while the skin node holds a read
+    /// view. Runtime-owned; freed at teardown beside player_geom_keys.
+    player_skin_palette: []f32 = &.{},
     mesh_prop_vertex_buffers: std.ArrayList([]f32) = .empty,
     // LIVESKIN per-slot (req_2025): the live mesh-ref draw runs EVERY frame, so its per-slot
     // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)

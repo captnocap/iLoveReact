@@ -745,7 +745,11 @@ const oct_decode_wgsl =
 /// 3D mesh pipeline: perspective projection + Blinn-Phong lighting.
 /// Vertex: position f32x3 + oct normal snorm16x2 + uv f16x2 = 20 bytes (3d.zig Vertex).
 /// Uniforms: MVP, model matrix, lighting, material color.
-pub const scene3d_wgsl = oct_decode_wgsl ++
+/// Assembled below from shared chunks (decls / vertex input / common / vs / fs)
+/// so the SKINNED variant reuses everything except its vertex stage — the
+/// fragment shader and the packed-instance model rebuild can never drift
+/// between the two.
+const scene3d_decls =
     \\// ── Scene-wide uniforms (one set per frame, no dynamic offset) ──
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
@@ -803,6 +807,12 @@ pub const scene3d_wgsl = oct_decode_wgsl ++
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
     \\
+;
+
+// The standard (non-skinned) VertexInput — locations 0–2 per-vertex from vbuf0,
+// 3–6 per-instance from vbuf1. Split from the shared decls so the skinned
+// variant can extend it with joint/weight attributes at locations 7–8.
+const scene3d_vs_input =
     \\// ── Vertex I/O ────────────────────────────────────────────────
     \\// Per-vertex attrs at locations 0–2 come from vertex buffer 0 (the retained
     \\// geometry, step=vertex). Per-instance attrs at locations 3–7 come from
@@ -820,6 +830,11 @@ pub const scene3d_wgsl = oct_decode_wgsl ++
     \\    @location(6) inst_color: vec4f,   // rgba (unorm8)
     \\};
     \\
+;
+
+// Shared between the standard and skinned variants: VertexOutput, the packed-
+// instance model matrix rebuild, and the shadow-visibility sampler.
+const scene3d_common =
     \\struct VertexOutput {
     \\    @builtin(position) clip_pos: vec4f,
     \\    @location(0) world_pos: vec3f,
@@ -876,6 +891,9 @@ pub const scene3d_wgsl = oct_decode_wgsl ++
     \\    return sum / 9.0;
     \\}
     \\
+;
+
+const scene3d_vs_main =
     \\// ── Vertex shader ────────────────────────────────────────────
     \\@vertex
     \\fn vs_main(in: VertexInput, @builtin(vertex_index) vid: u32) -> VertexOutput {
@@ -896,6 +914,9 @@ pub const scene3d_wgsl = oct_decode_wgsl ++
     \\    return out;
     \\}
     \\
+;
+
+const scene3d_fs =
     \\// ── Fragment shader (Blinn-Phong + diffuse texture) ──────────
     \\// Meshes without an explicit texture get a 1×1 white default, so the multiply
     \\// collapses to the per-instance color and behavior matches the pre-texture path.
@@ -984,6 +1005,119 @@ pub const scene3d_wgsl = oct_decode_wgsl ++
     \\    // default (a == 1) and never hit this.
     \\    if (out_a <= 0.01) { discard; }
     \\    return vec4f(final_rgb * out_a, out_a);
+    \\}
+;
+
+pub const scene3d_wgsl = oct_decode_wgsl ++ scene3d_decls ++ scene3d_vs_input ++ scene3d_common ++ scene3d_vs_main ++ scene3d_fs;
+
+// SKINNED vertex input (SKIN-3499): the standard layout plus a bone palette.
+// Each palette entry is a column-major MODEL-SPACE matrix (the inverse-bind
+// translation is folded in host-side by skeleton/pose.zig) + an rgba tint —
+// 80 bytes std430 (mat4x4f + vec4f), matching the 20-float wire rows the
+// world loader writes. Weights arrive unorm8-quantized, so the vertex stage
+// renormalizes by the weight sum — rigid exports (w = 1,0,0,0) pass through
+// exactly and reproduce today's per-part transforms bit-for-visual-bit.
+const scene3d_skinned_vs_input =
+    \\struct BoneData {
+    \\    m: mat4x4f,
+    \\    color: vec4f,
+    \\};
+    \\@group(2) @binding(0) var<storage, read> bones: array<BoneData>;
+    \\
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,   // rx, ry, rz (u16 deg ring) + pad
+    \\    @location(5) inst_scale: vec4f,   // sx, sy, sz (f16 m) + pad
+    \\    @location(6) inst_color: vec4f,   // rgba (unorm8)
+    \\    @location(7) joints: vec4u,       // bone indices (uint8x4)
+    \\    @location(8) weights: vec4f,      // bone weights (unorm8x4)
+    \\};
+    \\
+;
+
+const scene3d_skinned_vs_main =
+    \\// ── Vertex shader (matrix-palette LBS) ───────────────────────
+    \\// model = instance root (the figure's world placement) × the weighted
+    \\// blend of bone matrices. The normal rides the same matrix as the base
+    \\// path (no inverse-transpose; bone scales are ~uniform in practice).
+    \\@vertex
+    \\fn vs_main(in: VertexInput, @builtin(vertex_index) vid: u32) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    let ws = max(in.weights.x + in.weights.y + in.weights.z + in.weights.w, 1e-4);
+    \\    let skin_m = (in.weights.x * bones[in.joints.x].m
+    \\                + in.weights.y * bones[in.joints.y].m
+    \\                + in.weights.z * bones[in.joints.z].m
+    \\                + in.weights.w * bones[in.joints.w].m) * (1.0 / ws);
+    \\    let bone_col = (in.weights.x * bones[in.joints.x].color
+    \\                  + in.weights.y * bones[in.joints.y].color
+    \\                  + in.weights.z * bones[in.joints.z].color
+    \\                  + in.weights.w * bones[in.joints.w].color) * (1.0 / ws);
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale) * skin_m;
+    \\    let world = model * vec4f(in.position, 1.0);
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
+    \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color * bone_col;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    let corner = vid % 3u;
+    \\    out.bary = vec3f(f32(corner == 0u), f32(corner == 1u), f32(corner == 2u));
+    \\    return out;
+    \\}
+    \\
+;
+
+/// Skinned 3D mesh pipeline (SKIN-3499) — scene3d with a matrix-palette LBS
+/// vertex stage. Shares decls/common/fragment with scene3d_wgsl by construction.
+pub const scene3d_skinned_wgsl = oct_decode_wgsl ++ scene3d_decls ++ scene3d_skinned_vs_input ++ scene3d_common ++ scene3d_skinned_vs_main ++ scene3d_fs;
+
+/// Skinned shadow-depth variant (SKIN-3499): group(0) = the light VP (same as
+/// shadow_depth_wgsl), group(1) = the bone palette. rebuild_model MUST stay
+/// byte-identical to the other copies (same lockstep invariant).
+pub const shadow_depth_skinned_wgsl =
+    \\@group(0) @binding(0) var<uniform> LVP: mat4x4f;
+    \\struct BoneData {
+    \\    m: mat4x4f,
+    \\    color: vec4f,
+    \\};
+    \\@group(1) @binding(0) var<storage, read> bones: array<BoneData>;
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (unused here)
+    \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_pos: vec3f,
+    \\    @location(4) inst_euler: vec4u,
+    \\    @location(5) inst_scale: vec4f,
+    \\    @location(6) inst_color: vec4f,
+    \\    @location(7) joints: vec4u,
+    \\    @location(8) weights: vec4f,
+    \\};
+    \\fn rebuild_model(inst_pos: vec3f, inst_euler: vec4u, inst_scale: vec4f) -> mat4x4f {
+    \\    let a = 360.0 / 65536.0 * 0.017453292;
+    \\    let rot = vec3f(f32(inst_euler.x), f32(inst_euler.y), f32(inst_euler.z)) * a;
+    \\    let s = inst_scale.xyz;
+    \\    let crx = cos(rot.x); let srx = sin(rot.x);
+    \\    let cry = cos(rot.y); let sry = sin(rot.y);
+    \\    let crz = cos(rot.z); let srz = sin(rot.z);
+    \\    let mS  = mat4x4f(vec4f(s.x,0,0,0), vec4f(0,s.y,0,0), vec4f(0,0,s.z,0), vec4f(0,0,0,1));
+    \\    let mRx = mat4x4f(vec4f(1,0,0,0), vec4f(0,crx,srx,0), vec4f(0,-srx,crx,0), vec4f(0,0,0,1));
+    \\    let mRy = mat4x4f(vec4f(cry,0,-sry,0), vec4f(0,1,0,0), vec4f(sry,0,cry,0), vec4f(0,0,0,1));
+    \\    let mRz = mat4x4f(vec4f(crz,srz,0,0), vec4f(-srz,crz,0,0), vec4f(0,0,1,0), vec4f(0,0,0,1));
+    \\    let mT  = mat4x4f(vec4f(1,0,0,0), vec4f(0,1,0,0), vec4f(0,0,1,0), vec4f(inst_pos,1));
+    \\    return mT * mRy * mRx * mRz * mS;
+    \\}
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> @builtin(position) vec4f {
+    \\    let ws = max(in.weights.x + in.weights.y + in.weights.z + in.weights.w, 1e-4);
+    \\    let skin_m = (in.weights.x * bones[in.joints.x].m
+    \\                + in.weights.y * bones[in.joints.y].m
+    \\                + in.weights.z * bones[in.joints.z].m
+    \\                + in.weights.w * bones[in.joints.w].m) * (1.0 / ws);
+    \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale) * skin_m;
+    \\    return LVP * model * vec4f(in.position, 1.0);
     \\}
 ;
 

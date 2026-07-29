@@ -9098,6 +9098,57 @@ pub fn telemetryStats() TelemetryStats {
 // Init / deinit (same as before — pipeline, bind groups, sampler)
 // ════════════════════════════════════════════════════════════════════════
 
+// ── Skinned-mesh path (SKIN-3499): matrix-palette LBS for figures ───────────
+// A skinned node (layout scene3d_skin_*) draws as ONE palette-blended mesh:
+// 28-byte vertices carrying bone indices/weights, a per-figure storage-buffer
+// palette (BoneData: column-major model-space mat4 + rgba tint, 80 B std430),
+// and the node's own TRS as the instance root. Wire verts are stride-16 f32
+// [pos3, normal3, uv2, joint4, weight4]; packing happens once at upload,
+// exactly like stageVertexRows does for the standard path.
+const SkinnedVertex = extern struct {
+    px: f32,
+    py: f32,
+    pz: f32,
+    noct: [2]i16, // snorm16x2 octahedral normal
+    u: f16,
+    v: f16,
+    joints: [4]u8, // bone indices (uint8x4)
+    weights: [4]u8, // bone weights (unorm8x4)
+};
+
+comptime {
+    if (@sizeOf(SkinnedVertex) != 28 or @alignOf(SkinnedVertex) != 4) {
+        @compileError("SkinnedVertex must match the packed skinned vbuf0 layout (28 bytes)");
+    }
+}
+
+/// Retained skinned-vertex budget: 1M verts × 28 B = 28 MiB — figures are
+/// small next to the world's 256 MiB retained pool. Interned once per content
+/// key, never evicted (same discipline as the standard geometry cache).
+const MAX_SKINNED_VERTS: u64 = 1 << 20;
+const SKIN_GEO_CACHE = 64;
+/// Concurrent skinned figures per frame (player + a handful of NPCs today).
+const SKIN_POOL = 8;
+/// Bones per palette slot — u8 joint indices cap the wire at 256 anyway.
+const MAX_SKIN_BONES = 256;
+/// Floats per palette entry: column-major mat4 (16) + rgba tint (4) = 80 B.
+const SKIN_BONE_FLOATS = 20;
+
+const SkinGeoEntry = struct { hash: u64 = 0, offset_bytes: u64 = 0, count: u32 = 0, present: bool = false };
+var g_skin_geo_cache: [SKIN_GEO_CACHE]SkinGeoEntry = @splat(.{});
+var g_skin_geo_len: usize = 0;
+var g_skinned_vbuf: ?*wgpu.Buffer = null;
+var g_skinned_top: u64 = 0;
+var g_skin_bgl: ?*wgpu.BindGroupLayout = null;
+var g_skin_palette_buf: [SKIN_POOL]?*wgpu.Buffer = @splat(null);
+var g_skin_palette_bg: [SKIN_POOL]?*wgpu.BindGroup = @splat(null);
+var g_skin_inst_buf: ?*wgpu.Buffer = null;
+var g_skinned_pipeline: ?*wgpu.RenderPipeline = null;
+var g_skinned_shadow_pipeline: ?*wgpu.RenderPipeline = null;
+var g_skin_warned: bool = false;
+const SKIN_PACK_CHUNK = 32768;
+var g_skin_pack_scratch: [SKIN_PACK_CHUNK]SkinnedVertex = undefined;
+
 pub fn init(environ: *const std.process.Environ.Map) void {
     g_perflog_on = environ.get("RJIT_PERFLOG") != null;
     g_census_on = environ.get("RJIT_R3D_CENSUS") != null;
@@ -9419,6 +9470,54 @@ pub fn init(environ: *const std.process.Environ.Map) void {
     g_ground_data_version = @splat(0);
     g_ground_data_len = @splat(0);
 
+    // ── Skinned-figure resources (SKIN-3499): the retained skinned-vertex
+    //    buffer, the palette pool (one storage buffer + bind group per figure
+    //    slot, g_ground_bgl-style), and the tiny per-figure instance buffer. ──
+    g_skinned_vbuf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_skinned_verts"),
+        .size = MAX_SKINNED_VERTS * @sizeOf(SkinnedVertex),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    g_skin_bgl = device.createBindGroupLayout(&.{
+        .entry_count = 1,
+        .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
+            .binding = 0,
+            .visibility = wgpu.ShaderStages.vertex,
+            .buffer = .{ .type = .read_only_storage, .has_dynamic_offset = 0, .min_binding_size = 0 },
+        }),
+    });
+    if (g_skin_bgl) |sbgl| {
+        var ski: usize = 0;
+        while (ski < SKIN_POOL) : (ski += 1) {
+            const buf = device.createBuffer(&.{
+                .label = wgpu.StringView.fromSlice("r3d_skin_palette"),
+                .size = MAX_SKIN_BONES * SKIN_BONE_FLOATS * @sizeOf(f32),
+                .usage = wgpu.BufferUsages.storage | wgpu.BufferUsages.copy_dst,
+                .mapped_at_creation = 0,
+            });
+            g_skin_palette_buf[ski] = buf;
+            if (buf) |b| {
+                g_skin_palette_bg[ski] = device.createBindGroup(&.{
+                    .layout = sbgl,
+                    .entry_count = 1,
+                    .entries = @ptrCast(&wgpu.BindGroupEntry{
+                        .binding = 0,
+                        .buffer = b,
+                        .offset = 0,
+                        .size = MAX_SKIN_BONES * SKIN_BONE_FLOATS * @sizeOf(f32),
+                    }),
+                });
+            }
+        }
+    }
+    g_skin_inst_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("r3d_skin_instances"),
+        .size = SKIN_POOL * @sizeOf(InstanceData),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+
     const layouts = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_tex_bind_group_layout.? };
     const pipeline_layout = device.createPipelineLayout(&.{
         .bind_group_layout_count = layouts.len,
@@ -9507,6 +9606,49 @@ pub fn init(environ: *const std.process.Environ.Map) void {
         .fragment = &frag,
     });
 
+    // ── Skinned pipeline (SKIN-3499): scene3d with a matrix-palette vertex
+    //    stage. Same group0/group1 as the standard path plus group2 = the bone
+    //    palette; 28-byte skinned vertices at locations 0-2 + 7-8. Opaque,
+    //    depth-write on — figures draw with the world, not the glass pass. ──
+    const skinned_vert_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
+        .{ .format = .snorm16x2, .offset = 12, .shader_location = 1 }, // oct normal
+        .{ .format = .float16x2, .offset = 16, .shader_location = 2 }, // uv
+        .{ .format = .uint8x4, .offset = 20, .shader_location = 7 }, // joints
+        .{ .format = .unorm8x4, .offset = 24, .shader_location = 8 }, // weights
+    };
+    const skinned_vert_layouts = [_]wgpu.VertexBufferLayout{
+        .{ .step_mode = .vertex, .array_stride = @sizeOf(SkinnedVertex), .attribute_count = skinned_vert_attrs.len, .attributes = &skinned_vert_attrs },
+        .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
+    };
+    if (g_skin_bgl != null) {
+        const skin_layouts = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_tex_bind_group_layout.?, g_skin_bgl.? };
+        const skin_pl = device.createPipelineLayout(&.{
+            .bind_group_layout_count = skin_layouts.len,
+            .bind_group_layouts = @ptrCast(&skin_layouts),
+        });
+        const skinned_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_skinned_shader", .code = shaders.scene3d_skinned_wgsl });
+        const skinned_module = device.createShaderModule(&skinned_desc);
+        if (skin_pl != null and skinned_module != null) {
+            const skinned_frag = wgpu.FragmentState{
+                .module = skinned_module.?,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = 1,
+                .targets = @ptrCast(&color_target),
+            };
+            g_skinned_pipeline = device.createRenderPipeline(&.{
+                .layout = skin_pl.?,
+                .vertex = .{ .module = skinned_module.?, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = skinned_vert_layouts.len, .buffers = &skinned_vert_layouts },
+                .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+                .depth_stencil = &depth_stencil,
+                .multisample = .{},
+                .fragment = &skinned_frag,
+            });
+        }
+        if (skinned_module) |sm| sm.release();
+        if (skin_pl) |spl| spl.release();
+    }
+
     // ── Shadow depth pipeline (renders geometry from a light's POV, depth only) ──
     // Reuses vert_layouts (same vbuf0 verts + vbuf1 packed InstanceData), so the
     // caster instances staged for shadows replay through the exact vertex path. Its
@@ -9548,6 +9690,29 @@ pub fn init(environ: *const std.process.Environ.Map) void {
                 .depth_stencil = &shadow_depth_stencil,
                 .multisample = .{},
             });
+        }
+        // Skinned shadow companion (SKIN-3499): group(0) = the light VP,
+        // group(1) = the bone palette; skinned vertices + the same packed
+        // instances. Figures keep casting shadows on the palette path.
+        if (g_skin_bgl != null) {
+            const sshadow_layouts = [_]?*wgpu.BindGroupLayout{ sbgl, g_skin_bgl.? };
+            const sshadow_pl = device.createPipelineLayout(&.{
+                .bind_group_layout_count = sshadow_layouts.len,
+                .bind_group_layouts = @ptrCast(&sshadow_layouts),
+            });
+            const sshadow_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "shadow_depth_skinned_shader", .code = shaders.shadow_depth_skinned_wgsl });
+            const sshadow_module = device.createShaderModule(&sshadow_desc);
+            if (sshadow_pl != null and sshadow_module != null) {
+                g_skinned_shadow_pipeline = device.createRenderPipeline(&.{
+                    .layout = sshadow_pl.?,
+                    .vertex = .{ .module = sshadow_module.?, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = skinned_vert_layouts.len, .buffers = &skinned_vert_layouts },
+                    .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+                    .depth_stencil = &shadow_depth_stencil,
+                    .multisample = .{},
+                });
+            }
+            if (sshadow_module) |sm| sm.release();
+            if (sshadow_pl) |spl| spl.release();
         }
         if (shadow_module) |sm| sm.release();
         if (shadow_pl) |spl| spl.release();
@@ -10341,6 +10506,80 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     g_retained_top += bytes;
     g_geo_cache[g_geo_cache_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
     g_geo_cache_len += 1;
+    return .{ .offset = off, .count = count };
+}
+
+// ── Skinned geometry intern (SKIN-3499): the standard intern discipline on the
+//    28-byte SkinnedVertex and its own retained buffer. Wire rows are stride-16
+//    f32 [pos3, normal3, uv2, joint4, weight4]; joints clamp to u8, weights
+//    quantize to unorm8 (the shader renormalizes by the weight sum). ──
+fn lookupSkinnedGeometry(key: []const u8) ?GeoSlice {
+    const hash = hashKey(key);
+    for (g_skin_geo_cache[0..g_skin_geo_len]) |*e| {
+        if (e.present and e.hash == hash) return .{ .offset = e.offset_bytes, .count = e.count };
+    }
+    return null;
+}
+
+fn packSkinnedVertexRow(src: []const f32) SkinnedVertex {
+    const q = struct {
+        fn joint(v: f32) u8 {
+            const i: i32 = @trunc(@max(0.0, v));
+            return @intCast(@min(i, 255));
+        }
+        fn weight(v: f32) u8 {
+            const c = std.math.clamp(v, 0.0, 1.0);
+            return @round(c * 255.0);
+        }
+    };
+    return .{
+        .px = src[0],
+        .py = src[1],
+        .pz = src[2],
+        .noct = pack.octEncodeSnorm16(src[3], src[4], src[5]),
+        .u = @floatCast(src[6]),
+        .v = @floatCast(src[7]),
+        .joints = .{ q.joint(src[8]), q.joint(src[9]), q.joint(src[10]), q.joint(src[11]) },
+        .weights = .{ q.weight(src[12]), q.weight(src[13]), q.weight(src[14]), q.weight(src[15]) },
+    };
+}
+
+fn stageSkinnedVertexRows(queue: *wgpu.Queue, buf: *wgpu.Buffer, dst_offset: u64, verts: []const f32, count: u32) void {
+    var done: u32 = 0;
+    while (done < count) {
+        const chunk: u32 = @min(SKIN_PACK_CHUNK, count - done);
+        for (0..chunk) |k| {
+            const s = (@as(usize, done) + k) * 16;
+            g_skin_pack_scratch[k] = packSkinnedVertexRow(verts[s .. s + 16]);
+        }
+        bu.writeTypedBuffer(queue, buf, dst_offset + bu.bytesOfCount(SkinnedVertex, done), SkinnedVertex, g_skin_pack_scratch[0..chunk]);
+        done += chunk;
+    }
+}
+
+fn internSkinnedGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+    if (lookupSkinnedGeometry(key)) |slot| return slot;
+    if (g_skin_geo_len >= SKIN_GEO_CACHE) {
+        if (!g_skin_warned) {
+            g_skin_warned = true;
+            log.print("[r3d-skin] ERROR: skinned geometry cache full ({d} entries) — figure dropped\n", .{@as(usize, SKIN_GEO_CACHE)});
+        }
+        return null;
+    }
+    const buf = g_skinned_vbuf orelse return null;
+    const bytes = bu.bytesOfCount(SkinnedVertex, count);
+    if (g_skinned_top + bytes > MAX_SKINNED_VERTS * @sizeOf(SkinnedVertex)) {
+        if (!g_skin_warned) {
+            g_skin_warned = true;
+            log.print("[r3d-skin] ERROR: skinned vertex budget full ({d} verts) — figure dropped\n", .{MAX_SKINNED_VERTS});
+        }
+        return null;
+    }
+    stageSkinnedVertexRows(queue, buf, g_skinned_top, verts, count);
+    const off = g_skinned_top;
+    g_skinned_top += bytes;
+    g_skin_geo_cache[g_skin_geo_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
+    g_skin_geo_len += 1;
     return .{ .offset = off, .count = count };
 }
 
@@ -11527,6 +11766,53 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     const depth_view = slot.depth_view orelse return;
     const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("r3d") }) orelse return;
 
+    // ── Skinned figures (SKIN-3499): collect palette-driven meshes ──────────
+    // One record per skinned node: intern its geometry, upload its live palette
+    // to a pool slot, stage its root transform as one InstanceData row. Both
+    // the shadow pass and the skinned color pass below draw from these records.
+    const SkinRec = struct { child: u32, slot: GeoSlice, pool: u32 };
+    var skin_recs: [SKIN_POOL]SkinRec = undefined;
+    var skin_nrec: usize = 0;
+    {
+        var ski: usize = 0;
+        while (ski < scene_node.children.len and skin_nrec < SKIN_POOL) : (ski += 1) {
+            const c = &scene_node.children[ski];
+            const skin_key = c.scene3d_skin_geom_key orelse continue;
+            const palette = c.scene3d_skin_palette orelse continue;
+            const nbones: usize = @min(@as(usize, c.scene3d_skin_bone_count), MAX_SKIN_BONES);
+            if (nbones == 0) continue;
+            const sl = lookupSkinnedGeometry(skin_key) orelse blk: {
+                const verts = c.scene3d_skin_vertices orelse break :blk null;
+                if (c.scene3d_skin_vert_count == 0) break :blk null;
+                if (verts.len < @as(usize, c.scene3d_skin_vert_count) * 16) break :blk null;
+                break :blk internSkinnedGeometry(queue, skin_key, verts, c.scene3d_skin_vert_count);
+            } orelse continue;
+            const pool = skin_nrec;
+            const pbuf = g_skin_palette_buf[pool] orelse continue;
+            const n = @min(palette.len, nbones * SKIN_BONE_FLOATS);
+            bu.writeTypedBuffer(queue, pbuf, 0, f32, palette[0..n]);
+            const ib = g_skin_inst_buf orelse continue;
+            const root = makeInstance(
+                c.scene3d_pos_x,
+                c.scene3d_pos_y,
+                c.scene3d_pos_z,
+                c.scene3d_rot_x,
+                c.scene3d_rot_y,
+                c.scene3d_rot_z,
+                c.scene3d_scale_x,
+                c.scene3d_scale_y,
+                c.scene3d_scale_z,
+                c.scene3d_color_r,
+                c.scene3d_color_g,
+                c.scene3d_color_b,
+                c.scene3d_color_a,
+            );
+            bu.writeValue(queue, ib, @as(u64, pool) * @sizeOf(InstanceData), &root);
+            skin_recs[skin_nrec] = .{ .child = @intCast(ski), .slot = sl, .pool = @intCast(pool) };
+            skin_nrec += 1;
+        }
+    }
+
     // ── Shadow depth pass ───────────────────────────────────────────────────
     // Render opaque caster geometry from the shadow-casting spot's POV into the
     // depth map, so the main fragment shader can test occlusion. Runs BEFORE the
@@ -11665,6 +11951,22 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                     sp.setVertexBuffer(0, g_retained_vbuf.?, sl.offset, bu.bytesOfCount(Vertex, sl.count));
                     sp.setVertexBuffer(1, g_shadow_inst_buf.?, sh_rec_off[ri], bu.bytesOfCount(InstanceData, sh_rec_cnt[ri]));
                     sp.draw(sl.count, sh_rec_cnt[ri], 0, 0);
+                }
+                // Skinned casters (SKIN-3499): the figure keeps its shadow on
+                // the palette path — group(1) here is the bone palette.
+                if (skin_nrec > 0 and g_skinned_shadow_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
+                    sp.setPipeline(g_skinned_shadow_pipeline.?);
+                    sp.setBindGroup(0, g_shadow_pass_bind_group.?, 0, null);
+                    var ssi: usize = 0;
+                    while (ssi < skin_nrec) : (ssi += 1) {
+                        const rec = skin_recs[ssi];
+                        if (rec.slot.count == 0) continue;
+                        const pbg = g_skin_palette_bg[rec.pool] orelse continue;
+                        sp.setBindGroup(1, pbg, 0, null);
+                        sp.setVertexBuffer(0, g_skinned_vbuf.?, rec.slot.offset, bu.bytesOfCount(SkinnedVertex, rec.slot.count));
+                        sp.setVertexBuffer(1, g_skin_inst_buf.?, @as(u64, rec.pool) * @sizeOf(InstanceData), @sizeOf(InstanceData));
+                        sp.draw(rec.slot.count, 1, 0, 0);
+                    }
                 }
                 sp.end();
                 shadow_on = true;
@@ -12223,6 +12525,28 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
         pass.draw(group_slot.count, group_count, 0, 0);
         recordDraw(group_slot.count, group_count);
         g_telemetry.staged_dynamic += group_count; // re-staged this frame (overflow path)
+    }
+
+    // ── Skinned pass (SKIN-3499): one palette-blended draw per figure ─────
+    // Opaque, depth-write on (same states as the standard pipeline), drawn
+    // after the opaque batches. group2 = the figure's palette pool slot; the
+    // default 1×1 white texture keeps the fragment path identical to an
+    // untextured mesh (bone tints ride the vertex color).
+    if (skin_nrec > 0 and g_skinned_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
+        pass.setPipeline(g_skinned_pipeline.?);
+        pass.setBindGroup(0, g_bind_group.?, 0, null);
+        if (g_default_tex_bind_group) |dbg| pass.setBindGroup(1, dbg, 0, null);
+        var sri: usize = 0;
+        while (sri < skin_nrec) : (sri += 1) {
+            const rec = skin_recs[sri];
+            if (rec.slot.count == 0) continue;
+            const pbg = g_skin_palette_bg[rec.pool] orelse continue;
+            pass.setBindGroup(2, pbg, 0, null);
+            pass.setVertexBuffer(0, g_skinned_vbuf.?, rec.slot.offset, bu.bytesOfCount(SkinnedVertex, rec.slot.count));
+            pass.setVertexBuffer(1, g_skin_inst_buf.?, @as(u64, rec.pool) * @sizeOf(InstanceData), @sizeOf(InstanceData));
+            pass.draw(rec.slot.count, 1, 0, 0);
+            recordDraw(rec.slot.count, 1);
+        }
     }
 
     // ── Transparent pass ──────────────────────────────────────────────────

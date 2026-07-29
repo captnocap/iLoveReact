@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const layout = @import("../layout.zig");
+const pose = @import("../skeleton/pose.zig");
 const constructor = @import("../world/constructor.zig");
 const config = @import("config.zig");
 const state = @import("state.zig");
@@ -92,6 +93,54 @@ pub fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constr
         node.scene3d_scale_y = t.scale[1];
         node.scene3d_scale_z = t.scale[2];
     }
+}
+
+/// The SKINNED figure updater (SKIN-3499): the same clip selection and
+/// sampling as updatePlayerModelNodes, but instead of writing N part-node
+/// transforms it rewrites the bone PALETTE (model-space matrices with the
+/// inverse-bind folded in — skeleton/pose.zig) and sets the ONE node's root
+/// TRS to the figure's world placement. Clip transforms stay model-local, so
+/// root = T(player) · Ry(yaw) reproduces the legacy per-part composition
+/// exactly under rigid weights.
+pub fn updatePlayerSkinnedNode(kids: []Node, first: usize, skin: constructor.PlayerSkin, palette: []f32, animation: constructor.PlayerAnimationSet, player: PlayerState, moving: bool, running: bool, airborne: bool) void {
+    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+    const clip_id: u32 = switch (player.posture) {
+        .sit => PLAYER_CLIP_SIT,
+        .lay => PLAYER_CLIP_LAY,
+        .none => if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE,
+    };
+    const clip_time: f32 = if (clip_id == PLAYER_CLIP_WALK) player.gait_phase else if (clip_id == PLAYER_CLIP_JUMP) player.jump_time else 0;
+    const clip = if (animation.node_count == skin.bones.len) findPlayerClip(animation, clip_id) else null;
+    for (skin.bones, 0..) |bone, i| {
+        const rest = constructor.PlayerTransform{ .position = bone.center, .rotation = .{ 0, 0, 0 }, .scale = .{ 1, 1, 1 } };
+        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse rest else rest;
+        pose.writeBonePalette(palette, i, t.position, t.rotation, t.scale, bone.center, bone.color);
+    }
+    setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
+}
+
+/// The skinned LIVE-POSE twin: per-bone transforms come straight from the
+/// capture push (n × 9, model-local like clip keys) instead of a clip.
+pub fn updatePlayerSkinnedNodeLive(kids: []Node, first: usize, skin: constructor.PlayerSkin, palette: []f32, transforms: []const f32, player: PlayerState) void {
+    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+    const count = @min(skin.bones.len, transforms.len / 9);
+    for (skin.bones[0..count], 0..) |bone, i| {
+        const t = transforms[i * 9 ..][0..9];
+        pose.writeBonePalette(palette, i, .{ t[0], t[1], t[2] }, .{ t[3], t[4], t[5] }, .{ t[6], t[7], t[8] }, bone.center, bone.color);
+    }
+    setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
+}
+
+fn setSkinnedRoot(node: *Node, x: f32, y: f32, z: f32, yaw_degrees: f32) void {
+    node.scene3d_pos_x = x;
+    node.scene3d_pos_y = y;
+    node.scene3d_pos_z = z;
+    node.scene3d_rot_x = 0;
+    node.scene3d_rot_y = yaw_degrees;
+    node.scene3d_rot_z = 0;
+    node.scene3d_scale_x = 1;
+    node.scene3d_scale_y = 1;
+    node.scene3d_scale_z = 1;
 }
 
 /// The LIVE-POSE twin (req_2786): identical node math, but the per-node

@@ -70,6 +70,8 @@ const aimPitchLimitsInOrbitSpace = m_camera.aimPitchLimitsInOrbitSpace;
 const setAimMode = m_camera.setAimMode;
 const updatePlayerModelNodes = m_animation.updatePlayerModelNodes;
 const updatePlayerModelNodesLive = m_animation.updatePlayerModelNodesLive;
+const updatePlayerSkinnedNode = m_animation.updatePlayerSkinnedNode;
+const updatePlayerSkinnedNodeLive = m_animation.updatePlayerSkinnedNodeLive;
 const updateNpcModelNodes = m_animation.updateNpcModelNodes;
 const updatePlayerAnimationClock = m_animation.updatePlayerAnimationClock;
 const STREAM_CELL_METERS = m_streaming_support.STREAM_CELL_METERS;
@@ -538,14 +540,27 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     // (~3/4s without a push) falls back to clips so a dropped tracker
     // never freezes the body.
     var live_posed = false;
-    if (pendingPoseFor(self.node_id)) |lp| {
-        if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
-            updatePlayerModelNodesLive(self.kid_list.items, self.player_first_child, self.scene.player_model, lp.transforms, self.player);
-            live_posed = true;
+    if (self.scene.player_skin) |skin| {
+        // SKINNED figure (SKIN-3499): the same clip/live-pose discipline, but
+        // the pose lands in the bone palette instead of N part nodes.
+        if (pendingPoseFor(self.node_id)) |lp| {
+            if (lp.count == skin.bones.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
+                updatePlayerSkinnedNodeLive(self.kid_list.items, self.player_first_child, skin, self.player_skin_palette, lp.transforms, self.player);
+                live_posed = true;
+            }
+            lp.age_frames +%= 1;
         }
-        lp.age_frames +%= 1;
+        if (!live_posed) updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, skin, self.player_skin_palette, self.scene.player_animation, self.player, moving, run_down, airborne);
+    } else {
+        if (pendingPoseFor(self.node_id)) |lp| {
+            if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
+                updatePlayerModelNodesLive(self.kid_list.items, self.player_first_child, self.scene.player_model, lp.transforms, self.player);
+                live_posed = true;
+            }
+            lp.age_frames +%= 1;
+        }
+        if (!live_posed) updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
     }
-    if (!live_posed) updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
     refreshNpcNodes(self);
     updateDynamicPropNodes(self);
     stepTickers(self, dt);

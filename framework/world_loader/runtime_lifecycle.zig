@@ -163,6 +163,8 @@ pub fn deinit(self: anytype, io: std.Io) void {
     if (self.mesh_prop_islands.len > 0) self.allocator.free(self.mesh_prop_islands);
     for (self.player_geom_keys.items) |key| self.allocator.free(key);
     self.player_geom_keys.deinit(self.allocator);
+    if (self.player_skin_palette.len > 0) self.allocator.free(self.player_skin_palette);
+    self.player_skin_palette = &.{};
     for (self.paint_slot_key) |maybe_key| {
         if (maybe_key) |key| self.allocator.free(key);
     }
