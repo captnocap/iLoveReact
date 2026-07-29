@@ -1,0 +1,30 @@
+{
+  "id": "req_3530",
+  "at": "2026-07-29T15:29:28.523Z",
+  "origin": "codex:019fac74",
+  "text": "great next a model import may have a texture in the model file for applicable models, but we never set it, change that and always add this texture as a paint variant",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T15:29:39.083Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T15:49:36.104Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compatible self-contained GLB imports now adopt their embedded base-colour image and original TEXCOORD_0 mapping as the live paint atlas. The importer fails closed for mixed or unsupported material contracts, guards image dimensions before decode, applies the shared base-colour factor, and publishes the final UV-correct resident mesh. The editor skips the fallback colour flood, writes a new import as the package base, and automatically stores a fingerprint-deduplicated Imported Texture full-look variant while preserving any existing authored base; editing that variant removes its pristine-source provenance so it can be recaptured later. Added GLB extraction/compatibility/data-URI tests, painter limit coverage, paint-variant dedupe/recapture coverage, documentation, and verified the ReleaseFast editor build.",
+  "shas": [
+    "97e3710ca"
+  ],
+  "resolvedAt": "2026-07-29T15:49:36.104Z"
+}
