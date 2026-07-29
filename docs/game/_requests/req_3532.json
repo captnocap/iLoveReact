@@ -13,6 +13,12 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-29T21:19:53.572Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed on live /dev/video42: the frame-thread MultiReader retained one byte of spare capacity and converged to tiny pipe reads, so it could not assemble a 3.69MB RGBA frame before the 10s watchdog killed FFmpeg. OBS also emitted native 1920x1080 bytes despite the 1280x720 input request. Fix uses a cancelable native-Io whole-frame pump with pointer swaps and pins FFmpeg output scaling to the renderer buffer size."
     }
   ]
 }

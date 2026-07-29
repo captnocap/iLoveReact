@@ -1153,6 +1153,29 @@ pub fn build(b: *std.Build) void {
     // V4L2 camera discovery (req_2846): querycap filtering must never expose
     // a camera's metadata companion as if it were a usable image source.
     if (os_tag == .linux) {
+        // Whole-frame camera pipe pump (req_3532): multi-megabyte raw frames
+        // must be assembled off the frame thread before the watchdog expires.
+        const frame_pipe_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/render/frame_pipe.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        const frame_pipe_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/frame_pipe.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        frame_pipe_test_mod.addImport("frame_pipe", frame_pipe_mod_for_tests);
+        const frame_pipe_test = b.addTest(.{
+            .name = "frame-pipe-test",
+            .root_module = frame_pipe_test_mod,
+        });
+        const run_frame_pipe_test = b.addRunArtifact(frame_pipe_test);
+        const frame_pipe_test_step = b.step("test-frame-pipe", "Run camera whole-frame pipe pump tests");
+        frame_pipe_test_step.dependOn(&run_frame_pipe_test.step);
+
         const video_devices_mod_for_tests = b.createModule(.{
             .root_source_file = b.path("framework/render/video_devices.zig"),
             .target = target,

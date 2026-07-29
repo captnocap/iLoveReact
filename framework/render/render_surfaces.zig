@@ -33,6 +33,7 @@ const log = @import("../diag/log.zig");
 pub const vm = @import("render_surfaces_vm.zig");
 const transport = @import("../net/transport.zig");
 const child_teardown = @import("child_teardown.zig");
+const frame_pipe = @import("frame_pipe.zig");
 
 const page_alloc = std.heap.page_allocator;
 
@@ -335,11 +336,21 @@ pub const FeedStatus = enum { starting, connecting, ready, @"error", stopped };
 pub const MAX_FEEDS = 64; // perf-lab headroom: pile on capture surfaces til the GPU/CPU wall, not an array cap
 const UNLOAD_DEBOUNCE_FRAMES = 180; // ~3s at 60fps
 
+const CAPTURE_TUNING = .{
+    .render_update_hz = 60,
+    .first_frame_timeout_seconds = 10,
+    .ffmpeg_fps = 30,
+    .camera_width = 1280,
+    .camera_height = 720,
+    .screen_width = 1920,
+    .screen_height = 1080,
+};
+
 /// 10s at the 60Hz update cadence — how long a spawned capture child may
 /// produce ZERO complete frames before the feed fails LOUDLY instead of
 /// showing an eternal black square. OBS-style virtual cameras enumerate and
 /// open fine but produce nothing until "Start Virtual Camera" (req_3504).
-const FFMPEG_FIRST_FRAME_TIMEOUT_TICKS: u32 = 10 * 60;
+const FFMPEG_FIRST_FRAME_TIMEOUT_TICKS: u32 = CAPTURE_TUNING.first_frame_timeout_seconds * CAPTURE_TUNING.render_update_hz;
 /// Same period: how long an errored camera feed rests before paint retries it
 /// from scratch — self-healing once the device starts streaming, without a
 /// per-frame respawn storm while it stays dead.
@@ -377,10 +388,7 @@ pub const Feed = struct {
 
     // FFmpeg subprocess state
     ffmpeg_child: ?std.process.Child = null,
-    ffmpeg_reader_storage: std.Io.File.MultiReader.Buffer(1) = undefined,
-    ffmpeg_reader: std.Io.File.MultiReader = undefined,
-    ffmpeg_reader_active: bool = false,
-    ffmpeg_read_offset: usize = 0, // partial frame read progress
+    ffmpeg_pump: ?frame_pipe.FramePump = null,
     // True once ONE complete frame has landed in pixel_buf. Gates the pose
     // tracker (latestCpuFrame) so inference never runs on uninitialized
     // bytes, and drives the first-frame watchdog below (req_3504).
@@ -498,10 +506,8 @@ pub const Feed = struct {
     }
 
     fn closeFFmpeg(self: *Feed, io: std.Io, environ: *const std.process.Environ.Map) void {
-        if (self.ffmpeg_reader_active) {
-            self.ffmpeg_reader.deinit();
-            self.ffmpeg_reader_active = false;
-        }
+        if (self.ffmpeg_pump) |*pump| pump.deinit(io);
+        self.ffmpeg_pump = null;
         // CAMFREEZE (req_3503 — THE webcam freeze): Child.kill here was ONE
         // SIGTERM + an uncancelable wait4 on the FRAME thread, while the
         // reader above had just stopped draining the pipe. ffmpeg, blocked
@@ -512,7 +518,6 @@ pub const Feed = struct {
             child_teardown.terminateDetached(io, environ, child);
         }
         self.ffmpeg_child = null;
-        self.ffmpeg_read_offset = 0;
         self.ffmpeg_first_frame_seen = false;
         self.ffmpeg_no_frame_ticks = 0;
     }
@@ -893,7 +898,7 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
     const fps_str = std.fmt.bufPrint(&fps_buf, "{d}", .{fps}) catch return false;
 
     // Build argv as slices for std.process.spawn's Zig 0.16 options.
-    var argv: [26][]const u8 = undefined;
+    var argv: [28][]const u8 = undefined;
     var argc: usize = 0;
 
     // pdeathsig: if our process dies by ANY means mid-capture (including
@@ -971,7 +976,16 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
         else => return false,
     }
 
-    // Output format: raw RGBA to stdout
+    // Input format requests are advisory for V4L2. OBS Virtual Camera, for
+    // example, remains at its native 1920x1080 even when asked for 1280x720.
+    // Pin the OUTPUT size so every emitted raw frame exactly matches the
+    // renderer-owned frame buffer and frame boundaries cannot drift.
+    argv[argc] = "-s";
+    argc += 1;
+    argv[argc] = size_str;
+    argc += 1;
+
+    // Output format: fixed-size raw RGBA to stdout.
     argv[argc] = "-f";
     argc += 1;
     argv[argc] = "rawvideo";
@@ -998,20 +1012,23 @@ fn startFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed,
         return false;
     };
 
-    feed.ffmpeg_child = child;
-    feed.ffmpeg_reader.init(page_alloc, io, feed.ffmpeg_reader_storage.toStreams(), &.{child.stdout.?});
-    feed.ffmpeg_reader_active = true;
-
     feed.width = w;
     feed.height = h;
-    feed.pixel_buf = page_alloc.alloc(u8, @as(usize, w) * @as(usize, h) * 4) catch {
+    const frame_size = @as(usize, w) * @as(usize, h) * 4;
+    feed.pixel_buf = page_alloc.alloc(u8, frame_size) catch {
+        feed.ffmpeg_child = child;
         feed.closeFFmpeg(io, environ);
         return false;
     };
     // Zero until the first real frame lands: paint uploads only on dirty, but
     // nothing downstream may ever observe uninitialized bytes.
     @memset(feed.pixel_buf.?, 0);
-    feed.ffmpeg_read_offset = 0;
+    feed.ffmpeg_child = child;
+    feed.ffmpeg_pump = frame_pipe.FramePump.init(io, page_alloc, child.stdout.?, frame_size) catch |err| {
+        log.print("[render] FFmpeg frame pump failed to start: {}\n", .{err});
+        feed.closeFFmpeg(io, environ);
+        return false;
+    };
     feed.ffmpeg_first_frame_seen = false;
     feed.ffmpeg_no_frame_ticks = 0;
     feed.backend = .ffmpeg;
@@ -1032,13 +1049,11 @@ fn failFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed, 
     feed.error_ticks = 0;
 }
 
-/// Read available data from FFmpeg stdout pipe. Non-blocking.
-/// When a full frame (w*h*4 bytes) is accumulated, marks dirty.
+/// Swap in the newest whole frame produced by the blocking native-Io pump.
+/// The frame thread neither waits for pipe bytes nor copies frame payloads.
 fn updateFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed) void {
-    if (!feed.ffmpeg_reader_active) return;
-    const buf = feed.pixel_buf orelse return;
-    const frame_size = @as(usize, feed.width) * @as(usize, feed.height) * 4;
-    if (frame_size == 0) return;
+    const pump = if (feed.ffmpeg_pump) |*value| value else return;
+    const recycle = feed.pixel_buf orelse return;
 
     // First-frame watchdog: a device that opened but never streams (OBS
     // virtual camera before "Start Virtual Camera", wedged driver) must fail
@@ -1051,40 +1066,17 @@ fn updateFFmpeg(io: std.Io, environ: *const std.process.Environ.Map, feed: *Feed
         }
     }
 
-    // Poll the native Io reader without blocking the frame. MultiReader keeps
-    // the pipe read scheduled between ticks; a zero-duration fill only harvests
-    // data already completed by the Io implementation.
-    const reader = feed.ffmpeg_reader.reader(0);
-    if (reader.buffered().len == 0) {
-        feed.ffmpeg_reader.fill(1, .{ .duration = .{
-            .raw = .zero,
-            .clock = .awake,
-        } }) catch |err| switch (err) {
-            error.Timeout => return,
-            error.EndOfStream => {
-                failFFmpeg(io, environ, feed, "capture stream ended (device closed or ffmpeg exited — its stderr above says why)");
-                return;
-            },
-            else => {
-                failFFmpeg(io, environ, feed, "capture pipe read failed");
-                return;
-            },
-        };
-    }
-
-    const remaining = frame_size - feed.ffmpeg_read_offset;
-    const dest = buf[feed.ffmpeg_read_offset..frame_size];
-    const available = reader.buffered();
-    const n = @min(remaining, available.len);
-    if (n == 0) return;
-    @memcpy(dest[0..n], available[0..n]);
-    reader.toss(n);
-
-    feed.ffmpeg_read_offset += n;
-    if (feed.ffmpeg_read_offset >= frame_size) {
-        feed.ffmpeg_read_offset = 0;
+    if (pump.takeLatest(io, recycle)) |fresh| {
+        feed.pixel_buf = fresh;
         feed.dirty = true;
         feed.ffmpeg_first_frame_seen = true;
+        return;
+    }
+
+    switch (pump.outcome()) {
+        .running => {},
+        .end_of_stream => failFFmpeg(io, environ, feed, "capture stream ended (device closed or ffmpeg exited — its stderr above says why)"),
+        .read_failed => failFFmpeg(io, environ, feed, "capture pipe read failed"),
     }
 }
 
@@ -1459,7 +1451,15 @@ fn createFeed(io: std.Io, environ: *const std.process.Environ.Map, src: []const 
                 }
             }
             // Fallback: FFmpeg x11grab
-            if (!startFFmpeg(io, environ, feed, parsed, 30, 1920, 1080)) setError(feed);
+            if (!startFFmpeg(
+                io,
+                environ,
+                feed,
+                parsed,
+                CAPTURE_TUNING.ffmpeg_fps,
+                CAPTURE_TUNING.screen_width,
+                CAPTURE_TUNING.screen_height,
+            )) setError(feed);
         },
 
         .window => {
@@ -1523,7 +1523,15 @@ fn createFeed(io: std.Io, environ: *const std.process.Environ.Map, src: []const 
 
         .cam, .hdmi, .v4l2 => {
             // FFmpeg v4l2 capture
-            if (!startFFmpeg(io, environ, feed, parsed, 30, 1280, 720)) setError(feed);
+            if (!startFFmpeg(
+                io,
+                environ,
+                feed,
+                parsed,
+                CAPTURE_TUNING.ffmpeg_fps,
+                CAPTURE_TUNING.camera_width,
+                CAPTURE_TUNING.camera_height,
+            )) setError(feed);
         },
 
         .display => {
