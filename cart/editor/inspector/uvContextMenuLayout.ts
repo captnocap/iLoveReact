@@ -18,7 +18,7 @@ export const UV_CONTEXT_MENU_TUNING = {
   edgePx: 4,
   baseHeightPx: 330,
   rowHeightPx: 26,
-  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 9 } as Record<UvMenuGroup, number>,
+  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 10 } as Record<UvMenuGroup, number>,
 } as const;
 
 export function uvContextMenuHeight(

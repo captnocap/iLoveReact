@@ -113,6 +113,7 @@ type UvRepeatStackReview = Readonly<{
   exact: UvRepeatStackPlan;
   normalize: UvRepeatStackPlan;
 }>;
+type UvRepeatStackExport = 'none' | 'wireframe' | 'generation';
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
@@ -1116,8 +1117,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     host.__clipboard_set?.(saved.path);
     setNote(`${saved.note} · path copied`);
   };
-  const exportWireframeFor = (islands: readonly UvIslandRect[]) => {
-    const saved = bridge.exportUvWireframe(islands);
+  const copyGuideExport = (saved: { path: string | null; note: string }) => {
     if (!saved.path) {
       setNote(saved.note);
       return;
@@ -1125,8 +1125,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     host.__clipboard_set?.(saved.path);
     setNote(`${saved.note} · path copied`);
   };
+  const exportWireframeFor = (islands: readonly UvIslandRect[]) => {
+    copyGuideExport(bridge.exportUvWireframe(islands));
+  };
+  const exportGenerationGuideFor = (islands: readonly UvIslandRect[]) => {
+    copyGuideExport(bridge.exportUvGenerationGuide(islands));
+  };
   const exportWireframeAndCopyPath = () => exportWireframeFor(rectsRef.current);
-  const applyRepeatStackReview = (andExport: boolean) => {
+  const exportGenerationGuideAndCopyPath = () => exportGenerationGuideFor(rectsRef.current);
+  const applyRepeatStackReview = (exportKind: UvRepeatStackExport) => {
     const review = repeatStackReview;
     if (!review) return;
     if (rectsRef.current !== review.source) {
@@ -1148,7 +1155,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     if (plan.changedIslands > 0) applied = applyIslandSetEdit(plan.rects, label, 'stack');
     else setNote(`${label} · layout was already stacked`);
     setRepeatStackReview(null);
-    if (applied && andExport) exportWireframeFor(plan.rects);
+    if (applied && exportKind === 'wireframe') exportWireframeFor(plan.rects);
+    if (applied && exportKind === 'generation') exportGenerationGuideFor(plan.rects);
   };
   const collectUvOrientation = () => {
     const count = bridge.selectUvOrientation();
@@ -1873,6 +1881,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Icon name="ImageDown" size={10} color={accentFor('primary')} />
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>WIRE PNG</Text>
           </Pressable>
+          <Pressable
+            tooltip="Export a numbered UV guide on a 6%-alpha pink canvas so image generation can perceive and address each footprint"
+            onPress={exportGenerationGuideAndCopyPath}
+            style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}
+          >
+            <Icon name="Hash" size={10} color="#d7acb9" />
+            <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>AI GUIDE</Text>
+          </Pressable>
         </Row>
         {compileLabel ? <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace' }}>{compileLabel}</Text> : null}
         {workspaceDoc && uv.packageDir ? (
@@ -2063,6 +2079,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               <UvContextRow indented icon="RefreshCw" label="Reload base.png" onPress={() => runMenuAction(() => setNote(bridge.reloadUvAtlas()))} />
               <UvContextRow indented icon="Copy" label="Save & Copy Atlas Path" enabled={Boolean(uv.diskPath)} onPress={() => runMenuAction(saveAndCopyAtlasPath)} />
               <UvContextRow indented icon="ImageDown" label="Export Transparent Wireframe" detail="PNG + COPY PATH" enabled={rects.length > 0} tooltip="Write authored UV edges only; transparent background, with quad diagonals omitted" onPress={() => runMenuAction(exportWireframeAndCopyPath)} />
+              <UvContextRow indented icon="Hash" label="Export Numbered AI Guide" detail="6% PINK + COPY PATH" enabled={rects.length > 0} tooltip="Write one stable number per exact UV footprint over a faint pink alpha signal that image generation can perceive" onPress={() => runMenuAction(exportGenerationGuideAndCopyPath)} />
             </>
           ) : null}
         </C.HW_StageContextMenu>
@@ -2187,16 +2204,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 <Text style={{ color: accentFor('textDim'), fontSize: 9, fontWeight: '800' }}>CANCEL</Text>
               </Pressable>
               <Pressable
-                onPress={() => applyRepeatStackReview(false)}
+                onPress={() => applyRepeatStackReview('none')}
                 style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
               >
                 <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY</Text>
               </Pressable>
               <Pressable
-                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview(true)}
-                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+                tooltip="Apply the reviewed prestack and export the truly transparent guide"
+                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview('wireframe')}
+                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
               >
-                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY + WIRE PNG</Text>
+                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ WIRE</Text>
+              </Pressable>
+              <Pressable
+                tooltip="Apply the reviewed prestack and export the numbered 6%-pink image-generation guide"
+                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview('generation')}
+                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+              >
+                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI GUIDE</Text>
               </Pressable>
             </Row>
           </Box>

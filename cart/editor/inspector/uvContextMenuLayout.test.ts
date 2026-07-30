@@ -5,10 +5,10 @@ const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__w
 function test(name: string, fn: () => void) { try { fn(); passed += 1; log(`  ok  ${name}`); } catch (error) { failed += 1; log(`FAIL  ${name}: ${(error as Error).message}`); } }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-test('texture menu first frame budgets every action including Reset and Prestack', () => {
+test('texture menu first frame budgets every action including both UV guide exports', () => {
   const height = uvContextMenuHeight('texture', { group: null, height: 0 });
-  assert(UV_CONTEXT_MENU_TUNING.expandedRows.texture === 9, 'Texture Atlas row estimate lost an action');
-  assert(height === 330 + 9 * 26, `texture fallback height drifted to ${height}`);
+  assert(UV_CONTEXT_MENU_TUNING.expandedRows.texture === 10, 'Texture Atlas row estimate lost an action');
+  assert(height === 330 + 10 * 26, `texture fallback height drifted to ${height}`);
 });
 
 test('rendered menu height replaces estimates only for the matching group', () => {

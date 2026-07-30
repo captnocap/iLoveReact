@@ -53,7 +53,18 @@ import {
   type PaintTarget,
   type PaintVariant,
 } from '../data/paintVariants';
-import { ensureModelUvResetBaseline, hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
+import {
+  ensureModelUvResetBaseline,
+  hasStoredModelPaint,
+  modelPaintLayoutIsStale,
+  readModelBasePaint,
+  readModelRasterBase,
+  resolvePackageDir,
+  writeLiveModelAtlas,
+  writeModelArtifacts,
+  writeModelUvGenerationGuide,
+  writeModelUvWireframe,
+} from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
 import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
@@ -209,6 +220,7 @@ export type ModelFocusBridge = {
   selectUvOrientation: () => number;
   saveUvAtlas: () => { path: string | null; note: string };
   exportUvWireframe: (islands?: readonly UvIslandRect[]) => { path: string | null; note: string };
+  exportUvGenerationGuide: (islands?: readonly UvIslandRect[]) => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
   resizeUvAtlas: (width: number, height: number) => Promise<string>;
   addUvTextureLayer: (x: number, y: number) => Promise<string>;
@@ -1729,7 +1741,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       ? { path: result.path, note: `saved base.png · ${result.width}×${result.height}` }
       : { path: null, note: result.error };
   };
-  const exportUvWireframe = (islands?: readonly UvIslandRect[]): { path: string | null; note: string } => {
+  const exportUvGuide = (
+    kind: 'transparent' | 'generation',
+    islands?: readonly UvIslandRect[],
+  ): { path: string | null; note: string } => {
     if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
     const atlas = uvPanel;
     const authoredIslands = islands ?? atlas?.islands ?? [];
@@ -1743,16 +1758,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         x: rect.x - atlas.atlasOriginX,
         y: rect.y - atlas.atlasOriginY,
       }));
-    const raster = rasterizeUvWireframe(localIslands, atlas.w, atlas.h);
+    const raster = rasterizeUvWireframe(localIslands, atlas.w, atlas.h, { kind });
     if (!raster) return { path: null, note: 'Export refused — the UV wireframe exceeded the live atlas limit.' };
-    const result = writeModelUvWireframe(paintTarget, raster.rgba, raster.width, raster.height);
+    const result = kind === 'generation'
+      ? writeModelUvGenerationGuide(paintTarget, raster.rgba, raster.width, raster.height)
+      : writeModelUvWireframe(paintTarget, raster.rgba, raster.width, raster.height);
     return result.ok
       ? {
         path: result.path,
-        note: `exported transparent uv-wireframe.png · ${result.width}×${result.height} · ${raster.authoredEdges} authored edges`,
+        note: kind === 'generation'
+          ? `exported numbered uv-ai-guide.png · ${result.width}×${result.height} · ${raster.numberedFootprints} footprints · 6% pink signal`
+          : `exported transparent uv-wireframe.png · ${result.width}×${result.height} · ${raster.authoredEdges} authored edges`,
       }
       : { path: null, note: result.error };
   };
+  const exportUvWireframe = (islands?: readonly UvIslandRect[]) => exportUvGuide('transparent', islands);
+  const exportUvGenerationGuide = (islands?: readonly UvIslandRect[]) => exportUvGuide('generation', islands);
   const importUvAtlas = async (): Promise<string> => {
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Import refused — save the model package first.';
@@ -2606,6 +2627,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       selectUvOrientation,
       saveUvAtlas,
       exportUvWireframe,
+      exportUvGenerationGuide,
       importUvAtlas,
       resizeUvAtlas,
       addUvTextureLayer,

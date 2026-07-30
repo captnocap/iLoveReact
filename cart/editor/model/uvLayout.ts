@@ -2292,10 +2292,38 @@ function absoluteUvFootprintSignature(rect: UvIslandRect): string {
   return `${rect.x},${rect.y},${rect.w},${rect.h}|${repeatTopologySignature(rect, pointTokens)}`;
 }
 
+export type UvTextureFootprintGroup = Readonly<{
+  /** First logical island carrying this exact authored texture footprint. */
+  representative: number;
+  /** Logical islands already sampling the same exact corners. */
+  islands: readonly number[];
+}>;
+
+/** Group exact, topology-compatible texture footprints in stable source order.
+ * Export guides use one number per group; packing uses the same identity so the
+ * visual promise and the subsequent atlas mutation cannot disagree. */
+export function groupUvTextureFootprints(
+  rects: readonly UvIslandRect[],
+): readonly UvTextureFootprintGroup[] {
+  const footprintByKey = new Map<string, number>();
+  const groups: { representative: number; islands: number[] }[] = [];
+  rects.forEach((rect, island) => {
+    const key = absoluteUvFootprintSignature(rect);
+    const existing = footprintByKey.get(key);
+    if (existing === undefined) {
+      footprintByKey.set(key, groups.length);
+      groups.push({ representative: island, islands: [island] });
+    } else {
+      groups[existing]!.islands.push(island);
+    }
+  });
+  return groups;
+}
+
 /** Count exact, topology-compatible texture footprints. Logical islands already
  * stacked on the same corners intentionally count once. */
 export function countUvTextureFootprints(rects: readonly UvIslandRect[]): number {
-  return new Set(rects.map(absoluteUvFootprintSignature)).size;
+  return groupUvTextureFootprints(rects).length;
 }
 
 /** Repack every distinct footprint into equal cells while preserving the current
@@ -2309,18 +2337,12 @@ export function uniformUvPack(
   originY = 0,
 ): UvIslandRect[] {
   if (!rects.length || atlasW < 1 || atlasH < 1) return [];
-  const footprintByKey = new Map<string, number>();
-  const footprintForIsland: number[] = [];
-  for (const rect of rects) {
-    const key = absoluteUvFootprintSignature(rect);
-    let footprint = footprintByKey.get(key);
-    if (footprint === undefined) {
-      footprint = footprintByKey.size;
-      footprintByKey.set(key, footprint);
-    }
-    footprintForIsland.push(footprint);
-  }
-  const footprintCount = footprintByKey.size;
+  const footprints = groupUvTextureFootprints(rects);
+  const footprintForIsland: number[] = new Array(rects.length);
+  footprints.forEach((footprint, footprintIndex) => {
+    for (const island of footprint.islands) footprintForIsland[island] = footprintIndex;
+  });
+  const footprintCount = footprints.length;
   const aspect = atlasW / Math.max(1, atlasH);
   const columns = Math.max(1, Math.ceil(Math.sqrt(footprintCount * aspect)));
   const rows = Math.max(1, Math.ceil(footprintCount / columns));

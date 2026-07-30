@@ -6,7 +6,12 @@
 //     --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-model-atlas-store.test.js
-import { claimPackageDir, writeLiveModelAtlas, writeModelUvWireframe } from './modelPackageStore';
+import {
+  claimPackageDir,
+  writeLiveModelAtlas,
+  writeModelUvGenerationGuide,
+  writeModelUvWireframe,
+} from './modelPackageStore';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -49,7 +54,7 @@ test('copy-path persistence returns only a PNG proven to exist', () => {
   }
 });
 
-test('transparent UV wireframe uses atomic package PNG persistence', () => {
+test('transparent and generation UV guides use distinct atomic package PNG paths', () => {
   const host = globalThis as any;
   const names = ['__fs_exists', '__fs_read', '__fs_list_json', '__fs_mkdir', '__imageops_encode_raw', '__fs_write_bytes_atomic', '__cwd'];
   const prior = new Map(names.map((name) => [name, host[name]]));
@@ -79,6 +84,12 @@ test('transparent UV wireframe uses atomic package PNG persistence', () => {
     assert(result.path === '/workspace/cart/editor/data/models/props/Wireframe_Copy/atlases/uv-wireframe.png', `unexpected wireframe path ${result.path}`);
     assert(result.width === 4 && result.height === 2, 'wireframe dimensions were not carried with the proof');
     assert(writtenBytes?.join(',') === '137,80,78,71', 'encoded PNG bytes did not use the atomic binary door');
+
+    const generation = writeModelUvGenerationGuide({ kind: 'prop', id: 'test:wireframe-copy' }, rgba, 4, 2);
+    assert(generation.ok, `generation guide write failed: ${generation.ok ? '' : generation.error}`);
+    if (!generation.ok) return;
+    assert(generation.path === '/workspace/cart/editor/data/models/props/Wireframe_Copy/atlases/uv-ai-guide.png', `unexpected generation guide path ${generation.path}`);
+    assert(generation.width === 4 && generation.height === 2, 'generation guide dimensions were not carried with the proof');
   } finally {
     for (const name of names) {
       const value = prior.get(name);

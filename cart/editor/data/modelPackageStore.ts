@@ -722,6 +722,32 @@ export function writeLiveModelAtlas(pkg: Pick<ModelPackage, 'kind' | 'id'>): Liv
 }
 
 export const MODEL_UV_WIREFRAME_FILE = 'atlases/uv-wireframe.png';
+export const MODEL_UV_GENERATION_GUIDE_FILE = 'atlases/uv-ai-guide.png';
+
+function writeModelUvGuide(
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+  file: string,
+  label: string,
+): LiveAtlasWriteResult {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return { ok: false, error: `Save the model package before exporting its ${label}.` };
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
+    || rgba.length !== width * height * 4) {
+    return { ok: false, error: `The ${label} pixels were incomplete.` };
+  }
+  const atlasDir = `${dir}/atlases`;
+  if (!mkdir(atlasDir)) return { ok: false, error: 'Could not create the model atlas folder.' };
+  const png = encodeImage(rgba, width, height, { format: 'png' });
+  if (!png) return { ok: false, error: `The ${label} could not be encoded as PNG.` };
+  const path = `${dir}/${file}`;
+  if (!writeFileBytesAtomic(path, png) || !exists(path)) {
+    return { ok: false, error: `${file.split('/').pop()} could not be written to the model package.` };
+  }
+  return { ok: true, path: absoluteDiskPath(path), width, height };
+}
 
 /** Persist a derived transparent UV guide beside the model's source atlas.
  * The caller supplies raw pixels produced from the current authored UV geometry;
@@ -732,21 +758,17 @@ export function writeModelUvWireframe(
   width: number,
   height: number,
 ): LiveAtlasWriteResult {
-  const dir = resolvePackageDir(pkg.kind, pkg.id);
-  if (!dir) return { ok: false, error: 'Save the model package before exporting its UV wireframe.' };
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
-    || rgba.length !== width * height * 4) {
-    return { ok: false, error: 'The transparent UV wireframe pixels were incomplete.' };
-  }
-  const atlasDir = `${dir}/atlases`;
-  if (!mkdir(atlasDir)) return { ok: false, error: 'Could not create the model atlas folder.' };
-  const png = encodeImage(rgba, width, height, { format: 'png' });
-  if (!png) return { ok: false, error: 'The transparent UV wireframe could not be encoded as PNG.' };
-  const path = `${dir}/${MODEL_UV_WIREFRAME_FILE}`;
-  if (!writeFileBytesAtomic(path, png) || !exists(path)) {
-    return { ok: false, error: 'uv-wireframe.png could not be written to the model package.' };
-  }
-  return { ok: true, path: absoluteDiskPath(path), width, height };
+  return writeModelUvGuide(pkg, rgba, width, height, MODEL_UV_WIREFRAME_FILE, 'transparent UV wireframe');
+}
+
+/** Persist the numbered, faint-tint guide intended for image generation. */
+export function writeModelUvGenerationGuide(
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+): LiveAtlasWriteResult {
+  return writeModelUvGuide(pkg, rgba, width, height, MODEL_UV_GENERATION_GUIDE_FILE, 'numbered UV AI guide');
 }
 
 export const PACKAGE_COLLISION_FILE = 'mesh/collision.blob';
