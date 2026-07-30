@@ -6,10 +6,11 @@
 // cyan, legs orange, face gold — see where identification lands before
 // trusting it). Right pane: the SAME playtest world, its player body driven
 // by the solved pose through __compiled_world_set_player_live_pose (the clip
-// sampler resumes ~3/4s after pushes stop). The solve is FRONTAL by design —
-// single camera sees lateral raises/bends/leans/squats; depth is the
-// multi-cam phase. RECORD grows from this surface next: the same solved
-// angles, keyframed + reduced into the clip stream.
+// sampler resumes ~3/4s after pushes stop). Image vectors drive frontal motion;
+// calibrated limb foreshortening reconstructs depth magnitude. Since a single
+// image cannot distinguish toward from away, that sign is an explicit capture
+// control. RECORD grows from this surface next: the same solved angles,
+// keyframed + reduced into the clip stream.
 //
 // SELFSHOT law: this surface opens V4L2 camera sources ONLY — never a
 // screen:/window: source.
@@ -19,8 +20,14 @@ import { RenderTarget } from '../../../runtime/primitives';
 import { C } from '../workspace.cls';
 import { EDITOR_GAME_FILE, EDITOR_STORE_DIR } from './WorldEditorSurface';
 import { pushPlayerModel } from '../world/playerModelPush';
-import { frontalPose, encodeLivePose } from '../world/playerAnimation';
-import { initialSolve, solveFrontal, MIN_SCORE } from '../world/poseSolve';
+import { capturePose, encodeLivePose } from '../world/playerAnimation';
+import {
+  initialSpatialSolve,
+  solveSpatial,
+  MIN_SCORE,
+  POSE_SOLVE_TUNING,
+  type DepthSign,
+} from '../world/poseSolve';
 import {
   POSE_CAPTURE_TUNING,
   listPoseCameraDevices,
@@ -74,10 +81,23 @@ export default function AnimationCaptureSurface() {
   // real 3D bone-origin spheres updated beside the palette, not a projected
   // duplicate of the camera dots; ordinary playtest constructs none.
   const playerModel = useMemo(() => pushPlayerModel({ poseMarkers: true }), []);
+  const figureHeightMeters = useMemo(() => {
+    if (!playerModel || playerModel.nodes.length === 0) return POSE_SOLVE_TUNING.defaultFigureHeightMeters;
+    const heights = playerModel.nodes.map((node) => node.center[1]);
+    return Math.max(
+      POSE_SOLVE_TUNING.minimumMeasuredFigureHeightMeters,
+      Math.max(...heights) - Math.min(...heights),
+    );
+  }, [playerModel]);
   const [keypoints, setKeypoints] = useState<PoseKeypoint[] | null>(null);
   const [trackError, setTrackError] = useState<string | null>(null);
   const [solveHz, setSolveHz] = useState(0);
-  const solveRef = useRef(initialSolve());
+  // Windowed averages beside the Hz readout (req_3542): inference wall time
+  // vs the full submit→result round trip — the tuning dashboard.
+  const [solveStats, setSolveStats] = useState('');
+  const [depthSign, setDepthSign] = useState<DepthSign>(1);
+  const [depthCalibration, setDepthCalibration] = useState(0);
+  const solveRef = useRef(initialSpatialSolve());
   const discoveredAtMount = useMemo(() => listPoseCameraDevices(), []);
   const savedCameraAtMount = useMemo(readStoredCameraSource, []);
   const savedCameraIsAvailable = typeof savedCameraAtMount === 'string'
@@ -125,8 +145,12 @@ export default function AnimationCaptureSurface() {
     setKeypoints(null);
     setTrackError(null);
     setSolveHz(0);
-    solveRef.current = initialSolve();
-    const applyResult = (res: PoseResult) => {
+    setSolveStats('');
+    solveRef.current = initialSpatialSolve();
+    setDepthCalibration(0);
+    let inferMsSum = 0;
+    let rttMsSum = 0;
+    const applyResult = (res: PoseResult, rttMs: number) => {
       if (!live) return;
       if ('error' in res) {
         setTrackError(res.error);
@@ -136,18 +160,24 @@ export default function AnimationCaptureSurface() {
       setTrackError(null);
       setKeypoints(res.keypoints);
       if (playerModel && playerModel.nodes.length > 0 && playerModel.trackedJoints > 0) {
-        solveRef.current = solveFrontal(solveRef.current, res);
-        const transforms = frontalPose(playerModel.nodes, solveRef.current.angles);
+        solveRef.current = solveSpatial(solveRef.current, res, figureHeightMeters, depthSign, Date.now());
+        setDepthCalibration(solveRef.current.calibrationFrames);
+        const transforms = capturePose(playerModel.nodes, solveRef.current.angles);
         const nodeId = Number(loaderRef.current?.id ?? 0);
         if (nodeId && typeof g.__compiled_world_set_player_live_pose === 'function') {
           g.__compiled_world_set_player_live_pose(nodeId, encodeLivePose(transforms));
         }
       }
       ticks += 1;
+      inferMsSum += res.elapsedMs;
+      rttMsSum += rttMs;
       const now = Date.now();
       if (now - windowStart >= 1000) {
         setSolveHz(ticks);
+        setSolveStats(`${Math.round(inferMsSum / ticks)}ms infer · ${Math.round(rttMsSum / ticks)}ms rtt`);
         ticks = 0;
+        inferMsSum = 0;
+        rttMsSum = 0;
         windowStart = now;
       }
     };
@@ -157,9 +187,15 @@ export default function AnimationCaptureSurface() {
       cancelPending = requestPose(cameraSrc, (res) => {
         cancelPending = null;
         if (!live) return;
-        applyResult(res);
         const spent = Date.now() - cycleStarted;
-        timer = setTimeout(tick, Math.max(0, POSE_CAPTURE_TUNING.targetIntervalMs - spent));
+        // Pipeline (req_3542): the worker went idle the instant this result
+        // published — resubmit BEFORE the solve/push work so inference N+1
+        // overlaps it. Over-budget cycles re-tick synchronously (zero gap);
+        // targetIntervalMs is only the pacing floor.
+        const wait = POSE_CAPTURE_TUNING.targetIntervalMs - spent;
+        if (wait <= 0) tick();
+        else timer = setTimeout(tick, wait);
+        applyResult(res, spent);
       });
     };
     // First estimate waits a beat for the cam feed to open.
@@ -171,7 +207,7 @@ export default function AnimationCaptureSurface() {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       if (nodeId) g.__compiled_world_clear_player_live_pose?.(nodeId);
     };
-  }, [cameraSrc, playerModel]);
+  }, [cameraSrc, depthSign, figureHeightMeters, playerModel]);
 
   const tracked = keypoints ? keypoints.filter((kp) => kp.score >= MIN_SCORE) : [];
   return (
@@ -195,13 +231,43 @@ export default function AnimationCaptureSurface() {
             ))}
             <Row style={{ position: 'absolute', left: 6, top: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, backgroundColor: 'rgba(10,12,16,0.82)', borderRadius: 6 }}>
               <Text style={{ color: trackError ? '#e8b04c' : '#7fe89a', fontSize: 10, fontFamily: 'monospace' }}>
-                {trackError ?? `tracking · ${tracked.length}/17 keypoints · ${solveHz} Hz`}
+                {trackError ?? `tracking · ${tracked.length}/17 keypoints · ${solveHz} Hz${solveStats ? ` · ${solveStats}` : ''} · ${
+                  depthCalibration >= POSE_SOLVE_TUNING.depthCalibrationFrames
+                    ? 'depth ready'
+                    : `depth calibration ${depthCalibration}/${POSE_SOLVE_TUNING.depthCalibrationFrames}`
+                }`}
               </Text>
             </Row>
           </Box>
           <Text style={{ color: '#9a9ea6', fontSize: 10, fontFamily: 'monospace', marginTop: 8 }}>
-            {`${selectedCamera.name} · ${cameraSrc} — stand back until hips are in frame; frontal moves read best`}
+            {`${selectedCamera.name} · ${cameraSrc} — full body in frame; begin standing with limbs visible`}
           </Text>
+          <Row style={{ marginTop: 7, gap: 5, alignItems: 'center' }}>
+            <Text style={{ color: '#778391', fontSize: 9, fontFamily: 'monospace' }}>depth interpretation</Text>
+            {([
+              [1, 'TOWARD CAMERA'],
+              [-1, 'AWAY FROM CAMERA'],
+            ] as const).map(([sign, label]) => (
+              <Pressable
+                key={label}
+                onPress={() => setDepthSign(sign)}
+                style={{
+                  height: 24,
+                  paddingLeft: 8,
+                  paddingRight: 8,
+                  justifyContent: 'center',
+                  borderRadius: 5,
+                  borderWidth: 1,
+                  borderColor: depthSign === sign ? '#4cc9e8' : '#343943',
+                  backgroundColor: depthSign === sign ? '#15303b' : '#11151c',
+                }}
+              >
+                <Text style={{ color: depthSign === sign ? '#7edcf2' : '#8b949e', fontSize: 9, fontFamily: 'monospace' }}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </Row>
           <Col style={{ position: 'absolute', right: 8, top: 8, width: 250 }}>
             <Pressable
               onPress={() => setCameraMenuOpen((open) => !open)}
@@ -251,7 +317,7 @@ export default function AnimationCaptureSurface() {
               {playerModel
                 ? playerModel.trackedJoints === 0
                   ? `RIG UNAVAILABLE · ${playerModel.name} exposes ${playerModel.groups} bone(s), 0 tracked joints · camera points cannot drive this mesh`
-                  : `player model: ${playerModel.name} · ${playerModel.groups} bones · ${playerModel.trackedJoints} applied markers · live sync ${trackError ? 'waiting' : 'on'}${playerModel.recoveredRig ? ' · recovered range table' : ''}`
+                  : `player model: ${playerModel.name} · ${playerModel.groups} bones · ${playerModel.trackedJoints} applied markers · live 2.5D ${trackError ? 'waiting' : 'on'} · ${depthSign > 0 ? 'toward' : 'away'}${playerModel.recoveredRig ? ' · recovered range table' : ''}`
                 : 'no model declared as THE player — File → Export → Player Model first'}
             </Text>
           </Row>

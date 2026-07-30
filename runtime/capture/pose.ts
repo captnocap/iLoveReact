@@ -38,7 +38,11 @@ export type PoseCameraDevice = {
  * in-flight inference. `targetIntervalMs` is start-to-start, not an extra
  * delay after a slow estimate. */
 export const POSE_CAPTURE_TUNING = Object.freeze({
-  targetIntervalMs: 90,
+  // Start-to-start pacing FLOOR (~30 Hz), not the achieved rate — the loop is
+  // inference-bound and pipelined (req_3542): the next frame submits the
+  // moment a result lands, so the real rate is what the tuned ONNX session
+  // sustains. Render-side interpolation still supplies visual 60 Hz motion.
+  targetIntervalMs: 33,
   startupDelayMs: 400,
 });
 

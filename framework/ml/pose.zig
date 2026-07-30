@@ -28,6 +28,9 @@ const stb = @cImport({
 const log = std.log.scoped(.pose);
 
 pub const INPUT_SIZE: usize = 192;
+/// Intra-op threads for the CPU session (req_3542): a 192² graph saturates a
+/// handful of cores; more just adds scheduling overhead against the frame loop.
+const POSE_INTRA_OP_THREADS: c_int = 4;
 pub const KEYPOINTS: usize = pose_mailbox.KEYPOINTS;
 pub const Keypoint = pose_mailbox.Keypoint;
 pub const AsyncResult = pose_mailbox.Result;
@@ -44,6 +47,11 @@ var g_inference_mutex: std.Io.Mutex = .init;
 var g_async_initialized: bool = false;
 var g_async: AsyncState = undefined;
 
+/// Persistent inference input (req_3542) — page-allocating 442 KB per solve
+/// was an mmap/munmap round trip on every estimate. estimateRgba holds
+/// g_inference_mutex, so one scratch serves all callers.
+var g_tensor_scratch: [INPUT_SIZE * INPUT_SIZE * 3]i32 = undefined;
+
 const AsyncState = struct {
     io: std.Io,
     environ: *const std.process.Environ.Map,
@@ -55,6 +63,12 @@ const page_alloc = std.heap.page_allocator;
 
 pub fn initError() ?[]const u8 {
     return g_init_error;
+}
+
+/// Release a non-fatal OrtStatus from a session-tuning call — a failed knob
+/// must not poison init (the session still works at ORT defaults).
+fn discardStatus(api: *const c.OrtApi, status: ?*c.OrtStatus) void {
+    if (status != null) if (api.ReleaseStatus) |fp| fp(status);
 }
 
 fn recordInitErr(msg: []const u8) void {
@@ -119,6 +133,14 @@ fn ensureInit(io: std.Io, environ: *const std.process.Environ.Map) bool {
         return false;
     }
     defer if (api.ReleaseSessionOptions) |fp| fp(session_opts);
+    // Tuned CPU session (req_3542): the 192² Lightning graph wants a small
+    // fixed thread pool, a fully-optimized graph, and NO spin-waiting between
+    // Runs — ORT's default spinning workers burn cores against the frame loop
+    // while capture idles between solves. Tuning failures are non-fatal: the
+    // session still runs at ORT defaults.
+    if (api.SetIntraOpNumThreads) |fp| discardStatus(api, fp(session_opts, POSE_INTRA_OP_THREADS));
+    if (api.SetSessionGraphOptimizationLevel) |fp| discardStatus(api, fp(session_opts, c.ORT_ENABLE_ALL));
+    if (api.AddSessionConfigEntry) |fp| discardStatus(api, fp(session_opts, "session.intra_op.allow_spinning", "0"));
     {
         const create_mi = api.CreateCpuMemoryInfo orelse {
             recordInitErr("CreateCpuMemoryInfo null");
@@ -245,8 +267,7 @@ pub fn estimateRgba(
     );
     const fit_w: usize = @max(1, @as(usize, @trunc(@as(f32, @floatFromInt(width)) * scale)));
     const fit_h: usize = @max(1, @as(usize, @trunc(@as(f32, @floatFromInt(height)) * scale)));
-    var tensor = page_alloc.alloc(i32, INPUT_SIZE * INPUT_SIZE * 3) catch return null;
-    defer page_alloc.free(tensor);
+    const tensor: []i32 = g_tensor_scratch[0..];
     @memset(tensor, 0);
     var ty: usize = 0;
     while (ty < fit_h) : (ty += 1) {
