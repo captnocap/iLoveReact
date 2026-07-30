@@ -927,6 +927,8 @@ export type UvRepeatStackPlan = Readonly<{
   rects: UvIslandRect[];
   groups: readonly UvRepeatStackGroup[];
   sourceIslands: number;
+  /** Exact texture footprints already present before this proposal. */
+  sourceFootprints: number;
   /** Logical texture footprints after every family shares one representative. */
   uniqueFootprints: number;
   /** Non-representative islands assigned to an existing family footprint. */
@@ -1352,7 +1354,8 @@ export function planRepeatedUvStacks(
     rects: next,
     groups,
     sourceIslands: rects.length,
-    uniqueFootprints: rects.length - stackedIslands,
+    sourceFootprints: countUvTextureFootprints(rects),
+    uniqueFootprints: countUvTextureFootprints(next),
     stackedIslands,
     changedIslands,
     normalizedIslands,

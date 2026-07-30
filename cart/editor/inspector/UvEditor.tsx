@@ -1077,10 +1077,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       if (repeatStackScanGenerationRef.current !== generation) return;
       setRepeatStackScanning(false);
       setRepeatStackReview({ source, mode: 'exact', exact, normalize });
-      const available = Math.max(exact.stackedIslands, normalize.stackedIslands);
-      setNote(available > 0
-        ? `repeat dry run found ${available} shareable UV islands`
-        : 'repeat dry run found no congruent authored island families');
+      const moving = Math.max(exact.changedIslands, normalize.changedIslands);
+      const sharing = Math.max(exact.stackedIslands, normalize.stackedIslands);
+      setNote(moving > 0
+        ? `repeat dry run found ${moving} UV islands that can move onto shared footprints`
+        : sharing > 0
+          ? `${sharing} repeated UV islands already share their proposed footprints`
+          : 'repeat dry run found no congruent authored island families');
     }, UV_LAYOUT_TUNING.repeatScanYieldMs);
   };
   const importAtlas = () => {
@@ -1142,18 +1145,17 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       return;
     }
     const plan = review[review.mode];
-    if (plan.stackedIslands === 0) {
-      setRepeatStackReview(null);
-      setNote('No congruent repeated islands were available in this evaluation.');
+    if (plan.changedIslands === 0) {
+      setNote(plan.stackedIslands > 0
+        ? `No UVs need moving — this layout already has the proposed ${plan.uniqueFootprints} footprints.`
+        : 'No congruent repeated islands were available in this evaluation.');
       return;
     }
     const normalized = plan.normalizedIslands > 0
       ? ` · normalized ${plan.normalizedIslands} to the largest eligible family footprint`
       : '';
-    const label = `prestacked ${plan.stackedIslands} repeated islands into ${plan.groups.length} shared footprints${normalized}`;
-    let applied = true;
-    if (plan.changedIslands > 0) applied = applyIslandSetEdit(plan.rects, label, 'stack');
-    else setNote(`${label} · layout was already stacked`);
+    const label = `prestacked ${plan.changedIslands} UV islands · ${plan.sourceFootprints}→${plan.uniqueFootprints} footprints${normalized}`;
+    const applied = applyIslandSetEdit(plan.rects, label, 'stack');
     setRepeatStackReview(null);
     if (applied && exportKind === 'wireframe') exportWireframeFor(plan.rects);
     if (applied && exportKind === 'generation') exportGenerationGuideFor(plan.rects);
@@ -2154,9 +2156,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
             <Box style={{ padding: 10, gap: 5, backgroundColor: '#0b1118', borderWidth: 1, borderColor: accentFor('borderSoft'), borderRadius: 6 }}>
               <Row style={{ alignItems: 'center' }}>
-                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Logical islands → footprints</Text>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Current footprints → proposed</Text>
                 <Box style={{ flexGrow: 1 }} />
-                <Text style={{ color: accentFor('primary'), fontSize: 11, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`${repeatStackPlan.sourceIslands} → ${repeatStackPlan.uniqueFootprints}`}</Text>
+                <Text style={{ color: accentFor('primary'), fontSize: 11, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`${repeatStackPlan.sourceFootprints} → ${repeatStackPlan.uniqueFootprints}`}</Text>
+              </Row>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Logical islands</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.sourceIslands}`}</Text>
               </Row>
               <Row style={{ alignItems: 'center' }}>
                 <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Congruent families</Text>
@@ -2164,7 +2171,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.groups.length}`}</Text>
               </Row>
               <Row style={{ alignItems: 'center' }}>
-                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Islands sharing a footprint</Text>
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('textDim'), fontSize: 9 }}>UV islands moving</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`${repeatStackPlan.changedIslands}`}</Text>
+              </Row>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Repeated members sharing</Text>
                 <Box style={{ flexGrow: 1 }} />
                 <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.stackedIslands}`}</Text>
               </Row>
@@ -2185,6 +2197,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               {repeatStackPlan.unclassifiedIslands > 0 ? (
                 <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`${repeatStackPlan.unclassifiedIslands} legacy rectangle-only rows left untouched`}</Text>
               ) : null}
+              {repeatStackPlan.changedIslands === 0 && repeatStackPlan.stackedIslands > 0 ? (
+                <Text style={{ color: '#86d7a2', fontSize: 8, fontFamily: 'ui-monospace' }}>ALREADY STACKED · APPLY HAS NO PENDING UV MUTATION</Text>
+              ) : null}
             </Box>
 
             <Text style={{ color: repeatStackReview.mode === 'normalize' ? '#d7ac6d' : accentFor('textDim'), fontSize: 9, lineHeight: 14 }}>
@@ -2204,24 +2219,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 <Text style={{ color: accentFor('textDim'), fontSize: 9, fontWeight: '800' }}>CANCEL</Text>
               </Pressable>
               <Pressable
-                onPress={() => applyRepeatStackReview('none')}
-                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+                onPress={() => repeatStackPlan.changedIslands > 0 && applyRepeatStackReview('none')}
+                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
               >
-                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY</Text>
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY</Text>
               </Pressable>
               <Pressable
                 tooltip="Apply the reviewed prestack and export the truly transparent guide"
-                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview('wireframe')}
-                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+                onPress={() => repeatStackPlan.changedIslands > 0 && applyRepeatStackReview('wireframe')}
+                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
               >
-                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ WIRE</Text>
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ WIRE</Text>
               </Pressable>
               <Pressable
                 tooltip="Apply the reviewed prestack and export the numbered 6%-pink image-generation guide"
-                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview('generation')}
-                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+                onPress={() => repeatStackPlan.changedIslands > 0 && applyRepeatStackReview('generation')}
+                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
               >
-                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI GUIDE</Text>
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI GUIDE</Text>
               </Pressable>
             </Row>
           </Box>

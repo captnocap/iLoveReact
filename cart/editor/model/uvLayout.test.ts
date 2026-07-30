@@ -321,6 +321,7 @@ test('repeat prestack matches authored topology across quarter turns without tru
   assert(plan.groups.length === 1, `repeat scan invented ${plan.groups.length} families`);
   assert(plan.groups[0]!.islands.join(',') === '0,1,3', 'quarter-turned and mirrored copies did not join their exact family');
   assert(plan.stackedIslands === 2 && plan.changedIslands === 2, 'repeat scan reported the wrong mutation size');
+  assert(plan.sourceFootprints === 4, 'repeat scan lost the current unstacked footprint count');
   assert(plan.uniqueFootprints === 2, 'repeat scan did not collapse one logical texture footprint');
   assert(plan.rects[2] === rects[2], 'equal-bounds diamond was mistaken for the rectangular topology');
   const corners = flattenUvFaceCorners(plan.rects)!;
@@ -333,6 +334,12 @@ test('repeat prestack matches authored topology across quarter turns without tru
   assert(pointSet(0, 12) === pointSet(36, 12), 'stacked mirror missed the representative corners');
   assert(plan.rects[1]!.triangles?.[0]?.face === 2, 'prestack replaced source render-face identity');
   assert(plan.rects[1]!.triangles?.[0]?.vertices?.join(',') === '10,11,12', 'prestack replaced welded source identity');
+
+  const alreadyStacked = planRepeatedUvStacks(plan.rects, 'exact', 128, 128);
+  assert(alreadyStacked.sourceIslands === 4, 'idempotent repeat scan confused logical islands with footprints');
+  assert(alreadyStacked.sourceFootprints === 2 && alreadyStacked.uniqueFootprints === 2, 'idempotent repeat scan advertised an already-landed footprint reduction');
+  assert(alreadyStacked.stackedIslands === 2, 'idempotent repeat scan lost its congruent family membership');
+  assert(alreadyStacked.changedIslands === 0, 'idempotent repeat scan advertised already-overlapped islands as pending moves');
 });
 
 test('normalized repeat prestack adopts the largest congruent family footprint', () => {
