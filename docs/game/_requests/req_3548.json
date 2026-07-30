@@ -1,0 +1,31 @@
+{
+  "id": "req_3548",
+  "at": "2026-07-30T21:56:28.407Z",
+  "origin": "codex:019fac74",
+  "text": "ok and then one more thing, are we able to just pre-stack before we build the wireframe, like if you look at how many of these end up being the exact same size because they are just the one side of N sides of the thing, we can prestack and then either normalize or not but atleast make it easier to land on the texture with the uv since the more the model grows in scale this uv gets attrocious sometimes [Image #1]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T21:56:38.255Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T22:14:56.688Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a topology-aware repeated-island prestack dry run to the UV editor before wireframe export. Exact Scale preserves texel density; Normalize may adopt the largest congruent footprint. The review reports island-to-footprint reduction, families, moved islands, and scale changes, with Cancel, Apply, and Apply + Wire PNG. Matching uses full authored triangle, face-group, and welded-corner structure under rotations/reflections rather than bounding boxes, and Uniform Pack now preserves confirmed stacks. The saved Bed_003 snapshot evaluated from 110 logical islands to 60 footprints across 32 repeat families. Focused UV, menu, history, and wireframe tests plus the ReleaseFast editor build pass.",
+  "shas": [
+    "021700f33",
+    "58a88f71c"
+  ],
+  "resolvedAt": "2026-07-30T22:14:56.687Z"
+}
