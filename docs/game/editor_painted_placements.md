@@ -4,7 +4,7 @@ Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-30. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
-req_3529 / req_3544 / req_3545 / req_3546 / req_3547.
+req_3529 / req_3544 / req_3545 / req_3546 / req_3547 / req_3548.
 
 ## In one sentence
 
@@ -69,8 +69,8 @@ The Texture Atlas submenu remains fully reachable as actions are added
 detail are single-line, the UV menu is wide enough for its descriptive verbs,
 and edge placement adopts the rendered container's `onLayout` height instead
 of trusting a permanent manual row count. The initial estimate includes all
-eight Texture Atlas actions, including Reset, so neither first paint nor later
-measurement can place it beyond the viewport.
+nine Texture Atlas actions, including Reset and Prestack, so neither first
+paint nor later measurement can place one beyond the viewport.
 
 ## Identity stitch + transparent UV guide (req_3515)
 
@@ -112,6 +112,38 @@ edge source is the authored UV view, so a resident triangle diagonal hidden by
 an authored quad stays absent from the export. Encoding uses the existing
 image codec and an atomic binary write. The guide is not loaded as texture
 state and can always be regenerated from `cornerUv`.
+
+## Repeated-island prestack before the UV guide (req_3548)
+
+`PRESTACK` beside `WIRE PNG` and RMB → Texture Atlas → Prestack Repeated
+Islands both open the same whole-topology dry run. The scan yields once so its
+loader paints, changes no UVs, and returns the proposed logical-island count →
+unique texture-footprint count, congruent-family count, number of islands that
+will overlap, and (for normalized evaluation) number whose texel scale will
+change. Cancel discards the frozen proposal. Apply is one `stack UV islands`
+journal step; Apply + Wire PNG commits that same step and exports the reviewed
+corner table directly, without waiting on a React refresh.
+
+Equal width and height are not sufficient evidence. `planRepeatedUvStacks`
+first buckets by render-triangle count, distinct UV points, authored-face
+partition, welded-corner partition, and scale/aspect. It then compares the
+complete authored triangle graph under the eight quarter-turn/reflection
+orientations. Exact Scale requires agreement within one hundredth of a texel
+and preserves current density. Normalize ignores uniform scale, chooses the
+largest member as the family representative, reports every density change,
+and copies that representative's exact corners. Differently built shapes with
+the same bounding rectangle remain separate. Face rows, authored groups, and
+welded model identities are retained; only their UV corner coordinates overlap,
+so the operation never welds mesh topology.
+
+The saved `Bed_003` development snapshot reconstructed 110 UV islands. Its dry
+scan found 32 repeated families and 50 shareable members, reducing the guide to
+60 unique footprints; Exact and Normalize agreed because its repeated pieces
+already carried matching scale. A separate 1,024-island regression pins
+deterministic family formation. `Uniform Pack All Islands` now keys exact
+absolute authored footprints before assigning cells, so a confirmed stack
+moves and normalizes as one footprint instead of being exploded back into one
+cell per logical island.
 
 ## Editable UV total for generated textures (req_3546/req_3547)
 
