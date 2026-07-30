@@ -838,6 +838,8 @@ export function scaleUvSelection(
   if (!bounds) return rect;
   const sx = Math.max(UV_LAYOUT_TUNING.minimumSelectionScale, Number.isFinite(scaleX) ? scaleX : 1);
   const sy = Math.max(UV_LAYOUT_TUNING.minimumSelectionScale, Number.isFinite(scaleY) ? scaleY : 1);
+  if (Math.abs(sx - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon
+    && Math.abs(sy - 1) <= UV_LAYOUT_TUNING.pointMatchEpsilon) return rect;
   const triangles = absoluteTriangles(rect);
   for (const triangle of triangles) {
     if (!triangleMatchesTarget(triangle, target)) continue;
@@ -848,6 +850,22 @@ export function scaleUvSelection(
     }
   }
   return rebuildUvRect(rect, triangles, atlasW, atlasH);
+}
+
+/**
+ * Convert a pointer drag that begins on the visually offset south-east handle
+ * into the actual UV corner being resized. At zero pointer travel this returns
+ * the authored corner exactly, so merely grabbing the handle cannot jump scale.
+ */
+export function uvScaleDragPoint(
+  bounds: UvSelectionBounds,
+  pointerStart: UvCanvasPoint,
+  pointerCurrent: UvCanvasPoint,
+): UvCanvasPoint {
+  return {
+    x: bounds.x + bounds.w + pointerCurrent.x - pointerStart.x,
+    y: bounds.y + bounds.h + pointerCurrent.y - pointerStart.y,
+  };
 }
 
 export type UvSizeMatch = 'width' | 'height' | 'both';
@@ -1012,32 +1030,6 @@ function repeatInverseOrientationPoint(
   };
 }
 
-function repeatGroupPartition(rect: UvIslandRect): string {
-  const groups = new Map<number, number>();
-  let loose = 0;
-  for (const triangle of rect.triangles ?? []) {
-    if (triangle.group === NO_UV_GROUP) loose += 1;
-    else groups.set(triangle.group, (groups.get(triangle.group) ?? 0) + 1);
-  }
-  const sizes = [...groups.values(), ...new Array(loose).fill(1)].sort((a, b) => a - b);
-  return sizes.join(',');
-}
-
-function repeatVertexPartition(rect: UvIslandRect): string {
-  const occurrences = new Map<number, number>();
-  let missing = 0;
-  for (const triangle of rect.triangles ?? []) {
-    if (!triangle.vertices) {
-      missing += 3;
-      continue;
-    }
-    for (const vertex of triangle.vertices) {
-      occurrences.set(vertex, (occurrences.get(vertex) ?? 0) + 1);
-    }
-  }
-  return `${[...occurrences.values()].sort((a, b) => a - b).join(',')}|${missing}`;
-}
-
 function repeatCoarseKey(rect: UvIslandRect, mode: UvRepeatStackMode): string | null {
   const triangles = rect.triangles ?? [];
   if (triangles.length === 0) return null;
@@ -1045,71 +1037,44 @@ function repeatCoarseKey(rect: UvIslandRect, mode: UvRepeatStackMode): string | 
   const short = Math.min(bounds.w, bounds.h);
   const long = Math.max(bounds.w, bounds.h);
   if (long <= UV_LAYOUT_TUNING.pointMatchEpsilon) return null;
+  const boundary = uvIslandBoundarySegments([rect], 1, 1);
+  if (boundary.length === 0) return null;
   const pointKeys = new Set<string>();
-  for (const triangle of triangles) {
-    const points = absoluteTrianglePoints(rect, triangle);
-    for (let corner = 0; corner < 3; corner += 1) {
-      pointKeys.add(repeatPointToken(
-        points[corner * 2]!,
-        points[corner * 2 + 1]!,
-        UV_LAYOUT_TUNING.pointMatchEpsilon,
-      ));
-    }
+  for (let at = 0; at < boundary.length; at += 2) {
+    pointKeys.add(repeatPointToken(
+      boundary[at]!,
+      boundary[at + 1]!,
+      UV_LAYOUT_TUNING.pointMatchEpsilon,
+    ));
   }
   const size = mode === 'exact'
     ? `${repeatCoordinate(short, UV_LAYOUT_TUNING.repeatExactTexelEpsilon)}:${repeatCoordinate(long, UV_LAYOUT_TUNING.repeatExactTexelEpsilon)}`
     : `${repeatCoordinate(short / long, UV_LAYOUT_TUNING.repeatNormalizedEpsilon)}`;
-  return `${triangles.length}|${pointKeys.size}|${repeatGroupPartition(rect)}|${repeatVertexPartition(rect)}|${size}`;
+  return `${boundary.length / 4}|${pointKeys.size}|${size}`;
 }
 
-function repeatTopologySignature(
+function repeatBoundarySignature(
   rect: UvIslandRect,
-  pointTokens: readonly (readonly [string, string, string])[],
-): string {
-  const triangles = rect.triangles ?? [];
-  const vertexPoints = new Map<number, Set<string>>();
-  for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex += 1) {
-    const triangle = triangles[triangleIndex]!;
-    const tokens = pointTokens[triangleIndex]!;
-    if (!triangle.vertices) continue;
-    for (let corner = 0; corner < 3; corner += 1) {
-      const vertex = triangle.vertices[corner]!;
-      const points = vertexPoints.get(vertex);
-      if (points) points.add(tokens[corner]!);
-      else vertexPoints.set(vertex, new Set([tokens[corner]!]));
-    }
+  orientation: UvRepeatOrientation,
+  originX: number,
+  originY: number,
+  divisor: number,
+  epsilon: number,
+): string | null {
+  const boundary = uvIslandBoundarySegments([rect], 1, 1);
+  if (boundary.length === 0) return null;
+  const points = new Set<string>();
+  const edges: string[] = [];
+  for (let at = 0; at + 3 < boundary.length; at += 4) {
+    const a = repeatOrientationPoint(orientation, boundary[at]!, boundary[at + 1]!);
+    const b = repeatOrientationPoint(orientation, boundary[at + 2]!, boundary[at + 3]!);
+    const aToken = repeatPointToken((a.x - originX) / divisor, (a.y - originY) / divisor, epsilon);
+    const bToken = repeatPointToken((b.x - originX) / divisor, (b.y - originY) / divisor, epsilon);
+    points.add(aToken);
+    points.add(bToken);
+    edges.push(aToken < bToken ? `${aToken}/${bToken}` : `${bToken}/${aToken}`);
   }
-  const vertexDescriptors = new Map<number, string>();
-  for (const [vertex, points] of vertexPoints) {
-    vertexDescriptors.set(vertex, [...points].sort().join('+'));
-  }
-
-  const triangleRows = triangles.map((triangle, triangleIndex) => {
-    const points = pointTokens[triangleIndex]!;
-    const corners = points.map((point, corner) => {
-      const vertex = triangle.vertices?.[corner];
-      return `${point}#${vertex === undefined ? '?' : vertexDescriptors.get(vertex) ?? '?'}`;
-    }).sort();
-    return corners.join('/');
-  });
-
-  const groupedRows = new Map<number, string[]>();
-  for (let index = 0; index < triangles.length; index += 1) {
-    const group = triangles[index]!.group;
-    if (group === NO_UV_GROUP) continue;
-    const rows = groupedRows.get(group);
-    if (rows) rows.push(triangleRows[index]!);
-    else groupedRows.set(group, [triangleRows[index]!]);
-  }
-  const groupDescriptors = new Map<number, string>();
-  for (const [group, rows] of groupedRows) {
-    groupDescriptors.set(group, `G(${rows.sort().join('&')})`);
-  }
-  const rows = triangles.map((triangle, index) => (
-    `${triangleRows[index]}@${triangle.group === NO_UV_GROUP ? 'L' : groupDescriptors.get(triangle.group)}`
-  )).sort();
-  const points = new Set(pointTokens.flatMap((triangle) => [...triangle]));
-  return `${triangles.length}|${points.size}|${rows.join(';')}`;
+  return `${edges.length}|${points.size}|${edges.sort().join(';')}`;
 }
 
 function repeatCandidateAtOrientation(
@@ -1172,10 +1137,12 @@ function repeatCandidateAtOrientation(
       }
     }
   }
+  const key = repeatBoundarySignature(rect, orientation, lowX, lowY, divisor, epsilon);
+  if (!key) return null;
   return {
     index,
     rect,
-    key: repeatTopologySignature(rect, pointTokens),
+    key,
     orientation,
     originX: lowX,
     originY: lowY,
@@ -1236,11 +1203,15 @@ function stackRepeatCandidate(
       const sourceY = triangle.points[at + 1]!;
       const token = repeatCanonicalPointToken(candidate, sourceX, sourceY);
       const canonical = representative.canonicalPoints.get(token);
-      if (!canonical) return null;
+      const candidatePoint = repeatOrientationPoint(candidate.orientation, sourceX, sourceY);
+      const targetCanonical = canonical ?? {
+        x: ((candidatePoint.x - candidate.originX) / candidate.divisor) * representative.divisor,
+        y: ((candidatePoint.y - candidate.originY) / candidate.divisor) * representative.divisor,
+      };
       const target = repeatInverseOrientationPoint(
         representative.orientation,
-        representative.originX + canonical.x,
-        representative.originY + canonical.y,
+        representative.originX + targetCanonical.x,
+        representative.originY + targetCanonical.y,
       );
       changed ||= Math.abs(target.x - sourceX) > UV_LAYOUT_TUNING.pointMatchEpsilon
         || Math.abs(target.y - sourceY) > UV_LAYOUT_TUNING.pointMatchEpsilon;
@@ -1252,11 +1223,12 @@ function stackRepeatCandidate(
 }
 
 /**
- * Dry-run a whole-topology repeated-island sweep. Equal bounds alone are never
- * enough: a family must have the same authored triangle graph, face partition,
- * welded-corner partition, and D4-equivalent UV coordinates. `normalize` removes
- * only uniform scale from that comparison and adopts the largest member's exact
- * footprint, retaining the most source texels available in the family.
+ * Dry-run a whole-layout repeated-island sweep. Equal bounds alone are never
+ * enough: the complete UV coverage boundary must agree after explicitly trying
+ * four quarter-turns, then a horizontal reflection and those same four turns.
+ * Face groups, welded ids, and resident triangulation are source bookkeeping and
+ * do not veto identical paint coverage. `normalize` additionally removes uniform
+ * scale and adopts the largest eligible member's exact footprint.
  */
 export function planRepeatedUvStacks(
   rects: readonly UvIslandRect[],
@@ -2284,15 +2256,15 @@ function absoluteUvFootprintSignature(rect: UvIslandRect): string {
   if (triangles.length === 0) {
     return `R|${rect.x},${rect.y},${rect.w},${rect.h}`;
   }
-  const pointTokens = triangles.map((triangle) => {
-    const points = absoluteTrianglePoints(rect, triangle);
-    return [
-      repeatPointToken(points[0], points[1], UV_LAYOUT_TUNING.pointMatchEpsilon),
-      repeatPointToken(points[2], points[3], UV_LAYOUT_TUNING.pointMatchEpsilon),
-      repeatPointToken(points[4], points[5], UV_LAYOUT_TUNING.pointMatchEpsilon),
-    ] as const;
-  });
-  return `${rect.x},${rect.y},${rect.w},${rect.h}|${repeatTopologySignature(rect, pointTokens)}`;
+  const boundary = uvIslandBoundarySegments([rect], 1, 1);
+  if (boundary.length === 0) return `R|${rect.x},${rect.y},${rect.w},${rect.h}`;
+  const edges: string[] = [];
+  for (let at = 0; at + 3 < boundary.length; at += 4) {
+    const a = repeatPointToken(boundary[at]!, boundary[at + 1]!, UV_LAYOUT_TUNING.pointMatchEpsilon);
+    const b = repeatPointToken(boundary[at + 2]!, boundary[at + 3]!, UV_LAYOUT_TUNING.pointMatchEpsilon);
+    edges.push(a < b ? `${a}/${b}` : `${b}/${a}`);
+  }
+  return `B|${edges.sort().join(';')}`;
 }
 
 export type UvTextureFootprintGroup = Readonly<{
@@ -2302,9 +2274,9 @@ export type UvTextureFootprintGroup = Readonly<{
   islands: readonly number[];
 }>;
 
-/** Group exact, topology-compatible texture footprints in stable source order.
- * Export guides use one number per group; packing uses the same identity so the
- * visual promise and the subsequent atlas mutation cannot disagree. */
+/** Group exact, coverage-compatible texture footprints in stable source order.
+ * Numbered exports assign one candidate id per group; packing uses the same
+ * identity so the visual promise and subsequent atlas mutation cannot disagree. */
 export function groupUvTextureFootprints(
   rects: readonly UvIslandRect[],
 ): readonly UvTextureFootprintGroup[] {
@@ -2323,7 +2295,7 @@ export function groupUvTextureFootprints(
   return groups;
 }
 
-/** Count exact, topology-compatible texture footprints. Logical islands already
+/** Count exact, coverage-compatible texture footprints. Logical islands already
  * stacked on the same corners intentionally count once. */
 export function countUvTextureFootprints(rects: readonly UvIslandRect[]): number {
   return groupUvTextureFootprints(rects).length;

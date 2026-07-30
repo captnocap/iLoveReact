@@ -21,6 +21,8 @@ export const UV_WIREFRAME_EXPORT_TUNING = {
   generationLabelAlphaByte: 255,
   generationLabelPaddingPx: 1,
   generationLabelMaximumScalePx: 3,
+  /** Keep pixel rounding and the black UV edge outside a fitted number plate. */
+  generationLabelSafetyInsetPx: 1,
   /** Same 32 MiB RGBA ceiling as the live UV preview. */
   maximumPixels: 8_388_608,
 } as const;
@@ -29,6 +31,8 @@ export type UvWireframeRasterKind = 'transparent' | 'generation';
 
 export type UvWireframeRasterOptions = Readonly<{
   kind?: UvWireframeRasterKind;
+  /** Numbering is an explicit color-by-number aid, not part of every AI guide. */
+  numberFootprints?: boolean;
 }>;
 
 export type UvWireframeRaster = Readonly<{
@@ -151,9 +155,15 @@ function drawSegments(
   }
 }
 
-function islandLabelPoint(rect: UvIslandRect): { x: number; y: number } {
-  let largestArea = -1;
-  let point = { x: rect.x + rect.w * 0.5, y: rect.y + rect.h * 0.5 };
+type UvFootprintLabelPlacement = Readonly<{ x: number; y: number; radius: number }>;
+
+function islandLabelPlacement(rect: UvIslandRect): UvFootprintLabelPlacement {
+  const fallback: UvFootprintLabelPlacement = {
+    x: rect.x + rect.w * 0.5,
+    y: rect.y + rect.h * 0.5,
+    radius: Math.max(0, Math.min(rect.w, rect.h) * 0.5),
+  };
+  let placement: UvFootprintLabelPlacement | null = null;
   for (const triangle of rect.triangles ?? []) {
     const ax = rect.x + triangle.points[0] * rect.w;
     const ay = rect.y + triangle.points[1] * rect.h;
@@ -161,12 +171,21 @@ function islandLabelPoint(rect: UvIslandRect): { x: number; y: number } {
     const by = rect.y + triangle.points[3] * rect.h;
     const cx = rect.x + triangle.points[4] * rect.w;
     const cy = rect.y + triangle.points[5] * rect.h;
-    const area = Math.abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay));
-    if (area <= largestArea) continue;
-    largestArea = area;
-    point = { x: (ax + bx + cx) / 3, y: (ay + by + cy) / 3 };
+    const sideA = Math.hypot(bx - cx, by - cy);
+    const sideB = Math.hypot(cx - ax, cy - ay);
+    const sideC = Math.hypot(ax - bx, ay - by);
+    const perimeter = sideA + sideB + sideC;
+    if (perimeter <= Number.EPSILON) continue;
+    const twiceArea = Math.abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay));
+    const radius = twiceArea / perimeter;
+    if (placement && radius <= placement.radius) continue;
+    placement = {
+      x: (sideA * ax + sideB * bx + sideC * cx) / perimeter,
+      y: (sideA * ay + sideB * by + sideC * cy) / perimeter,
+      radius,
+    };
   }
-  return point;
+  return placement ?? fallback;
 }
 
 function drawNumber(
@@ -176,23 +195,32 @@ function drawNumber(
   value: number,
   centerX: number,
   centerY: number,
-  availableWidth: number,
-  availableHeight: number,
-): void {
+  safeRadius: number,
+): boolean {
   const text = String(value);
   const glyphWidth = text.length * 3 + Math.max(0, text.length - 1);
   const padding = UV_WIREFRAME_EXPORT_TUNING.generationLabelPaddingPx;
-  const scale = Math.max(1, Math.min(
-    UV_WIREFRAME_EXPORT_TUNING.generationLabelMaximumScalePx,
-    Math.floor((Math.max(1, availableWidth) - padding * 2) / glyphWidth),
-    Math.floor((Math.max(1, availableHeight) - padding * 2) / 5),
-  ));
+  const usableRadius = Math.max(
+    0,
+    safeRadius - UV_WIREFRAME_EXPORT_TUNING.generationLabelSafetyInsetPx,
+  );
+  let scale = 0;
+  for (let candidate = UV_WIREFRAME_EXPORT_TUNING.generationLabelMaximumScalePx; candidate >= 1; candidate -= 1) {
+    const candidateWidth = glyphWidth * candidate + padding * 2;
+    const candidateHeight = 5 * candidate + padding * 2;
+    if (Math.hypot(candidateWidth * 0.5, candidateHeight * 0.5) <= usableRadius) {
+      scale = candidate;
+      break;
+    }
+  }
+  if (scale === 0) return false;
   const textWidth = glyphWidth * scale;
   const textHeight = 5 * scale;
   const labelWidth = textWidth + padding * 2;
   const labelHeight = textHeight + padding * 2;
-  const labelX = Math.round(Math.max(0, Math.min(width - labelWidth, centerX - labelWidth * 0.5)));
-  const labelY = Math.round(Math.max(0, Math.min(height - labelHeight, centerY - labelHeight * 0.5)));
+  const labelX = Math.round(centerX - labelWidth * 0.5);
+  const labelY = Math.round(centerY - labelHeight * 0.5);
+  if (labelX < 0 || labelY < 0 || labelX + labelWidth > width || labelY + labelHeight > height) return false;
   fillRect(
     rgba,
     width,
@@ -225,6 +253,7 @@ function drawNumber(
     });
     cursorX += 4 * scale;
   }
+  return true;
 }
 
 function drawFootprintNumbers(
@@ -237,12 +266,15 @@ function drawFootprintNumbers(
     const rect = rects[footprint.representative]!;
     return rect.x + rect.w > 0 && rect.y + rect.h > 0 && rect.x < width && rect.y < height;
   });
+  let numbered = 0;
   visibleFootprints.forEach((footprint, index) => {
     const rect = rects[footprint.representative]!;
-    const center = islandLabelPoint(rect);
-    drawNumber(rgba, width, height, index + 1, center.x, center.y, rect.w, rect.h);
+    const placement = islandLabelPlacement(rect);
+    if (drawNumber(rgba, width, height, index + 1, placement.x, placement.y, placement.radius)) {
+      numbered += 1;
+    }
   });
-  return visibleFootprints.length;
+  return numbered;
 }
 
 /**
@@ -251,9 +283,10 @@ function drawFootprintNumbers(
  * quad exports four sides rather than reintroducing its resident triangle
  * diagonal. Island boundaries receive a heavier neutral line for legibility.
  *
- * The generation preset preserves that geometry but adds one stable number per
- * exact texture footprint and a 6%-alpha pink canvas signal. The transparent
- * preset remains byte-transparent away from lines for compositing workflows.
+ * The generation preset preserves that geometry and adds a 6%-alpha pink canvas
+ * signal. Color-by-number labels are opt-in; each plate scales down to fit wholly
+ * inside an authored triangle, and tiny slivers remain clean when no readable
+ * label can fit. The transparent preset stays alpha-zero away from its lines.
  */
 export function rasterizeUvWireframe(
   rects: readonly UvIslandRect[],
@@ -294,7 +327,7 @@ export function rasterizeUvWireframe(
     UV_WIREFRAME_EXPORT_TUNING.boundaryLineWidthPx,
     UV_WIREFRAME_EXPORT_TUNING.boundaryAlphaByte,
   );
-  const numberedFootprints = kind === 'generation'
+  const numberedFootprints = kind === 'generation' && options.numberFootprints === true
     ? drawFootprintNumbers(rgba, width, height, rects)
     : 0;
   return {

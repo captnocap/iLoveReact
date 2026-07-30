@@ -21,6 +21,7 @@ import {
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
+  scaleUvSelection,
   matchUvIslandSize,
   shouldActivateUvDrag,
   shouldPanUvCanvas,
@@ -32,6 +33,7 @@ import {
   uniformUvPack,
   uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
+  uvScaleDragPoint,
   uvFaceEdgeSegments,
   uvFaceEdgePath,
   uvFaceCornerIdentityMarkers,
@@ -296,7 +298,7 @@ test('exact stacking refuses incompatible triangle counts instead of approximati
   assert(result.rects[0] === rects[0], 'incompatible source island was approximately rescaled');
 });
 
-test('repeat prestack matches authored topology across quarter turns without trusting equal bounds', () => {
+test('repeat prestack matches UV coverage across quarter turns without trusting equal bounds', () => {
   const rects = parseUvIslandRects(
     [0, 0, 10, 20, 30, 0, 20, 10, 60, 0, 10, 20, 80, 0, 10, 20],
     [10, 20, 30, 40],
@@ -330,8 +332,18 @@ test('repeat prestack matches authored topology across quarter turns without tru
     for (let at = start; at < start + count; at += 2) points.push(`${corners[at]},${corners[at + 1]}`);
     return points.sort().join('|');
   };
+  const boundarySet = (index: number) => {
+    const segments = uvIslandBoundarySegments([plan.rects[index]!], 1, 1);
+    const edges: string[] = [];
+    for (let at = 0; at + 3 < segments.length; at += 4) {
+      const a = `${segments[at]},${segments[at + 1]}`;
+      const b = `${segments[at + 2]},${segments[at + 3]}`;
+      edges.push(a < b ? `${a}/${b}` : `${b}/${a}`);
+    }
+    return edges.sort().join('|');
+  };
   assert(pointSet(0, 12) === pointSet(12, 12), 'stacked quarter-turn missed the representative corners');
-  assert(pointSet(0, 12) === pointSet(36, 12), 'stacked mirror missed the representative corners');
+  assert(boundarySet(0) === boundarySet(3), 'stacked mirror missed the representative coverage boundary');
   assert(plan.rects[1]!.triangles?.[0]?.face === 2, 'prestack replaced source render-face identity');
   assert(plan.rects[1]!.triangles?.[0]?.vertices?.join(',') === '10,11,12', 'prestack replaced welded source identity');
 
@@ -405,24 +417,96 @@ test('normalized repeat prestack protects congruent UV surfaces above its area t
   assert(sliverOnly.normalizationProtectedIslands === 2, 'stricter area gate did not protect both larger matches');
 });
 
-test('repeat prestack preserves authored face partitions instead of grouping by silhouette alone', () => {
+test('repeat prestack matches identical coverage despite different triangulation and source bookkeeping', () => {
   const rects = parseUvIslandRects(
     [0, 0, 10, 10, 20, 0, 10, 10],
     [10, 20],
     [
       0, 10, 0, 0, 10, 0, 10, 10,
       0, 10, 0, 0, 10, 10, 0, 10,
-      1, 20, 20, 0, 30, 0, 30, 10,
-      1, 21, 20, 0, 30, 10, 20, 10,
+      1, 20, 20, 0, 30, 0, 20, 10,
+      1, 21, 30, 0, 30, 10, 20, 10,
     ],
     [
       0, 1, 2, 0, 2, 3,
-      10, 11, 12, 10, 12, 13,
+      10, 11, 13, 11, 12, 13,
     ],
   );
   const plan = planRepeatedUvStacks(rects, 'exact', 64, 64);
-  assert(plan.groups.length === 0 && plan.stackedIslands === 0, 'one quad and two separate faces were collapsed together');
-  assert(plan.rects[0] === rects[0] && plan.rects[1] === rects[1], 'refused family still churned UV geometry');
+  assert(plan.groups.length === 1 && plan.groups[0]!.islands.join(',') === '0,1', 'identical coverage was split by source bookkeeping');
+  assert(plan.sourceFootprints === 2 && plan.uniqueFootprints === 1, 'identical coverage did not collapse to one texture footprint');
+  assert(plan.stackedIslands === 1 && plan.changedIslands === 1, 'coverage family reported the wrong move count');
+  assert(plan.rects[0] === rects[0] && plan.rects[1] !== rects[1], 'coverage stack moved the representative or skipped its peer');
+  assert(plan.rects[1]!.triangles?.[0]?.group === 20 && plan.rects[1]!.triangles?.[1]?.group === 21, 'coverage stack replaced authored face groups');
+  assert(plan.rects[1]!.triangles?.[0]?.vertices?.join(',') === '10,11,13', 'coverage stack replaced welded source identities');
+});
+
+test('repeat prestack explicitly walks four turns and horizontal flip plus four turns', () => {
+  const orientations = [
+    [1, 0, 0, 1],
+    [0, -1, 1, 0],
+    [-1, 0, 0, -1],
+    [0, 1, -1, 0],
+    [-1, 0, 0, 1],
+    [0, -1, -1, 0],
+    [1, 0, 0, -1],
+    [0, 1, 1, 0],
+  ] as const;
+  const source = [
+    [0, 0],
+    [7, 1],
+    [5, 9],
+    [1, 6],
+  ] as const;
+  const bounds: number[] = [];
+  const groups: number[] = [];
+  const triangles: number[] = [];
+  const vertices: number[] = [];
+  orientations.forEach(([xx, xy, yx, yy], island) => {
+    const transformed = source.map(([x, y]) => ({
+      x: xx * x + xy * y,
+      y: yx * x + yy * y,
+    }));
+    const lowX = Math.min(...transformed.map((point) => point.x));
+    const lowY = Math.min(...transformed.map((point) => point.y));
+    const highX = Math.max(...transformed.map((point) => point.x));
+    const highY = Math.max(...transformed.map((point) => point.y));
+    const offsetX = island * 16 - lowX;
+    const offsetY = (island % 2) * 16 - lowY;
+    const points = transformed.map((point) => ({
+      x: point.x + offsetX,
+      y: point.y + offsetY,
+    }));
+    bounds.push(
+      island * 16,
+      (island % 2) * 16,
+      highX - lowX,
+      highY - lowY,
+    );
+    groups.push(100 + island);
+    triangles.push(
+      island, 100 + island,
+      points[0]!.x, points[0]!.y,
+      points[1]!.x, points[1]!.y,
+      points[2]!.x, points[2]!.y,
+      island, 100 + island,
+      points[0]!.x, points[0]!.y,
+      points[2]!.x, points[2]!.y,
+      points[3]!.x, points[3]!.y,
+    );
+    const vertexBase = island * 10;
+    vertices.push(
+      vertexBase, vertexBase + 1, vertexBase + 2,
+      vertexBase, vertexBase + 2, vertexBase + 3,
+    );
+  });
+  const rects = parseUvIslandRects(bounds, groups, triangles, vertices);
+  const plan = planRepeatedUvStacks(rects, 'exact', 256, 64);
+  assert(plan.groups.length === 1, `eight-orientation walk split into ${plan.groups.length} families`);
+  assert(plan.groups[0]!.islands.join(',') === '0,1,2,3,4,5,6,7', 'one of the eight explicit orientations was missed');
+  assert(plan.sourceFootprints === 8 && plan.uniqueFootprints === 1, 'eight-orientation walk did not produce one footprint');
+  assert(plan.stackedIslands === 7 && plan.changedIslands === 7, 'eight-orientation walk reported the wrong move count');
+  assert(plan.rects[7]!.triangles?.[0]?.vertices?.join(',') === '70,71,72', 'mirrored peer lost its welded source identities');
 });
 
 test('repeat prestack buckets a production-sized repeated topology sweep into one deterministic family', () => {
@@ -676,6 +760,17 @@ test('four-corner resize keeps the opposite corner fixed', () => {
   assert(northwest.x === 15 && northwest.y === 8 && northwest.w === 15 && northwest.h === 20, 'northwest handle moved the fixed corner');
   const southeast = resizeUvIslandFromCorner(rect, 'se', 80, -80, 64, 64);
   assert(southeast.x === 10 && southeast.y === 12 && southeast.w === 100 && southeast.h === 1, 'southeast handle did not cross the former atlas edge');
+});
+
+test('offset scale handle starts at one-to-one and follows pointer travel without jumping', () => {
+  const bounds = { x: 10, y: 12, w: 20, h: 16, cx: 20, cy: 20 };
+  const handle = { x: 37, y: 35 };
+  const grabbed = uvScaleDragPoint(bounds, handle, handle);
+  assert(grabbed.x === 30 && grabbed.y === 28, 'grabbing the offset scale handle changed the authored corner');
+  const dragged = uvScaleDragPoint(bounds, handle, { x: 47, y: 30 });
+  assert(dragged.x === 40 && dragged.y === 23, 'scale corner did not follow pointer delta from its gesture seed');
+  const rect = parseUvIslandRects([10, 12, 20, 16], [1], [0, 1, 10, 12, 30, 12, 10, 28])[0]!;
+  assert(scaleUvSelection(rect, undefined, 1, 1, 64, 64) === rect, 'one-to-one scale grab churned UV geometry');
 });
 
 test('hit testing chooses the smallest overlapping island', () => {

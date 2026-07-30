@@ -26,20 +26,23 @@ test('transparent UV wireframe preserves authored quad edges without its residen
   assert(raster!.numberedFootprints === 0, 'transparent compositing guide gained generation labels');
 });
 
-test('generation UV guide adds a faint pink canvas and one number per exact footprint', () => {
+test('generation UV guide keeps numbering optional and labels readable exact footprints', () => {
   const rects = parseUvIslandRects(
-    [2, 2, 12, 12, 2, 2, 12, 12, 18, 2, 10, 12],
+    [4, 4, 24, 24, 4, 4, 24, 24, 34, 4, 24, 24],
     [700, 800, 900],
     [
-      0, 700, 2, 2, 14, 2, 14, 14,
-      0, 700, 2, 2, 14, 14, 2, 14,
-      1, 800, 2, 2, 14, 2, 14, 14,
-      1, 800, 2, 2, 14, 14, 2, 14,
-      2, 900, 18, 2, 28, 2, 28, 14,
-      2, 900, 18, 2, 28, 14, 18, 14,
+      0, 700, 4, 4, 28, 4, 28, 28,
+      0, 700, 4, 4, 28, 28, 4, 28,
+      1, 800, 4, 4, 28, 4, 28, 28,
+      1, 800, 4, 4, 28, 28, 4, 28,
+      2, 900, 34, 4, 58, 4, 58, 28,
+      2, 900, 34, 4, 58, 28, 34, 28,
     ],
   );
-  const raster = rasterizeUvWireframe(rects, 32, 18, { kind: 'generation' });
+  const plain = rasterizeUvWireframe(rects, 64, 36, { kind: 'generation' });
+  assert(Boolean(plain), 'valid UV geometry did not produce a plain generation guide');
+  assert(plain!.numberedFootprints === 0, 'plain generation guide gained implicit numbering');
+  const raster = rasterizeUvWireframe(rects, 64, 36, { kind: 'generation', numberFootprints: true });
   assert(Boolean(raster), 'valid UV geometry did not produce a generation guide');
   const [red, green, blue] = UV_WIREFRAME_EXPORT_TUNING.generationBackgroundRgb;
   assert(raster!.rgba[0] === red && raster!.rgba[1] === green && raster!.rgba[2] === blue, 'generation guide lost its pink canvas signal');
@@ -57,6 +60,23 @@ test('generation UV guide adds a faint pink canvas and one number per exact foot
     }
   }
   assert(foundLabel, 'generation guide did not rasterize a readable number plate');
+});
+
+test('numbered generation guide omits plates that cannot fit inside a UV sliver', () => {
+  const rects = parseUvIslandRects(
+    [2, 2, 2, 28, 8, 2, 20, 20],
+    [100, 200],
+    [
+      0, 100, 2, 2, 4, 30, 3, 2,
+      1, 200, 8, 2, 28, 2, 8, 22,
+    ],
+  );
+  const raster = rasterizeUvWireframe(rects, 32, 32, {
+    kind: 'generation',
+    numberFootprints: true,
+  });
+  assert(Boolean(raster), 'mixed sliver guide did not rasterize');
+  assert(raster!.numberedFootprints === 1, 'unreadable sliver label was drawn outside its authored triangle');
 });
 
 test('wireframe export rejects unbounded allocations and empty geometry', () => {

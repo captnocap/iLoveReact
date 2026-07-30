@@ -36,7 +36,6 @@ import {
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
-  snapUvBoundsToGuides,
   snapUvTranslationToGridAndGuides,
   stackUvIslands,
   stitchUvIslands,
@@ -50,6 +49,7 @@ import {
   uvIslandBoundarySegments,
   uvIslandsIntersectingMarquee,
   uvIslandSetBounds,
+  uvScaleDragPoint,
   uvSelectionBounds,
   uvSelectionVertices,
   uvTranslationSnapStep,
@@ -113,7 +113,7 @@ type UvRepeatStackReview = Readonly<{
   exact: UvRepeatStackPlan;
   normalize: UvRepeatStackPlan;
 }>;
-type UvRepeatStackExport = 'none' | 'wireframe' | 'generation';
+type UvRepeatStackExport = 'none' | 'wireframe' | 'generation' | 'generation-numbered';
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
@@ -121,7 +121,7 @@ type Gesture =
   | { kind: 'move'; index: number; indices: number[]; target?: UvFaceTarget; bounds: UvSelectionBounds; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; doubleClick: boolean; seed: UvIslandRect; seedRects: UvIslandRect[] }
   | { kind: 'vertex'; index: number; target?: UvFaceTarget; vertex: number; origin: ScreenPoint; start: ScreenPoint; screenStart: ScreenPoint; activated: boolean; seed: UvIslandRect }
   | { kind: 'rotate'; index: number; target?: UvFaceTarget; center: ScreenPoint; startAngle: number; seed: UvIslandRect }
-  | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; seed: UvIslandRect };
+  | { kind: 'scale'; index: number; target?: UvFaceTarget; bounds: UvSelectionBounds; start: ScreenPoint; seed: UvIslandRect };
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
@@ -653,11 +653,6 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setNote(`${removing ? 'removed' : 'selected'} ${guide.axis} guide at ${coordinate} · Alt bypasses guide snapping`);
     return true;
   };
-  const snapToSelectedGuides = (bounds: UvSelectionBounds) => snapUvBoundsToGuides(
-    bounds,
-    selectedGuidesRef.current,
-    UV_LAYOUT_TUNING.guideSnapPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
-  );
   const applyIslandSetEdit = (next: UvIslandRect[], label: string, action: UvHistoryAction): boolean => {
     if (sameRectReferences(rectsRef.current, next)) {
       setNote(`${label} — selection was already there`);
@@ -978,7 +973,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     }
     if (gesture?.kind === 'vertex' && rectsRef.current[gesture.index] !== gesture.seed) commit(rectsRef.current, 'moved UV vertex over the fixed texture', 'vertex');
     if (gesture?.kind === 'rotate') commit(rectsRef.current, gesture.target ? 'rotated detached UV face' : 'rotated UV island', 'rotate');
-    if (gesture?.kind === 'scale') commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island', 'scale');
+    if (gesture?.kind === 'scale' && rectsRef.current[gesture.index] !== gesture.seed) {
+      commit(rectsRef.current, gesture.target ? 'scaled detached UV face' : 'scaled UV island', 'scale');
+    }
   };
   const history = documentHistory.uv;
   const paintHistory = documentHistory.paint;
@@ -1067,7 +1064,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     repeatStackScanGenerationRef.current = generation;
     setRepeatStackReview(null);
     setRepeatStackScanning(true);
-    setNote(`scanning ${source.length} UV islands for repeated authored topology…`);
+    setNote(`scanning ${source.length} UV islands through eight rotation/reflection coverage tests…`);
     setTimeout(() => {
       if (repeatStackScanGenerationRef.current !== generation) return;
       const exact = planRepeatedUvStacks(source, 'exact', uv.w, uv.h);
@@ -1083,7 +1080,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         ? `repeat dry run found ${moving} UV islands that can move onto shared footprints`
         : sharing > 0
           ? `${sharing} repeated UV islands already share their proposed footprints`
-          : 'repeat dry run found no congruent authored island families');
+          : 'repeat dry run found no congruent UV coverage families');
     }, UV_LAYOUT_TUNING.repeatScanYieldMs);
   };
   const importAtlas = () => {
@@ -1131,11 +1128,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const exportWireframeFor = (islands: readonly UvIslandRect[]) => {
     copyGuideExport(bridge.exportUvWireframe(islands));
   };
-  const exportGenerationGuideFor = (islands: readonly UvIslandRect[]) => {
-    copyGuideExport(bridge.exportUvGenerationGuide(islands));
+  const exportGenerationGuideFor = (islands: readonly UvIslandRect[], numbered = false) => {
+    copyGuideExport(bridge.exportUvGenerationGuide(islands, numbered));
   };
   const exportWireframeAndCopyPath = () => exportWireframeFor(rectsRef.current);
-  const exportGenerationGuideAndCopyPath = () => exportGenerationGuideFor(rectsRef.current);
+  const exportGenerationGuideAndCopyPath = (numbered = false) => exportGenerationGuideFor(rectsRef.current, numbered);
   const applyRepeatStackReview = (exportKind: UvRepeatStackExport) => {
     const review = repeatStackReview;
     if (!review) return;
@@ -1159,6 +1156,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setRepeatStackReview(null);
     if (applied && exportKind === 'wireframe') exportWireframeFor(plan.rects);
     if (applied && exportKind === 'generation') exportGenerationGuideFor(plan.rects);
+    if (applied && exportKind === 'generation-numbered') exportGenerationGuideFor(plan.rects, true);
   };
   const collectUvOrientation = () => {
     const count = bridge.selectUvOrientation();
@@ -1425,7 +1423,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             return;
           }
           if (selectedRect && selectionBounds && hitsControl(screen, scaleHandle, UV_LAYOUT_TUNING.scaleHandleHitPx)) {
-            gestureRef.current = { kind: 'scale', index: selected, target: selectedTarget, bounds: selectionBounds, seed: selectedRect };
+            gestureRef.current = {
+              kind: 'scale',
+              index: selected,
+              target: selectedTarget,
+              bounds: selectionBounds,
+              start: atlasPoint(screen),
+              seed: selectedRect,
+            };
             return;
           }
           const vertex = hitHandle(screen);
@@ -1582,16 +1587,27 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             changed = rotated.rect;
             guide = rotated.guide;
           } else if (gesture.kind === 'scale') {
-            let scalePoint = point;
-            if (!event?.altKey && selectedGuidesRef.current.length > 0) {
-              const snapped = snapToSelectedGuides({ x: point.x, y: point.y, w: 0, h: 0, cx: point.x, cy: point.y });
-              scalePoint = { x: point.x + snapped.dx, y: point.y + snapped.dy };
-              guide = snapped.guides[0] ?? null;
-            }
+            const cornerX = gesture.bounds.x + gesture.bounds.w;
+            const cornerY = gesture.bounds.y + gesture.bounds.h;
+            const dragPoint = uvScaleDragPoint(gesture.bounds, gesture.start, point);
+            const snapped = snapUvTranslationToGridAndGuides(
+              { x: cornerX, y: cornerY, w: 0, h: 0, cx: cornerX, cy: cornerY },
+              dragPoint.x - cornerX,
+              dragPoint.y - cornerY,
+              translationSnapStep,
+              selectedGuidesRef.current,
+              UV_LAYOUT_TUNING.guideSnapPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
+              Boolean(event?.altKey),
+            );
+            const scalePoint = { x: cornerX + snapped.dx, y: cornerY + snapped.dy };
+            guide = snapped.guides[0] ?? null;
             let scaleX = (scalePoint.x - gesture.bounds.x) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.w);
             let scaleY = (scalePoint.y - gesture.bounds.y) / Math.max(UV_LAYOUT_TUNING.pointMatchEpsilon, gesture.bounds.h);
             if (aspectLocked) {
-              const uniform = Math.max(UV_LAYOUT_TUNING.minimumSelectionScale, Math.min(scaleX, scaleY));
+              const uniform = Math.max(
+                UV_LAYOUT_TUNING.minimumSelectionScale,
+                Math.abs(scaleX - 1) >= Math.abs(scaleY - 1) ? scaleX : scaleY,
+              );
               scaleX = uniform;
               scaleY = uniform;
             }
@@ -1868,7 +1884,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{compileLabel ? 'WORKING' : 'COMPILE'}</Text>
           </Pressable>
           <Pressable
-            tooltip="Dry-run a whole-topology scan for congruent UV islands, then choose exact-scale or normalized pre-stacking"
+            tooltip="Dry-run every UV coverage boundary through four quarter-turns, then a horizontal flip and four more turns"
             onPress={beginRepeatStackReview}
             style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: repeatStackScanning ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: repeatStackScanning ? accentFor('primary') : accentFor('border') }}
           >
@@ -1884,11 +1900,11 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>WIRE PNG</Text>
           </Pressable>
           <Pressable
-            tooltip="Export a numbered UV guide on a 6%-alpha pink canvas so image generation can perceive and address each footprint"
-            onPress={exportGenerationGuideAndCopyPath}
+            tooltip="Export the UV edges on a 6%-alpha pink canvas that image generation can perceive; numbering is optional in the context menu"
+            onPress={() => exportGenerationGuideAndCopyPath(false)}
             style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}
           >
-            <Icon name="Hash" size={10} color="#d7acb9" />
+            <Icon name="ImageDown" size={10} color="#d7acb9" />
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>AI GUIDE</Text>
           </Pressable>
         </Row>
@@ -2071,7 +2087,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 label="Prestack Repeated Islands…"
                 detail="DRY RUN"
                 enabled={rects.length > 1 && !repeatStackScanning}
-                tooltip="Compare authored triangle topology across the complete UV layout, preview exact or normalized families, then confirm one undoable stack"
+                tooltip="Compare every UV coverage boundary through four quarter-turns, then a horizontal flip and four more turns; preview and confirm one undoable stack"
                 onPress={() => runMenuAction(beginRepeatStackReview)}
               />
               <UvContextRow indented icon="Grid3x3" label="Uniform Pack All Islands" enabled={rects.length > 0} onPress={() => runMenuAction(packAtlas)} />
@@ -2081,7 +2097,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               <UvContextRow indented icon="RefreshCw" label="Reload base.png" onPress={() => runMenuAction(() => setNote(bridge.reloadUvAtlas()))} />
               <UvContextRow indented icon="Copy" label="Save & Copy Atlas Path" enabled={Boolean(uv.diskPath)} onPress={() => runMenuAction(saveAndCopyAtlasPath)} />
               <UvContextRow indented icon="ImageDown" label="Export Transparent Wireframe" detail="PNG + COPY PATH" enabled={rects.length > 0} tooltip="Write authored UV edges only; transparent background, with quad diagonals omitted" onPress={() => runMenuAction(exportWireframeAndCopyPath)} />
-              <UvContextRow indented icon="Hash" label="Export Numbered AI Guide" detail="6% PINK + COPY PATH" enabled={rects.length > 0} tooltip="Write one stable number per exact UV footprint over a faint pink alpha signal that image generation can perceive" onPress={() => runMenuAction(exportGenerationGuideAndCopyPath)} />
+              <UvContextRow indented icon="ImageDown" label="Export AI Guide" detail="6% PINK + COPY PATH" enabled={rects.length > 0} tooltip="Write a faint pink alpha signal that image generation can perceive, with no footprint labels" onPress={() => runMenuAction(() => exportGenerationGuideAndCopyPath(false))} />
+              <UvContextRow indented icon="Hash" label="Export Numbered AI Guide" detail="FITTED LABELS + COPY" enabled={rects.length > 0} tooltip="Add a fitted number only where its entire plate can remain inside an authored UV triangle; tiny slivers stay unlabelled" onPress={() => runMenuAction(() => exportGenerationGuideAndCopyPath(true))} />
             </>
           ) : null}
         </C.HW_StageContextMenu>
@@ -2094,8 +2111,8 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         >
           <Box style={{ width: 282, padding: 16, gap: 8, alignItems: 'center', backgroundColor: '#111821', borderWidth: 1, borderColor: accentFor('primary'), borderRadius: 9 }}>
             <Icon name="ScanSearch" size={18} color={accentFor('primary')} />
-            <Text style={{ color: accentFor('text'), fontSize: 11, fontWeight: '900', letterSpacing: 0.8 }}>SCANNING UV TOPOLOGY</Text>
-            <Text style={{ color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', textAlign: 'center' }}>{`${rects.length} islands · authored triangles + welded corners`}</Text>
+            <Text style={{ color: accentFor('text'), fontSize: 11, fontWeight: '900', letterSpacing: 0.8 }}>SCANNING UV COVERAGE</Text>
+            <Text style={{ color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', textAlign: 'center' }}>{`${rects.length} islands · 4 turns + horizontal flip × 4 turns`}</Text>
           </Box>
         </Box>
       ) : null}
@@ -2205,7 +2222,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Text style={{ color: repeatStackReview.mode === 'normalize' ? '#d7ac6d' : accentFor('textDim'), fontSize: 9, lineHeight: 14 }}>
               {repeatStackReview.mode === 'normalize'
                 ? `Only congruent surfaces at or below ${repeatNormalizeMaxAreaTexels}px² ignore uniform scale and adopt the largest eligible footprint. Larger surfaces cannot be pulled into a sliver family.`
-                : 'Only congruent authored shapes already at the same texel scale overlap. Quarter-turns and mirrors are handled; differently built equal bounds stay separate.'}
+                : 'Only equal UV coverage already at the same texel scale overlaps. Four quarter-turns and the same four turns after a horizontal flip are tested; equal bounds with different silhouettes stay separate.'}
             </Text>
             <Text style={{ color: accentFor('textFaint'), fontSize: 8, lineHeight: 12 }}>
               Uniform Pack All Islands now keeps confirmed stacks together if you want to normalize and compact them afterward.
@@ -2232,11 +2249,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ WIRE</Text>
               </Pressable>
               <Pressable
-                tooltip="Apply the reviewed prestack and export the numbered 6%-pink image-generation guide"
+                tooltip="Apply the reviewed prestack and export the unnumbered 6%-pink image-generation guide"
                 onPress={() => repeatStackPlan.changedIslands > 0 && applyRepeatStackReview('generation')}
-                style={{ height: 29, paddingLeft: 9, paddingRight: 9, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
+                style={{ height: 29, paddingLeft: 8, paddingRight: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
               >
-                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI GUIDE</Text>
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI</Text>
+              </Pressable>
+              <Pressable
+                tooltip="Apply the reviewed prestack and export the optional fitted-number guide"
+                onPress={() => repeatStackPlan.changedIslands > 0 && applyRepeatStackReview('generation-numbered')}
+                style={{ height: 29, paddingLeft: 8, paddingRight: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.changedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.changedIslands > 0 ? 1 : 0.4 }}
+              >
+                <Text style={{ color: repeatStackPlan.changedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 8, fontWeight: '900' }}>+ AI #</Text>
               </Pressable>
             </Row>
           </Box>
