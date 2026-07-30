@@ -1,0 +1,31 @@
+{
+  "id": "req_3544",
+  "at": "2026-07-30T01:14:34.108Z",
+  "origin": "codex:019fac74",
+  "text": "great for the uvs, when any atlas is made at all, do we store the positions so that we can reset or no? i dont think we do because i dont think there is any formal way to reset it to its original state, lets pass that in since it seems right now i have to manually reimport the model",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T01:14:49.223Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T01:27:57.932Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a durable atlas-generation UV reset contract. Every newly created/remade atlas now captures its complete face-corner layout in atlases/uv-reset.json using signed workspace coordinates, while routine UV/paint saves preserve that baseline. Existing v4 packages lazily adopt their last exact saved layout, so they do not need reimport. The UV editor now exposes RMB → Texture Atlas → Reset UV Layout; restore is topology/count guarded, saved immediately, and recorded as one native undoable reset action. Signed off-image UV coordinates are also persisted under the same finite bound as the native infinite workspace.",
+  "shas": [
+    "b39a8e41a",
+    "7eff5b292"
+  ],
+  "resolvedAt": "2026-07-30T01:27:57.932Z"
+}
