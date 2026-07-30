@@ -1,0 +1,31 @@
+{
+  "id": "req_3552",
+  "at": "2026-07-30T22:58:44.727Z",
+  "origin": "codex:019fac74",
+  "text": "you need to take a uv, and walk it at a 90 degree turn for a full 360 degrees, and then again with a horizontal face flip, and walk through every other that matches here, you are still missing this problem: [Image #1] these are the same thing the moment i do a horizontal flip, [Image #2] so there is tons of opportunity missed [Image #3]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T23:03:49.044Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T23:16:09.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced bookkeeping-sensitive repeated-UV admission with complete coverage-boundary matching over the explicit eight requested orientations: 0/90/180/270, then horizontal flip plus the same four turns. Face groups, welded ids, and resident triangulation remain attached to moved faces but no longer hide identical paint coverage. Added all-eight, differing-triangulation, equal-silhouette safety, idempotence, and production-size regressions. The saved swingset atlas-start probe improves from 86 shareable islands / 299→213 footprints to 102 shareable islands across 78 families / 299→197 footprints.",
+  "shas": [
+    "912638f4b",
+    "effd658e8"
+  ],
+  "resolvedAt": "2026-07-30T23:16:09.312Z"
+}

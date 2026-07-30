@@ -1,0 +1,31 @@
+{
+  "id": "req_3553",
+  "at": "2026-07-30T23:04:57.425Z",
+  "origin": "codex:019fac74",
+  "text": "and the font size on the numbering is too large some of these are getting blown out also not every time is it necessary to have numbers so you shouldnt just do it all the time [Image #1]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T23:05:06.788Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T23:16:09.323Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the ordinary AI Guide a 6%-pink unnumbered export and added explicit Numbered AI Guide / + AI # choices. Number plates now choose the authored triangle with the largest incircle, shrink from 3px to 1px, and are omitted when the complete plate cannot fit, preventing labels from blowing across UV slivers. Updated the context-menu first-frame extent for the extra action and added raster regressions for opt-in numbering and sliver omission.",
+  "shas": [
+    "912638f4b",
+    "effd658e8"
+  ],
+  "resolvedAt": "2026-07-30T23:16:09.323Z"
+}

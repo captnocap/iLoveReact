@@ -1,0 +1,31 @@
+{
+  "id": "req_3554",
+  "at": "2026-07-30T23:07:11.979Z",
+  "origin": "codex:019fac74",
+  "text": "+ the resize on the uv pointers doesnt seem to work right, id check on that",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T23:07:20.822Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T23:16:09.333Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed pointer scaling at its real cause: the visible scale handle sits outside the UV corner, but its old pointer coordinate was treated as the corner and caused an immediate jump, especially on narrow islands. Scale gestures now seed at grab, apply only pointer travel to the real corner, grid/guide-snap unless Alt bypasses, use the dominant normalized axis under aspect lock, and avoid committing a no-op 1:1 grab. Added a focused zero-jump regression.",
+  "shas": [
+    "912638f4b",
+    "effd658e8"
+  ],
+  "resolvedAt": "2026-07-30T23:16:09.333Z"
+}
