@@ -5,7 +5,7 @@ Last verified: 2026-07-30. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
 req_3529 / req_3544 / req_3545 / req_3546 / req_3547 / req_3548 / req_3549 /
-req_3550.
+req_3550 / req_3551.
 
 ## In one sentence
 
@@ -131,10 +131,22 @@ Islands both open the same whole-topology dry run. The scan yields once so its
 loader paints, changes no UVs, and returns the proposed logical-island count →
 unique texture-footprint count, congruent-family count, number of islands that
 will overlap, and (for normalized evaluation) number whose texel scale will
-change or remain protected. Cancel discards the frozen proposal. Apply is one
-`stack UV islands` journal step; + Wire and + AI Guide commit that same step
-and export the reviewed corner table directly, without waiting on a React
-refresh.
+change or remain protected. The review distinguishes logical islands, repeated
+members already sharing a footprint, and UV islands that will actually move.
+Its headline compares current exact footprints → proposed exact footprints,
+not logical rows → a theoretical family count. Cancel discards the frozen
+proposal. Apply is one `stack UV islands` journal step; + Wire and + AI Guide
+commit that same step and export the reviewed corner table directly, without
+waiting on a React refresh.
+
+The scan is explicitly idempotent (req_3551). Once an operation has landed, a
+repeat scan shows equal current/proposed footprints, `UV islands moving 0`, and
+`ALREADY STACKED`; all Apply variants are disabled. Congruent family membership
+remains visible for explanation but is never presented as pending mutation.
+The reported swingset save proves the distinction: its durable record contains
+299 logical layout rows but 213 exact placements, matching the earlier 86
+already-overlapped members. A second scan therefore reports `213 → 213`, not
+the misleading `299 → 213`.
 
 Equal width and height are not sufficient evidence. `planRepeatedUvStacks`
 first buckets by render-triangle count, distinct UV points, authored-face
