@@ -22,6 +22,7 @@ export const UV_HISTORY_ACTIONS = [
   { id: 'auto-size', label: 'auto UV size' },
   { id: 'project-view', label: 'project UV from view' },
   { id: 'stitch', label: 'stitch UV seams' },
+  { id: 'reset', label: 'reset UV layout' },
 ] as const;
 
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';

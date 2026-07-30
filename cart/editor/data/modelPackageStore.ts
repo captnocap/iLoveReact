@@ -35,6 +35,7 @@ import { encode as encodeImage } from '../../../runtime/image';
 import { compileOutlinerCollision, decodeCollisionBake, encodeCollisionBake } from '../model/meshCollision';
 import { groundRebase } from '../model/groundRebase';
 import { hasUvCoverageRasterWriter, writeUvCoverageRasters } from './uvCoverageRaster';
+import { readUvTextureWorkspace } from './uvTextureWorkspaceStore';
 
 const host = globalThis as any;
 
@@ -277,6 +278,21 @@ export type ModelBasePaint = {
 
 const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
 const PAINT_RASTER_BASE_FILE = 'atlases/raster-base.png';
+export const MODEL_UV_RESET_FILE = 'atlases/uv-reset.json';
+const MAX_SIGNED_UV_TEXELS = 16_777_216;
+
+/**
+ * Immutable reset point for one authored atlas generation.
+ *
+ * Coordinates live in the signed image workspace rather than the current
+ * compiled PNG's local 0..width/height frame. Compiling image layers may crop
+ * that workspace to a different origin; a reset therefore remains stationary
+ * relative to the user's source images instead of drifting with the crop.
+ */
+export type ModelUvResetBaseline = {
+  version: 1;
+  cornerUv: number[];
+};
 
 /** A structural mesh save leaves the previous paint assets recoverable on disk,
  *  but this marker prevents them from being silently rebound to the new topology. */
@@ -293,8 +309,33 @@ function parsedUvIslandLayout(value: unknown): number[] | null {
 
 export function parsedUvCornerGeometry(value: unknown): number[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length % 6 !== 0) return null;
-  if (!value.every((entry) => typeof entry === 'number' && Number.isFinite(entry) && entry >= 0)) return null;
+  if (!value.every((entry) => (
+    typeof entry === 'number'
+    && Number.isFinite(entry)
+    && Math.abs(entry) <= MAX_SIGNED_UV_TEXELS
+  ))) return null;
   return value.slice();
+}
+
+export function parseModelUvResetText(text: string): ModelUvResetBaseline | null {
+  try {
+    const value = JSON.parse(text) as Partial<ModelUvResetBaseline>;
+    const cornerUv = value.version === 1 ? parsedUvCornerGeometry(value.cornerUv) : null;
+    return cornerUv ? { version: 1, cornerUv } : null;
+  } catch { return null; }
+}
+
+function offsetUvCornerGeometry(cornerUv: readonly number[], x: number, y: number): number[] | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const shifted = new Array<number>(cornerUv.length);
+  for (let coordinate = 0; coordinate < cornerUv.length; coordinate += 2) {
+    const shiftedX = cornerUv[coordinate]! + x;
+    const shiftedY = cornerUv[coordinate + 1]! + y;
+    if (Math.abs(shiftedX) > MAX_SIGNED_UV_TEXELS || Math.abs(shiftedY) > MAX_SIGNED_UV_TEXELS) return null;
+    shifted[coordinate + 0] = shiftedX;
+    shifted[coordinate + 1] = shiftedY;
+  }
+  return shifted;
 }
 
 export function parseModelBasePaintText(text: string): ModelBasePaint | null {
@@ -324,9 +365,9 @@ export function parseModelBasePaintText(text: string): ModelBasePaint | null {
  * Strip the atlas-read triangle envelope
  *   [island, authoredGroup, x0, y0, x1, y1, x2, y2]
  * into the exact six-float-per-render-face table accepted by
- * __model_uv_geometry_apply. The host emits rows in render-face order; rejecting
- * one malformed/out-of-bounds row prevents a partial layout from becoming disk
- * truth.
+ * __model_uv_geometry_apply. The host emits rows in render-face order. Signed
+ * coordinates are intentional in the infinite UV workspace; the same exact-f32
+ * bound as the native door rejects corrupt/explosive rows.
  */
 export function exactUvCornersFromAtlasTriangles(
   triangles: unknown,
@@ -342,12 +383,69 @@ export function exactUvCornersFromAtlasTriangles(
     if (!Number.isInteger(triangles[index + 1]) || (triangles[index + 1] as number) < 0) return null;
     for (let coordinate = 0; coordinate < 6; coordinate += 1) {
       const value = triangles[index + 2 + coordinate];
-      const limit = coordinate % 2 === 0 ? atlasWidth : atlasHeight;
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > limit) return null;
+      if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > MAX_SIGNED_UV_TEXELS) return null;
       cornerUv[write++] = value;
     }
   }
   return cornerUv;
+}
+
+function uvWorkspaceOrigin(dir: string, atlasWidth: number, atlasHeight: number): { x: number; y: number } {
+  const compiled = readUvTextureWorkspace(dir)?.compiled;
+  return compiled && compiled.width === atlasWidth && compiled.height === atlasHeight
+    ? { x: compiled.originX, y: compiled.originY }
+    : { x: 0, y: 0 };
+}
+
+function readUvResetAt(dir: string): ModelUvResetBaseline | null {
+  const text = readFile(`${dir}/${MODEL_UV_RESET_FILE}`);
+  return text ? parseModelUvResetText(text) : null;
+}
+
+function writeUvResetAt(
+  dir: string,
+  localCornerUv: readonly number[],
+  originX: number,
+  originY: number,
+): ModelUvResetBaseline | null {
+  const cornerUv = offsetUvCornerGeometry(localCornerUv, originX, originY);
+  if (!cornerUv) return null;
+  const baseline: ModelUvResetBaseline = { version: 1, cornerUv };
+  return writeFileBytesAtomic(`${dir}/${MODEL_UV_RESET_FILE}`, textBytes(JSON.stringify(baseline)))
+    ? baseline
+    : null;
+}
+
+/** Read the immutable atlas-start layout. A topology-stale package may keep its
+ * old file for recovery, but cannot advertise it as applicable to the live mesh. */
+export function readModelUvResetBaseline(pkg: Pick<ModelPackage, 'kind' | 'id'>): ModelUvResetBaseline | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir || exists(`${dir}/${PAINT_LAYOUT_STALE_FILE}`)) return null;
+  return readUvResetAt(dir);
+}
+
+/**
+ * Upgrade a legacy package on first Reset use without redefining an existing
+ * reset point. Its last durable v4 corner table is preferred over unsaved live
+ * edits; the live table is only a fallback for pre-v4 packages.
+ */
+export function ensureModelUvResetBaseline(
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+  liveWorkspaceCornerUv: ArrayLike<number>,
+  originX: number,
+  originY: number,
+): ModelUvResetBaseline | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir || exists(`${dir}/${PAINT_LAYOUT_STALE_FILE}`)) return null;
+  const live = parsedUvCornerGeometry(Array.from(liveWorkspaceCornerUv));
+  if (!live) return null;
+  const current = readUvResetAt(dir);
+  if (current) return current.cornerUv.length === live.length ? current : null;
+  const priorPaintText = readFile(`${dir}/atlases/base.paint.json`);
+  const priorPaint = priorPaintText ? parseModelBasePaintText(priorPaintText) : null;
+  return priorPaint?.cornerUv?.length === live.length
+    ? writeUvResetAt(dir, priorPaint.cornerUv, originX, originY)
+    : writeUvResetAt(dir, live, 0, 0);
 }
 
 export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): ModelBasePaint | null {
@@ -711,7 +809,7 @@ export function writeModelArtifacts(
   pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
   parts?: MeshDocPartMeta[],
   recoveryRanges?: { lo: number; hi: number }[],
-  options: { allowPartShrink?: boolean } = {},
+  options: { allowPartShrink?: boolean; captureUvResetBaseline?: boolean } = {},
 ): boolean {
   const dir = claimPackageDir(pkg);
   const meshDir = `${dir}/mesh`;
@@ -788,6 +886,22 @@ export function writeModelArtifacts(
     const layout = Array.isArray(atlas.islands) && atlas.islands.length > 0 ? atlas.islands : null;
     const cornerUv = exactUvCornersFromAtlasTriangles(atlas.triangles, atlas.w, atlas.h);
     const basePaintPath = `${atlasDir}/base.paint.json`;
+    // The mutable base.paint record follows every save. The reset record does
+    // not: normal writes preserve the atlas-start geometry byte-for-byte, while
+    // Create/Remake explicitly establishes a new generation. A missing legacy
+    // record adopts the best exact layout available on its first upgraded save.
+    let uvResetWritten = !options.captureUvResetBaseline;
+    if (cornerUv) {
+      const priorReset = readUvResetAt(dir);
+      if (options.captureUvResetBaseline || !priorReset) {
+        const origin = uvWorkspaceOrigin(dir, atlas.w, atlas.h);
+        uvResetWritten = writeUvResetAt(dir, cornerUv, origin.x, origin.y) !== null;
+      } else {
+        // A normal save may never bless a different topology as the new
+        // "original." Only the explicit atlas-remake boundary can do that.
+        uvResetWritten = priorReset.cornerUv.length === cornerUv.length;
+      }
+    }
     let rasterWritten = coverageWrite?.baselinePath === rasterBasePath;
     if (!rasterWritten) {
       const baselineValue = host.__model_paint_baseline_read?.();
@@ -813,7 +927,7 @@ export function writeModelArtifacts(
           layout: layout!,
           rasterBase: true,
         };
-      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
+      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint))) && uvResetWritten;
     } else if (program.length > 0) {
       if (exists(rasterBasePath)) remove(rasterBasePath);
       const basePaint: ModelBasePaint = {
@@ -822,7 +936,7 @@ export function writeModelArtifacts(
         program,
         ...(layout ? { layout } : {}),
       };
-      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint)));
+      paintProgramWritten = writeFileBytesAtomic(basePaintPath, textBytes(JSON.stringify(basePaint))) && uvResetWritten;
     } else {
       if (exists(rasterBasePath)) remove(rasterBasePath);
       if (exists(basePaintPath)) remove(basePaintPath);

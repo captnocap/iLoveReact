@@ -109,6 +109,7 @@ test "UV action ordinals labels and restore domains stay bridge exact" {
         journal_log.UV_AUTO_SIZE_LABEL,
         journal_log.UV_PROJECT_VIEW_LABEL,
         journal_log.UV_STITCH_LABEL,
+        journal_log.UV_RESET_LABEL,
     };
     try testing.expectEqual(@typeInfo(journal_log.UvAction).@"enum".fields.len, expected.len);
     for (expected, 0..) |label, ordinal| {

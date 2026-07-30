@@ -1850,6 +1850,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <UvContextRow icon="Image" label="Texture Atlas" detail={`${uv.w}×${uv.h}`} expanded={menuGroup === 'texture'} onPress={() => toggleMenuGroup('texture')} />
           {menuGroup === 'texture' ? (
             <>
+              <UvContextRow
+                indented
+                icon="RotateCcw"
+                label="Reset UV Layout"
+                detail="ATLAS START"
+                enabled={rects.length > 0}
+                tooltip="Restore every UV corner to the immutable layout saved when this atlas was created; one undo step"
+                onPress={() => runMenuAction(() => setNote(bridge.resetUvLayout()))}
+              />
               <UvContextRow indented icon="Grid3x3" label="Uniform Pack All Islands" enabled={rects.length > 0} onPress={() => runMenuAction(packAtlas)} />
               <UvContextRow indented icon="ImagePlus" label="Add Image Layer…" detail="NATIVE PX" onPress={() => runMenuAction(addImageLayer)} />
               <UvContextRow indented icon="PackageCheck" label="Compile Image Layers" detail={workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? 'STALE' : workspaceDoc ? 'CURRENT' : 'EMPTY'} enabled={Boolean(workspaceDoc) && !compileLabel} tooltip="Crop the signed image workspace to its visible union and composite transparent gaps; originals stay separate" onPress={() => runMenuAction(compileImageLayers)} />

@@ -53,10 +53,10 @@ import {
   type PaintTarget,
   type PaintVariant,
 } from '../data/paintVariants';
-import { hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
+import { ensureModelUvResetBaseline, hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { image as imageOps } from '../../../runtime/image';
-import { parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
 import {
   setUvTextureLayerLocked,
   updateUvTextureWorkspace,
@@ -212,6 +212,7 @@ export type ModelFocusBridge = {
   editUvTextureLayer: (id: string, edit: UvTextureLayerEdit) => string;
   compileUvTextureLayers: (onProgress?: (completed: number, total: number, label: string) => void) => Promise<string>;
   reloadUvAtlas: () => string;
+  resetUvLayout: () => string;
   // Restore a saved paint variant's whole look onto the resident model (req_3439):
   // texture + UV layout + strokes for full looks, program/atlas replay for legacy ones.
   loadPaintVariant: (variant: PaintVariant) => boolean;
@@ -1695,6 +1696,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     buildUvPanel();
     return 'Reloaded atlases/base.png into the live model.';
   };
+  const resetUvLayout = (): string => {
+    if (!paintTarget) return 'Reset refused — this viewer has no package-backed paint target.';
+    const atlas = uvPanel;
+    if (!atlas || atlas.islands.length === 0) return 'Reset refused — there is no authored UV layout to restore.';
+    const liveWorkspaceCorners = flattenUvFaceCorners(atlas.islands);
+    if (!liveWorkspaceCorners) return 'Reset refused — the live UV corner table is incomplete.';
+    const baseline = ensureModelUvResetBaseline(
+      paintTarget,
+      liveWorkspaceCorners,
+      atlas.atlasOriginX,
+      atlas.atlasOriginY,
+    );
+    if (!baseline) {
+      return 'Reset refused — this atlas has no compatible saved starting layout. Remake the atlas once to establish one.';
+    }
+    if (!applyUvGeometry(new Float32Array(baseline.cornerUv), 'reset')) {
+      return 'Reset refused — the saved atlas-start layout does not match the live mesh.';
+    }
+    const saved = writeModelArtifacts(paintTarget);
+    return saved
+      ? `Reset ${baseline.cornerUv.length / 2} UV corners to the saved atlas-start layout.`
+      : 'Reset the live UV layout, but its current package record could not be saved.';
+  };
   const saveUvAtlas = (): { path: string | null; note: string } => {
     if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
     const result = writeLiveModelAtlas(paintTarget);
@@ -2097,7 +2121,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     atlasInvalidatedRef.current = false;
     // The moment the atlas is made + coloured, persist it as the model's base atlas + mesh
     // (req_2551) — the freshly laid base is exactly what atlases/base.png should hold.
-    if (paintTarget) writeModelArtifacts(paintTarget);
+    if (paintTarget) writeModelArtifacts(paintTarget, undefined, undefined, { captureUvResetBaseline: true });
     setAtlasPrompt(false);
     enterPaint();
   };
@@ -2512,6 +2536,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       editUvTextureLayer,
       compileUvTextureLayers,
       reloadUvAtlas,
+      resetUvLayout,
       loadPaintVariant,
       shape: model
         ? {
