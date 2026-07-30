@@ -4,7 +4,8 @@ Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-30. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
-req_3529 / req_3544 / req_3545 / req_3546 / req_3547 / req_3548.
+req_3529 / req_3544 / req_3545 / req_3546 / req_3547 / req_3548 / req_3549 /
+req_3550.
 
 ## In one sentence
 
@@ -69,8 +70,8 @@ The Texture Atlas submenu remains fully reachable as actions are added
 detail are single-line, the UV menu is wide enough for its descriptive verbs,
 and edge placement adopts the rendered container's `onLayout` height instead
 of trusting a permanent manual row count. The initial estimate includes all
-nine Texture Atlas actions, including Reset and Prestack, so neither first
-paint nor later measurement can place one beyond the viewport.
+ten Texture Atlas actions, including Reset, Prestack, and both guide exports,
+so neither first paint nor later measurement can place one beyond the viewport.
 
 ## Identity stitch + transparent UV guide (req_3515)
 
@@ -113,28 +114,44 @@ an authored quad stays absent from the export. Encoding uses the existing
 image codec and an atomic binary write. The guide is not loaded as texture
 state and can always be regenerated from `cornerUv`.
 
-## Repeated-island prestack before the UV guide (req_3548)
+`AI GUIDE` (also Export Numbered AI Guide) preserves the same authored edges
+in `atlases/uv-ai-guide.png` but is tuned for image-generation ingestion
+(req_3550). The entire canvas carries the user's A/B-proven pink signal at
+exactly 6% alpha, so a model does not preprocess the nearly empty wire image as
+blank. Every visible exact texture footprint receives one high-contrast bitmap
+number placed inside its largest authored triangle. Logical islands already
+stacked on identical corners share one number. The source-order grouping is
+stable, quad diagonals remain absent, and the transparent `uv-wireframe.png`
+continues to exist separately for compositing.
+
+## Repeated-island prestack before the UV guide (req_3548/3549)
 
 `PRESTACK` beside `WIRE PNG` and RMB → Texture Atlas → Prestack Repeated
 Islands both open the same whole-topology dry run. The scan yields once so its
 loader paints, changes no UVs, and returns the proposed logical-island count →
 unique texture-footprint count, congruent-family count, number of islands that
 will overlap, and (for normalized evaluation) number whose texel scale will
-change. Cancel discards the frozen proposal. Apply is one `stack UV islands`
-journal step; Apply + Wire PNG commits that same step and exports the reviewed
-corner table directly, without waiting on a React refresh.
+change or remain protected. Cancel discards the frozen proposal. Apply is one
+`stack UV islands` journal step; + Wire and + AI Guide commit that same step
+and export the reviewed corner table directly, without waiting on a React
+refresh.
 
 Equal width and height are not sufficient evidence. `planRepeatedUvStacks`
 first buckets by render-triangle count, distinct UV points, authored-face
 partition, welded-corner partition, and scale/aspect. It then compares the
 complete authored triangle graph under the eight quarter-turn/reflection
 orientations. Exact Scale requires agreement within one hundredth of a texel
-and preserves current density. Normalize ignores uniform scale, chooses the
-largest member as the family representative, reports every density change,
-and copies that representative's exact corners. Differently built shapes with
-the same bounding rectangle remain separate. Face rows, authored groups, and
-welded model identities are retained; only their UV corner coordinates overlap,
-so the operation never welds mesh topology.
+and preserves current density. Normalize ignores uniform scale only for islands
+whose summed authored-triangle UV area is at or below the editable
+`MAX NORMALIZE AREA` threshold (default 4,096 px², the area of 64×64 texels).
+Larger congruent surfaces stay independent and are reported as protected,
+preventing an important broad surface from joining a sliver family. Among the
+eligible members, Normalize chooses the largest footprint, reports every density
+change, and copies those exact corners. Tightening the gate until only one
+small member qualifies creates no stack. Differently built shapes with the same
+bounding rectangle remain separate. Face rows, authored groups, and welded
+model identities are retained; only their UV corner coordinates overlap, so
+the operation never welds mesh topology.
 
 The saved `Bed_003` development snapshot reconstructed 110 UV islands. Its dry
 scan found 32 repeated families and 50 shareable members, reducing the guide to
