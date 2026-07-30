@@ -334,6 +334,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [atlasResizePending, setAtlasResizePending] = useState(false);
   const [repeatStackScanning, setRepeatStackScanning] = useState(false);
   const [repeatStackReview, setRepeatStackReview] = useState<UvRepeatStackReview | null>(null);
+  const [repeatNormalizeMaxAreaTexels, setRepeatNormalizeMaxAreaTexels] = useState(
+    UV_LAYOUT_TUNING.repeatNormalizeDefaultMaxAreaTexels,
+  );
   const repeatStackScanGenerationRef = useRef(0);
   // Copy/Paste Transform clipboard (req_3427) — one frame survives selection changes;
   // where the context menu opened, in atlas texels, so Move Here lands on the cursor.
@@ -1047,6 +1050,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setRects(next);
     commit(next, `packed ${next.length} islands as ${footprints} uniform footprints · exact stacks preserved`, 'pack');
   };
+  const updateRepeatNormalizeMaxArea = (maxAreaTexels: number) => {
+    setRepeatNormalizeMaxAreaTexels(maxAreaTexels);
+    setRepeatStackReview((current) => current ? {
+      ...current,
+      normalize: planRepeatedUvStacks(current.source, 'normalize', uv.w, uv.h, {
+        normalizeMaxAreaTexels: maxAreaTexels,
+      }),
+    } : current);
+  };
   const beginRepeatStackReview = () => {
     if (repeatStackScanning) return;
     const source = rectsRef.current;
@@ -1058,7 +1070,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setTimeout(() => {
       if (repeatStackScanGenerationRef.current !== generation) return;
       const exact = planRepeatedUvStacks(source, 'exact', uv.w, uv.h);
-      const normalize = planRepeatedUvStacks(source, 'normalize', uv.w, uv.h);
+      const normalize = planRepeatedUvStacks(source, 'normalize', uv.w, uv.h, {
+        normalizeMaxAreaTexels: repeatNormalizeMaxAreaTexels,
+      });
       if (repeatStackScanGenerationRef.current !== generation) return;
       setRepeatStackScanning(false);
       setRepeatStackReview({ source, mode: 'exact', exact, normalize });
@@ -1127,7 +1141,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       return;
     }
     const normalized = plan.normalizedIslands > 0
-      ? ` · normalized ${plan.normalizedIslands} to the largest family footprint`
+      ? ` · normalized ${plan.normalizedIslands} to the largest eligible family footprint`
       : '';
     const label = `prestacked ${plan.stackedIslands} repeated islands into ${plan.groups.length} shared footprints${normalized}`;
     let applied = true;
@@ -2072,7 +2086,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           blocksPointerEvents
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,7,11,0.74)' }}
         >
-          <Box style={{ width: 352, padding: 14, gap: 10, backgroundColor: '#111821', borderWidth: 1, borderColor: accentFor('primary'), borderRadius: 9 }}>
+          <Box style={{ width: 368, padding: 14, gap: 10, backgroundColor: '#111821', borderWidth: 1, borderColor: accentFor('primary'), borderRadius: 9 }}>
             <Row style={{ alignItems: 'center', gap: 8 }}>
               <Icon name="Layers3" size={15} color={accentFor('primary')} />
               <Box style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
@@ -2102,6 +2116,25 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
               })}
             </Row>
 
+            {repeatStackReview.mode === 'normalize' ? (
+              <Row style={{ minHeight: 37, alignItems: 'center', gap: 7, paddingLeft: 8, paddingRight: 8, backgroundColor: '#0b1118', borderWidth: 1, borderColor: '#7c633f', borderRadius: 6 }}>
+                <Box style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
+                  <Text style={{ color: '#d7ac6d', fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>MAX NORMALIZE AREA</Text>
+                  <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 7 }}>Larger current UV surfaces stay independent</Text>
+                </Box>
+                <Box style={{ width: 104 }}>
+                  <UvNumberField
+                    label="A"
+                    value={repeatNormalizeMaxAreaTexels}
+                    min={1}
+                    max={UV_ATLAS_SIZE_TUNING.maxDimension * UV_ATLAS_SIZE_TUNING.maxDimension}
+                    onCommit={updateRepeatNormalizeMaxArea}
+                  />
+                </Box>
+                <Text style={{ color: '#d7ac6d', fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>PX²</Text>
+              </Row>
+            ) : null}
+
             <Box style={{ padding: 10, gap: 5, backgroundColor: '#0b1118', borderWidth: 1, borderColor: accentFor('borderSoft'), borderRadius: 6 }}>
               <Row style={{ alignItems: 'center' }}>
                 <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Logical islands → footprints</Text>
@@ -2119,11 +2152,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.stackedIslands}`}</Text>
               </Row>
               {repeatStackReview.mode === 'normalize' ? (
-                <Row style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#d7ac6d', fontSize: 9 }}>Texel scales changed</Text>
-                  <Box style={{ flexGrow: 1 }} />
-                  <Text style={{ color: '#d7ac6d', fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.normalizedIslands}`}</Text>
-                </Row>
+                <>
+                  <Row style={{ alignItems: 'center' }}>
+                    <Text style={{ color: '#d7ac6d', fontSize: 9 }}>Texel scales changed</Text>
+                    <Box style={{ flexGrow: 1 }} />
+                    <Text style={{ color: '#d7ac6d', fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.normalizedIslands}`}</Text>
+                  </Row>
+                  <Row style={{ alignItems: 'center' }}>
+                    <Text style={{ color: '#d7ac6d', fontSize: 9 }}>Larger matches protected</Text>
+                    <Box style={{ flexGrow: 1 }} />
+                    <Text style={{ color: '#d7ac6d', fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.normalizationProtectedIslands}`}</Text>
+                  </Row>
+                </>
               ) : null}
               {repeatStackPlan.unclassifiedIslands > 0 ? (
                 <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`${repeatStackPlan.unclassifiedIslands} legacy rectangle-only rows left untouched`}</Text>
@@ -2132,7 +2172,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
 
             <Text style={{ color: repeatStackReview.mode === 'normalize' ? '#d7ac6d' : accentFor('textDim'), fontSize: 9, lineHeight: 14 }}>
               {repeatStackReview.mode === 'normalize'
-                ? 'Congruent authored shapes ignore uniform scale and adopt the largest member’s exact footprint. This changes texel density.'
+                ? `Only congruent surfaces at or below ${repeatNormalizeMaxAreaTexels}px² ignore uniform scale and adopt the largest eligible footprint. Larger surfaces cannot be pulled into a sliver family.`
                 : 'Only congruent authored shapes already at the same texel scale overlap. Quarter-turns and mirrors are handled; differently built equal bounds stay separate.'}
             </Text>
             <Text style={{ color: accentFor('textFaint'), fontSize: 8, lineHeight: 12 }}>

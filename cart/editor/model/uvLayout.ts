@@ -52,6 +52,8 @@ export const UV_LAYOUT_TUNING = {
   repeatExactTexelEpsilon: 0.01,
   /** Normalized shape matching ignores scale, but not visible silhouette drift. */
   repeatNormalizedEpsilon: 0.0001,
+  /** Default Normalize gate: only repeated UV surfaces at or below 64×64 texels may change scale. */
+  repeatNormalizeDefaultMaxAreaTexels: 64 * 64,
   /** Yield once so the topology-scan affordance paints before a large dry run. */
   repeatScanYieldMs: 0,
   /** Bound visible grid geometry under pathological zoom without bounding space. */
@@ -903,6 +905,15 @@ export type UvStackResult = Readonly<{
 
 export type UvRepeatStackMode = 'exact' | 'normalize';
 
+export type UvRepeatStackOptions = Readonly<{
+  /**
+   * Normalize-only summed authored-triangle area in atlas texels². Larger
+   * congruent surfaces remain independent instead of sharing a small-part family.
+   * Omit the value for an unrestricted programmatic evaluation.
+   */
+  normalizeMaxAreaTexels?: number;
+}>;
+
 export type UvRepeatStackGroup = Readonly<{
   /** The largest member in normalize mode; deterministic first member on exact ties. */
   representative: number;
@@ -924,6 +935,10 @@ export type UvRepeatStackPlan = Readonly<{
   changedIslands: number;
   /** Normalize-only count whose texel scale changes to the largest family member. */
   normalizedIslands: number;
+  /** Active Normalize area gate, or null when this evaluation is unrestricted. */
+  normalizeMaxAreaTexels: number | null;
+  /** Congruent islands kept independent because their current UV surface exceeds the gate. */
+  normalizationProtectedIslands: number;
   /** Legacy rectangle-only rows cannot be classified safely by topology. */
   unclassifiedIslands: number;
 }>;
@@ -1192,6 +1207,18 @@ function repeatCanonicalPointToken(candidate: UvRepeatCandidate, x: number, y: n
   );
 }
 
+function repeatUvSurfaceArea(rect: UvIslandRect): number {
+  let area = 0;
+  for (const triangle of rect.triangles ?? []) {
+    const points = absoluteTrianglePoints(rect, triangle);
+    area += Math.abs(
+      (points[2] - points[0]) * (points[5] - points[1])
+      - (points[4] - points[0]) * (points[3] - points[1]),
+    ) * 0.5;
+  }
+  return area;
+}
+
 function stackRepeatCandidate(
   candidate: UvRepeatCandidate,
   representative: UvRepeatCandidate,
@@ -1234,7 +1261,14 @@ export function planRepeatedUvStacks(
   mode: UvRepeatStackMode,
   atlasW: number,
   atlasH: number,
+  options: UvRepeatStackOptions = {},
 ): UvRepeatStackPlan {
+  const requestedMaxArea = options.normalizeMaxAreaTexels;
+  const normalizeMaxAreaTexels = mode === 'normalize'
+    && requestedMaxArea !== undefined
+    && Number.isFinite(requestedMaxArea)
+      ? Math.max(0, requestedMaxArea)
+      : null;
   const coarse = new Map<string, number[]>();
   let unclassifiedIslands = 0;
   for (let index = 0; index < rects.length; index += 1) {
@@ -1261,19 +1295,30 @@ export function planRepeatedUvStacks(
     }
   }
 
+  let normalizationProtectedIslands = 0;
   const families = [...exact.values()]
     .filter((candidates) => candidates.length > 1)
     .map((candidates) => {
-      const ordered = [...candidates].sort((left, right) => {
+      const eligible = normalizeMaxAreaTexels === null
+        ? candidates
+        : candidates.filter((candidate) => {
+          const admitted = repeatUvSurfaceArea(candidate.rect)
+            <= normalizeMaxAreaTexels + UV_LAYOUT_TUNING.geometryEpsilon;
+          if (!admitted) normalizationProtectedIslands += 1;
+          return admitted;
+        });
+      if (eligible.length < 2) return null;
+      const ordered = [...eligible].sort((left, right) => {
         const areaDelta = right.spanX * right.spanY - left.spanX * left.spanY;
         return areaDelta || left.index - right.index;
       });
       const representative = ordered[0]!;
       return {
         representative,
-        candidates: [...candidates].sort((left, right) => left.index - right.index),
+        candidates: [...eligible].sort((left, right) => left.index - right.index),
       };
     })
+    .filter((family): family is NonNullable<typeof family> => family !== null)
     .sort((left, right) => left.representative.index - right.representative.index);
 
   const next = [...rects];
@@ -1311,6 +1356,8 @@ export function planRepeatedUvStacks(
     stackedIslands,
     changedIslands,
     normalizedIslands,
+    normalizeMaxAreaTexels,
+    normalizationProtectedIslands,
     unclassifiedIslands,
   };
 }

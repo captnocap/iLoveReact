@@ -364,6 +364,40 @@ test('normalized repeat prestack adopts the largest congruent family footprint',
   );
 });
 
+test('normalized repeat prestack protects congruent UV surfaces above its area threshold', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 10, 20, 30, 0, 20, 40, 60, 0, 5, 10],
+    [10, 20, 30],
+    [
+      0, 10, 0, 0, 10, 0, 0, 20,
+      1, 20, 30, 0, 50, 0, 30, 40,
+      2, 30, 60, 0, 65, 0, 60, 10,
+    ],
+    [
+      0, 1, 2,
+      10, 11, 12,
+      20, 21, 22,
+    ],
+  );
+  const gated = planRepeatedUvStacks(rects, 'normalize', 128, 128, {
+    normalizeMaxAreaTexels: 120,
+  });
+  assert(gated.groups.length === 1, 'area gate removed the eligible small repeated family');
+  assert(gated.groups[0]!.representative === 0, 'area gate did not retain the largest eligible footprint');
+  assert(gated.groups[0]!.islands.join(',') === '0,2', 'large UV surface joined a below-threshold family');
+  assert(gated.rects[1] === rects[1], 'large protected UV surface was changed');
+  assert(gated.normalizedIslands === 1, 'area-gated normalize lost its scale-change count');
+  assert(gated.normalizeMaxAreaTexels === 120, 'area-gated plan did not retain its reviewed threshold');
+  assert(gated.normalizationProtectedIslands === 1, 'area-gated plan did not report the protected surface');
+
+  const sliverOnly = planRepeatedUvStacks(rects, 'normalize', 128, 128, {
+    normalizeMaxAreaTexels: 50,
+  });
+  assert(sliverOnly.groups.length === 0, 'one below-threshold sliver invented a stack family');
+  assert(sliverOnly.stackedIslands === 0, 'one below-threshold sliver changed the UV layout');
+  assert(sliverOnly.normalizationProtectedIslands === 2, 'stricter area gate did not protect both larger matches');
+});
+
 test('repeat prestack preserves authored face partitions instead of grouping by silhouette alone', () => {
   const rects = parseUvIslandRects(
     [0, 0, 10, 10, 20, 0, 10, 10],
