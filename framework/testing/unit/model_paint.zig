@@ -92,7 +92,6 @@ test "unused atlas space stays transparent while real faces retain their alpha" 
         model_paint.setDetail(1, &quad, 6);
         model_paint.test_support.clearTargetAndSource();
     }
-
     model_paint.setBase(.solid, .{ 41, 67, 89, 255 });
     model_paint.paintFaceAlpha(0, 87);
     model_paint.clearAtlas();
@@ -216,6 +215,62 @@ test "texture import adopts native dimensions without stretching UV geometry" {
     const fixed_hash = atlasHash(atlas.rgba);
     try testing.expect(!model_paint.importAtlasPreservingUvGeometry(imported[0 .. imported.len - 1], width, height, &quad, 6));
     try testing.expectEqual(fixed_hash, atlasHash(model_paint.atlas().?.rgba));
+}
+
+test "atlas coordinate resize preserves normalized UVs and every supplied pixel" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(9091, &quad, 6);
+    model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 1 }, &quad, 6);
+    model_paint.setDetail(32, &quad, 6);
+    defer {
+        model_paint.setDetail(1, &quad, 6);
+        model_paint.test_support.clearTargetAndSource();
+    }
+    const original_atlas = model_paint.atlas().?;
+    const original_width = original_atlas.w;
+    const original_height = original_atlas.h;
+
+    var normalized_before: [12]f32 = undefined;
+    for (0..6) |vertex| {
+        normalized_before[vertex * 2 + 0] = quad[vertex * 8 + 6];
+        normalized_before[vertex * 2 + 1] = quad[vertex * 8 + 7];
+    }
+
+    const width: u32 = 37;
+    const height: u32 = 19;
+    var resized: [width * height * 4]u8 = undefined;
+    for (&resized, 0..) |*byte, index| byte.* = @intCast((index * 17) % 251);
+
+    try testing.expect(model_paint.importAtlasPreservingNormalizedUv(&resized, width, height, &quad, 6));
+    const atlas = model_paint.atlas().?;
+    try testing.expectEqual(width, atlas.w);
+    try testing.expectEqual(height, atlas.h);
+    try testing.expectEqualSlices(u8, &resized, atlas.rgba);
+    for (0..6) |vertex| {
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 0], quad[vertex * 8 + 6], 0.0001);
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 1], quad[vertex * 8 + 7], 0.0001);
+    }
+
+    const fixed_hash = atlasHash(atlas.rgba);
+    try testing.expect(!model_paint.importAtlasPreservingNormalizedUv(resized[0 .. resized.len - 1], width, height, &quad, 6));
+    try testing.expectEqual(fixed_hash, atlasHash(model_paint.atlas().?.rgba));
+
+    const restored = try testing.allocator.alloc(u8, @as(usize, original_width) * @as(usize, original_height) * 4);
+    defer testing.allocator.free(restored);
+    @memset(restored, 71);
+    try testing.expect(model_paint.importAtlasPreservingNormalizedUv(
+        restored,
+        original_width,
+        original_height,
+        &quad,
+        6,
+    ));
+    try testing.expectEqual(original_width, model_paint.atlas().?.w);
+    try testing.expectEqual(original_height, model_paint.atlas().?.h);
+    for (0..6) |vertex| {
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 0], quad[vertex * 8 + 6], 0.0001);
+        try testing.expectApproxEqAbs(normalized_before[vertex * 2 + 1], quad[vertex * 8 + 7], 0.0001);
+    }
 }
 
 test "restore shape reprojects a distorted island with square texel aspect in place" {

@@ -4366,7 +4366,11 @@ fn journalInstallAtlas(e: *const JournalEntry) bool {
     if (e.count != g_edit_count) return false;
     const retained_state = e.paint_state orelse return false;
     const paint_state = paint_program.journalStateClone(retained_state) orelse return false;
-    if (!importPaintAtlas(atlas.rgba, atlas.w, atlas.h)) {
+    const installed = if (std.mem.eql(u8, e.label, mesh_journal_log.UV_ATLAS_RESIZE_LABEL))
+        resizePaintAtlas(atlas.rgba, atlas.w, atlas.h)
+    else
+        importPaintAtlas(atlas.rgba, atlas.w, atlas.h);
+    if (!installed) {
         paint_program.journalStateFree(paint_state);
         return false;
     }
@@ -8609,6 +8613,40 @@ pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool
         return false;
     }
     if (!importPaintAtlas(rgba, width, height)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
+    return true;
+}
+
+/// Resize the live raster and its absolute texel coordinate frame as one
+/// operation. The cart performs the high-quality pixel resample; native keeps
+/// normalized UVs byte-for-byte stable so a generated texture made from a
+/// differently sized wireframe still addresses the same surface locations.
+/// Unlike a source-image import, alpha is retained: this may be a compiled
+/// editable image workspace with intentionally transparent gaps.
+pub fn resizePaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+    const verts = g_edit_verts orelse return false;
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    if (!model_paint.importAtlasPreservingNormalizedUv(rgba, width, height, verts, g_edit_count)) return false;
+    paint_program.adoptCurrentAtlasAsBaseline();
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
+pub fn resizePaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+    if (model_paint.atlas()) |atlas| {
+        if (atlas.w == width and atlas.h == height and std.mem.eql(u8, atlas.rgba, rgba)) return true;
+    } else return false;
+    var snap = journalSnapshotForNewAction(mesh_journal_log.UV_ATLAS_RESIZE_LABEL);
+    if (snap == null or snap.?.atlas == null) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (!resizePaintAtlas(rgba, width, height)) {
         journalDiscard(&snap);
         return false;
     }

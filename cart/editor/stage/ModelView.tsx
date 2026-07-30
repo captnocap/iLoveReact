@@ -55,8 +55,9 @@ import {
 } from '../data/paintVariants';
 import { ensureModelUvResetBaseline, hasStoredModelPaint, modelPaintLayoutIsStale, readModelBasePaint, readModelRasterBase, resolvePackageDir, writeLiveModelAtlas, writeModelArtifacts, writeModelUvWireframe } from '../data/modelPackageStore';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
-import { image as imageOps } from '../../../runtime/image';
+import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
 import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import { planUvAtlasResize, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
   setUvTextureLayerLocked,
   updateUvTextureWorkspace,
@@ -77,6 +78,7 @@ import {
   JOURNAL_UV_ATLAS_MUTATION,
   UV_ATLAS_IMPORT_LABEL,
   UV_ATLAS_RELOAD_LABEL,
+  UV_ATLAS_RESIZE_LABEL,
   isUvDocumentHistoryLabel,
   parsePaintHistory,
   parseModelHistory,
@@ -208,6 +210,7 @@ export type ModelFocusBridge = {
   saveUvAtlas: () => { path: string | null; note: string };
   exportUvWireframe: () => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
+  resizeUvAtlas: (width: number, height: number) => Promise<string>;
   addUvTextureLayer: (x: number, y: number) => Promise<string>;
   editUvTextureLayer: (id: string, edit: UvTextureLayerEdit) => string;
   compileUvTextureLayers: (onProgress?: (completed: number, total: number, label: string) => void) => Promise<string>;
@@ -1428,7 +1431,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // No temp PNG and no UI state baked into the pixels.
   const [uvPanel, setUvPanel] = useState<ModelFocusUv | null>(null);
   const uvRevisionRef = useRef(0);
-  const UV_PREVIEW_BYTE_CAP = 32 * 1024 * 1024; // reading a 100MB atlas into JS would stall the app
+  const UV_PREVIEW_BYTE_CAP = UV_ATLAS_SIZE_TUNING.maxRgbaBytes; // reading a 100MB atlas into JS would stall the app
   // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
   // door's base64 by hand. ~1MB for a 512² atlas; one-shot per refresh, not per frame.
   const B64_REV = (() => {
@@ -1793,6 +1796,74 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       : `Imported ${name} live, but ${persisted.error.toLowerCase()}`;
   };
 
+  const markUvTextureWorkspaceStale = (): string => {
+    const dir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
+    const workspace = dir ? readUvTextureWorkspace(dir) : null;
+    if (!dir || !workspace) return '';
+    try {
+      const stale = updateUvTextureWorkspace(workspace, workspace.layers);
+      return writeUvTextureWorkspace(dir, stale)
+        ? ' · image sources kept native; Compile is now stale'
+        : ' · image sources stayed intact, but their stale marker could not be saved';
+    } catch {
+      return ' · image sources stayed intact, but their stale marker could not be created';
+    }
+  };
+
+  const resizeUvAtlas = async (width: number, height: number): Promise<string> => {
+    if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
+      return 'Resize refused — save the model package first.';
+    }
+    const atlas = uvPanel;
+    if (!atlas?.rgba || atlas.rgba.length !== atlas.w * atlas.h * 4) {
+      return 'Resize refused — the live UV atlas pixels are unavailable.';
+    }
+    const result = planUvAtlasResize(atlas.w, atlas.h, width, height);
+    if (!result.ok) return `Resize refused — ${result.error}`;
+    const plan = result.plan;
+    if (!plan.changed) return `UV total is already ${plan.targetWidth}×${plan.targetHeight}.`;
+    if (typeof host.__model_atlas_resize !== 'function') {
+      return 'Resize refused — this editor host does not expose atlas coordinate resizing.';
+    }
+
+    // Yield once so the inspector can paint its RESIZING state before the two
+    // codec passes. Image sources remain untouched; only the current composite
+    // base is resampled to keep the model continuously textured until import.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const sourcePng = encodeImage(atlas.rgba, atlas.w, atlas.h, { format: 'png' });
+    if (!sourcePng) return 'Resize refused — the current atlas could not be staged for resampling.';
+    const resizedPng = imageOps(sourcePng)
+      .resize(plan.targetWidth, plan.targetHeight, { fit: 'fill' })
+      .png()
+      .toBuffer();
+    const resized = resizedPng ? imageOps(resizedPng).raw() : null;
+    if (!resized
+      || resized.width !== plan.targetWidth
+      || resized.height !== plan.targetHeight
+      || resized.rgba.length !== plan.targetRgbaBytes) {
+      return 'Resize refused — the resampled atlas did not match the requested UV total.';
+    }
+    if (host.__model_atlas_resize(
+      resized.rgba,
+      resized.width,
+      resized.height,
+      JOURNAL_UV_ATLAS_MUTATION,
+    ) !== 1) {
+      return 'Resize refused by the live paint target or its undo snapshot.';
+    }
+
+    atlasReadyRef.current = true;
+    const workspaceNote = markUvTextureWorkspaceStale();
+    writeModelArtifacts(paintTarget);
+    const persisted = writeLiveModelAtlas(paintTarget);
+    onDocumentMutated?.();
+    buildUvPanel();
+    const scale = `X ${plan.scaleX.toFixed(UV_ATLAS_SIZE_TUNING.scaleDigits)} · Y ${plan.scaleY.toFixed(UV_ATLAS_SIZE_TUNING.scaleDigits)}`;
+    return persisted.ok
+      ? `UV total ${plan.sourceWidth}×${plan.sourceHeight} → ${plan.targetWidth}×${plan.targetHeight} · ${scale}${workspaceNote}.`
+      : `Resized the live UV total to ${plan.targetWidth}×${plan.targetHeight}, but ${persisted.error.toLowerCase()}${workspaceNote}.`;
+  };
+
   const addUvTextureLayer = async (x: number, y: number): Promise<string> => {
     if (!paintTarget) return 'Add Image refused — this viewer has no package-backed paint target.';
     const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
@@ -1922,9 +1993,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // adoptMesh already refreshes a live Paint panel. This extra branch covers app-wide
     // UV undo outside Paint without doing a second expensive atlas read in Paint.
     if (isUvDocumentHistoryLabel(label) && !paintMode) buildUvPanel();
-    if ((label === UV_ATLAS_IMPORT_LABEL || label === UV_ATLAS_RELOAD_LABEL) && paintTarget) {
-      // Import/reload writes the package immediately, so its inverse must keep
-      // atlases/base.png in lockstep with the restored live raster as well.
+    if ((label === UV_ATLAS_IMPORT_LABEL
+      || label === UV_ATLAS_RELOAD_LABEL
+      || label === UV_ATLAS_RESIZE_LABEL) && paintTarget) {
+      // These raster actions write the package immediately, so their inverse
+      // must keep base.png (and editable-workspace staleness) in lockstep too.
+      if (label === UV_ATLAS_RESIZE_LABEL) markUvTextureWorkspaceStale();
       writeModelArtifacts(paintTarget);
       writeLiveModelAtlas(paintTarget);
     }
@@ -2532,6 +2606,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       saveUvAtlas,
       exportUvWireframe,
       importUvAtlas,
+      resizeUvAtlas,
       addUvTextureLayer,
       editUvTextureLayer,
       compileUvTextureLayers,

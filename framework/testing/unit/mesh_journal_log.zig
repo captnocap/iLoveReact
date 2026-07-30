@@ -59,6 +59,7 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ journal_log.UV_TEXTURE_IMPORT_LABEL, .uv_texture_import, "model.uv.import-texture" },
         .{ journal_log.UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload, "model.uv.reload-texture" },
         .{ "tris to quads", .tris_to_quads, "model.mesh.tris-to-quads" },
+        .{ journal_log.UV_ATLAS_RESIZE_LABEL, .uv_atlas_resize, "model.uv.resize-atlas" },
     };
     // integrity_alert is the one action-ring diagnostic that is not minted from
     // a journal label; every actual mutation kind must appear above.
@@ -85,6 +86,7 @@ test "only UV-structural mesh actions invalidate an authored paint layout" {
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.glass_faces));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_edit));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_texture_import));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_atlas_resize));
 }
 
 test "UV action ordinals labels and restore domains stay bridge exact" {
@@ -121,6 +123,7 @@ test "UV action ordinals labels and restore domains stay bridge exact" {
     try testing.expect(journal_log.uvActionLabel(expected.len) == null);
     try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_IMPORT_LABEL));
     try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_RELOAD_LABEL));
+    try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_ATLAS_RESIZE_LABEL));
     try testing.expectEqual(journal_log.RestoreDomain.mesh, journal_log.restoreDomainForLabel("transform"));
 }
 

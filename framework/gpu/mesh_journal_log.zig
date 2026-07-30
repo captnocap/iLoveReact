@@ -48,6 +48,9 @@ pub const ActionKind = enum(u8) {
     // Append-only ordinal 27 (req_3507): selected compatible triangle pairs
     // become authored quads in one group-only native transaction.
     tris_to_quads,
+    // Append-only ordinal 28 (req_3547): the atlas raster and absolute UV
+    // coordinate frame resize together while normalized UV placement survives.
+    uv_atlas_resize,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -78,6 +81,7 @@ pub const UvAction = enum(u8) {
 
 pub const UV_TEXTURE_IMPORT_LABEL = "import UV texture";
 pub const UV_TEXTURE_RELOAD_LABEL = "reload UV texture";
+pub const UV_ATLAS_RESIZE_LABEL = "resize UV atlas";
 pub const UV_RESTORE_SHAPE_LABEL = "restore UV shape";
 pub const UV_AUTO_SIZE_LABEL = "auto UV size";
 pub const UV_PROJECT_VIEW_LABEL = "project UV from view";
@@ -191,6 +195,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ UV_TEXTURE_IMPORT_LABEL, .uv_texture_import },
         .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
         .{ "tris to quads", .tris_to_quads },
+        .{ UV_ATLAS_RESIZE_LABEL, .uv_atlas_resize },
     };
     for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
     return null;
@@ -226,6 +231,7 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .uv_texture_reload => "model.uv.reload-texture",
         .integrity_alert => "model.mesh.integrity-alert",
         .tris_to_quads => "model.mesh.tris-to-quads",
+        .uv_atlas_resize => "model.uv.resize-atlas",
     };
 }
 
@@ -263,6 +269,7 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .uv_edit,
         .uv_texture_import,
         .uv_texture_reload,
+        .uv_atlas_resize,
         .integrity_alert,
         => false,
     };
@@ -276,7 +283,7 @@ pub fn restoreDomainForLabel(label: []const u8) RestoreDomain {
     const kind = actionKindForLabel(label) orelse return .mesh;
     return switch (kind) {
         .uv_edit => .uv,
-        .uv_texture_import, .uv_texture_reload => .atlas,
+        .uv_texture_import, .uv_texture_reload, .uv_atlas_resize => .atlas,
         else => .mesh,
     };
 }

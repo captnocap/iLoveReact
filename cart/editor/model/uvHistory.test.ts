@@ -2,6 +2,7 @@ import {
   EMPTY_MODEL_HISTORY,
   UV_ATLAS_IMPORT_LABEL,
   UV_ATLAS_RELOAD_LABEL,
+  UV_ATLAS_RESIZE_LABEL,
   UV_HISTORY_ACTIONS,
   isUvDocumentHistoryLabel,
   parsePaintHistory,
@@ -26,6 +27,7 @@ test('every UV mutation has one stable append-only host ordinal', () => {
 test('atlas replacement actions share the UV document-history gate', () => {
   assert(isUvDocumentHistoryLabel(UV_ATLAS_IMPORT_LABEL), 'texture import cannot be undone from the UV panel');
   assert(isUvDocumentHistoryLabel(UV_ATLAS_RELOAD_LABEL), 'texture reload cannot be undone from the UV panel');
+  assert(isUvDocumentHistoryLabel(UV_ATLAS_RESIZE_LABEL), 'atlas resize cannot be undone from the UV panel');
   assert(!isUvDocumentHistoryLabel('delete part'), 'UV history would bypass outliner resynchronization');
 });
 

@@ -13,6 +13,7 @@ import {
   type UvTextureWorkspaceDoc,
 } from '../data/uvTextureWorkspace';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
+import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
   chainUvIslands,
   flattenUvFaceCorners,
@@ -318,6 +319,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null,
   );
   const [compileLabel, setCompileLabel] = useState<string | null>(null);
+  const [atlasWidthDraft, setAtlasWidthDraft] = useState(uv.w);
+  const [atlasHeightDraft, setAtlasHeightDraft] = useState(uv.h);
+  const [atlasResizePending, setAtlasResizePending] = useState(false);
   // Copy/Paste Transform clipboard (req_3427) — one frame survives selection changes;
   // where the context menu opened, in atlas texels, so Move Here lands on the cursor.
   const [transformClipboard, setTransformClipboard] = useState<UvTransformFrame | null>(null);
@@ -357,6 +361,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   useEffect(() => {
     selectedGuidesRef.current = [];
     setSelectedGuides([]);
+  }, [uv.key, uv.w, uv.h]);
+
+  useEffect(() => {
+    setAtlasWidthDraft(uv.w);
+    setAtlasHeightDraft(uv.h);
+    setAtlasResizePending(false);
   }, [uv.key, uv.w, uv.h]);
 
   const setView = (next: UvCanvasView) => {
@@ -988,6 +998,29 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setSelectedIndices([selected]);
     }
     setNote('face selection · double-click a face again to return to its island');
+  };
+  const atlasResizeResult = planUvAtlasResize(uv.w, uv.h, atlasWidthDraft, atlasHeightDraft);
+  const atlasResizePlan = atlasResizeResult.ok ? atlasResizeResult.plan : null;
+  const applyAtlasResize = () => {
+    if (atlasResizePending) return;
+    if (!atlasResizeResult.ok) {
+      setNote(`resize refused · ${atlasResizeResult.error}`);
+      return;
+    }
+    if (!atlasResizeResult.plan.changed) {
+      setNote(`UV total is already ${uv.w}×${uv.h}`);
+      return;
+    }
+    setAtlasResizePending(true);
+    setNote(`resizing UV total to ${atlasResizeResult.plan.targetWidth}×${atlasResizeResult.plan.targetHeight}…`);
+    void bridge.resizeUvAtlas(
+      atlasResizeResult.plan.targetWidth,
+      atlasResizeResult.plan.targetHeight,
+    ).then(setNote).catch((error) => {
+      setNote(`resize failed · ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => {
+      setAtlasResizePending(false);
+    });
   };
   const packAtlas = () => {
     const next = uniformUvPack(rectsRef.current, uv.w, uv.h, uv.atlasOriginX, uv.atlasOriginY);
@@ -1639,6 +1672,53 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`INFINITE WORKSPACE · ATLAS ${uv.w}×${uv.h} @ ${uv.atlasOriginX},${uv.atlasOriginY}`}</Text>
       </Row>
 
+      <Row style={{ height: 29, alignItems: 'center', gap: 4 }}>
+        <Text style={{ width: 48, color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.4 }}>UV TOTAL</Text>
+        <UvNumberField
+          label="W"
+          value={atlasWidthDraft}
+          min={UV_ATLAS_SIZE_TUNING.minDimension}
+          max={UV_ATLAS_SIZE_TUNING.maxDimension}
+          disabled={atlasResizePending}
+          onCommit={setAtlasWidthDraft}
+        />
+        <UvNumberField
+          label="H"
+          value={atlasHeightDraft}
+          min={UV_ATLAS_SIZE_TUNING.minDimension}
+          max={UV_ATLAS_SIZE_TUNING.maxDimension}
+          disabled={atlasResizePending}
+          onCommit={setAtlasHeightDraft}
+        />
+        <Text
+          numberOfLines={1}
+          style={{ minWidth: 92, color: atlasResizeResult.ok ? accentFor('textFaint') : '#ef8f8f', fontSize: 7, fontFamily: 'ui-monospace', textAlign: 'center' }}
+        >
+          {atlasResizePlan ? uvAtlasResizePreview(atlasResizePlan) : 'INVALID SIZE'}
+        </Text>
+        <Pressable
+          tooltip={atlasResizeResult.ok
+            ? `Resize the atlas coordinate frame ${uv.w}×${uv.h} → ${atlasWidthDraft}×${atlasHeightDraft}; normalized UV placement stays fixed`
+            : atlasResizeResult.error}
+          onPress={() => atlasResizePlan?.changed && !atlasResizePending && !compileLabel && applyAtlasResize()}
+          style={{
+            width: 58,
+            height: 29,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 4,
+            backgroundColor: atlasResizePlan?.changed ? accentFor('segActiveBg') : accentFor('surfaceRaised'),
+            borderWidth: 1,
+            borderColor: atlasResizePlan?.changed ? accentFor('primary') : accentFor('border'),
+            opacity: atlasResizePlan?.changed && !atlasResizePending && !compileLabel ? 1 : 0.5,
+          }}
+        >
+          <Text style={{ color: atlasResizePlan?.changed ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>
+            {atlasResizePending ? 'WORKING' : 'RESIZE'}
+          </Text>
+        </Pressable>
+      </Row>
+
       <Row style={{ alignItems: 'center', gap: 4 }}>
         {surfaceMode === 'images' ? (() => {
           const layer = workspaceDoc?.layers.find((candidate) => candidate.id === selectedLayerId) ?? null;
@@ -1646,9 +1726,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <>
               <UvNumberField label="X" value={layer?.x ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} disabled={layer?.locked} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: value, y: layer.y })} />
               <UvNumberField label="Y" value={layer?.y ?? null} min={-UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} max={UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate} disabled={layer?.locked} onCommit={(value) => layer && editImageLayer(layer.id, { kind: 'position', x: layer.x, y: value })} />
-              <Box style={{ flexGrow: 2, height: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4 }}>
+              <Pressable
+                tooltip={layer ? `Use ${layer.width}×${layer.height} as the UV total above` : 'Select an image first'}
+                onPress={() => {
+                  if (!layer) return;
+                  setAtlasWidthDraft(layer.width);
+                  setAtlasHeightDraft(layer.height);
+                  setNote(`UV total draft matched ${layer.name} · press Resize to apply`);
+                }}
+                style={{ flexGrow: 2, height: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('controlBg'), borderWidth: 1, borderColor: accentFor('controlBorder'), borderRadius: 4 }}
+              >
                 <Text style={{ color: layer?.locked ? '#d5aa69' : accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace' }}>{layer ? `${layer.width}×${layer.height} NATIVE PX${layer.locked ? ' · LOCKED' : ''}` : 'SELECT AN IMAGE'}</Text>
-              </Box>
+              </Pressable>
             </>
           );
         })() : (

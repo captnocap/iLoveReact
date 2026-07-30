@@ -3055,6 +3055,30 @@ fn hostModelAtlasImport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_atlas_resize(Uint8Array rgba, width, height, journal=0) → 1.
+/// Replace the raster at explicit dimensions while preserving every normalized
+/// UV coordinate. This is distinct from source-image import's uniform fit.
+fn hostModelAtlasResize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const rgba = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const width_raw = argToI32(info, 1) orelse 0;
+    const height_raw = argToI32(info, 2) orelse 0;
+    if (width_raw <= 0 or height_raw <= 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const journal = (argToI32(info, 3) orelse 0) != 0;
+    const ok = if (journal)
+        scene3d.resizePaintAtlasJournaled(rgba, @intCast(width_raw), @intCast(height_raw))
+    else
+        scene3d.resizePaintAtlas(rgba, @intCast(width_raw), @intCast(height_raw));
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_atlas_workspace_apply(rgba, width, height, shiftX, shiftY,
 /// preserveProgram=0) → 1. Compile positioned source images to one finite atlas
 /// while retaining alpha and translating signed UV geometry without resampling.
@@ -4179,6 +4203,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_uv_islands_select", hostModelUvIslandsSelect);
     v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
     v8_runtime.registerHostFn("__model_atlas_import", hostModelAtlasImport);
+    v8_runtime.registerHostFn("__model_atlas_resize", hostModelAtlasResize);
     v8_runtime.registerHostFn("__model_atlas_workspace_apply", hostModelAtlasWorkspaceApply);
     v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
     v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);

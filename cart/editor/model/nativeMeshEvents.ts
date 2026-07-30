@@ -37,6 +37,9 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'integrity-alert', label: 'integrity alert', commandId: 'model.mesh.integrity-alert' },
   // Append-only ordinal 27 (req_3507): the native bulk triangle-pairing action.
   { kind: 'tris-to-quads', label: 'tris to quads', commandId: 'model.mesh.tris-to-quads' },
+  // Append-only ordinal 28 (req_3547): raster dimensions and normalized UVs
+  // move through one journal transaction.
+  { kind: 'uv-atlas-resize', label: 'resize UV atlas', commandId: 'model.uv.resize-atlas' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

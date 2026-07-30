@@ -1070,7 +1070,8 @@ fn importAtlasWithUvTransform(
     rgba: []const u8,
     width: u32,
     height: u32,
-    scale: f32,
+    scale_x: f32,
+    scale_y: f32,
     offset_x: f32,
     offset_y: f32,
     verts: []f32,
@@ -1084,7 +1085,8 @@ fn importAtlasWithUvTransform(
     const byte_count = @as(usize, width) * @as(usize, height) * 4;
     if (rgba.len != byte_count) return false;
     if (old_layout.corner_uv.len != @as(usize, vert_count) * 2 or g_atlas_w == 0 or g_atlas_h == 0) return false;
-    if (!std.math.isFinite(scale) or scale <= 0 or
+    if (!std.math.isFinite(scale_x) or scale_x <= 0 or
+        !std.math.isFinite(scale_y) or scale_y <= 0 or
         !std.math.isFinite(offset_x) or !std.math.isFinite(offset_y)) return false;
 
     const normalized = alloc.alloc(f32, old_layout.corner_uv.len) catch return false;
@@ -1093,8 +1095,8 @@ fn importAtlasWithUvTransform(
     const new_height: f32 = @floatFromInt(height);
     var coordinate: usize = 0;
     while (coordinate < normalized.len) : (coordinate += 2) {
-        normalized[coordinate + 0] = (offset_x + old_layout.corner_uv[coordinate + 0] * scale) / new_width;
-        normalized[coordinate + 1] = (offset_y + old_layout.corner_uv[coordinate + 1] * scale) / new_height;
+        normalized[coordinate + 0] = (offset_x + old_layout.corner_uv[coordinate + 0] * scale_x) / new_width;
+        normalized[coordinate + 1] = (offset_y + old_layout.corner_uv[coordinate + 1] * scale_y) / new_height;
     }
 
     const groups = collectFaceGroups(g_facecount) orelse return false;
@@ -1162,8 +1164,37 @@ pub fn importAtlasPreservingUvGeometry(rgba: []const u8, width: u32, height: u32
         width,
         height,
         uniform_scale,
+        uniform_scale,
         (new_width - old_width * uniform_scale) * 0.5,
         (new_height - old_height * uniform_scale) * 0.5,
+        verts,
+        vert_count,
+    );
+}
+
+/// Resize the atlas coordinate frame without changing normalized UV placement.
+/// Absolute texel coordinates scale independently on X and Y, which is the
+/// deliberate inverse of importing a generated texture whose output dimensions
+/// differ from the wireframe guide. The caller supplies the already-resampled
+/// raster; no source image is discarded or resized here.
+pub fn importAtlasPreservingNormalizedUv(
+    rgba: []const u8,
+    width: u32,
+    height: u32,
+    verts: []f32,
+    vert_count: u32,
+) bool {
+    if (g_atlas_w == 0 or g_atlas_h == 0 or width == 0 or height == 0) return false;
+    const old_width: f32 = @floatFromInt(g_atlas_w);
+    const old_height: f32 = @floatFromInt(g_atlas_h);
+    return importAtlasWithUvTransform(
+        rgba,
+        width,
+        height,
+        @as(f32, @floatFromInt(width)) / old_width,
+        @as(f32, @floatFromInt(height)) / old_height,
+        0,
+        0,
         verts,
         vert_count,
     );
@@ -1183,7 +1214,7 @@ pub fn importAtlasTranslatingUvGeometry(
 ) bool {
     if (@abs(shift_x) > UvWorkspaceTuning.max_abs_coordinate_texels or
         @abs(shift_y) > UvWorkspaceTuning.max_abs_coordinate_texels) return false;
-    return importAtlasWithUvTransform(rgba, width, height, 1, shift_x, shift_y, verts, vert_count);
+    return importAtlasWithUvTransform(rgba, width, height, 1, 1, shift_x, shift_y, verts, vert_count);
 }
 
 /// Write a candidate corner table whose selected UV islands are reprojected from the

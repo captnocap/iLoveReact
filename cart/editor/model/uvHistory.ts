@@ -27,6 +27,7 @@ export const UV_HISTORY_ACTIONS = [
 
 export const UV_ATLAS_IMPORT_LABEL = 'import UV texture';
 export const UV_ATLAS_RELOAD_LABEL = 'reload UV texture';
+export const UV_ATLAS_RESIZE_LABEL = 'resize UV atlas';
 export const JOURNAL_UV_ATLAS_MUTATION = 1;
 export const UV_HISTORY_TUNING = { refreshMs: 250 } as const;
 
@@ -56,6 +57,7 @@ export function uvHistoryActionOrdinal(action: UvHistoryAction): number {
 export function isUvDocumentHistoryLabel(label: string): boolean {
   return label === UV_ATLAS_IMPORT_LABEL
     || label === UV_ATLAS_RELOAD_LABEL
+    || label === UV_ATLAS_RESIZE_LABEL
     || UV_HISTORY_ACTIONS.some((row) => row.label === label);
 }
 
