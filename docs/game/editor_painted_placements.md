@@ -4,7 +4,7 @@ Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
-req_3529 / req_3544.
+req_3529 / req_3544 / req_3545.
 
 ## In one sentence
 
@@ -63,6 +63,14 @@ matches; only a pre-v4 package with no exact saved table falls back to the
 current live layout. Signed off-image corners now pass the cart persistence
 validator under the same ±16,777,216 texel corruption bound as the native
 infinite-workspace door.
+
+The Texture Atlas submenu remains fully reachable as actions are added
+(req_3545). Shared fixed-height context labels and the UV row's right-side
+detail are single-line, the UV menu is wide enough for its descriptive verbs,
+and edge placement adopts the rendered container's `onLayout` height instead
+of trusting a permanent manual row count. The initial estimate includes all
+eight Texture Atlas actions, including Reset, so neither first paint nor later
+measurement can place it beyond the viewport.
 
 ## Identity stitch + transparent UV guide (req_3515)
 

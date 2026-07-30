@@ -82,6 +82,15 @@ function Item({ label, onClick }: { label: string; onClick: () => void }) {
 
 For a submenu, render another absolutely-positioned `<div>` with `zIndex: 1000` (one above the parent menu) anchored to the parent item's right edge. See `cart/context_menu_demo.tsx` for a working hover + nested example, including the gotcha that submenu state must be **separate** from hovered-item state — otherwise the submenu closes the moment your cursor enters it.
 
+Fixed-height action rows must also make their text single-line
+(`noWrap` + `numberOfLines={1}`). Allowing a label or right-side key hint to
+wrap makes the visual row taller than the popup's edge-placement calculation
+and can push later actions beyond the window. If a popup clamps itself to a
+panel or viewport, treat row-count arithmetic as a first-frame estimate only:
+read the rendered container's `onLayout` height and reposition from that
+measurement. The editor's `HW_ContextText` and UV action menu follow this
+contract.
+
 ## Why z-index alone makes this work
 
 This is the load-bearing piece — and it is **not** how CSS z-index normally works. In this engine:
