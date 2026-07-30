@@ -1,5 +1,6 @@
 import {
   chainUvIslands,
+  countUvTextureFootprints,
   flattenUvFaceCorners,
   flattenUvIslandRects,
   flipUvSelection,
@@ -16,6 +17,7 @@ import {
   panUvCanvasView,
   parseUvIslandRects,
   pasteUvTransform,
+  planRepeatedUvStacks,
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
@@ -292,6 +294,153 @@ test('exact stacking refuses incompatible triangle counts instead of approximati
   const result = stackUvIslands(rects, [0, 1], 1);
   assert(result.compatible === 0 && result.skipped === 1, 'incompatible stack did not report its skipped island');
   assert(result.rects[0] === rects[0], 'incompatible source island was approximately rescaled');
+});
+
+test('repeat prestack matches authored topology across quarter turns without trusting equal bounds', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 10, 20, 30, 0, 20, 10, 60, 0, 10, 20, 80, 0, 10, 20],
+    [10, 20, 30, 40],
+    [
+      0, 10, 0, 0, 10, 0, 10, 20,
+      0, 10, 0, 0, 10, 20, 0, 20,
+      1, 20, 30, 10, 30, 0, 50, 0,
+      1, 20, 30, 10, 50, 0, 50, 10,
+      2, 30, 65, 0, 70, 10, 65, 20,
+      2, 30, 65, 0, 65, 20, 60, 10,
+      3, 40, 90, 0, 80, 0, 80, 20,
+      3, 40, 90, 0, 80, 20, 90, 20,
+    ],
+    [
+      0, 1, 2, 0, 2, 3,
+      10, 11, 12, 10, 12, 13,
+      20, 21, 22, 20, 22, 23,
+      30, 31, 32, 30, 32, 33,
+    ],
+  );
+  const plan = planRepeatedUvStacks(rects, 'exact', 128, 128);
+  assert(plan.groups.length === 1, `repeat scan invented ${plan.groups.length} families`);
+  assert(plan.groups[0]!.islands.join(',') === '0,1,3', 'quarter-turned and mirrored copies did not join their exact family');
+  assert(plan.stackedIslands === 2 && plan.changedIslands === 2, 'repeat scan reported the wrong mutation size');
+  assert(plan.uniqueFootprints === 2, 'repeat scan did not collapse one logical texture footprint');
+  assert(plan.rects[2] === rects[2], 'equal-bounds diamond was mistaken for the rectangular topology');
+  const corners = flattenUvFaceCorners(plan.rects)!;
+  const pointSet = (start: number, count: number) => {
+    const points: string[] = [];
+    for (let at = start; at < start + count; at += 2) points.push(`${corners[at]},${corners[at + 1]}`);
+    return points.sort().join('|');
+  };
+  assert(pointSet(0, 12) === pointSet(12, 12), 'stacked quarter-turn missed the representative corners');
+  assert(pointSet(0, 12) === pointSet(36, 12), 'stacked mirror missed the representative corners');
+  assert(plan.rects[1]!.triangles?.[0]?.face === 2, 'prestack replaced source render-face identity');
+  assert(plan.rects[1]!.triangles?.[0]?.vertices?.join(',') === '10,11,12', 'prestack replaced welded source identity');
+});
+
+test('normalized repeat prestack adopts the largest congruent family footprint', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 10, 20, 30, 0, 20, 40, 60, 0, 20, 30],
+    [10, 20, 30],
+    [
+      0, 10, 0, 0, 10, 0, 0, 20,
+      1, 20, 30, 0, 50, 0, 30, 40,
+      2, 30, 60, 0, 80, 0, 60, 30,
+    ],
+    [
+      0, 1, 2,
+      10, 11, 12,
+      20, 21, 22,
+    ],
+  );
+  const exact = planRepeatedUvStacks(rects, 'exact', 128, 128);
+  assert(exact.groups.length === 0, 'exact mode silently normalized a differently scaled triangle');
+  const normalized = planRepeatedUvStacks(rects, 'normalize', 128, 128);
+  assert(normalized.groups.length === 1, 'normalized mode missed a congruent scaled triangle');
+  assert(normalized.groups[0]!.representative === 1, 'normalize mode did not retain the largest family footprint');
+  assert(normalized.groups[0]!.islands.join(',') === '0,1', 'distorted same-count triangle joined the family');
+  assert(normalized.normalizedIslands === 1 && normalized.changedIslands === 1, 'normalize preview lost its rescale count');
+  const corners = flattenUvFaceCorners(normalized.rects)!;
+  assert(
+    [...corners.slice(0, 6)].join(',') === [...corners.slice(6, 12)].join(','),
+    'normalized family did not sample the representative triangle exactly',
+  );
+});
+
+test('repeat prestack preserves authored face partitions instead of grouping by silhouette alone', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 10, 10, 20, 0, 10, 10],
+    [10, 20],
+    [
+      0, 10, 0, 0, 10, 0, 10, 10,
+      0, 10, 0, 0, 10, 10, 0, 10,
+      1, 20, 20, 0, 30, 0, 30, 10,
+      1, 21, 20, 0, 30, 10, 20, 10,
+    ],
+    [
+      0, 1, 2, 0, 2, 3,
+      10, 11, 12, 10, 12, 13,
+    ],
+  );
+  const plan = planRepeatedUvStacks(rects, 'exact', 64, 64);
+  assert(plan.groups.length === 0 && plan.stackedIslands === 0, 'one quad and two separate faces were collapsed together');
+  assert(plan.rects[0] === rects[0] && plan.rects[1] === rects[1], 'refused family still churned UV geometry');
+});
+
+test('repeat prestack buckets a production-sized repeated topology sweep into one deterministic family', () => {
+  const islandCount = 1024;
+  const bounds: number[] = [];
+  const groups: number[] = [];
+  const triangles: number[] = [];
+  const vertices: number[] = [];
+  for (let island = 0; island < islandCount; island += 1) {
+    const x = (island % 32) * 12;
+    const y = Math.floor(island / 32) * 10;
+    bounds.push(x, y, 8, 6);
+    groups.push(island);
+    triangles.push(island, island, x, y, x + 8, y, x, y + 6);
+    vertices.push(island * 3, island * 3 + 1, island * 3 + 2);
+  }
+  const rects = parseUvIslandRects(bounds, groups, triangles, vertices);
+  const first = planRepeatedUvStacks(rects, 'exact', 512, 512);
+  const second = planRepeatedUvStacks(rects, 'exact', 512, 512);
+  assert(first.groups.length === 1 && first.stackedIslands === islandCount - 1, 'large repeat family fragmented during the sweep');
+  assert(first.uniqueFootprints === 1 && first.changedIslands === islandCount - 1, 'large repeat preview reported the wrong footprint reduction');
+  assert(
+    JSON.stringify(first.groups) === JSON.stringify(second.groups),
+    'same large topology produced a different repeat-family decision',
+  );
+});
+
+test('uniform packing keeps exact stacks together as one normalized footprint', () => {
+  const source = parseUvIslandRects(
+    [0, 0, 10, 20, 30, 0, 20, 10, 60, 0, 8, 8],
+    [10, 20, 30],
+    [
+      0, 10, 0, 0, 10, 0, 10, 20,
+      0, 10, 0, 0, 10, 20, 0, 20,
+      1, 20, 30, 10, 30, 0, 50, 0,
+      1, 20, 30, 10, 50, 0, 50, 10,
+      2, 30, 60, 0, 68, 0, 60, 8,
+    ],
+    [
+      0, 1, 2, 0, 2, 3,
+      10, 11, 12, 10, 12, 13,
+      20, 21, 22,
+    ],
+  );
+  const stacked = planRepeatedUvStacks(source, 'exact', 64, 64).rects;
+  assert(countUvTextureFootprints(stacked) === 2, 'exact stack still counted as separate texture footprints');
+  const packed = uniformUvPack(stacked, 64, 64);
+  assert(countUvTextureFootprints(packed) === 2, 'uniform packing exploded a prestack');
+  assert(
+    packed[0]!.x === packed[1]!.x
+      && packed[0]!.y === packed[1]!.y
+      && packed[0]!.w === packed[1]!.w
+      && packed[0]!.h === packed[1]!.h,
+    'stack members received different normalized cells',
+  );
+  const corners = flattenUvFaceCorners(packed)!;
+  const first = [...corners.slice(0, 12)].map((value, index) => `${index % 2}:${value}`).sort().join('|');
+  const second = [...corners.slice(12, 24)].map((value, index) => `${index % 2}:${value}`).sort().join('|');
+  assert(first === second, 'uniform packing moved stack members to different authored corners');
 });
 
 test('stitching fits a broken UV edge by welded model identity while the active island stays fixed', () => {

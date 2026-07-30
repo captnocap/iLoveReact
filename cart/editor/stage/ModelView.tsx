@@ -208,7 +208,7 @@ export type ModelFocusBridge = {
   selectUvFace: (face: number, additive: boolean) => boolean;
   selectUvOrientation: () => number;
   saveUvAtlas: () => { path: string | null; note: string };
-  exportUvWireframe: () => { path: string | null; note: string };
+  exportUvWireframe: (islands?: readonly UvIslandRect[]) => { path: string | null; note: string };
   importUvAtlas: () => Promise<string>;
   resizeUvAtlas: (width: number, height: number) => Promise<string>;
   addUvTextureLayer: (x: number, y: number) => Promise<string>;
@@ -1729,15 +1729,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       ? { path: result.path, note: `saved base.png · ${result.width}×${result.height}` }
       : { path: null, note: result.error };
   };
-  const exportUvWireframe = (): { path: string | null; note: string } => {
+  const exportUvWireframe = (islands?: readonly UvIslandRect[]): { path: string | null; note: string } => {
     if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
     const atlas = uvPanel;
-    if (!atlas || atlas.islands.length === 0 || atlas.w < 1 || atlas.h < 1) {
+    const authoredIslands = islands ?? atlas?.islands ?? [];
+    if (!atlas || authoredIslands.length === 0 || atlas.w < 1 || atlas.h < 1) {
       return { path: null, note: 'Export refused — there is no authored UV geometry to draw.' };
     }
     const localIslands = atlas.atlasOriginX === 0 && atlas.atlasOriginY === 0
-      ? atlas.islands
-      : atlas.islands.map((rect) => ({
+      ? authoredIslands
+      : authoredIslands.map((rect) => ({
         ...rect,
         x: rect.x - atlas.atlasOriginX,
         y: rect.y - atlas.atlasOriginY,

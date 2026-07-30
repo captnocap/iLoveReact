@@ -16,6 +16,7 @@ import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, typ
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
   chainUvIslands,
+  countUvTextureFootprints,
   flattenUvFaceCorners,
   flipUvSelection,
   hitUvGridGuide,
@@ -31,6 +32,7 @@ import {
   NO_UV_GROUP,
   panUvCanvasView,
   pasteUvTransform,
+  planRepeatedUvStacks,
   rotateUvSelection,
   scaleUvSelection,
   shouldActivateUvDrag,
@@ -60,6 +62,8 @@ import {
   type UvFaceTarget,
   type UvFlipAxis,
   type UvIslandRect,
+  type UvRepeatStackMode,
+  type UvRepeatStackPlan,
   type UvSelectionBounds,
   type UvSelectionMode,
   type UvSizeMatch,
@@ -103,6 +107,12 @@ type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeo
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type UvMarqueeFrame = Readonly<{ left: number; top: number; width: number; height: number }>;
 type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
+type UvRepeatStackReview = Readonly<{
+  source: readonly UvIslandRect[];
+  mode: UvRepeatStackMode;
+  exact: UvRepeatStackPlan;
+  normalize: UvRepeatStackPlan;
+}>;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
@@ -322,6 +332,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [atlasWidthDraft, setAtlasWidthDraft] = useState(uv.w);
   const [atlasHeightDraft, setAtlasHeightDraft] = useState(uv.h);
   const [atlasResizePending, setAtlasResizePending] = useState(false);
+  const [repeatStackScanning, setRepeatStackScanning] = useState(false);
+  const [repeatStackReview, setRepeatStackReview] = useState<UvRepeatStackReview | null>(null);
+  const repeatStackScanGenerationRef = useRef(0);
   // Copy/Paste Transform clipboard (req_3427) — one frame survives selection changes;
   // where the context menu opened, in atlas texels, so Move Here lands on the cursor.
   const [transformClipboard, setTransformClipboard] = useState<UvTransformFrame | null>(null);
@@ -498,12 +511,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     marqueeGenerationRef.current += 1;
     pendingMarqueeRef.current = null;
     marqueeFramePendingRef.current = false;
+    repeatStackScanGenerationRef.current += 1;
   }, []);
 
   useEffect(() => {
     previewGenerationRef.current += 1;
     pendingPreviewRef.current = null;
     previewFramePendingRef.current = false;
+    repeatStackScanGenerationRef.current += 1;
+    setRepeatStackScanning(false);
+    setRepeatStackReview(null);
     const next = initialRects();
     setRects(next);
     rectsRef.current = next;
@@ -568,7 +585,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     x: (screen.x - viewRef.current.x) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
     y: (screen.y - viewRef.current.y) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
   });
-  const commit = (next: UvIslandRect[], label: string, action: UvHistoryAction) => {
+  const commit = (next: UvIslandRect[], label: string, action: UvHistoryAction): boolean => {
     const corners = flattenUvFaceCorners(next);
     if (!corners || !bridge.applyUvGeometry(corners, action)) {
       const restored = initialRects();
@@ -576,9 +593,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setRects(restored);
       setNote(`${label} refused — live model changed; atlas was refreshed`);
       bridge.refreshUv();
-      return;
+      return false;
     }
     setNote(label);
+    return true;
   };
   const replaceSelected = (changed: UvIslandRect, label: string, action: UvHistoryAction) => {
     if (selected < 0) return;
@@ -636,14 +654,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     selectedGuidesRef.current,
     UV_LAYOUT_TUNING.guideSnapPx / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
   );
-  const applyIslandSetEdit = (next: UvIslandRect[], label: string, action: UvHistoryAction) => {
+  const applyIslandSetEdit = (next: UvIslandRect[], label: string, action: UvHistoryAction): boolean => {
     if (sameRectReferences(rectsRef.current, next)) {
       setNote(`${label} — selection was already there`);
-      return;
+      return false;
     }
     rectsRef.current = next;
     setRects(next);
-    commit(next, label, action);
+    return commit(next, label, action);
   };
   const matchSelectedSize = (mode: UvSizeMatch) => {
     if (!multiIslandSelection) {
@@ -1023,10 +1041,32 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     });
   };
   const packAtlas = () => {
+    const footprints = countUvTextureFootprints(rectsRef.current);
     const next = uniformUvPack(rectsRef.current, uv.w, uv.h, uv.atlasOriginX, uv.atlasOriginY);
     rectsRef.current = next;
     setRects(next);
-    commit(next, `packed ${next.length} islands into uniform cells`, 'pack');
+    commit(next, `packed ${next.length} islands as ${footprints} uniform footprints · exact stacks preserved`, 'pack');
+  };
+  const beginRepeatStackReview = () => {
+    if (repeatStackScanning) return;
+    const source = rectsRef.current;
+    const generation = repeatStackScanGenerationRef.current + 1;
+    repeatStackScanGenerationRef.current = generation;
+    setRepeatStackReview(null);
+    setRepeatStackScanning(true);
+    setNote(`scanning ${source.length} UV islands for repeated authored topology…`);
+    setTimeout(() => {
+      if (repeatStackScanGenerationRef.current !== generation) return;
+      const exact = planRepeatedUvStacks(source, 'exact', uv.w, uv.h);
+      const normalize = planRepeatedUvStacks(source, 'normalize', uv.w, uv.h);
+      if (repeatStackScanGenerationRef.current !== generation) return;
+      setRepeatStackScanning(false);
+      setRepeatStackReview({ source, mode: 'exact', exact, normalize });
+      const available = Math.max(exact.stackedIslands, normalize.stackedIslands);
+      setNote(available > 0
+        ? `repeat dry run found ${available} shareable UV islands`
+        : 'repeat dry run found no congruent authored island families');
+    }, UV_LAYOUT_TUNING.repeatScanYieldMs);
   };
   const importAtlas = () => {
     setNote('choosing a texture…');
@@ -1062,14 +1102,39 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     host.__clipboard_set?.(saved.path);
     setNote(`${saved.note} · path copied`);
   };
-  const exportWireframeAndCopyPath = () => {
-    const saved = bridge.exportUvWireframe();
+  const exportWireframeFor = (islands: readonly UvIslandRect[]) => {
+    const saved = bridge.exportUvWireframe(islands);
     if (!saved.path) {
       setNote(saved.note);
       return;
     }
     host.__clipboard_set?.(saved.path);
     setNote(`${saved.note} · path copied`);
+  };
+  const exportWireframeAndCopyPath = () => exportWireframeFor(rectsRef.current);
+  const applyRepeatStackReview = (andExport: boolean) => {
+    const review = repeatStackReview;
+    if (!review) return;
+    if (rectsRef.current !== review.source) {
+      setRepeatStackReview(null);
+      setNote('Prestack preview expired because the live UV layout changed. Run the scan again.');
+      return;
+    }
+    const plan = review[review.mode];
+    if (plan.stackedIslands === 0) {
+      setRepeatStackReview(null);
+      setNote('No congruent repeated islands were available in this evaluation.');
+      return;
+    }
+    const normalized = plan.normalizedIslands > 0
+      ? ` · normalized ${plan.normalizedIslands} to the largest family footprint`
+      : '';
+    const label = `prestacked ${plan.stackedIslands} repeated islands into ${plan.groups.length} shared footprints${normalized}`;
+    let applied = true;
+    if (plan.changedIslands > 0) applied = applyIslandSetEdit(plan.rects, label, 'stack');
+    else setNote(`${label} · layout was already stacked`);
+    setRepeatStackReview(null);
+    if (applied && andExport) exportWireframeFor(plan.rects);
   };
   const collectUvOrientation = () => {
     const count = bridge.selectUvOrientation();
@@ -1229,6 +1294,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     { width: UV_CONTEXT_MENU_TUNING.widthPx, height: contextMenuHeight },
     UV_CONTEXT_MENU_TUNING.edgePx,
   );
+  const repeatStackPlan = repeatStackReview
+    ? repeatStackReview[repeatStackReview.mode]
+    : null;
 
   return (
     <Box
@@ -1776,6 +1844,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{compileLabel ? 'WORKING' : 'COMPILE'}</Text>
           </Pressable>
           <Pressable
+            tooltip="Dry-run a whole-topology scan for congruent UV islands, then choose exact-scale or normalized pre-stacking"
+            onPress={beginRepeatStackReview}
+            style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: repeatStackScanning ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: repeatStackScanning ? accentFor('primary') : accentFor('border') }}
+          >
+            <Icon name="Layers3" size={10} color={accentFor('primary')} />
+            <Text style={{ color: accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{repeatStackScanning ? 'SCAN' : 'PRESTACK'}</Text>
+          </Pressable>
+          <Pressable
             tooltip="Export an atlas-sized UV wireframe PNG with a transparent background and copy its path"
             onPress={exportWireframeAndCopyPath}
             style={{ height: 21, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('border') }}
@@ -1957,6 +2033,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 tooltip="Restore every UV corner to the immutable layout saved when this atlas was created; one undo step"
                 onPress={() => runMenuAction(() => setNote(bridge.resetUvLayout()))}
               />
+              <UvContextRow
+                indented
+                icon="Layers3"
+                label="Prestack Repeated Islands…"
+                detail="DRY RUN"
+                enabled={rects.length > 1 && !repeatStackScanning}
+                tooltip="Compare authored triangle topology across the complete UV layout, preview exact or normalized families, then confirm one undoable stack"
+                onPress={() => runMenuAction(beginRepeatStackReview)}
+              />
               <UvContextRow indented icon="Grid3x3" label="Uniform Pack All Islands" enabled={rects.length > 0} onPress={() => runMenuAction(packAtlas)} />
               <UvContextRow indented icon="ImagePlus" label="Add Image Layer…" detail="NATIVE PX" onPress={() => runMenuAction(addImageLayer)} />
               <UvContextRow indented icon="PackageCheck" label="Compile Image Layers" detail={workspaceDoc && uvTextureWorkspaceIsStale(workspaceDoc) ? 'STALE' : workspaceDoc ? 'CURRENT' : 'EMPTY'} enabled={Boolean(workspaceDoc) && !compileLabel} tooltip="Crop the signed image workspace to its visible union and composite transparent gaps; originals stay separate" onPress={() => runMenuAction(compileImageLayers)} />
@@ -1968,6 +2053,115 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           ) : null}
         </C.HW_StageContextMenu>
       </uvMenu.ContextMenu>
+
+      {repeatStackScanning ? (
+        <Box
+          blocksPointerEvents
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,7,11,0.72)' }}
+        >
+          <Box style={{ width: 282, padding: 16, gap: 8, alignItems: 'center', backgroundColor: '#111821', borderWidth: 1, borderColor: accentFor('primary'), borderRadius: 9 }}>
+            <Icon name="ScanSearch" size={18} color={accentFor('primary')} />
+            <Text style={{ color: accentFor('text'), fontSize: 11, fontWeight: '900', letterSpacing: 0.8 }}>SCANNING UV TOPOLOGY</Text>
+            <Text style={{ color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', textAlign: 'center' }}>{`${rects.length} islands · authored triangles + welded corners`}</Text>
+          </Box>
+        </Box>
+      ) : null}
+
+      {repeatStackReview && repeatStackPlan ? (
+        <Box
+          blocksPointerEvents
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,7,11,0.74)' }}
+        >
+          <Box style={{ width: 352, padding: 14, gap: 10, backgroundColor: '#111821', borderWidth: 1, borderColor: accentFor('primary'), borderRadius: 9 }}>
+            <Row style={{ alignItems: 'center', gap: 8 }}>
+              <Icon name="Layers3" size={15} color={accentFor('primary')} />
+              <Box style={{ flexGrow: 1, minWidth: 0, gap: 1 }}>
+                <Text style={{ color: accentFor('text'), fontSize: 12, fontWeight: '900' }}>Prestack Repeated UVs</Text>
+                <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>DRY RUN · NO UVS CHANGED YET</Text>
+              </Box>
+              <Pressable onPress={() => setRepeatStackReview(null)} style={{ width: 25, height: 25, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="X" size={13} color={accentFor('textDim')} />
+              </Pressable>
+            </Row>
+
+            <Row style={{ height: 31, gap: 5 }}>
+              {([
+                ['exact', 'EXACT SCALE'],
+                ['normalize', 'NORMALIZE'],
+              ] as const).map(([mode, label]) => {
+                const active = repeatStackReview.mode === mode;
+                return (
+                  <Pressable
+                    key={`repeat-stack-mode-${mode}`}
+                    onPress={() => setRepeatStackReview((current) => current ? { ...current, mode } : current)}
+                    style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: active ? accentFor('primary') : accentFor('border'), backgroundColor: active ? accentFor('segActiveBg') : accentFor('surfaceRaised') }}
+                  >
+                    <Text style={{ color: active ? accentFor('primary') : accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900' }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </Row>
+
+            <Box style={{ padding: 10, gap: 5, backgroundColor: '#0b1118', borderWidth: 1, borderColor: accentFor('borderSoft'), borderRadius: 6 }}>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Logical islands → footprints</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: accentFor('primary'), fontSize: 11, fontFamily: 'ui-monospace', fontWeight: '900' }}>{`${repeatStackPlan.sourceIslands} → ${repeatStackPlan.uniqueFootprints}`}</Text>
+              </Row>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Congruent families</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.groups.length}`}</Text>
+              </Row>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: accentFor('textDim'), fontSize: 9 }}>Islands sharing a footprint</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: accentFor('text'), fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.stackedIslands}`}</Text>
+              </Row>
+              {repeatStackReview.mode === 'normalize' ? (
+                <Row style={{ alignItems: 'center' }}>
+                  <Text style={{ color: '#d7ac6d', fontSize: 9 }}>Texel scales changed</Text>
+                  <Box style={{ flexGrow: 1 }} />
+                  <Text style={{ color: '#d7ac6d', fontSize: 10, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${repeatStackPlan.normalizedIslands}`}</Text>
+                </Row>
+              ) : null}
+              {repeatStackPlan.unclassifiedIslands > 0 ? (
+                <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`${repeatStackPlan.unclassifiedIslands} legacy rectangle-only rows left untouched`}</Text>
+              ) : null}
+            </Box>
+
+            <Text style={{ color: repeatStackReview.mode === 'normalize' ? '#d7ac6d' : accentFor('textDim'), fontSize: 9, lineHeight: 14 }}>
+              {repeatStackReview.mode === 'normalize'
+                ? 'Congruent authored shapes ignore uniform scale and adopt the largest member’s exact footprint. This changes texel density.'
+                : 'Only congruent authored shapes already at the same texel scale overlap. Quarter-turns and mirrors are handled; differently built equal bounds stay separate.'}
+            </Text>
+            <Text style={{ color: accentFor('textFaint'), fontSize: 8, lineHeight: 12 }}>
+              Uniform Pack All Islands now keeps confirmed stacks together if you want to normalize and compact them afterward.
+            </Text>
+
+            <Row style={{ justifyContent: 'flex-end', gap: 6 }}>
+              <Pressable
+                onPress={() => setRepeatStackReview(null)}
+                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: accentFor('border') }}
+              >
+                <Text style={{ color: accentFor('textDim'), fontSize: 9, fontWeight: '800' }}>CANCEL</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => applyRepeatStackReview(false)}
+                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('border'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+              >
+                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => repeatStackPlan.stackedIslands > 0 && applyRepeatStackReview(true)}
+                style={{ height: 29, paddingLeft: 11, paddingRight: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: repeatStackPlan.stackedIslands > 0 ? accentFor('primary') : accentFor('surfaceRaised'), opacity: repeatStackPlan.stackedIslands > 0 ? 1 : 0.4 }}
+              >
+                <Text style={{ color: repeatStackPlan.stackedIslands > 0 ? '#071015' : accentFor('textFaint'), fontSize: 9, fontWeight: '900' }}>APPLY + WIRE PNG</Text>
+              </Pressable>
+            </Row>
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }

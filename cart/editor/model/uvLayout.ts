@@ -48,6 +48,12 @@ export const UV_LAYOUT_TUNING = {
   stitchMaximumScale: 20,
   /** A model edge/point with more owners is non-manifold and not an automatic seam. */
   stitchUnambiguousOwnerCount: 2,
+  /** Repeated UVs must agree to a hundredth of a texel in exact-scale mode. */
+  repeatExactTexelEpsilon: 0.01,
+  /** Normalized shape matching ignores scale, but not visible silhouette drift. */
+  repeatNormalizedEpsilon: 0.0001,
+  /** Yield once so the topology-scan affordance paints before a large dry run. */
+  repeatScanYieldMs: 0,
   /** Bound visible grid geometry under pathological zoom without bounding space. */
   maximumVisibleGridLines: 4096,
 } as const;
@@ -894,6 +900,420 @@ export type UvStackResult = Readonly<{
   compatible: number;
   skipped: number;
 }>;
+
+export type UvRepeatStackMode = 'exact' | 'normalize';
+
+export type UvRepeatStackGroup = Readonly<{
+  /** The largest member in normalize mode; deterministic first member on exact ties. */
+  representative: number;
+  /** Complete logical island family, including the representative. */
+  islands: readonly number[];
+}>;
+
+export type UvRepeatStackPlan = Readonly<{
+  mode: UvRepeatStackMode;
+  /** Dry-run result. No source rectangle or triangle is mutated. */
+  rects: UvIslandRect[];
+  groups: readonly UvRepeatStackGroup[];
+  sourceIslands: number;
+  /** Logical texture footprints after every family shares one representative. */
+  uniqueFootprints: number;
+  /** Non-representative islands assigned to an existing family footprint. */
+  stackedIslands: number;
+  /** Islands whose current corner coordinates would actually change. */
+  changedIslands: number;
+  /** Normalize-only count whose texel scale changes to the largest family member. */
+  normalizedIslands: number;
+  /** Legacy rectangle-only rows cannot be classified safely by topology. */
+  unclassifiedIslands: number;
+}>;
+
+type UvRepeatOrientation = Readonly<{
+  xx: number;
+  xy: number;
+  yx: number;
+  yy: number;
+}>;
+
+type UvRepeatCandidate = Readonly<{
+  index: number;
+  rect: UvIslandRect;
+  key: string;
+  orientation: UvRepeatOrientation;
+  originX: number;
+  originY: number;
+  divisor: number;
+  epsilon: number;
+  spanX: number;
+  spanY: number;
+  canonicalPoints: ReadonlyMap<string, UvIslandVertex>;
+}>;
+
+// The eight quarter-turn/reflection transforms. Imported box/cylinder projections
+// differ only by this D4 family; arbitrary-angle lookalikes are deliberately not
+// guessed into a shared texture footprint.
+const UV_REPEAT_ORIENTATIONS: readonly UvRepeatOrientation[] = [
+  { xx: 1, xy: 0, yx: 0, yy: 1 },
+  { xx: 0, xy: -1, yx: 1, yy: 0 },
+  { xx: -1, xy: 0, yx: 0, yy: -1 },
+  { xx: 0, xy: 1, yx: -1, yy: 0 },
+  { xx: -1, xy: 0, yx: 0, yy: 1 },
+  { xx: 0, xy: -1, yx: -1, yy: 0 },
+  { xx: 1, xy: 0, yx: 0, yy: -1 },
+  { xx: 0, xy: 1, yx: 1, yy: 0 },
+] as const;
+
+function repeatCoordinate(value: number, epsilon: number): number {
+  const quantized = Math.round(value / epsilon);
+  return Object.is(quantized, -0) ? 0 : quantized;
+}
+
+function repeatPointToken(x: number, y: number, epsilon: number): string {
+  return `${repeatCoordinate(x, epsilon)},${repeatCoordinate(y, epsilon)}`;
+}
+
+function repeatOrientationPoint(
+  orientation: UvRepeatOrientation,
+  x: number,
+  y: number,
+): UvIslandVertex {
+  return {
+    x: orientation.xx * x + orientation.xy * y,
+    y: orientation.yx * x + orientation.yy * y,
+  };
+}
+
+function repeatInverseOrientationPoint(
+  orientation: UvRepeatOrientation,
+  x: number,
+  y: number,
+): UvIslandVertex {
+  // Every orientation is orthogonal, so its inverse is its transpose.
+  return {
+    x: orientation.xx * x + orientation.yx * y,
+    y: orientation.xy * x + orientation.yy * y,
+  };
+}
+
+function repeatGroupPartition(rect: UvIslandRect): string {
+  const groups = new Map<number, number>();
+  let loose = 0;
+  for (const triangle of rect.triangles ?? []) {
+    if (triangle.group === NO_UV_GROUP) loose += 1;
+    else groups.set(triangle.group, (groups.get(triangle.group) ?? 0) + 1);
+  }
+  const sizes = [...groups.values(), ...new Array(loose).fill(1)].sort((a, b) => a - b);
+  return sizes.join(',');
+}
+
+function repeatVertexPartition(rect: UvIslandRect): string {
+  const occurrences = new Map<number, number>();
+  let missing = 0;
+  for (const triangle of rect.triangles ?? []) {
+    if (!triangle.vertices) {
+      missing += 3;
+      continue;
+    }
+    for (const vertex of triangle.vertices) {
+      occurrences.set(vertex, (occurrences.get(vertex) ?? 0) + 1);
+    }
+  }
+  return `${[...occurrences.values()].sort((a, b) => a - b).join(',')}|${missing}`;
+}
+
+function repeatCoarseKey(rect: UvIslandRect, mode: UvRepeatStackMode): string | null {
+  const triangles = rect.triangles ?? [];
+  if (triangles.length === 0) return null;
+  const bounds = wholeIslandBounds(rect);
+  const short = Math.min(bounds.w, bounds.h);
+  const long = Math.max(bounds.w, bounds.h);
+  if (long <= UV_LAYOUT_TUNING.pointMatchEpsilon) return null;
+  const pointKeys = new Set<string>();
+  for (const triangle of triangles) {
+    const points = absoluteTrianglePoints(rect, triangle);
+    for (let corner = 0; corner < 3; corner += 1) {
+      pointKeys.add(repeatPointToken(
+        points[corner * 2]!,
+        points[corner * 2 + 1]!,
+        UV_LAYOUT_TUNING.pointMatchEpsilon,
+      ));
+    }
+  }
+  const size = mode === 'exact'
+    ? `${repeatCoordinate(short, UV_LAYOUT_TUNING.repeatExactTexelEpsilon)}:${repeatCoordinate(long, UV_LAYOUT_TUNING.repeatExactTexelEpsilon)}`
+    : `${repeatCoordinate(short / long, UV_LAYOUT_TUNING.repeatNormalizedEpsilon)}`;
+  return `${triangles.length}|${pointKeys.size}|${repeatGroupPartition(rect)}|${repeatVertexPartition(rect)}|${size}`;
+}
+
+function repeatTopologySignature(
+  rect: UvIslandRect,
+  pointTokens: readonly (readonly [string, string, string])[],
+): string {
+  const triangles = rect.triangles ?? [];
+  const vertexPoints = new Map<number, Set<string>>();
+  for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex += 1) {
+    const triangle = triangles[triangleIndex]!;
+    const tokens = pointTokens[triangleIndex]!;
+    if (!triangle.vertices) continue;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = triangle.vertices[corner]!;
+      const points = vertexPoints.get(vertex);
+      if (points) points.add(tokens[corner]!);
+      else vertexPoints.set(vertex, new Set([tokens[corner]!]));
+    }
+  }
+  const vertexDescriptors = new Map<number, string>();
+  for (const [vertex, points] of vertexPoints) {
+    vertexDescriptors.set(vertex, [...points].sort().join('+'));
+  }
+
+  const triangleRows = triangles.map((triangle, triangleIndex) => {
+    const points = pointTokens[triangleIndex]!;
+    const corners = points.map((point, corner) => {
+      const vertex = triangle.vertices?.[corner];
+      return `${point}#${vertex === undefined ? '?' : vertexDescriptors.get(vertex) ?? '?'}`;
+    }).sort();
+    return corners.join('/');
+  });
+
+  const groupedRows = new Map<number, string[]>();
+  for (let index = 0; index < triangles.length; index += 1) {
+    const group = triangles[index]!.group;
+    if (group === NO_UV_GROUP) continue;
+    const rows = groupedRows.get(group);
+    if (rows) rows.push(triangleRows[index]!);
+    else groupedRows.set(group, [triangleRows[index]!]);
+  }
+  const groupDescriptors = new Map<number, string>();
+  for (const [group, rows] of groupedRows) {
+    groupDescriptors.set(group, `G(${rows.sort().join('&')})`);
+  }
+  const rows = triangles.map((triangle, index) => (
+    `${triangleRows[index]}@${triangle.group === NO_UV_GROUP ? 'L' : groupDescriptors.get(triangle.group)}`
+  )).sort();
+  const points = new Set(pointTokens.flatMap((triangle) => [...triangle]));
+  return `${triangles.length}|${points.size}|${rows.join(';')}`;
+}
+
+function repeatCandidateAtOrientation(
+  rect: UvIslandRect,
+  index: number,
+  orientation: UvRepeatOrientation,
+  mode: UvRepeatStackMode,
+): UvRepeatCandidate | null {
+  const triangles = rect.triangles ?? [];
+  if (triangles.length === 0) return null;
+  const transformed: UvIslandVertex[][] = [];
+  let lowX = Number.POSITIVE_INFINITY;
+  let lowY = Number.POSITIVE_INFINITY;
+  let highX = Number.NEGATIVE_INFINITY;
+  let highY = Number.NEGATIVE_INFINITY;
+  for (const triangle of triangles) {
+    const points = absoluteTrianglePoints(rect, triangle);
+    const row: UvIslandVertex[] = [];
+    for (let corner = 0; corner < 3; corner += 1) {
+      const point = repeatOrientationPoint(
+        orientation,
+        points[corner * 2]!,
+        points[corner * 2 + 1]!,
+      );
+      row.push(point);
+      lowX = Math.min(lowX, point.x);
+      lowY = Math.min(lowY, point.y);
+      highX = Math.max(highX, point.x);
+      highY = Math.max(highY, point.y);
+    }
+    transformed.push(row);
+  }
+  const spanX = highX - lowX;
+  const spanY = highY - lowY;
+  const largestSpan = Math.max(spanX, spanY);
+  if (!Number.isFinite(largestSpan) || largestSpan <= UV_LAYOUT_TUNING.pointMatchEpsilon) return null;
+  const divisor = mode === 'normalize' ? largestSpan : 1;
+  const epsilon = mode === 'normalize'
+    ? UV_LAYOUT_TUNING.repeatNormalizedEpsilon
+    : UV_LAYOUT_TUNING.repeatExactTexelEpsilon;
+  const pointTokens = transformed.map((row) => row.map((point) => (
+    repeatPointToken((point.x - lowX) / divisor, (point.y - lowY) / divisor, epsilon)
+  )) as [string, string, string]);
+  const canonicalPoints = new Map<string, UvIslandVertex>();
+  for (let triangleIndex = 0; triangleIndex < transformed.length; triangleIndex += 1) {
+    const row = transformed[triangleIndex]!;
+    const tokens = pointTokens[triangleIndex]!;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const token = tokens[corner]!;
+      const point = { x: row[corner]!.x - lowX, y: row[corner]!.y - lowY };
+      const existing = canonicalPoints.get(token);
+      if (existing) {
+        const distance = Math.hypot(
+          (existing.x - point.x) / divisor,
+          (existing.y - point.y) / divisor,
+        );
+        if (distance > epsilon * 1.5) return null;
+      } else {
+        canonicalPoints.set(token, point);
+      }
+    }
+  }
+  return {
+    index,
+    rect,
+    key: repeatTopologySignature(rect, pointTokens),
+    orientation,
+    originX: lowX,
+    originY: lowY,
+    divisor,
+    epsilon,
+    spanX,
+    spanY,
+    canonicalPoints,
+  };
+}
+
+function repeatCandidate(
+  rect: UvIslandRect,
+  index: number,
+  mode: UvRepeatStackMode,
+): UvRepeatCandidate | null {
+  let best: UvRepeatCandidate | null = null;
+  for (const orientation of UV_REPEAT_ORIENTATIONS) {
+    const candidate = repeatCandidateAtOrientation(rect, index, orientation, mode);
+    if (candidate && (!best || candidate.key < best.key)) best = candidate;
+  }
+  return best;
+}
+
+function repeatCanonicalPointToken(candidate: UvRepeatCandidate, x: number, y: number): string {
+  const point = repeatOrientationPoint(candidate.orientation, x, y);
+  return repeatPointToken(
+    (point.x - candidate.originX) / candidate.divisor,
+    (point.y - candidate.originY) / candidate.divisor,
+    candidate.epsilon,
+  );
+}
+
+function stackRepeatCandidate(
+  candidate: UvRepeatCandidate,
+  representative: UvRepeatCandidate,
+  atlasW: number,
+  atlasH: number,
+): UvIslandRect | null {
+  const triangles = absoluteTriangles(candidate.rect);
+  let changed = false;
+  for (const triangle of triangles) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const at = corner * 2;
+      const sourceX = triangle.points[at]!;
+      const sourceY = triangle.points[at + 1]!;
+      const token = repeatCanonicalPointToken(candidate, sourceX, sourceY);
+      const canonical = representative.canonicalPoints.get(token);
+      if (!canonical) return null;
+      const target = repeatInverseOrientationPoint(
+        representative.orientation,
+        representative.originX + canonical.x,
+        representative.originY + canonical.y,
+      );
+      changed ||= Math.abs(target.x - sourceX) > UV_LAYOUT_TUNING.pointMatchEpsilon
+        || Math.abs(target.y - sourceY) > UV_LAYOUT_TUNING.pointMatchEpsilon;
+      triangle.points[at] = target.x;
+      triangle.points[at + 1] = target.y;
+    }
+  }
+  return changed ? rebuildUvRect(candidate.rect, triangles, atlasW, atlasH) : candidate.rect;
+}
+
+/**
+ * Dry-run a whole-topology repeated-island sweep. Equal bounds alone are never
+ * enough: a family must have the same authored triangle graph, face partition,
+ * welded-corner partition, and D4-equivalent UV coordinates. `normalize` removes
+ * only uniform scale from that comparison and adopts the largest member's exact
+ * footprint, retaining the most source texels available in the family.
+ */
+export function planRepeatedUvStacks(
+  rects: readonly UvIslandRect[],
+  mode: UvRepeatStackMode,
+  atlasW: number,
+  atlasH: number,
+): UvRepeatStackPlan {
+  const coarse = new Map<string, number[]>();
+  let unclassifiedIslands = 0;
+  for (let index = 0; index < rects.length; index += 1) {
+    const key = repeatCoarseKey(rects[index]!, mode);
+    if (!key) {
+      unclassifiedIslands += 1;
+      continue;
+    }
+    const bucket = coarse.get(key);
+    if (bucket) bucket.push(index);
+    else coarse.set(key, [index]);
+  }
+
+  const exact = new Map<string, UvRepeatCandidate[]>();
+  for (const [coarseKey, bucket] of coarse) {
+    if (bucket.length < 2) continue;
+    for (const index of bucket) {
+      const candidate = repeatCandidate(rects[index]!, index, mode);
+      if (!candidate) continue;
+      const familyKey = `${coarseKey}|${candidate.key}`;
+      const matches = exact.get(familyKey);
+      if (matches) matches.push(candidate);
+      else exact.set(familyKey, [candidate]);
+    }
+  }
+
+  const families = [...exact.values()]
+    .filter((candidates) => candidates.length > 1)
+    .map((candidates) => {
+      const ordered = [...candidates].sort((left, right) => {
+        const areaDelta = right.spanX * right.spanY - left.spanX * left.spanY;
+        return areaDelta || left.index - right.index;
+      });
+      const representative = ordered[0]!;
+      return {
+        representative,
+        candidates: [...candidates].sort((left, right) => left.index - right.index),
+      };
+    })
+    .sort((left, right) => left.representative.index - right.representative.index);
+
+  const next = [...rects];
+  const groups: UvRepeatStackGroup[] = [];
+  let stackedIslands = 0;
+  let changedIslands = 0;
+  let normalizedIslands = 0;
+  for (const family of families) {
+    const applied: number[] = [family.representative.index];
+    for (const candidate of family.candidates) {
+      if (candidate.index === family.representative.index) continue;
+      const stacked = stackRepeatCandidate(candidate, family.representative, atlasW, atlasH);
+      if (!stacked) continue;
+      next[candidate.index] = stacked;
+      applied.push(candidate.index);
+      stackedIslands += 1;
+      if (stacked !== candidate.rect) changedIslands += 1;
+      if (mode === 'normalize'
+        && Math.abs(candidate.divisor - family.representative.divisor)
+          > UV_LAYOUT_TUNING.repeatExactTexelEpsilon) normalizedIslands += 1;
+    }
+    if (applied.length > 1) {
+      groups.push({
+        representative: family.representative.index,
+        islands: applied.sort((a, b) => a - b),
+      });
+    }
+  }
+  return {
+    mode,
+    rects: next,
+    groups,
+    sourceIslands: rects.length,
+    uniqueFootprints: rects.length - stackedIslands,
+    stackedIslands,
+    changedIslands,
+    normalizedIslands,
+    unclassifiedIslands,
+  };
+}
 
 const sameTrianglePoints = (left: UvTrianglePoints, right: UvTrianglePoints): boolean => (
   left.every((value, index) => value === right[index])
@@ -1809,7 +2229,31 @@ export function hitUvFace(rects: readonly UvIslandRect[], x: number, y: number):
   return hit;
 }
 
-/** Repack every island into equal cells while preserving the current atlas size. */
+function absoluteUvFootprintSignature(rect: UvIslandRect): string {
+  const triangles = rect.triangles ?? [];
+  if (triangles.length === 0) {
+    return `R|${rect.x},${rect.y},${rect.w},${rect.h}`;
+  }
+  const pointTokens = triangles.map((triangle) => {
+    const points = absoluteTrianglePoints(rect, triangle);
+    return [
+      repeatPointToken(points[0], points[1], UV_LAYOUT_TUNING.pointMatchEpsilon),
+      repeatPointToken(points[2], points[3], UV_LAYOUT_TUNING.pointMatchEpsilon),
+      repeatPointToken(points[4], points[5], UV_LAYOUT_TUNING.pointMatchEpsilon),
+    ] as const;
+  });
+  return `${rect.x},${rect.y},${rect.w},${rect.h}|${repeatTopologySignature(rect, pointTokens)}`;
+}
+
+/** Count exact, topology-compatible texture footprints. Logical islands already
+ * stacked on the same corners intentionally count once. */
+export function countUvTextureFootprints(rects: readonly UvIslandRect[]): number {
+  return new Set(rects.map(absoluteUvFootprintSignature)).size;
+}
+
+/** Repack every distinct footprint into equal cells while preserving the current
+ * atlas size. Exact stacks move and normalize as one unit instead of exploding
+ * back into one cell per logical island. */
 export function uniformUvPack(
   rects: readonly UvIslandRect[],
   atlasW: number,
@@ -1818,17 +2262,30 @@ export function uniformUvPack(
   originY = 0,
 ): UvIslandRect[] {
   if (!rects.length || atlasW < 1 || atlasH < 1) return [];
+  const footprintByKey = new Map<string, number>();
+  const footprintForIsland: number[] = [];
+  for (const rect of rects) {
+    const key = absoluteUvFootprintSignature(rect);
+    let footprint = footprintByKey.get(key);
+    if (footprint === undefined) {
+      footprint = footprintByKey.size;
+      footprintByKey.set(key, footprint);
+    }
+    footprintForIsland.push(footprint);
+  }
+  const footprintCount = footprintByKey.size;
   const aspect = atlasW / Math.max(1, atlasH);
-  const columns = Math.max(1, Math.ceil(Math.sqrt(rects.length * aspect)));
-  const rows = Math.max(1, Math.ceil(rects.length / columns));
+  const columns = Math.max(1, Math.ceil(Math.sqrt(footprintCount * aspect)));
+  const rows = Math.max(1, Math.ceil(footprintCount / columns));
   const cellW = Math.max(1, Math.floor(atlasW / columns));
   const cellH = Math.max(1, Math.floor(atlasH / rows));
   const gutter = UV_LAYOUT_TUNING.gutterTexels;
   const packedW = Math.max(1, cellW - gutter);
   const packedH = Math.max(1, cellH - gutter);
   return rects.map((rect, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
+    const footprint = footprintForIsland[index]!;
+    const column = footprint % columns;
+    const row = Math.floor(footprint / columns);
     return {
       ...rect,
       x: originX + column * cellW,
