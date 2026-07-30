@@ -490,7 +490,10 @@ classifier({
   HW_StageMenuQualityHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center' } },
   HW_ContextHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
   HW_ContextRow: { type: 'Pressable', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 8 }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
-  HW_ContextText: { type: 'Text', fontSize: 11, color: 'theme:textSecondary' },
+  // Context rows are fixed-height actions. A wrapped label silently consumes
+  // menu space and can push later actions beyond the viewport, so labels obey
+  // the same one-line law as every other editor button.
+  HW_ContextText: { type: 'Text', fontSize: 11, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { flexShrink: 1, minWidth: 0, overflow: 'hidden' } },
   HW_KeyText: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_FloatingCard: { type: 'Box', style: { position: 'absolute', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:surface', overflow: 'hidden' } },
   HW_MiniMap: { type: 'Box', style: { width: 278, height: 166, position: 'relative', backgroundColor: 'theme:miniMapBg' } },

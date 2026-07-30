@@ -65,6 +65,12 @@ import {
   type UvTransformFrame,
   zoomUvCanvasViewAt,
 } from '../model/uvLayout';
+import {
+  UV_CONTEXT_MENU_TUNING,
+  uvContextMenuHeight,
+  type UvContextMenuMeasure,
+  type UvMenuGroup,
+} from './uvContextMenuLayout';
 
 const ATLAS_SHADER = `
 @group(0) @binding(1) var<storage, read> P: array<f32>;
@@ -96,14 +102,6 @@ type UvLineGeometryCache = { rects: readonly UvIslandRect[]; geometry: UvLineGeo
 type PendingUvPreview = { generation: number; rects: UvIslandRect[]; guide: UvAxisGuide | null };
 type UvMarqueeFrame = Readonly<{ left: number; top: number; width: number; height: number }>;
 type UvPanelHistory = Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
-type UvMenuGroup = 'transform' | 'arrange' | 'snap' | 'edit' | 'texture';
-const UV_CONTEXT_MENU_TUNING = {
-  widthPx: 220,
-  edgePx: 4,
-  baseHeightPx: 330,
-  rowHeightPx: 26,
-  expandedRows: { transform: 8, arrange: 6, snap: 6, edit: 2, texture: 7 } as Record<UvMenuGroup, number>,
-} as const;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
@@ -271,7 +269,7 @@ function UvContextRow(props: {
       <Icon name={props.icon} size={12} color={accentFor(props.active ? 'primary' : 'textDim')} />
       <C.HW_ContextText {...textProps}>{props.label}</C.HW_ContextText>
       <C.HW_Spacer />
-      {props.detail ? <C.HW_KeyText>{props.detail}</C.HW_KeyText> : null}
+      {props.detail ? <C.HW_KeyText noWrap numberOfLines={1} style={{ flexShrink: 0 }}>{props.detail}</C.HW_KeyText> : null}
       {props.expanded !== undefined ? <Icon name={props.expanded ? 'ChevronDown' : 'ChevronRight'} size={11} color={accentFor('textFaint')} /> : null}
     </C.HW_ContextRow>
   );
@@ -312,6 +310,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [snapBaseStep, setSnapBaseStep] = useState<number>(UV_SNAP_STEPS[0]);
   const [aspectLocked, setAspectLocked] = useState(false);
   const [menuGroup, setMenuGroup] = useState<UvMenuGroup | null>(null);
+  const [contextMenuMeasure, setContextMenuMeasure] = useState<UvContextMenuMeasure>({ group: null, height: 0 });
   const [surfaceMode, setSurfaceMode] = useState<'uv' | 'images'>('uv');
   const [workspaceDoc, setWorkspaceDoc] = useState<UvTextureWorkspaceDoc | null>(uv.workspace);
   const workspaceDocRef = useRef<UvTextureWorkspaceDoc | null>(uv.workspace);
@@ -1190,8 +1189,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     middlePanActiveRef.current = true;
     middlePanTimerRef.current = setTimeout(middlePanStep, UV_LAYOUT_TUNING.dragPreviewIntervalMs);
   };
-  const contextMenuHeight = UV_CONTEXT_MENU_TUNING.baseHeightPx
-    + (menuGroup ? UV_CONTEXT_MENU_TUNING.expandedRows[menuGroup] * UV_CONTEXT_MENU_TUNING.rowHeightPx : 0);
+  const contextMenuHeight = uvContextMenuHeight(menuGroup, contextMenuMeasure);
   const contextMenuPosition = uvContextMenuPosition(
     { x: uvMenu.x, y: uvMenu.y },
     panelRef.current,
@@ -1753,7 +1751,18 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         onDismiss={() => setMenuGroup(null)}
         style={{ left: contextMenuPosition.x, top: contextMenuPosition.y, width: UV_CONTEXT_MENU_TUNING.widthPx }}
       >
-        <C.HW_StageContextMenu style={{ width: UV_CONTEXT_MENU_TUNING.widthPx }}>
+        <C.HW_StageContextMenu
+          onLayout={(layout: any) => {
+            const height = Math.ceil(Number(layout.height));
+            if (!Number.isFinite(height) || height <= 0) return;
+            setContextMenuMeasure((current) => (
+              current.group === menuGroup && current.height === height
+                ? current
+                : { group: menuGroup, height }
+            ));
+          }}
+          style={{ width: UV_CONTEXT_MENU_TUNING.widthPx }}
+        >
           <C.HW_ContextHead>
             <Icon name="Grid3x3" size={13} color={accentFor('primary')} />
             <Box style={{ gap: 1 }}>
