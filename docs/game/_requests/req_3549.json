@@ -1,0 +1,31 @@
+{
+  "id": "req_3549",
+  "at": "2026-07-30T22:38:26.959Z",
+  "origin": "codex:019fac74",
+  "text": "can we also get a normalize under a specific size threshold so that it doesnt take what is a larger uv surface and make it the same as a sliver",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T22:38:31.692Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T22:51:27.980Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an editable MAX NORMALIZE AREA gate to the repeated-UV dry run. Normalize now measures each congruent island by summed authored-triangle UV area, admits only surfaces at or below the threshold (default 4,096 px²), selects the largest eligible footprint, and reports larger matches as protected. Exact Scale remains unrestricted. If fewer than two eligible members remain, no stack is proposed. Focused topology tests cover a protected broad surface, eligible small copies, and the one-sliver no-op case; the ReleaseFast editor build passes.",
+  "shas": [
+    "cd79da327",
+    "fc961b600"
+  ],
+  "resolvedAt": "2026-07-30T22:51:27.980Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_3550",
+  "at": "2026-07-30T22:41:59.532Z",
+  "origin": "codex:019fac74",
+  "text": "also, adding in a number to the output png would be ideal, so that a prompt for filling it can be like a color by number and not just guessing. lastly, i have found that gpt-2-image is compeltely blind to our uv output for some reason, so it just generates something compleetely random beacuse it must think its a blank reference image. i found out by doing a small A/B test where in gimp i added a layer of pink fill over everything with an opacity of 6% and t hen sent that and it finally started to actually generate within the provided image",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T22:42:11.713Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T22:51:27.991Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a separate image-generation UV export without weakening the transparent wireframe. uv-ai-guide.png uses the same quad-aware authored edges, an exact 6%-alpha pink full-canvas signal from the user's successful A/B test, and one high-contrast bitmap number per visible exact texture footprint; already-stacked logical islands share one number. AI GUIDE is available in the toolbar, Texture Atlas context menu, and prestack + AI Guide action, with atomic package persistence and copied path. Raster, footprint deduplication, store, menu, bridge bundles, and the ReleaseFast editor build pass.",
+  "shas": [
+    "f563398e6",
+    "fc961b600"
+  ],
+  "resolvedAt": "2026-07-30T22:51:27.990Z"
+}

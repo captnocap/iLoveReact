@@ -1,0 +1,31 @@
+{
+  "id": "req_3551",
+  "at": "2026-07-30T22:51:28.087Z",
+  "origin": "codex:019fac74",
+  "text": "I do not think the prestack is doing anything. I tried it a few times, thought maybe i did something wrong but no it doesnt even move anything at all [Image #1][Image #2]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T22:51:40.237Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T22:57:36.957Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified from the user's saved swingset record that prestack did land: 299 logical layout rows now occupy 213 exact placements. Fixed the misleading idempotent dry run that kept presenting 86 already-overlapped family members as pending work. Plans now carry current and proposed exact footprint counts separately; the review shows logical islands, actual UV islands moving, and repeated members already sharing. A landed rescan reads 213→213 / moving 0 / ALREADY STACKED, and all Apply variants are disabled, while an unstacked layout still reads 299→213 / moving 86. Added an idempotence regression and passed the ReleaseFast editor build.",
+  "shas": [
+    "1691cef0b",
+    "f07a772f3"
+  ],
+  "resolvedAt": "2026-07-30T22:57:36.957Z"
+}
