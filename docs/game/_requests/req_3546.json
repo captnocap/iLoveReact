@@ -3,7 +3,7 @@
   "at": "2026-07-30T21:19:55.219Z",
   "origin": "codex:019fac74",
   "text": "alright, now how can we do this so i can not spend so much time, basically, i have found that taking the wireframe png and using inside of image generation can land a pretty good generated texture, but none of them end up aligning to the uv when importing, they hold the shape, and everything is just barely offset, because of the image model pixel dimmensions it outputs. heres an example [Image #1][Image #2] [Image #3] see how it doesnt align when imported but the base image and the wireframe and so the iamge is 817x996 while the textured image comes back at 928x1152",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-30T21:40:56.622Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Added a generated-texture alignment path built around an editable UV total. The UV panel now shows live W/H, previews independent X/Y scaling, and performs one journaled normalized-coordinate resize. The current composite is resampled only to keep the live model textured; native image-layer sources remain untouched and are marked for recompile, so a same-size generated result retains its original pixels. Selecting an image layer and clicking its NATIVE PX readout copies both output dimensions into the draft.",
+  "shas": [
+    "06cc10a6f",
+    "da5dfdbdd"
+  ],
+  "resolvedAt": "2026-07-30T21:40:56.622Z"
 }

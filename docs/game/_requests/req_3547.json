@@ -3,7 +3,7 @@
   "at": "2026-07-30T21:22:32.894Z",
   "origin": "codex:019fac74",
   "text": "ah good idea, basically you can display the uv total size (being the 817x996) and just let me change the values to match the image size or any size for that matter for future case",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-30T21:40:56.667Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Exposed the UV atlas total as editable width and height with one explicit Resize commit and a live X/Y ratio preview. Resize preserves normalized UV placement, retains workspace alpha, persists base.png, and is fully undoable/redoable. Invalid, over-GPU-limit, and over-preview-budget dimensions are rejected before resampling; an image layer's native-size readout can populate both fields in one click.",
+  "shas": [
+    "06cc10a6f",
+    "da5dfdbdd"
+  ],
+  "resolvedAt": "2026-07-30T21:40:56.667Z"
 }
