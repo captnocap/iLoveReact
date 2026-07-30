@@ -4,7 +4,7 @@ Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
 Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
-req_3529.
+req_3529 / req_3544.
 
 ## In one sentence
 
@@ -27,7 +27,7 @@ exported look and renders as-is (collision still comes from the full-res doc).
 
 ## Cold-restart UV state (req_3362)
 
-`atlases/base.paint.json` v4 is the editable finite-atlas UV document paired with the raster
+`atlases/base.paint.json` v4 is the editable signed-atlas UV document paired with the raster
 baseline. `__model_atlas_read` publishes every render face as
 `[island, authoredGroup, x0, y0, x1, y1, x2, y2]`; Save strips the envelope and
 writes the six exact absolute-atlas corner coordinates per face as `cornerUv`.
@@ -39,6 +39,30 @@ remain readable for old packages, but they are transform bounds rather than UV
 geometry: they cannot reproduce a rotated island, a detached cylinder wedge, or
 one moved vertex. New saves therefore emit v4 whenever the host's complete
 triangle table is present.
+
+## Durable atlas-start reset (req_3544)
+
+`atlases/uv-reset.json` is a separate immutable UV-corner snapshot for the
+current atlas generation. The first exact atlas save establishes it, and the
+Create/Remake Paint Atlas boundary explicitly replaces it; ordinary saves,
+packs, stitches, texture imports, image-workspace compiles, and paint changes
+never redefine “original.” The snapshot stores six floats per render face in
+signed workspace coordinates. A later image-layer compile can crop to a new
+finite PNG origin without moving the reset point relative to the source images.
+
+RMB → Texture Atlas → Reset UV Layout restores the complete snapshot through
+the same journaled `__model_uv_geometry_apply` boundary as every other UV
+gesture. It is one `reset UV layout` undo step, rebuilds the live island graph,
+and immediately saves the restored current layout while preserving the reset
+file. A topology-stale or corner-count-mismatched snapshot is refused rather
+than partially applied or silently recaptured.
+
+Legacy packages do not need a model reimport. On first Reset, the editor creates
+`uv-reset.json` from their last durable v4 `cornerUv` when its face count still
+matches; only a pre-v4 package with no exact saved table falls back to the
+current live layout. Signed off-image corners now pass the cart persistence
+validator under the same ±16,777,216 texel corruption bound as the native
+infinite-workspace door.
 
 ## Identity stitch + transparent UV guide (req_3515)
 
