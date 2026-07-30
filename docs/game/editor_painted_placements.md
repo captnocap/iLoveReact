@@ -1,10 +1,10 @@
 # Painted placements: which mesh a placed model renders
 
 Active surface: `cart/editor/world/livePush.ts` (the one resident-mesh seam).
-Last verified: 2026-07-29. USER ASK req_2832 / req_2833 / req_2930 /
+Last verified: 2026-07-30. USER ASK req_2832 / req_2833 / req_2930 /
 req_3133 / req_3328 / req_3329 / req_3362 / req_3439 / req_3443 / req_3450 /
 req_3515 / req_3520 / req_3524 / req_3525 / req_3526 / req_3527 / req_3528 /
-req_3529 / req_3544 / req_3545.
+req_3529 / req_3544 / req_3545 / req_3546 / req_3547.
 
 ## In one sentence
 
@@ -112,6 +112,33 @@ edge source is the authored UV view, so a resident triangle diagonal hidden by
 an authored quad stays absent from the export. Encoding uses the existing
 image codec and an atomic binary write. The guide is not loaded as texture
 state and can always be regenerated from `cornerUv`.
+
+## Editable UV total for generated textures (req_3546/req_3547)
+
+The UV panel exposes the live atlas width and height as one `UV TOTAL` edit.
+Both target values are drafted first; `RESIZE` is the single commit boundary,
+with the independent X/Y scale shown before it runs. For the reported
+generation path, `817×996 → 928×1152` previews `X 1.1359 · Y 1.1566`.
+Selecting an image layer and clicking its `NATIVE PX` readout copies that
+image's dimensions into the draft, so matching a generated output does not
+require transcribing both numbers.
+
+Resize is deliberately distinct from ordinary texture import. Import keeps
+square texels by uniformly fitting and centering old absolute UV geometry when
+the incoming aspect changes. UV-total resize instead keeps every normalized UV
+coordinate stationary while X and Y absolute texel coordinates scale
+independently. The current composite raster is resampled with exact fill only
+to keep the live model continuously textured; original image-workspace sources
+remain at native resolution and the workspace becomes explicitly stale.
+Compiling or importing the generated image afterward at the matching
+dimensions therefore retains its native pixels and performs no second UV move.
+
+The operation is one `resize UV atlas` native journal step. Undo/redo restores
+both dimensions and raster through the normalized-coordinate path, package
+`base.png` follows the restored live state, and a workspace stays marked for
+recompile. The inspector rejects non-integer/zero dimensions, dimensions above
+the 8192px GPU ceiling, and sizes beyond the 32 MiB live UV preview budget
+before allocating a resample.
 
 ## Infinite UV + image workspace (req_3524/req_3525)
 
