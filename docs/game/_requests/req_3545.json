@@ -1,0 +1,31 @@
+{
+  "id": "req_3545",
+  "at": "2026-07-30T18:45:32.604Z",
+  "origin": "codex:019fac74",
+  "text": "oh i am not getting that action to show up, because there is a layout bug, every single one of these that has text wrap is pushing the option out of scope [Image #1]",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T18:45:41.324Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T18:51:55.314Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the UV context-menu layout bug that hid later Texture Atlas actions. Shared fixed-height context action labels are now single-line and shrink safely beside key hints; UV detail text is also single-line, and the popup was widened so descriptive actions remain readable. Texture Atlas's first-frame estimate now includes all eight actions, including Reset UV Layout, while the rendered menu's measured onLayout height becomes authoritative for panel-edge clamping so future rows or text metrics cannot push actions out of view. Added regressions for the shared no-wrap row contract and measured/fallback UV menu sizing; focused tests, editor bundle check, ReleaseFast ship, and doc-index bundle pass.",
+  "shas": [
+    "95570d8b6",
+    "0653420ab"
+  ],
+  "resolvedAt": "2026-07-30T18:51:55.314Z"
+}
