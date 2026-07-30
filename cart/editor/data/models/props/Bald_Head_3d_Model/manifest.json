@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:bald_head_3d_model",
+  "name": "Bald+Head+3d+Model",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "props",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#43a368",
+  "rig": "source model file",
+  "data": "file bald+head+3d+model.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Bald_Head_3d_Model/mesh/bald+head+3d+model.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "imported-from:/home/siah/Downloads/bald+head+3d+model.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

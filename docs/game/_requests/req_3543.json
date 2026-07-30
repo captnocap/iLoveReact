@@ -1,0 +1,17 @@
+{
+  "id": "req_3543",
+  "at": "2026-07-30T00:24:36.850Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bk2ta5y6s</task-id>\n<tool-use-id>toolu_01BU3nhXapPfbr42R1obNynS</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/28d9c959-c6e5-4a34-aebc-648b8853d1f6/tasks/bk2ta5y6s.output</output-file>\n<status>completed</status>\n<summary>Background command \"Build editor with capture-rate tuning\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T00:25:07.093Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

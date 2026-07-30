@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Van+Seat+3d+Model",
+      "color": "#c9b48f",
+      "visible": true,
+      "outlinerOrder": 0
+    }
+  ]
+}

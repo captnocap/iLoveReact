@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:dresser_003",
+  "name": "Dresser 003",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "props",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#a34378",
+  "rig": "source model file",
+  "data": "file dresser_003.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Dresser_003/mesh/dresser_003.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "imported-from:/home/siah/Downloads/dresser_003.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

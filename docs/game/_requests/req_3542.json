@@ -1,0 +1,36 @@
+{
+  "id": "req_3542",
+  "at": "2026-07-30T00:16:26.813Z",
+  "origin": "session:28d9c959",
+  "text": "[Image #1] its working. it needs some love with tuning for sure but its doing something i tried it on my self, i tried it on emote videos, on the black knight in monty python, it uh seems that the rate it polls or whatever is quite slow being the biggest one i think",
+  "status": "review",
+  "sessionId": "28d9c959-c6e5-4a34-aebc-648b8853d1f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T00:17:22.960Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-30T00:25:32.460Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-30T00:25:45.623Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "CORRECTION: the commit sha is 5b3ced872 (the --shas value on the review move was a pre-commit guess and is wrong; disregard 62b1ad30f)."
+    }
+  ],
+  "resolution": "Diagnosed the 7 Hz capture rate as three stacked throttles and removed all of them: (1) the JS loop serialized result-processing before scheduling and enforced a 90ms start-to-start floor — now pipelined (resubmit the instant a result lands, before solve/push work, synchronous re-tick when over budget) with a 33ms pacing floor; (2) the ONNX session had zero options set — now 4 intra-op threads, full graph optimization, and spin-waiting disabled so idle inference threads stop fighting the frame loop; (3) the 442KB input tensor was page-allocated every solve — now persistent scratch. Added 'XXms infer · YYms rtt' to the tracking status line so the remaining bottleneck is readable on screen: if infer stays high the next lever is a faster model variant, if rtt-infer is big it's the result pump. Ship + headless shot PASS; the real rate number needs the user's OBS run.",
+  "shas": [
+    "62b1ad30f"
+  ],
+  "resolvedAt": "2026-07-30T00:25:32.460Z"
+}

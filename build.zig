@@ -2006,6 +2006,21 @@ pub fn build(b: *std.Build) void {
     b.step("test-pose-markers", "Run applied-pose marker contract tests")
         .dependOn(&b.addRunArtifact(pose_markers_test).step);
 
+    const pose_stream_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/pose_stream.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const pose_stream_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/pose_stream.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pose_stream_test_mod.addImport("pose_stream", pose_stream_mod_t);
+    const pose_stream_test = b.addTest(.{ .name = "pose-stream-test", .root_module = pose_stream_test_mod });
+    b.step("test-pose-stream", "Run render-rate live-pose interpolation tests")
+        .dependOn(&b.addRunArtifact(pose_stream_test).step);
+
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
     // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.

@@ -1,0 +1,28 @@
+{
+  "id": "req_3536",
+  "at": "2026-07-29T22:13:06.660Z",
+  "origin": "codex:019fafb5",
+  "text": "hm. so is it not possible though to at least verify some of that by showing the identical marker that is tracking from the camera so it can be clear if it even exists or what is happening",
+  "status": "review",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T22:13:13.460Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T22:14:04.913Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the requested verification is possible and should precede broader stabilization. The current left-side dots are raw MoveNet landmarks only; the model receives derived/smoothed per-bone transforms. Proposed one diagnostics projection with shared joint identities/colors: raw camera landmarks on the feed and applied joint markers drawn from the exact transforms passed to encodeLivePose on the model viewport (not a second solver). This comparison isolates tracker jitter vs solve/calibration jitter vs skin/palette deformation: raw+applied move together = tracker; raw steady/applied jitters = solver; applied steady/mesh jitters = rig/weights. Add confidence/drop/held state and optional short trails; keep switchable/off by default per V27 diagnostics ruling. No code changed pending confirmation of the requested visual placement.",
+  "shas": [],
+  "resolvedAt": "2026-07-29T22:14:04.912Z"
+}

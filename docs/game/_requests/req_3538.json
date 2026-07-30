@@ -1,0 +1,30 @@
+{
+  "id": "req_3538",
+  "at": "2026-07-29T22:48:00.910Z",
+  "origin": "codex:019fafb5",
+  "text": "there are no dots on the model after rebuild [Image #1] but they are on me",
+  "status": "review",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T22:48:07.162Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T23:03:07.992Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented model-side applied-pose markers in Globals → Animation. The spheres are driven from the exact posed bone positions used for the skinned palette, with shared face/upper/leg region colors; ordinary play creates no diagnostic nodes. Added TS mapping tests, Zig decode/color tests, a ReleaseFast editor build, and a 60-second pose stress run with zero frame-budget spikes.",
+  "shas": [
+    "1ea512879"
+  ],
+  "resolvedAt": "2026-07-29T23:03:07.992Z"
+}

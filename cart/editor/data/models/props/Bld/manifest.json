@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "import:bld",
+  "name": "Bld",
+  "kind": "prop",
+  "stage": "ready",
+  "folderId": "props",
+  "semanticKind": "prop",
+  "sourceKind": "source-file",
+  "color": "#a3439b",
+  "rig": "source model file",
+  "data": "file bld.glb",
+  "triangles": 0,
+  "lods": 0,
+  "mesh": {
+    "viewerPath": "cart/editor/data/models/props/Bld/mesh/bld.glb"
+  },
+  "decompositions": [
+    "semantic:prop",
+    "format:glb",
+    "imported-from:/home/siah/Downloads/bld.glb"
+  ],
+  "atlases": [],
+  "paints": [],
+  "textureSlots": [],
+  "lights": []
+}

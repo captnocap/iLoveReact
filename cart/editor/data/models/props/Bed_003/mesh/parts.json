@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Bed 003",
+      "color": "#c9b48f",
+      "visible": true,
+      "outlinerOrder": 0
+    }
+  ]
+}

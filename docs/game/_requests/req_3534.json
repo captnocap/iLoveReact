@@ -1,0 +1,28 @@
+{
+  "id": "req_3534",
+  "at": "2026-07-29T21:59:26.712Z",
+  "origin": "codex:019fafb5",
+  "text": "that did it. so hey look at the recent commits then and tell me about the rigging systems made because i now see the dots showing up and finding me in the camera, but the model is kinda just vibrating around lol",
+  "status": "review",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T21:59:32.799Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T22:00:50.246Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited the recent character rig, live pose, LBS skinning, and voxel-geodesic weight commits without changing code. Found two separate rig layers: the export-time named hierarchical skeleton, and the current live render path where outliner parts become palette bones driven by manually solved absolute transforms. The visible vibration is chiefly latent in the July 6 webcam solver: raw MoveNet landmarks arrive around 11 Hz, angle EMA uses a relatively aggressive 0.45 blend with no render-rate interpolation, and the standing maximum hip-to-ankle span converts ordinary landmark noise into whole-body squat/drop motion. The July 28 auto-weight system is spatial smoothing rather than temporal filtering; it can spread noisy bone motion across the mesh but is not the source signal. Also identified hard-coded two-meter squat scaling and a 0.9m torso pivot as proportion amplifiers, plus the 45-frame stale-pose fallback as a possible occasional snap rather than continuous vibration.",
+  "shas": [],
+  "resolvedAt": "2026-07-29T22:00:50.246Z"
+}

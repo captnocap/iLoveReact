@@ -48,6 +48,7 @@ const nowNs = m_state.nowNs;
 const keyDown = m_state.keyDown;
 const LIVE_POSE_STALE_FRAMES = m_player_assets.LIVE_POSE_STALE_FRAMES;
 const pendingPoseFor = m_player_assets.pendingPoseFor;
+const advancePlayerLivePose = m_player_assets.advancePlayerLivePose;
 const instanceYawRadians = m_instances.instanceYawRadians;
 const isRampInstance = m_instances.isRampInstance;
 const isNonCollidingFoliage = m_instances.isNonCollidingFoliage;
@@ -546,6 +547,7 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         // the pose lands in the bone palette instead of N part nodes.
         if (pendingPoseFor(self.node_id)) |lp| {
             if (lp.count == skin.bones.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
+                advancePlayerLivePose(lp, dt);
                 updatePlayerSkinnedNodeLive(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, lp.transforms, self.player);
                 live_posed = true;
             }
@@ -555,6 +557,7 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     } else {
         if (pendingPoseFor(self.node_id)) |lp| {
             if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
+                advancePlayerLivePose(lp, dt);
                 updatePlayerModelNodesLive(self.kid_list.items, self.player_first_child, self.scene.player_model, lp.transforms, self.player);
                 live_posed = true;
             }

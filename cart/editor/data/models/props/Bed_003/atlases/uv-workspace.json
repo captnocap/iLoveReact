@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "revision": 5,
+  "nextLayer": 3,
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "paint baseline",
+      "source": "atlases/uv-sources/0d5b9eb85de3baa9318e3d7aee4296c060a2ce9babb0fc984c54d4a216cd2f2f.png",
+      "x": 0,
+      "y": 0,
+      "width": 928,
+      "height": 1152,
+      "visible": true,
+      "locked": false
+    }
+  ],
+  "compiled": {
+    "revision": 5,
+    "originX": 0,
+    "originY": 0,
+    "width": 928,
+    "height": 1152,
+    "atlasSha256": "0d5b9eb85de3baa9318e3d7aee4296c060a2ce9babb0fc984c54d4a216cd2f2f"
+  }
+}

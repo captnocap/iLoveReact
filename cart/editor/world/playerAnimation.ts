@@ -89,16 +89,18 @@ function rotZAt(pivot: V3, p: V3, deg: number): V3 {
   return [pivot[0] + dx * c - dy * s, pivot[1] + dx * s + dy * c, p[2]];
 }
 
-/** The FRONTAL-plane twin of swingLimb (req_2786 live capture): the camera
- *  sees lateral raises/bends, which are Z rotations on the figure. Same
- *  measured pivots, same missing-part tolerance. */
-function swingLimbFrontal(
+/** The spatial live-capture twin of swingLimb. Image-plane motion rotates
+ *  around model Z; reconstructed foreshortening rotates around model X.
+ *  Applying Z then X mirrors the palette's Rx·Rz order. */
+function swingLimbSpatial(
   work: Map<string, { pos: V3; rx: number; ry: number; rz: number }>,
   rest: Map<string, V3>,
   side: 'left' | 'right',
   kind: 'leg' | 'arm',
-  upperDeg: number,
-  lowerDeg: number,
+  sideUpperDeg: number,
+  sideLowerDeg: number,
+  depthUpperDeg: number,
+  depthLowerDeg: number,
 ): void {
   const chain = kind === 'leg'
     ? ['upper_leg', 'knee', 'lower_leg', 'foot', 'toes']
@@ -111,49 +113,63 @@ function swingLimbFrontal(
   for (const name of names) {
     const w = work.get(name);
     if (!w) continue;
-    w.pos = rotZAt(rootPivot, w.pos, upperDeg);
-    w.rz += upperDeg;
+    w.pos = rotXAt(rootPivot, rotZAt(rootPivot, w.pos, sideUpperDeg), depthUpperDeg);
+    w.rx += depthUpperDeg;
+    w.rz += sideUpperDeg;
   }
   const mid = work.get(midJoint);
-  if (!mid || lowerDeg === 0) return;
+  if (!mid || (sideLowerDeg === 0 && depthLowerDeg === 0)) return;
   const lowerFrom = chain.indexOf(kind === 'leg' ? 'lower_leg' : 'lower_arm');
   const midPivot = mid.pos;
   for (const name of names.slice(lowerFrom)) {
     const w = work.get(name);
     if (!w) continue;
-    w.pos = rotZAt(midPivot, w.pos, lowerDeg);
-    w.rz += lowerDeg;
+    w.pos = rotXAt(midPivot, rotZAt(midPivot, w.pos, sideLowerDeg), depthLowerDeg);
+    w.rx += depthLowerDeg;
+    w.rz += sideLowerDeg;
   }
 }
 
-/** The live-capture pose vocabulary: frontal-plane limb angles (degrees,
- *  positive = toward the figure's +X/right), torso lean, head tilt, and a
- *  whole-body vertical drop (squat) in meters. */
-export type FrontalAngles = {
-  armL: { upper: number; lower: number };
-  armR: { upper: number; lower: number };
-  legL: { upper: number; lower: number };
-  legR: { upper: number; lower: number };
-  torso: number;
-  head: number;
-  drop: number;
+export type CaptureLimbAngles = {
+  /** Image-plane rotation around model Z. */
+  sideUpper: number;
+  sideLower: number;
+  /** Calibrated foreshortening rotation around model X. */
+  depthUpper: number;
+  depthLower: number;
 };
 
-export const FRONTAL_REST: FrontalAngles = {
-  armL: { upper: 0, lower: 0 }, armR: { upper: 0, lower: 0 },
-  legL: { upper: 0, lower: 0 }, legR: { upper: 0, lower: 0 },
-  torso: 0, head: 0, drop: 0,
+/** Spatial live-capture pose: two-axis limbs, torso/head tilt, and signed
+ *  whole-body vertical motion (positive jump, negative squat). */
+export type CaptureAngles = {
+  armL: CaptureLimbAngles;
+  armR: CaptureLimbAngles;
+  legL: CaptureLimbAngles;
+  legR: CaptureLimbAngles;
+  torso: number;
+  head: number;
+  rootY: number;
+};
+
+const REST_LIMB: CaptureLimbAngles = {
+  sideUpper: 0, sideLower: 0, depthUpper: 0, depthLower: 0,
+};
+
+export const CAPTURE_REST: CaptureAngles = {
+  armL: { ...REST_LIMB }, armR: { ...REST_LIMB },
+  legL: { ...REST_LIMB }, legR: { ...REST_LIMB },
+  torso: 0, head: 0, rootY: 0,
 };
 
 /** Build the full-body pose for one solved camera frame — the live-sync
  *  sample the capture surface pushes through the live-pose door. */
-export function frontalPose(nodes: AnimNode[], f: FrontalAngles): NodeTransform[] {
+export function capturePose(nodes: AnimNode[], f: CaptureAngles): NodeTransform[] {
   const work = new Map(nodes.map((n) => [n.name, { pos: [...n.center] as V3, rx: 0, ry: 0, rz: 0 }]));
   const rest = new Map<string, V3>(nodes.map((n) => [n.name, n.center]));
-  swingLimbFrontal(work, rest, 'left', 'arm', f.armL.upper, f.armL.lower);
-  swingLimbFrontal(work, rest, 'right', 'arm', f.armR.upper, f.armR.lower);
-  swingLimbFrontal(work, rest, 'left', 'leg', f.legL.upper, f.legL.lower);
-  swingLimbFrontal(work, rest, 'right', 'leg', f.legR.upper, f.legR.lower);
+  swingLimbSpatial(work, rest, 'left', 'arm', f.armL.sideUpper, f.armL.sideLower, f.armL.depthUpper, f.armL.depthLower);
+  swingLimbSpatial(work, rest, 'right', 'arm', f.armR.sideUpper, f.armR.sideLower, f.armR.depthUpper, f.armR.depthLower);
+  swingLimbSpatial(work, rest, 'left', 'leg', f.legL.sideUpper, f.legL.sideLower, f.legL.depthUpper, f.legL.depthLower);
+  swingLimbSpatial(work, rest, 'right', 'leg', f.legR.sideUpper, f.legR.sideLower, f.legR.depthUpper, f.legR.depthLower);
   // Torso lean about a low pivot; the head adds its own tilt on top.
   const leanPivot: V3 = [0, 0.9, 0];
   return nodes.map((n) => {
@@ -165,7 +181,7 @@ export function frontalPose(nodes: AnimNode[], f: FrontalAngles): NodeTransform[
       rz += f.torso;
       if (n.name === 'head' || n.name.startsWith('eye_') || ['nose', 'mouth', 'lips', 'teeth', 'hair'].includes(n.name)) rz += f.head;
     }
-    return { pos: [pos[0], Math.max(0.02, pos[1] - f.drop), pos[2]] as V3, rot: [w.rx, w.ry, rz] as V3 };
+    return { pos: [pos[0], Math.max(0.02, pos[1] + f.rootY), pos[2]] as V3, rot: [w.rx, w.ry, rz] as V3 };
   });
 }
 

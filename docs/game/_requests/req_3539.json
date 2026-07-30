@@ -1,0 +1,30 @@
+{
+  "id": "req_3539",
+  "at": "2026-07-29T22:51:31.472Z",
+  "origin": "codex:019fafb5",
+  "text": "also i see this log btw which i didnt pay attention to before [skin-solve] voxel-geodesic weights — 1 bones × 7560 verts, 23784 voxels, 16 unreachable kept rigid (SKIN-3499)",
+  "status": "review",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T22:51:39.964Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-29T23:03:08.002Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Player Model 3 collapsing to one skin bone because its RJMD lacks stored part ranges. Historical character meshes now recover semantic ranges from connectivity runs, exported bone order/centers, and shell compactness, while failing closed on insufficient evidence. Verified the actual model recovers 28 bones from 36 shells, including multi-shell fingers; no model data was overwritten. Live pose is suppressed for zero-joint rigs.",
+  "shas": [
+    "1ea512879"
+  ],
+  "resolvedAt": "2026-07-29T23:03:08.002Z"
+}

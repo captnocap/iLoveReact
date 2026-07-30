@@ -5,6 +5,7 @@
 const std = @import("std");
 const autoweights = @import("../skeleton/autoweights.zig");
 const pose_markers = @import("../skeleton/pose_markers.zig");
+const pose_stream = @import("../skeleton/pose_stream.zig");
 const constructor = @import("../world/constructor.zig");
 const geometry = @import("geometry.zig");
 const log = std.debug;
@@ -360,7 +361,11 @@ pub const LIVE_POSE_STALE_FRAMES: u32 = 45;
 pub const PendingPose = struct {
     node_id: u32 = 0,
     set: bool = false,
+    /// Render-rate value consumed by the palette/node updater.
     transforms: []f32 = &.{}, // n × 9 floats (px,py,pz, rx,ry,rz, sx,sy,sz), page_allocator
+    /// Latest sparse inference target.
+    targets: []f32 = &.{},
+    interpolation_seconds: f32 = 0,
     count: usize = 0,
     age_frames: u32 = 0,
 };
@@ -392,25 +397,43 @@ pub fn setPlayerLivePose(node_id: u32, bytes: []const u8) void {
         clearPlayerLivePose(node_id);
         return;
     }
-    if (p.transforms.len != float_count) {
+    if (p.transforms.len != float_count or p.targets.len != float_count) {
         if (p.transforms.len > 0) alloc.free(p.transforms);
+        if (p.targets.len > 0) alloc.free(p.targets);
         p.transforms = alloc.alloc(f32, float_count) catch {
             p.transforms = &.{};
+            p.targets = &.{};
             p.set = false;
             return;
         };
+        p.targets = alloc.alloc(f32, float_count) catch {
+            alloc.free(p.transforms);
+            p.transforms = &.{};
+            p.targets = &.{};
+            p.set = false;
+            return;
+        };
+        @memcpy(std.mem.sliceAsBytes(p.transforms), bytes[0 .. float_count * 4]);
     }
-    @memcpy(std.mem.sliceAsBytes(p.transforms), bytes[0 .. float_count * 4]);
+    @memcpy(std.mem.sliceAsBytes(p.targets), bytes[0 .. float_count * 4]);
     p.node_id = node_id;
     p.set = true;
     p.count = float_count / 9;
     p.age_frames = 0;
+    p.interpolation_seconds = pose_stream.TARGET_INTERVAL_SECONDS;
+}
+
+pub fn advancePlayerLivePose(pose: *PendingPose, dt: f32) void {
+    pose_stream.advance(pose.transforms, pose.targets, &pose.interpolation_seconds, dt);
 }
 
 pub fn clearPlayerLivePose(node_id: u32) void {
     const p = pendingPoseFor(node_id) orelse return;
     if (p.transforms.len > 0) std.heap.page_allocator.free(p.transforms);
+    if (p.targets.len > 0) std.heap.page_allocator.free(p.targets);
     p.transforms = &.{};
+    p.targets = &.{};
+    p.interpolation_seconds = 0;
     p.count = 0;
     p.set = false;
     p.node_id = 0;

@@ -1,0 +1,18 @@
+{
+  "id": "req_3540",
+  "at": "2026-07-29T23:35:00.334Z",
+  "origin": "codex:019fafb5",
+  "text": "haha tis but a scratch [Image #1] lol it needs some real love i have tested it with a few things now and myself and its tracking, its also got 0 awareness of depth, like arm movements stay always in a up and down motion never putting the arm forward or backwards, same with legs, and jumping doesnt capture anything it seems. could be slow capture. idk",
+  "status": "doing",
+  "sessionId": "019fafb5-29e9-7283-97ef-8a1e54c8c9bd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-29T23:35:05.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}
