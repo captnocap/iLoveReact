@@ -1,0 +1,30 @@
+{
+  "id": "req_3560",
+  "at": "2026-07-31T17:42:51.404Z",
+  "origin": "codex:019fb940",
+  "text": "in the editor when in vert/face/edge mode we need to additionally give better control for the way the model renders and how we see these points. because as it stands, you just get everything all the time, so you always see a bunch of shit unrelated on the other side of a model. which then u end up targeting it by accident and it creates more wasted time than anything else annymore",
+  "status": "review",
+  "sessionId": "019fb940-d512-7f91-b5f4-fb3daf1e6324",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-31T17:42:54.973Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-31T17:57:55.429Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a safe Surface view as the default for vertex, edge, and face editing: camera-facing elements drive the overlay and marquee target set, click picks reject geometry occluded by another rendered surface, and selected elements remain legible. Added an explicit X-Ray Elements toggle that restores through-model handles/targeting and renders the model translucent, wired through the native host boundary, standalone viewer, editor toolbar/context menu, hot-reload state, and generated bindings. Focused Zig tests, 18 editor command tests, binding drift checks, diff checks, and the full ReleaseFast editor build pass; visual interaction and the required 60-second spikewatch are the user review gate.",
+  "shas": [
+    "cb5046137"
+  ],
+  "resolvedAt": "2026-07-31T17:57:55.429Z"
+}
