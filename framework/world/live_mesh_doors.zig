@@ -57,18 +57,39 @@ pub fn routeSlotTransparent(slot_index: usize, leaf_slot: usize, slot_count: usi
     return texture_has_translucency and slot_index == leaf_slot and slot_count == leaf_slot + 1;
 }
 
+/// The shared mesh shader alpha-CUTS a texel at or below this byte
+/// (`shaders.zig` scene3d_fs: `if (out_a <= 0.01) { discard; }` — 0.01 × 255).
+/// A discarded fragment writes neither colour nor depth, so cutout alpha already
+/// reveals whatever is behind it from inside the opaque depth-writing pass.
+pub const SHADER_ALPHA_CUT_BYTE: u8 = 2;
+/// At or above this byte a texel is solid: it must write depth like any opaque
+/// surface. Matches the 0.999 node cutoff the collector sorts transparency on.
+pub const SHADER_ALPHA_OPAQUE_BYTE: u8 = 250;
+
+/// TRUE translucency: at least one texel the shader neither discards nor treats
+/// as solid, so it must BLEND against what is behind it.
+///
+/// Binary CUTOUT alpha is deliberately not translucency (req_3562). Every
+/// painted atlas bakes its untouched gutters between UV islands as alpha-zero,
+/// so a `< 250` test flagged fully opaque props — 48 of the 131 model packages
+/// on disk — and dragged them into the depth-write-off pass, where a mesh's own
+/// triangles stop occluding each other and it paints in vertex-buffer order
+/// instead (a bed's mattress and frame overwriting the blanket draped over
+/// them). The shader's discard already covers the holes those gutters make.
 pub fn rgbaHasTranslucency(rgba: []const u8) bool {
     var alpha_at: usize = 3;
     while (alpha_at < rgba.len) : (alpha_at += 4) {
-        if (rgba[alpha_at] < 250) return true;
+        const alpha = rgba[alpha_at];
+        if (alpha > SHADER_ALPHA_CUT_BYTE and alpha < SHADER_ALPHA_OPAQUE_BYTE) return true;
     }
     return false;
 }
 
-/// A resident mesh whose atlas has non-opaque texels cannot write depth in the
-/// opaque pass: its transparent texels would hide the world behind the mesh.
-/// The shared mesh shader still alpha-discards fully empty texels; this route
-/// supplies the matching depth-write-off draw for the painted texels.
+/// A resident mesh whose atlas carries genuinely translucent texels cannot write
+/// depth in the opaque pass: those texels must blend against the world behind
+/// them instead of hiding it. This route supplies the matching depth-write-off
+/// draw. A cutout-only atlas stays opaque — the shader discard handles its holes
+/// and the mesh keeps self-occlusion, which the transparent pass cannot give it.
 pub fn routeTexturedMeshTransparent(texture_has_translucency: bool) bool {
     return texture_has_translucency;
 }
@@ -99,9 +120,19 @@ test "legacy mixed leaf and v2 glass tail both route through the transparent pas
 test "atlas alpha detection finds the Studio glass value without flagging opaque paint" {
     try std.testing.expect(rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 87 }));
     try std.testing.expect(!rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 255 }));
+    // The band edges: the shader's cut byte is still cutout, one above it blends.
+    try std.testing.expect(!rgbaHasTranslucency(&.{ 40, 50, 60, SHADER_ALPHA_CUT_BYTE }));
+    try std.testing.expect(rgbaHasTranslucency(&.{ 40, 50, 60, SHADER_ALPHA_CUT_BYTE + 1 }));
+    try std.testing.expect(!rgbaHasTranslucency(&.{ 40, 50, 60, SHADER_ALPHA_OPAQUE_BYTE }));
+    try std.testing.expect(rgbaHasTranslucency(&.{ 40, 50, 60, SHADER_ALPHA_OPAQUE_BYTE - 1 }));
 }
 
-test "painted atlas with an empty background routes through the transparent pass" {
-    try std.testing.expect(routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 0, 0, 0, 0, 220, 90, 30, 255 })));
+test "a cutout-only painted atlas stays opaque so the mesh keeps self-occlusion" {
+    // req_3562: alpha-zero UV gutters are the shader's discard band, not glass.
+    // Routing this mesh transparent cost it depth-write and its own triangles
+    // stopped occluding each other.
+    try std.testing.expect(!routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 0, 0, 0, 0, 220, 90, 30, 255 })));
     try std.testing.expect(!routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 220, 90, 30, 255 })));
+    // Real glass in the same atlas still earns the depth-write-off draw.
+    try std.testing.expect(routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 0, 0, 0, 0, 220, 90, 30, 255, 169, 200, 216, 87 })));
 }

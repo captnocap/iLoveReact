@@ -190,5 +190,17 @@ export const editor_painted_placements: DocIndex = {
       evidence: ['docs/game/editor_painted_placements.md "Import boundary invariants"'],
       severity: 'medium',
     },
+    {
+      name: 'cutout alpha is not translucency — the transparent pass has no self-occlusion (req_3562)',
+      purpose: ['texture_bake', 'rendering'],
+      description:
+        'The transparent pass (gpu/3d.zig g_pipeline_transparent) is depth-write OFF and sorts PER MESH, so a mesh routed into it stops occluding ITSELF and paints in vertex-buffer order. live_mesh_doors.rgbaHasTranslucency used to flag any atlas texel < 250, and every painted atlas bakes its untouched UV gutters as alpha-zero — so 48 of 131 model packages on disk were fully opaque yet routed transparent, and any prop with real depth complexity rendered inside-out when placed (Bed_002: blanket tris 0-239 overwritten by frame 240-400 and mattress/pillow 401-438; correct in the editor opaque preview, wrong in the world). FIXED: the predicate now flags only GENUINE partial alpha (SHADER_ALPHA_CUT_BYTE 2 < a < SHADER_ALPHA_OPAQUE_BYTE 250). Cutout holes never needed the route — the shared mesh shader already discards them (shaders.zig scene3d_fs "out_a <= 0.01"), and a discarded fragment writes no depth. Real glass (bong_01, rhino_pill, Lavalampsad, the Studio 87/255 door glass) still routes transparent. Standing trap: anything that pushes a whole mesh through the transparent pass buys blending at the cost of self-occlusion — only pay it for texels that must blend.',
+      evidence: [
+        'framework/world/live_mesh_doors.zig rgbaHasTranslucency',
+        'framework/gpu/3d.zig g_pipeline_transparent (depth_write_enabled = .false)',
+        'docs/game/editor_painted_placements.md "Cutout alpha is not translucency"',
+      ],
+      severity: 'medium',
+    },
   ],
 };

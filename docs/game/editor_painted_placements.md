@@ -549,6 +549,47 @@ not disk — but the investigation surfaced two real traps:
   `scene3d.normalizeSoupWinding` before retention/adoption and warn loudly when
   they repair.
 
+## Cutout alpha is not translucency (req_3562 — the inside-out bed)
+
+A painted bed looked right in the model editor and rendered inside-out when
+placed: the mattress, frame and pillow drawn OVER the blanket draped on top of
+them, the blanket surviving only where nothing else overlapped it on screen.
+
+The chain, measured end to end on `Bed_002`:
+
+1. `atlases/base.png` is 3.89% alpha-ZERO and 96.11% alpha-255 — strictly binary.
+   The alpha-zero texels are the gutters between UV islands; no triangle samples
+   them. Every painted atlas has them.
+2. `live_mesh_doors.rgbaHasTranslucency` flagged any texel `< 250`, so the mesh
+   came back `texture_has_translucency = true`.
+3. `routeTexturedMeshTransparent` therefore put the WHOLE mesh on
+   `LIVE_TEXTURED_ALPHA_ROUTE_ALPHA` (0.998), which is under the 0.999 cutoff
+   `gpu/3d.zig` sorts transparency on.
+4. `g_pipeline_transparent` is **`depth_write_enabled = .false`** and the
+   transparent list sorts **per mesh**, not per triangle. A mesh in that pass has
+   no self-occlusion: its triangles paint in vertex-buffer order.
+5. `mesh/painted.blob` (439 tris, f32 soup) is ordered blanket `0-239`, wood
+   frame `240-400`, mattress + pillow `401-438` — so the frame and mattress
+   painted over the blanket. Exactly the artifact.
+
+The route was never needed for cutout. The shared mesh shader already ends with
+`if (out_a <= 0.01) { discard; }` (`shaders.zig` scene3d_fs, req_0915), and a
+discarded fragment writes **no colour and no depth** — the hole reveals what is
+behind it from inside the opaque depth-writing pass. Only GENUINELY PARTIAL
+alpha needs the depth-write-off draw, because it has to blend.
+
+`rgbaHasTranslucency` now flags only the blend band,
+`SHADER_ALPHA_CUT_BYTE (2) < a < SHADER_ALPHA_OPAQUE_BYTE (250)`. Real glass is
+unaffected — the Studio door value is 87/255, and a disk scan of all 131 model
+atlases splits 74 fully opaque / 48 cutout-only (the broken class, now opaque) /
+9 genuinely translucent (`bong_01`, `rhino_pill`, `Lavalampsad`,
+`ACTUALLY_A_CAR`, `cd_mayhem`, `pillbottle_amphetamine`, `pillz`, `Model_5`,
+`dell` — all still routed transparent).
+
+The standing rule this leaves: **pushing a whole mesh through the transparent
+pass buys blending at the cost of self-occlusion.** Pay it only for texels that
+must blend, never for texels the shader is going to discard.
+
 ## Not yet covered
 
 - Paint SKINS (`paints/paint_N.blob`) painted at decimated quality still

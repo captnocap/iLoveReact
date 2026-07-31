@@ -220,10 +220,12 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
     // an independent node for the hinge animation.
     if (mesh.door == null and (mesh.slots.len == 0 or r.mats.len == 0)) {
         const override: ?[]const u8 = if (r.mats.len > 0 and r.mats[0] != 0) self.live_mat_keys.get(r.mats[0]) else null;
-        // A facade (and any other painted resident mesh) bakes its untouched
-        // texels as alpha-zero. Keep its draw out of the opaque depth-writing
-        // pass so those holes reveal the wall face underneath; the shared mesh
-        // shader discards the empty texels and blends the painted ones.
+        // A painted resident mesh carrying GENUINELY TRANSLUCENT texels keeps its
+        // draw out of the opaque depth-writing pass, so it blends over the world
+        // behind it instead of hiding it. The alpha-zero gutters every painted
+        // atlas bakes are NOT that (req_3562): the shared mesh shader discards
+        // them, which already writes no depth, and staying opaque is what lets
+        // the mesh's own triangles occlude each other.
         const textured_alpha_route = alpha == null and override == null and
             live_mesh_doors.routeTexturedMeshTransparent(mesh.texture_has_translucency);
         const node_alpha = if (textured_alpha_route) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else alpha;
