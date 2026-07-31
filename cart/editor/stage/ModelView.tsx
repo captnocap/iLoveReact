@@ -156,7 +156,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -255,6 +255,7 @@ export type ModelToolApi = {
   pathEdges: () => void;
   focus: () => void;
   wire: () => void;
+  xray: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
   camLock: () => void;
   // View bookmarks (req_3067/req_3074): pin the current orbit pose; camRecall (the H
@@ -483,6 +484,7 @@ type QuadifyPlan = TopoResult & {
 };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
+const meshSetXray = (on: boolean) => host.__mesh_edit_xray?.(on ? 1 : 0);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
 const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
 // Symmetry trust layer (studio req_1190-1192 ported, req_2831): the live off-count badge
@@ -527,7 +529,7 @@ type DocTwig = { docId: string; key: string };
 // __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
 export type CamBookmark = { name: string; pose: number[] };
 type ToolTwig = {
-  wire: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
+  wire: boolean; xray: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -736,6 +738,7 @@ const readGuard = (): GuardInfo | null => {
 const resolveGuard = (action: number) => host.__mesh_edit_guard_resolve?.(action);
 const SEL_MODES = ['Object', 'Vertex', 'Edge', 'Face'];
 const GIZMO_TOOLS = ['Move', 'Scale', 'Rotate'];
+const MODEL_EDIT_PRESENTATION = Object.freeze({ xrayOpacity: 0.28 });
 // Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
 // and return the new {key,count}, or null. The host re-meshes from the retained full-res
 // source — nothing but the key + count crosses the bridge.
@@ -876,6 +879,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
+  const [xray, setXray] = useState(toolTwig?.xray ?? false);
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
@@ -2261,8 +2265,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, xray, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, xray, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -2321,6 +2325,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // the next viewer would boot with every selection door inert.
     return () => { if (paintMode) host.__mesh_paint_session?.(0); };
   }, [paintMode]);
+  // Surface is the safe default for all element modes. X-Ray is explicit view state:
+  // it changes both the host's target visibility and this viewer's mesh presentation.
+  useEffect(() => {
+    meshSetXray(xray);
+    return () => { if (xray) meshSetXray(false); };
+  }, [xray]);
   // NOTE: the host CARRIES the paint density across mesh adopts (edits and fresh loads
   // rebuild the island atlas at the last-chosen density), so the JS mirror deliberately
   // survives model key changes too — no reset-to-1 here.
@@ -2384,6 +2394,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     pathEdges: togglePathEdges,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
+    xray: () => setXray((v) => !v),
     camLock: toggleCamLock,
     camStore: camStoreView,
     camRecall: camRecallView,
@@ -2598,8 +2609,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xray, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -3428,7 +3439,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         )) : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
-        {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
+        {model && (
+          <Scene3D.Mesh
+            hostKey={model.key}
+            material={xray && selMode !== 0
+              ? { color: '#ffffff', opacity: MODEL_EDIT_PRESENTATION.xrayOpacity }
+              : '#ffffff'}
+          />
+        )}
         {/* Reference backdrops (req_2758): translucent trace planes. White material so the
             picture (sampled via textureKey) reads true; alpha<1 routes them through the
             back-to-front transparent pass. The quad is centered at origin and PLACED via
@@ -3745,6 +3763,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           {selMode !== 0 && (
             <>
               <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+              <Pressable
+                onPress={() => setXray((value) => !value)}
+                tooltip={xray
+                  ? 'X-Ray: show and target elements through the model; click for Surface mode'
+                  : 'Surface: hide and protect back-side elements; click for X-Ray'}
+                style={{
+                  paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                  backgroundColor: xray ? '#5a3826ee' : '#203a2fee',
+                  borderWidth: 1, borderColor: xray ? '#bc7448' : '#3d765c',
+                }}
+              >
+                <Text style={{ color: xray ? '#ffe4d2' : '#ddf5e8', fontSize: 12, fontWeight: 600 }}>
+                  {xray ? 'X-Ray' : 'Surface'}
+                </Text>
+              </Pressable>
               {GIZMO_TOOLS.map((label, t) => {
                 const active = gizmoTool === t;
                 const key = t === 0 ? 'G' : t === 1 ? 'S' : 'R';

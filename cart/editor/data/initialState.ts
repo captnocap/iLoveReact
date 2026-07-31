@@ -84,7 +84,7 @@ export const INITIAL_OBJECTS: WorldObject[] = [
 // hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
 // per call (defaultPalette()) keeps the recents ring from being shared across resets.
 export function defaultModelTool(): ModelToolSnapshot {
-  return { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, focus: false, wire: false, camLock: false, camSaved: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
+  return { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, focus: false, wire: false, xray: false, camLock: false, camSaved: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
 }
 
 export function initialState(): EditorState {

@@ -805,6 +805,14 @@ fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     state.markDirty();
 }
 
+/// __mesh_edit_xray(on) — choose whether edit handles/selection pass through the model.
+/// Surface mode (0) is the default; X-Ray (nonzero) is an explicit authoring view.
+fn hostMeshEditXray(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.meshEditSetXray((argToI32(info, 0) orelse 0) != 0);
+    state.markDirty();
+}
+
 /// __mesh_edit_mirror(mask) — live mirror editing (req_2758): enable the X/Y/Z symmetry
 /// planes (bit 0 = X, 1 = Y, 2 = Z). While a plane is on, every selection transform
 /// (gizmo drag / nudge) also lands, reflected around that outliner part's local center,
@@ -4097,6 +4105,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
+    v8_runtime.registerHostFn("__mesh_edit_xray", hostMeshEditXray);
     v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);

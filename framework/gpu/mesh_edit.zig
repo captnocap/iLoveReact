@@ -359,6 +359,13 @@ var g_tint_suspend: u32 = 0;
 var g_snap: ?[]bool = null;
 var g_snap_mode: Mode = .none;
 
+// Element visibility is editor VIEW state, never mesh data. Surface mode is the
+// safe default; X-Ray deliberately restores through-model handles and targeting.
+// Camera masks are derived in O(faces + edges), avoiding one raycast per marker.
+var g_xray: bool = false;
+var g_camera_visible_vert: ?[]bool = null;
+var g_camera_visible_edge: ?[]bool = null;
+
 // ── Read accessors for the overlay renderer (3d.zig owns the GPU/capsule emit; this module
 // stays GPU-free so its topology/selection logic is unit-testable without wgpu). ──────────
 /// Build the welded topology if needed (so entering vertex/edge mode shows dots immediately).
@@ -382,6 +389,94 @@ pub fn edgeEndpointsPub(e: u32) [2]u32 {
 pub fn edgeSelectedPub(e: u32) bool {
     const s = g_sel_edge orelse return false;
     return e < s.len and s[e];
+}
+
+pub fn setXray(on: bool) void {
+    g_xray = on;
+}
+
+pub fn xray() bool {
+    return g_xray;
+}
+
+fn faceCameraFacing(cam: model_paint.Camera, face: u32) bool {
+    const positions = model_paint.positions() orelse return false;
+    const base = @as(usize, face) * 9;
+    if (base + 8 >= positions.len) return false;
+    const a = [3]f32{ positions[base], positions[base + 1], positions[base + 2] };
+    const b = [3]f32{ positions[base + 3], positions[base + 4], positions[base + 5] };
+    const c = [3]f32{ positions[base + 6], positions[base + 7], positions[base + 8] };
+    const ab = [3]f32{ b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+    const ac = [3]f32{ c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+    const normal = [3]f32{
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    };
+    const center = [3]f32{
+        (a[0] + b[0] + c[0]) / 3.0,
+        (a[1] + b[1] + c[1]) / 3.0,
+        (a[2] + b[2] + c[2]) / 3.0,
+    };
+    const to_eye = [3]f32{ cam.eye[0] - center[0], cam.eye[1] - center[1], cam.eye[2] - center[2] };
+    return normal[0] * to_eye[0] + normal[1] * to_eye[1] + normal[2] * to_eye[2] > 0.0;
+}
+
+/// Refresh the camera-derived vertex/edge target masks. Overlay presentation,
+/// click candidates, and marquee selection all consume this one boundary.
+pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
+    if (!ensureTopology()) return false;
+    if (g_camera_visible_vert == null or g_camera_visible_vert.?.len != g_vert_count) {
+        if (g_camera_visible_vert) |mask| alloc.free(mask);
+        g_camera_visible_vert = alloc.alloc(bool, g_vert_count) catch return false;
+    }
+    if (g_camera_visible_edge == null or g_camera_visible_edge.?.len != g_edge_count) {
+        if (g_camera_visible_edge) |mask| alloc.free(mask);
+        g_camera_visible_edge = alloc.alloc(bool, g_edge_count) catch return false;
+    }
+    const visible_vertices = g_camera_visible_vert.?;
+    const visible_edges = g_camera_visible_edge.?;
+    @memset(visible_vertices, false);
+    @memset(visible_edges, false);
+    if (g_xray) {
+        @memset(visible_vertices, true);
+        @memset(visible_edges, true);
+        return true;
+    }
+
+    const corners = g_corner_vert orelse return false;
+    const face_count = model_paint.faceCount();
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (!faceInScope(face) or !faceCameraFacing(cam, face)) continue;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const vertex = corners[face * 3 + corner];
+            if (vertex < visible_vertices.len) visible_vertices[vertex] = true;
+        }
+    }
+    const edges = g_edges orelse return false;
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        // A Pen Edges wire has no surface normal; the wire is the authored object.
+        visible_edges[edge] = edgeIsWirePub(edge) or
+            (a < visible_vertices.len and b < visible_vertices.len and visible_vertices[a] and visible_vertices[b]);
+    }
+    return true;
+}
+
+pub fn vertexCameraVisiblePub(vertex: u32) bool {
+    if (g_xray) return true;
+    const visible = g_camera_visible_vert orelse return false;
+    return vertex < visible.len and visible[vertex];
+}
+
+pub fn edgeCameraVisiblePub(edge: u32) bool {
+    if (g_xray) return true;
+    const visible = g_camera_visible_edge orelse return false;
+    return edge < visible.len and visible[edge];
 }
 /// Whether a displayed triangle belongs to the active authored-face selection.
 /// UV authoring reads this same set so the 3D and 2D views never invent parallel
@@ -934,6 +1029,8 @@ pub fn reset() void {
     if (g_edge_wire) |w| alloc.free(w);
     if (g_scope_vert) |s| alloc.free(s);
     if (g_scope_edge) |s| alloc.free(s);
+    if (g_camera_visible_vert) |s| alloc.free(s);
+    if (g_camera_visible_edge) |s| alloc.free(s);
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
@@ -953,6 +1050,8 @@ pub fn reset() void {
     g_edge_wire = null;
     g_scope_vert = null;
     g_scope_edge = null;
+    g_camera_visible_vert = null;
+    g_camera_visible_edge = null;
     g_scope_built = 0;
     g_affect_vert = null;
     g_sel_vert = null;
@@ -2392,6 +2491,7 @@ pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, add
     // paint. Vertex/edge modes build (once) the welded topology they project against.
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
+    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam);
 
     var hit: i32 = switch (g_mode) {
         .face => model_paint.pick(cam, vp_w, vp_h, mx, my),
@@ -2466,6 +2566,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
     if (g_mode == .none) return -1;
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
+    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam);
     const minx = @min(x0, x1);
     const maxx = @max(x0, x1);
     const miny = @min(y0, y1);
@@ -2487,6 +2588,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             var f: u32 = 0;
             while (f < n) : (f += 1) {
                 if (!faceInScope(f)) continue; // outside the focused part
+                if (!g_xray and !faceCameraFacing(cam, f)) continue;
                 const b = f * 9;
                 const c: [3]f32 = .{
                     (pos[b + 0] + pos[b + 3] + pos[b + 6]) / 3.0,
@@ -2520,6 +2622,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             var i: u32 = 0;
             while (i < g_vert_count) : (i += 1) {
                 if (!vertInScopePub(i)) continue; // outside the focused part
+                if (!vertexCameraVisiblePub(i)) continue;
                 if (inRect(model_paint.project(cam, vp_w, vp_h, vertPos(i)), minx, maxx, miny, maxy)) set[i] = true;
             }
         },
@@ -2529,6 +2632,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             while (e < g_edge_count) : (e += 1) {
                 if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges
                 if (!edgeInScopePub(e)) continue; // outside the focused part
+                if (!edgeCameraVisiblePub(e)) continue;
                 const a = vertPos(edges[e * 2 + 0]);
                 const b = vertPos(edges[e * 2 + 1]);
                 const mid: [3]f32 = .{ (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5 };
@@ -2547,13 +2651,14 @@ fn pickVertex(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
         if (!vertInScopePub(i)) continue; // outside the focused part
+        if (!vertexCameraVisiblePub(i)) continue;
         const sp = model_paint.project(cam, vp_w, vp_h, vertPos(i)) orelse continue;
         const dx = sp[0] - mx;
         const dy = sp[1] - my;
         const d2 = dx * dx + dy * dy;
-        // The vertex dot is overlay geometry drawn on top of the mesh, so click picking
-        // follows that visible handle instead of depth-rejecting through another part.
-        if (d2 < best_d2) {
+        // Surface mode confirms the candidate is not behind another rendered part;
+        // X-Ray deliberately follows the through-model overlay handle instead.
+        if (d2 < best_d2 and (g_xray or !model_paint.occluded(cam, vertPos(i)))) {
             best_d2 = d2;
             best = @intCast(i);
         }
@@ -2569,12 +2674,14 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
     while (e < g_edge_count) : (e += 1) {
         if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges — not pickable
         if (!edgeInScopePub(e)) continue; // outside the focused part
+        if (!edgeCameraVisiblePub(e)) continue;
         const va = vertPos(edges[e * 2 + 0]);
         const vb = vertPos(edges[e * 2 + 1]);
         const a = model_paint.project(cam, vp_w, vp_h, va) orelse continue;
         const b = model_paint.project(cam, vp_w, vp_h, vb) orelse continue;
         const d2 = segDist2(mx, my, a[0], a[1], b[0], b[1]);
-        if (d2 < best_d2) {
+        const midpoint = [3]f32{ (va[0] + vb[0]) * 0.5, (va[1] + vb[1]) * 0.5, (va[2] + vb[2]) * 0.5 };
+        if (d2 < best_d2 and (g_xray or !model_paint.occluded(cam, midpoint))) {
             best_d2 = d2;
             best = @intCast(e);
         }
@@ -2819,9 +2926,10 @@ test "vertex pick selects the nearest welded corner; face selection leaves atlas
     try testing.expectEqual(base0[2], restored[2]);
 }
 
-test "vertex and edge picks follow overlay handles through an occluding part" {
-    // Back/scoped triangle is hidden behind a front triangle from the camera's ray, but
-    // its overlay dots/edges are drawn on top and must remain clickable.
+test "surface mode rejects occluded element handles and xray deliberately restores them" {
+    // Back/scoped triangle is hidden behind a front triangle from the camera's ray.
+    // Surface mode must not let that unrelated part steal a click; X-Ray is the explicit
+    // opt-in for reaching through the front surface.
     var verts = [_]f32{
         // scoped back part, group 0
         0.00,  0.00, -1.0, 0, 0, 1, 0, 0,
@@ -2837,6 +2945,7 @@ test "vertex and edge picks follow overlay handles through an occluding part" {
     model_source.setPartRanges(&[_]u32{ 0, 1, 1, 2 });
     setEditScope(0, 1);
     defer {
+        setXray(false);
         setEditScope(0, 0);
         reset();
         model_paint.clear();
@@ -2850,6 +2959,12 @@ test "vertex and edge picks follow overlay handles through an occluding part" {
     try testing.expect(ensureTopology());
     setMode(.vertex);
     const sp = model_paint.project(cam, 800, 600, hidden_vert).?;
+    setXray(false);
+    try testing.expectEqual(@as(i32, 0), pick(cam, 800, 600, sp[0], sp[1], false));
+    try testing.expect(refreshCameraVisibility(cam));
+    try testing.expect(vertexCameraVisiblePub(0)); // camera-facing, but exactly occluded by the other part
+
+    setXray(true);
     try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, sp[0], sp[1], false));
     const pivot = selectionPivot().?;
     try testing.expectApproxEqAbs(@as(f32, -1), pivot[2], 1e-4);
@@ -2859,6 +2974,9 @@ test "vertex and edge picks follow overlay handles through an occluding part" {
     const hidden_edge_mid = [3]f32{ 0.125, 0.10, -1 };
     try testing.expect(model_paint.occluded(cam, hidden_edge_mid));
     const ep = model_paint.project(cam, 800, 600, hidden_edge_mid).?;
+    setXray(false);
+    try testing.expectEqual(@as(i32, 0), pick(cam, 800, 600, ep[0], ep[1], false));
+    setXray(true);
     try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, ep[0], ep[1], false));
     try testing.expectEqual(@as(u32, 1), selectedEdgeCountPub());
 }

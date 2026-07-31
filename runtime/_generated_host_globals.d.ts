@@ -32,6 +32,7 @@ declare global {
   function __model_session_json(...args: unknown[]): unknown;
   function __model_focus_at(...args: unknown[]): unknown;
   function __mesh_edit_mode(...args: unknown[]): unknown;
+  function __mesh_edit_xray(...args: unknown[]): unknown;
   function __mesh_edit_mirror(...args: unknown[]): unknown;
   function __mesh_edit_pick(...args: unknown[]): unknown;
   function __mesh_edit_clear(...args: unknown[]): unknown;
@@ -135,6 +136,7 @@ declare global {
   function __model_uv_project_view(...args: unknown[]): unknown;
   function __model_uv_selection_read(...args: unknown[]): unknown;
   function __model_uv_island_select(...args: unknown[]): unknown;
+  function __model_uv_islands_select(...args: unknown[]): unknown;
   function __model_atlas_replace(...args: unknown[]): unknown;
   function __model_atlas_import(...args: unknown[]): unknown;
   function __model_atlas_resize(...args: unknown[]): unknown;

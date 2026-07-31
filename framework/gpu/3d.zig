@@ -6056,6 +6056,14 @@ pub fn meshEditSetMode(m: u8) void {
         else => .none,
     });
 }
+/// Surface (false) is the safe modeling default; X-Ray (true) deliberately exposes
+/// back-side element overlays and through-model selection.
+pub fn meshEditSetXray(on: bool) void {
+    mesh_edit.setXray(on);
+}
+pub fn meshEditXray() bool {
+    return mesh_edit.xray();
+}
 /// Live mirror editing (req_2758): enable/disable the X/Y/Z symmetry planes (bit 0/1/2).
 pub fn meshEditSetMirror(mask: u8) void {
     mesh_edit.setMirrorMask(mask);
@@ -7202,7 +7210,7 @@ fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
         const n = vcross(vsub(p1, p0), vsub(p2, p0));
         const cen = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
-        if (vdot(n, vsub(cam.eye, cen)) <= 0) continue; // back-facing
+        if (!mesh_edit.xray() and vdot(n, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
         const a = ovProject(cam, p0, ox, oy) orelse continue;
         const bb = ovProject(cam, p1, ox, oy) orelse continue;
         const cc = ovProject(cam, p2, ox, oy) orelse continue;
@@ -7237,7 +7245,7 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const grp = model_source.faceGroupOf(f);
         if (grp == model_source.NO_FACE_GROUP) {
             // Ungrouped soup: a dot per front-facing triangle.
-            if (vdot(n, vsub(cam.eye, cen)) <= 0) continue;
+            if (!mesh_edit.xray() and vdot(n, vsub(cam.eye, cen)) <= 0) continue;
             const sp = ovProject(cam, cen, ox, oy) orelse continue;
             drawFaceSemanticDot(sp[0], sp[1], selected, glass);
             continue;
@@ -7257,7 +7265,7 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const acc = entry.value_ptr.*;
         if (acc.w <= 1e-12) continue;
         const cen = vmul(acc.cen, 1.0 / acc.w);
-        if (vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing face
+        if (!mesh_edit.xray() and vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
         const sp = ovProject(cam, cen, ox, oy) orelse continue;
         drawFaceSemanticDot(sp[0], sp[1], acc.sel, acc.glass);
     }
@@ -7345,13 +7353,15 @@ fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
     while (e < n) : (e += 1) {
         if (!mesh_edit.edgeIsBoundaryPub(e)) continue;
         if (!mesh_edit.edgeInScopePub(e)) continue; // only the focused part's edges
+        const selected = mode == 2 and mesh_edit.edgeSelectedPub(e);
+        if (!selected and !mesh_edit.edgeCameraVisiblePub(e)) continue;
         const ep = mesh_edit.edgeEndpointsPub(e);
         const wa = mesh_edit.vertPosPub(ep[0]);
         const wb = mesh_edit.vertPosPub(ep[1]);
         const a = ovProject(cam, wa, ox, oy) orelse continue;
         const b = ovProject(cam, wb, ox, oy) orelse continue;
         // In edge mode a selected boundary edge draws bold-orange over the dim base.
-        if (mode == 2 and mesh_edit.edgeSelectedPub(e)) {
+        if (selected) {
             overlayLine(a[0], a[1], b[0], b[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
             continue;
         }
@@ -7650,7 +7660,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     if (mode == 3) drawFaceTintOverlay(cam, ox, oy);
     overlayLayerBreak(ox, oy);
     // Layer 4 (capsules): edges, dots, loop-cut accents, gizmo, marquee.
-    if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.ensureTopologyPub()) {
+    if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam)) {
         drawEdgeOverlay(cam, mode, ox, oy);
     } else if (mode == 0 and !g_paint_session and mesh_edit.ensureTopologyPub()) {
         // Plain view: only the naked Pen Edges wires — they have no faces to rasterize,
@@ -7678,6 +7688,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         while (i < n) : (i += 1) {
             if (!mesh_edit.vertInScopePub(i)) continue; // only the focused part's verts
             const selected = mesh_edit.vertSelectedPub(i);
+            if (!selected and !mesh_edit.vertexCameraVisiblePub(i)) continue;
             if (!selected and !draw_all) continue;
             const p = mesh_edit.vertPosPub(i);
             const sp = ovProject(cam, p, ox, oy) orelse continue;

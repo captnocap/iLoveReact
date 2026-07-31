@@ -125,6 +125,10 @@
           "zig": "hostMeshEditMode"
         },
         {
+          "js": "__mesh_edit_xray",
+          "zig": "hostMeshEditXray"
+        },
+        {
           "js": "__mesh_edit_mirror",
           "zig": "hostMeshEditMirror"
         },
@@ -537,12 +541,24 @@
           "zig": "hostModelUvIslandSelect"
         },
         {
+          "js": "__model_uv_islands_select",
+          "zig": "hostModelUvIslandsSelect"
+        },
+        {
           "js": "__model_atlas_replace",
           "zig": "hostModelAtlasReplace"
         },
         {
           "js": "__model_atlas_import",
           "zig": "hostModelAtlasImport"
+        },
+        {
+          "js": "__model_atlas_resize",
+          "zig": "hostModelAtlasResize"
+        },
+        {
+          "js": "__model_atlas_workspace_apply",
+          "zig": "hostModelAtlasWorkspaceApply"
         },
         {
           "js": "__model_paint_sample",
