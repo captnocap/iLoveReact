@@ -1,0 +1,30 @@
+{
+  "id": "req_3561",
+  "at": "2026-07-31T19:10:47.241Z",
+  "origin": "codex:019fb940",
+  "text": "it turns on xray at a random time, and then also then turning on paint makes the model invisible [Image #1]",
+  "status": "review",
+  "sessionId": "019fb940-d512-7f91-b5f4-fb3daf1e6324",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-31T19:10:55.185Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-31T19:27:39.798Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stopped X-Ray from activating unexpectedly by removing it from hot-reload persistence and pointer-device tool replay, including a gate that rejects stale saved device slots. Centralized mesh presentation now permits transparency only in active vertex, edge, or face editing, so entering Paint or Object mode immediately restores the normal opaque model and clears the dormant X-Ray request.",
+  "shas": [
+    "fc001dc3f"
+  ],
+  "resolvedAt": "2026-07-31T19:27:39.798Z"
+}
