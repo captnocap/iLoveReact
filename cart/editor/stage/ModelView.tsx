@@ -84,7 +84,7 @@ import {
 } from '../data/uvTextureWorkspaceStore';
 import { rasterizeUvWireframe } from '../model/uvWireframe';
 import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
-import { triangleWireframeVisible } from '../model/viewportPresentation';
+import { meshEditXrayActive, triangleWireframeVisible } from '../model/viewportPresentation';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
   UV_ATLAS_IMPORT_LABEL,
@@ -529,7 +529,7 @@ type DocTwig = { docId: string; key: string };
 // __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
 export type CamBookmark = { name: string; pose: number[] };
 type ToolTwig = {
-  wire: boolean; xray: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
+  wire: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -879,7 +879,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
-  const [xray, setXray] = useState(toolTwig?.xray ?? false);
+  // Session-local and edit-mode-only. Persisting this view toggle made a remount or
+  // document switch appear to turn X-Ray on by itself.
+  const [xray, setXray] = useState(false);
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
@@ -1400,6 +1402,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
   const chooseSelMode = (m: number) => {
+    if (m === 0) setXray(false);
     setSelMode(m);
     setPaintMode(false);
     setPathPlaneMode(false);
@@ -2059,6 +2062,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const refreshUvIfLive = () => { if (paintMode) buildUvPanel(); };
 
   const enterPaint = () => {
+    setXray(false);
     setPathPlaneMode(false);
     setPathEdgesMode(false);
     setFocusMode(false);
@@ -2265,8 +2269,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, xray, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, xray, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -2325,12 +2329,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // the next viewer would boot with every selection door inert.
     return () => { if (paintMode) host.__mesh_paint_session?.(0); };
   }, [paintMode]);
-  // Surface is the safe default for all element modes. X-Ray is explicit view state:
-  // it changes both the host's target visibility and this viewer's mesh presentation.
+  // Surface is the safe default. X-Ray is active only while an element-edit mode owns
+  // the viewport; Paint and View synchronously recover the opaque resident material.
+  const xrayActive = meshEditXrayActive(xray, selMode, paintMode);
   useEffect(() => {
-    meshSetXray(xray);
-    return () => { if (xray) meshSetXray(false); };
-  }, [xray]);
+    meshSetXray(xrayActive);
+    return () => { meshSetXray(false); };
+  }, [xrayActive]);
+  // Covers native/headless paint entry and host-driven returns to Object mode, not only
+  // the toolbar's enterPaint door. The derived presentation above is already safe in
+  // this render; this clears the dormant request so it cannot revive later.
+  useEffect(() => {
+    if (xray && !xrayActive) setXray(false);
+  }, [xray, xrayActive]);
   // NOTE: the host CARRIES the paint density across mesh adopts (edits and fresh loads
   // rebuild the island atlas at the last-chosen density), so the JS mirror deliberately
   // survives model key changes too — no reset-to-1 here.
@@ -2394,7 +2405,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     pathEdges: togglePathEdges,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
-    xray: () => setXray((v) => !v),
+    xray: () => {
+      if (selMode === 0 || paintMode) {
+        setXray(false);
+        return;
+      }
+      setXray((v) => !v);
+    },
     camLock: toggleCamLock,
     camStore: camStoreView,
     camRecall: camRecallView,
@@ -2609,8 +2626,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xray, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -3442,7 +3459,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         {model && (
           <Scene3D.Mesh
             hostKey={model.key}
-            material={xray && selMode !== 0
+            material={xrayActive
               ? { color: '#ffffff', opacity: MODEL_EDIT_PRESENTATION.xrayOpacity }
               : '#ffffff'}
           />
@@ -3765,17 +3782,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
               <Pressable
                 onPress={() => setXray((value) => !value)}
-                tooltip={xray
+                tooltip={xrayActive
                   ? 'X-Ray: show and target elements through the model; click for Surface mode'
                   : 'Surface: hide and protect back-side elements; click for X-Ray'}
                 style={{
                   paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
-                  backgroundColor: xray ? '#5a3826ee' : '#203a2fee',
-                  borderWidth: 1, borderColor: xray ? '#bc7448' : '#3d765c',
+                  backgroundColor: xrayActive ? '#5a3826ee' : '#203a2fee',
+                  borderWidth: 1, borderColor: xrayActive ? '#bc7448' : '#3d765c',
                 }}
               >
-                <Text style={{ color: xray ? '#ffe4d2' : '#ddf5e8', fontSize: 12, fontWeight: 600 }}>
-                  {xray ? 'X-Ray' : 'Surface'}
+                <Text style={{ color: xrayActive ? '#ffe4d2' : '#ddf5e8', fontSize: 12, fontWeight: 600 }}>
+                  {xrayActive ? 'X-Ray' : 'Surface'}
                 </Text>
               </Pressable>
               {GIZMO_TOOLS.map((label, t) => {

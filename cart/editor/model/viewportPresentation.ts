@@ -9,3 +9,8 @@
 export function triangleWireframeVisible(requested: boolean, selectionMode: number): boolean {
   return requested && selectionMode === 0;
 }
+
+/** X-Ray belongs only to active element editing; Paint and View always render opaque. */
+export function meshEditXrayActive(requested: boolean, selectionMode: number, paintMode: boolean): boolean {
+  return requested && selectionMode >= 1 && selectionMode <= 3 && !paintMode;
+}

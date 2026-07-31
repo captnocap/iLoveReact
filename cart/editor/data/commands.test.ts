@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  COMMANDS, MENUS, commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  COMMANDS, MENUS, commandById, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   menuDropdownLeft, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -127,6 +127,12 @@ test('model context menu folds stable tool families without hiding a command', (
     ...layout.directPartCommands,
   ]).sort().join('|');
   assert(presented === expected, `context layout lost or duplicated commands: ${presented}`);
+});
+
+test('X-Ray is not replayed as remembered pointer-device input state', () => {
+  assert(commandById('mesh-xray').tool !== true, 'X-Ray was registered as a replayable input tool');
+  assert(!deviceToolReplayable('mesh-xray', 'model'), 'a stale device slot can still replay X-Ray');
+  assert(deviceToolReplayable('mesh-face', 'model'), 'the device gate rejected a real model input tool');
 });
 
 test('model context mirror group omits part actions without a focused part', () => {

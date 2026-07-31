@@ -82,7 +82,7 @@ import MapTexturePicker from '../stage/MapTexturePicker';
 import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
-import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -4755,8 +4755,9 @@ export default function AppFrame() {
     if (surface !== 'world' && surface !== 'model') return;
     const remembered = s.deviceTools[surface]?.[dev];
     if (!remembered || remembered === lastToolByScopeRef.current[surface]) return;
-    // A slot persisted across a code update may name a removed command.
-    if (!commandById(remembered)) return;
+    // A slot persisted across a code update may name a removed command or a view
+    // toggle that is no longer classified as an input tool. Neither is replayable.
+    if (!deviceToolReplayable(remembered, surface)) return;
     if (surface === 'world' && s.activeCommandId === remembered) return;
     runCommandRef.current(remembered, 'device');
   }), []);

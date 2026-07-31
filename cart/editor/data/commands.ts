@@ -234,7 +234,8 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-path-edges', menu: 'Edit', scope: 'model', name: 'Pen Edges', icon: 'Spline', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
-  { id: 'mesh-xray', menu: 'Edit', scope: 'model', name: 'X-Ray Elements', icon: 'Eye', key: '', context: false, native: true, undoable: false, tool: true },
+  // Presentation toggle, not an input tool: device switching must never replay it.
+  { id: 'mesh-xray', menu: 'Edit', scope: 'model', name: 'X-Ray Elements', icon: 'Eye', key: '', context: false, native: true, undoable: false },
   // Camera lock (req_2893): freeze the orbit view where the user set it — every camera
   // motion (drag/zoom/pan/double-click focus/compass snap) no-ops host-side while on.
   { id: 'mesh-cam-lock', menu: 'Edit', scope: 'model', name: 'Lock Camera', icon: 'Lock', key: 'K', context: false, native: true, undoable: false, tool: true },
@@ -585,6 +586,12 @@ export function meshPaintCommands(tool: { paint: boolean }): Command[] {
 
 export function isMeshToolCommand(id: string): boolean {
   return commandById(id).scope === 'model';
+}
+
+/** Validate persisted per-device slots before replaying them into an input surface. */
+export function deviceToolReplayable(id: string, scope: 'world' | 'model'): boolean {
+  const command = COMMANDS.find((candidate) => candidate.id === id);
+  return command?.tool === true && command.scope === scope;
 }
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
