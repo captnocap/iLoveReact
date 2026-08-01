@@ -5,93 +5,286 @@ description: Drive the running ReactJIT studio model editor through its live Age
 
 # Agent Seat
 
-Model with the editor's resident tools; never emit vertex arrays or replace the mesh with generated code. Treat every successful reply's `percept` as the new source of truth.
+Model with the editor's resident tools; never emit vertex arrays or replace the mesh
+with generated code. Treat every successful reply's `percept` as the new source of truth.
+
+**This document is the complete capability surface. Everything the seat can do is listed
+here, and everything it cannot do is listed under "What the seat cannot do" with the
+resident code that would implement it. Do not go grepping the editor to find out whether
+a verb exists — if it is not in the verb table below, it is not reachable from the seat.**
+
+Source of truth for this file: `cart/editor/agent/seatApi.ts` (the API),
+`tools/seat` (the CLI adapter), `cart/editor/stage/ModelView.tsx:2598` (the live handler).
+
+---
+
+## Scale contract — READ THIS BEFORE PICKING ANY NUMBER
+
+**1 unit = 1 meter.** This is ruled (`tools/oracle "scale contract"` → R4): 1 tile = 1 meter,
+player collider 1.65 m, visual head-top ~2.04 m.
+
+The seat bootstraps a **1×1×1 cube** — that is a **1 meter** cube, already the size of a
+washing machine. The "unit cube" framing is a trap: block out in meters from the first
+operation, because a model built at unit-cube scale lands ~4× oversized and nothing in the
+percept will warn you.
+
+| Object | Realistic size (w × h × d, meters) |
+|---|---|
+| Tabletop radio | 0.35 × 0.22 × 0.15 |
+| Console/floor radio cabinet | 1.1 × 1.0 × 0.45 |
+| Chair seat height | 0.45 |
+| Table / desk height | 0.75 |
+| Door | 0.9 × 2.0 |
+| Player collider | 1.65 tall |
+
+Sanity check before you start: *would this object fit next to a 1.65 m person?* State the
+target dimensions in meters in your first message, then scale the bootstrap cube to them.
+
+The bootstrap cube is `x[-0.5,0.5] y[0,1] z[-0.5,0.5]` — centred in x/z, **sitting on
+y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
+
+---
 
 ## Loop
 
 1. Ensure the user has the target model open under `./tools/rjit dev editor`.
 2. Run `tools/seat look` before editing.
-3. Select a durable name whenever one exists. Use a geometric selector only for the first reach or a deliberate spatial query.
+3. Select a durable name whenever one exists. Use a geometric selector only for the first
+   reach or a deliberate spatial query.
 4. Make one coherent structural change, inspect the returned percept, then continue.
-5. Use a named operation for every face-creating change. Rewind with `tools/seat undo` as soon as a result diverges from the requested form.
+5. Use a named operation for every face-creating change. Rewind with `tools/seat undo` as
+   soon as a result diverges from the requested form.
 6. Report changes in terms of semantic names and dimensions, not face indices.
 
-For several already-decided operations, send one visible 100 ms-cadence batch:
+---
+
+## Verb table — the complete surface
+
+Ten actions. There are no others; `tools/seat <anything-else>` exits 2.
+
+| CLI | JSON `{action, args}` | Notes |
+|---|---|---|
+| `tools/seat look` | `{"action":"look"}` | Returns percept. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
+| `tools/seat name <name> [instance]` | `{"action":"name","args":{"name":"…","instance":0}}` | Names the current selection, role `authored`. |
+| `tools/seat extrude <dist> <name> [instance]` | `{"action":"extrude","args":{"distance":0.2,"name":"roof","instance":0}}` | Creates `<name>.cap` + `<name>.wall`. |
+| `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. |
+| `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":1.2}}` | Scales along one axis about a pivot. |
+| `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
+| `tools/seat undo` | `{"action":"undo"}` | |
+| `tools/seat redo` | `{"action":"redo"}` | |
+| `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
+
+Transforms act on **the current selection** — they take no selector. Always `select`
+first. All values are model-space; state the axis and pivot explicitly rather than relying
+on a screen gizmo's ambient frame.
+
+Transport: writes one NOTICE to `$RJIT_SOCKET` (default `/tmp/reactjit.sock`), then polls
+for `/tmp/reactjit-seat-<id>.json` every 25 ms, **timing out at 15 s**. Exit code is 0 on
+`ok:true`, 1 otherwise.
+
+---
+
+## Selector grammar — complete
+
+From `compileSeatSelector`. Anything not matching these returns `unknown selector`.
+
+| Selector | Meaning |
+|---|---|
+| `all` | Every face. Use this to transform the whole model. |
+| `<name>` or `region:<name>` | A named semantic region. **Checked before every pattern below.** |
+| `facing:+y` / `facing:-z@30` | Faces whose normal is within N degrees of an axis. **Default tolerance 15°.** |
+| `top` / `bottom` | Extremal face on ±y. |
+| `outermost:+x` / `outermost:-z` | Extremal face on the named axis. |
+| `above:y>1.4` / `below:y>1.4` | Faces above/below a threshold on an axis. |
+| `part:12..18` | Face-index range. Index-based — never durable memory. |
+| `inside:box(minx,miny,minz,maxx,maxy,maxz)` | Faces fully inside an AABB. Six finite numbers. |
+
+### Selector gotchas, all real
+
+- **Names shadow keywords.** Named-region lookup runs *before* the `top`/`bottom` checks,
+  and the cube bootstrap creates regions literally named `top`, `bottom`, `left`, `right`,
+  `front`, `back`. So `select top` resolves to the **named region**, not the extremal
+  query. They coincide on a fresh cube and silently diverge the moment you edit — after
+  raising a mast, extremal-top is the mast tip while the name `top` may not exist at all.
+- **The comparator in `above:`/`below:` is decorative.** `above:y>1.4` and `above:y<1.4`
+  compile identically; only the `above`/`below` prefix and the number are read.
+- **`inside:box` needs the face fully inside**, and coordinates are absolute. It is the
+  only way to isolate a sub-part of a multi-face region (e.g. the front quad of a
+  `*.wall` ring), but it is brittle: a bound tuned to exclude a neighbouring quad breaks
+  the moment either moves. Re-derive bounds from the live percept, never from memory.
+- **There are no compound selectors.** You cannot write `deck.wall & facing:-z`. Isolating
+  the front quad of a wall ring means hand-fitting an `inside:box` around it.
+- Geometric selectors return the real face count and bbox. Zero, or an unexpectedly broad
+  result, is a reason to stop and inspect — not to proceed.
+
+---
+
+## The percept
+
+Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
+
+```jsonc
+{ "version": 1,
+  "generation": 18,          // bump per topology change; used by the race guard
+  "faces": 132,              // total triangles
+  "unnamed": 0,              // naming debt
+  "regions": [ { "id": 0, "faces": 2, "instances": 1, "bbox": [minx,miny,minz,maxx,maxy,maxz] } ],
+  "table": { "version": 1, "regions": [ { "id": 0, "name": "right", "role": "+x", "parent": 3,
+                                          "createdBy": { "op": "extrude", "at": 1785607074856 } } ],
+             "nextRegionId": 6 } }
+```
+
+`regions[]` carries live geometry (face count + bbox per id); `table.regions[]` carries
+meaning (name, role, parent, provenance). Join them on `id`.
+
+**The reply is verbose and a batch embeds one full percept per row** — a 14-row batch
+returns 14 copies of everything. Pipe through a compact reader when driving long
+sessions. `formatSeatPercept()` is exported from `seatApi.ts` and renders exactly this
+digest, but **the CLI does not call it** — it prints raw JSON.
+
+Each extrude adds exactly **+8 faces** (2 cap faces become 2 new cap + 8 wall).
+
+---
+
+## Recipes
+
+### Inset — the two-stage move (there is no `inset` verb)
+
+**The trap:** extruding a face and then scaling its cap turns the *entire face* into a
+tapered pyramid, because the wall connects the original full perimeter straight to the
+shrunken cap. This is silent and looks plausible until rendered.
+
+**The fix** — extrude a hairline first, so the shrink happens across ~zero depth and the
+wall becomes a *flat ring* in the original plane. Then extrude again for real depth:
 
 ```bash
+# 1. flat inset ring: the panel stays flat, cap becomes the feature footprint
 tools/seat do '[
-  {"action":"select","args":{"selector":"body/front"}},
-  {"action":"extrude","args":{"distance":0.2,"name":"window"}},
-  {"action":"move","args":{"delta":[0,0.1,0]}}
+  {"action":"select","args":{"selector":"right"}},
+  {"action":"extrude","args":{"distance":0.001,"name":"rightPanel"}},
+  {"action":"select","args":{"selector":"rightPanel.cap"}},
+  {"action":"scale","args":{"axis":[0,1,0],"pivot":[0,0.475,0],"factor":0.27}},
+  {"action":"scale","args":{"axis":[0,0,1],"pivot":[0,0,0],"factor":0.47}},
+  {"action":"move","args":{"delta":[0,-0.055,-0.1]}}
+]'
+# 2. now pull the real feature — a crisp nub on a flat panel
+tools/seat do '[
+  {"action":"select","args":{"selector":"rightPanel.cap"}},
+  {"action":"extrude","args":{"distance":0.1,"name":"knob"}}
 ]'
 ```
 
-Stop on the first rejected row. Do not blindly retry a rejected batch.
+`rightPanel.wall` is the flat panel; `knob.wall` is the barrel. Name the pair for what the
+**wall** will mean, because the cap gets consumed (below).
 
-## Inspect and select
+A **recess** is the same shape inverted: inset ring, extrude hairline, then `move` the cap
+*into* the body. That yields crisp square-sided recesses; scaling a cap after a real
+extrude yields sloped/chamfered ones. Pick deliberately.
+
+### Pivot as placement
+
+Scaling a cap about an off-centre pivot collapses it *toward that point*. That is how you
+position a small feature on a large face — shrink to size about the face centre, then
+`move` to the target centre, or scale directly about the target.
+
+### One face yields one feature chain
+
+Nothing in the seat subdivides a face, so two side-by-side features on one flat face are
+**not reachable** — features nest concentrically instead. Work around it by *building* a
+new surface (extrude a raised sub-form, then use `inside:box` to isolate its front wall)
+and putting the second feature there. `__mesh_topo_loop_cut` would remove this limit
+entirely but is not exposed; see below.
+
+---
+
+## Naming rules
+
+- `extrude <dist> <name>` declares `<name>.cap` and `<name>.wall` in the same journal
+  transaction as the topology.
+- **Extruding a `.cap` consumes it.** Extruding `faceplate.cap` into `grille` makes
+  `faceplate.cap` disappear from the table; it becomes `grille.cap` + `grille.wall`. Only
+  `.wall` regions persist down a chain. Plan names so each `.wall` reads correctly on its
+  own, since that is what a cold agent will see.
+- Reusing an existing name returns the **existing region** rather than making a duplicate,
+  and sets it as the new pair's `parent`.
+- Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
+  (`DEFAULT_NAMING_DEBT_BUDGET`). Prefer naming everything; the budget is a backstop.
+- `name` assigns the current selection to a region with role `authored`.
+- The `instance` argument exists on `name`/`extrude` and the percept reports an
+  `instances` count per region, **but no verb duplicates geometry** — the seat cannot
+  create an instance. Do not plan around instancing.
+
+---
+
+## Batching
 
 ```bash
-tools/seat look
-tools/seat select 'window.rim'
-tools/seat select 'facing:+y@15'
-tools/seat select top
-tools/seat select bottom
-tools/seat select 'outermost:-x'
-tools/seat select 'above:y>1.4'
-tools/seat select 'inside:box(-1,0,-1,1,2,1)'
-tools/seat select 'part:12..18'
+tools/seat do '[{"action":"select","args":{"selector":"body/front"}},
+                {"action":"extrude","args":{"distance":0.2,"name":"window"}},
+                {"action":"move","args":{"delta":[0,0.1,0]}}]'
 ```
 
-Names are durable primary handles. Geometric selectors resolve against live topology and return the actual face count and bounding box; treat zero or unexpectedly broad results as a reason to stop and inspect.
+- Rows run at a deliberate **100 ms cadence** so the user can watch the model build.
+- **Hard ceiling ~140 rows**: 100 ms/row against the CLI's 15 s timeout.
+- Execution **stops at the first rejected row**; the reply carries every reply collected so
+  far and `ok:false`. Do not blindly retry a rejected batch — `look`, then re-plan.
+- Batch only *already-decided* operations. Anything whose parameters depend on the previous
+  result must be its own call.
 
-## Name and create
-
-Name the current selection:
-
-```bash
-tools/seat name body/front
-```
-
-Extrude the current face selection with declared output roles:
-
-```bash
-tools/seat extrude 0.35 parapet
-```
-
-This creates `parapet.cap` and `parapet.wall` semantic regions in the same journal transaction as the topology. Never omit the name. `as _` is represented by `_`, but anonymous creation is refused once naming debt exceeds eight faces.
-
-## Transform exactly
-
-All values are model-space. State the axis and pivot; do not rely on a screen gizmo's ambient frame.
-
-```bash
-tools/seat move 0 0.3 0
-tools/seat scale 1 0 0  0 0 0  1.2
-tools/seat rotate 0 1 0  0 0 0  15
-```
-
-The first three values for scale/rotate are an arbitrary axis vector, the next three are the explicit pivot, and the final value is factor/degrees.
+---
 
 ## Rewind and race safety
 
 ```bash
 tools/seat undo
 tools/seat redo
-```
-
-Every percept includes a mesh `generation`. For guarded work, export that generation before the next call:
-
-```bash
 RJIT_SEAT_GENERATION=42 tools/seat extrude 0.2 roof
 ```
 
-A request stamped with an older generation is rejected after a rewind or concurrent edit. Re-run `look`; never apply an old plan to the new mesh.
+The generation guard is checked **once, before the request runs** (and for a batch, once
+before the first row — not per row). A stale stamp is rejected with
+`stale generation N; live generation is M`. Re-run `look`; never apply an old plan to a new
+mesh.
+
+---
+
+## What the seat cannot do
+
+The editor underneath is far larger than the seat. The host declares **95 `__mesh_*`
+doors and the seat uses 11**; alongside them `cart/editor/model/editMesh.ts` is a ~2900-line
+modeling kernel. None of the following is reachable from the seat today. **Do not search for
+a way in — there isn't one. Tell the user what is missing and offer to build the verb.**
+
+| Want | Status | Resident implementation |
+|---|---|---|
+| Add a primitive (cylinder, sphere, cone…) | **No verb** | `editMesh.ts` → `cuboid, cylinder(r,h,segments), cone, pyramid, plane, sphere, icosphere, latticePanel, wheelMesh(r,w,sides,axle)`. Sides clamp **3..48**. Editor UI: outliner `+` / Edit → Add Primitive → `addPart()` (`AppFrame.tsx:1921`). |
+| Parts / outliner tree | **Not in the percept** | Percept is face-regions only. Native `__mesh_part_ranges`, `__mesh_set_part_ranges`, `__mesh_merge_parts`. |
+| Inset | **No verb** | Use the two-stage recipe above. |
+| Bevel / chamfer | **No verb** | `bevelEdge`, `bevelVertex`; native `__mesh_bevel_begin/preview/end`. Scaling a cap only *fakes* a chamfer. |
+| Loop cut / subdivide a face | **No verb** | `loopCut`, `loopCutFromFace`, `loopCutRange`; native `__mesh_topo_loop_cut`. |
+| Mirror / symmetry | **No verb** | `mirrorMesh`, `symmetrize`, `symmetryReport`, `mirrorEditAxes`; native `__mesh_edit_mirror`, `__mesh_symmetrize`. Mirrored features must be hand-computed. |
+| Edge or vertex selection | **No verb** | Selection is face-only. `extrudeEdge`, `connectVerts`, `bridgeEdges` exist unexposed. |
+| Delete / merge / weld / solidify / detach / flip | **No verb** | `deleteFaces`, `mergeFaces`, `solidifyFaces`, `detachPanel`, `flipFace`; native `__mesh_topo_*` equivalents. |
+| Save / persist the model | **No verb** | Native `__mesh_journal_checkpoint`, `__mesh_journal_note`. Hot state survives reload; a **cold restart resets it**. |
+| See the result | **No verb** | The agent is blind; the user is the render loop. `tools/rjit shot` boots a *headless* instance that loads the on-disk model, **not** the live hot-state mesh. `__mesh_edit_capture` is input-loop handoff, **not** a frame grab. |
+| UV / paint / materials | **No verb** | Extensive `__mesh_paint_*` and texture-slot doors exist. |
+
+Consequences to accept rather than fight: models come out **box-derived** (no round or
+n-gon forms), symmetry is manual, and **you cannot verify your own work visually** — so
+state dimensions explicitly in your report and let the user confirm the look.
+
+---
 
 ## Semantic discipline
 
-- Preserve the user's mental model: a repeated structure should share one name and use instances, not `window1`, `window2`, and so on.
-- Block out proportions and major parts before detail.
-- Name meaning at the operation that creates it. Do not plan to reconstruct it later from normals.
-- Rename or re-author a region when its meaning changes; a confidently stale label is worse than an unnamed face.
+- Preserve the user's mental model: a repeated structure should share one name, not
+  `window1`, `window2`.
+- Block out proportions and major parts before detail. Get the meter-scale right first.
+- Name meaning at the operation that creates it. Do not plan to reconstruct it later from
+  normals.
+- Rename or re-author a region when its meaning changes; a confidently stale label is worse
+  than an unnamed face.
 - Never use raw face indices as durable memory.
-- A cold agent must be able to continue from `tools/seat look` alone. If the percept cannot support that, pay down naming debt before continuing.
+- A cold agent must be able to continue from `tools/seat look` alone. If the percept cannot
+  support that, pay down naming debt before continuing.
