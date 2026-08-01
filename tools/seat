@@ -9,10 +9,20 @@ const args = process.argv.slice(2);
 const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
-if (action === 'look' || action === 'undo' || action === 'redo') request = { action };
+if (['look', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save'].includes(action)) request = { action };
 else if (action === 'select') request = { action, args: { selector: args.join(' ') } };
+else if (action === 'select-edge' || action === 'select-vertex') request = { action, args: { index: Number(args[0]), additive: args[1] === '+' } };
 else if (action === 'name') request = { action, args: { name: args[0], instance: Number(args[1] || 0) } };
 else if (action === 'extrude') request = { action, args: { distance: Number(args[0] || 0), name: args[1], instance: Number(args[2] || 0) } };
+else if (action === 'extrude-edge') request = { action, args: { distance: Number(args[0] || 0) } };
+else if (action === 'create-face') request = { action, args: { name: args[0], instance: Number(args[1] || 0) } };
+else if (action === 'bevel') request = { action, args: { width: Number(args[0] || 0) } };
+else if (action === 'inset') request = { action, args: {
+  distance: Number(args[0] || 0.001), name: args[1], pivot: numberList(args.slice(2, 5)),
+  axes: [numberList(args.slice(5, 8)), numberList(args.slice(9, 12))],
+  factors: [Number(args[8]), Number(args[12])],
+  ...(args.length >= 16 ? { offset: numberList(args.slice(13, 16)) } : {}),
+} };
 else if (action === 'move') request = { action, args: { delta: numberList(args.slice(0, 3)) } };
 else if (action === 'scale') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), factor: Number(args[6] || 1) } };
 else if (action === 'rotate') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), degrees: Number(args[6] || 0) } };
@@ -20,6 +30,15 @@ else if (action === 'rotate') request = { action, args: { axis: numberList(args.
 else if (action === 'mirror') request = { action, args: { axis: 'xyz'.indexOf(String(args[0] || 'x').toLowerCase()), keep: String(args[1] || '+') !== '-' } };
 // cut <direction 0|1> <cuts> [offsetFraction] — loop cut the current face selection.
 else if (action === 'cut') request = { action, args: { direction: Number(args[0] || 0), cuts: Number(args[1] || 1), offset: args[2] === undefined ? 0.5 : Number(args[2]) } };
+else if (action === 'solidify') request = { action, args: { thickness: Number(args[0] || 0) } };
+else if (action === 'detach') request = { action, args: { name: args[0] } };
+else if (action === 'paint') request = { action, args: { rgb: numberList(args.slice(0, 3)) } };
+else if (action === 'atlas') request = { action, args: {
+  base: args[0] || 'template', rgb: args.length >= 4 ? numberList(args.slice(1, 4)) : [220, 220, 225],
+  ...(args[4] === undefined ? {} : { detail: Number(args[4]) }),
+} };
+else if (action === 'material') request = { action, args: { slot: args[0] === 'clear' ? null : Number(args[0]) } };
+else if (action === 'uv') request = { action, args: { operation: args[0] } };
 // add <kind> <size> <height> <sides> <name> [x y z] — dimensions in METERS (R4).
 else if (action === 'add') {
   request = { action, args: {
@@ -32,7 +51,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat look|select <selector>|name <name> [instance]|extrude <distance> <name>|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|mirror x|y|z [-]|cut <dir> <cuts> [offset]|add <kind> <size> <height> <sides> <name> [x y z]|shot <path>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat look|elements|select <selector>|select-edge <id> [+]|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset <hairline> <name> px py pz a1x a1y a1z f1 a2x a2y a2z f2 [ox oy oz]|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|mirror x|y|z [-]|cut <dir> <cuts> [offset]|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas <template|solid|blank> [r g b] [detail]|material <slot|clear>|uv <restore|auto-size|project-view>|save|add <kind> <size> <height> <sides> <name> [x y z]|shot <path>|undo|redo|do <json-array>');
   process.exit(2);
 }
 

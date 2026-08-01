@@ -28,6 +28,10 @@ export type SeatPercept = {
 export type SelectorReceipt = { ok: boolean; faces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
 export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: SeatPercept | null; reason?: string };
+export type SeatElements = {
+  vertices: { id: number; at: [number, number, number] }[];
+  edges: { id: number; vertices: [number, number] }[];
+};
 
 /** A primitive the seat asks the editor's RESIDENT generators to build (editMesh.ts
  *  cuboid/cylinder/cone/…). The seat still never emits vertex arrays — it names a
@@ -58,6 +62,11 @@ export type SeatAdapter = {
    *  runtime/capture.ts AND the binary carries -Dhas-capture. Never touches the
    *  desktop: it reads back the frame the app itself composed. */
   captureFrame?: (path: string) => boolean;
+  /** Full package save through AppFrame: meshdoc v4, semantic table, parts,
+   *  atlas, and package metadata cross the cold-restart boundary together. */
+  persist?: () => boolean;
+  /** Detach changes both native part ranges and the shell-owned Outliner table. */
+  detachSelection?: (name: string) => { lo: number; hi: number } | null;
 };
 
 function parseJson<T>(raw: unknown): T | null {
@@ -98,6 +107,14 @@ function axisIndex(axis: string): number | null {
   return axis === 'x' ? 0 : axis === 'y' ? 1 : axis === 'z' ? 2 : null;
 }
 
+function finiteVec3(value: unknown): value is [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => Number.isFinite(item));
+}
+
+function rgbBytes(value: unknown): value is [number, number, number] {
+  return finiteVec3(value) && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255);
+}
+
 /** Compile the stable selector text agents use into the native query shape. */
 export function compileSeatSelector(selector: string, percept: SeatPercept): Record<string, unknown> | null {
   const text = selector.trim();
@@ -133,6 +150,10 @@ export function formatSeatPercept(percept: SeatPercept): string {
 export function createAgentSeat(adapter: SeatAdapter = {}) {
   const debtBudget = adapter.namingDebtBudget ?? DEFAULT_NAMING_DEBT_BUDGET;
   let primitiveBootstrapAttempted = false;
+  const automation = <T>(invoke: () => T): T => {
+    host.__mesh_action_source?.(9); // CommandSource 'automation'
+    try { return invoke(); } finally { host.__mesh_action_source?.(0); }
+  };
   const look = (): SeatPercept | null => {
     const initial = readSeatPercept();
     if (!initial || primitiveBootstrapAttempted || initial.table.regions.length > 0 || initial.unnamed !== initial.faces || initial.faces < 6 || initial.faces > 12) return initial;
@@ -159,18 +180,23 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     host.__mesh_edit_mode?.(3);
     return parseJson<SelectorReceipt>(host.__mesh_select_query?.(JSON.stringify(query))) ?? { ok: false, reason: 'selector door unavailable' };
   };
+  const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
+  const selectEdge = (index: number, additive = false): boolean =>
+    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
+  const selectVertex = (index: number, additive = false): boolean =>
+    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_vertex?.(index, additive ? 1 : 0) === 1;
   const nameSelection = (name: string, instance = 0, role = 'authored', op = 'name'): number => {
     const percept = look();
     if (!percept || !name || name === '_') return 0;
     const declared = declareRegion(percept.table, name, role, op, adapter.take?.());
-    return Number(host.__mesh_semantic_assign?.(declared.region.id, instance, JSON.stringify(declared.table)) ?? 0);
+    return Number(automation(() => host.__mesh_semantic_assign?.(declared.region.id, instance, JSON.stringify(declared.table))) ?? 0);
   };
   const extrude = (distance: number, name: string, instance = 0): TopologyReceipt | null => {
     const before = look();
     if (!before) return null;
     if (!name || name === '_') {
       if (before.unnamed > debtBudget) return null;
-      const result = readTopology(host.__mesh_topo_extrude_face?.(distance));
+      const result = readTopology(automation(() => host.__mesh_topo_extrude_face?.(distance)));
       adapter.adoptTopology?.(result);
       return result;
     }
@@ -181,20 +207,107 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const wall = declareRegion(table, `${name}.wall`, 'wall', 'extrude', adapter.take?.(), parent);
     table = wall.table;
     if (host.__mesh_semantic_extrude_intent?.(cap.region.id, wall.region.id, instance, JSON.stringify(table)) !== 1) return null;
-    const result = readTopology(host.__mesh_topo_extrude_face?.(distance));
+    const result = readTopology(automation(() => host.__mesh_topo_extrude_face?.(distance)));
     adapter.adoptTopology?.(result);
     return result;
   };
-  const move = (delta: [number, number, number]) => host.__mesh_transform_translate?.(...delta) === 1;
-  const scale = (axis: [number, number, number], pivot: [number, number, number], factor: number) => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor) === 1;
-  const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180) === 1;
-  const undo = (): TopologyReceipt | null => { const result = readTopology(host.__mesh_undo?.()); adapter.adoptTopology?.(result); return result; };
-  const redo = (): TopologyReceipt | null => { const result = readTopology(host.__mesh_redo?.()); adapter.adoptTopology?.(result); return result; };
+  const move = (delta: [number, number, number]) => finiteVec3(delta) && automation(() => host.__mesh_transform_translate?.(...delta)) === 1;
+  const scale = (axis: [number, number, number], pivot: [number, number, number], factor: number) =>
+    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(factor) && automation(() => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor)) === 1;
+  const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) =>
+    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees) && automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1;
+  const topology = (invoke: () => unknown): TopologyReceipt | null => {
+    const result = readTopology(automation(invoke));
+    adapter.adoptTopology?.(result);
+    return result;
+  };
+  const extrudeEdge = (distance: number): TopologyReceipt | null => topology(() => host.__mesh_topo_extrude_edge?.(distance));
+  const connectVertices = (): TopologyReceipt | null => topology(() => host.__mesh_topo_connect_vertices?.());
+  const createFace = (name: string, instance = 0): TopologyReceipt | null => {
+    if (!name || name === '_') return null;
+    const result = topology(() => host.__mesh_topo_create_face?.());
+    if (!result) return null;
+    if (nameSelection(name, instance, 'face', 'create face') > 0) return result;
+    topology(() => host.__mesh_undo?.());
+    return null;
+  };
+  const bevel = (width: number): TopologyReceipt | null => {
+    if (!Number.isFinite(width) || width <= 0) return null;
+    const begin = parseJson<{ ok?: number }>(host.__mesh_bevel_begin?.());
+    if (begin?.ok !== 1) return null;
+    const preview = readTopology(host.__mesh_bevel_preview?.(width));
+    if (!preview) { host.__mesh_bevel_end?.(0); return null; }
+    const result = readTopology(automation(() => host.__mesh_bevel_end?.(1)));
+    adapter.adoptTopology?.(result);
+    return result;
+  };
+  const deleteSelection = (): TopologyReceipt | null => topology(() => host.__mesh_delete_selection?.());
+  const mergeFaces = (): TopologyReceipt | null => topology(() => host.__mesh_topo_merge_faces?.());
+  const weld = (): TopologyReceipt | null => topology(() => host.__mesh_topo_weld?.());
+  const solidify = (thickness: number): TopologyReceipt | null => topology(() => host.__mesh_topo_solidify?.(thickness));
+  const flip = (): TopologyReceipt | null => topology(() => host.__mesh_topo_flip_faces?.());
+  const glass = (): TopologyReceipt | null => topology(() => host.__mesh_topo_glass?.());
+  const detach = (name: string): { lo: number; hi: number } | null =>
+    name && name !== '_' ? adapter.detachSelection?.(name) ?? null : null;
+  const inset = (
+    distance: number,
+    name: string,
+    pivot: [number, number, number],
+    axes: [[number, number, number], [number, number, number]],
+    factors: [number, number],
+    offset: [number, number, number] = [0, 0, 0],
+  ): { topology: TopologyReceipt; transforms: number } | null => {
+    if (!Number.isFinite(distance) || !finiteVec3(pivot) || !Array.isArray(axes) || axes.length !== 2 ||
+        !axes.every(finiteVec3) || !Array.isArray(factors) || factors.length !== 2 ||
+        !factors.every((factor) => Number.isFinite(factor) && factor > 0) || !finiteVec3(offset)) return null;
+    const result = extrude(distance, name);
+    if (!result) return null;
+    let transforms = 0;
+    const rollback = () => {
+      for (let step = 0; step < transforms + 1; step += 1) topology(() => host.__mesh_undo?.());
+      return null;
+    };
+    for (let at = 0; at < 2; at += 1) {
+      if (factors[at] === 1) continue;
+      if (!scale(axes[at]!, pivot, factors[at]!)) return rollback();
+      transforms += 1;
+    }
+    if (offset.some((value) => value !== 0)) {
+      if (!move(offset)) return rollback();
+      transforms += 1;
+    }
+    return { topology: result, transforms };
+  };
+  const paint = (rgb: [number, number, number]): number => rgbBytes(rgb)
+    ? Number(automation(() => host.__model_paint_selection?.(...rgb)) ?? 0)
+    : 0;
+  const atlas = (base: 'template' | 'solid' | 'blank', rgb: [number, number, number], detail?: number): boolean => {
+    if (!['template', 'solid', 'blank'].includes(base) || !rgbBytes(rgb) ||
+        (detail !== undefined && (!Number.isInteger(detail) || detail < 1))) return false;
+    const mode = base === 'solid' ? 1 : base === 'blank' ? 2 : 0;
+    if (automation(() => host.__model_atlas_base?.(mode, ...rgb)) !== 1) return false;
+    return detail === undefined || Number(automation(() => host.__model_set_paint_detail?.(detail)) ?? -1) >= 0;
+  };
+  const material = (slot: number | null): number => slot !== null && (!Number.isInteger(slot) || slot < 0) ? 0 : Number(automation(() => slot == null
+    ? host.__mesh_texture_slot_clear?.()
+    : host.__mesh_texture_slot_assign?.(slot)) ?? 0);
+  const uv = (operation: 'restore' | 'auto-size' | 'project-view'): boolean => {
+    if (!['restore', 'auto-size', 'project-view'].includes(operation)) return false;
+    const selected = parseJson<{ islands?: number[] }>(host.__model_uv_selection_read?.());
+    const islands = new Uint32Array((selected?.islands ?? []).filter((value) => Number.isInteger(value) && value >= 0));
+    if (islands.length === 0) return false;
+    if (operation === 'restore') return automation(() => host.__model_uv_restore_shape?.(islands)) === 1;
+    if (operation === 'auto-size') return automation(() => host.__model_uv_auto_size?.(islands)) === 1;
+    return automation(() => host.__model_uv_project_view?.(islands)) === 1;
+  };
+  const save = (): boolean => adapter.persist?.() === true;
+  const undo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_undo?.())); adapter.adoptTopology?.(result); return result; };
+  const redo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_redo?.())); adapter.adoptTopology?.(result); return result; };
   /** Mirror the mesh exactly across an axis plane (0 = X, 1 = Y, 2 = Z), keeping the
    *  +side or the −side. One host op, journaled — the seat never hand-computes a
    *  reflection, which is what made mirrored features drift when it could not. */
   const symmetrize = (axis: number, keepPositive: boolean): TopologyReceipt | null => {
-    const result = readTopology(host.__mesh_symmetrize?.(axis, keepPositive ? 1 : 0));
+    const result = readTopology(automation(() => host.__mesh_symmetrize?.(axis, keepPositive ? 1 : 0)));
     adapter.adoptTopology?.(result);
     return result;
   };
@@ -208,7 +321,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(0))?.ok !== 1) return null;
     const preview = parseJson<{ ok?: number; fallbackReason?: string }>(host.__mesh_lc_preview?.(direction, cuts, offsetFraction));
     if (preview?.ok !== 1) { host.__mesh_lc_end?.(0); return null; } // cancel restores the pre-cut mesh exactly
-    const result = readTopology(host.__mesh_lc_end?.(1));
+    const result = readTopology(automation(() => host.__mesh_lc_end?.(1)));
     adapter.adoptTopology?.(result);
     return result;
   };
@@ -234,7 +347,12 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
-  return { look, select, nameSelection, extrude, move, scale, rotate, undo, redo, symmetrize, loopCut, addPrimitive, shot, reply };
+  return {
+    look, elements, select, selectEdge, selectVertex, nameSelection, extrude, extrudeEdge,
+    connectVertices, createFace, bevel, inset, move, scale, rotate, deleteSelection,
+    mergeFaces, weld, solidify, detach, flip, glass, paint, atlas, material, uv, save,
+    undo, redo, symmetrize, loopCut, addPrimitive, shot, reply,
+  };
 }
 
 export type AgentSeat = ReturnType<typeof createAgentSeat>;
@@ -250,6 +368,18 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const result = seat.select(String(args.selector ?? ''));
         return seat.reply('select', result.ok, result, result.reason);
       }
+      case 'elements': {
+        const result = seat.elements();
+        return seat.reply('elements', !!result, result ?? undefined, result ? undefined : 'topology descriptors unavailable');
+      }
+      case 'select-edge': {
+        const ok = seat.selectEdge(Number(args.index), args.additive === true);
+        return seat.reply('select-edge', ok, undefined, ok ? undefined : 'edge index is invalid, stale, or outside the active scope');
+      }
+      case 'select-vertex': {
+        const ok = seat.selectVertex(Number(args.index), args.additive === true);
+        return seat.reply('select-vertex', ok, undefined, ok ? undefined : 'vertex index is invalid, stale, or outside the active scope');
+      }
       case 'name': {
         const changed = seat.nameSelection(String(args.name ?? ''), Number(args.instance ?? 0));
         return seat.reply('name', changed > 0, { changed }, changed > 0 ? undefined : 'no selected faces or invalid name');
@@ -258,11 +388,66 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const result = seat.extrude(Number(args.distance ?? 0), String(args.name ?? ''), Number(args.instance ?? 0));
         return seat.reply('extrude', !!result, result ?? undefined, result ? undefined : 'extrude rejected (selection, name, or naming debt)');
       }
+      case 'extrude-edge': {
+        const result = seat.extrudeEdge(Number(args.distance ?? 0));
+        return seat.reply('extrude-edge', !!result, result ?? undefined, result ? undefined : 'select exactly one edge first');
+      }
+      case 'connect': {
+        const result = seat.connectVertices();
+        return seat.reply('connect', !!result, result ?? undefined, result ? undefined : 'select exactly two non-adjacent vertices on one face');
+      }
+      case 'create-face': {
+        const result = seat.createFace(String(args.name ?? ''), Number(args.instance ?? 0));
+        return seat.reply('create-face', !!result, result ?? undefined, result ? undefined : 'select two bridge edges or a closed 3/4-edge loop and provide a name');
+      }
+      case 'bevel': {
+        const result = seat.bevel(Number(args.width ?? 0));
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge or vertex and use a valid width');
+      }
+      case 'inset': {
+        const result = seat.inset(
+          Number(args.distance ?? 0.001), String(args.name ?? ''),
+          args.pivot as [number, number, number],
+          args.axes as [[number, number, number], [number, number, number]],
+          args.factors as [number, number],
+          (args.offset as [number, number, number]) ?? [0, 0, 0],
+        );
+        return seat.reply('inset', !!result, result ?? undefined, result ? undefined : 'inset recipe rejected and was rolled back');
+      }
       case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
+      case 'delete': { const result = seat.deleteSelection(); return seat.reply('delete', !!result, result ?? undefined, result ? undefined : 'nothing selected to delete'); }
+      case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : 'select two or more compatible faces'); }
+      case 'weld': { const result = seat.weld(); return seat.reply('weld', !!result, result ?? undefined, result ? undefined : 'select at least two vertices or one edge'); }
+      case 'solidify': { const result = seat.solidify(Number(args.thickness ?? 0)); return seat.reply('solidify', !!result, result ?? undefined, result ? undefined : 'select faces and provide a valid thickness'); }
+      case 'detach': { const result = seat.detach(String(args.name ?? '')); return seat.reply('detach', !!result, result ?? undefined, result ? undefined : 'detach needs a named face selection in a multi-part document'); }
+      case 'flip': { const result = seat.flip(); return seat.reply('flip', !!result, result ?? undefined, result ? undefined : 'select faces first'); }
+      case 'glass': { const result = seat.glass(); return seat.reply('glass', !!result, result ?? undefined, result ? undefined : 'select faces first'); }
+      case 'paint': {
+        const changed = seat.paint(args.rgb as [number, number, number]);
+        return seat.reply('paint', changed > 0, { changed }, changed > 0 ? undefined : 'select faces and use RGB bytes while the paint layout is current');
+      }
+      case 'atlas': {
+        const ok = seat.atlas(
+          String(args.base ?? 'template') as 'template' | 'solid' | 'blank',
+          (args.rgb as [number, number, number]) ?? [220, 220, 225],
+          args.detail === undefined ? undefined : Number(args.detail),
+        );
+        return seat.reply('atlas', ok, undefined, ok ? undefined : 'the active model could not rebuild its paint atlas');
+      }
+      case 'material': {
+        const changed = seat.material(args.slot == null ? null : Number(args.slot));
+        return seat.reply('material', changed > 0, { changed }, changed > 0 ? undefined : 'selection already has that material role or no faces are selected');
+      }
+      case 'uv': {
+        const operation = String(args.operation ?? '') as 'restore' | 'auto-size' | 'project-view';
+        const ok = seat.uv(operation);
+        return seat.reply('uv', ok, undefined, ok ? undefined : 'no UV islands are selected or the operation was rejected');
+      }
+      case 'save': { const ok = seat.save(); return seat.reply('save', ok, undefined, ok ? undefined : 'the shell could not persist the active model package'); }
       case 'mirror': {
         const result = seat.symmetrize(Number(args.axis ?? 0), args.keep !== false);
         return seat.reply('mirror', !!result, result ?? undefined, result ? undefined : 'symmetrize rejected');

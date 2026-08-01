@@ -3523,10 +3523,48 @@ export default function AppFrame() {
     if (!PRIMITIVE_MESHES.some((entry) => entry.kind === spec.kind)) return null;
     return addPrimitivePart(spec.kind as PrimitiveKind, { size: spec.size, height: spec.height, resolution: spec.sides }, 'seat');
   };
+  const seatDetachSelection = (name: string): { lo: number; hi: number } | null => {
+    const current = stateRef.current;
+    const modelId = activePartsModelId(current);
+    const api = modelToolApiRef.current;
+    if (!modelId || !api || !name.trim()) return null;
+    const range = withNativeMeshActionSource('seat', () => api.detachSelection());
+    if (!range) return null;
+    const parts = current.modelParts[modelId] ?? [];
+    const placed: ModelPart = {
+      id: `part:detach:${current.seq}`,
+      name: name.trim(),
+      visible: true,
+      color: PART_TINTS[parts.length % PART_TINTS.length]!,
+      lo: range.lo,
+      hi: range.hi,
+    };
+    const nextParts = [...parts, placed];
+    selectedPartIdsRef.current = [placed.id];
+    setSelectedPartIds([placed.id]);
+    pushPartSetToHost(current, nextParts, [placed.id], placed.id);
+    (globalThis as any).__mesh_journal_note?.(JSON.stringify({
+      modelId,
+      parts: nextParts.map(({ mesh: _mesh, ...rest }) => rest),
+    }));
+    setState((previous) => ({
+      ...previous,
+      seq: previous.seq + 1,
+      modelParts: { ...previous.modelParts, [modelId]: nextParts },
+      modelActivePartId: placed.id,
+      modelDirty: { ...previous.modelDirty, [modelId]: true },
+      status: `agent detached selection → ${placed.name} [${range.lo},${range.hi})`,
+    }));
+    return range;
+  };
   // Publish it on the global door ModelView's seat adapter reads. Mount-once is correct:
   // addPrimitivePart reads live state through stateRef/modelToolApiRef, never a closure.
   useEffect(() => {
-    (globalThis as any).__seatShellBridge = { addPrimitive: seatAddPrimitive };
+    (globalThis as any).__seatShellBridge = {
+      addPrimitive: seatAddPrimitive,
+      detachSelection: seatDetachSelection,
+      persist: () => saveActiveModelNow('Saved by Agent Seat'),
+    };
     return () => { (globalThis as any).__seatShellBridge = null; };
   }, []);
 
