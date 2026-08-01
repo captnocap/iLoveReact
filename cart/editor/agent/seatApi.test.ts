@@ -23,6 +23,16 @@ test('cold agent resolves a durable name without geometry archaeology', () => {
   assert(query?.kind === 'region' && query.region === 7, 'name did not resolve to its durable region id');
 });
 
+test('semantic-status exposes the same resident-vs-mount diagnosis as Model Focus', () => {
+  const diagnostics = {
+    status: 'load-mismatch', savedFaces: 28, savedNamedFaces: 28, savedRegions: 10,
+    residentFaces: 28, residentNamedFaces: 0, residentRegions: 0, residentUnnamed: 28, rows: [],
+  };
+  (globalThis as any).__modelSemanticDiagnostics = diagnostics;
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'semantic-status' });
+  assert(reply.ok && reply.result === diagnostics, 'CLI and GUI semantic diagnosis diverged');
+});
+
 test('geometric selectors compile to native query arguments', () => {
   const query = compileSeatSelector('facing:+y@30', percept);
   assert(query?.kind === 'facing' && query.axis === 1 && query.sign === 1 && query.tolerance_degrees === 30, 'facing selector changed meaning');

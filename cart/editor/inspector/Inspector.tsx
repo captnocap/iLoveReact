@@ -1,7 +1,7 @@
 // SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the contextual focus
 // body + its persistent pane rail. The active rail button folds the body away.
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, Row } from '@reactjit/runtime/primitives';
+import { Pressable, Row, ScrollView } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 // Fixed-region contract (req_2627): the UV preview sizes itself from the focus
@@ -31,6 +31,7 @@ import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
 import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
+import type { ModelFocusSemantics } from '../model/modelSemanticsFocus';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -91,6 +92,56 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
         <C.HW_FormLabel>bounds radius</C.HW_FormLabel>
         <C.HW_ReadValue>{radiusLine}</C.HW_ReadValue>
       </C.HW_ReadRow>
+    </C.HW_Section>
+  );
+}
+
+function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSemantics; onRefresh: () => void }) {
+  const statusLabel = semantics.status === 'healthy' ? 'RESIDENT'
+    : semantics.status === 'load-mismatch' ? 'LOAD MISMATCH'
+      : semantics.status === 'resident-only' ? 'LIVE ONLY'
+        : 'NO NAMES';
+  const statusTone = semantics.status === 'healthy' ? 'success'
+    : semantics.status === 'load-mismatch' ? 'warning'
+      : 'textFaint';
+  const listHeight = Math.min(6, semantics.rows.length) * REGIONS.grid.rowHeight;
+  return (
+    <C.HW_Section>
+      <C.HW_SectionHead>
+        <C.HW_AccentBar />
+        <C.HW_SectionTitle>SEMANTICS</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_Tag style={{ backgroundColor: accentFor(statusTone) }}>
+          <C.HW_TagText>{statusLabel}</C.HW_TagText>
+        </C.HW_Tag>
+        <C.HW_MiniVerb onPress={onRefresh} tooltip="Re-read semantic names from the resident native mesh">
+          <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
+        </C.HW_MiniVerb>
+      </C.HW_SectionHead>
+      <C.HW_ReadRow>
+        <C.HW_FormLabel>saved blob</C.HW_FormLabel>
+        <C.HW_ReadValue>{`${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} faces`}</C.HW_ReadValue>
+      </C.HW_ReadRow>
+      <C.HW_ReadRow>
+        <C.HW_FormLabel>resident</C.HW_FormLabel>
+        <C.HW_ReadValue>{`${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} faces`}</C.HW_ReadValue>
+      </C.HW_ReadRow>
+      {semantics.status === 'load-mismatch' ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
+          <C.HW_ReadValue>saved names exist; native hydration lost them</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : null}
+      {semantics.rows.length > 0 ? (
+        <ScrollView style={{ width: '100%', height: listHeight }} showScrollbar>
+          {semantics.rows.map((row) => (
+            <C.HW_ReadRow key={`semantic-${row.id}`}>
+              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces}f · ${row.instances}x` : 'saved only'}</C.HW_FormLabel>
+              <C.HW_ReadValue>{`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}</C.HW_ReadValue>
+            </C.HW_ReadRow>
+          ))}
+        </ScrollView>
+      ) : null}
     </C.HW_Section>
   );
 }
@@ -540,6 +591,9 @@ export default function Inspector(props: {
               <>
                 <ModelDetailBody model={activeModel} />
                 <ShapeSection shape={focusBridge?.shape ?? null} />
+                {focusBridge ? (
+                  <SemanticsSection semantics={focusBridge.semantics} onRefresh={focusBridge.refreshSemantics} />
+                ) : null}
                 {/* The OUTLINER is geometry/selection focus, not rig or paint state. */}
                 {modelParts ? (
                   <ModelOutliner

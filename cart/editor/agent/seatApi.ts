@@ -372,6 +372,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
   const args = request.args ?? {};
   try {
     switch (request.action) {
+      case 'semantic-status': {
+        const result = (globalThis as any).__modelSemanticDiagnostics ?? null;
+        return seat.reply('semantic-status', !!result, result ?? undefined, result ? undefined : 'Model Focus semantic diagnostics unavailable');
+      }
       case 'look': return seat.reply('look', !!seat.look());
       case 'select': {
         const result = seat.select(String(args.selector ?? ''));

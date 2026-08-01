@@ -11,6 +11,7 @@ import {
   EMPTY_MODEL_VIEW_RESIDENCY,
   advanceModelViewResidency,
 } from '../model/partResidency';
+import { modelDocumentSeed, type ModelDocumentSeed } from '../model/modelDocumentSeed';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -57,7 +58,7 @@ export type OutlinerApi = OutlinerHandlers & {
 // fan-triangulated soup back into the original authored faces.
 type ViewerSource =
   | { kind: 'path'; path: string }
-  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array; faceMaterials?: Uint32Array; glassFirstVertex?: number | null }
+  | ({ kind: 'mesh' } & ModelDocumentSeed)
   | { kind: 'missing'; title: string; label: string }
   | null;
 
@@ -163,16 +164,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
     // edits persist. A remount happens only on a real doc switch.
     const seed = mountDoc
       ? {
-          key: model.id,
-          name: model.name,
-          vertices: mountDoc.vertices,
-          count: Math.floor(mountDoc.vertices.length / 8),
-          faceGroups: mountDoc.faceGroups ?? undefined,
-          faceMaterials: mountDoc.faceMaterials ?? undefined,
-          semanticRegions: mountDoc.semanticRegions ?? undefined,
-          semanticInstances: mountDoc.semanticInstances ?? undefined,
-          semanticTable: mountDoc.semanticTable ?? undefined,
-          glassFirstVertex: mountDoc.glassFirstVertex,
+          ...modelDocumentSeed(model.id, model.name, mountDoc),
           partColors,
           hiddenRanges: meshDocHiddenRanges(mountDoc.ranges, rowsByLo),
         }
@@ -216,7 +208,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
       ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups, faceMaterials: viewer.faceMaterials, glassFirstVertex: viewer.glassFirstVertex }} importedTextureSourcePath={model.viewerPath} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={viewer} importedTextureSourcePath={model.viewerPath} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
@@ -299,13 +291,13 @@ function resolveViewer(model: ModelPackage): ViewerSource {
   // a saved-then-reopened model must show its EDITS, not re-arm its primitive seed.
   const doc = packageMeshDoc(model);
   if (doc && doc.vertices.length >= 8) {
-    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined, faceMaterials: doc.faceMaterials ?? undefined, glassFirstVertex: doc.glassFirstVertex };
+    return { kind: 'mesh', ...modelDocumentSeed(model.id, model.name, doc) };
   }
   // A freshly-authored primitive builds its geometry on the spot (cuboid → grouped soup),
   // keyed by the doc id so each new cube is its own resident mesh.
   if (model.primitive) {
     const built = primitiveMeshData(model.primitive);
-    return { kind: 'mesh', key: `primitive:${model.primitive}:${model.id}`, vertices: built.positions, faceGroups: built.faceGroups };
+    return { kind: 'mesh', key: `primitive:${model.primitive}:${model.id}`, name: model.name, vertices: built.positions, count: Math.floor(built.positions.length / 8), faceGroups: built.faceGroups };
   }
   if (model.viewerPath) return { kind: 'path', path: model.viewerPath };
   return { kind: 'missing', title: 'MODEL PACKAGE GEOMETRY MISSING', label: `${model.path}/mesh` };

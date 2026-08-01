@@ -29,7 +29,8 @@ import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBack
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { createAgentSeat, executeSeatRequest, type SeatRequest } from '../agent/seatApi';
+import { createAgentSeat, executeSeatRequest, readSeatPercept, type SeatRequest } from '../agent/seatApi';
+import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
@@ -210,6 +211,8 @@ export type ModelFocusShape = {
 // card — row click recalls, the trash verb removes, the + verb pins the current view.
 export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
+  semantics: ModelFocusSemantics;
+  refreshSemantics: () => void;
   paintLive: boolean;
   readUvHistory: () => Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
   refreshUv: () => void;
@@ -1465,6 +1468,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Paintable by the focus panel; outlines, selection and handles stay live geometry.
   // No temp PNG and no UI state baked into the pixels.
   const [uvPanel, setUvPanel] = useState<ModelFocusUv | null>(null);
+  const [semanticRevision, setSemanticRevision] = useState(0);
   const uvRevisionRef = useRef(0);
   const UV_PREVIEW_BYTE_CAP = UV_ATLAS_SIZE_TUNING.maxRgbaBytes; // reading a 100MB atlas into JS would stall the app
   // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
@@ -2625,7 +2629,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         ? request.args!.requests as SeatRequest[]
         : null;
       if (!batch) {
-        host.__fs_write?.(payload.replyPath, JSON.stringify(executeSeatRequest(seat, request)));
+        const reply = executeSeatRequest(seat, request);
+        setSemanticRevision((value) => value + 1);
+        host.__fs_write?.(payload.replyPath, JSON.stringify(reply));
         return;
       }
       const replies: ReturnType<typeof executeSeatRequest>[] = [];
@@ -2638,6 +2644,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         }
         const row = executeSeatRequest(seat, batch[index++]!);
         replies.push(row);
+        setSemanticRevision((value) => value + 1);
         if (!row.ok) index = batch.length;
         setTimeout(runNext, 100); // visible modeling cadence is a seat feature
       };
@@ -2709,8 +2716,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const g = globalThis as any;
     const tris = model ? Math.floor(model.count / 3) : 0;
     const faces = authoredFaces ?? tris;
+    const semantics = modelFocusSemantics({
+      regions: initialMesh?.semanticRegions,
+      instances: initialMesh?.semanticInstances,
+      table: initialMesh?.semanticTable ?? null,
+    }, readSeatPercept());
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
+      semantics,
+      refreshSemantics: () => setSemanticRevision((value) => value + 1),
       paintLive: paintMode,
       readUvHistory: () => ({ uv: readMeshHistory(), paint: readPaintHistory() }),
       refreshUv: buildUvPanel,
@@ -2756,8 +2770,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       camRemoveAt: (index) => toolApiRef.current?.camRemoveAt(index),
     };
     g.__modelFocusBridge = bridge;
+    g.__modelSemanticDiagnostics = semantics;
     g.__modelFocusBridgeChanged?.();
-  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark]);
+  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision]);
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
