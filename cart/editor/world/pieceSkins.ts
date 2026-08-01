@@ -195,6 +195,7 @@ export function pieceSkinBoxes(pieces: readonly PlacedPiece[]): SkinPush {
         if (shape.kind !== 'box') continue; // skinned ramps deferred (roofs stay flat)
         const b = shape.box;
         if (b.door) continue; // the door leaf keeps its dark panel, never a material
+        if (b.opacity !== undefined) continue; // the glass pane stays glass — an opaque skin cube would plate the window hole
         const ref = slotRefForBox(piece, b.slot);
         if (!ref) continue;
         const mat = liveMaterialFor(ref);
