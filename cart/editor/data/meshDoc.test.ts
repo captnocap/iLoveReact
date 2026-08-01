@@ -161,5 +161,36 @@ test('paint-only artifact persistence cannot rewrite editable mesh files', () =>
   }
 });
 
+function semanticDocBlob(): Uint8Array {
+  const tableText = JSON.stringify({ version: 1, regions: [{ id: 5, name: 'window.rim', createdBy: { op: 'inset', take: 3 } }] });
+  const table = Uint8Array.from(Array.from(tableText, (ch) => ch.charCodeAt(0)));
+  const headerBytes = 40;
+  const vertCount = 3;
+  const faceCount = 1;
+  const bytes = new Uint8Array(headerBytes + vertCount * 8 * 4 + faceCount * 4 + faceCount * 8 + 8 + table.length);
+  new Uint32Array(bytes.buffer, 0, 10).set([0x444d4a52, 4, vertCount, faceCount, 1, 1, 3, 0, 1, table.length]);
+  let at = headerBytes + vertCount * 8 * 4;
+  new Uint32Array(bytes.buffer, at, 1)[0] = 0; at += 4;
+  new Uint32Array(bytes.buffer, at, 1)[0] = 5; at += 4;
+  new Uint32Array(bytes.buffer, at, 1)[0] = 2; at += 4;
+  new Uint32Array(bytes.buffer, at, 2).set([0, 1]); at += 8;
+  bytes.set(table, at);
+  return bytes;
+}
+
+test('RJMD v4 restores semantic membership and its name table together', () => {
+  const doc = parseMeshDocBytes(semanticDocBlob());
+  assert(!!doc, 'v4 fixture did not decode');
+  assert(doc!.semanticRegions?.[0] === 5, 'region membership was lost');
+  assert(doc!.semanticInstances?.[0] === 2, 'instance membership was lost');
+  assert(doc!.semanticTable?.regions[0]?.name === 'window.rim', 'semantic name table was lost');
+});
+
+test('RJMD v4 rejects semantic membership without a dictionary', () => {
+  const bytes = semanticDocBlob();
+  new Uint32Array(bytes.buffer, 36, 1)[0] = 0;
+  assert(parseMeshDocBytes(bytes) === null, 'orphaned semantic ids were accepted');
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} test(s) failed`);

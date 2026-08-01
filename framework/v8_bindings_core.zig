@@ -763,6 +763,92 @@ fn hostMeshSetFaceMaterials(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setReturnNumber(info, if (scene3d.meshEditSetFaceMaterials(materials)) 1 else 0);
 }
 
+/// __mesh_set_face_semantics(regionRows, instanceRows, tableJson) → 1|0.
+/// Restore the complete RJMD v4 semantic state immediately after geometry load.
+fn hostMeshSetFaceSemantics(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const region_bytes = argBytes(info, 0) orelse return setReturnNumber(info, 0);
+    const instance_bytes = argBytes(info, 1) orelse return setReturnNumber(info, 0);
+    if (region_bytes.len == 0 or region_bytes.len % @sizeOf(u32) != 0 or
+        instance_bytes.len != region_bytes.len)
+    {
+        return setReturnNumber(info, 0);
+    }
+    const table_json = argToStringAlloc(info, 2) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(table_json);
+    const regions: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, region_bytes));
+    const instances: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, instance_bytes));
+    setReturnNumber(info, if (scene3d.meshEditSetFaceSemantics(regions, instances, table_json)) 1 else 0);
+}
+
+/// __mesh_semantic_assign(region, instance, tableJson) → changed triangles.
+fn hostMeshSemanticAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const region_raw = argToI32(info, 0) orelse return setReturnNumber(info, 0);
+    const instance_raw = argToI32(info, 1) orelse return setReturnNumber(info, 0);
+    if (region_raw < 0 or instance_raw < 0) return setReturnNumber(info, 0);
+    const table_json = argToStringAlloc(info, 2) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(table_json);
+    const changed = scene3d.meshSemanticAssignSelection(@intCast(region_raw), @intCast(instance_raw), table_json);
+    if (changed > 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
+/// __mesh_semantic_extrude_intent(capRegion, wallRegion, instance, tableJson).
+/// Stages roles for exactly one subsequent face extrusion; the op consumes it.
+fn hostMeshSemanticExtrudeIntent(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const cap = argToI32(info, 0) orelse return setReturnNumber(info, 0);
+    const wall = argToI32(info, 1) orelse return setReturnNumber(info, 0);
+    const instance = argToI32(info, 2) orelse return setReturnNumber(info, 0);
+    if (cap < 0 or wall < 0 or instance < 0) return setReturnNumber(info, 0);
+    const table_json = argToStringAlloc(info, 3) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(table_json);
+    setReturnNumber(info, if (scene3d.meshSemanticExtrudeIntentSet(@intCast(cap), @intCast(wall), @intCast(instance), table_json)) 1 else 0);
+}
+
+fn hostMeshSemanticBootstrapAxes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnNumber(info, 0);
+    if (bytes.len != 6 * @sizeOf(u32)) return setReturnNumber(info, 0);
+    const rows: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const ids: [6]u32 = .{ rows[0], rows[1], rows[2], rows[3], rows[4], rows[5] };
+    const table_json = argToStringAlloc(info, 1) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(table_json);
+    const ok = scene3d.meshSemanticBootstrapAxes(ids, table_json);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_semantic_state() → cold-agent percept JSON.
+fn hostMeshSemanticState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const allocator = std.heap.c_allocator;
+    const json = scene3d.meshSemanticStateJson(allocator) orelse return setReturnString(info, "");
+    defer allocator.free(json);
+    setReturnString(info, json);
+}
+
+/// __mesh_select_query(json) → {ok,faces,bbox}. Selector resolution stays native,
+/// beside the topology and normals it queries, and never leaks unstable indices.
+fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const allocator = std.heap.c_allocator;
+    const json = argToStringAlloc(info, 0) orelse return setReturnString(info, "{\"ok\":false,\"reason\":\"invalid query\"}");
+    defer allocator.free(json);
+    var parsed = std.json.parseFromSlice(scene3d.MeshSelectorQuery, allocator, json, .{ .ignore_unknown_fields = false }) catch
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"invalid query\"}");
+    defer parsed.deinit();
+    const result = scene3d.meshSelectQuery(parsed.value) orelse
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh\"}");
+    var buf: [256]u8 = undefined;
+    const reply = std.fmt.bufPrint(&buf,
+        "{{\"ok\":true,\"faces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+        .{ result.faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
+    ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
+    setReturnString(info, reply);
+}
+
 /// __mesh_texture_slot_assign(index) / _clear() mutate metadata on the selected
 /// authored faces. Return the number of authored faces whose role changed.
 fn hostMeshTextureSlotAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -900,6 +986,38 @@ fn hostMeshGizmoScaleBy(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const factor: f32 = @floatCast(argToF64(info, 0) orelse 1);
     const ok = scene3d.meshGizmoScaleBy(factor);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostMeshTransformTranslate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const delta = [3]f32{
+        @floatCast(argToF64(info, 0) orelse 0),
+        @floatCast(argToF64(info, 1) orelse 0),
+        @floatCast(argToF64(info, 2) orelse 0),
+    };
+    const ok = scene3d.meshTransformTranslate(delta);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostMeshTransformScaleAxis(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis = [3]f32{ @floatCast(argToF64(info, 0) orelse 0), @floatCast(argToF64(info, 1) orelse 0), @floatCast(argToF64(info, 2) orelse 0) };
+    const pivot = [3]f32{ @floatCast(argToF64(info, 3) orelse 0), @floatCast(argToF64(info, 4) orelse 0), @floatCast(argToF64(info, 5) orelse 0) };
+    const factor: f32 = @floatCast(argToF64(info, 6) orelse 1);
+    const ok = scene3d.meshTransformScaleAxis(axis, pivot, factor);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostMeshTransformRotateAxis(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis = [3]f32{ @floatCast(argToF64(info, 0) orelse 0), @floatCast(argToF64(info, 1) orelse 0), @floatCast(argToF64(info, 2) orelse 0) };
+    const pivot = [3]f32{ @floatCast(argToF64(info, 3) orelse 0), @floatCast(argToF64(info, 4) orelse 0), @floatCast(argToF64(info, 5) orelse 0) };
+    const radians: f32 = @floatCast(argToF64(info, 6) orelse 0);
+    const ok = scene3d.meshTransformRotateAxis(axis, pivot, radians);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -2348,14 +2466,15 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
-/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v3) — the
+/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v4) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
-/// header u32×8 [magic 'RJMD', version=3, vertCount, faceCount, hasGroups, rangeCount,
-/// glassFirstVertex, hasMaterials],
+/// header u32×10 [magic 'RJMD', version=4, vertCount, faceCount, hasGroups, rangeCount,
+/// glassFirstVertex, hasMaterials, hasSemantics, semanticJsonBytes],
 /// then vertCount×8 f32 durable verts, then faceCount u32 authored-face-group ids (when
-/// hasGroups=1), faceCount u32 texture-role indices (when hasMaterials=1), then
-/// rangeCount×2 u32 flattened [lo,hi) per-part group ranges. All
+/// hasGroups=1), faceCount u32 texture-role indices (when hasMaterials=1), semantic
+/// region + instance rows (when hasSemantics=1), rangeCount×2 u32 flattened [lo,hi)
+/// per-part group ranges, then the versioned semantic dictionary JSON. All
 /// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
 fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2371,6 +2490,9 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const face_count: u32 = vert_count / 3;
     const groups: ?[]const u32 = if (document.groups) |rows| rows else null;
     const materials: ?[]const u32 = if (document.materials) |rows| rows else null;
+    const semantic_regions: ?[]const u32 = if (document.semantic_regions) |rows| rows else null;
+    const semantic_instances: ?[]const u32 = if (document.semantic_instances) |rows| rows else null;
+    const empty_semantic_table = "{\"version\":1,\"regions\":[]}";
     const ranges = model_source.partRanges();
     const has_groups: u32 = if (groups != null and groups.?.len == face_count) 1 else 0;
     var has_materials: u32 = 0;
@@ -2382,6 +2504,14 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
             };
         }
     }
+    const has_semantics: u32 = if (semantic_regions != null and semantic_instances != null and
+        semantic_regions.?.len == face_count and semantic_instances.?.len == face_count) 1 else 0;
+    const semantic_json: []const u8 = if (has_semantics == 1)
+        (document.semantic_table_json orelse empty_semantic_table)
+    else
+        &.{};
+    if (semantic_json.len > model_source.MAX_SEMANTIC_TABLE_BYTES) return setReturnNumber(info, 0);
+    const semantic_json_bytes: u32 = @intCast(semantic_json.len);
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
     if (!meshdoc_format.rangesValid(ranges, range_count)) return setReturnNumber(info, 0);
     if (!meshdoc_format.rangesOwnEveryFace(ranges, groups, range_count)) {
@@ -2398,7 +2528,7 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch return setReturnNumber(info, 0);
     const file = std.Io.Dir.cwd().createFile(io, tmp_path, .{ .truncate = true }) catch return setReturnNumber(info, 0);
     const glass_first_vertex = @min(document.glass_first_vertex, vert_count);
-    const header = [8]u32{ 0x444D4A52, 3, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials };
+    const header = [10]u32{ 0x444D4A52, 4, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials, has_semantics, semantic_json_bytes };
     file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch {
         file.close(io);
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
@@ -2423,8 +2553,27 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
             return setReturnNumber(info, 0);
         };
     }
+    if (has_semantics == 1) {
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(semantic_regions.?[0..face_count])) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(semantic_instances.?[0..face_count])) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
+    }
     if (range_count > 0) {
         file.writeStreamingAll(io, std.mem.sliceAsBytes(ranges.?)) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
+    }
+    if (semantic_json_bytes > 0) {
+        file.writeStreamingAll(io, semantic_json) catch {
             file.close(io);
             std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
             return setReturnNumber(info, 0);
@@ -4094,6 +4243,12 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
     v8_runtime.registerHostFn("__mesh_set_face_groups", hostMeshSetFaceGroups);
     v8_runtime.registerHostFn("__mesh_set_face_materials", hostMeshSetFaceMaterials);
+    v8_runtime.registerHostFn("__mesh_set_face_semantics", hostMeshSetFaceSemantics);
+    v8_runtime.registerHostFn("__mesh_semantic_assign", hostMeshSemanticAssign);
+    v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
+    v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
+    v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
+    v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
     v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
     v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
     v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);
@@ -4120,6 +4275,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
+    v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
+    v8_runtime.registerHostFn("__mesh_transform_scale_axis", hostMeshTransformScaleAxis);
+    v8_runtime.registerHostFn("__mesh_transform_rotate_axis", hostMeshTransformRotateAxis);
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);

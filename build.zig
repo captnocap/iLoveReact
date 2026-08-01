@@ -1382,6 +1382,21 @@ pub fn build(b: *std.Build) void {
     const stable_geometry_slot_test_step = b.step("test-stable-geometry-slot", "Run stable mutable geometry-slot allocation tests");
     stable_geometry_slot_test_step.dependOn(&run_stable_geometry_slot_test.step);
 
+    // ── semantic face membership/debt invariants — headless, no GPU ─────────
+    const mesh_semantics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_semantics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_semantics_test = b.addTest(.{
+        .name = "mesh-semantics-test",
+        .root_module = mesh_semantics_test_mod,
+    });
+    const run_mesh_semantics_test = b.addRunArtifact(mesh_semantics_test);
+    const mesh_semantics_test_step = b.step("test-mesh-semantics", "Run semantic face membership/debt tests");
+    mesh_semantics_test_step.dependOn(&run_mesh_semantics_test.step);
+
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),

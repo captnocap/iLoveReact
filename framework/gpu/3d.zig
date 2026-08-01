@@ -604,6 +604,7 @@ fn adoptIndexedEditMesh(mesh: *indexed_edit_mesh.Mesh, lowered: *const indexed_e
     mesh.clearCutOrigins();
     mesh.adoptLoweredMetadata(lowered, groups, parts);
     model_source.setFaceMaterials(lowered.materials);
+    _ = model_source.setFaceSemantics(lowered.semantic_regions, lowered.semantic_instances);
     clearIndexedEditMesh();
     g_indexed_edit_mesh = mesh.*;
     mesh.* = .{ .allocator = std.heap.c_allocator };
@@ -617,7 +618,14 @@ fn cloneIndexedEditMeshOrImport(
     materials: ?[]const u32,
 ) ?indexed_edit_mesh.Mesh {
     if (g_indexed_edit_mesh) |*mesh| {
-        if (mesh.residentMetadataMatches(tri_count, groups, parts, materials) and
+        if (mesh.residentMetadataMatchesWithSemantics(
+            tri_count,
+            groups,
+            parts,
+            materials,
+            model_source.faceSemanticRegions(),
+            model_source.faceSemanticInstances(),
+        ) and
             mesh.residentUvsMatch(verts, tri_count))
         {
             return mesh.clone() catch null;
@@ -627,7 +635,16 @@ fn cloneIndexedEditMeshOrImport(
         // cache back over the live document.
         clearIndexedEditMesh();
     }
-    return indexed_edit_mesh.Mesh.fromSoupWithMaterials(std.heap.c_allocator, verts, tri_count, groups, parts, materials) catch null;
+    return indexed_edit_mesh.Mesh.fromSoupWithSemantics(
+        std.heap.c_allocator,
+        verts,
+        tri_count,
+        groups,
+        parts,
+        materials,
+        model_source.faceSemanticRegions(),
+        model_source.faceSemanticInstances(),
+    ) catch null;
 }
 
 fn ensureIndexedEditMesh() bool {
@@ -640,13 +657,15 @@ fn ensureIndexedEditMesh() bool {
     const parts = capturePartOfFaces();
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
     const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
-    g_indexed_edit_mesh = indexed_edit_mesh.Mesh.fromSoupWithMaterials(
+    g_indexed_edit_mesh = indexed_edit_mesh.Mesh.fromSoupWithSemantics(
         std.heap.c_allocator,
         verts,
         tri_count,
         groups_arg,
         parts,
         model_source.faceMaterials(),
+        model_source.faceSemanticRegions(),
+        model_source.faceSemanticInstances(),
     ) catch return false;
     return true;
 }
@@ -1116,6 +1135,16 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     else
         null;
     defer if (old_materials) |rows| std.heap.c_allocator.free(rows);
+    const old_semantic_regions: ?[]u32 = if (model_source.faceSemanticRegions()) |rows|
+        (std.heap.c_allocator.dupe(u32, rows) catch null)
+    else
+        null;
+    defer if (old_semantic_regions) |rows| std.heap.c_allocator.free(rows);
+    const old_semantic_instances: ?[]u32 = if (model_source.faceSemanticInstances()) |rows|
+        (std.heap.c_allocator.dupe(u32, rows) catch null)
+    else
+        null;
+    defer if (old_semantic_instances) |rows| std.heap.c_allocator.free(rows);
     // Part ranges are pure authored-group-id spans — they survive every EDIT replace
     // (retain() clears them, which is right for a fresh LOAD but was silently destroying
     // the outliner's part identity on every topology op; req_2644). Ops that change the
@@ -1141,6 +1170,9 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // Position/winding/group-only replacements preserve triangle order. Topology
     // replacements with a different face count install their explicit provenance.
     if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
+    if (old_semantic_regions) |regions| if (old_semantic_instances) |instances| {
+        if (regions.len == count / 3 and instances.len == count / 3) _ = model_source.setFaceSemantics(regions, instances);
+    };
     applyCarriedFaceColors(old_colors, count / 3);
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
     return true;
@@ -1229,7 +1261,35 @@ const FaceExtrudeEntity = struct {
     part: u32,
     color: [4]u8,
     material: u32,
+    semantic_region: u32,
+    semantic_instance: u32,
 };
+
+const SemanticMintIntent = struct {
+    cap_region: u32,
+    wall_region: u32,
+    instance: u32,
+    table_json: []u8,
+};
+var g_semantic_mint_intent: ?SemanticMintIntent = null;
+
+fn semanticMintIntentClear() void {
+    if (g_semantic_mint_intent) |intent| jalloc.free(intent.table_json);
+    g_semantic_mint_intent = null;
+}
+
+/// Stage semantic output roles for exactly the next face extrusion. The op owns
+/// the table only after it succeeds; failure drops the intent without mutating
+/// the document, and the operation's journal snapshot remains truly pre-op.
+pub fn meshSemanticExtrudeIntentSet(cap_region: u32, wall_region: u32, instance: u32, table_json: []const u8) bool {
+    if (cap_region == model_source.NO_SEMANTIC_ID or wall_region == model_source.NO_SEMANTIC_ID or
+        table_json.len < 2 or table_json.len > model_source.MAX_SEMANTIC_TABLE_BYTES or
+        table_json[0] != '{' or table_json[table_json.len - 1] != '}') return false;
+    const owned = jalloc.dupe(u8, table_json) catch return false;
+    semanticMintIntentClear();
+    g_semantic_mint_intent = .{ .cap_region = cap_region, .wall_region = wall_region, .instance = instance, .table_json = owned };
+    return true;
+}
 
 fn faceExtrudePosKey(p: [3]f32) u64 {
     const q: [3]f32 = .{ p[0] + 0.0, p[1] + 0.0, p[2] + 0.0 };
@@ -1365,6 +1425,7 @@ fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_fac
 }
 
 pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
+    defer semanticMintIntentClear();
     if (!model_paint.hasTarget()) return false;
     if (mesh_edit.mode() != .face) return false;
     const cur_verts = g_edit_verts orelse return false;
@@ -1394,6 +1455,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
             .part = if (grouped) model_source.partIndexOf(g) else model_source.NO_PART,
             .color = trueFaceColor(f),
             .material = model_source.faceMaterialOf(f),
+            .semantic_region = model_source.faceSemanticOf(f).region,
+            .semantic_instance = model_source.faceSemanticOf(f).instance,
         };
     }
     const ent = entity orelse return false;
@@ -1420,6 +1483,10 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     defer colors.deinit(std.heap.c_allocator);
     var materials: std.ArrayListUnmanaged(u32) = .empty;
     defer materials.deinit(std.heap.c_allocator);
+    var semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_regions.deinit(std.heap.c_allocator);
+    var semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_instances.deinit(std.heap.c_allocator);
 
     f = 0;
     while (f < tri_count) : (f += 1) {
@@ -1434,6 +1501,9 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         }
         if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
         materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
+        const semantic = model_source.faceSemanticOf(f);
+        semantic_regions.append(std.heap.c_allocator, semantic.region) catch return false;
+        semantic_instances.append(std.heap.c_allocator, semantic.instance) catch return false;
     }
 
     var next_group: u32 = if (has_groups) @intCast(maxGroupId(old_groups.?) + 1) else 0;
@@ -1452,6 +1522,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         }
         if (!appendFaceColor(&colors, ent.color)) return false;
         materials.append(std.heap.c_allocator, ent.material) catch return false;
+        semantic_regions.append(std.heap.c_allocator, if (g_semantic_mint_intent) |intent| intent.cap_region else ent.semantic_region) catch return false;
+        semantic_instances.append(std.heap.c_allocator, if (g_semantic_mint_intent) |intent| intent.instance else ent.semantic_instance) catch return false;
     }
 
     i = 0;
@@ -1483,6 +1555,12 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         if (!appendFaceColor(&colors, ent.color) or !appendFaceColor(&colors, ent.color)) return false;
         materials.append(std.heap.c_allocator, indexed_edit_mesh.NO_MATERIAL) catch return false;
         materials.append(std.heap.c_allocator, indexed_edit_mesh.NO_MATERIAL) catch return false;
+        const wall_region = if (g_semantic_mint_intent) |intent| intent.wall_region else ent.semantic_region;
+        const wall_instance = if (g_semantic_mint_intent) |intent| intent.instance else ent.semantic_instance;
+        semantic_regions.append(std.heap.c_allocator, wall_region) catch return false;
+        semantic_regions.append(std.heap.c_allocator, wall_region) catch return false;
+        semantic_instances.append(std.heap.c_allocator, wall_instance) catch return false;
+        semantic_instances.append(std.heap.c_allocator, wall_instance) catch return false;
     }
 
     const new_count: u32 = @intCast(out.items.len / 8);
@@ -1498,6 +1576,15 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         if (part_count > 0) renormalizePartRanges(face_part.items, part_count) else _ = refreshPaintLayout();
     }
     model_source.setFaceMaterials(materials.items);
+    const semantics_installed = if (g_semantic_mint_intent) |intent|
+        model_source.setSemanticState(semantic_regions.items, semantic_instances.items, intent.table_json)
+    else
+        model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items);
+    if (!semantics_installed) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return false;
+    }
     model_paint.applyColors(colors.items);
     if (model_source.colors()) |src| {
         const nbytes = @min(src.len, colors.items.len);
@@ -1560,6 +1647,11 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     const materials = captureFaceMaterials(g_edit_count / 3 + 2) orelse return false;
     defer std.heap.c_allocator.free(materials);
     @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
+    var semantics = captureFaceSemantics(old_faces + 2) orelse return false;
+    defer semantics.deinit();
+    const source_semantic = model_source.faceSemanticOf(frame.source_face);
+    @memset(semantics.regions[old_faces..], source_semantic.region);
+    @memset(semantics.instances[old_faces..], source_semantic.instance);
     const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("extrude edge");
@@ -1578,6 +1670,11 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     // succeed; failure leaves a valid committed mesh with no edge selected.
     _ = selectWeldedEdgeAt(c, d);
     model_source.setFaceMaterials(materials);
+    if (!model_source.setFaceSemantics(semantics.regions, semantics.instances)) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return false;
+    }
     mesh_edit.setMode(.edge);
     journalCommit(&snap);
     return true;
@@ -1921,7 +2018,7 @@ pub fn meshTopoLoopCut() bool {
 
     var snap = journalSnapshotCurrent("loop cut");
     const install_groups: ?[]const u32 = if (groups_arg != null) cut.groups else null;
-    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut.materials, cut_colors);
+    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut.materials, cut.semantic_regions, cut.semantic_instances, cut_colors);
     if (ok) {
         if (base_part) |bp| {
             _ = bp;
@@ -1992,7 +2089,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 
     var snap = journalSnapshotCurrent("symmetrize");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
@@ -2113,12 +2210,16 @@ fn lcInstallLowered(
     tri_count: u32,
     groups: ?[]const u32,
     materials: []const u32,
+    semantic_regions: []const u32,
+    semantic_instances: []const u32,
     colors: []const u8,
 ) bool {
     if (pos.len != @as(usize, tri_count) * 9 or
         uvs.len != @as(usize, tri_count) * 6 or
         colors.len != @as(usize, tri_count) * 4 or
-        materials.len != tri_count) return false;
+        materials.len != tri_count or
+        semantic_regions.len != tri_count or
+        semantic_instances.len != tri_count) return false;
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
@@ -2144,6 +2245,7 @@ fn lcInstallLowered(
     defer std.heap.c_allocator.free(owned);
     if (!replaceActiveEditMeshPreservingAtlas(owned, tri_count * 3, groups, colors)) return false;
     model_source.setFaceMaterials(materials);
+    if (!model_source.setFaceSemantics(semantic_regions, semantic_instances)) return false;
     mesh_edit.setMode(.face);
     return true;
 }
@@ -2317,7 +2419,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
     }
     const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
-    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, colors)) return false;
+    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors)) return false;
     if (s.last_mesh) |*mesh| mesh.deinit();
     s.last_mesh = preview;
     preview = .{ .allocator = std.heap.c_allocator };
@@ -2381,7 +2483,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         if (s.base_mesh.lower()) |lowered_value| {
             var lowered = lowered_value;
             defer lowered.deinit();
-            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, lowered.materials, s.base_colors);
+            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, s.base_colors);
         } else |_| {
             ok = false;
         }
@@ -2617,6 +2719,8 @@ pub fn meshBevelPreview(width_raw: f32) bool {
         lowered.tri_count,
         install_groups,
         lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
         colors,
     )) return false;
     mesh_edit.setMode(session.original_mode);
@@ -2668,6 +2772,8 @@ pub fn meshBevelEnd(commit: bool) bool {
                 lowered.tri_count,
                 groups_arg,
                 lowered.materials,
+                lowered.semantic_regions,
+                lowered.semantic_instances,
                 session.base_colors,
             );
         } else |_| {
@@ -2893,6 +2999,10 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
     defer groups.deinit(std.heap.c_allocator);
     var materials: std.ArrayListUnmanaged(u32) = .empty;
     defer materials.deinit(std.heap.c_allocator);
+    var semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_regions.deinit(std.heap.c_allocator);
+    var semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_instances.deinit(std.heap.c_allocator);
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(std.heap.c_allocator);
     var f: u32 = 0;
@@ -2920,6 +3030,9 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
         }
         if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
         materials.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch {};
+        const semantic = model_source.faceSemanticOf(f);
+        semantic_regions.append(std.heap.c_allocator, semantic.region) catch return false;
+        semantic_instances.append(std.heap.c_allocator, semantic.instance) catch return false;
         if (paint_stable) {
             const color = trueFaceColor(f);
             colors.appendSlice(std.heap.c_allocator, &color) catch {
@@ -2983,6 +3096,11 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
         } else {
             model_source.setFaceMaterials(&.{});
         }
+        if (!model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items)) {
+            if (snap) |*before| _ = journalInstall(before);
+            journalDiscard(&snap);
+            return false;
+        }
         if (has_groups) {
             model_source.setFaceGroups(groups.items);
             if (compacted_ranges) |ranges| model_source.setPartRanges(ranges);
@@ -3016,6 +3134,41 @@ fn captureFaceMaterials(total_faces: u32) ?[]u32 {
     return out;
 }
 
+const SemanticRows = struct {
+    regions: []u32,
+    instances: []u32,
+
+    fn deinit(rows: *SemanticRows) void {
+        std.heap.c_allocator.free(rows.regions);
+        std.heap.c_allocator.free(rows.instances);
+        rows.* = undefined;
+    }
+};
+
+/// Snapshot durable meaning for a topology transaction. Appended rows start as
+/// explicit debt; each face-mint path must either inherit or assign a role before
+/// committing the transaction.
+fn captureFaceSemantics(total_faces: u32) ?SemanticRows {
+    const current_faces = g_edit_count / 3;
+    if (total_faces < current_faces) return null;
+    const regions = std.heap.c_allocator.alloc(u32, total_faces) catch return null;
+    const instances = std.heap.c_allocator.alloc(u32, total_faces) catch {
+        std.heap.c_allocator.free(regions);
+        return null;
+    };
+    var face: u32 = 0;
+    while (face < current_faces) : (face += 1) {
+        const semantic = model_source.faceSemanticOf(face);
+        regions[face] = semantic.region;
+        instances[face] = semantic.instance;
+    }
+    if (total_faces > current_faces) {
+        @memset(regions[current_faces..], model_source.NO_SEMANTIC_ID);
+        @memset(instances[current_faces..], model_source.NO_SEMANTIC_ID);
+    }
+    return .{ .regions = regions, .instances = instances };
+}
+
 fn optionalU32SlicesEqual(expected: ?[]const u32, actual: ?[]const u32) bool {
     if (expected == null or actual == null) return expected == null and actual == null;
     return std.mem.eql(u32, expected.?, actual.?);
@@ -3035,6 +3188,8 @@ fn hiddenModelStateHash() u64 {
         hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.source_verts));
         hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.groups));
         hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.materials));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.semantic_regions));
+        hash = std.hash.Wyhash.hash(hash, std.mem.sliceAsBytes(hidden.semantic_instances));
         hash = std.hash.Wyhash.hash(hash, hidden.colors);
     }
     return hash;
@@ -3051,6 +3206,9 @@ const ResidentMetadataGuard = struct {
     part_ranges: ?[]u32 = null,
     face_parts: ?[]u32 = null,
     materials: ?[]u32 = null,
+    semantic_regions: ?[]u32 = null,
+    semantic_instances: ?[]u32 = null,
+    semantic_table_json: ?[]u8 = null,
     source_colors: ?[]u8 = null,
     face_colors: ?[]u8 = null,
     atlas_present: bool = false,
@@ -3099,6 +3257,12 @@ const ResidentMetadataGuard = struct {
         if (capturePartOfFaces()) |rows| guard.face_parts = rows;
         if (model_source.faceMaterials()) |rows|
             guard.materials = std.heap.c_allocator.dupe(u32, rows) catch return null;
+        if (model_source.faceSemanticRegions()) |rows|
+            guard.semantic_regions = std.heap.c_allocator.dupe(u32, rows) catch return null;
+        if (model_source.faceSemanticInstances()) |rows|
+            guard.semantic_instances = std.heap.c_allocator.dupe(u32, rows) catch return null;
+        if (model_source.semanticTableJson()) |json|
+            guard.semantic_table_json = std.heap.c_allocator.dupe(u8, json) catch return null;
         if (model_source.colors()) |rows|
             guard.source_colors = std.heap.c_allocator.dupe(u8, rows) catch return null;
         if (model_paint.atlas()) |atlas| {
@@ -3119,6 +3283,9 @@ const ResidentMetadataGuard = struct {
         if (guard.part_ranges) |rows| std.heap.c_allocator.free(rows);
         if (guard.face_parts) |rows| std.heap.c_allocator.free(rows);
         if (guard.materials) |rows| std.heap.c_allocator.free(rows);
+        if (guard.semantic_regions) |rows| std.heap.c_allocator.free(rows);
+        if (guard.semantic_instances) |rows| std.heap.c_allocator.free(rows);
+        if (guard.semantic_table_json) |json| std.heap.c_allocator.free(json);
         if (guard.source_colors) |rows| std.heap.c_allocator.free(rows);
         if (guard.face_colors) |rows| std.heap.c_allocator.free(rows);
         if (guard.edit_key) |key| std.heap.c_allocator.free(key);
@@ -3154,6 +3321,9 @@ const ResidentMetadataGuard = struct {
         defer if (live_face_parts) |rows| std.heap.c_allocator.free(rows);
         if (!optionalU32SlicesEqual(guard.face_parts, live_face_parts)) return false;
         if (!optionalU32SlicesEqual(guard.materials, model_source.faceMaterials())) return false;
+        if (!optionalU32SlicesEqual(guard.semantic_regions, model_source.faceSemanticRegions())) return false;
+        if (!optionalU32SlicesEqual(guard.semantic_instances, model_source.faceSemanticInstances())) return false;
+        if (!optionalU8SlicesEqual(guard.semantic_table_json, model_source.semanticTableJson())) return false;
         if (!optionalU8SlicesEqual(guard.source_colors, model_source.colors())) return false;
         const live_colors = collectCurrentFaceColors() orelse return false;
         defer std.heap.c_allocator.free(live_colors);
@@ -3285,6 +3455,8 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     const cur_materials = std.heap.c_allocator.alloc(u32, cur_count / 3) catch return fail;
     defer std.heap.c_allocator.free(cur_materials);
     for (cur_materials, 0..) |*material, face| material.* = model_source.faceMaterialOf(@intCast(face));
+    var semantics = captureFaceSemantics(cur_count / 3 + new_count / 3) orelse return fail;
+    defer semantics.deinit();
     const offset: u32 = nextFreeGroupId(cur_groups);
 
     const cur_faces = cur_count / 3;
@@ -3387,6 +3559,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         @memcpy(materials[0..cur_faces], cur_materials);
         @memset(materials[cur_faces..], indexed_edit_mesh.NO_MATERIAL);
         model_source.setFaceMaterials(materials);
+        if (!model_source.setFaceSemantics(semantics.regions, semantics.instances)) return fail;
         // The appended part joins the host's part-range truth (req_2644): grow the
         // PRE-REPLACE captured ranges with its fresh pair so __mesh_part_ranges reads
         // back the full partition without waiting for a cart push. The capture matters
@@ -3425,6 +3598,8 @@ const HiddenGroup = struct {
     source_verts: []f32,
     groups: []u32,
     materials: []u32,
+    semantic_regions: []u32,
+    semantic_instances: []u32,
     colors: []u8,
 };
 var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .empty;
@@ -3434,6 +3609,8 @@ fn freeHiddenGroup(group: HiddenGroup) void {
     std.heap.c_allocator.free(group.source_verts);
     std.heap.c_allocator.free(group.groups);
     std.heap.c_allocator.free(group.materials);
+    std.heap.c_allocator.free(group.semantic_regions);
+    std.heap.c_allocator.free(group.semantic_instances);
     std.heap.c_allocator.free(group.colors);
 }
 
@@ -3457,6 +3634,11 @@ fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_s
     defer if (displayed_groups) |groups| std.heap.c_allocator.free(groups);
     const displayed_materials = if (use_displayed and visible_blocks == 1) captureFaceMaterials(visible_count / 3) else null;
     defer if (displayed_materials) |materials| std.heap.c_allocator.free(materials);
+    var displayed_semantics = if (use_displayed and visible_blocks == 1 and model_source.faceSemanticRegions() != null)
+        captureFaceSemantics(visible_count / 3)
+    else
+        null;
+    defer if (displayed_semantics) |*semantics| semantics.deinit();
     if (use_displayed and visible_blocks == 1 and (displayed_groups == null or displayed_materials == null)) return null;
     const blocks = allocator.alloc(model_source.MeshDocFaceBlock, g_hidden_groups.items.len + visible_blocks) catch return null;
     defer allocator.free(blocks);
@@ -3465,6 +3647,8 @@ fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_s
             .verts = visible[0..visible_len],
             .groups = if (use_displayed) displayed_groups else model_source.faceGroups(),
             .materials = if (use_displayed) displayed_materials else model_source.faceMaterials(),
+            .semantic_regions = if (displayed_semantics) |semantics| semantics.regions else model_source.faceSemanticRegions(),
+            .semantic_instances = if (displayed_semantics) |semantics| semantics.instances else model_source.faceSemanticInstances(),
             .colors = if (use_displayed) displayed_colors else model_source.colors(),
         };
     }
@@ -3473,10 +3657,19 @@ fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_s
             .verts = if (painted) hidden.verts else hidden.source_verts,
             .groups = hidden.groups,
             .materials = hidden.materials,
+            .semantic_regions = hidden.semantic_regions,
+            .semantic_instances = hidden.semantic_instances,
             .colors = hidden.colors,
         };
     }
-    return model_source.composeMeshDocSnapshot(allocator, blocks) catch null;
+    var snapshot = model_source.composeMeshDocSnapshot(allocator, blocks) catch return null;
+    if (model_source.semanticTableJson()) |json| {
+        snapshot.semantic_table_json = allocator.dupe(u8, json) catch {
+            snapshot.deinit(allocator);
+            return null;
+        };
+    }
+    return snapshot;
 }
 
 /// Complete durable source document. Visibility is presentation state: hidden
@@ -3526,6 +3719,10 @@ fn hideGroup(lo: u32, hi: u32) bool {
     defer keep_g.deinit(std.heap.c_allocator);
     var keep_m: std.ArrayListUnmanaged(u32) = .empty;
     defer keep_m.deinit(std.heap.c_allocator);
+    var keep_sr: std.ArrayListUnmanaged(u32) = .empty;
+    defer keep_sr.deinit(std.heap.c_allocator);
+    var keep_si: std.ArrayListUnmanaged(u32) = .empty;
+    defer keep_si.deinit(std.heap.c_allocator);
     var keep_c: std.ArrayListUnmanaged(u8) = .empty;
     defer keep_c.deinit(std.heap.c_allocator);
     var hid: std.ArrayListUnmanaged(f32) = .empty;
@@ -3536,6 +3733,10 @@ fn hideGroup(lo: u32, hi: u32) bool {
     defer hid_g.deinit(std.heap.c_allocator);
     var hid_m: std.ArrayListUnmanaged(u32) = .empty;
     defer hid_m.deinit(std.heap.c_allocator);
+    var hid_sr: std.ArrayListUnmanaged(u32) = .empty;
+    defer hid_sr.deinit(std.heap.c_allocator);
+    var hid_si: std.ArrayListUnmanaged(u32) = .empty;
+    defer hid_si.deinit(std.heap.c_allocator);
     var hid_c: std.ArrayListUnmanaged(u8) = .empty;
     defer hid_c.deinit(std.heap.c_allocator);
     var any = false;
@@ -3550,12 +3751,18 @@ fn hideGroup(lo: u32, hi: u32) bool {
                 !appendFloats(&hid_source, cur_source[base .. base + 24])) return false;
             hid_g.append(std.heap.c_allocator, g) catch return false;
             hid_m.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
+            const semantic = model_source.faceSemanticOf(f);
+            hid_sr.append(std.heap.c_allocator, semantic.region) catch return false;
+            hid_si.append(std.heap.c_allocator, semantic.instance) catch return false;
             hid_c.appendSlice(std.heap.c_allocator, cur_colors[color_base .. color_base + 4]) catch return false;
         } else {
             if (!appendFloats(&keep, cur_verts[base .. base + 24]) or
                 !appendFloats(&keep_source, cur_source[base .. base + 24])) return false;
             keep_g.append(std.heap.c_allocator, g) catch return false;
             keep_m.append(std.heap.c_allocator, model_source.faceMaterialOf(f)) catch return false;
+            const semantic = model_source.faceSemanticOf(f);
+            keep_sr.append(std.heap.c_allocator, semantic.region) catch return false;
+            keep_si.append(std.heap.c_allocator, semantic.instance) catch return false;
             keep_c.appendSlice(std.heap.c_allocator, cur_colors[color_base .. color_base + 4]) catch return false;
         }
     }
@@ -3577,11 +3784,28 @@ fn hideGroup(lo: u32, hi: u32) bool {
         std.heap.c_allocator.free(hid_groups);
         return false;
     };
+    const hid_semantic_regions = hid_sr.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        std.heap.c_allocator.free(hid_source_verts);
+        std.heap.c_allocator.free(hid_groups);
+        std.heap.c_allocator.free(hid_materials);
+        return false;
+    };
+    const hid_semantic_instances = hid_si.toOwnedSlice(std.heap.c_allocator) catch {
+        std.heap.c_allocator.free(hid_verts);
+        std.heap.c_allocator.free(hid_source_verts);
+        std.heap.c_allocator.free(hid_groups);
+        std.heap.c_allocator.free(hid_materials);
+        std.heap.c_allocator.free(hid_semantic_regions);
+        return false;
+    };
     const hid_colors = hid_c.toOwnedSlice(std.heap.c_allocator) catch {
         std.heap.c_allocator.free(hid_verts);
         std.heap.c_allocator.free(hid_source_verts);
         std.heap.c_allocator.free(hid_groups);
         std.heap.c_allocator.free(hid_materials);
+        std.heap.c_allocator.free(hid_semantic_regions);
+        std.heap.c_allocator.free(hid_semantic_instances);
         return false;
     };
     const hidden = HiddenGroup{
@@ -3591,6 +3815,8 @@ fn hideGroup(lo: u32, hi: u32) bool {
         .source_verts = hid_source_verts,
         .groups = hid_groups,
         .materials = hid_materials,
+        .semantic_regions = hid_semantic_regions,
+        .semantic_instances = hid_semantic_instances,
         .colors = hid_colors,
     };
 
@@ -3604,6 +3830,10 @@ fn hideGroup(lo: u32, hi: u32) bool {
     if (ok) {
         model_source.setFaceGroups(keep_g.items);
         model_source.setFaceMaterials(keep_m.items);
+        if (!model_source.setFaceSemantics(keep_sr.items, keep_si.items)) {
+            freeHiddenGroup(hidden);
+            return false;
+        }
         _ = model_source.replaceGeometrySameTriangleCount(keep_source.items, kept);
         _ = refreshPaintLayout();
         restoreFaceColorMetadata(keep_c.items);
@@ -3637,6 +3867,8 @@ fn showGroup(lo: u32, hi: u32) bool {
     const cur_materials = std.heap.c_allocator.alloc(u32, cur_count / 3) catch return false;
     defer std.heap.c_allocator.free(cur_materials);
     for (cur_materials, 0..) |*material, face| material.* = model_source.faceMaterialOf(@intCast(face));
+    var current_semantics = captureFaceSemantics(cur_count / 3) orelse return false;
+    defer current_semantics.deinit();
 
     var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(std.heap.c_allocator);
@@ -3654,6 +3886,14 @@ fn showGroup(lo: u32, hi: u32) bool {
     defer materials.deinit(std.heap.c_allocator);
     materials.appendSlice(std.heap.c_allocator, cur_materials) catch return false;
     materials.appendSlice(std.heap.c_allocator, entry.materials) catch return false;
+    var semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_regions.deinit(std.heap.c_allocator);
+    semantic_regions.appendSlice(std.heap.c_allocator, current_semantics.regions) catch return false;
+    semantic_regions.appendSlice(std.heap.c_allocator, entry.semantic_regions) catch return false;
+    var semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_instances.deinit(std.heap.c_allocator);
+    semantic_instances.appendSlice(std.heap.c_allocator, current_semantics.instances) catch return false;
+    semantic_instances.appendSlice(std.heap.c_allocator, entry.semantic_instances) catch return false;
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(std.heap.c_allocator);
     colors.appendSlice(std.heap.c_allocator, cur_colors) catch return false;
@@ -3668,6 +3908,7 @@ fn showGroup(lo: u32, hi: u32) bool {
     if (ok) {
         model_source.setFaceGroups(groups.items);
         model_source.setFaceMaterials(materials.items);
+        if (!model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items)) return false;
         _ = model_source.replaceGeometrySameTriangleCount(source_out.items, new_count);
         _ = refreshPaintLayout();
         restoreFaceColorMetadata(colors.items);
@@ -3723,6 +3964,8 @@ const JournalHidden = struct {
     source_verts: []f32,
     groups: []u32,
     materials: []u32,
+    semantic_regions: []u32,
+    semantic_instances: []u32,
     colors: []u8,
 };
 const JournalAtlas = struct {
@@ -3735,6 +3978,9 @@ const JournalEntry = struct {
     count: u32,
     groups: ?[]u32,
     materials: ?[]u32,
+    semantic_regions: ?[]u32,
+    semantic_instances: ?[]u32,
+    semantic_table_json: ?[]u8,
     part_ranges: ?[]u32,
     colors: ?[]u8,
     hidden: []JournalHidden,
@@ -3844,12 +4090,16 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
     var n: usize = e.verts.len * @sizeOf(f32);
     if (e.groups) |g| n += g.len * @sizeOf(u32);
     if (e.materials) |m| n += m.len * @sizeOf(u32);
+    if (e.semantic_regions) |rows| n += rows.len * @sizeOf(u32);
+    if (e.semantic_instances) |rows| n += rows.len * @sizeOf(u32);
+    if (e.semantic_table_json) |json| n += json.len;
     if (e.part_ranges) |p| n += p.len * @sizeOf(u32);
     if (e.colors) |c| n += c.len;
     n += e.hidden.len * @sizeOf(JournalHidden);
     for (e.hidden) |h| {
         n += (h.verts.len + h.source_verts.len) * @sizeOf(f32);
         n += h.groups.len * @sizeOf(u32) + h.materials.len * @sizeOf(u32) + h.colors.len;
+        n += (h.semantic_regions.len + h.semantic_instances.len) * @sizeOf(u32);
     }
     if (e.atlas) |atlas| n += atlas.rgba.len;
     if (e.paint_state) |paint_state| n += paint_program.journalStateBytes(paint_state);
@@ -3861,6 +4111,9 @@ fn journalFreeEntry(e: *JournalEntry) void {
     jalloc.free(e.verts);
     if (e.groups) |g| jalloc.free(g);
     if (e.materials) |m| jalloc.free(m);
+    if (e.semantic_regions) |rows| jalloc.free(rows);
+    if (e.semantic_instances) |rows| jalloc.free(rows);
+    if (e.semantic_table_json) |json| jalloc.free(json);
     if (e.part_ranges) |p| jalloc.free(p);
     if (e.colors) |c| jalloc.free(c);
     for (e.hidden) |h| {
@@ -3868,6 +4121,8 @@ fn journalFreeEntry(e: *JournalEntry) void {
         jalloc.free(h.source_verts);
         jalloc.free(h.groups);
         jalloc.free(h.materials);
+        jalloc.free(h.semantic_regions);
+        jalloc.free(h.semantic_instances);
         jalloc.free(h.colors);
     }
     if (e.hidden.len > 0) jalloc.free(e.hidden);
@@ -3893,6 +4148,9 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .count = g_edit_count,
         .groups = null,
         .materials = null,
+        .semantic_regions = null,
+        .semantic_instances = null,
+        .semantic_table_json = null,
         .part_ranges = null,
         .colors = null,
         .hidden = &.{},
@@ -3932,6 +4190,9 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
     }
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
     if (model_source.faceMaterials()) |rows| entry.materials = jalloc.dupe(u32, rows) catch null;
+    if (model_source.faceSemanticRegions()) |rows| entry.semantic_regions = jalloc.dupe(u32, rows) catch null;
+    if (model_source.faceSemanticInstances()) |rows| entry.semantic_instances = jalloc.dupe(u32, rows) catch null;
+    if (model_source.semanticTableJson()) |json| entry.semantic_table_json = jalloc.dupe(u8, json) catch null;
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
     entry.colors = collectCurrentFaceColors();
     if (g_hidden_groups.items.len > 0) {
@@ -3953,18 +4214,47 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
                 jalloc.free(hg);
                 continue;
             };
-            const hc = jalloc.dupe(u8, h.colors) catch {
+            const hsr = jalloc.dupe(u32, h.semantic_regions) catch {
                 jalloc.free(hv);
                 jalloc.free(hsv);
                 jalloc.free(hg);
                 jalloc.free(hm);
                 continue;
             };
-            hs.append(jalloc, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .source_verts = hsv, .groups = hg, .materials = hm, .colors = hc }) catch {
+            const hsi = jalloc.dupe(u32, h.semantic_instances) catch {
                 jalloc.free(hv);
                 jalloc.free(hsv);
                 jalloc.free(hg);
                 jalloc.free(hm);
+                jalloc.free(hsr);
+                continue;
+            };
+            const hc = jalloc.dupe(u8, h.colors) catch {
+                jalloc.free(hv);
+                jalloc.free(hsv);
+                jalloc.free(hg);
+                jalloc.free(hm);
+                jalloc.free(hsr);
+                jalloc.free(hsi);
+                continue;
+            };
+            hs.append(jalloc, .{
+                .lo = h.lo,
+                .hi = h.hi,
+                .verts = hv,
+                .source_verts = hsv,
+                .groups = hg,
+                .materials = hm,
+                .semantic_regions = hsr,
+                .semantic_instances = hsi,
+                .colors = hc,
+            }) catch {
+                jalloc.free(hv);
+                jalloc.free(hsv);
+                jalloc.free(hg);
+                jalloc.free(hm);
+                jalloc.free(hsr);
+                jalloc.free(hsi);
                 jalloc.free(hc);
             };
         }
@@ -4207,6 +4497,7 @@ fn journalDropLast() void {
 
 /// Forget all history — a fresh model load is a new document.
 pub fn meshJournalClear() void {
+    semanticMintIntentClear();
     g_integrity_pending = false; // an armed check must not audit the NEXT document
     g_integrity_strikes = 0;
     journalFreeStack(&g_journal_undo);
@@ -4277,12 +4568,16 @@ fn journalCurrentStateBytes(groups: ?[]const u32) usize {
     var bytes = @as(usize, g_edit_count) * 8 * @sizeOf(f32);
     if (groups) |rows| bytes += rows.len * @sizeOf(u32);
     if (model_source.faceMaterials()) |rows| bytes += rows.len * @sizeOf(u32);
+    if (model_source.faceSemanticRegions()) |rows| bytes += rows.len * @sizeOf(u32);
+    if (model_source.faceSemanticInstances()) |rows| bytes += rows.len * @sizeOf(u32);
+    if (model_source.semanticTableJson()) |json| bytes += json.len;
     if (model_source.partRanges()) |ranges| bytes += ranges.len * @sizeOf(u32);
     if (model_source.colors()) |colors| bytes += colors.len;
     bytes += g_hidden_groups.items.len * @sizeOf(HiddenGroup);
     for (g_hidden_groups.items) |hidden| {
         bytes += (hidden.verts.len + hidden.source_verts.len) * @sizeOf(f32);
         bytes += hidden.groups.len * @sizeOf(u32) + hidden.materials.len * @sizeOf(u32) + hidden.colors.len;
+        bytes += (hidden.semantic_regions.len + hidden.semantic_instances.len) * @sizeOf(u32);
     }
     if (g_journal_note) |note| bytes += note.len;
     return bytes;
@@ -4484,18 +4779,47 @@ fn journalInstall(e: *const JournalEntry) bool {
             std.heap.c_allocator.free(hg);
             continue;
         };
-        const hc = std.heap.c_allocator.dupe(u8, h.colors) catch {
+        const hsr = std.heap.c_allocator.dupe(u32, h.semantic_regions) catch {
             std.heap.c_allocator.free(hv);
             std.heap.c_allocator.free(hsv);
             std.heap.c_allocator.free(hg);
             std.heap.c_allocator.free(hm);
             continue;
         };
-        g_hidden_groups.append(std.heap.c_allocator, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .source_verts = hsv, .groups = hg, .materials = hm, .colors = hc }) catch {
+        const hsi = std.heap.c_allocator.dupe(u32, h.semantic_instances) catch {
             std.heap.c_allocator.free(hv);
             std.heap.c_allocator.free(hsv);
             std.heap.c_allocator.free(hg);
             std.heap.c_allocator.free(hm);
+            std.heap.c_allocator.free(hsr);
+            continue;
+        };
+        const hc = std.heap.c_allocator.dupe(u8, h.colors) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
+            std.heap.c_allocator.free(hg);
+            std.heap.c_allocator.free(hm);
+            std.heap.c_allocator.free(hsr);
+            std.heap.c_allocator.free(hsi);
+            continue;
+        };
+        g_hidden_groups.append(std.heap.c_allocator, .{
+            .lo = h.lo,
+            .hi = h.hi,
+            .verts = hv,
+            .source_verts = hsv,
+            .groups = hg,
+            .materials = hm,
+            .semantic_regions = hsr,
+            .semantic_instances = hsi,
+            .colors = hc,
+        }) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hsv);
+            std.heap.c_allocator.free(hg);
+            std.heap.c_allocator.free(hm);
+            std.heap.c_allocator.free(hsr);
+            std.heap.c_allocator.free(hsi);
             std.heap.c_allocator.free(hc);
         };
     }
@@ -4504,6 +4828,12 @@ fn journalInstall(e: *const JournalEntry) bool {
         model_source.setFaceMaterials(materials)
     else
         model_source.clearFaceMaterials();
+    if (e.semantic_regions) |regions| {
+        const instances = e.semantic_instances orelse return false;
+        if (e.semantic_table_json) |json| {
+            if (!model_source.setSemanticState(regions, instances, json)) return false;
+        } else if (!model_source.setFaceSemantics(regions, instances)) return false;
+    } else model_source.clearFaceSemantics();
     // Tripwire (req_3049): restoring a snapshot that carries NO ranges over a mesh
     // that has them silently un-parts the model — the save then persists a doc that
     // reopens merged. Name it when it happens.
@@ -4600,6 +4930,10 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     defer colors.deinit(jalloc);
     var copied_materials: std.ArrayListUnmanaged(u32) = .empty;
     defer copied_materials.deinit(jalloc);
+    var copied_semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer copied_semantic_regions.deinit(jalloc);
+    var copied_semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer copied_semantic_instances.deinit(jalloc);
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
     defer remap.deinit(jalloc);
     var next_local: u32 = 0;
@@ -4632,6 +4966,9 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
         const c = trueFaceColor(f);
         colors.appendSlice(jalloc, c[0..]) catch return fail;
         copied_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return fail;
+        const semantic = model_source.faceSemanticOf(f);
+        copied_semantic_regions.append(jalloc, semantic.region) catch return fail;
+        copied_semantic_instances.append(jalloc, semantic.instance) catch return fail;
     }
     if (groups.items.len == 0) return fail;
 
@@ -4643,12 +4980,24 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     };
     defer jalloc.free(installed_materials);
     @memcpy(installed_materials[first_new_face..], copied_materials.items);
+    var installed_semantics = captureFaceSemantics(first_new_face + @as(u32, @intCast(copied_semantic_regions.items.len))) orelse {
+        journalDiscard(&snap);
+        return fail;
+    };
+    defer installed_semantics.deinit();
+    @memcpy(installed_semantics.regions[first_new_face..], copied_semantic_regions.items);
+    @memcpy(installed_semantics.instances[first_new_face..], copied_semantic_instances.items);
     const r = appendGroupInner(out.items, @intCast(out.items.len / 8), groups.items);
     if (!r.ok) {
         journalDiscard(&snap);
         return r;
     }
     model_source.setFaceMaterials(installed_materials);
+    if (!model_source.setFaceSemantics(installed_semantics.regions, installed_semantics.instances)) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return fail;
+    }
     // The copy keeps the source's per-face paint — a duplicate reads as a twin.
     var i: u32 = 0;
     while (i < groups.items.len) : (i += 1) {
@@ -4812,6 +5161,10 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     defer colors.deinit(jalloc);
     var materials: std.ArrayListUnmanaged(u32) = .empty;
     defer materials.deinit(jalloc);
+    var semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_regions.deinit(jalloc);
+    var semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_instances.deinit(jalloc);
     var all_ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer all_ranges.deinit(jalloc);
     var fresh_ranges: std.ArrayListUnmanaged(u32) = .empty;
@@ -4823,6 +5176,9 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     var material_face: u32 = 0;
     while (material_face < cur_faces) : (material_face += 1) {
         materials.append(jalloc, model_source.faceMaterialOf(material_face)) catch return fail;
+        const semantic = model_source.faceSemanticOf(material_face);
+        semantic_regions.append(jalloc, semantic.region) catch return fail;
+        semantic_instances.append(jalloc, semantic.instance) catch return fail;
     }
     all_ranges.appendSlice(jalloc, part_ranges) catch return fail;
 
@@ -4864,6 +5220,9 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
                 groups.append(jalloc, range_start + group_entry.value_ptr.*) catch return fail;
                 colors.appendSlice(jalloc, cur_colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return fail;
                 materials.append(jalloc, model_source.faceMaterialOf(f)) catch return fail;
+                const semantic = model_source.faceSemanticOf(f);
+                semantic_regions.append(jalloc, semantic.region) catch return fail;
+                semantic_instances.append(jalloc, semantic.instance) catch return fail;
                 copied_faces += 1;
             }
             if (copied_faces == 0 or next_local == 0) return fail;
@@ -4885,6 +5244,12 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     }
     model_source.setFaceGroups(groups.items);
     model_source.setFaceMaterials(materials.items);
+    if (!model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items)) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        alloc.free(result_ranges);
+        return fail;
+    }
     model_source.setPartRanges(all_ranges.items);
     if (!applyExactFaceColors(colors.items, @intCast(groups.items.len))) {
         if (snap) |*before| _ = journalInstall(before);
@@ -5544,6 +5909,10 @@ fn partitionGlassFaces(colors: []const u8) bool {
     defer new_colors.deinit(jalloc);
     var new_materials: std.ArrayListUnmanaged(u32) = .empty;
     defer new_materials.deinit(jalloc);
+    var new_semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer new_semantic_regions.deinit(jalloc);
+    var new_semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer new_semantic_instances.deinit(jalloc);
 
     inline for (.{ true, false }) |want_opaque| {
         var f: u32 = 0;
@@ -5556,6 +5925,9 @@ fn partitionGlassFaces(colors: []const u8) bool {
             if (cur_groups) |g| new_groups.append(jalloc, g[f]) catch return false;
             new_colors.appendSlice(jalloc, colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return false;
             new_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
+            const semantic = model_source.faceSemanticOf(f);
+            new_semantic_regions.append(jalloc, semantic.region) catch return false;
+            new_semantic_instances.append(jalloc, semantic.instance) catch return false;
         }
     }
     const count: u32 = @intCast(out.items.len / 8);
@@ -5563,6 +5935,7 @@ fn partitionGlassFaces(colors: []const u8) bool {
     if (!replaceActiveEditMesh(out.items, count)) return false;
     if (cur_groups != null) model_source.setFaceGroups(new_groups.items);
     model_source.setFaceMaterials(new_materials.items);
+    if (!model_source.setFaceSemantics(new_semantic_regions.items, new_semantic_instances.items)) return false;
     model_paint.applyColors(new_colors.items);
     if (model_source.colors()) |src| {
         const n = @min(src.len, new_colors.items.len);
@@ -5703,6 +6076,10 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     defer add_colors.deinit(jalloc);
     var add_materials: std.ArrayListUnmanaged(u32) = .empty;
     defer add_materials.deinit(jalloc);
+    var add_semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer add_semantic_regions.deinit(jalloc);
+    var add_semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer add_semantic_instances.deinit(jalloc);
     var add_part: std.ArrayListUnmanaged(u32) = .empty;
     defer add_part.deinit(jalloc);
     var next_group: u32 = if (has_groups) nextFreeGroupId(cur_groups.?) else 0;
@@ -5734,6 +6111,9 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         const c = trueFaceColor(f);
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
         add_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
+        const semantic = model_source.faceSemanticOf(f);
+        add_semantic_regions.append(jalloc, semantic.region) catch return false;
+        add_semantic_instances.append(jalloc, semantic.instance) catch return false;
         if (base_part) |bp| add_part.append(jalloc, bp[f]) catch return false;
     }
     // Rim walls on the selection's boundary edges (incident to exactly ONE selected face).
@@ -5761,6 +6141,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
         add_materials.append(jalloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
         add_materials.append(jalloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
+        const semantic = model_source.faceSemanticOf(fa);
+        add_semantic_regions.append(jalloc, semantic.region) catch return false;
+        add_semantic_regions.append(jalloc, semantic.region) catch return false;
+        add_semantic_instances.append(jalloc, semantic.instance) catch return false;
+        add_semantic_instances.append(jalloc, semantic.instance) catch return false;
         if (base_part) |bp| {
             add_part.append(jalloc, bp[fa]) catch return false;
             add_part.append(jalloc, bp[fa]) catch return false;
@@ -5781,11 +6166,29 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         return false;
     }
     @memcpy(materials[first_new_face..], add_materials.items);
+    var semantics = captureFaceSemantics(new_count / 3) orelse {
+        journalDiscard(&snap);
+        return false;
+    };
+    defer semantics.deinit();
+    if (add_semantic_regions.items.len != semantics.regions.len - first_new_face or
+        add_semantic_instances.items.len != semantics.instances.len - first_new_face)
+    {
+        journalDiscard(&snap);
+        return false;
+    }
+    @memcpy(semantics.regions[first_new_face..], add_semantic_regions.items);
+    @memcpy(semantics.instances[first_new_face..], add_semantic_instances.items);
     if (!replaceActiveEditMesh(out.items, new_count)) {
         journalDiscard(&snap);
         return false;
     }
     model_source.setFaceMaterials(materials);
+    if (!model_source.setFaceSemantics(semantics.regions, semantics.instances)) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return false;
+    }
     if (has_groups) {
         var all_groups: std.ArrayListUnmanaged(u32) = .empty;
         defer all_groups.deinit(jalloc);
@@ -6998,6 +7401,30 @@ pub fn meshGizmoScaleBy(factor: f32) bool {
     return ok;
 }
 
+pub fn meshTransformTranslate(delta: [3]f32) bool {
+    if (meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    var snap = journalSnapshotCurrent("translate exact");
+    const ok = applyMeshMutation(mesh_edit.translateSelection(delta));
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
+}
+
+pub fn meshTransformScaleAxis(axis: [3]f32, pivot: [3]f32, factor: f32) bool {
+    if (meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    var snap = journalSnapshotCurrent("scale exact");
+    const ok = applyMeshMutation(mesh_edit.scaleSelectionAxis(axis, pivot, factor));
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
+}
+
+pub fn meshTransformRotateAxis(axis: [3]f32, pivot: [3]f32, radians: f32) bool {
+    if (meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    var snap = journalSnapshotCurrent("rotate exact");
+    const ok = applyMeshMutation(mesh_edit.rotateSelectionAxis(axis, pivot, radians));
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
+}
+
 /// Project a world point into the pane's window-px space (viewport-local + pane origin).
 fn ovProject(cam: model_paint.Camera, p: [3]f32, ox: f32, oy: f32) ?[2]f32 {
     const s = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p) orelse return null;
@@ -7832,6 +8259,259 @@ pub fn meshEditSetFaceMaterials(materials: []const u32) bool {
     clearIndexedEditMesh();
     model_source.setFaceMaterials(materials);
     return true;
+}
+
+/// Restore RJMD's semantic membership and name/provenance dictionary together.
+/// The topology cache must be rebuilt because each indexed face carries the ids.
+pub fn meshEditSetFaceSemantics(regions: []const u32, instances: []const u32, table_json: []const u8) bool {
+    if (regions.len != g_edit_count / 3 or instances.len != regions.len) return false;
+    if (!model_source.setSemanticState(regions, instances, table_json)) return false;
+    clearIndexedEditMesh();
+    return true;
+}
+
+/// Author meaning onto the current face selection. Membership and dictionary
+/// commit in the same journal unit, so undo/redo can never pair ids with the
+/// wrong names. Returns changed render triangles (zero is a refusal/no-op).
+pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []const u8) u32 {
+    if (region == model_source.NO_SEMANTIC_ID or !model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
+    const face_count = g_edit_count / 3;
+    if (face_count == 0) return 0;
+    const mask = jalloc.alloc(bool, face_count) catch return 0;
+    defer jalloc.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
+    var rows = captureFaceSemantics(face_count) orelse return 0;
+    defer rows.deinit();
+    var changed: u32 = 0;
+    for (mask, 0..) |selected, face| {
+        if (!selected) continue;
+        if (rows.regions[face] == region and rows.instances[face] == instance) continue;
+        rows.regions[face] = region;
+        rows.instances[face] = instance;
+        changed += 1;
+    }
+    if (changed == 0) return 0;
+    var snap = journalSnapshotCurrent("name faces");
+    if (!model_source.setSemanticState(rows.regions, rows.instances, table_json)) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    clearIndexedEditMesh();
+    journalCommit(&snap);
+    return changed;
+}
+
+/// Name an untouched axis-aligned cube in one transaction. This is deliberately
+/// strict (six authored faces, every normal axis-aligned, every side present), so
+/// opening a legacy cube gives the seat known top/bottom/front/back/left/right
+/// without mislabeling an arbitrary imported mesh.
+pub fn meshSemanticBootstrapAxes(ids: [6]u32, table_json: []const u8) bool {
+    if (model_source.faceSemanticRegions() != null or !model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const face_count: usize = @intCast(g_edit_count / 3);
+    if (face_count < 6 or face_count > 12 or verts.len < face_count * 24) return false;
+    var groups = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer groups.deinit(jalloc);
+    const regions = jalloc.alloc(u32, face_count) catch return false;
+    defer jalloc.free(regions);
+    const instances = jalloc.alloc(u32, face_count) catch return false;
+    defer jalloc.free(instances);
+    @memset(instances, 0);
+    var seen = [_]bool{false} ** 6;
+    for (0..face_count) |face| {
+        const group = model_source.faceGroupOf(@intCast(face));
+        if (group == model_source.NO_FACE_GROUP) return false;
+        _ = groups.getOrPut(jalloc, group) catch return false;
+        const base = face * 24;
+        const a = [3]f32{ verts[base], verts[base + 1], verts[base + 2] };
+        const b = [3]f32{ verts[base + 8], verts[base + 9], verts[base + 10] };
+        const c = [3]f32{ verts[base + 16], verts[base + 17], verts[base + 18] };
+        const normal = normalOf(a, b, c);
+        var axis: usize = 0;
+        if (@abs(normal[1]) > @abs(normal[axis])) axis = 1;
+        if (@abs(normal[2]) > @abs(normal[axis])) axis = 2;
+        if (@abs(normal[axis]) < 0.99) return false;
+        const side = axis * 2 + @as(usize, if (normal[axis] >= 0) 0 else 1);
+        regions[face] = ids[side];
+        seen[side] = true;
+    }
+    if (groups.count() != 6) return false;
+    for (seen) |present| if (!present) return false;
+    var snap = journalSnapshotCurrent("name primitive");
+    if (!model_source.setSemanticState(regions, instances, table_json)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    clearIndexedEditMesh();
+    journalCommit(&snap);
+    return true;
+}
+
+const SemanticPerceptAggregate = struct {
+    faces: u32 = 0,
+    instances: u32 = 0,
+    min: [3]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) },
+    max: [3]f32 = .{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) },
+};
+
+/// Cheap cold-agent percept: stable semantic ids grouped with counts, distinct
+/// instances, and exact model-space bounds. The versioned name table is embedded
+/// verbatim, making this sufficient to resume with an empty context window.
+pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
+    const verts = g_edit_verts orelse return null;
+    const regions = model_source.faceSemanticRegions();
+    const instances = model_source.faceSemanticInstances();
+    const face_count: usize = @intCast(g_edit_count / 3);
+    var aggregates = std.AutoHashMapUnmanaged(u32, SemanticPerceptAggregate).empty;
+    defer aggregates.deinit(allocator);
+    var instance_keys = std.AutoHashMapUnmanaged(u64, void).empty;
+    defer instance_keys.deinit(allocator);
+    var unnamed: u32 = 0;
+    if (regions) |region_rows| {
+        const instance_rows = instances orelse return null;
+        if (region_rows.len != face_count or instance_rows.len != face_count) return null;
+        for (region_rows, instance_rows, 0..) |region, instance, face| {
+            if (region == model_source.NO_SEMANTIC_ID) {
+                unnamed += 1;
+                continue;
+            }
+            const gop = aggregates.getOrPut(allocator, region) catch return null;
+            if (!gop.found_existing) gop.value_ptr.* = .{};
+            gop.value_ptr.faces += 1;
+            const instance_key = (@as(u64, region) << 32) | instance;
+            const instance_gop = instance_keys.getOrPut(allocator, instance_key) catch return null;
+            if (!instance_gop.found_existing) gop.value_ptr.instances += 1;
+            const base = face * 24;
+            if (base + 24 > verts.len) return null;
+            for (0..3) |corner| for (0..3) |axis| {
+                const value = verts[base + corner * 8 + axis];
+                gop.value_ptr.min[axis] = @min(gop.value_ptr.min[axis], value);
+                gop.value_ptr.max[axis] = @max(gop.value_ptr.max[axis], value);
+            };
+        }
+    } else unnamed = @intCast(face_count);
+
+    const ids = allocator.alloc(u32, aggregates.count()) catch return null;
+    defer allocator.free(ids);
+    var id_index: usize = 0;
+    var iterator = aggregates.keyIterator();
+    while (iterator.next()) |id| {
+        ids[id_index] = id.*;
+        id_index += 1;
+    }
+    std.mem.sort(u32, ids, {}, std.sort.asc(u32));
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var head_buf: [128]u8 = undefined;
+    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"regions\":[", .{
+        g_edit_generation, face_count, unnamed,
+    }) catch return null;
+    out.appendSlice(allocator, head) catch return null;
+    for (ids, 0..) |id, index| {
+        const aggregate = aggregates.get(id) orelse continue;
+        var row_buf: [320]u8 = undefined;
+        const row = std.fmt.bufPrint(&row_buf,
+            "{s}{{\"id\":{d},\"faces\":{d},\"instances\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+            .{ if (index == 0) "" else ",", id, aggregate.faces, aggregate.instances,
+                aggregate.min[0], aggregate.min[1], aggregate.min[2], aggregate.max[0], aggregate.max[1], aggregate.max[2] },
+        ) catch return null;
+        out.appendSlice(allocator, row) catch return null;
+    }
+    out.appendSlice(allocator, "],\"table\":") catch return null;
+    out.appendSlice(allocator, model_source.semanticTableJson() orelse "{\"version\":1,\"regions\":[]}") catch return null;
+    out.append(allocator, '}') catch return null;
+    return out.toOwnedSlice(allocator) catch null;
+}
+
+pub const MeshSelectorKind = enum { all, region, part, facing, above, below, extremal, box };
+pub const MeshSelectorQuery = struct {
+    kind: MeshSelectorKind,
+    region: u32 = model_source.NO_SEMANTIC_ID,
+    lo: u32 = 0,
+    hi: u32 = 0,
+    axis: u8 = 1,
+    sign: f32 = 1,
+    tolerance_degrees: f32 = 15,
+    threshold: f32 = 0,
+    epsilon: f32 = 0.0001,
+    min: [3]f32 = .{ 0, 0, 0 },
+    max: [3]f32 = .{ 0, 0, 0 },
+    additive: bool = false,
+};
+pub const MeshSelectorResult = struct { faces: u32, bbox: [6]f32 };
+
+fn triangleCentroidAxis(verts: []const f32, face: usize, axis: usize) f32 {
+    const base = face * 24;
+    return (verts[base + axis] + verts[base + 8 + axis] + verts[base + 16 + axis]) / 3;
+}
+
+/// Resolve a geometric/semantic selector against the live topology at use time.
+/// No index is retained across mutations; the returned count/bounds state exactly
+/// what the operation reached, which makes zero/over-broad resolutions visible.
+pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
+    const verts = g_edit_verts orelse return null;
+    const face_count: usize = @intCast(g_edit_count / 3);
+    if (face_count == 0 or query.axis > 2 or verts.len < face_count * 24) return null;
+    const mask = jalloc.alloc(bool, face_count) catch return null;
+    defer jalloc.free(mask);
+    @memset(mask, false);
+    const axis: usize = query.axis;
+    var extremum: f32 = if (query.sign >= 0) -std.math.inf(f32) else std.math.inf(f32);
+    if (query.kind == .extremal) for (0..face_count) |face| {
+        const value = triangleCentroidAxis(verts, face, axis);
+        extremum = if (query.sign >= 0) @max(extremum, value) else @min(extremum, value);
+    };
+    const facing_cos = @cos(std.math.degreesToRadians(std.math.clamp(query.tolerance_degrees, 0, 180)));
+    var matched: u32 = 0;
+    var bbox: [6]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    for (0..face_count) |face| {
+        const centroid = [3]f32{
+            triangleCentroidAxis(verts, face, 0),
+            triangleCentroidAxis(verts, face, 1),
+            triangleCentroidAxis(verts, face, 2),
+        };
+        const include = switch (query.kind) {
+            .all => true,
+            .region => model_source.faceSemanticOf(@intCast(face)).region == query.region,
+            .part => blk: {
+                const group = model_source.faceGroupOf(@intCast(face));
+                break :blk group != model_source.NO_FACE_GROUP and group >= query.lo and group < query.hi;
+            },
+            .above => centroid[axis] > query.threshold,
+            .below => centroid[axis] < query.threshold,
+            .extremal => @abs(centroid[axis] - extremum) <= @max(query.epsilon, 0),
+            .box => centroid[0] >= query.min[0] and centroid[0] <= query.max[0] and
+                centroid[1] >= query.min[1] and centroid[1] <= query.max[1] and
+                centroid[2] >= query.min[2] and centroid[2] <= query.max[2],
+            .facing => blk: {
+                const base = face * 24;
+                const a = [3]f32{ verts[base], verts[base + 1], verts[base + 2] };
+                const b = [3]f32{ verts[base + 8], verts[base + 9], verts[base + 10] };
+                const c = [3]f32{ verts[base + 16], verts[base + 17], verts[base + 18] };
+                const normal = normalOf(a, b, c);
+                break :blk normal[axis] * (if (query.sign >= 0) @as(f32, 1) else -1) >= facing_cos;
+            },
+        };
+        if (!include) continue;
+        mask[face] = true;
+        matched += 1;
+        const base = face * 24;
+        for (0..3) |corner| for (0..3) |component| {
+            const value = verts[base + corner * 8 + component];
+            bbox[component] = @min(bbox[component], value);
+            bbox[component + 3] = @max(bbox[component + 3], value);
+        };
+    }
+    if (!query.additive) mesh_edit.clearSelection();
+    var first = !query.additive;
+    for (mask, 0..) |selected, face| {
+        if (!selected) continue;
+        _ = mesh_edit.selectFaceByIndex(@intCast(face), !first);
+        first = false;
+    }
+    if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
+    return .{ .faces = matched, .bbox = bbox };
 }
 
 /// Assign/clear a texture role on the CURRENT authored-face selection. Geometry and

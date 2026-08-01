@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Seat"
+  short_description: "Drive the live 3D editor with durable semantics"
+  default_prompt: "Use $agent-seat to model this reference in the running studio editor."

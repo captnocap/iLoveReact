@@ -6,10 +6,12 @@
 //! every operation after that resolves adjacency by ids.
 
 const std = @import("std");
+const mesh_semantics = @import("mesh_semantics.zig");
 
 pub const NO_GROUP: u32 = std.math.maxInt(u32);
 pub const NO_PART: u32 = std.math.maxInt(u32);
 pub const NO_MATERIAL: u32 = std.math.maxInt(u32);
+pub const NO_SEMANTIC_ID: u32 = mesh_semantics.NO_ID;
 const IMPORT_WELD_SCALE: f32 = 1024.0;
 /// Public because it is a durability contract, not just an import knob: any two
 /// vertices closer than this MERGE on the next soup→indexed rebuild, so an edit
@@ -323,6 +325,8 @@ pub const Face = struct {
     /// Stable texture-role index authored in the Rig panel. Rendering remains
     /// triangle soup, but splits/cuts inherit this identity from their source face.
     material: u32 = NO_MATERIAL,
+    /// Meaning survives topology changes independently from authored group ids.
+    semantic: mesh_semantics.Face = .{},
     /// True while `source_triangles` still names the exact resident render
     /// tessellation for this authored face. Authored grouping (Merge Faces) may
     /// change without changing those triangles; geometric edits invalidate the
@@ -343,6 +347,7 @@ pub const Face = struct {
             .group = face.group,
             .part = face.part,
             .material = face.material,
+            .semantic = face.semantic,
             .source_tessellation_valid = face.source_tessellation_valid,
             .alive = face.alive,
             .diagonal = face.diagonal,
@@ -379,6 +384,8 @@ pub const Lowered = struct {
     face_ids: []u32,
     parts: []u32,
     materials: []u32,
+    semantic_regions: []u32,
+    semantic_instances: []u32,
     tri_count: u32,
 
     pub fn deinit(lowered: *Lowered) void {
@@ -390,6 +397,8 @@ pub const Lowered = struct {
         lowered.allocator.free(lowered.face_ids);
         lowered.allocator.free(lowered.parts);
         lowered.allocator.free(lowered.materials);
+        lowered.allocator.free(lowered.semantic_regions);
+        lowered.allocator.free(lowered.semantic_instances);
         lowered.* = undefined;
     }
 };
@@ -439,10 +448,23 @@ pub const Mesh = struct {
         parts: ?[]const u32,
         materials: ?[]const u32,
     ) bool {
+        return mesh.residentMetadataMatchesWithSemantics(tri_count, groups, parts, materials, null, null);
+    }
+
+    pub fn residentMetadataMatchesWithSemantics(
+        mesh: *const Mesh,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+        semantic_regions: ?[]const u32,
+        semantic_instances: ?[]const u32,
+    ) bool {
         if (mesh.render_triangles.items.len != tri_count or mesh.render_uvs.items.len != tri_count) return false;
         if (groups) |rows| if (rows.len < tri_count) return false;
         if (parts) |rows| if (rows.len < tri_count) return false;
         if (materials) |rows| if (rows.len < tri_count) return false;
+        if (!mesh_semantics.rowsValid(semantic_regions, semantic_instances, tri_count)) return false;
 
         const seen = mesh.allocator.alloc(bool, tri_count) catch return false;
         defer mesh.allocator.free(seen);
@@ -455,9 +477,14 @@ pub const Mesh = struct {
                 const expected_group = if (groups) |rows| rows[triangle] else NO_GROUP;
                 const expected_part = if (parts) |rows| rows[triangle] else NO_PART;
                 const expected_material = if (materials) |rows| rows[triangle] else NO_MATERIAL;
+                const expected_semantic = mesh_semantics.Face{
+                    .region = if (semantic_regions) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                    .instance = if (semantic_instances) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                };
                 if (face.group != expected_group or
                     face.part != expected_part or
-                    face.material != expected_material)
+                    face.material != expected_material or
+                    !mesh_semantics.eql(face.semantic, expected_semantic))
                 {
                     return false;
                 }
@@ -491,11 +518,28 @@ pub const Mesh = struct {
         parts: []u32,
         materials: []u32,
     ) bool {
+        const ignored_regions = mesh.allocator.alloc(u32, groups.len) catch return false;
+        defer mesh.allocator.free(ignored_regions);
+        const ignored_instances = mesh.allocator.alloc(u32, groups.len) catch return false;
+        defer mesh.allocator.free(ignored_instances);
+        return mesh.writeResidentMetadataWithSemantics(groups, parts, materials, ignored_regions, ignored_instances);
+    }
+
+    pub fn writeResidentMetadataWithSemantics(
+        mesh: *const Mesh,
+        groups: []u32,
+        parts: []u32,
+        materials: []u32,
+        semantic_regions: []u32,
+        semantic_instances: []u32,
+    ) bool {
         const tri_count = mesh.render_triangles.items.len;
         if (mesh.render_uvs.items.len != tri_count or
             groups.len != tri_count or
             parts.len != tri_count or
-            materials.len != tri_count)
+            materials.len != tri_count or
+            semantic_regions.len != tri_count or
+            semantic_instances.len != tri_count)
         {
             return false;
         }
@@ -510,6 +554,8 @@ pub const Mesh = struct {
                 groups[triangle] = face.group;
                 parts[triangle] = face.part;
                 materials[triangle] = face.material;
+                semantic_regions[triangle] = face.semantic.region;
+                semantic_instances[triangle] = face.semantic.instance;
                 seen[triangle] = true;
                 seen_count += 1;
             }
@@ -533,6 +579,7 @@ pub const Mesh = struct {
         group: u32,
         part: u32,
         material: u32,
+        semantic: mesh_semantics.Face,
         triangles: std.ArrayListUnmanaged(u32) = .empty,
     };
 
@@ -561,10 +608,24 @@ pub const Mesh = struct {
         parts: ?[]const u32,
         materials: ?[]const u32,
     ) !Mesh {
+        return fromSoupWithSemantics(allocator, interleaved, tri_count, groups, parts, materials, null, null);
+    }
+
+    pub fn fromSoupWithSemantics(
+        allocator: std.mem.Allocator,
+        interleaved: []const f32,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+        semantic_regions: ?[]const u32,
+        semantic_instances: ?[]const u32,
+    ) !Mesh {
         if (interleaved.len < @as(usize, tri_count) * 24) return error.InvalidSoup;
         if (groups) |rows| if (rows.len < tri_count) return error.InvalidGroups;
         if (parts) |rows| if (rows.len < tri_count) return error.InvalidParts;
         if (materials) |rows| if (rows.len < tri_count) return error.InvalidMaterials;
+        if (!mesh_semantics.rowsValid(semantic_regions, semantic_instances, tri_count)) return error.InvalidSemantics;
 
         var mesh = Mesh{ .allocator = allocator };
         errdefer mesh.deinit();
@@ -656,11 +717,23 @@ pub const Mesh = struct {
                     .group = group,
                     .part = if (parts) |rows| rows[triangle] else NO_PART,
                     .material = if (materials) |rows| rows[triangle] else NO_MATERIAL,
+                    .semantic = .{
+                        .region = if (semantic_regions) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                        .instance = if (semantic_instances) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                    },
                 });
-            } else if (materials != null and buckets.items[entry.value_ptr.*].material != materials.?[triangle]) {
-                // One authored face cannot wear two texture roles. Reject corrupt
-                // persistence at the import boundary instead of choosing a triangle.
-                return error.InconsistentFaceMaterial;
+            } else {
+                const bucket = &buckets.items[entry.value_ptr.*];
+                if (materials != null and bucket.material != materials.?[triangle]) {
+                    // One authored face cannot wear two texture roles. Reject corrupt
+                    // persistence at the import boundary instead of choosing a triangle.
+                    return error.InconsistentFaceMaterial;
+                }
+                const semantic = mesh_semantics.Face{
+                    .region = if (semantic_regions) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                    .instance = if (semantic_instances) |rows| rows[triangle] else mesh_semantics.NO_ID,
+                };
+                if (!mesh_semantics.eql(bucket.semantic, semantic)) return error.InconsistentFaceSemantic;
             }
             try buckets.items[entry.value_ptr.*].triangles.append(allocator, triangle);
             if (group != NO_GROUP and group >= mesh.next_group) mesh.next_group = group + 1;
@@ -683,7 +756,7 @@ pub const Mesh = struct {
     /// source triangles so whole-face selection still finds it; REVERSED cycles
     /// (back-to-back two-sided sheets) are deliberate authoring and are kept.
     fn collapseCoincidentDuplicateFaces(mesh: *Mesh) !void {
-        const CycleKey = struct { part: u32, material: u32, hash: u64 };
+        const CycleKey = struct { part: u32, material: u32, region: u32, instance: u32, hash: u64 };
         var seen = std.AutoHashMapUnmanaged(CycleKey, u32).empty;
         defer seen.deinit(mesh.allocator);
         for (mesh.faces.items) |*face| {
@@ -699,7 +772,13 @@ pub const Mesh = struct {
                 const vertex_id = items[(start + offset) % items.len];
                 hash = (hash ^ vertex_id) *% 1099511628211;
             }
-            const entry = try seen.getOrPut(mesh.allocator, .{ .part = face.part, .material = face.material, .hash = hash });
+            const entry = try seen.getOrPut(mesh.allocator, .{
+                .part = face.part,
+                .material = face.material,
+                .region = face.semantic.region,
+                .instance = face.semantic.instance,
+                .hash = hash,
+            });
             if (!entry.found_existing) {
                 entry.value_ptr.* = face.id;
                 continue;
@@ -769,6 +848,7 @@ pub const Mesh = struct {
             .group = bucket.group,
             .part = bucket.part,
             .material = bucket.material,
+            .semantic = bucket.semantic,
             .source_tessellation_valid = true,
         };
         errdefer face.deinit(allocator);
@@ -2189,6 +2269,7 @@ pub const Mesh = struct {
             .group = mesh.next_group,
             .part = source.part,
             .material = source.material,
+            .semantic = source.semantic,
             .source_tessellation_valid = false,
         };
         mesh.next_group += 1;
@@ -2525,6 +2606,7 @@ pub const Mesh = struct {
             .group = mesh.next_group,
             .part = source.part,
             .material = source.material,
+            .semantic = source.semantic,
             .source_tessellation_valid = false,
         };
         mesh.next_group += 1;
@@ -2734,6 +2816,10 @@ pub const Mesh = struct {
         defer parts.deinit(mesh.allocator);
         var materials = std.ArrayListUnmanaged(u32).empty;
         defer materials.deinit(mesh.allocator);
+        var semantic_regions = std.ArrayListUnmanaged(u32).empty;
+        defer semantic_regions.deinit(mesh.allocator);
+        var semantic_instances = std.ArrayListUnmanaged(u32).empty;
+        defer semantic_instances.deinit(mesh.allocator);
 
         for (mesh.faces.items) |*face| {
             if (!face.alive or face.vertices.items.len < 3) continue;
@@ -2764,16 +2850,18 @@ pub const Mesh = struct {
                         &face_ids,
                         &parts,
                         &materials,
+                        &semantic_regions,
+                        &semantic_instances,
                     );
                 }
             } else if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
-                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
-                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
+                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
+                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
             } else {
                 var corner: usize = 1;
                 while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials);
+                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
                 }
             }
         }
@@ -2792,6 +2880,10 @@ pub const Mesh = struct {
         const part_owned = try parts.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(part_owned);
         const material_owned = try materials.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(material_owned);
+        const semantic_region_owned = try semantic_regions.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(semantic_region_owned);
+        const semantic_instance_owned = try semantic_instances.toOwnedSlice(mesh.allocator);
         return .{
             .allocator = mesh.allocator,
             .positions = pos_owned,
@@ -2802,6 +2894,8 @@ pub const Mesh = struct {
             .face_ids = face_id_owned,
             .parts = part_owned,
             .materials = material_owned,
+            .semantic_regions = semantic_region_owned,
+            .semantic_instances = semantic_instance_owned,
             .tri_count = @intCast(group_owned.len),
         };
     }
@@ -2818,6 +2912,8 @@ pub const Mesh = struct {
         face_ids: *std.ArrayListUnmanaged(u32),
         parts: *std.ArrayListUnmanaged(u32),
         materials: *std.ArrayListUnmanaged(u32),
+        semantic_regions: *std.ArrayListUnmanaged(u32),
+        semantic_instances: *std.ArrayListUnmanaged(u32),
     ) !void {
         if (source_triangle >= mesh.render_triangles.items.len or source_triangle >= mesh.render_uvs.items.len)
             return error.InvalidSourceTessellation;
@@ -2835,6 +2931,8 @@ pub const Mesh = struct {
         try face_ids.append(mesh.allocator, face.id);
         try parts.append(mesh.allocator, face.part);
         try materials.append(mesh.allocator, face.material);
+        try semantic_regions.append(mesh.allocator, face.semantic.region);
+        try semantic_instances.append(mesh.allocator, face.semantic.instance);
     }
 
     fn emitLoweredTri(
@@ -2849,6 +2947,8 @@ pub const Mesh = struct {
         face_ids: *std.ArrayListUnmanaged(u32),
         parts: *std.ArrayListUnmanaged(u32),
         materials: *std.ArrayListUnmanaged(u32),
+        semantic_regions: *std.ArrayListUnmanaged(u32),
+        semantic_instances: *std.ArrayListUnmanaged(u32),
     ) !void {
         for (triangle) |corner| {
             const p = mesh.vertices.items[face.vertices.items[corner]].position;
@@ -2866,6 +2966,8 @@ pub const Mesh = struct {
         try face_ids.append(mesh.allocator, face.id);
         try parts.append(mesh.allocator, face.part);
         try materials.append(mesh.allocator, face.material);
+        try semantic_regions.append(mesh.allocator, face.semantic.region);
+        try semantic_instances.append(mesh.allocator, face.semantic.instance);
     }
 
     /// Adopt metadata that was normalized after lowering, then make current render
@@ -3159,6 +3261,33 @@ fn makeQuadStripSoup(allocator: std.mem.Allocator, quads: []const [4]Vec3) !stru
         try groups.append(allocator, @intCast(group));
     }
     return .{ .verts = try soup.toOwnedSlice(allocator), .groups = try groups.toOwnedSlice(allocator) };
+}
+
+test "semantic membership survives indexed face splitting" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ -1, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ -1, 1, 0 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    const regions = [_]u32{ 7, 7 };
+    const instances = [_]u32{ 2, 2 };
+    var mesh = try Mesh.fromSoupWithSemantics(
+        allocator,
+        fixture.verts,
+        2,
+        fixture.groups,
+        null,
+        null,
+        regions[0..],
+        instances[0..],
+    );
+    defer mesh.deinit();
+    try std.testing.expect(try mesh.cutSelected(&.{ true, true }, 0, 1, 0.5));
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    try std.testing.expect(lowered.tri_count > 2);
+    for (lowered.semantic_regions) |region| try std.testing.expectEqual(@as(u32, 7), region);
+    for (lowered.semantic_instances) |instance| try std.testing.expectEqual(@as(u32, 2), instance);
 }
 
 test "indexed loop cut follows a closed flared quad ring at edge ratios" {

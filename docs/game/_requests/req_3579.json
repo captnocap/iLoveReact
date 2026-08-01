@@ -1,0 +1,30 @@
+{
+  "id": "req_3579",
+  "at": "2026-08-01T17:13:22.307Z",
+  "origin": "codex:019fbe1c",
+  "text": "let it rip",
+  "status": "doing",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-01T17:13:24.055Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T17:20:59.519Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Stable document-handle foundation implemented: topology and quality replacements retain the initial document key, advance a host-only generation, and update one retained geometry cache entry rather than minting per-op keys/entries. Generation now rides topology receipts and hot-reload session percepts. Added a pure stable_geometry_slot allocation policy with Zig tests. Verified test-stable-geometry-slot, test-mesh-edit, and ReleaseFast editor ship."
+    },
+    {
+      "at": "2026-08-01T17:50:03.123Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented the semantic-memory + first live Agent Seat vertical slice: inheriting per-face region/instance ids across indexed splits, bevels, extrusion, duplicate, path-array, hide/show, glass reorder and journal restores; atomic RJMD v4 face rows + versioned name/provenance table; cold percept; strict cube pre-naming; native geometry/name selectors; exact arbitrary-axis transforms with explicit pivots; named extrusion cap/wall roles; naming-debt gate; live NOTICE transport with generation rejection and visible 100ms batch cadence; tools/seat CLI; portable validated agent-seat skill. Zig semantic/mesh/stable-handle tests, 12 RJMD tests, 4 seat API tests, skill validation, and ReleaseFast editor ship are green."
+    }
+  ]
+}

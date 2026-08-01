@@ -28,7 +28,8 @@ import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
-import { callHost } from '@reactjit/runtime/ffi';
+import { callHost, subscribe } from '@reactjit/runtime/ffi';
+import { createAgentSeat, executeSeatRequest, type SeatRequest } from '../agent/seatApi';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
   AttributionPanel, AttributionStatusBadge, type Attribution, type Ledger,
@@ -128,6 +129,10 @@ export type ModelViewInitialMesh = {
   faceGroups?: Uint32Array | number[];
   /** stable texture-role index per render triangle (RJMD v3) */
   faceMaterials?: Uint32Array | number[];
+  /** durable semantic membership and its name/provenance table (RJMD v4) */
+  semanticRegions?: Uint32Array | number[];
+  semanticInstances?: Uint32Array | number[];
+  semanticTable?: { version: 1; regions: unknown[]; [key: string]: unknown };
   // Per-part colour ranges (multi-part models): paint each part its outliner colour on load,
   // so a bare studio mesh reads as coloured parts instead of blank white.
   partColors?: { lo: number; hi: number; color: string }[];
@@ -428,6 +433,15 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
       ? mesh.faceMaterials
       : mesh.faceMaterials ? new Uint32Array(mesh.faceMaterials) : null;
     if (materials && materials.length > 0) host.__mesh_set_face_materials?.(materials);
+    const semanticRegions = mesh.semanticRegions instanceof Uint32Array
+      ? mesh.semanticRegions
+      : mesh.semanticRegions ? new Uint32Array(mesh.semanticRegions) : null;
+    const semanticInstances = mesh.semanticInstances instanceof Uint32Array
+      ? mesh.semanticInstances
+      : mesh.semanticInstances ? new Uint32Array(mesh.semanticInstances) : null;
+    if (semanticRegions && semanticInstances && semanticRegions.length > 0 && mesh.semanticTable) {
+      host.__mesh_set_face_semantics?.(semanticRegions, semanticInstances, JSON.stringify(mesh.semanticTable));
+    }
     // Tint each part its outliner colour (multi-part models) so a bare studio mesh isn't a
     // blank white blob and the model matches the outliner swatches.
     for (const pc of mesh.partColors ?? []) {
@@ -2577,6 +2591,51 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // made the editor call "X is not a function". Registering the real object can't drift.
   // onModelToolApi only stores a ref, so this is a cheap assignment with no re-render.
   useEffect(() => { onToolApi?.(toolApiRef.current!); });
+
+  // The live Agent Seat. Dev IPC NOTICE is only the transport: requests execute
+  // through the same host doors/tool adoption as this visible ModelView, and the
+  // bounded /tmp reply path lets a shell-based agent receive the structured diff.
+  useEffect(() => {
+    const seat = createAgentSeat({ adoptTopology: (result) => adoptMesh(result as TopoResult | null) });
+    (globalThis as any).__agentSeat = seat;
+    const unsubscribe = subscribe('system:notification', (payload: any) => {
+      if (payload?.kind !== 'agent-seat' || typeof payload?.replyPath !== 'string' ||
+          !payload.replyPath.startsWith('/tmp/reactjit-seat-') || !payload.replyPath.endsWith('.json')) return;
+      const request = payload.request as SeatRequest | undefined;
+      if (!request || typeof request.action !== 'string') return;
+      const expected = Number(payload.generation);
+      const current = seat.look();
+      if (Number.isFinite(expected) && current && expected !== current.generation) {
+        host.__fs_write?.(payload.replyPath, JSON.stringify(seat.reply(request.action, false, undefined, `stale generation ${expected}; live generation is ${current.generation}`)));
+        return;
+      }
+      const batch = request.action === 'batch' && Array.isArray(request.args?.requests)
+        ? request.args!.requests as SeatRequest[]
+        : null;
+      if (!batch) {
+        host.__fs_write?.(payload.replyPath, JSON.stringify(executeSeatRequest(seat, request)));
+        return;
+      }
+      const replies: ReturnType<typeof executeSeatRequest>[] = [];
+      let index = 0;
+      const runNext = () => {
+        if (index >= batch.length) {
+          const ok = replies.every((reply) => reply.ok);
+          host.__fs_write?.(payload.replyPath, JSON.stringify(seat.reply('batch', ok, replies, ok ? undefined : 'batch stopped at first rejection')));
+          return;
+        }
+        const row = executeSeatRequest(seat, batch[index++]!);
+        replies.push(row);
+        if (!row.ok) index = batch.length;
+        setTimeout(runNext, 100); // visible modeling cadence is a seat feature
+      };
+      runNext();
+    });
+    return () => {
+      unsubscribe();
+      if ((globalThis as any).__agentSeat === seat) (globalThis as any).__agentSeat = null;
+    };
+  }, []);
 
   // Paint-with-a-shader: keep the HOST paint-material in sync with the brush ink. A shader
   // ink bakes its recipe (spec WGSL + tuned params) into a pixel bucket the brush samples;

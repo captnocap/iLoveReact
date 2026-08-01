@@ -6,9 +6,9 @@
 // doc switch rebuilt the seed (edits gone from view) and a restart re-armed the
 // primitive generator (cube, no outliner). The meshdoc is the durable, READABLE form:
 //
-//   mesh/doc.blob    RJMD v3 — verts + authored face groups + stable per-face texture
-//                    role indices + per-part group ranges + trailing glass boundary
-//                    (v1/v2 remain readable),
+//   mesh/doc.blob    RJMD v4 — verts + authored face groups + stable per-face texture
+//                    roles + semantic region/instance membership and its name table +
+//                    per-part group ranges + trailing glass boundary (v1-v3 readable),
 //                    written by the host door __model_meshdoc_write (the format's twin
 //                    lives in framework/v8_bindings_core.zig hostModelMeshdocWrite).
 //   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind/group), matching
@@ -22,7 +22,7 @@
 // stays in modelPackageStore (this module must not import it: the store's
 // writeModelArtifacts calls down into this writer).
 import { exists, readFile, readFileBase64, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
-import { base64ToBytes, textBytes } from '../../../runtime/workspace';
+import { base64ToBytes, bytesText, textBytes } from '../../../runtime/workspace';
 
 const host = globalThis as any;
 
@@ -33,6 +33,11 @@ export type PackageMeshDoc = {
   faceGroups: Uint32Array | null;
   /** one texture-slot index per triangle; 0xffffffff keeps the painted atlas */
   faceMaterials?: Uint32Array | null;
+  /** Durable semantic region and repeated-instance id per triangle (RJMD v4). */
+  semanticRegions?: Uint32Array | null;
+  semanticInstances?: Uint32Array | null;
+  /** Versioned dictionary that turns numeric membership into names and provenance. */
+  semanticTable?: MeshSemanticTable | null;
   /** per-part [lo,hi) authored-group ranges, ascending lo; always ≥1 entry */
   ranges: { lo: number; hi: number }[];
   /** Number physically stored in RJMD. Zero means `ranges` is only the decoder's
@@ -43,6 +48,20 @@ export type PackageMeshDoc = {
   recoveredPartRanges?: boolean;
   /** First vertex in the stable trailing glass run; absent on legacy RJMD v1. */
   glassFirstVertex?: number | null;
+};
+
+export type MeshSemanticRegion = {
+  id: number;
+  name: string;
+  parent?: number | null;
+  role?: string;
+  createdBy?: { op: string; take?: number; at?: number };
+};
+
+export type MeshSemanticTable = {
+  version: 1;
+  regions: MeshSemanticRegion[];
+  nextRegionId?: number;
 };
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
@@ -240,14 +259,20 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const head = new Uint32Array(buf, 0, 6);
   const [magic, version, vertCount, faceCount, hasGroups, rangeCount] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, head[5]!];
-  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3) || vertCount === 0) return null;
-  const headerBytes = version >= 3 ? 32 : version >= 2 ? 28 : 24;
+  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3 && version !== 4) || vertCount === 0) return null;
+  const headerBytes = version >= 4 ? 40 : version >= 3 ? 32 : version >= 2 ? 28 : 24;
   if (bytes.length < headerBytes) return null;
   const glassFirstVertex = version >= 2 ? new Uint32Array(buf, 24, 1)[0]! : null;
   const hasMaterials = version >= 3 ? new Uint32Array(buf, 28, 1)[0]! : 0;
+  const hasSemantics = version >= 4 ? new Uint32Array(buf, 32, 1)[0]! : 0;
+  const semanticJsonBytes = version >= 4 ? new Uint32Array(buf, 36, 1)[0]! : 0;
   if (hasMaterials !== 0 && hasMaterials !== 1) return null;
+  if (hasGroups !== 0 && hasGroups !== 1) return null;
+  if (hasSemantics !== 0 && hasSemantics !== 1) return null;
+  if (hasSemantics === 0 && semanticJsonBytes !== 0) return null;
+  if (faceCount !== Math.floor(vertCount / 3)) return null;
   if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) return null;
-  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + rangeCount * 8;
+  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + (hasSemantics ? faceCount * 8 : 0) + rangeCount * 8 + semanticJsonBytes;
   if (bytes.length < need) return null;
   let at = headerBytes;
   const vertices = new Float32Array(buf, at, vertCount * 8);
@@ -262,13 +287,39 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
     faceMaterials = new Uint32Array(buf, at, faceCount);
     at += faceCount * 4;
   }
+  let semanticRegions: Uint32Array | null = null;
+  let semanticInstances: Uint32Array | null = null;
+  if (hasSemantics) {
+    semanticRegions = new Uint32Array(buf, at, faceCount);
+    at += faceCount * 4;
+    semanticInstances = new Uint32Array(buf, at, faceCount);
+    at += faceCount * 4;
+  }
   const ranges: { lo: number; hi: number }[] = [];
   if (rangeCount > 0) {
     const pairs = new Uint32Array(buf, at, rangeCount * 2);
     for (let i = 0; i < rangeCount; i += 1) ranges.push({ lo: pairs[i * 2]!, hi: pairs[i * 2 + 1]! });
+    at += rangeCount * 8;
+  }
+  let semanticTable: MeshSemanticTable | null = null;
+  if (hasSemantics) {
+    if (semanticJsonBytes === 0) return null;
+    try {
+      const parsed = JSON.parse(bytesText(bytes.subarray(at, at + semanticJsonBytes)));
+      if (parsed?.version !== 1 || !Array.isArray(parsed.regions)) return null;
+      const regions = parsed.regions.filter((region: unknown): region is MeshSemanticRegion => {
+        const row = region as Partial<MeshSemanticRegion> | null;
+        return !!row && Number.isInteger(row.id) && row.id! >= 0 && typeof row.name === 'string' && row.name.length > 0;
+      });
+      if (regions.length !== parsed.regions.length) return null;
+      const ids = new Set(regions.map((region) => region.id));
+      if (ids.size !== regions.length) return null;
+      for (const region of semanticRegions ?? []) if (region !== 0xffffffff && !ids.has(region)) return null;
+      semanticTable = { ...parsed, version: 1, regions };
+    } catch { return null; }
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
-  return { vertices, faceGroups, faceMaterials, ranges, glassFirstVertex, storedRangeCount: rangeCount };
+  return { vertices, faceGroups, faceMaterials, semanticRegions, semanticInstances, semanticTable, ranges, glassFirstVertex, storedRangeCount: rangeCount };
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering

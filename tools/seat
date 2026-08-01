@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+// Shell adapter for cart/editor/agent/seatApi.ts. It sends one bounded NOTICE to
+// the running live editor and waits for that request's exact /tmp reply file.
+const fs = require('fs');
+const net = require('net');
+const path = require('path');
+
+const args = process.argv.slice(2);
+const action = args.shift() || 'look';
+const numberList = (values) => values.map((value) => Number(value));
+let request;
+if (action === 'look' || action === 'undo' || action === 'redo') request = { action };
+else if (action === 'select') request = { action, args: { selector: args.join(' ') } };
+else if (action === 'name') request = { action, args: { name: args[0], instance: Number(args[1] || 0) } };
+else if (action === 'extrude') request = { action, args: { distance: Number(args[0] || 0), name: args[1], instance: Number(args[2] || 0) } };
+else if (action === 'move') request = { action, args: { delta: numberList(args.slice(0, 3)) } };
+else if (action === 'scale') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), factor: Number(args[6] || 1) } };
+else if (action === 'rotate') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), degrees: Number(args[6] || 0) } };
+else if (action === 'do') {
+  try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
+  catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
+} else {
+  console.error('usage: tools/seat look|select <selector>|name <name> [instance]|extrude <distance> <name>|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|undo|redo|do <json-array>');
+  process.exit(2);
+}
+
+const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const replyPath = `/tmp/reactjit-seat-${id}.json`;
+const payload = JSON.stringify({
+  kind: 'agent-seat', id, replyPath, request,
+  ...(process.env.RJIT_SEAT_GENERATION ? { generation: Number(process.env.RJIT_SEAT_GENERATION) } : {}),
+});
+const socketPath = process.env.RJIT_SOCKET || '/tmp/reactjit.sock';
+const socket = net.createConnection(socketPath);
+socket.setEncoding('utf8');
+let ack = '';
+socket.on('connect', () => socket.write(`NOTICE ${Buffer.byteLength(payload)}\n${payload}`));
+socket.on('data', (chunk) => { ack += chunk; });
+socket.on('error', (error) => { console.error(`seat: ${error.message}`); process.exit(1); });
+socket.on('close', () => {
+  if (!ack.startsWith('OK')) { console.error(`seat: editor refused request: ${ack.trim()}`); process.exit(1); }
+  const started = Date.now();
+  const poll = () => {
+    if (fs.existsSync(replyPath)) {
+      const result = fs.readFileSync(replyPath, 'utf8');
+      try { fs.unlinkSync(replyPath); } catch {}
+      process.stdout.write(`${result}\n`);
+      try { process.exit(JSON.parse(result).ok ? 0 : 1); } catch { process.exit(1); }
+    }
+    if (Date.now() - started > 15000) {
+      console.error(`seat: timed out waiting for ${path.basename(replyPath)}`);
+      process.exit(1);
+    }
+    setTimeout(poll, 25);
+  };
+  poll();
+});

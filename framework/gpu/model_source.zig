@@ -29,6 +29,16 @@ pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
 // keeps the model's painted atlas; a concrete index is substituted per placement.
 var g_source_face_material: ?[]u32 = null;
 pub const NO_FACE_MATERIAL: u32 = std.math.maxInt(u32);
+// Durable semantic membership per SOURCE face. Unlike authored groups, these rows
+// inherit through topology splits and answer what a surface means across sessions.
+var g_source_face_region: ?[]u32 = null;
+var g_source_face_instance: ?[]u32 = null;
+// Opaque, versioned JSON dictionary for region names, op roles, and provenance.
+// It is persisted atomically beside the face rows in RJMD and journal snapshots;
+// the native topology core only owns its lifetime, while the cart/seat interprets it.
+var g_semantic_table_json: ?[]u8 = null;
+pub const NO_SEMANTIC_ID: u32 = std.math.maxInt(u32);
+pub const MAX_SEMANTIC_TABLE_BYTES: usize = 1024 * 1024;
 // Flattened [lo,hi) pairs of authored-group ids, sorted and non-overlapping — one pair
 // per outliner PART of a composed multi-part model. The mesh editor welds coincident
 // positions only WITHIN a part, so two stacked cubes stay independently editable.
@@ -67,6 +77,9 @@ pub fn clear() void {
     if (g_face_to_source) |m| alloc.free(m);
     if (g_source_face_group) |m| alloc.free(m);
     if (g_source_face_material) |m| alloc.free(m);
+    if (g_source_face_region) |m| alloc.free(m);
+    if (g_source_face_instance) |m| alloc.free(m);
+    if (g_semantic_table_json) |m| alloc.free(m);
     if (g_part_ranges) |m| alloc.free(m);
     g_source_verts = null;
     g_source_path = null;
@@ -74,6 +87,9 @@ pub fn clear() void {
     g_face_to_source = null;
     g_source_face_group = null;
     g_source_face_material = null;
+    g_source_face_region = null;
+    g_source_face_instance = null;
+    g_semantic_table_json = null;
     g_part_ranges = null;
     g_source_count = 0;
 }
@@ -147,6 +163,119 @@ pub fn faceMaterialOf(displayed_face: u32) u32 {
     }
     if (sf >= materials.len) return NO_FACE_MATERIAL;
     return materials[sf];
+}
+
+pub var face_semantics_gen: u32 = 1;
+
+fn semanticRowsValid(regions: []const u32, instances: []const u32, face_count: usize) bool {
+    if (regions.len != face_count or instances.len != face_count) return false;
+    for (regions, instances) |region, instance| {
+        if (region == NO_SEMANTIC_ID and instance != NO_SEMANTIC_ID) return false;
+    }
+    return true;
+}
+
+pub fn setFaceSemantics(regions: []const u32, instances: []const u32) bool {
+    const face_count: usize = @intCast(g_source_count / 3);
+    if (!semanticRowsValid(regions, instances, face_count)) return false;
+    const next_regions = alloc.dupe(u32, regions) catch return false;
+    const next_instances = alloc.dupe(u32, instances) catch {
+        alloc.free(next_regions);
+        return false;
+    };
+    if (g_source_face_region) |old| alloc.free(old);
+    if (g_source_face_instance) |old| alloc.free(old);
+    g_source_face_region = next_regions;
+    g_source_face_instance = next_instances;
+    face_semantics_gen +%= 1;
+    return true;
+}
+
+pub fn clearFaceSemantics() void {
+    if (g_source_face_region) |old| alloc.free(old);
+    if (g_source_face_instance) |old| alloc.free(old);
+    if (g_semantic_table_json) |old| alloc.free(old);
+    g_source_face_region = null;
+    g_source_face_instance = null;
+    g_semantic_table_json = null;
+    face_semantics_gen +%= 1;
+}
+
+pub fn faceSemanticRegions() ?[]const u32 {
+    return g_source_face_region;
+}
+
+pub fn faceSemanticInstances() ?[]const u32 {
+    return g_source_face_instance;
+}
+
+fn semanticTableJsonValid(json: []const u8) bool {
+    if (json.len < 2 or json.len > MAX_SEMANTIC_TABLE_BYTES) return false;
+    if (json[0] != '{' or json[json.len - 1] != '}') return false;
+    return std.mem.indexOfScalar(u8, json, 0) == null;
+}
+
+pub fn setSemanticTableJson(json: []const u8) bool {
+    if (!semanticTableJsonValid(json)) return false;
+    const next = alloc.dupe(u8, json) catch return false;
+    if (g_semantic_table_json) |old| alloc.free(old);
+    g_semantic_table_json = next;
+    face_semantics_gen +%= 1;
+    return true;
+}
+
+pub fn semanticTableJson() ?[]const u8 {
+    return g_semantic_table_json;
+}
+
+/// Install face membership and its dictionary as one boundary transaction. No
+/// partially-restored semantic state becomes visible on an invalid row or table.
+pub fn setSemanticState(regions: []const u32, instances: []const u32, json: []const u8) bool {
+    const face_count: usize = @intCast(g_source_count / 3);
+    if (!semanticRowsValid(regions, instances, face_count) or !semanticTableJsonValid(json)) return false;
+    const next_regions = alloc.dupe(u32, regions) catch return false;
+    const next_instances = alloc.dupe(u32, instances) catch {
+        alloc.free(next_regions);
+        return false;
+    };
+    const next_json = alloc.dupe(u8, json) catch {
+        alloc.free(next_regions);
+        alloc.free(next_instances);
+        return false;
+    };
+    if (g_source_face_region) |old| alloc.free(old);
+    if (g_source_face_instance) |old| alloc.free(old);
+    if (g_semantic_table_json) |old| alloc.free(old);
+    g_source_face_region = next_regions;
+    g_source_face_instance = next_instances;
+    g_semantic_table_json = next_json;
+    face_semantics_gen +%= 1;
+    return true;
+}
+
+pub const FaceSemantic = struct { region: u32 = NO_SEMANTIC_ID, instance: u32 = NO_SEMANTIC_ID };
+
+pub fn faceSemanticOf(displayed_face: u32) FaceSemantic {
+    const regions = g_source_face_region orelse return .{};
+    const instances = g_source_face_instance orelse return .{};
+    var source_face = displayed_face;
+    if (g_face_to_source) |map| {
+        if (displayed_face >= map.len) return .{};
+        source_face = map[displayed_face];
+    }
+    if (source_face >= regions.len or source_face >= instances.len) return .{};
+    return .{ .region = regions[source_face], .instance = instances[source_face] };
+}
+
+test "semantic face membership follows displayed to source projection" {
+    const triangle_verts = [_]f32{0} ** 48;
+    retain("semantic-test", triangle_verts[0..], 6);
+    defer clear();
+    try std.testing.expect(setFaceSemantics(&.{ 4, 9 }, &.{ 2, 7 }));
+    setFaceMap(&.{1});
+    const semantic = faceSemanticOf(0);
+    try std.testing.expectEqual(@as(u32, 9), semantic.region);
+    try std.testing.expectEqual(@as(u32, 7), semantic.instance);
 }
 
 test "absent face material table means every face keeps paint" {

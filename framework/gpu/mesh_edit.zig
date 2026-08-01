@@ -826,6 +826,7 @@ pub const EdgeExtrusionFrame = struct {
     b: [3]f32,
     outward: [3]f32,
     face_normal: [3]f32,
+    source_face: u32,
 
     pub fn outer(self: EdgeExtrusionFrame, distance: f32) [2][3]f32 {
         return .{
@@ -926,6 +927,7 @@ pub fn edgeExtrusionFramePub(edge_idx: u32) ?EdgeExtrusionFrame {
         .b = b,
         .outward = outward,
         .face_normal = face_normal,
+        .source_face = anchor,
     };
 }
 

@@ -27,21 +27,29 @@ pub const NO_FACE_MATERIAL: u32 = std.math.maxInt(u32);
 /// shape exists only long enough to build the atomic RJMD write snapshot.
 pub const FaceBlock = struct {
     verts: []const f32,
-    groups: ?[]const u32,
-    materials: ?[]const u32,
-    colors: ?[]const u8,
+    groups: ?[]const u32 = null,
+    materials: ?[]const u32 = null,
+    semantic_regions: ?[]const u32 = null,
+    semantic_instances: ?[]const u32 = null,
+    colors: ?[]const u8 = null,
 };
 
 pub const Snapshot = struct {
     verts: []f32,
     groups: ?[]u32,
     materials: ?[]u32,
+    semantic_regions: ?[]u32,
+    semantic_instances: ?[]u32,
+    semantic_table_json: ?[]u8,
     glass_first_vertex: u32,
 
     pub fn deinit(self: *Snapshot, allocator: std.mem.Allocator) void {
         allocator.free(self.verts);
         if (self.groups) |rows| allocator.free(rows);
         if (self.materials) |rows| allocator.free(rows);
+        if (self.semantic_regions) |rows| allocator.free(rows);
+        if (self.semantic_instances) |rows| allocator.free(rows);
+        if (self.semantic_table_json) |json| allocator.free(json);
         self.* = undefined;
     }
 };
@@ -51,6 +59,9 @@ fn faceCount(block: FaceBlock) error{InvalidFaceBlock}!usize {
     const faces = block.verts.len / 24;
     if (block.groups) |rows| if (rows.len != faces) return error.InvalidFaceBlock;
     if (block.materials) |rows| if (rows.len != faces) return error.InvalidFaceBlock;
+    if (block.semantic_regions) |rows| if (rows.len != faces) return error.InvalidFaceBlock;
+    if (block.semantic_instances) |rows| if (rows.len != faces) return error.InvalidFaceBlock;
+    if ((block.semantic_regions == null) != (block.semantic_instances == null)) return error.InvalidFaceBlock;
     if (block.colors) |rows| if (rows.len != faces * 4) return error.InvalidFaceBlock;
     return faces;
 }
@@ -63,6 +74,7 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
     var total_faces: usize = 0;
     var has_groups = false;
     var has_materials = false;
+    var has_semantics = false;
     for (blocks) |block| {
         total_faces = std.math.add(usize, total_faces, try faceCount(block)) catch return error.InvalidFaceBlock;
         has_groups = has_groups or block.groups != null;
@@ -72,9 +84,11 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
                 break;
             };
         }
+        has_semantics = has_semantics or block.semantic_regions != null;
     }
     if (total_faces == 0 or total_faces > std.math.maxInt(u32) / 3) return error.InvalidFaceBlock;
     if (has_groups) for (blocks) |block| if (block.groups == null) return error.InvalidFaceBlock;
+    if (has_semantics) for (blocks) |block| if (block.semantic_regions == null or block.semantic_instances == null) return error.InvalidFaceBlock;
 
     const verts = try allocator.alloc(f32, total_faces * 24);
     errdefer allocator.free(verts);
@@ -82,6 +96,10 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
     errdefer if (groups) |rows| allocator.free(rows);
     const materials: ?[]u32 = if (has_materials) try allocator.alloc(u32, total_faces) else null;
     errdefer if (materials) |rows| allocator.free(rows);
+    const semantic_regions: ?[]u32 = if (has_semantics) try allocator.alloc(u32, total_faces) else null;
+    errdefer if (semantic_regions) |rows| allocator.free(rows);
+    const semantic_instances: ?[]u32 = if (has_semantics) try allocator.alloc(u32, total_faces) else null;
+    errdefer if (semantic_instances) |rows| allocator.free(rows);
 
     var output_face: usize = 0;
     var opaque_faces: usize = 0;
@@ -94,6 +112,8 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
                 @memcpy(verts[output_face * 24 .. output_face * 24 + 24], block.verts[face * 24 .. face * 24 + 24]);
                 if (groups) |rows| rows[output_face] = block.groups.?[face];
                 if (materials) |rows| rows[output_face] = if (block.materials) |source| source[face] else NO_FACE_MATERIAL;
+                if (semantic_regions) |rows| rows[output_face] = block.semantic_regions.?[face];
+                if (semantic_instances) |rows| rows[output_face] = block.semantic_instances.?[face];
                 output_face += 1;
                 if (want_opaque) opaque_faces += 1;
             }
@@ -104,6 +124,9 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
         .verts = verts,
         .groups = groups,
         .materials = materials,
+        .semantic_regions = semantic_regions,
+        .semantic_instances = semantic_instances,
+        .semantic_table_json = null,
         .glass_first_vertex = @intCast(opaque_faces * 3),
     };
 }
@@ -132,4 +155,19 @@ pub fn rangesOwnEveryFace(pairs: ?[]const u32, groups: ?[]const u32, expected_co
     }
     for (seen) |present| if (!present) return false;
     return true;
+}
+
+test "document composition reorders semantic rows with opaque and glass faces" {
+    const solid_face = [_]f32{0} ** 24;
+    const glass = [_]f32{1} ** 24;
+    var opaque_color = [_]u8{ 10, 20, 30, 255 };
+    var glass_color = [_]u8{ 40, 50, 60, 80 };
+    var snapshot = try composeSnapshot(std.testing.allocator, &.{
+        .{ .verts = glass[0..], .semantic_regions = &.{7}, .semantic_instances = &.{3}, .colors = glass_color[0..] },
+        .{ .verts = solid_face[0..], .semantic_regions = &.{2}, .semantic_instances = &.{1}, .colors = opaque_color[0..] },
+    });
+    defer snapshot.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u32, 3), snapshot.glass_first_vertex);
+    try std.testing.expectEqualSlices(u32, &.{ 2, 7 }, snapshot.semantic_regions.?);
+    try std.testing.expectEqualSlices(u32, &.{ 1, 3 }, snapshot.semantic_instances.?);
 }
