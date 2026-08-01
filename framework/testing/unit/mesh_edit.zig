@@ -112,6 +112,41 @@ test "changing outliner scope drops stale vertex selection before transform" {
     try testing.expectEqual(@as(u32, 1), moved.last_face);
 }
 
+test "follow patch records exact selected triangles and their next adjacency ring" {
+    var soup = [_]f32{0} ** (9 * 8);
+    const positions = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+        .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 1, 1, 0 },
+    };
+    for (positions, 0..) |position, row| {
+        soup[row * 8] = position[0];
+        soup[row * 8 + 1] = position[1];
+        soup[row * 8 + 2] = position[2];
+        soup[row * 8 + 5] = 1;
+    }
+    mesh_edit.test_support.loadGroupedSoup(3617, soup[0..], 9, &.{ 10, 11, 12 });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    try testing.expect(mesh_edit.selectFaceByIndex(1, true));
+    const before = mesh_edit.followPatchJson(testing.allocator, null, 1) orelse return error.TestUnexpectedResult;
+    defer testing.allocator.free(before);
+    try testing.expect(std.mem.indexOf(u8, before, "\"selectedTriangles\":[0,1]") != null);
+    try testing.expect(std.mem.indexOf(u8, before, "\"selectedGroups\":[10,11]") != null);
+    try testing.expect(std.mem.indexOf(u8, before, "\"id\":2,\"selected\":false") != null);
+    try testing.expect(std.mem.indexOf(u8, before, "\"outside\":2") != null);
+
+    // Merge Faces keeps resident triangle ids and welded vertices fixed; only the
+    // authored grouping changes. Re-reading the recorded ids therefore proves the
+    // exact before/after lesson without a second mesh snapshot.
+    mesh_edit.test_support.regroup(&.{ 21, 21, 12 });
+    const after = mesh_edit.followPatchJson(testing.allocator, &.{ 0, 1 }, 1) orelse return error.TestUnexpectedResult;
+    defer testing.allocator.free(after);
+    try testing.expect(std.mem.indexOf(u8, after, "\"selectedGroups\":[21]") != null);
+    try testing.expect(std.mem.indexOf(u8, after, "\"vertices\":[0,1,2]") != null);
+}
+
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
     var verts = [_]f32{
         // Selected triangle: +Z winding, distinct UVs on every corner.
@@ -472,7 +507,7 @@ test "exact numeric scaling preserves sub-centimetre factors instead of drag cla
 test "resident interleaved frame follows transformed geometry" {
     const verts = [_]f32{
         -2, 1, 3, 0, 1, 0, 0, 0,
-        4, 5, 7, 0, 1, 0, 1, 0,
+        4,  5, 7, 0, 1, 0, 1, 0,
     };
     const frame = mesh_edit.frameForInterleavedPositions(verts[0..]).?;
     try testing.expectEqual([3]f32{ 1, 3, 5 }, frame.center);
@@ -670,11 +705,11 @@ test "tris to quads solves an odd ambiguous fan without losing the tail pair" {
     // only edge to face 3. The maximum therefore has to reserve (2,3) and pair
     // (0,1). This is the blossom case that a plain bipartite/path matcher misses.
     const points = [_][3]f32{
-        .{ 0, 0, 0 },   // center
+        .{ 0, 0, 0 }, // center
         .{ -2, -1, 0 }, // outer A
-        .{ 2, -1, 0 },  // outer B
-        .{ 0, 2, 0 },   // outer C
-        .{ -3, 2, 0 },  // tail
+        .{ 2, -1, 0 }, // outer B
+        .{ 0, 2, 0 }, // outer C
+        .{ -3, 2, 0 }, // tail
     };
     const triangles = [_][3]usize{
         .{ 0, 1, 2 },

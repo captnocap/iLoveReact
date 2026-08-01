@@ -29,7 +29,7 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type SeatFollowSession, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -2829,6 +2829,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       shellAction: (action, args) => seatViewActionRef.current(action, args)
         ?? (globalThis as any).__seatShellBridge?.shellAction?.(action, args)
         ?? { ok: false, reason: 'editor shell action bridge unavailable' },
+      followState: {
+        read: () => getHotState<SeatFollowSession | null>('editor.agent-seat.follow.v1', null),
+        write: (state) => setHotState('editor.agent-seat.follow.v1', state),
+      },
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
       captureFrame: (path) => captureFrame(path),
     });

@@ -8868,6 +8868,14 @@ pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
     writer.writeAll("]}") catch return null;
     return out.toOwnedSlice() catch null;
 }
+
+/// Read-only local topology patch for Agent Seat Follow demonstrations. Null
+/// `faces` means the current native face selection; explicit ids re-read the
+/// same resident triangles after a group-only Merge Faces commit clears it.
+pub fn meshFollowPatchJson(allocator: std.mem.Allocator, faces: ?[]const u32, rings: u32) ?[]u8 {
+    if (!model_paint.hasTarget()) return null;
+    return mesh_edit.followPatchJson(allocator, faces, rings);
+}
 pub fn meshEditReset() void {
     mesh_edit.reset();
 }

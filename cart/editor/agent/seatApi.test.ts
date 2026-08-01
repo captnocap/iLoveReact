@@ -55,6 +55,43 @@ test('per-row generation guard closes a batch after a human topology edit', () =
   assert(seatBatchGenerationReason(4, 5, 2)?.includes('row 3'), 'external generation bump did not close the next row');
 });
 
+test('Follow records the exact native Merge Faces selection before and after its group commit', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const patch = (group: number) => ({
+    version: 1, rings: 2, selectedTriangles: [4, 5], selectedGroups: [group],
+    vertices: [
+      { id: 10, at: [0, 0, 0] }, { id: 11, at: [1, 0, 0] },
+      { id: 12, at: [1, 1, 0] }, { id: 13, at: [0, 1, 0] },
+    ],
+    triangles: [
+      { id: 4, selected: true, group, part: 0, material: 2, region: 7, instance: 0, vertices: [10, 11, 12] },
+      { id: 5, selected: true, group, part: 0, material: 2, region: 7, instance: 0, vertices: [10, 12, 13] },
+      { id: 6, selected: false, group: 90, part: 0, material: 2, region: 7, instance: 0, vertices: [11, 14, 12] },
+    ],
+    frontier: [{ vertices: [11, 12], inside: 4, outside: 6, nonManifold: false }],
+  });
+  (globalThis as any).__mesh_follow_patch = (faces?: Uint32Array) => JSON.stringify(faces ? patch(77) : patch(31));
+  let stored: any = null;
+  const seat = createAgentSeat({ followState: { read: () => stored, write: (value) => { stored = value; } } });
+
+  const started = executeSeatRequest(seat, { action: 'follow', args: { operation: 'start', label: 'torso strips' } });
+  assert(started.ok && stored?.active === true, 'Follow did not enter its real recording state');
+  assert(seat.beginFollowMerge('automation') === null, 'automation was recorded as the user demonstration');
+  const pending = seat.beginFollowMerge('hotkey');
+  assert(!!pending && pending.before.selectedTriangles.join(',') === '4,5', 'Follow lost the user selection before Merge Faces');
+  assert(seat.finishFollowMerge(pending, true), 'accepted native merge did not commit an example');
+
+  const read = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read' } });
+  const session = read.result as any;
+  assert(read.ok && session.examples.length === 1, 'Follow transcript did not report the demonstrated merge');
+  assert(session.examples[0].before.selectedGroups[0] === 31 && session.examples[0].after.selectedGroups[0] === 77,
+    'Follow did not prove the exact group-only before/after change');
+  assert(session.examples[0].after.frontier[0].outside === 6, 'Follow dropped the adjacent continuation candidate');
+
+  const stopped = executeSeatRequest(seat, { action: 'follow', args: { operation: 'stop' } });
+  assert(stopped.ok && (stopped.result as any).active === false, 'Follow transcript did not close cleanly');
+});
+
 test('camera orbit uses explicit degrees instead of undocumented pixel calibration', () => {
   const pose = orbitPoseByDegrees([0, 0, 3, 1, 2, 3], 90, -45);
   assert(!!pose && Math.abs(pose[0]! - Math.PI / 2) < 1e-9 && Math.abs(pose[1]! + Math.PI / 4) < 1e-9, 'degree orbit did not convert exactly');

@@ -13,6 +13,13 @@ const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
 if (['look', 'semantic-status', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save', 'tris-to-quads', 'collect-uv-orientation'].includes(action)) request = { action };
+else if (action === 'follow') {
+  const operation = args.shift() || 'read';
+  if (operation === 'inspect') {
+    const faces = String(args[0] || '').split(',').filter(Boolean).map(Number);
+    request = { action, args: { operation, ...(faces.length ? { faces } : {}), rings: Number(args[1] || 2) } };
+  } else request = { action, args: { operation, ...(operation === 'start' ? { label: args.join(' ') } : {}) } };
+}
 else if (action === 'select') request = { action, args: { selector: args.join(' ') } };
 else if (action === 'select-edge' || action === 'select-vertex' || action === 'select-face') request = { action, args: { index: Number(args[0]), additive: args[1] === '+' } };
 else if (action === 'name') request = { action, args: { name: args[0], instance: Number(args[1] || 0) } };
@@ -82,7 +89,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
   process.exit(2);
 }
 

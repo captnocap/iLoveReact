@@ -61,6 +61,47 @@ export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
   edges: { id: number; vertices: [number, number] }[];
 };
+export type SeatFollowPatch = {
+  version: 1;
+  rings: number;
+  selectedTriangles: number[];
+  selectedGroups: number[];
+  vertices: { id: number; at: [number, number, number] }[];
+  triangles: {
+    id: number;
+    selected: boolean;
+    group: number;
+    part: number;
+    material: number;
+    region: number;
+    instance: number;
+    vertices: [number, number, number];
+  }[];
+  frontier: {
+    vertices: [number, number];
+    inside: number;
+    outside: number | null;
+    nonManifold: boolean;
+  }[];
+};
+export type SeatFollowExample = {
+  index: number;
+  action: 'merge-faces';
+  source: string;
+  at: number;
+  before: SeatFollowPatch;
+  after: SeatFollowPatch;
+};
+export type SeatFollowSession = {
+  version: 1;
+  id: number;
+  label: string;
+  active: boolean;
+  startedAt: number;
+  stoppedAt?: number;
+  startedGeneration: number;
+  examples: SeatFollowExample[];
+};
 export type SeatShellReceipt = { ok: boolean; result?: unknown; reason?: string };
 export type SeatRecipeReceipt = {
   ok: boolean;
@@ -114,6 +155,12 @@ export type SeatAdapter = {
   shellAction?: (action: string, args: Record<string, unknown>) => SeatShellReceipt;
   /** Detach changes both native part ranges and the shell-owned Outliner table. */
   detachSelection?: (name: string) => { lo: number; hi: number } | null;
+  /** Follow is short-lived editor working state. It survives a dev hot reload in
+   * the existing hot-state twig, but deliberately resets on a cold process. */
+  followState?: {
+    read: () => SeatFollowSession | null;
+    write: (state: SeatFollowSession | null) => void;
+  };
 };
 
 function parseJson<T>(raw: unknown): T | null {
@@ -272,6 +319,12 @@ export function seatBatchGenerationReason(expected: number, live: number, rowInd
 export function createAgentSeat(adapter: SeatAdapter = {}) {
   const debtBudget = adapter.namingDebtBudget ?? DEFAULT_NAMING_DEBT_BUDGET;
   let primitiveBootstrapAttempted = false;
+  const restoredFollow = adapter.followState?.read();
+  let followSession: SeatFollowSession | null = restoredFollow?.version === 1 ? restoredFollow : null;
+  const storeFollow = (state: SeatFollowSession | null) => {
+    followSession = state;
+    adapter.followState?.write(state);
+  };
   const automation = <T>(invoke: () => T): T => {
     host.__mesh_action_source?.(9); // CommandSource 'automation'
     try { return invoke(); } finally { host.__mesh_action_source?.(0); }
@@ -326,6 +379,77 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return receipt;
   };
   const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
+  const followPatch = (faces?: number[], rings = 1): SeatFollowPatch | null => {
+    const cleanFaces = Array.isArray(faces)
+      ? [...new Set(faces.map(Number).filter((face) => Number.isInteger(face) && face >= 0))]
+      : undefined;
+    const depth = Math.max(0, Math.min(4, Math.trunc(Number(rings) || 0)));
+    const value = parseJson<SeatFollowPatch>(host.__mesh_follow_patch?.(
+      cleanFaces === undefined ? undefined : new Uint32Array(cleanFaces), depth,
+    ));
+    return value?.version === 1 && Array.isArray(value.selectedTriangles) && Array.isArray(value.frontier)
+      ? value
+      : null;
+  };
+  const follow = (operation: string, args: Record<string, unknown> = {}): SeatShellReceipt => {
+    if (operation === 'start') {
+      const live = look();
+      if (!live) return { ok: false, reason: 'no live mesh to follow' };
+      const state: SeatFollowSession = {
+        version: 1,
+        id: Date.now(),
+        label: String(args.label ?? '').trim() || 'mesh demonstration',
+        active: true,
+        startedAt: Date.now(),
+        startedGeneration: live.generation,
+        examples: [],
+      };
+      storeFollow(state);
+      return { ok: true, result: state };
+    }
+    if (operation === 'read') return followSession
+      ? { ok: true, result: followSession }
+      : { ok: false, reason: 'no Follow demonstration has been started' };
+    if (operation === 'stop') {
+      if (!followSession) return { ok: false, reason: 'no Follow demonstration has been started' };
+      const state = { ...followSession, active: false, stoppedAt: Date.now() };
+      storeFollow(state);
+      return { ok: true, result: state };
+    }
+    if (operation === 'clear') {
+      storeFollow(null);
+      return { ok: true, result: { cleared: true } };
+    }
+    if (operation === 'inspect') {
+      const patch = followPatch(args.faces as number[] | undefined, Number(args.rings ?? 1));
+      return patch
+        ? { ok: true, result: patch }
+        : { ok: false, reason: 'Follow inspect needs a live face selection or valid resident triangle ids' };
+    }
+    return { ok: false, reason: `unknown Follow operation "${operation}"` };
+  };
+  type PendingFollowMerge = { sessionId: number; source: string; at: number; before: SeatFollowPatch };
+  const beginFollowMerge = (source: string): PendingFollowMerge | null => {
+    if (!followSession?.active || source === 'seat' || source === 'automation' || source === 'remote') return null;
+    const before = followPatch(undefined, 2);
+    if (!before || before.selectedTriangles.length < 2) return null;
+    return { sessionId: followSession.id, source, at: Date.now(), before };
+  };
+  const finishFollowMerge = (pending: PendingFollowMerge | null, accepted: boolean): boolean => {
+    if (!pending || !accepted || !followSession?.active || followSession.id !== pending.sessionId) return false;
+    const after = followPatch(pending.before.selectedTriangles, 2);
+    if (!after) return false;
+    const example: SeatFollowExample = {
+      index: followSession.examples.length + 1,
+      action: 'merge-faces',
+      source: pending.source,
+      at: pending.at,
+      before: pending.before,
+      after,
+    };
+    storeFollow({ ...followSession, examples: [...followSession.examples, example] });
+    return true;
+  };
   const selectEdge = (index: number, additive = false): boolean =>
     Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
   const selectVertex = (index: number, additive = false): boolean =>
@@ -653,7 +777,8 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
-    look, elements, select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
+    look, elements, follow, followPatch, beginFollowMerge, finishFollowMerge,
+    select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
@@ -681,6 +806,11 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'elements': {
         const result = seat.elements();
         return seat.reply('elements', !!result, result ?? undefined, result ? undefined : 'topology descriptors unavailable');
+      }
+      case 'follow': {
+        const operation = String(args.operation ?? 'read');
+        const result = seat.follow(operation, args);
+        return seat.reply('follow', result.ok, result.result, result.reason);
       }
       case 'select-edge': {
         const ok = seat.selectEdge(Number(args.index), args.additive === true);

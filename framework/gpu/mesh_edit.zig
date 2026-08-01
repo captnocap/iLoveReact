@@ -511,6 +511,207 @@ pub fn faceCornerVerticesPub(face: u32) ?[3]u32 {
     return .{ corners[base], corners[base + 1], corners[base + 2] };
 }
 
+const FollowEdgeUse = struct {
+    a: u32,
+    b: u32,
+    first: u32,
+    second: u32 = std.math.maxInt(u32),
+    count: u32 = 1,
+};
+
+/// Exact, read-only topology vocabulary for an Agent Seat Follow demonstration.
+///
+/// A merge-faces example does not move resident triangles; it changes only their
+/// authored group ids. That makes the durable demonstration much smaller than a
+/// mesh snapshot: exact selected triangle ids, their welded corners, the requested
+/// adjacency rings, and the selected patch frontier are enough to compare the same
+/// triangles before/after the native commit and to walk into the next strip.
+///
+/// `requested_faces == null` reads the live face selection. Supplying ids is used
+/// immediately after Merge Faces clears the UI selection, so the recorder can read
+/// those same resident triangles with their newly committed group identity.
+pub fn followPatchJson(allocator: std.mem.Allocator, requested_faces: ?[]const u32, rings_raw: u32) ?[]u8 {
+    if (!ensureTopology()) return null;
+    const face_count = model_paint.faceCount();
+    if (face_count == 0) return null;
+    const corners = g_corner_vert orelse return null;
+    if (corners.len < @as(usize, face_count) * 3) return null;
+
+    const selected = allocator.alloc(bool, @intCast(face_count)) catch return null;
+    defer allocator.free(selected);
+    @memset(selected, false);
+    var selected_count: u32 = 0;
+    if (requested_faces) |faces| {
+        for (faces) |face| {
+            if (face >= face_count or selected[face]) continue;
+            selected[face] = true;
+            selected_count += 1;
+        }
+    } else {
+        if (g_mode != .face) return null;
+        const live = g_sel_face orelse return null;
+        var face: usize = 0;
+        while (face < face_count and face < live.len) : (face += 1) {
+            if (!live[face]) continue;
+            selected[face] = true;
+            selected_count += 1;
+        }
+    }
+    if (selected_count == 0) return null;
+
+    var edges = std.AutoHashMapUnmanaged(u64, FollowEdgeUse).empty;
+    defer edges.deinit(allocator);
+    edges.ensureTotalCapacity(allocator, face_count * 3) catch return null;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const base = @as(usize, face) * 3;
+        var side: usize = 0;
+        while (side < 3) : (side += 1) {
+            const va = corners[base + side];
+            const vb = corners[base + ((side + 1) % 3)];
+            const a = @min(va, vb);
+            const b = @max(va, vb);
+            const key = edgeKey(a, b);
+            const entry = edges.getOrPutAssumeCapacity(key);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = .{ .a = a, .b = b, .first = face };
+            } else if (entry.value_ptr.count == 1) {
+                entry.value_ptr.second = face;
+                entry.value_ptr.count = 2;
+            } else {
+                entry.value_ptr.count += 1;
+            }
+        }
+    }
+
+    const included = allocator.dupe(bool, selected) catch return null;
+    defer allocator.free(included);
+    const rings = @min(rings_raw, 4);
+    var ring: u32 = 0;
+    while (ring < rings) : (ring += 1) {
+        var changed = false;
+        var iterator = edges.valueIterator();
+        while (iterator.next()) |edge| {
+            // Never teach propagation through a non-manifold junction. The trace
+            // still reports it on the frontier so the agent stops and asks for a
+            // fresh seed instead of inventing connectivity.
+            if (edge.count != 2) continue;
+            const first_in = included[edge.first];
+            const second_in = included[edge.second];
+            if (first_in == second_in) continue;
+            if (first_in) included[edge.second] = true else included[edge.first] = true;
+            changed = true;
+        }
+        if (!changed) break;
+    }
+
+    const vertex_count = g_vert_count;
+    const included_vertices = allocator.alloc(bool, @intCast(vertex_count)) catch return null;
+    defer allocator.free(included_vertices);
+    @memset(included_vertices, false);
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!included[face]) continue;
+        const base = @as(usize, face) * 3;
+        included_vertices[corners[base]] = true;
+        included_vertices[corners[base + 1]] = true;
+        included_vertices[corners[base + 2]] = true;
+    }
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.print("{{\"version\":1,\"rings\":{d},\"selectedTriangles\":[", .{rings}) catch return null;
+    var emitted: usize = 0;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!selected[face]) continue;
+        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", face }) catch return null;
+        emitted += 1;
+    }
+
+    writer.writeAll("],\"selectedGroups\":[") catch return null;
+    var seen_groups = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer seen_groups.deinit(allocator);
+    emitted = 0;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!selected[face]) continue;
+        const group = model_source.faceGroupOf(face);
+        const entry = seen_groups.getOrPut(allocator, group) catch return null;
+        if (entry.found_existing) continue;
+        writer.print("{s}{d}", .{ if (emitted == 0) "" else ",", group }) catch return null;
+        emitted += 1;
+    }
+
+    writer.writeAll("],\"vertices\":[") catch return null;
+    emitted = 0;
+    var vertex: u32 = 0;
+    while (vertex < vertex_count) : (vertex += 1) {
+        if (!included_vertices[vertex]) continue;
+        const position = vertPosPub(vertex);
+        writer.print("{s}{{\"id\":{d},\"at\":[{d},{d},{d}]}}", .{
+            if (emitted == 0) "" else ",", vertex, position[0], position[1], position[2],
+        }) catch return null;
+        emitted += 1;
+    }
+
+    writer.writeAll("],\"triangles\":[") catch return null;
+    emitted = 0;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!included[face]) continue;
+        const base = @as(usize, face) * 3;
+        const group = model_source.faceGroupOf(face);
+        const semantic = model_source.faceSemanticOf(face);
+        writer.print(
+            "{s}{{\"id\":{d},\"selected\":{s},\"group\":{d},\"part\":{d},\"material\":{d},\"region\":{d},\"instance\":{d},\"vertices\":[{d},{d},{d}]}}",
+            .{
+                if (emitted == 0) "" else ",", face,                            if (selected[face]) "true" else "false",
+                group,                         model_source.partIndexOf(group), model_source.faceMaterialOf(face),
+                semantic.region,               semantic.instance,               corners[base],
+                corners[base + 1],             corners[base + 2],
+            },
+        ) catch return null;
+        emitted += 1;
+    }
+
+    // The frontier is the selected patch boundary, not the outer edge of the
+    // returned neighborhood. It tells the next agent exactly where a demonstrated
+    // strip can continue and where it must stop (outside:null or nonManifold:true).
+    writer.writeAll("],\"frontier\":[") catch return null;
+    var emitted_edges = std.AutoHashMapUnmanaged(u64, void).empty;
+    defer emitted_edges.deinit(allocator);
+    emitted = 0;
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        if (!selected[face]) continue;
+        const base = @as(usize, face) * 3;
+        var side: usize = 0;
+        while (side < 3) : (side += 1) {
+            const va = corners[base + side];
+            const vb = corners[base + ((side + 1) % 3)];
+            const key = edgeKey(va, vb);
+            if (emitted_edges.contains(key)) continue;
+            const edge = edges.get(key) orelse continue;
+            const other = if (edge.count == 2)
+                (if (edge.first == face) edge.second else edge.first)
+            else
+                std.math.maxInt(u32);
+            if (edge.count == 2 and other < face_count and selected[other]) continue;
+            emitted_edges.put(allocator, key, {}) catch return null;
+            writer.print("{s}{{\"vertices\":[{d},{d}],\"inside\":{d},\"outside\":", .{
+                if (emitted == 0) "" else ",", edge.a, edge.b, face,
+            }) catch return null;
+            if (edge.count == 2 and other < face_count) writer.print("{d}", .{other}) catch return null else writer.writeAll("null") catch return null;
+            writer.print(",\"nonManifold\":{s}}}", .{if (edge.count > 2) "true" else "false"}) catch return null;
+            emitted += 1;
+        }
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
+}
+
 /// Solidify works from the authored surface, not its render triangulation. These
 /// values are deliberately centralized because both the host operation and its
 /// unit regressions consume the same boundary contract.

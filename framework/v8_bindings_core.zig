@@ -2371,6 +2371,25 @@ fn hostMeshEditElements(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, json);
 }
 
+/// __mesh_follow_patch(faceIds?, rings?) → exact selected/local topology JSON.
+/// Omit faceIds to read the current native face selection. Passing the recorded
+/// ids after Merge Faces reads those same triangles with their new group ids.
+fn hostMeshFollowPatch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw_faces = argBytes(info, 0);
+    if (raw_faces) |bytes| {
+        if (bytes.len % @sizeOf(u32) != 0) return setReturnString(info, "");
+    }
+    const faces: ?[]const u32 = if (raw_faces) |bytes|
+        @alignCast(std.mem.bytesAsSlice(u32, bytes))
+    else
+        null;
+    const rings: u32 = @intCast(std.math.clamp(argToI32(info, 1) orelse 1, 0, 4));
+    const json = scene3d.meshFollowPatchJson(std.heap.c_allocator, faces, rings) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
+}
+
 /// __mesh_edit_guard() → JSON {"pending","bad","faces","canSplit"}. A pending guard
 /// means a gizmo edit collapsed or flipped triangles and needs user confirmation.
 fn hostMeshEditGuard(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4464,6 +4483,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_selection", hostModelPaintSelection);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
+    v8_runtime.registerHostFn("__mesh_follow_patch", hostMeshFollowPatch);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
     v8_runtime.registerHostFn("__mesh_symmetry_report", hostMeshSymmetryReport);
