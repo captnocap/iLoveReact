@@ -25,6 +25,12 @@
       "actor": "codex",
       "kind": "note",
       "text": "Implemented the semantic-memory + first live Agent Seat vertical slice: inheriting per-face region/instance ids across indexed splits, bevels, extrusion, duplicate, path-array, hide/show, glass reorder and journal restores; atomic RJMD v4 face rows + versioned name/provenance table; cold percept; strict cube pre-naming; native geometry/name selectors; exact arbitrary-axis transforms with explicit pivots; named extrusion cap/wall roles; naming-debt gate; live NOTICE transport with generation rejection and visible 100ms batch cadence; tools/seat CLI; portable validated agent-seat skill. Zig semantic/mesh/stable-handle tests, 12 RJMD tests, 4 seat API tests, skill validation, and ReleaseFast editor ship are green."
+    },
+    {
+      "at": "2026-08-01T17:59:41.196Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "USER VISUAL PASS: supplied three live-editor screenshots proving tools/seat look atomically bootstraps six named cube sides with zero unnamed debt; select top resolves exactly 2 faces and highlights the intended surface; extrude 0.5 roof visibly creates the raised volume and percept regions roof.cap (2 faces) + roof.wall (8 faces); undo visibly restores the original cube and 12-face semantic percept. Core seat vertical slice is visually verified."
     }
   ]
 }
