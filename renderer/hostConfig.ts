@@ -932,6 +932,10 @@ function diffStyleObjects(
   let hasChanged = false;
 
   for (const key of Object.keys(newStyle)) {
+    // `key: undefined` means UNSET, exactly like an absent key. Diffing it as a
+    // change ships `{key: undefined}`, which serializes to nothing — the host
+    // never resets and a `cond ? value : undefined` toggle sticks ON forever.
+    if (newStyle[key] === undefined) continue;
     if (oldStyle[key] !== newStyle[key]) {
       changed[key] = newStyle[key];
       hasChanged = true;
@@ -939,7 +943,8 @@ function diffStyleObjects(
   }
 
   for (const key of Object.keys(oldStyle)) {
-    if (!(key in newStyle)) {
+    if (oldStyle[key] === undefined) continue; // was never a live value
+    if (!(key in newStyle) || newStyle[key] === undefined) {
       removed.push(key);
     }
   }
@@ -997,13 +1002,23 @@ function diffCleanProps(
         hasDiff = true;
       }
     } else if (oldVal !== newVal) {
-      diff[key] = newVal;
-      hasDiff = true;
+      // Same undefined-means-unset rule as diffStyleObjects: a prop toggled to
+      // undefined must travel as a removal, not a value that serializes away.
+      if (newVal === undefined) {
+        if (oldVal !== undefined) {
+          removeKeys.push(key);
+          hasDiff = true;
+        }
+      } else {
+        diff[key] = newVal;
+        hasDiff = true;
+      }
     }
   }
 
   for (const key of Object.keys(oldClean)) {
     if (key === 'style') continue; // handled above
+    if (oldClean[key] === undefined) continue; // was never a live value
     if (!(key in newClean)) {
       removeKeys.push(key);
       hasDiff = true;
