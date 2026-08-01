@@ -35,6 +35,16 @@ test('matching saved and resident semantics are healthy', () => {
   assert(focus.status === 'healthy' && focus.residentNamedFaces === 3, 'healthy semantic state was rejected');
 });
 
+test('hidden parts are a visibility filter rather than a semantic load mismatch', () => {
+  const focus = modelFocusSemantics({ regions: [3, 3, 4], instances: [0, 0, 0], table }, {
+    faces: 2, unnamed: 0, hiddenFaces: 1, hiddenNamedFaces: 1, hiddenRegions: 1,
+    regions: [{ id: 3, faces: 2, instances: 1 }], table,
+  });
+  assert(focus.status === 'visibility-filtered', 'hidden semantic faces were reported as lost');
+  assert(focus.residentHiddenNamedFaces === 1 && focus.residentHiddenFaces === 1, 'hidden semantic totals were omitted');
+  assert(focus.rows.find((row) => row.id === 4)?.presence === 'not-visible', 'hidden region was not identified as filtered');
+});
+
 test('documents with no saved or resident names remain honestly empty', () => {
   const focus = modelFocusSemantics({ regions: [NO_SEMANTIC_ID], instances: [NO_SEMANTIC_ID], table: null }, null);
   assert(focus.status === 'none' && focus.rows.length === 0, 'anonymous document invented semantics');

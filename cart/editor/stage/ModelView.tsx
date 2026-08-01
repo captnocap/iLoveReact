@@ -29,7 +29,7 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { compactSeatReply, createAgentSeat, executeSeatRequest, readSeatPercept, seatBatchGenerationReason, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -211,8 +211,8 @@ export type ModelFocusShape = {
   tris: number;
   uvd: number; // faces carrying an atlas island — the whole-model atlas covers all once it exists, 0 before
   mounts: number; // honest 0 until the rig slice lands
-  radius: number; // host bounding-sphere radius (load-time)
-  center: [number, number, number] | null; // cart-side bounds center (primitive/studio loads only)
+  radius: number; // live resident edit-mesh bounding radius
+  center: [number, number, number] | null; // live resident edit-mesh center
 };
 // View bookmarks on the bridge (req_3074): the focus panel lists them below the UV
 // card — row click recalls, the trash verb removes, the + verb pins the current view.
@@ -220,6 +220,7 @@ export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   semantics: ModelFocusSemantics;
   refreshSemantics: () => void;
+  refreshGeometry: () => void;
   paintLive: boolean;
   readUvHistory: () => Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
   refreshUv: () => void;
@@ -2615,18 +2616,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
     if (action === 'viewport') {
       const operation = String(args.operation ?? 'read');
+      const readPose = (): unknown => {
+        try { return JSON.parse(host.__model_cam_pose?.() ?? 'null'); } catch { return null; }
+      };
+      const leaveFocusTool = () => {
+        if (!focusMode) return;
+        setFocusMode(false);
+        meshFocusTool(false);
+      };
       if (operation === 'read') {
-        let pose: unknown = null;
-        try { pose = JSON.parse(host.__model_cam_pose?.() ?? 'null'); } catch { /* honest null */ }
-        return ok({ pose, locked: camLock, wire, xray, selectionMode: selMode, gizmoTool, mirrorMask, bookmarks: camMarks });
+        return ok({ pose: readPose(), locked: camLock, wire, xray, selectionMode: selMode, gizmoTool, mirrorMask, bookmarks: camMarks });
       }
-      if (operation === 'orbit' && finite(args.dx) && finite(args.dy)) { host.__model_orbit_drag?.(args.dx, args.dy); return ok(); }
-      if (operation === 'pan' && finite(args.dx) && finite(args.dy)) { host.__model_orbit_pan?.(args.dx, args.dy); return ok(); }
-      if (operation === 'zoom' && finite(args.delta)) { host.__model_orbit_zoom?.(args.delta); return ok(); }
+      if (operation === 'orbit' && finite(args.yawDegrees) && finite(args.pitchDegrees)) {
+        if (camLock) return fail('camera orbit was rejected because the camera is locked');
+        const pose = readPose();
+        if (!Array.isArray(pose) || pose.length !== 6) return fail('live camera pose unavailable');
+        leaveFocusTool();
+        const next = orbitPoseByDegrees(pose, args.yawDegrees, args.pitchDegrees);
+        if (!next) return fail('live camera pose is malformed');
+        return host.__model_cam_set_pose?.(...next) === 1 ? ok({ pose: readPose() }) : fail('camera orbit was rejected');
+      }
+      if (operation === 'orbit-pixels' && finite(args.dx) && finite(args.dy)) { if (camLock) return fail('camera is locked'); leaveFocusTool(); host.__model_orbit_drag?.(args.dx, args.dy); return ok({ pose: readPose() }); }
+      if (operation === 'pan' && finite(args.dx) && finite(args.dy)) { if (camLock) return fail('camera is locked'); leaveFocusTool(); host.__model_orbit_pan?.(args.dx, args.dy); return ok({ pose: readPose() }); }
+      if (operation === 'zoom' && finite(args.delta)) { if (camLock) return fail('camera is locked'); leaveFocusTool(); host.__model_orbit_zoom?.(args.delta); return ok({ pose: readPose() }); }
       if (operation === 'pose') {
         const pose = Array.isArray(args.pose) ? args.pose.map(Number) : [];
         if (pose.length !== 6 || pose.some((value) => !Number.isFinite(value))) return fail('pose must be [yaw,pitch,distance,targetX,targetY,targetZ]');
-        return host.__model_cam_set_pose?.(...pose) === 1 ? ok({ pose }) : fail('camera pose was rejected (the camera may be locked)');
+        leaveFocusTool();
+        return host.__model_cam_set_pose?.(...pose) === 1 ? ok({ pose: readPose() }) : fail('camera pose was rejected (the camera may be locked)');
+      }
+      if (operation === 'frame' || operation === 'focus') {
+        const target = operation === 'focus' ? 'selection' : String(args.target ?? 'model');
+        if (target !== 'selection' && target !== 'model') return fail('frame target must be selection or model');
+        leaveFocusTool();
+        return host.__model_orbit_frame?.(target === 'selection' ? 1 : 0) === 1
+          ? ok({ target, pose: readPose() }) : fail(`could not frame ${target} (selection may be empty or camera locked)`);
       }
       if (operation === 'lock') { const locked = args.locked !== false; setCamLock(locked); orbitSetLocked(locked); return ok({ locked }); }
       if (operation === 'selection-mode') {
@@ -2643,7 +2667,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       }
       if (operation === 'wire') { setWire(args.enabled === undefined ? !wire : args.enabled === true); return ok(); }
       if (operation === 'xray') { setXray(args.enabled === undefined ? !xray : args.enabled === true); return ok(); }
-      if (operation === 'focus') { toggleFocus(); return ok(); }
+      if (operation === 'focus-tool') {
+        const enabled = args.enabled === undefined ? !focusMode : args.enabled === true;
+        if (enabled !== focusMode) toggleFocus();
+        return ok({ enabled });
+      }
       if (operation === 'mirror') {
         const axis = Number(args.axis);
         if (!Number.isInteger(axis) || axis < 0 || axis > 2) return fail('mirror axis must be 0, 1, or 2');
@@ -2939,10 +2967,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       packageDir,
       mountSource: initialFileParts ? 'file' : initialMesh?.source ?? (initialPath ? 'path' : 'none'),
     });
+    let liveFrame: { center: [number, number, number]; radius: number } | null = null;
+    try {
+      const value = JSON.parse(host.__mesh_live_frame?.() ?? 'null');
+      if (Array.isArray(value?.center) && value.center.length === 3 && value.center.every(Number.isFinite) && Number.isFinite(value.radius)) liveFrame = value;
+    } catch { /* fall back to seed bounds only when the native door is unavailable */ }
+    let atlasHasUv = false;
+    try {
+      const value = JSON.parse(host.__model_atlas_read?.(0) ?? 'null');
+      atlasHasUv = Number(value?.w) > 0 && Number(value?.h) > 0 && Array.isArray(value?.islands) && value.islands.length >= 4;
+    } catch { /* no readable live atlas */ }
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       semantics,
       refreshSemantics: () => setSemanticRevision((value) => value + 1),
+      refreshGeometry: () => setSemanticRevision((value) => value + 1),
       paintLive: paintMode,
       readUvHistory: () => ({ uv: readMeshHistory(), paint: readPaintHistory() }),
       refreshUv: buildUvPanel,
@@ -2974,10 +3013,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           edges: selInfo.edges,
           faces,
           tris,
-          uvd: atlasReadyRef.current ? faces : 0,
+          uvd: atlasHasUv ? faces : 0,
           mounts: 0,
-          radius: model.radius,
-          center: boundsCenter,
+          radius: liveFrame?.radius ?? model.radius,
+          center: liveFrame?.center ?? boundsCenter,
         }
         : null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),

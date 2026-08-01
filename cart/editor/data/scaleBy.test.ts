@@ -17,8 +17,8 @@ test('defaults to an ordinary authoring multiplier', () => {
 });
 
 test('accepts fractional down-scaling inside the engine contract', () => {
-  const parsed = parseScaleByFactor('0.5');
-  assert(parsed.ok && parsed.factor === 0.5, 'fractional scale was rejected');
+  const parsed = parseScaleByFactor('0.018');
+  assert(parsed.ok && parsed.factor === 0.018, 'exact sub-centimetre factor was rounded or rejected');
 });
 
 test('accepts a negative multiplier for an exact mirror through the pivot', () => {

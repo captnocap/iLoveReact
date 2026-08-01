@@ -9,6 +9,9 @@ export type SavedModelSemantics = {
 export type ResidentModelSemantics = {
   faces: number;
   unnamed: number;
+  hiddenFaces?: number;
+  hiddenNamedFaces?: number;
+  hiddenRegions?: number;
   regions: { id: number; faces: number; instances: number }[];
   table: { version: 1; regions: unknown[]; [key: string]: unknown };
 } | null;
@@ -20,11 +23,11 @@ export type ModelFocusSemanticRow = {
   parent: number | null;
   faces: number;
   instances: number;
-  presence: 'resident' | 'mount-only' | 'saved-only';
+  presence: 'resident' | 'not-visible' | 'mount-only' | 'saved-only';
 };
 
 export type ModelFocusSemantics = {
-  status: 'healthy' | 'mount-mismatch' | 'load-mismatch' | 'resident-only' | 'none';
+  status: 'healthy' | 'visibility-filtered' | 'mount-mismatch' | 'load-mismatch' | 'resident-only' | 'none';
   documentId?: string;
   packageDir?: string | null;
   mountSource?: string;
@@ -38,6 +41,9 @@ export type ModelFocusSemantics = {
   residentNamedFaces: number;
   residentRegions: number;
   residentUnnamed: number;
+  residentHiddenFaces: number;
+  residentHiddenNamedFaces: number;
+  residentHiddenRegions: number;
   rows: ModelFocusSemanticRow[];
 };
 
@@ -75,6 +81,13 @@ export function modelFocusSemantics(
   for (const row of savedTable) names.set(row.id, row);
   for (const row of mountTable) names.set(row.id, row);
   for (const row of residentTable) names.set(row.id, row);
+  const savedNamedFaces = savedRows.filter((id) => id !== NO_SEMANTIC_ID).length;
+  const mountNamedFaces = mountRows.filter((id) => id !== NO_SEMANTIC_ID).length;
+  const residentNamedFaces = resident ? Math.max(0, resident.faces - resident.unnamed) : 0;
+  const residentHiddenFaces = resident?.hiddenFaces ?? 0;
+  const residentHiddenNamedFaces = resident?.hiddenNamedFaces ?? 0;
+  const residentHiddenRegions = resident?.hiddenRegions ?? 0;
+  const visibilityFiltered = residentHiddenFaces > 0 && residentNamedFaces + residentHiddenNamedFaces === mountNamedFaces;
   const rows = [...names.values()].map((row): ModelFocusSemanticRow => {
     const counts = residentCounts.get(row.id);
     return {
@@ -82,19 +95,18 @@ export function modelFocusSemantics(
       faces: counts?.faces ?? 0,
       instances: counts?.instances ?? 0,
       presence: counts ? 'resident'
+        : visibilityFiltered && residentTable.some((candidate) => candidate.id === row.id) ? 'not-visible'
         : mountTable.some((candidate) => candidate.id === row.id) ? 'mount-only'
           : 'saved-only',
     };
   }).sort((a, b) => a.id - b.id);
-  const savedNamedFaces = savedRows.filter((id) => id !== NO_SEMANTIC_ID).length;
-  const mountNamedFaces = mountRows.filter((id) => id !== NO_SEMANTIC_ID).length;
-  const residentNamedFaces = resident ? Math.max(0, resident.faces - resident.unnamed) : 0;
   const savedRegions = savedTable.length;
   const mountRegions = mountTable.length;
   const residentRegions = resident?.regions.length ?? 0;
   const status = savedRegions > 0 && mountRegions === 0 ? 'mount-mismatch'
     : mountRegions > 0
-      ? (residentRegions > 0 && residentNamedFaces === mountNamedFaces ? 'healthy' : 'load-mismatch')
+      ? (visibilityFiltered ? 'visibility-filtered'
+        : residentRegions > 0 && residentNamedFaces === mountNamedFaces ? 'healthy' : 'load-mismatch')
     : residentRegions > 0 ? 'resident-only' : 'none';
   return {
     ...context,
@@ -109,6 +121,9 @@ export function modelFocusSemantics(
     residentNamedFaces,
     residentRegions,
     residentUnnamed: resident?.unnamed ?? 0,
+    residentHiddenFaces,
+    residentHiddenNamedFaces,
+    residentHiddenRegions,
     rows,
   };
 }

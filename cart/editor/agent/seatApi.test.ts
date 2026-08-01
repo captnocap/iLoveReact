@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, seatBatchGenerationReason, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, seatBatchGenerationReason, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -55,6 +55,12 @@ test('per-row generation guard closes a batch after a human topology edit', () =
   assert(seatBatchGenerationReason(4, 5, 2)?.includes('row 3'), 'external generation bump did not close the next row');
 });
 
+test('camera orbit uses explicit degrees instead of undocumented pixel calibration', () => {
+  const pose = orbitPoseByDegrees([0, 0, 3, 1, 2, 3], 90, -45);
+  assert(!!pose && Math.abs(pose[0]! - Math.PI / 2) < 1e-9 && Math.abs(pose[1]! + Math.PI / 4) < 1e-9, 'degree orbit did not convert exactly');
+  assert(pose?.slice(2).join(',') === '3,1,2,3', 'degree orbit moved the frame target');
+});
+
 test('look joins durable outliner parts to the resident semantic percept', () => {
   const partPercept: SeatPartPercept = {
     activePartId: 'part:body',
@@ -82,6 +88,46 @@ test('semantic-status exposes the same resident-vs-mount diagnosis as Model Focu
 test('geometric selectors compile to native query arguments', () => {
   const query = compileSeatSelector('facing:+y@30', percept);
   assert(query?.kind === 'facing' && query.axis === 1 && query.sign === 1 && query.tolerance_degrees === 30, 'facing selector changed meaning');
+});
+
+test('compound region and facing selectors include the named descendant family', () => {
+  const nested: SeatPercept = {
+    ...percept,
+    table: { version: 1, regions: [
+      { id: 10, name: 'hood', role: 'part' },
+      { id: 11, name: 'hood.cap.top', role: '+y', parent: 10 },
+      { id: 12, name: 'hood.wall', role: 'wall', parent: 10 },
+    ] },
+  };
+  const query = compileSeatSelector('region:hood & facing:+y', nested);
+  assert(query?.kind === 'region_facing' && (query.regions as number[]).join(',') === '10,11,12', 'compound selector lost the region family');
+});
+
+test('select all expands native scope to every visible part before selecting', () => {
+  const multipart: SeatPercept = {
+    ...percept, activePartId: 'body', parts: [
+      { id: 'body', name: 'Body', kind: 'cube', visible: true, lo: 0, hi: 6, groupPath: [] },
+      { id: 'hood', name: 'Hood', kind: 'cylinder', visible: true, lo: 6, hi: 18, groupPath: [] },
+    ],
+  };
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(multipart);
+  (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 60, actionableFaces: 60, bbox: [0, 0, 0, 1, 1, 1] });
+  let selectedIds: string[] = [];
+  const seat = createAgentSeat({
+    partPercept: () => ({ activePartId: multipart.activePartId, parts: multipart.parts }),
+    shellAction: (action, args) => { if (action === 'part-select') selectedIds = args.ids as string[]; return { ok: true }; },
+  });
+  const reply = executeSeatRequest(seat, { action: 'select', args: { selector: 'all' } });
+  assert(reply.ok && selectedIds.join(',') === 'body,hood', 'select all remained clipped to the active part');
+});
+
+test('a selector that resolves beyond active scope is rejected instead of partially succeeding', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 12, actionableFaces: 2, bbox: [0, 0, 0, 1, 1, 1] });
+  let cleared = false;
+  (globalThis as any).__mesh_edit_clear = () => { cleared = true; };
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'select', args: { selector: 'all' } });
+  assert(!reply.ok && cleared && reply.reason?.includes('permits 2'), 'silent partial selection escaped the scope guard');
 });
 
 test('named extrude declares cap and wall roles before topology runs', () => {
@@ -121,7 +167,10 @@ test('adding a primitive keeps every existing name', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(live);
   (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 24 });
   let written: any = null;
-  (globalThis as any).__mesh_semantic_assign = (_id: number, _instance: number, table: string) => { written = JSON.parse(table); return 1; };
+  let roleIds: number[] = [];
+  (globalThis as any).__mesh_semantic_name_primitive = (_lo: number, _hi: number, kind: string, ids: Uint32Array, table: string) => {
+    written = JSON.parse(table); roleIds = Array.from(ids); return kind === 'cylinder' ? 1 : 0;
+  };
   const seat = createAgentSeat({
     // The append resets the host table — exactly what the live editor does.
     addPrimitive: () => { live = { ...named, faces: 156, table: { version: 1, regions: [], nextRegionId: 0 } }; return { lo: 66, hi: 84 }; },
@@ -130,7 +179,10 @@ test('adding a primitive keeps every existing name', () => {
   assert(reply.ok, 'add was rejected');
   assert(!!written, 'no semantic table was written back');
   assert(written.regions.some((row: any) => row.name === 'faceplate.wall'), 'the append wiped an existing name');
-  assert(written.regions.some((row: any) => row.name === 'hexDial'), 'the new part was not named');
+  assert(written.regions.some((row: any) => row.name === 'hexDial'), 'the new part root was not named');
+  assert(written.regions.some((row: any) => row.name === 'hexDial.cap.top'), 'the primitive top cap was not born named');
+  assert(written.regions.some((row: any) => row.name === 'hexDial.cap.bottom'), 'the primitive bottom cap was not born named');
+  assert(written.regions.some((row: any) => row.name === 'hexDial.wall') && roleIds.length === 3, 'the primitive wall role was not born named');
 });
 
 test('an unnamed primitive is refused rather than added anonymously', () => {
@@ -188,6 +240,14 @@ test('uniform scale uses the same selection-pivot operation as the visible Scale
   (globalThis as any).__mesh_gizmo_scale_by = (value: number) => { factor = value; return 1; };
   const reply = executeSeatRequest(createAgentSeat(), { action: 'scale-uniform', args: { factor: 1.25 } });
   assert(reply.ok && factor === 1.25, 'uniform scale did not reach the resident selection-pivot door');
+});
+
+test('axis scale preserves sub-centimetre factors exactly at the seat boundary', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let factor = 0;
+  (globalThis as any).__mesh_transform_scale_axis = (...values: number[]) => { factor = values[6]!; return 1; };
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'scale', args: { axis: [1, 0, 0], pivot: [0, 0, 0], factor: 0.018 } });
+  assert(reply.ok && factor === 0.018, 'seat rounded 0.018 before the native exact-scale door');
 });
 
 test('shell-owned modeling tools delegate through one bounded authority', () => {
@@ -263,6 +323,7 @@ test('inset reports the exact rejected stage instead of hiding it behind rollbac
 test('paint, material, UV, detach, and cold save use their authoritative boundaries', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   (globalThis as any).__model_paint_selection = () => 4;
+  (globalThis as any).__model_atlas_read = () => JSON.stringify({ w: 512, h: 512, detail: 256, islands: [0, 0, 32, 32, 32, 0, 16, 24] });
   (globalThis as any).__model_atlas_base = () => 1;
   (globalThis as any).__model_set_paint_detail = () => 16;
   let appliedFit = 0;
@@ -295,6 +356,16 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
   assert(executeSeatRequest(seat, { action: 'save' }).ok && persisted, 'save did not cross the package persistence boundary');
 });
 
+test('paint rejects an atlas whose islands filter into invisibility and recommends a budget', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__model_atlas_read = () => JSON.stringify({ w: 25, h: 26, detail: 16, islands: [0, 0, 6, 4, 6, 0, 5, 6] });
+  let painted = false;
+  (globalThis as any).__model_paint_selection = () => { painted = true; return 4; };
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'paint', args: { rgb: [10, 20, 30] } });
+  assert(!reply.ok && !painted, 'invisible paint still reported success');
+  assert(reply.reason?.includes('rebuild with atlas fit='), 'paint rejection omitted the actionable atlas recommendation');
+});
+
 test('save is a zero-debt durable boundary', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify({ ...percept, unnamed: 2 });
   let persisted = false;
@@ -306,7 +377,7 @@ test('save is a zero-debt durable boundary', () => {
 test('dial is a callable candidate recipe that seats a resident cylinder on a target face', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 2, bbox: [1, 2, 3, 1, 4, 5] });
-  (globalThis as any).__mesh_semantic_assign = () => 1;
+  (globalThis as any).__mesh_semantic_name_primitive = () => 1;
   const rotations: number[][] = [];
   const moves: number[][] = [];
   (globalThis as any).__mesh_transform_rotate_axis = (...values: number[]) => { rotations.push(values); return 1; };

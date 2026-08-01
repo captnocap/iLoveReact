@@ -2147,7 +2147,7 @@ pub const ScaleByValueTuning = struct {
 /// uniform factor mirrors the selection through its pivot, while mouse drags
 /// remain positive and never cross the zero singularity.
 pub const scale_by_value_tuning = ScaleByValueTuning{
-    .min_magnitude = 0.02,
+    .min_magnitude = 0.000001,
     .max_magnitude = 50.0,
     .no_op_epsilon = 1e-5,
 };
@@ -2480,10 +2480,35 @@ pub fn translateSelection(delta: [3]f32) Mutation {
 }
 
 pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation {
-    if (!std.math.isFinite(factor_raw)) return .{};
-    const factor = std.math.clamp(factor_raw, scale_factor_tuning.min, scale_factor_tuning.max);
-    if (@abs(factor - 1.0) < scale_factor_tuning.no_op_epsilon) return .{};
+    const factor = exactScaleByFactor(factor_raw) orelse return .{};
     return applyTransform(.scale_axis, .{ 0, 0, 0 }, axis, pivot, factor);
+}
+
+/// Bounding sphere for the resident interleaved position/normal/UV soup. This is
+/// the live Model Focus + camera-frame truth after numeric transforms; load-time
+/// `MeshRef.radius` is intentionally not consulted.
+pub fn frameForInterleavedPositions(verts: []const f32) ?SelectionFrame {
+    if (verts.len < 8 or verts.len % 8 != 0) return null;
+    var min = [3]f32{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) };
+    var max = [3]f32{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    var at: usize = 0;
+    while (at + 2 < verts.len) : (at += 8) for (0..3) |axis| {
+        if (!std.math.isFinite(verts[at + axis])) return null;
+        min[axis] = @min(min[axis], verts[at + axis]);
+        max[axis] = @max(max[axis], verts[at + axis]);
+    };
+    const center = [3]f32{
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    };
+    var radius_sq: f32 = 0;
+    at = 0;
+    while (at + 2 < verts.len) : (at += 8) {
+        const rel = [3]f32{ verts[at] - center[0], verts[at + 1] - center[1], verts[at + 2] - center[2] };
+        radius_sq = @max(radius_sq, vecDot(rel, rel));
+    }
+    return .{ .center = center, .radius = @sqrt(radius_sq) };
 }
 
 /// Exact uniform scale in one mesh mutation. Applying X/Y/Z as three separate

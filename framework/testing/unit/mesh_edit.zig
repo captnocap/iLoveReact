@@ -453,6 +453,32 @@ test "exact uniform scale accepts a negative factor to mirror through its pivot"
     try testing.expect(!mesh_edit.scaleSelectionUniform(pivot, -51).changed);
 }
 
+test "exact numeric scaling preserves sub-centimetre factors instead of drag clamping" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 0, 1,
+    };
+    mesh_edit.test_support.loadGroupedSoup(2932, soup[0..], 3, &.{0});
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.face);
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    const pivot = mesh_edit.selectionFrame().?.center;
+    try testing.expect(mesh_edit.scaleSelectionAxis(.{ 1, 0, 0 }, pivot, 0.018).changed);
+    const after = mesh_edit.vertPosPub(1);
+    try testing.expectApproxEqAbs(pivot[0] + (1.0 - pivot[0]) * 0.018, after[0], 0.000001);
+}
+
+test "resident interleaved frame follows transformed geometry" {
+    const verts = [_]f32{
+        -2, 1, 3, 0, 1, 0, 0, 0,
+        4, 5, 7, 0, 1, 0, 1, 0,
+    };
+    const frame = mesh_edit.frameForInterleavedPositions(verts[0..]).?;
+    try testing.expectEqual([3]f32{ 1, 3, 5 }, frame.center);
+    try testing.expectApproxEqAbs(@sqrt(@as(f32, 17)), frame.radius, 0.0001);
+}
+
 test "merging authored faces dissolves their shared selectable edge (req_2871)" {
     // Two side-by-side quads, each represented by two render triangles. Before the
     // merge there are seven authored boundary segments: the six-segment outer rim plus

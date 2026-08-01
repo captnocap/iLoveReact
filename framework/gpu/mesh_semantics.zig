@@ -18,6 +18,36 @@ pub const Face = struct {
     }
 };
 
+pub const PrimitiveKind = enum { cube, cylinder, cone, pyramid, plane, sphere, icosphere };
+const primitive_axis_role_threshold: f32 = 0.9;
+
+pub fn primitiveRoleCount(kind: PrimitiveKind) usize {
+    return switch (kind) {
+        .cube => 6,
+        .cylinder => 3,
+        .cone, .pyramid => 2,
+        .plane, .sphere, .icosphere => 1,
+    };
+}
+
+/// Fixed role vocabulary for resident generators. The role is captured while the
+/// primitive is still in its canonical +Y-axis frame, before later transforms make
+/// geometric inference ambiguous.
+pub fn primitiveRole(kind: PrimitiveKind, normal: [3]f32) ?usize {
+    return switch (kind) {
+        .cube => blk: {
+            var axis: usize = 0;
+            if (@abs(normal[1]) > @abs(normal[axis])) axis = 1;
+            if (@abs(normal[2]) > @abs(normal[axis])) axis = 2;
+            if (@abs(normal[axis]) < primitive_axis_role_threshold) return null;
+            break :blk axis * 2 + @as(usize, if (normal[axis] >= 0) 0 else 1);
+        },
+        .cylinder => if (normal[1] >= primitive_axis_role_threshold) 0 else if (normal[1] <= -primitive_axis_role_threshold) 1 else 2,
+        .cone, .pyramid => if (normal[1] <= -primitive_axis_role_threshold) 0 else 1,
+        .plane, .sphere, .icosphere => 0,
+    };
+}
+
 pub fn eql(a: Face, b: Face) bool {
     return a.region == b.region and a.instance == b.instance;
 }
@@ -95,4 +125,12 @@ test "conflicting face meanings become explicit debt" {
     try std.testing.expect(eql(window, merged(window, window)));
     try std.testing.expect(!merged(window, .{ .region = 8, .instance = 2 }).isNamed());
     try std.testing.expectEqual(@as(usize, 2), unnamedCount(&.{ NO_ID, 3, NO_ID }, 3));
+}
+
+test "resident primitive roles split caps walls and cube sides deterministically" {
+    try std.testing.expectEqual(@as(?usize, 0), primitiveRole(.cylinder, .{ 0, 1, 0 }));
+    try std.testing.expectEqual(@as(?usize, 1), primitiveRole(.cylinder, .{ 0, -1, 0 }));
+    try std.testing.expectEqual(@as(?usize, 2), primitiveRole(.cylinder, .{ 1, 0, 0 }));
+    try std.testing.expectEqual(@as(?usize, 4), primitiveRole(.cube, .{ 0, 0, 1 }));
+    try std.testing.expectEqual(@as(usize, 2), primitiveRoleCount(.pyramid));
 }

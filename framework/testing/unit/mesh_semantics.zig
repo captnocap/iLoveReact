@@ -22,3 +22,11 @@ test "separate copies of one family receive disjoint instance ids" {
     try testing.expectEqual(@as(u32, 1), first[0]);
     try testing.expectEqual(@as(u32, 2), second[0]);
 }
+
+test "primitive creation assigns a fixed cap wall and axis role vocabulary" {
+    try testing.expectEqual(@as(usize, 3), semantics.primitiveRoleCount(.cylinder));
+    try testing.expectEqual(@as(?usize, 0), semantics.primitiveRole(.cylinder, .{ 0, 1, 0 }));
+    try testing.expectEqual(@as(?usize, 1), semantics.primitiveRole(.cylinder, .{ 0, -1, 0 }));
+    try testing.expectEqual(@as(?usize, 2), semantics.primitiveRole(.cylinder, .{ 1, 0, 0 }));
+    try testing.expectEqual(@as(?usize, 4), semantics.primitiveRole(.cube, .{ 0, 0, 1 }));
+}

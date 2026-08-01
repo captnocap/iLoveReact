@@ -5210,7 +5210,9 @@ export default function AppFrame() {
   // not mirror mesh state through React.
   useEffect(() => {
     const drain = () => {
+      let geometryChanged = false;
       for (const report of nativeMeshActionDrain()) {
+        geometryChanged = true;
         const mapped = modelIdByMeshTokenRef.current.get(report.documentToken);
         const modelId = mapped || `native-model-token:${report.documentToken}`;
         if (report.kind === 'integrity-alert') {
@@ -5229,6 +5231,7 @@ export default function AppFrame() {
         }
         dispatchNativeMeshAction(report, modelId);
       }
+      if (geometryChanged) (globalThis as any).__modelFocusBridge?.refreshGeometry?.();
     };
     drain();
     const timer = setInterval(drain, 250);

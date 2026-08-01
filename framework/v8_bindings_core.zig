@@ -699,6 +699,29 @@ fn hostModelCamSetPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_orbit_frame(selection) → 1|0 — frame the selected faces or the full
+/// visible model through the native orbit camera authority.
+fn hostModelOrbitFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const frame_selection = (argToF64(info, 0) orelse 0) != 0;
+    const ok = scene3d.orbitFrameCurrent(frame_selection);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_live_frame() → {center:[x,y,z],radius}. The focus panel consumes the
+/// resident edit mesh, never the original asset's stale load-time bounds.
+fn hostMeshLiveFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const frame = scene3d.meshLiveFrame() orelse return setReturnString(info, "");
+    var buf: [160]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf,
+        "{{\"center\":[{d},{d},{d}],\"radius\":{d}}}",
+        .{ frame.center[0], frame.center[1], frame.center[2], frame.radius },
+    ) catch return setReturnString(info, "");
+    setReturnString(info, json);
+}
+
 /// __model_bd_gizmo_set(x, y, z) — open (or re-seat) the backdrop move-gizmo session at
 /// the reference image's world center (req_3080). The native input loop then drags the
 /// arms exactly like the mesh gizmo; the cart polls __model_bd_gizmo_pos to follow.
@@ -849,6 +872,28 @@ fn hostMeshSemanticBootstrapAxes(info_c: ?*const v8.c.FunctionCallbackInfo) call
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_semantic_name_primitive(lo, hi, kind, roleIds, tableJson) → 1|0.
+/// Assigns authored cap/wall/axis roles from canonical primitive normals in one
+/// journal unit, so an added primitive is never born as one anonymous blob.
+fn hostMeshSemanticNamePrimitive(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo_raw = argToI32(info, 0) orelse return setReturnNumber(info, 0);
+    const hi_raw = argToI32(info, 1) orelse return setReturnNumber(info, 0);
+    if (lo_raw < 0 or hi_raw <= lo_raw) return setReturnNumber(info, 0);
+    const kind_text = argToStringAlloc(info, 2) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(kind_text);
+    const kind = std.meta.stringToEnum(scene3d.PrimitiveSemanticKind, kind_text) orelse
+        return setReturnNumber(info, 0);
+    const id_bytes = argBytes(info, 3) orelse return setReturnNumber(info, 0);
+    if (id_bytes.len == 0 or id_bytes.len % @sizeOf(u32) != 0) return setReturnNumber(info, 0);
+    const ids: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, id_bytes));
+    const table_json = argToStringAlloc(info, 4) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(table_json);
+    const ok = scene3d.meshSemanticNamePrimitive(@intCast(lo_raw), @intCast(hi_raw), kind, ids, table_json);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __mesh_semantic_state() → cold-agent percept JSON.
 fn hostMeshSemanticState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -858,7 +903,7 @@ fn hostMeshSemanticState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, json);
 }
 
-/// __mesh_select_query(json) → {ok,faces,bbox}. Selector resolution stays native,
+/// __mesh_select_query(json) → {ok,faces,actionableFaces,bbox}. Selector resolution stays native,
 /// beside the topology and normals it queries, and never leaks unstable indices.
 fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -870,10 +915,10 @@ fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     defer parsed.deinit();
     const result = scene3d.meshSelectQuery(parsed.value) orelse
         return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh\"}");
-    var buf: [256]u8 = undefined;
+    var buf: [320]u8 = undefined;
     const reply = std.fmt.bufPrint(&buf,
-        "{{\"ok\":true,\"faces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
-        .{ result.faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
+        "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+        .{ result.faces, result.actionable_faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
     ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
     setReturnString(info, reply);
 }
@@ -4316,6 +4361,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_assign", hostMeshSemanticAssign);
     v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
     v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
+    v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
     v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
     v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
     v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
@@ -4328,6 +4374,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
     v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
     v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
+    v8_runtime.registerHostFn("__model_orbit_frame", hostModelOrbitFrame);
+    v8_runtime.registerHostFn("__mesh_live_frame", hostMeshLiveFrame);
     v8_runtime.registerHostFn("__model_bd_gizmo_set", hostModelBdGizmoSet);
     v8_runtime.registerHostFn("__model_bd_gizmo_clear", hostModelBdGizmoClear);
     v8_runtime.registerHostFn("__model_bd_gizmo_pos", hostModelBdGizmoPos);

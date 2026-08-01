@@ -5,6 +5,11 @@
 
 export const NO_SEMANTIC_ID = 0xffffffff;
 export const DEFAULT_NAMING_DEBT_BUDGET = 8;
+const PAINT_ATLAS_TUNING = {
+  minMedianIslandTexels: 8,
+  fitLevels: [512, 1024, 2048, 4096] as readonly number[],
+  defaultFit: 1024,
+};
 
 const host = globalThis as any;
 
@@ -32,6 +37,9 @@ export type SeatPercept = {
   generation: number;
   faces: number;
   unnamed: number;
+  hiddenFaces?: number;
+  hiddenNamedFaces?: number;
+  hiddenRegions?: number;
   regions: { id: number; faces: number; instances: number; bbox: [number, number, number, number, number, number] }[];
   table: SemanticTable;
   /** Shell-owned Outliner identity paired with the host-authored ranges. This is
@@ -39,7 +47,7 @@ export type SeatPercept = {
   activePartId: string | null;
   parts: SeatPart[];
 };
-export type SelectorReceipt = { ok: boolean; faces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
+export type SelectorReceipt = { ok: boolean; faces?: number; actionableFaces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
 export type InsetReceipt =
   | { ok: true; topology: TopologyReceipt; transforms: number }
@@ -132,6 +140,22 @@ function regionByName(table: SemanticTable, name: string): SemanticRegion | null
   return table.regions.find((region) => region.name === name) ?? null;
 }
 
+function regionFamily(table: SemanticTable, name: string): number[] {
+  const root = regionByName(table, name);
+  if (!root) return [];
+  const byId = new Map(table.regions.map((region) => [region.id, region]));
+  return table.regions.filter((region) => {
+    let cursor: SemanticRegion | undefined = region;
+    const visited = new Set<number>();
+    while (cursor && !visited.has(cursor.id)) {
+      if (cursor.id === root.id) return true;
+      visited.add(cursor.id);
+      cursor = cursor.parent == null ? undefined : byId.get(cursor.parent);
+    }
+    return false;
+  }).map((region) => region.id);
+}
+
 function declareRegion(table: SemanticTable, name: string, role: string, op: string, take?: number, parent?: number): { table: SemanticTable; region: SemanticRegion } {
   const existing = regionByName(table, name);
   if (existing) return { table, region: existing };
@@ -158,10 +182,30 @@ function rgbBytes(value: unknown): value is [number, number, number] {
   return finiteVec3(value) && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255);
 }
 
+export function orbitPoseByDegrees(pose: unknown, yawDegrees: number, pitchDegrees: number): number[] | null {
+  if (!Array.isArray(pose) || pose.length !== 6 || pose.some((value) => !Number.isFinite(value)) ||
+      !Number.isFinite(yawDegrees) || !Number.isFinite(pitchDegrees)) return null;
+  return [
+    pose[0] + yawDegrees * Math.PI / 180,
+    pose[1] + pitchDegrees * Math.PI / 180,
+    pose[2], pose[3], pose[4], pose[5],
+  ];
+}
+
 /** Compile the stable selector text agents use into the native query shape. */
 export function compileSeatSelector(selector: string, percept: SeatPercept): Record<string, unknown> | null {
   const text = selector.trim();
   if (text === 'all') return { kind: 'all' };
+  const regionFacing = /^region:(.+?)\s*&\s*facing:([+-])([xyz])(?:@(\d+(?:\.\d+)?))?$/.exec(text);
+  if (regionFacing) {
+    const regions = regionFamily(percept.table, regionFacing[1]!);
+    if (regions.length === 0) return null;
+    return {
+      kind: 'region_facing', regions,
+      axis: axisIndex(regionFacing[3]!)!, sign: regionFacing[2] === '+' ? 1 : -1,
+      tolerance_degrees: Number(regionFacing[4] ?? 15),
+    };
+  }
   const facing = /^facing:([+-])([xyz])(?:@(\d+(?:\.\d+)?))?$/.exec(text);
   if (facing) return { kind: 'facing', axis: axisIndex(facing[2]!)!, sign: facing[1] === '+' ? 1 : -1, tolerance_degrees: Number(facing[3] ?? 15) };
   if (text === 'top' || text === 'extremal:top') return { kind: 'extremal', axis: 1, sign: 1 };
@@ -182,7 +226,7 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
   // but a saved region called "top" can never steal the extremal query again.
   const regionName = text.startsWith('region:') ? text.slice('region:'.length) : text;
   const named = regionByName(percept.table, regionName);
-  if (named) return { kind: 'region', region: named.id };
+  if (named) return { kind: 'region', region: named.id, regions: regionFamily(percept.table, regionName) };
   return null;
 }
 
@@ -254,6 +298,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const select = (selector: string): SelectorReceipt => {
     const percept = look();
     if (!percept) return { ok: false, reason: 'no live mesh' };
+    const visiblePartIds = percept.parts.filter((part) => part.visible && part.lo != null && part.hi != null).map((part) => part.id);
+    if (selector.trim() === 'all' && visiblePartIds.length > 1) {
+      const scoped = adapter.shellAction?.('part-select', { ids: visiblePartIds, primary: visiblePartIds[visiblePartIds.length - 1] });
+      if (!scoped?.ok) return { ok: false, reason: scoped?.reason ?? 'select all could not expand the active scope to every visible part' };
+    }
     const query = compileSeatSelector(selector, percept);
     if (!query) {
       if (/^part:\d+\.\.\d+$/.test(selector.trim())) return { ok: false, reason: 'face ranges use faces:<lo>..<hi>; part: is reserved for Outliner part ids' };
@@ -265,7 +314,16 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     // here rather than inside those verbs, because setting the mode clears the selection:
     // asserting it later would wipe the very faces the verb was handed.
     host.__mesh_edit_mode?.(3);
-    return parseJson<SelectorReceipt>(host.__mesh_select_query?.(JSON.stringify(query))) ?? { ok: false, reason: 'selector door unavailable' };
+    const receipt = parseJson<SelectorReceipt>(host.__mesh_select_query?.(JSON.stringify(query))) ?? { ok: false, reason: 'selector door unavailable' };
+    const actionable = receipt.actionableFaces ?? receipt.faces;
+    if (receipt.ok && receipt.faces !== undefined && actionable !== undefined && actionable < receipt.faces) {
+      host.__mesh_edit_clear?.();
+      return {
+        ok: false, faces: receipt.faces, actionableFaces: actionable, bbox: receipt.bbox,
+        reason: `selector matched ${receipt.faces} faces but active part scope permits ${actionable}; select every intended part first`,
+      };
+    }
+    return receipt;
   };
   const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
   const selectEdge = (index: number, additive = false): boolean =>
@@ -392,6 +450,29 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const paint = (rgb: [number, number, number]): number => rgbBytes(rgb)
     ? Number(automation(() => host.__model_paint_selection?.(...rgb)) ?? 0)
     : 0;
+  const paintReadiness = (): { ok: boolean; w?: number; h?: number; detail?: number; medianIslandTexels?: number; recommendedFit?: number; reason?: string } => {
+    const atlasState = parseJson<{ w?: number; h?: number; detail?: number; islands?: number[] }>(host.__model_atlas_read?.(0));
+    if (!atlasState || !Number.isFinite(atlasState.w) || !Number.isFinite(atlasState.h) || !Array.isArray(atlasState.islands)) {
+      return { ok: false, reason: 'paint blocked — no readable UV atlas; run atlas first' };
+    }
+    const shortEdges: number[] = [];
+    for (let at = 0; at + 3 < atlasState.islands.length; at += 4) {
+      const short = Math.min(Number(atlasState.islands[at + 2]), Number(atlasState.islands[at + 3]));
+      if (Number.isFinite(short) && short > 0) shortEdges.push(short);
+    }
+    shortEdges.sort((a, b) => a - b);
+    const median = shortEdges.length > 0 ? shortEdges[Math.floor(shortEdges.length / 2)]! : 0;
+    if (median >= PAINT_ATLAS_TUNING.minMedianIslandTexels) return { ok: true, w: atlasState.w, h: atlasState.h, detail: atlasState.detail, medianIslandTexels: median };
+    const largest = Math.max(Number(atlasState.w), Number(atlasState.h));
+    const recommendedFit = PAINT_ATLAS_TUNING.fitLevels.find((fit) =>
+      median * (fit / Math.max(1, largest)) >= PAINT_ATLAS_TUNING.minMedianIslandTexels
+    ) ?? PAINT_ATLAS_TUNING.fitLevels[PAINT_ATLAS_TUNING.fitLevels.length - 1];
+    return {
+      ok: false, w: atlasState.w, h: atlasState.h, detail: atlasState.detail,
+      medianIslandTexels: median, recommendedFit,
+      reason: `paint blocked — atlas ${atlasState.w}×${atlasState.h} at ${atlasState.detail ?? 0} px/m gives a ${median}px median island; rebuild with atlas fit=${recommendedFit}`,
+    };
+  };
   // Paint fidelity is an atlas BUDGET, not a hand-picked density (req_2518, the same law the
   // visible painter's Density button cycles): the model's islands fit a texels² sheet and the
   // host DERIVES px/m from the model's own size, so a small prop gets writing-grade texels and
@@ -399,16 +480,14 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   // 1024², instead of inheriting whatever density happened to be live — a 0.3m prop left on a
   // low density packs its whole atlas into ~25×26px, where a lens region owns six pixels and
   // reads as unpainted no matter how correct the paint program is.
-  const PAINT_FIT_LEVELS = [512, 1024, 2048, 4096];
-  const DEFAULT_PAINT_FIT = 1024;
   const atlas = (base: 'template' | 'solid' | 'blank', rgb: [number, number, number], detail?: number, fit?: number): AtlasReceipt | null => {
     if (!['template', 'solid', 'blank'].includes(base) || !rgbBytes(rgb) ||
         (detail !== undefined && (!Number.isInteger(detail) || detail < 1)) ||
-        (fit !== undefined && !PAINT_FIT_LEVELS.includes(fit))) return null;
+        (fit !== undefined && !PAINT_ATLAS_TUNING.fitLevels.includes(fit))) return null;
     const mode = base === 'solid' ? 1 : base === 'blank' ? 2 : 0;
     // Size the sheet BEFORE laying the base colour — createAtlasAndPaint's order, so the fill
     // lands on the final layout rather than being rescaled out from under itself.
-    const budget = fit ?? (detail === undefined ? DEFAULT_PAINT_FIT : 0);
+    const budget = fit ?? (detail === undefined ? PAINT_ATLAS_TUNING.defaultFit : 0);
     const density = budget
       ? Number(automation(() => host.__model_set_paint_fit?.(budget)) ?? -1)
       : Number(automation(() => host.__model_set_paint_detail?.(detail)) ?? -1);
@@ -493,9 +572,25 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const range = adapter.addPrimitive(spec);
     if (!range) return null;
     select(`faces:${range.lo}..${range.hi}`);
-    const declared = declareRegion(before?.table ?? { version: 1, regions: [] }, name, 'part', `add ${spec.kind}`, adapter.take?.());
-    // One assign both names the new part AND writes the merged table back, repairing the reset.
-    host.__mesh_semantic_assign?.(declared.region.id, 0, JSON.stringify(declared.table));
+    let table = before?.table ?? { version: 1 as const, regions: [] };
+    const root = declareRegion(table, name, 'part', `add ${spec.kind}`, adapter.take?.());
+    table = root.table;
+    const roleSpecs: Record<string, readonly (readonly [string, string])[]> = {
+      cube: [['.right', '+x'], ['.left', '-x'], ['.top', '+y'], ['.bottom', '-y'], ['.back', '+z'], ['.front', '-z']],
+      cylinder: [['.cap.top', '+y'], ['.cap.bottom', '-y'], ['.wall', 'wall']],
+      cone: [['.base', '-y'], ['.wall', 'wall']],
+      pyramid: [['.base', '-y'], ['.wall', 'wall']],
+      plane: [['.surface', 'surface']], sphere: [['.surface', 'surface']], icosphere: [['.surface', 'surface']],
+    };
+    const roles = roleSpecs[spec.kind];
+    if (!roles) return null;
+    const ids: number[] = [];
+    for (const [suffix, role] of roles) {
+      const declared = declareRegion(table, `${name}${suffix}`, role, `add ${spec.kind}`, adapter.take?.(), root.region.id);
+      table = declared.table;
+      ids.push(declared.region.id);
+    }
+    if (host.__mesh_semantic_name_primitive?.(range.lo, range.hi, spec.kind, new Uint32Array(ids), JSON.stringify(table)) !== 1) return null;
     return range;
   };
   const newPrimitive = (spec: SeatPrimitiveSpec): boolean => adapter.newPrimitive?.(spec) === true;
@@ -560,7 +655,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   return {
     look, elements, select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
-    mergeFaces, weld, solidify, detach, flip, glass, paint, atlas, material, uv, save,
+    mergeFaces, weld, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
   };
@@ -653,6 +748,8 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'flip': { const result = seat.flip(); return seat.reply('flip', !!result, result ?? undefined, result ? undefined : 'select faces first'); }
       case 'glass': { const result = seat.glass(); return seat.reply('glass', !!result, result ?? undefined, result ? undefined : 'select faces first'); }
       case 'paint': {
+        const readiness = seat.paintReadiness();
+        if (!readiness.ok) return seat.reply('paint', false, readiness, readiness.reason);
         const changed = seat.paint(args.rgb as [number, number, number]);
         return seat.reply('paint', changed > 0, { changed }, changed > 0 ? undefined : 'select faces and use RGB bytes while the paint layout is current');
       }

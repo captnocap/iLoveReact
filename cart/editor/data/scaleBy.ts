@@ -1,7 +1,7 @@
 // Exact-value uniform scaling shared by the dialog and command boundary.
 
 export const SCALE_BY_TUNING = {
-  minMagnitude: 0.02,
+  minMagnitude: 0.000001,
   maxMagnitude: 50,
   defaultFactor: 1.25,
   noOpEpsilon: 1e-5,

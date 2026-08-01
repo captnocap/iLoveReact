@@ -36,6 +36,8 @@ const pack = @import("pack.zig");
 const stable_geometry_slot = @import("stable_geometry_slot.zig");
 const Node = layout.Node;
 
+pub const PrimitiveSemanticKind = mesh_semantics.PrimitiveKind;
+
 // ════════════════════════════════════════════════════════════════════════
 // Vertex format: position f32x3 + oct normal snorm16x2 + uv f16x2 = 20 bytes
 // ════════════════════════════════════════════════════════════════════════
@@ -483,6 +485,21 @@ pub fn orbitFrame(target: [3]f32, radius: f32) void {
     g_orbit.radius = @max(1e-3, radius);
     g_orbit.dist = g_orbit.radius * 2.6;
     g_orbit.framed = true;
+}
+
+pub fn meshLiveFrame() ?mesh_edit.SelectionFrame {
+    const verts = g_edit_verts orelse return null;
+    return mesh_edit.frameForInterleavedPositions(verts[0 .. @as(usize, g_edit_count) * 8]);
+}
+
+/// Deterministic automation framing. Unlike load-time orbitFrame, an authored
+/// camera command respects the lock and reports rejection instead of appearing to
+/// succeed while the view stays put.
+pub fn orbitFrameCurrent(selection: bool) bool {
+    if (g_orbit.locked) return false;
+    const frame = (if (selection) mesh_edit.selectionFrame() else meshLiveFrame()) orelse return false;
+    orbitFrame(frame.center, frame.radius);
+    return true;
 }
 /// Pitch clamp shy of the poles — straight-down is degenerate for a Y-up orbit (the
 /// view basis loses its right vector). Shared by drag AND the compass axis snaps so a
@@ -8441,6 +8458,46 @@ pub fn meshSemanticBootstrapAxes(ids: [6]u32, table_json: []const u8) bool {
     return true;
 }
 
+/// Name one newly-appended resident primitive by the generator roles known at its
+/// creation boundary. Existing faces and their semantic ids remain untouched.
+pub fn meshSemanticNamePrimitive(
+    lo: u32,
+    hi: u32,
+    kind: mesh_semantics.PrimitiveKind,
+    ids: []const u32,
+    table_json: []const u8,
+) bool {
+    if (hi <= lo or ids.len != mesh_semantics.primitiveRoleCount(kind) or !model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const face_count: usize = @intCast(g_edit_count / 3);
+    var rows = captureFaceSemantics(@intCast(face_count)) orelse return false;
+    defer rows.deinit();
+    var changed: u32 = 0;
+    for (0..face_count) |face| {
+        const group = model_source.faceGroupOf(@intCast(face));
+        if (group == model_source.NO_FACE_GROUP or group < lo or group >= hi) continue;
+        const base = face * 24;
+        if (base + 24 > verts.len) return false;
+        const a = [3]f32{ verts[base], verts[base + 1], verts[base + 2] };
+        const b = [3]f32{ verts[base + 8], verts[base + 9], verts[base + 10] };
+        const c = [3]f32{ verts[base + 16], verts[base + 17], verts[base + 18] };
+        const role = mesh_semantics.primitiveRole(kind, normalOf(a, b, c)) orelse return false;
+        if (role >= ids.len or ids[role] == model_source.NO_SEMANTIC_ID) return false;
+        rows.regions[face] = ids[role];
+        rows.instances[face] = 0;
+        changed += 1;
+    }
+    if (changed == 0) return false;
+    var snap = journalSnapshotCurrent("name primitive roles");
+    if (!model_source.setSemanticState(rows.regions, rows.instances, table_json)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    clearIndexedEditMesh();
+    journalCommit(&snap);
+    return true;
+}
+
 const SemanticPerceptAggregate = struct {
     faces: u32 = 0,
     instances: u32 = 0,
@@ -8485,6 +8542,19 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
         }
     } else unnamed = @intCast(face_count);
 
+    var hidden_faces: u32 = 0;
+    var hidden_named_faces: u32 = 0;
+    var hidden_region_ids = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer hidden_region_ids.deinit(allocator);
+    for (g_hidden_groups.items) |hidden| {
+        hidden_faces += @intCast(hidden.semantic_regions.len);
+        for (hidden.semantic_regions) |region| {
+            if (region == model_source.NO_SEMANTIC_ID) continue;
+            hidden_named_faces += 1;
+            hidden_region_ids.put(allocator, region, {}) catch return null;
+        }
+    }
+
     const ids = allocator.alloc(u32, aggregates.count()) catch return null;
     defer allocator.free(ids);
     var id_index: usize = 0;
@@ -8497,9 +8567,9 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    var head_buf: [128]u8 = undefined;
-    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"regions\":[", .{
-        g_edit_generation, face_count, unnamed,
+    var head_buf: [256]u8 = undefined;
+    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"hiddenFaces\":{d},\"hiddenNamedFaces\":{d},\"hiddenRegions\":{d},\"regions\":[", .{
+        g_edit_generation, face_count, unnamed, hidden_faces, hidden_named_faces, hidden_region_ids.count(),
     }) catch return null;
     out.appendSlice(allocator, head) catch return null;
     for (ids, 0..) |id, index| {
@@ -8518,10 +8588,11 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     return out.toOwnedSlice(allocator) catch null;
 }
 
-pub const MeshSelectorKind = enum { all, region, part, facing, above, below, extremal, box };
+pub const MeshSelectorKind = enum { all, region, region_facing, part, facing, above, below, extremal, box };
 pub const MeshSelectorQuery = struct {
     kind: MeshSelectorKind,
     region: u32 = model_source.NO_SEMANTIC_ID,
+    regions: []const u32 = &.{},
     lo: u32 = 0,
     hi: u32 = 0,
     axis: u8 = 1,
@@ -8533,7 +8604,13 @@ pub const MeshSelectorQuery = struct {
     max: [3]f32 = .{ 0, 0, 0 },
     additive: bool = false,
 };
-pub const MeshSelectorResult = struct { faces: u32, bbox: [6]f32 };
+pub const MeshSelectorResult = struct { faces: u32, actionable_faces: u32, bbox: [6]f32 };
+
+fn selectorHasRegion(query: MeshSelectorQuery, region: u32) bool {
+    if (query.regions.len == 0) return region == query.region;
+    for (query.regions) |candidate| if (candidate == region) return true;
+    return false;
+}
 
 fn triangleCentroidAxis(verts: []const f32, face: usize, axis: usize) f32 {
     const base = face * 24;
@@ -8558,6 +8635,7 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
     };
     const facing_cos = @cos(std.math.degreesToRadians(std.math.clamp(query.tolerance_degrees, 0, 180)));
     var matched: u32 = 0;
+    var actionable: u32 = 0;
     var bbox: [6]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
     for (0..face_count) |face| {
         const centroid = [3]f32{
@@ -8567,7 +8645,16 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         };
         const include = switch (query.kind) {
             .all => true,
-            .region => model_source.faceSemanticOf(@intCast(face)).region == query.region,
+            .region => selectorHasRegion(query, model_source.faceSemanticOf(@intCast(face)).region),
+            .region_facing => blk: {
+                if (!selectorHasRegion(query, model_source.faceSemanticOf(@intCast(face)).region)) break :blk false;
+                const base = face * 24;
+                const a = [3]f32{ verts[base], verts[base + 1], verts[base + 2] };
+                const b = [3]f32{ verts[base + 8], verts[base + 9], verts[base + 10] };
+                const c = [3]f32{ verts[base + 16], verts[base + 17], verts[base + 18] };
+                const normal = normalOf(a, b, c);
+                break :blk normal[axis] * (if (query.sign >= 0) @as(f32, 1) else -1) >= facing_cos;
+            },
             .part => blk: {
                 const group = model_source.faceGroupOf(@intCast(face));
                 break :blk group != model_source.NO_FACE_GROUP and group >= query.lo and group < query.hi;
@@ -8590,6 +8677,7 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         if (!include) continue;
         mask[face] = true;
         matched += 1;
+        if (mesh_edit.faceInScopePub(@intCast(face))) actionable += 1;
         const base = face * 24;
         for (0..3) |corner| for (0..3) |component| {
             const value = verts[base + corner * 8 + component];
@@ -8605,7 +8693,7 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         first = false;
     }
     if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
-    return .{ .faces = matched, .bbox = bbox };
+    return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox };
 }
 
 /// Assign/clear a texture role on the CURRENT authored-face selection. Geometry and
