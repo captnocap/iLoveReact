@@ -1,12 +1,14 @@
 ---
 name: agent-seat
-description: Drive the running ReactJIT studio model editor through its live Agent Seat API. Use when an agent must create or revise a 3D model from a prompt or reference image by selecting named/geometric surfaces, extruding, transforming, naming topology, inspecting semantic percepts, or undoing work while the user watches the editor.
+description: Drive the running ReactJIT studio model editor through its live Agent Seat API. Use when an agent must create, revise, save, or cold-verify a 3D model from a prompt or reference image by selecting named/geometric surfaces, extruding, transforming, naming topology, inspecting semantic persistence, or undoing work while the user watches the editor.
 ---
 
 # Agent Seat
 
 Model with the editor's resident tools; never emit vertex arrays or replace the mesh
-with generated code. Treat every successful reply's `percept` as the new source of truth.
+with generated code. Treat every successful reply's `percept` as the source of truth for
+the **resident mesh**. Use `save` and `semantic-status` for durable-state claims; a live
+percept alone does not prove what will survive a cold restart.
 
 **This document is the complete capability surface. Everything the seat can do is listed
 here, and everything it cannot do is listed under "What the seat cannot do" with the
@@ -47,14 +49,19 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 
 ## Loop
 
-1. Ensure the user has the target model open under `./tools/rjit dev editor`.
-2. Run `tools/seat look` before editing.
+1. Ensure the user has the target model open under `./tools/rjit dev editor`, or create one
+   through the normal shell flow with `tools/seat new`.
+2. Run `tools/seat look` before editing. A new cube should report the six primitive names.
 3. Select a durable name whenever one exists. Use a geometric selector only for the first
    reach or a deliberate spatial query.
 4. Make one coherent structural change, inspect the returned percept, then continue.
 5. Use a named operation for every face-creating change. Rewind with `tools/seat undo` as
    soon as a result diverges from the requested form.
-6. Report changes in terms of semantic names and dimensions, not face indices.
+6. Run `tools/seat save`, then `tools/seat semantic-status`. Require `status:"healthy"`
+   and matching nonzero saved/mount/resident counts before claiming that names are durable.
+7. Report changes in terms of semantic names and dimensions, not face indices. When cold
+   persistence is material to the task, fully stop and reopen the editor and prove the names
+   with a generation-1 `look`.
 
 ---
 
@@ -65,6 +72,8 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
 | `tools/seat look` | `{"action":"look"}` | Returns percept. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat semantic-status` | `{"action":"semantic-status"}` | Compares saved RJMD, viewport mount input, and resident native semantics. |
+| `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
 | `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
 | `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
 | `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
@@ -92,12 +101,27 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat atlas <template\|solid\|blank> [r g b] [detail]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"detail":16}}` | Explicitly rebuild a stale paint atlas after topology edits. |
 | `tools/seat material <slot\|clear>` | `{"action":"material","args":{"slot":2}}` | Assign/clear an existing texture-role slot on selected faces. |
 | `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
-| `tools/seat save` | `{"action":"save"}` | Full package save: RJMD v4 geometry + semantic table + parts + paint metadata. |
+| `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
 | `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a resident primitive as a named part. **Meters.** |
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize; `-` keeps the −side. |
 | `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | The app captures its OWN frame. |
 | `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
+
+### new versus add
+
+Use `new` when the task needs a new model document. It routes through the editor shell's
+existing New Model flow, creates the package and outliner document, and replaces the active
+model exactly as the visible UI does:
+
+```bash
+tools/seat new cube 1 1 16
+```
+
+Use `add` only to append a part to the already-open document. `new` takes no semantic name;
+the first `look` bootstraps the primitive's canonical face names. Do not create a probe blob
+or reconstruct a lost table to test persistence—make a new model and exercise this normal
+flow.
 
 ### add — resident primitives
 
@@ -200,6 +224,46 @@ sessions. `formatSeatPercept()` is exported from `seatApi.ts` and renders exactl
 digest, but **the CLI does not call it** — it prints raw JSON.
 
 Extruding one authored quad adds **+8 render faces** (2 cap triangles remain plus 8 wall triangles).
+
+### Semantic persistence — three separate horizons
+
+`look` reports only the resident native mesh. `semantic-status` reports the same three-way
+diagnostic shown in Model Focus's **SEMANTICS** section:
+
+| Status / UI tag | Meaning |
+|---|---|
+| `healthy` / `RESIDENT` | The mount carries names and its named-face count matches the resident mesh; inspect the saved counters too. |
+| `mount-mismatch` / `MOUNT DROP` | The saved blob has names, but the viewport input dropped them. |
+| `load-mismatch` / `LOAD MISMATCH` | The mount input has names, but native hydration lost them. |
+| `resident-only` / `LIVE ONLY` | Names exist live but have not yet been saved. |
+| `none` / `NO NAMES` | No horizon currently carries names. |
+
+The result includes document/package identity, `mountSource`, face/name/region counts for
+all three horizons, and rows marked `resident`, `mount-only`, or `saved-only`. Refresh Model
+Focus or call `semantic-status` after a save instead of guessing whether a CLI or UI display
+is stale.
+
+`save` writes RJMD v4 geometry and semantic membership/table together, then re-reads the
+written blob. If named resident geometry would become anonymous, save fails and restores the
+previous exact blob. Therefore `ok:true` is the save postcondition; the reply's embedded
+`percept` is still only the live view. Follow it with `semantic-status` for the horizon
+diagnosis.
+
+Use this normal-flow acceptance test whenever semantic persistence changes or is in doubt:
+
+```bash
+tools/seat new cube 1 1 16
+tools/seat look                         # six primitive names, unnamed: 0
+tools/seat select top
+tools/seat extrude 0.25 persistence_test
+tools/seat save
+tools/seat semantic-status              # status: healthy; saved/mount/resident agree
+```
+
+Then fully terminate the editor process, cold-open that saved model, and run
+`tools/seat look`. The decisive result is `generation:1`, `unnamed:0`, with `top` and
+`persistence_test.cap` / `.wall` still in the table. Hot reload is not a cold persistence
+test.
 
 ---
 
