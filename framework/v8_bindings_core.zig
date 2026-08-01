@@ -914,7 +914,7 @@ fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
         return;
     };
     var buf: [256]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}", .{ key, scene3d.meshEditActiveCount() }) catch {
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d}}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration() }) catch {
         setReturnString(info, "{\"ok\":0}");
         return;
     };
@@ -933,8 +933,8 @@ fn setMeshTopoChangedReturn(info: v8.FunctionCallbackInfo, changed: u32) void {
     var buf: [256]u8 = undefined;
     const json = std.fmt.bufPrint(
         &buf,
-        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"changed\":{d}}}",
-        .{ key, scene3d.meshEditActiveCount(), changed },
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"changed\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), changed },
     ) catch {
         setReturnString(info, "{\"ok\":0,\"changed\":0}");
         return;
@@ -958,9 +958,9 @@ fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     };
     var buf: [512]u8 = undefined;
     const json = if (scene3d.meshLcFallbackReason()) |reason|
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"fallbackReason\":\"{s}\"}}", .{ key, scene3d.meshEditActiveCount(), reason })
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"fallbackReason\":\"{s}\"}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), reason })
     else
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}", .{ key, scene3d.meshEditActiveCount() });
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d}}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration() });
     setReturnString(info, json catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -984,8 +984,8 @@ fn setMeshBevelPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     var buf: [512]u8 = undefined;
     const json = std.fmt.bufPrint(
         &buf,
-        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}",
-        .{ key, scene3d.meshEditActiveCount() },
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration() },
     ) catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -3314,7 +3314,8 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer dec.deinit(std.heap.c_allocator);
 
-    // Quality-specific key so each level interns as its own resident geometry.
+    // The quality name is diagnostic input only. The active editor document keeps
+    // one stable host handle while scene3d advances its internal generation.
     const key = std.fmt.allocPrint(std.heap.c_allocator, "{s}#q{d}", .{ base, grid }) catch {
         setReturnString(info, "");
         return;
@@ -3322,7 +3323,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     defer std.heap.c_allocator.free(key);
 
     scene3d.setQualityPaintTarget(key, dec.mesh.verts, dec.mesh.vert_count);
-    if (!scene3d.stashHostMesh(key, dec.mesh.verts, dec.mesh.vert_count)) {
+    if (!scene3d.stashActiveEditMesh()) {
         setReturnString(info, "");
         return;
     }
@@ -3354,7 +3355,11 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnString(info, "");
         return;
     };
-    for (key) |ch| {
+    const handle = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "");
+        return;
+    };
+    for (handle) |ch| {
         switch (ch) {
             '"' => w.writeAll("\\\"") catch return,
             '\\' => w.writeAll("\\\\") catch return,

@@ -1367,6 +1367,21 @@ pub fn build(b: *std.Build) void {
     const stage_scale_test_step = b.step("test-stage-scale", "Run the model-stage scale cue unit tests");
     stage_scale_test_step.dependOn(&run_stage_scale_test.step);
 
+    // ── stable mutable geometry-slot allocation — headless, no GPU ──────────
+    const stable_geometry_slot_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/stable_geometry_slot.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const stable_geometry_slot_test = b.addTest(.{
+        .name = "stable-geometry-slot-test",
+        .root_module = stable_geometry_slot_test_mod,
+    });
+    const run_stable_geometry_slot_test = b.addRunArtifact(stable_geometry_slot_test);
+    const stable_geometry_slot_test_step = b.step("test-stable-geometry-slot", "Run stable mutable geometry-slot allocation tests");
+    stable_geometry_slot_test_step.dependOn(&run_stable_geometry_slot_test.step);
+
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),

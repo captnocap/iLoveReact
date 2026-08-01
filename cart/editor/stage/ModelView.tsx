@@ -470,7 +470,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number; changed?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
+type TopoResult = { ok: number; key?: string; count?: number; generation?: number; changed?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number; fallbackReason?: string };
 type QuadifyPlan = TopoResult & {
   evaluation: number;
   evaluationCount: number;
@@ -533,7 +533,7 @@ type ToolTwig = {
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
-type HostSession = { key: string; count: number; radius: number; undo: number; redo: number; atlas: boolean; paintStale?: boolean };
+type HostSession = { key: string; count: number; generation: number; radius: number; undo: number; redo: number; atlas: boolean; paintStale?: boolean };
 const readModelSession = (): HostSession | null => {
   const j = host.__model_session_json?.();
   if (typeof j !== 'string' || !j) return null;

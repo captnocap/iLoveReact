@@ -32,6 +32,7 @@ const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
 const pack = @import("pack.zig");
+const stable_geometry_slot = @import("stable_geometry_slot.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -282,6 +283,13 @@ const GeoEntry = struct {
     hash: u64 = 0,
     offset_bytes: u64 = 0,
     count: u32 = 0,
+    /// Allocated rows at `offset_bytes`. Mutable edit documents reuse this region
+    /// while their topology fits and grow the tail in place when this is the last
+    /// retained entry, so a topology generation does not mint a cache key/slot.
+    capacity: u32 = 0,
+    /// Zero for immutable interned geometry. The active edit document owns a
+    /// monotonically increasing generation under its stable handle hash.
+    generation: u32 = 0,
     present: bool = false,
 };
 var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
@@ -354,6 +362,7 @@ const HostMeshStash = struct {
     hash: u64 = 0,
     verts: ?[]f32 = null, // c_allocator-owned until interned, then freed
     count: u32 = 0,
+    generation: u32 = 0,
     present: bool = false,
 };
 var g_host_stash: [HOST_MESH_STASH]HostMeshStash = [_]HostMeshStash{.{}} ** HOST_MESH_STASH;
@@ -377,13 +386,14 @@ pub fn hostStashBytes() u64 {
 pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
     if (lookupGeometry(key) != null) return true; // already GPU-resident
     const hash = hashKey(key);
+    const generation = geometryGeneration(hash);
     // The viewer shows ONE host mesh at a time, so a previously-stashed-but-not-yet-
     // drawn mesh (a superseded quality level mid-scrub) is obsolete. Evict every OTHER
     // entry as we stash the new current one — otherwise a fast slider drag fills the
     // 16-slot stash with meshes that never draw and the model vanishes (req_2137).
     var slot: ?*HostMeshStash = null;
     for (&g_host_stash) |*s| {
-        if (s.present and s.hash == hash) {
+        if (s.present and s.hash == hash and s.generation == generation) {
             slot = s; // reuse the same-key entry (re-stash)
         } else if (s.present) {
             if (s.verts) |old| std.heap.c_allocator.free(old);
@@ -394,7 +404,7 @@ pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
     if (s.verts) |old| std.heap.c_allocator.free(old);
     const copy = std.heap.c_allocator.alloc(f32, verts.len) catch return false;
     @memcpy(copy, verts);
-    s.* = .{ .hash = hash, .verts = copy, .count = count, .present = true };
+    s.* = .{ .hash = hash, .verts = copy, .count = count, .generation = generation, .present = true };
     return true;
 }
 
@@ -402,8 +412,9 @@ pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
 /// copy on success. Returns null if no stash entry matches or interning failed.
 fn internFromStash(queue: *wgpu.Queue, key: []const u8) ?GeoSlice {
     const hash = hashKey(key);
+    const generation = geometryGeneration(hash);
     for (&g_host_stash) |*s| {
-        if (s.present and s.hash == hash) {
+        if (s.present and s.hash == hash and s.generation == generation) {
             const verts = s.verts orelse return null;
             const slot = internGeometry(queue, key, verts, s.count) orelse return null;
             std.heap.c_allocator.free(verts);
@@ -560,7 +571,9 @@ var g_edit_key_hash: u64 = 0;
 var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
 var g_edit_count: u32 = 0;
-var g_edit_revision: u32 = 0;
+/// Host-internal topology generation under `g_edit_key`. React declares the stable
+/// document handle once; topology replacement never leaks a renamed key again.
+var g_edit_generation: u32 = 0;
 // A quality slider result remains reversible against model_source's retained baseline
 // while the user scrubs, but Save must persist the mesh they chose and can actually
 // edit. When armed, the durable document snapshot reads the displayed projection;
@@ -651,15 +664,28 @@ fn clearMeshGuardSnapshot() void {
     g_guard_can_split = false;
 }
 
-fn clearActiveEditMesh() void {
+fn clearActiveEditGeometry() void {
     clearMeshGuardSnapshot();
     clearIndexedEditMesh();
     if (g_edit_verts) |v| std.heap.c_allocator.free(v);
-    if (g_edit_key) |k| std.heap.c_allocator.free(k);
     g_edit_verts = null;
+    g_edit_count = 0;
+}
+
+fn clearActiveEditMesh() void {
+    clearActiveEditGeometry();
+    if (g_edit_key) |k| std.heap.c_allocator.free(k);
     g_edit_key = null;
     g_edit_key_hash = 0;
-    g_edit_count = 0;
+    g_edit_generation = 0;
+}
+
+inline fn bumpEditGeneration() void {
+    g_edit_generation = stable_geometry_slot.nextGeneration(g_edit_generation);
+}
+
+inline fn geometryGeneration(hash: u64) u32 {
+    return if (hash != 0 and hash == g_edit_key_hash) g_edit_generation else 0;
 }
 
 fn normalOf(a: [3]f32, b: [3]f32, c: [3]f32) [3]f32 {
@@ -726,7 +752,7 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
 
     var patched = false;
     for (&g_host_stash) |*s| {
-        if (!s.present or s.hash != g_edit_key_hash) continue;
+        if (!s.present or s.hash != g_edit_key_hash or s.generation != g_edit_generation) continue;
         if (s.verts) |stash_verts| {
             if (start_f32 + len_f32 <= stash_verts.len) {
                 @memcpy(stash_verts[start_f32 .. start_f32 + len_f32], verts[start_f32 .. start_f32 + len_f32]);
@@ -738,7 +764,7 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
     const buf = g_retained_vbuf;
     if (queue != null and buf != null) {
         for (g_geo_cache[0..g_geo_cache_len]) |*e| {
-            if (!e.present or e.hash != g_edit_key_hash) continue;
+            if (!e.present or e.hash != g_edit_key_hash or e.generation != g_edit_generation) continue;
             if (first_vert + vert_count > e.count) continue;
             stageVertexRows(
                 queue.?,
@@ -800,8 +826,28 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
             g_edit_key = std.heap.c_allocator.dupe(u8, key) catch null;
             g_edit_key_hash = hashKey(key);
             g_edit_count = count;
+            g_edit_generation = 1;
         }
     }
+}
+
+/// Replace the displayed topology while retaining the active document handle. This
+/// is the stable-handle twin of `setPaintTarget`: paint/selection topology resets,
+/// but the caller-visible identity remains unchanged and only the host generation
+/// advances.
+fn setPaintTargetForGeneration(verts: []f32, count: u32) bool {
+    if (g_edit_key == null or g_edit_key_hash == 0) return false;
+    paint_program.reset();
+    mesh_edit.reset();
+    model_paint.setTarget(g_edit_key_hash, verts, count);
+    const need = @as(usize, count) * 8;
+    if (verts.len < need) return false;
+    const copy = std.heap.c_allocator.dupe(f32, verts[0..need]) catch return false;
+    clearActiveEditGeometry();
+    g_edit_verts = copy;
+    g_edit_count = count;
+    bumpEditGeneration();
+    return true;
 }
 
 /// Install a reversible quality preview and nominate that exact resident topology for
@@ -809,7 +855,8 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
 /// the JS door. A structural edit later retains the displayed mesh as the new source and
 /// clears this nomination through replaceActiveEditMesh.
 pub fn setQualityPaintTarget(key: []const u8, verts: []f32, count: u32) void {
-    setPaintTarget(key, verts, count);
+    _ = key;
+    if (!setPaintTargetForGeneration(verts, count)) setPaintTarget("model-quality", verts, count);
     g_save_displayed_projection = g_edit_verts != null and g_edit_count == count;
 }
 
@@ -818,6 +865,9 @@ pub fn meshEditActiveKey() ?[]const u8 {
 }
 pub fn meshEditActiveCount() u32 {
     return g_edit_count;
+}
+pub fn meshEditGeneration() u32 {
+    return g_edit_generation;
 }
 
 /// Park the authoritative active edit copy for first draw. Paint-layout rebuilds
@@ -1073,10 +1123,7 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     const old_ranges: ?[]u32 = if (model_source.partRanges()) |pr| (std.heap.c_allocator.dupe(u32, pr) catch null) else null;
     defer if (old_ranges) |r| std.heap.c_allocator.free(r);
 
-    const old_hash = g_edit_key_hash;
-    g_edit_revision +%= 1;
-    const key = std.fmt.allocPrint(std.heap.c_allocator, "modelview-edit-{x}-{d}", .{ old_hash, g_edit_revision }) catch return false;
-    defer std.heap.c_allocator.free(key);
+    const key = g_edit_key orelse return false;
 
     // setPaintTarget rewrites UVs for the per-face paint atlas; retain/stash the same
     // mutated vertices so quality changes and first draw see the new topology.
@@ -1085,7 +1132,7 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // table is organizational setup, not geometry: stash it so the reset re-adopts
     // it instead of nuking the layer list on every eye toggle / topo op (req_2672).
     paint_program.snapshotLayersForCarry();
-    setPaintTarget(key, new_verts, count);
+    if (!setPaintTargetForGeneration(new_verts, count)) return false;
     model_source.retain(key, new_verts[0..need], count);
     // A structural edit at reduced quality commits that displayed topology as the
     // authoritative source immediately; future saves no longer need projection mode.
@@ -1124,32 +1171,24 @@ fn replaceActiveEditMeshPreservingAtlas(
     else
         null;
     defer if (old_materials) |rows| std.heap.c_allocator.free(rows);
-    const old_hash = g_edit_key_hash;
-    g_edit_revision +%= 1;
-    const key = std.fmt.allocPrint(std.heap.c_allocator, "modelview-edit-{x}-{d}", .{ old_hash, g_edit_revision }) catch return false;
-    defer std.heap.c_allocator.free(key);
+    const key = g_edit_key orelse return false;
     const edit_copy = std.heap.c_allocator.dupe(f32, new_verts[0..need]) catch return false;
     var edit_copy_adopted = false;
     defer if (!edit_copy_adopted) std.heap.c_allocator.free(edit_copy);
-    const key_copy = std.heap.c_allocator.dupe(u8, key) catch return false;
-    var key_copy_adopted = false;
-    defer if (!key_copy_adopted) std.heap.c_allocator.free(key_copy);
-    if (!stashHostMesh(key, new_verts[0..need], count)) return false;
 
     // Restore any orange face tint into true paint while the OLD face indices and
     // layout still own its saved patches. The preserved atlas must never capture UI.
     mesh_edit.clearSelection();
-    if (!model_paint.setTargetPreservingAtlas(hashKey(key), new_verts, count, groups)) return false;
+    if (!model_paint.setTargetPreservingAtlas(g_edit_key_hash, new_verts, count, groups)) return false;
     g_paint_layout_stale = true;
 
     mesh_edit.reset();
-    clearActiveEditMesh();
+    clearActiveEditGeometry();
     g_edit_verts = edit_copy;
-    g_edit_key = key_copy;
-    g_edit_key_hash = hashKey(key);
     g_edit_count = count;
+    bumpEditGeneration();
     edit_copy_adopted = true;
-    key_copy_adopted = true;
+    if (!stashHostMesh(key, new_verts[0..need], count)) return false;
 
     model_source.retain(key, new_verts[0..need], count);
     g_save_displayed_projection = false;
@@ -4328,8 +4367,8 @@ pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
         else => out.append(alloc, ch) catch return null,
     };
     var print_buf: [192]u8 = undefined;
-    const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{},\"paintStale\":{}}}", .{
-        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.hasAuthoredAtlas(), g_paint_layout_stale,
+    const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"generation\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{},\"paintStale\":{}}}", .{
+        g_edit_count, g_edit_generation, g_orbit.radius, j[0], j[1], model_paint.hasAuthoredAtlas(), g_paint_layout_stale,
     }) catch return null;
     out.appendSlice(alloc, rendered) catch return null;
     return out.toOwnedSlice(alloc) catch null;
@@ -10887,8 +10926,9 @@ const GeoSlice = struct { offset: u64, count: u32 };
 /// can still draw, riding on the upload an earlier sibling did.
 fn lookupGeometry(key: []const u8) ?GeoSlice {
     const hash = hashKey(key);
+    const generation = geometryGeneration(hash);
     for (g_geo_cache[0..g_geo_cache_len]) |*e| {
-        if (e.present and e.hash == hash) return .{ .offset = e.offset_bytes, .count = e.count };
+        if (e.present and e.hash == hash and e.generation == generation) return .{ .offset = e.offset_bytes, .count = e.count };
     }
     return null;
 }
@@ -10929,15 +10969,50 @@ fn stageVertexRows(queue: *wgpu.Queue, buf: *wgpu.Buffer, dst_offset: u64, verts
 }
 
 fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
-    if (lookupGeometry(key)) |slot| return slot;
-    if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
     const buf = g_retained_vbuf orelse return null;
+    const hash = hashKey(key);
+    const generation = geometryGeneration(hash);
+    for (g_geo_cache[0..g_geo_cache_len]) |*entry| {
+        if (!entry.present or entry.hash != hash) continue;
+        if (entry.generation == generation) return .{ .offset = entry.offset_bytes, .count = entry.count };
+
+        // A mutable document changed beneath its stable handle. Reuse its retained
+        // region when possible. When it is the bump allocator's tail, grow that same
+        // region in place; if immutable geometry landed after it, move the entry once
+        // to the tail. Subsequent topology growth is in-place again, so generations
+        // no longer consume one cache entry (or one full orphan) apiece.
+        const old_bytes = bu.bytesOfCount(Vertex, entry.capacity);
+        const new_bytes = bu.bytesOfCount(Vertex, count);
+        const allocation = stable_geometry_slot.plan(
+            entry.offset_bytes,
+            old_bytes,
+            new_bytes,
+            g_retained_top,
+            @as(u64, MAX_RETAINED_VERTS) * @sizeOf(Vertex),
+        ) orelse return null;
+        stageVertexRows(queue, buf, allocation.offset_bytes, verts, count);
+        entry.offset_bytes = allocation.offset_bytes;
+        entry.capacity = @intCast(allocation.capacity_bytes / @sizeOf(Vertex));
+        g_retained_top = allocation.retained_top;
+        entry.count = count;
+        entry.generation = generation;
+        return .{ .offset = entry.offset_bytes, .count = entry.count };
+    }
+
+    if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
     const bytes = bu.bytesOfCount(Vertex, count);
     if (g_retained_top + bytes > @as(u64, MAX_RETAINED_VERTS) * @sizeOf(Vertex)) return null;
     stageVertexRows(queue, buf, g_retained_top, verts, count);
     const off = g_retained_top;
     g_retained_top += bytes;
-    g_geo_cache[g_geo_cache_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
+    g_geo_cache[g_geo_cache_len] = .{
+        .hash = hash,
+        .offset_bytes = off,
+        .count = count,
+        .capacity = count,
+        .generation = generation,
+        .present = true,
+    };
     g_geo_cache_len += 1;
     return .{ .offset = off, .count = count };
 }
