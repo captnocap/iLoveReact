@@ -1170,3 +1170,43 @@ reads as reference, not as a destination. The user's words, verbatim:
 > either silence the oracle codex searches or enforce it for both but tidy it
 > up, which the 2nd option i think is better, since claude gets by quite well
 > without it
+
+**V33 — Model semantics are RIGGING DATA: named regions ride the saved blob,
+because skinning reads them (SEMBLOB-0801). (Added 2026-08-01.)**
+
+Semantic region names on a model are not agent scratch memory — they are
+authoring input to the RIG. Naming every surface is what makes auto-skinning
+from a UV tractable: a mesh that arrives with named surfaces is far cheaper to
+skin than one that arrives as anonymous faces, because the names already carry
+the part meaning a rig would otherwise have to infer.
+
+Therefore the semantic table must PERSIST INTO THE MODEL BLOB, not live only as
+host state that a cold restart drops. Two standing consequences:
+
+1. Any model-persistence work (meshdoc / blob save + load) carries the semantic
+   table through as IN-SCOPE, never optional.
+2. Any authoring surface that creates geometry — the Agent Seat, the outliner,
+   importers, primitive adds — names what it creates AT THE MOMENT it creates
+   it. A name reconstructed later from normals is a guess.
+
+An op that resets or drops the semantic table is a BUG, not a cost of doing
+business (the Agent Seat add-verb table wipe, req_3588, and its part-range twin
+req_3465, are the same disease).
+
+The user's words, verbatim (req_3588):
+
+> the more important reason to actually annotate the semantics into the actual
+> blob long term is for skinning them, if you end up naming everything, then
+> skinning from a uv is much less up in arms
+
+Ruled into the constitution on req_3590, after this was first filed as informal
+"direction" in a memory + skill doc rather than as a verdict the oracle would
+return. The user's correction, verbatim:
+
+> bro what the oracle is for the shit i dont need to reexplain over and over
+> again, by not doing it now, your going to make it end up there by the next
+> time you call it
+
+STATE AT RULING TIME: names are LIVE-ONLY host state
+(`__mesh_semantic_state` / `__mesh_semantic_assign`) and do NOT ride the saved
+blob. The persistence half is OWED, not built.
