@@ -30,6 +30,7 @@ import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
 import { createAgentSeat, executeSeatRequest, type SeatRequest } from '../agent/seatApi';
+import { captureFrame } from '@reactjit/capture';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
   AttributionPanel, AttributionStatusBadge, type Attribution, type Ledger,
@@ -2596,7 +2597,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // through the same host doors/tool adoption as this visible ModelView, and the
   // bounded /tmp reply path lets a shell-based agent receive the structured diff.
   useEffect(() => {
-    const seat = createAgentSeat({ adoptTopology: (result) => adoptMesh(result as TopoResult | null) });
+    const seat = createAgentSeat({
+      adoptTopology: (result) => adoptMesh(result as TopoResult | null),
+      // `add` has to reach the SHELL: this viewer owns the host mesh, but the outliner
+      // part table lives in AppFrame, and req_3465 is what their divergence costs. Same
+      // global-door pattern as __modelFocusBridge, deliberately outside the prop path.
+      addPrimitive: (spec) => (globalThis as any).__seatShellBridge?.addPrimitive?.(spec) ?? null,
+      // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
+      captureFrame: (path) => captureFrame(path),
+    });
     (globalThis as any).__agentSeat = seat;
     const unsubscribe = subscribe('system:notification', (payload: any) => {
       if (payload?.kind !== 'agent-seat' || typeof payload?.replyPath !== 'string' ||

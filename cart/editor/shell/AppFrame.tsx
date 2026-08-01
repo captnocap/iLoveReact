@@ -83,6 +83,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import type { SeatPrimitiveSpec } from '../agent/seatApi';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -3446,18 +3447,22 @@ export default function AppFrame() {
 
   // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
   // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
-  const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams, source = 'dock') => {
+  // Returns the new part's authored group range so a non-UI caller (the Agent Seat)
+  // can select and name it in the same beat. UI callers ignore the value; every
+  // refusal path returns null rather than throwing, because the seat reports the
+  // refusal reason back to its agent instead of half-adding a part.
+  const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams, source = 'dock'): { lo: number; hi: number } | null => {
     // Defensive half of the mode boundary: all UI paths leave Paint in addPart(), but
     // automation or a stale caller must be refused instead of mutating the paint target.
     const live = stateRef.current;
     if (live.modelTool.paint) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Add Part refused while Paint is active — exit Paint first; painting was not changed.' }));
-      return;
+      return null;
     }
     const activeModel = activePartsModelId(live);
     if (!activeModel) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
-      return;
+      return null;
     }
     const parts = live.modelParts[activeModel] ?? [];
     const part = makePart(kind, parts, live.seq, params);
@@ -3475,7 +3480,7 @@ export default function AppFrame() {
       selectedPartIdsRef.current = [placed.id];
       setSelectedPartIds([placed.id]);
       setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name} to the empty model` }));
-      return;
+      return { lo: placed.lo, hi: placed.hi };
     }
     if (appendRoute === 'refuse' || !api) {
       setState((prev) => ({
@@ -3483,7 +3488,7 @@ export default function AppFrame() {
         newMeshPrompt: null,
         status: `Add Part stopped — ${parts.length} existing part(s) were kept, but their live mesh is unavailable. Reopen the model and try again.`,
       }));
-      return;
+      return null;
     }
     const geo = composeModelParts([{ ...part, visible: true }]);
     const range = geo.positions.length > 0
@@ -3493,7 +3498,7 @@ export default function AppFrame() {
       // The viewer's error line carries the host's SPECIFIC refusal (part-count
       // mismatch etc., req_3461) — the status echoes so neither surface is silent.
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Add Part refused by the live mesh — see the viewer message; save + reopen rebuilds the outliner and mesh from disk.' }));
-      return;
+      return null;
     }
     const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
     const nextParts = [...parts, placed];
@@ -3506,7 +3511,24 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
     const bridge = (globalThis as any).__modelFocusBridge;
     if (bridge?.paintLive) bridge.refreshUv?.();
+    return { lo: placed.lo, hi: placed.hi };
   };
+
+  // The Agent Seat's `add` verb (req_3586). It routes through addPrimitivePart rather
+  // than the host append door so the outliner row and the host mesh stay ONE truth —
+  // req_3465 is the bug a divergent part table causes. The seat speaks METERS (the R4
+  // scale contract); PrimitiveParams is already meters by the time it reaches here
+  // (NewMeshDialog converts u → meters at its own boundary), so nothing is rescaled.
+  const seatAddPrimitive = (spec: SeatPrimitiveSpec): { lo: number; hi: number } | null => {
+    if (!PRIMITIVE_MESHES.some((entry) => entry.kind === spec.kind)) return null;
+    return addPrimitivePart(spec.kind as PrimitiveKind, { size: spec.size, height: spec.height, resolution: spec.sides }, 'seat');
+  };
+  // Publish it on the global door ModelView's seat adapter reads. Mount-once is correct:
+  // addPrimitivePart reads live state through stateRef/modelToolApiRef, never a closure.
+  useEffect(() => {
+    (globalThis as any).__seatShellBridge = { addPrimitive: seatAddPrimitive };
+    return () => { (globalThis as any).__seatShellBridge = null; };
+  }, []);
 
   // A Pen Plane / Pen Edges part is generated against the live host camera, so its
   // geometry never takes a cart-side seed detour. Register only the metadata/range that

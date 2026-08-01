@@ -50,5 +50,38 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
   assert(!reply.ok && !called, 'anonymous complexity escaped the hard debt gate');
 });
 
+// req_3588: `add` appends a part by REPLACING the live mesh, which resets the host's
+// semantic table. Re-stamping from a post-append read wipes every existing name (the
+// faces stay bound to ids that no longer have one) — req_3465's part-range bug, one
+// layer up. The table the seat writes back must be grown from the PRE-append capture.
+test('adding a primitive keeps every existing name', () => {
+  const named: SeatPercept = {
+    version: 1, generation: 9, faces: 132, unnamed: 0,
+    regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
+    table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
+  };
+  let live = named;
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(live);
+  (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 24 });
+  let written: any = null;
+  (globalThis as any).__mesh_semantic_assign = (_id: number, _instance: number, table: string) => { written = JSON.parse(table); return 1; };
+  const seat = createAgentSeat({
+    // The append resets the host table — exactly what the live editor does.
+    addPrimitive: () => { live = { ...named, faces: 156, table: { version: 1, regions: [], nextRegionId: 0 } }; return { lo: 66, hi: 84 }; },
+  });
+  const reply = executeSeatRequest(seat, { action: 'add', args: { kind: 'cylinder', size: 0.26, height: 0.1, sides: 6, name: 'hexDial' } });
+  assert(reply.ok, 'add was rejected');
+  assert(!!written, 'no semantic table was written back');
+  assert(written.regions.some((row: any) => row.name === 'faceplate.wall'), 'the append wiped an existing name');
+  assert(written.regions.some((row: any) => row.name === 'hexDial'), 'the new part was not named');
+});
+
+test('an unnamed primitive is refused rather than added anonymously', () => {
+  let appended = false;
+  const seat = createAgentSeat({ addPrimitive: () => { appended = true; return { lo: 0, hi: 1 }; } });
+  const reply = executeSeatRequest(seat, { action: 'add', args: { kind: 'cube', name: '' } });
+  assert(!reply.ok && !appended, 'an anonymous part reached the mesh');
+});
+
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);
 log(`seatApi: ${passed} passed`);

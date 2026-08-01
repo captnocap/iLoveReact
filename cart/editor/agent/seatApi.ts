@@ -29,11 +29,35 @@ export type SelectorReceipt = { ok: boolean; faces?: number; bbox?: [number, num
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
 export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: SeatPercept | null; reason?: string };
 
+/** A primitive the seat asks the editor's RESIDENT generators to build (editMesh.ts
+ *  cuboid/cylinder/cone/…). The seat still never emits vertex arrays — it names a
+ *  shape and the editor builds it, exactly as `extrude` names a face operation.
+ *  Dimensions are METERS (the R4 scale contract: 1 unit = 1 meter); the adapter
+ *  converts to the asset catalog's u units. `sides` is the resolution knob —
+ *  cylinder/cone/sphere segments, clamped 3..48 by editMesh.clampSides. */
+export type SeatPrimitiveSpec = {
+  kind: string;
+  size: number;
+  height: number;
+  sides: number;
+  at?: [number, number, number];
+};
+
 export type SeatAdapter = {
   /** ModelView uses this to adopt the new host key/count after topology changes. */
   adoptTopology?: (result: TopologyReceipt | null) => void;
   take?: () => number | undefined;
   namingDebtBudget?: number;
+  /** Append a primitive as a new outliner part; returns its authored group range.
+   *  ModelView wires this to the shell's addPrimitivePart rather than calling
+   *  __mesh_append_group directly, because the outliner row and the host mesh must
+   *  stay ONE truth — req_3465 is what a cart/host part-table divergence costs.
+   *  Absent = the seat reports the verb unavailable instead of half-adding. */
+  addPrimitive?: (spec: SeatPrimitiveSpec) => { lo: number; hi: number } | null;
+  /** Frame self-capture (SELFSHOT-0606). Absent unless the cart imports
+   *  runtime/capture.ts AND the binary carries -Dhas-capture. Never touches the
+   *  desktop: it reads back the frame the app itself composed. */
+  captureFrame?: (path: string) => boolean;
 };
 
 function parseJson<T>(raw: unknown): T | null {
@@ -128,6 +152,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!percept) return { ok: false, reason: 'no live mesh' };
     const query = compileSeatSelector(selector, percept);
     if (!query) return { ok: false, reason: `unknown selector "${selector}"` };
+    // The seat's selection is face-only, and host ops gate on the edit MODE, not just the
+    // selection set — meshLoopCutFaceBegin bails outright unless mode() == .face. Assert it
+    // here rather than inside those verbs, because setting the mode clears the selection:
+    // asserting it later would wipe the very faces the verb was handed.
+    host.__mesh_edit_mode?.(3);
     return parseJson<SelectorReceipt>(host.__mesh_select_query?.(JSON.stringify(query))) ?? { ok: false, reason: 'selector door unavailable' };
   };
   const nameSelection = (name: string, instance = 0, role = 'authored', op = 'name'): number => {
@@ -161,8 +190,51 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180) === 1;
   const undo = (): TopologyReceipt | null => { const result = readTopology(host.__mesh_undo?.()); adapter.adoptTopology?.(result); return result; };
   const redo = (): TopologyReceipt | null => { const result = readTopology(host.__mesh_redo?.()); adapter.adoptTopology?.(result); return result; };
+  /** Mirror the mesh exactly across an axis plane (0 = X, 1 = Y, 2 = Z), keeping the
+   *  +side or the −side. One host op, journaled — the seat never hand-computes a
+   *  reflection, which is what made mirrored features drift when it could not. */
+  const symmetrize = (axis: number, keepPositive: boolean): TopologyReceipt | null => {
+    const result = readTopology(host.__mesh_symmetrize?.(axis, keepPositive ? 1 : 0));
+    adapter.adoptTopology?.(result);
+    return result;
+  };
+  /** Loop cut the CURRENT FACE SELECTION. Deliberately the lc_* session door, not
+   *  __mesh_topo_loop_cut: that one cuts across the one selected EDGE, and the seat
+   *  has no edge selection to give it. This one cuts along one of the clicked face's
+   *  two in-plane axes, which is addressable from a face selector. Authored grouping
+   *  carries through, so each crossed face becomes two faces in the SAME semantic
+   *  region — a cut never creates naming debt. */
+  const loopCut = (direction: number, cuts: number, offsetFraction: number): TopologyReceipt | null => {
+    if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(0))?.ok !== 1) return null;
+    const preview = parseJson<{ ok?: number; fallbackReason?: string }>(host.__mesh_lc_preview?.(direction, cuts, offsetFraction));
+    if (preview?.ok !== 1) { host.__mesh_lc_end?.(0); return null; } // cancel restores the pre-cut mesh exactly
+    const result = readTopology(host.__mesh_lc_end?.(1));
+    adapter.adoptTopology?.(result);
+    return result;
+  };
+  /** Append a resident primitive as a new named part, then leave it selected so the
+   *  very next transform lands on it. Naming happens in the same beat as the append
+   *  for the same reason extrude names its cap/wall: a cold `look` must show the part,
+   *  not a slab of anonymous faces. */
+  const addPrimitive = (spec: SeatPrimitiveSpec, name: string): { lo: number; hi: number } | null => {
+    if (!adapter.addPrimitive || !name || name === '_') return null; // a part must be named, like extrude's cap/wall
+    // Capture the semantic table BEFORE the append. The append REPLACES the live mesh and
+    // resets the host's semantic table, so a post-append read returns an empty one — and
+    // re-stamping from that drops every existing name while leaving the faces still bound
+    // to their (now nameless) ids. This is req_3465's part-range bug one layer up, and its
+    // fix is the same shape: grow the table from a PRE-replace capture, never a post read.
+    const before = look();
+    const range = adapter.addPrimitive(spec);
+    if (!range) return null;
+    select(`part:${range.lo}..${range.hi}`);
+    const declared = declareRegion(before?.table ?? { version: 1, regions: [] }, name, 'part', `add ${spec.kind}`, adapter.take?.());
+    // One assign both names the new part AND writes the merged table back, repairing the reset.
+    host.__mesh_semantic_assign?.(declared.region.id, 0, JSON.stringify(declared.table));
+    return range;
+  };
+  const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
-  return { look, select, nameSelection, extrude, move, scale, rotate, undo, redo, reply };
+  return { look, select, nameSelection, extrude, move, scale, rotate, undo, redo, symmetrize, loopCut, addPrimitive, shot, reply };
 }
 
 export type AgentSeat = ReturnType<typeof createAgentSeat>;
@@ -191,6 +263,32 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
+      case 'mirror': {
+        const result = seat.symmetrize(Number(args.axis ?? 0), args.keep !== false);
+        return seat.reply('mirror', !!result, result ?? undefined, result ? undefined : 'symmetrize rejected');
+      }
+      case 'cut': {
+        const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5));
+        return seat.reply('cut', !!result, result ?? undefined, result ? undefined : 'loop cut rejected — it needs a face selection to cut across');
+      }
+      case 'add': {
+        const spec: SeatPrimitiveSpec = {
+          kind: String(args.kind ?? 'cube'),
+          size: Number(args.size ?? 0.25),
+          height: Number(args.height ?? 0.25),
+          sides: Number(args.sides ?? 16),
+          ...(Array.isArray(args.at) ? { at: args.at as [number, number, number] } : {}),
+        };
+        const range = seat.addPrimitive(spec, String(args.name ?? ''));
+        return seat.reply('add', !!range, range ?? undefined, range ? undefined
+          : 'add rejected — no primitive adapter wired, Paint is active, or no model is open');
+      }
+      case 'shot': {
+        const path = String(args.path ?? '');
+        const ok = seat.shot(path);
+        return seat.reply('shot', ok, ok ? { path } : undefined, ok ? undefined
+          : 'capture door unavailable — the cart must import runtime/capture.ts and the binary must be built with -Dhas-capture');
+      }
       default: return seat.reply(request.action, false, undefined, `unknown seat action "${request.action}"`);
     }
   } catch (error) {

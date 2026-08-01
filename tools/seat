@@ -16,11 +16,23 @@ else if (action === 'extrude') request = { action, args: { distance: Number(args
 else if (action === 'move') request = { action, args: { delta: numberList(args.slice(0, 3)) } };
 else if (action === 'scale') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), factor: Number(args[6] || 1) } };
 else if (action === 'rotate') request = { action, args: { axis: numberList(args.slice(0, 3)), pivot: numberList(args.slice(3, 6)), degrees: Number(args[6] || 0) } };
+// mirror x|y|z [-]  — symmetrize across the axis plane, keeping +side unless '-' is given.
+else if (action === 'mirror') request = { action, args: { axis: 'xyz'.indexOf(String(args[0] || 'x').toLowerCase()), keep: String(args[1] || '+') !== '-' } };
+// cut <direction 0|1> <cuts> [offsetFraction] — loop cut the current face selection.
+else if (action === 'cut') request = { action, args: { direction: Number(args[0] || 0), cuts: Number(args[1] || 1), offset: args[2] === undefined ? 0.5 : Number(args[2]) } };
+// add <kind> <size> <height> <sides> <name> [x y z] — dimensions in METERS (R4).
+else if (action === 'add') {
+  request = { action, args: {
+    kind: args[0], size: Number(args[1] || 0.25), height: Number(args[2] || 0.25),
+    sides: Number(args[3] || 16), name: args[4],
+    ...(args.length >= 8 ? { at: numberList(args.slice(5, 8)) } : {}),
+  } };
+} else if (action === 'shot') request = { action, args: { path: args[0] } };
 else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat look|select <selector>|name <name> [instance]|extrude <distance> <name>|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|undo|redo|do <json-array>');
+  console.error('usage: tools/seat look|select <selector>|name <name> [instance]|extrude <distance> <name>|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|mirror x|y|z [-]|cut <dir> <cuts> [offset]|add <kind> <size> <height> <sides> <name> [x y z]|shot <path>|undo|redo|do <json-array>');
   process.exit(2);
 }
 
