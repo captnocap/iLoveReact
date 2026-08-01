@@ -62,7 +62,14 @@ never fight.
   the whole piece even though `piece.slots` was written per-face correctly.)
   Door leaves and the glass pane keep their fixed look. Shader materials
   additionally get their real texture via `pieceSkins.ts` skin boxes;
-  non-shader materials show as their per-face flat colour.
+  non-shader materials show as their per-face flat colour. A shader-skinned
+  box's flat row is pushed COLLIDE-ONLY (`r = -1`, req_3569): the outset skin
+  box IS that face — drawing the flat box too left two opaque surfaces 4mm
+  apart, which z-fought into visible tearing once depth precision passed the
+  outset (~45m out). `applyLiveColliders` still reads the marked row, so the
+  wall stays solid; `applyPendingLive` drops it from the render buffer. The
+  glass pane also never takes a skin box — an opaque cube would plate the
+  window hole.
 
 ## Relationship to the other paint modes
 

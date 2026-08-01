@@ -724,11 +724,23 @@ pub fn applyPendingLive(runtime: anytype) void {
             return;
         };
     }
-    if (floats > 0) @memcpy(runtime.live_buf[0..floats], p.rows[0..floats]);
+    // Rows with r < 0 are COLLIDE-ONLY (req_3569): the editor marks a face box
+    // whose slot wears a shader material — its outset skin box fully covers it,
+    // and drawing both opaque surfaces 4mm apart z-fights into tearing once
+    // depth precision passes the outset at distance. applyLiveColliders reads
+    // p.rows directly, so the skipped row still collides.
+    var visible: usize = 0;
+    var row: usize = 0;
+    while (row < p.count) : (row += 1) {
+        const src = p.rows[row * INSTANCE_STRIDE ..][0..INSTANCE_STRIDE];
+        if (src[9] < 0) continue;
+        @memcpy(runtime.live_buf[visible * INSTANCE_STRIDE ..][0..INSTANCE_STRIDE], src);
+        visible += 1;
+    }
     const node = &runtime.kid_list.items[kid];
-    node.scene3d_instance_data = runtime.live_buf[0..floats];
-    node.scene3d_instance_count = @intCast(p.count);
-    node.scene3d_mesh = p.count > 0;
+    node.scene3d_instance_data = runtime.live_buf[0 .. visible * INSTANCE_STRIDE];
+    node.scene3d_instance_count = @intCast(visible);
+    node.scene3d_mesh = visible > 0;
     runtime.live_gen = p.gen;
     // [live-diag req_1812] RJIT_LIVELOG=1: prove the overlay applies + dump the first row,
     // so an invisible placed piece is diagnosed (0 rows? off-screen? zero scale?).

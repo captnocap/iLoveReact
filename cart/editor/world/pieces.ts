@@ -12,6 +12,7 @@
 
 import { buildCatalogIndex, validateBuildPlacement } from '@reactjit/runtime/game/build';
 import { catalogRowFor, rowHex, type BuildKind } from './buildCatalog';
+import { liveMaterialFor } from './pieceSkins';
 import { slotRefForBox } from './pieceSlots';
 import { pieceVisualShapes, type FaceSlot } from './pieceShapes';
 import { authoredPieceFor, isAuthoredPiece, type PlaceableKind } from './authoredRegistry';
@@ -685,8 +686,16 @@ export function pieceInstanceRows(pieces: readonly PlacedPiece[]): Float32Array 
         const b = shape.box;
         // Door leaves and the glass pane keep their own fixed look; every other
         // box takes ITS slot's material colour (per-face, req_2886).
-        const hex = b.door || b.opacity !== undefined ? b.color : boxColorHex(piece, b.slot, b.color);
-        const rgb = hexToRgb(hex);
+        const fixedLook = b.door || b.opacity !== undefined;
+        const ref = fixedLook ? undefined : slotRefForBox(piece, b.slot);
+        // A box whose slot wears a SHADER material is fully covered by its
+        // outset skin box (pieceSkinBoxes). Drawing the flat box too leaves two
+        // opaque faces 4mm apart, which z-fights into tearing once depth
+        // precision passes the outset (~45m out, req_3569). r = -1 marks the
+        // row COLLIDE-ONLY: applyLiveColliders still reads it, applyPendingLive
+        // drops it from the render buffer.
+        const skinned = !!ref && !!liveMaterialFor(ref);
+        const rgb = skinned ? [-1, -1, -1] : hexToRgb(fixedLook || !ref || !('assetId' in ref) ? b.color : assetById(ref.assetId).color);
         rows.push(scaled(b.cx, piece.x), scaled(b.cy, piece.y), scaled(b.cz, piece.z), 0, b.yawDegrees, 0, b.sx * s, b.sy * s, b.sz * s, rgb[0], rgb[1], rgb[2]);
       } else {
         const r = shape.ramp;
