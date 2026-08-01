@@ -311,8 +311,14 @@ function pushLiveMaterialRegions(pieces: readonly PlacedPiece[], authoredPieces?
     if (g.__model_region_set(bind.key, bind.regionId, bind.faces, bind.data) === 1) landed += 1;
     else console.error(`[live-regions] host REFUSED region bind '${bind.key}' (#${bind.regionId}, ${bind.faces.length} face(s))`);
   }
+  // Every world push re-binds; only a CHANGED bind set is news (req_3566).
+  const signature = `${landed}/${binds.length} ${binds.map((b) => `${b.key}#${b.regionId}x${b.faces.length}:${b.data.join(',')}`).join(' ')}`;
+  if (signature === lastRegionBindSignature) return;
+  lastRegionBindSignature = signature;
   console.warn(`[live-regions] ${landed}/${binds.length} placed-prop region(s) bound: ${binds.map((b) => b.key).join(', ')}`);
 }
+
+let lastRegionBindSignature = '';
 
 /** Keep the authored meshes RESIDENT so their placements can draw (req_2577).
  *  Returns false while the loader node / door isn't up yet — callers retry. */
