@@ -98,11 +98,12 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 
 function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSemantics; onRefresh: () => void }) {
   const statusLabel = semantics.status === 'healthy' ? 'RESIDENT'
+    : semantics.status === 'mount-mismatch' ? 'MOUNT DROP'
     : semantics.status === 'load-mismatch' ? 'LOAD MISMATCH'
       : semantics.status === 'resident-only' ? 'LIVE ONLY'
         : 'NO NAMES';
   const statusTone = semantics.status === 'healthy' ? 'success'
-    : semantics.status === 'load-mismatch' ? 'warning'
+    : semantics.status === 'load-mismatch' || semantics.status === 'mount-mismatch' ? 'warning'
       : 'textFaint';
   const listHeight = Math.min(6, semantics.rows.length) * REGIONS.grid.rowHeight;
   return (
@@ -123,10 +124,19 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
         <C.HW_ReadValue>{`${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} faces`}</C.HW_ReadValue>
       </C.HW_ReadRow>
       <C.HW_ReadRow>
+        <C.HW_FormLabel>{`mount ${semantics.mountSource ?? ''}`}</C.HW_FormLabel>
+        <C.HW_ReadValue>{`${semantics.mountRegions} regions · ${semantics.mountNamedFaces}/${semantics.mountFaces} faces`}</C.HW_ReadValue>
+      </C.HW_ReadRow>
+      <C.HW_ReadRow>
         <C.HW_FormLabel>resident</C.HW_FormLabel>
         <C.HW_ReadValue>{`${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} faces`}</C.HW_ReadValue>
       </C.HW_ReadRow>
-      {semantics.status === 'load-mismatch' ? (
+      {semantics.status === 'mount-mismatch' ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
+          <C.HW_ReadValue>saved names exist; viewport input dropped them</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : semantics.status === 'load-mismatch' ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
           <C.HW_ReadValue>saved names exist; native hydration lost them</C.HW_ReadValue>
@@ -136,7 +146,7 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
         <ScrollView style={{ width: '100%', height: listHeight }} showScrollbar>
           {semantics.rows.map((row) => (
             <C.HW_ReadRow key={`semantic-${row.id}`}>
-              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces}f · ${row.instances}x` : 'saved only'}</C.HW_FormLabel>
+              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces}f · ${row.instances}x` : row.presence === 'mount-only' ? 'mount only' : 'saved only'}</C.HW_FormLabel>
               <C.HW_ReadValue>{`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}</C.HW_ReadValue>
             </C.HW_ReadRow>
           ))}

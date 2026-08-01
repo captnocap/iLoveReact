@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { inferMeshDocPartRanges, meshDocHiddenRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { inferMeshDocPartRanges, meshDocHiddenRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, meshDocSemanticsMatch, meshDocWouldEraseSemantics, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 import { writeModelArtifacts } from './modelPackageStore';
 
 let passed = 0, failed = 0;
@@ -190,6 +190,24 @@ test('RJMD v4 rejects semantic membership without a dictionary', () => {
   const bytes = semanticDocBlob();
   new Uint32Array(bytes.buffer, 36, 1)[0] = 0;
   assert(parseMeshDocBytes(bytes) === null, 'orphaned semantic ids were accepted');
+});
+
+test('save verification rejects geometry-only success that dropped resident names', () => {
+  const resident = {
+    faces: 3, unnamed: 0,
+    table: { version: 1 as const, regions: [{ id: 5, name: 'window.rim', role: 'rim' }] },
+  };
+  assert(!meshDocSemanticsMatch(resident, {
+    semanticRegions: null, semanticInstances: null, semanticTable: null,
+  }), 'geometry-only RJMD was accepted for a named resident mesh');
+  assert(meshDocSemanticsMatch(resident, {
+    semanticRegions: new Uint32Array([5, 5, 5]),
+    semanticInstances: new Uint32Array([0, 0, 0]),
+    semanticTable: resident.table,
+  }), 'matching durable semantics were rejected');
+  assert(meshDocWouldEraseSemantics({ ...resident, unnamed: 3 }, {
+    semanticRegions: new Uint32Array([5, 5, 5]),
+  }), 'anonymous hydration was allowed to erase a named durable document');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

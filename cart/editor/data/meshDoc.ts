@@ -21,7 +21,7 @@
 // Every function here takes the package's resolved on-disk home (`dir`) — resolution
 // stays in modelPackageStore (this module must not import it: the store's
 // writeModelArtifacts calls down into this writer).
-import { exists, readFile, readFileBase64, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { exists, readFile, readFileBase64, remove, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import { base64ToBytes, bytesText, textBytes } from '../../../runtime/workspace';
 
 const host = globalThis as any;
@@ -63,6 +63,44 @@ export type MeshSemanticTable = {
   regions: MeshSemanticRegion[];
   nextRegionId?: number;
 };
+
+export type ResidentSemanticSaveState = {
+  faces: number;
+  unnamed: number;
+  table: MeshSemanticTable;
+};
+
+/** Deep save postcondition: the blob must contain the same named-face count and
+ * dictionary the resident editor reported. A successful geometry write is not a
+ * successful model save when it silently drops rigging semantics. */
+export function meshDocSemanticsMatch(
+  resident: ResidentSemanticSaveState,
+  doc: Pick<PackageMeshDoc, 'semanticRegions' | 'semanticInstances' | 'semanticTable'> | null,
+): boolean {
+  const namedFaces = Math.max(0, resident.faces - resident.unnamed);
+  if (namedFaces === 0 && resident.table.regions.length === 0) {
+    return !doc?.semanticRegions || Array.from(doc.semanticRegions).every((id) => id === 0xffffffff);
+  }
+  if (!doc?.semanticRegions || !doc.semanticInstances || !doc.semanticTable) return false;
+  if (doc.semanticRegions.length !== resident.faces || doc.semanticInstances.length !== resident.faces) return false;
+  if (Array.from(doc.semanticRegions).filter((id) => id !== 0xffffffff).length !== namedFaces) return false;
+  const durable = new Map(doc.semanticTable.regions.map((region) => [region.id, region]));
+  if (durable.size !== resident.table.regions.length) return false;
+  return resident.table.regions.every((region) => {
+    const saved = durable.get(region.id);
+    return !!saved && saved.name === region.name && (saved.role ?? '') === (region.role ?? '') &&
+      (saved.parent ?? null) === (region.parent ?? null);
+  });
+}
+
+export function meshDocWouldEraseSemantics(
+  resident: ResidentSemanticSaveState,
+  prior: Pick<PackageMeshDoc, 'semanticRegions'> | null,
+): boolean {
+  const residentNamedFaces = Math.max(0, resident.faces - resident.unnamed);
+  const priorNamedFaces = Array.from(prior?.semanticRegions ?? []).filter((id) => id !== 0xffffffff).length;
+  return residentNamedFaces === 0 && priorNamedFaces > 0;
+}
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
 export type MeshDocPartMeta = {
@@ -158,6 +196,20 @@ export function writeMeshDoc(
   // document with that degraded state. Geometry can still be saved once the host is
   // re-seeded; until then the caller gets a loud failure and the old blob stays intact.
   {
+    const docPath = `${dir}/${DOC_BLOB}`;
+    const priorBlob = readFileBase64(docPath);
+    let residentSemantics: ResidentSemanticSaveState | null = null;
+    try {
+      const raw = host.__mesh_semantic_state?.();
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+      if (Number.isInteger(parsed?.faces) && Number.isInteger(parsed?.unnamed) && parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) {
+        residentSemantics = parsed as ResidentSemanticSaveState;
+      }
+    } catch { /* old host: the native write result remains the compatibility boundary */ }
+    if (residentSemantics && meshDocWouldEraseSemantics(residentSemantics, priorDoc)) {
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: resident mesh is anonymous but the durable document still has named faces`);
+      return false;
+    }
     const hostPartRanges = (): { lo: number; hi: number }[] => {
       try {
         const o = JSON.parse(host.__mesh_part_ranges?.() ?? 'null');
@@ -197,7 +249,18 @@ export function writeMeshDoc(
     // The expected count crosses as a scalar only. The host re-validates it at the
     // write boundary and atomically renames a complete fsynced RJMD over doc.blob;
     // resident geometry never crosses the JS bridge.
-    if (host.__model_meshdoc_write?.(`${dir}/${DOC_BLOB}`, parts.length) !== 1) return false;
+    if (host.__model_meshdoc_write?.(docPath, parts.length) !== 1) return false;
+    invalidateMeshDoc(dir);
+    if (residentSemantics && !meshDocSemanticsMatch(residentSemantics, parseDocBlob(dir))) {
+      // A mixed-version dev session can run a new TS bundle against an older native
+      // writer. Restore the exact prior blob instead of accepting geometry-only success.
+      const restored = priorBlob !== null
+        ? writeFileBase64Atomic(docPath, priorBlob)
+        : remove(docPath);
+      invalidateMeshDoc(dir);
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: native writer dropped resident semantic names${restored ? '; prior document restored' : '; prior document recovery failed'}`);
+      return false;
+    }
   }
 
   // doc.blob commits first. If the second atomic write fails, the old metadata remains

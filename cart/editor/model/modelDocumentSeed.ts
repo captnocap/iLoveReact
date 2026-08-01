@@ -1,6 +1,7 @@
 import type { PackageMeshDoc } from '../data/meshDoc';
 
 export type ModelDocumentSeed = {
+  source: 'rjmd' | 'primitive' | 'composed';
   key: string;
   name: string;
   vertices: Float32Array;
@@ -24,6 +25,7 @@ export function modelDocumentSeed(
   doc: PackageMeshDoc,
 ): ModelDocumentSeed {
   return {
+    source: 'rjmd',
     key,
     name,
     vertices: doc.vertices,

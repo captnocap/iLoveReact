@@ -13,7 +13,17 @@ test('saved semantics with an anonymous resident surface a load mismatch', () =>
     faces: 3, unnamed: 3, regions: [], table: { version: 1, regions: [] },
   });
   assert(focus.status === 'load-mismatch' && focus.savedRegions === 2 && focus.residentRegions === 0, 'load mismatch was hidden');
-  assert(focus.rows.every((row) => row.presence === 'saved-only'), 'lost regions were presented as resident');
+  assert(focus.rows.every((row) => row.presence === 'mount-only'), 'mounted regions lost by native hydration were misidentified');
+});
+
+test('disk semantics dropped before ModelView surface as a mount mismatch', () => {
+  const focus = modelFocusSemantics(
+    { regions: [3, 3, 4], instances: [0, 0, 0], table },
+    { faces: 3, unnamed: 3, regions: [], table: { version: 1, regions: [] } },
+    { regions: [], instances: [], table: null },
+  );
+  assert(focus.status === 'mount-mismatch' && focus.mountRegions === 0, 'pre-mount loss was blamed on native hydration');
+  assert(focus.rows.every((row) => row.presence === 'saved-only'), 'disk-only rows were not identified');
 });
 
 test('matching saved and resident semantics are healthy', () => {

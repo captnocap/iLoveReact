@@ -169,7 +169,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
           hiddenRanges: meshDocHiddenRanges(mountDoc.ranges, rowsByLo),
         }
       : composed.positions.length > 0
-        ? { key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }
+        ? { source: 'composed' as const, key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }
         : null;
     // `seed` is a BOOT input, not a liveness signal. Add From Library rows are
     // metadata + native group ranges, so deleting the original primitive can make
@@ -297,7 +297,7 @@ function resolveViewer(model: ModelPackage): ViewerSource {
   // keyed by the doc id so each new cube is its own resident mesh.
   if (model.primitive) {
     const built = primitiveMeshData(model.primitive);
-    return { kind: 'mesh', key: `primitive:${model.primitive}:${model.id}`, name: model.name, vertices: built.positions, count: Math.floor(built.positions.length / 8), faceGroups: built.faceGroups };
+    return { kind: 'mesh', source: 'primitive', key: `primitive:${model.primitive}:${model.id}`, name: model.name, vertices: built.positions, count: Math.floor(built.positions.length / 8), faceGroups: built.faceGroups };
   }
   if (model.viewerPath) return { kind: 'path', path: model.viewerPath };
   return { kind: 'missing', title: 'MODEL PACKAGE GEOMETRY MISSING', label: `${model.path}/mesh` };

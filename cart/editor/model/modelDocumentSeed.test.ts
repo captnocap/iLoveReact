@@ -24,6 +24,7 @@ const seed = modelDocumentSeed('model-46', 'Radio', doc);
 assert(seed.semanticRegions === semantics, 'RJMD semantic regions were dropped at the ModelView boundary');
 assert(seed.semanticInstances === instances, 'RJMD semantic instances were dropped at the ModelView boundary');
 assert(seed.semanticTable === table, 'RJMD semantic dictionary was dropped at the ModelView boundary');
+assert(seed.source === 'rjmd', 'RJMD seed lost its mount-source diagnosis');
 assert(seed.count === 6 && seed.glassFirstVertex === 6, 'ordinary RJMD fields changed while forwarding semantics');
 
 console.log('modelDocumentSeed: 1 passed');

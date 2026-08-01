@@ -68,6 +68,7 @@ import {
   writeModelUvGenerationGuide,
   writeModelUvWireframe,
 } from '../data/modelPackageStore';
+import { readMeshDoc } from '../data/meshDoc';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
 import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
@@ -121,6 +122,7 @@ type Loaded = {
   texture?: LoadedTexture;
 };
 export type ModelViewInitialMesh = {
+  source?: 'rjmd' | 'primitive' | 'composed';
   key: string;
   name: string;
   vertices: Float32Array | number[];
@@ -2716,11 +2718,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const g = globalThis as any;
     const tris = model ? Math.floor(model.count / 3) : 0;
     const faces = authoredFaces ?? tris;
+    const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
+    const diskDoc = packageDir ? readMeshDoc(packageDir) : null;
     const semantics = modelFocusSemantics({
+      regions: diskDoc?.semanticRegions ?? undefined,
+      instances: diskDoc?.semanticInstances ?? undefined,
+      table: diskDoc?.semanticTable ?? null,
+    }, readSeatPercept(), {
       regions: initialMesh?.semanticRegions,
       instances: initialMesh?.semanticInstances,
       table: initialMesh?.semanticTable ?? null,
-    }, readSeatPercept());
+    }, {
+      documentId: paintTarget?.id,
+      packageDir,
+      mountSource: initialFileParts ? 'file' : initialMesh?.source ?? (initialPath ? 'path' : 'none'),
+    });
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       semantics,
