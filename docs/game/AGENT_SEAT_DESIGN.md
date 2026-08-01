@@ -88,7 +88,7 @@ two ops to all of them, and add a way to name the selection.
 
 ---
 
-## The design, in five parts
+## The design, in six parts
 
 ### 1. The Selector — giving verbs a noun
 
@@ -125,47 +125,236 @@ The agent is never guessing, and the user's transcript reads in English:
 
 > `extrude part:roof & facing:+y by 0.35` → *6 faces, +0.35 Y, 24 → 42 faces*
 
-This is the single highest-leverage piece. Without it, an agent is doing
-index arithmetic and will fail exactly the way the old code-generation approach
-failed. With it, it is doing what you do.
+**But selectors alone are a trap, and the next section is the reason why.** They
+are how you *reach* geometry, not how you *remember* it. Read part 2 before
+treating this section as sufficient.
 
-### 2. The Ops — verb + noun + amount
+### 2. The Name — meaning must survive the operation that creates it
+
+**The failure mode this part exists to kill.** Six faces on a cube are
+*relatively* known — everyone agrees +Y is the top, `facing:-z` is the front,
+because at that complexity the geometry describes itself. Then:
+
+```
+loopcut 3 axis=y ; select the middle band ; inset ; extrude ; bevel
+```
+
+and there are sixty faces. Now:
+
+- `facing:+y` returns **17 faces spanning three unrelated things** — the roof,
+  the window sills, and the chamfer strip. The selector still "works" and the
+  answer is garbage.
+- The agent's understanding — *"the middle band is the window row"* — exists
+  **only in its context window.** The mesh does not know it. Disk does not know
+  it. You cannot see it.
+- One compaction, one rewind, one new session, one different agent, and that
+  understanding is gone. The model is sixty anonymous quads.
+
+And the lethal part: **the agent does not notice it got lost.** It selects
+`facing:+z` believing it's the window row, catches the door too, extrudes both,
+and reports success. Confidently wrong is worse than stuck.
+
+**Geometry stops being self-describing at about the third operation.** Below
+that line selectors are enough. Above it, an agent is doing archaeology on its
+own work — which is precisely "doesn't know its ass from its head."
+
+#### The principle
+
+> **The op that turns 6 faces into 60 is the only thing that ever knows what
+> it made. Meaning gets committed at that instant or it is lost forever.**
+
+`inset` knows it made one inner field and a rim of four. `extrude` knows it made
+a cap and N walls. `loopcut 3` knows it made four bands, in order along the axis.
+That knowledge exists for one instant inside the op and is currently **thrown
+away.** Everything below is about not throwing it away.
+
+#### The mechanism already exists in this repo
+
+`Face` in `framework/gpu/indexed_edit_mesh.zig:311` carries:
+
+```zig
+/// Stable texture-role index authored in the Rig panel. Rendering remains
+/// triangle soup, but splits/cuts inherit this identity from their source face.
+material: u32 = NO_MATERIAL,
+```
+
+and every face-creating path honors it — `makeSplitFace` (`:2186`) and
+`appendBevelFace` (`:2520`) both do `.material = source.material` while minting
+a *fresh* group id. That is exactly the property needed: **a per-face tag that
+survives topology ops by inheritance.**
+
+Note the contrast, because it's the reason `group` cannot be the carrier:
+when a face splits, *"the negative piece retains the source group; the positive
+piece receives a fresh authored group"* (`:1021`). A label riding group ids would
+silently cover half of what it used to — worse than no label at all.
+
+It persists, too: RJMD v3 already stores the per-face role on disk
+(`meshDoc.ts:9`, `hasMaterials` at `:247`), and cart-side part metadata already
+rides both the journal (`__mesh_journal_note`, restored on undo —
+`AppFrame.tsx:4453`) and disk (`PARTS_META`, `{version:1, parts}` — `meshDoc.ts:186`).
+
+**So this is not new machinery either. It is a second inheriting tag on the same
+proven path, with a name table.** The propagation is currently a hand-copied
+`.material = source.material` at each creation site; slice 1 should collapse
+those into one `Face.inheritFrom(source)` so the label doesn't become
+hand-synced copy #9 (`project_mesh_consistency_matrix`).
+
+#### Six moves
+
+**① Faces carry a name that survives cuts.** `Face.label: u32` into a name
+table, inheriting exactly as `material` does. Cut a labeled face and both halves
+stay labeled — for free.
+
+**② Ops emit *roles*, so the sub-structure is declared, not inferred.**
+Inheritance carries the noun; the op supplies the parts. Each op has a **fixed,
+documented** role vocabulary, so the agent can predict the names *before* it runs
+the op — which is what makes multi-step planning possible at all:
+
+| op | roles it emits |
+|---|---|
+| `extrude` | `cap`, `wall` |
+| `inset` | `field`, `rim` |
+| `bevel` | `chamfer` |
+| `loopcut n` | `band.0` … `band.n` — **ordered along the cut axis** |
+| `solidify` | `inner`, `edge` |
+| `mirror` | every source label, `.mirror` suffixed |
+| `detach` | becomes a named part |
+
+```
+select body/front
+inset 0.08 as window          → window.field (1)  window.rim (4)
+extrude window.field -0.06    → window.glass (1)  window.reveal (4)
+```
+
+Sixty faces, and every one of them says what it is.
+
+**③ You may not leave anonymous complexity — the naming-debt gate.** This is the
+"hasn't properly declared it" half, and it only works as a **hard gate**, never a
+convention. An op that raises the face count must name what it created:
+
+```
+REJECTED inset — creates 5 faces with no name.
+  say:   inset 0.08 as <name>
+  or:    inset 0.08 as _        (explicitly anonymous — charged to the debt)
+```
+
+and the seat carries a **debt budget**. Past the threshold, every op is refused
+until it's paid:
+
+```
+BLOCKED — 14 unnamed faces (budget 8). Name them or rewind.
+  since take 5 (bevel)    8 faces, "body" +Y edge strip
+  since take 6 (loopcut)  6 faces, bands 2–3 of "body"
+  fix: name <selector> as <name>
+```
+
+This is the move that actually prevents the forgetting. The agent **physically
+cannot** accumulate sixty faces of mystery, because anonymous work stops at
+eight. It protects you symmetrically: your panel shows names, not counts.
+
+**④ Repetition is declared once, not four times.** "6 → 60" is usually *"four
+windows."* If the agent insets four faces one at a time and names them
+`window1..4`, it owns four unrelated labels and no concept of "the windows."
+So one op over a four-face selection yields **one label with four instances**:
+
+```
+select body/front & facing:+z
+inset 0.08 as window          → window.rim ×4 instances (16 faces), window.field ×4 (4 faces)
+```
+
+`select window.rim` takes all of them; `select window[2].rim` takes one. **Sixty
+faces, seven names.** The mental model stays cube-sized while the geometry grows
+— that is the whole trick.
+
+**⑤ The percept becomes a named tree with provenance.** A face count is useless
+at sixty. This is what a fresh agent reads instead:
+
+```
+part "body"   48 faces
+  shell             24
+  window.rim        16   ×4      ← inset @ take 3
+  window.glass       4   ×4  glass  ← extrude @ take 4
+  door.reveal        4           ← extrude @ take 6
+  ⚠ unnamed          0
+```
+
+**⑥ Primitives ship pre-named.** `new cube` lands with
+`top/bottom/front/back/left/right` already on its faces — *known*, not
+"relatively known", from op zero. Build starters carry their piece roles the same
+way (`BUILD_PIECE_STARTERS`; the repo already fixes wall front/back roles
+per-piece at every yaw).
+
+#### Where it lives, so it cannot get lost
+
+| horizon | carrier | already exists |
+|---|---|---|
+| through an undo / rewind | `__mesh_journal_note` — opaque cart JSON on every snapshot, restored on undo | ✅ `AppFrame.tsx:4453` |
+| across a save / reopen | label tag in RJMD (as `material` is) + name table in `PARTS_META` | ✅ `meshDoc.ts:186, 247` |
+| across a **new agent** | the percept tree | new, small |
+
+A rewind restores the **names with the geometry**, automatically — because
+they're in the snapshot, not in anyone's head.
+
+#### The acceptance test
+
+> **A brand-new agent, empty context, opens the model and continues correctly.**
+
+Not "the agent remembers." Not "the transcript is in scrollback." A cold agent
+reads the tree, sees `window.rim ×4`, and knows where its head is. If that works,
+this problem is solved. If it doesn't, nothing else in this document matters.
+
+#### What this demotes
+
+Part 1 claimed selectors were the durable handle. **They are not.** Selectors are
+the *naming instrument* — how you reach geometry the first time, and how you
+create names. After roughly the third op, **names are the primary handle and
+selectors are for geometric queries only.** An agent still addressing
+sixty faces by `facing:+y` is an agent that is already lost.
+
+### 3. The Ops — verb + noun + amount + **name**
 
 One flat, boring, authored vocabulary. Every line is **one `CommandAuthority`
 invocation → one journal unit → one action event.** No line invents geometry;
 each routes to the `ModelToolApi` verb or host door that already exists.
 
+Every op that **creates** faces takes `as <name>` and it is **not optional**
+(part 2, move ③) — `as _` is the explicit escape, charged to the naming debt.
+
 ```
-new cube 1,1,1                      # or cylinder | cone | sphere | plane | pyramid | icosphere
-add cube 0.4,0.4,0.4 at 0,1.2,0     # append a part to the open model
+new cube 1,1,1                      # faces land pre-named: top/bottom/front/back/left/right
+add cube 0.4,0.4,0.4 at 0,1.2,0 as knob
 
-select part:body & facing:+y
-extrude 0.4                         # __mesh_topo_extrude_face + parameterized offset
-inset 0.08
-move 0,0.3,0                        # __mesh_gizmo_nudge, already parameterized
-scale 1.2 axis=x pivot=center       # __mesh_gizmo_scale_by
+select body/front                   # by NAME — the durable handle
+select part:body & facing:+y        # by SELECTOR — for the first reach, or a geometric query
+
+extrude 0.4 as parapet              # → parapet.cap, parapet.wall
+inset 0.08 as window                # → window.field, window.rim
+loopcut 2 axis=y at 0.5 as tier     # → tier.band.0 … tier.band.2
+bevel 0.05 segments=2 as fillet     # → fillet.chamfer
+solidify 0.05 as shell              # → shell.inner, shell.edge
+mirror x                            # → every source label, .mirror suffixed
+
+move 0,0.3,0                        # transforms create nothing → no name needed
+scale 1.2 axis=x pivot=center
 rotate 15 axis=y
-
-loopcut 2 axis=y at 0.5             # __mesh_topo_loop_cut + explicit cuts/offset
-bevel 0.05 segments=2               # __mesh_bevel_begin/preview/end, no popup
-solidify 0.05
-weld / flip / detach / merge
-mirror x                            # __mesh_symmetrize
+weld / flip / merge
 glass                               # __mesh_topo_glass
-
-part "roof"                         # name the current selection as a part
 paint #c0392b                       # __model_paint_group_range
+
+detach as roof                      # peel a selection into a named PART
+name <selector> as <name>           # pay down naming debt after the fact
+rename window.rim as sill           # meaning is editable — it's authored data
 ```
 
 **Nothing in this list is new capability.** It is the existing verb list with
-the two missing inputs supplied in text.
+the three missing inputs supplied in text.
 
 Deliberately **excluded**: pixel gestures. `pick:x,y` and `box:x0,y0,x1,y1` are
 camera-dependent — that's why `RJIT_MESHOPS` has to interleave `wait:frames`.
 They stay in the test harness. A seat that aims a mouse is a seat that breaks
 whenever the camera moves.
 
-### 3. The Percept — what the agent sees
+### 4. The Percept — what the agent sees
 
 Before and after each turn, one cheap text digest. Screenshots are a poor primary
 sense for geometry; *numbers* are precise and an order of magnitude cheaper:
@@ -187,7 +376,7 @@ The `warnings:` line is load-bearing. It surfaces the integrity roll call
 (`meshIntegrityRollCall`, req_3484) *to the agent*, so a seat that corrupts
 topology is told immediately instead of building forty ops on top of rubble.
 
-### 4. The Take — what you watch, and what you rewind to
+### 5. The Take — what you watch, and what you rewind to
 
 A **take** is one agent turn: an intent, the ops it ran, a journal mark, and a
 thumbnail.
@@ -216,7 +405,7 @@ Your own edits are tagged `source: native`. An agent rewind never touches them �
 the action stream already carries source attribution, so this falls out of
 existing data rather than needing new bookkeeping.
 
-### 5. The Seat — who's driving, and your leash on them
+### 6. The Seat — who's driving, and your leash on them
 
 A seat is a connected peer with a policy:
 
@@ -334,15 +523,20 @@ Riskiest and highest-value first; each step is independently useful.
 | # | Slice | Proves / delivers | New Zig |
 |---|---|---|---|
 | **0** | `SEAT` socket verb + `new cube` + `look` | The live channel works end to end | socket verb only |
-| **1** | **Selector resolver + the core 12 ops** | The heart. `select/extrude/inset/move/scale/loopcut/bevel/solidify/weld/mirror/part/paint` | `__mesh_select_query` + parameterized forms of the popup/gizmo verbs |
-| **2** | Takes: mark, rewind, thumbnails, stagger | You can watch and revert | `__mesh_journal_mark`, `__mesh_journal_rewind` |
-| **3** | Seat panel (filmstrip, transcript, HOLD/STEP/WHEEL) | Your leash | none |
-| **4** | Policy, budgets, generations, multi-seat | Safety + more than one agent | none |
-| **5** | `seat ref` blueprint planes + camera-preset shots | Modeling *from* an image | textured ortho plane in the model viewport |
-| **6** | The skill + export handoff | The agent's model lands as a real package via existing export commands | none |
+| **1** | **Selector resolver + the core 12 ops** | The reach. `select/extrude/inset/move/scale/loopcut/bevel/solidify/weld/mirror/part/paint` | `__mesh_select_query` + parameterized forms of the popup/gizmo verbs |
+| **2** | **The label layer** — `Face.label` inheriting as `material` does, name table, op role vocabulary, pre-named primitives, named-tree percept | **The memory.** Meaning survives cuts, undo, save, and a context wipe | `Face.label` + `Face.inheritFrom(source)` collapse, `__mesh_label_*` doors, RJMD field, `PARTS_META` + journal-note carriage |
+| **3** | **The naming-debt gate** — `as <name>` required, debt budget, `BLOCKED` reason | Anonymous complexity becomes impossible, not merely discouraged | none (CommandAuthority guard) |
+| **4** | Takes: mark, rewind, thumbnails, stagger | You can watch and revert | `__mesh_journal_mark`, `__mesh_journal_rewind` |
+| **5** | Seat panel (filmstrip, transcript, name tree, HOLD/STEP/WHEEL) | Your leash | none |
+| **6** | Policy, budgets, generations, multi-seat | Safety + more than one agent | none |
+| **7** | `seat ref` blueprint planes + camera-preset shots | Modeling *from* an image | textured ortho plane in the model viewport |
+| **8** | The skill + export handoff | The agent's model lands as a real package via existing export commands | none |
 
-Slice 1 is the one that decides whether this works. If the selector language is
-good, everything after it is assembly.
+**Slices 1–3 are one thing and should ship together.** Slice 1 alone produces an
+agent that can reach any face and remembers none of them — it will look like it
+works for three ops and then quietly lose the plot, which is the exact failure
+this design exists to prevent. Slice 2 gives the mesh a memory; slice 3 forces
+the agent to use it. Everything after slice 3 is assembly.
 
 ---
 
@@ -369,11 +563,24 @@ good, everything after it is assembly.
    against a hidden window it becomes a second `RJIT_MESHOPS` and dies as a test
    fixture. Slice 0 targets the live host on purpose.
 
-4. **Vocabulary creep.** Fifty ops nobody remembers is a failure. Twelve good ops
+4. **Label rot — the risk that eats part 2.** A name is only worth the
+   inheritance behind it. Three specific ways it goes bad: (a) a creation path
+   that forgets to inherit, so a label silently stops covering faces it used to
+   — **prevent by routing every `Face` mint through one `inheritFrom`, and by a
+   roll-call check that no live face lost a label its source had**; (b) labels
+   that drift from the geometry after a `weld`/`merge` of two differently-labeled
+   faces — **rule: merging conflicting labels yields `_` and charges the debt,
+   loudly, rather than silently picking a winner**; (c) names that stop being
+   true because the agent kept editing (`window.rim` is now a doorframe) —
+   **`rename` exists for exactly this, and the percept's provenance line makes
+   the drift visible.** A label the agent trusts and the mesh no longer honors is
+   worse than no label at all.
+
+5. **Vocabulary creep.** Fifty ops nobody remembers is a failure. Twelve good ops
    plus a strong selector language beats fifty weak ones. Add an op only when a
    real model can't be built without it.
 
-5. **The agent is still the agent.** This removes the handicaps; it does not
+6. **The agent is still the agent.** This removes the handicaps; it does not
    make a model a good sculptor. Expect it to be genuinely good at *hard-surface,
    measurable* work — buildings, props, furniture, vehicles, signage — and weak at
    organic form. That maps well onto what this game needs.
@@ -382,9 +589,11 @@ good, everything after it is assembly.
 
 ## Why this fits the house rules
 
-- **Zig-first** (`CLAUDE.md`): the capability — selector resolution, journal marks,
-  the socket verb, blueprint planes — lands in `framework/`. TS declares the
-  vocabulary and wires it. React renders the panel.
+- **Zig-first** (`CLAUDE.md`): the capability — selector resolution, the label
+  layer and its inheritance, journal marks, the socket verb, blueprint planes —
+  lands in `framework/`. TS declares the vocabulary and wires it. React renders
+  the panel. Notably the label layer *must* be Zig: it has to ride the same
+  face-mint path as `material` or it will not survive a cut.
 - **V19 ruling** — *"the entire testing surface is replayable all the time and
   DEEP — anything testable is scriptable."* A seat transcript **is** a replayable
   script. Verification and authoring become the same surface.
