@@ -49,6 +49,7 @@ export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
   edges: { id: number; vertices: [number, number] }[];
 };
+export type SeatShellReceipt = { ok: boolean; result?: unknown; reason?: string };
 
 /** A primitive the seat asks the editor's RESIDENT generators to build (editMesh.ts
  *  cuboid/cylinder/cone/…). The seat still never emits vertex arrays — it names a
@@ -88,6 +89,9 @@ export type SeatAdapter = {
   /** Live shell-owned Outliner names and hierarchy. The native semantic state
    *  intentionally knows geometry only; the seat joins both truths at look time. */
   partPercept?: () => SeatPartPercept;
+  /** Existing shell/Outliner/focus-panel authority for human-facing commands
+   *  whose truth is cart-owned rather than a native mesh operation. */
+  shellAction?: (action: string, args: Record<string, unknown>) => SeatShellReceipt;
   /** Detach changes both native part ranges and the shell-owned Outliner table. */
   detachSelection?: (name: string) => { lo: number; hi: number } | null;
 };
@@ -222,6 +226,22 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
   const selectVertex = (index: number, additive = false): boolean =>
     Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_vertex?.(index, additive ? 1 : 0) === 1;
+  const selectFace = (index: number, additive = false): boolean =>
+    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_face?.(index, additive ? 1 : 0) === 1;
+  const selectElements = (kind: 'face' | 'edge' | 'vertex', values: unknown): number => {
+    const indices = Array.isArray(values)
+      ? [...new Set(values.map(Number).filter((index) => Number.isInteger(index) && index >= 0))]
+      : [];
+    if (indices.length === 0) return 0;
+    host.__mesh_edit_mode?.(kind === 'vertex' ? 1 : kind === 'edge' ? 2 : 3);
+    const door = kind === 'vertex' ? host.__mesh_edit_select_vertex
+      : kind === 'edge' ? host.__mesh_edit_select_edge
+        : host.__mesh_edit_select_face;
+    if (typeof door !== 'function') return 0;
+    let changed = 0;
+    for (let at = 0; at < indices.length; at += 1) changed += door(indices[at], at === 0 ? 0 : 1) === 1 ? 1 : 0;
+    return changed;
+  };
   const nameSelection = (name: string, instance = 0, role = 'authored', op = 'name'): number => {
     const percept = look();
     if (!percept || !name || name === '_') return 0;
@@ -251,6 +271,8 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const move = (delta: [number, number, number]) => finiteVec3(delta) && automation(() => host.__mesh_transform_translate?.(...delta)) === 1;
   const scale = (axis: [number, number, number], pivot: [number, number, number], factor: number) =>
     finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(factor) && automation(() => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor)) === 1;
+  const scaleUniform = (factor: number) => Number.isFinite(factor) && factor !== 0
+    && automation(() => host.__mesh_gizmo_scale_by?.(factor)) === 1;
   const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) =>
     finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees) && automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1;
   const topology = (invoke: () => unknown): TopologyReceipt | null => {
@@ -360,14 +382,19 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
    *  two in-plane axes, which is addressable from a face selector. Authored grouping
    *  carries through, so each crossed face becomes two faces in the SAME semantic
    *  region — a cut never creates naming debt. */
-  const loopCut = (direction: number, cuts: number, offsetFraction: number): TopologyReceipt | null => {
-    if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(0))?.ok !== 1) return null;
+  const loopCut = (direction: number, cuts: number, offsetFraction: number, basic = false): TopologyReceipt | null => {
+    if (![0, 1].includes(direction) || !Number.isInteger(cuts) || cuts < 1 || !Number.isFinite(offsetFraction) || offsetFraction < 0 || offsetFraction > 1) return null;
+    if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(basic ? 1 : 0))?.ok !== 1) return null;
     const preview = parseJson<{ ok?: number; fallbackReason?: string }>(host.__mesh_lc_preview?.(direction, cuts, offsetFraction));
     if (preview?.ok !== 1) { host.__mesh_lc_end?.(0); return null; } // cancel restores the pre-cut mesh exactly
     const result = readTopology(automation(() => host.__mesh_lc_end?.(1)));
     adapter.adoptTopology?.(result);
     return result;
   };
+  const trisToQuads = (): TopologyReceipt | null => topology(() => host.__mesh_topo_tris_to_quads?.());
+  const collectUvOrientation = (): number => Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
+  const shellAction = (action: string, args: Record<string, unknown>): SeatShellReceipt =>
+    adapter.shellAction?.(action, args) ?? { ok: false, reason: 'editor shell action bridge unavailable' };
   /** Append a resident primitive as a new named part, then leave it selected so the
    *  very next transform lands on it. Naming happens in the same beat as the append
    *  for the same reason extrude names its cap/wall: a cold `look` must show the part,
@@ -392,10 +419,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
-    look, elements, select, selectEdge, selectVertex, nameSelection, extrude, extrudeEdge,
-    connectVertices, createFace, bevel, inset, move, scale, rotate, deleteSelection,
+    look, elements, select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
+    connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, solidify, detach, flip, glass, paint, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, addPrimitive, newPrimitive, shot, reply,
+    undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
+    addPrimitive, newPrimitive, shot, reply,
   };
 }
 
@@ -427,6 +455,16 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'select-vertex': {
         const ok = seat.selectVertex(Number(args.index), args.additive === true);
         return seat.reply('select-vertex', ok, undefined, ok ? undefined : 'vertex index is invalid, stale, or outside the active scope');
+      }
+      case 'select-face': {
+        const ok = seat.selectFace(Number(args.index), args.additive === true);
+        return seat.reply('select-face', ok, undefined, ok ? undefined : 'face index is invalid, stale, or outside the active scope');
+      }
+      case 'select-elements': {
+        const kind = String(args.kind ?? 'face');
+        if (kind !== 'face' && kind !== 'edge' && kind !== 'vertex') return seat.reply('select-elements', false, undefined, 'kind must be face, edge, or vertex');
+        const changed = seat.selectElements(kind, args.indices);
+        return seat.reply('select-elements', changed > 0, { changed }, changed > 0 ? undefined : 'no valid in-scope element indices were selected');
       }
       case 'name': {
         const changed = seat.nameSelection(String(args.name ?? ''), Number(args.instance ?? 0));
@@ -464,6 +502,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'transform rejected'); }
+      case 'scale-uniform': { const ok = seat.scaleUniform(Number(args.factor)); return seat.reply('scale-uniform', ok, undefined, ok ? undefined : 'uniform scale rejected'); }
       case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
@@ -504,6 +543,18 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5));
         return seat.reply('cut', !!result, result ?? undefined, result ? undefined : 'loop cut rejected — it needs a face selection to cut across');
       }
+      case 'basic-cut': {
+        const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5), true);
+        return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : 'basic cut rejected — select one or more faces');
+      }
+      case 'tris-to-quads': {
+        const result = seat.trisToQuads();
+        return seat.reply('tris-to-quads', !!result, result ?? undefined, result ? undefined : 'no compatible triangle pairs were available');
+      }
+      case 'collect-uv-orientation': {
+        const changed = seat.collectUvOrientation();
+        return seat.reply('collect-uv-orientation', changed > 0, { changed }, changed > 0 ? undefined : 'select one face with an authored UV orientation first');
+      }
       case 'add': {
         const spec: SeatPrimitiveSpec = {
           kind: String(args.kind ?? 'cube'),
@@ -532,6 +583,18 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const ok = seat.shot(path);
         return seat.reply('shot', ok, ok ? { path } : undefined, ok ? undefined
           : 'capture door unavailable — the cart must import runtime/capture.ts and the binary must be built with -Dhas-capture');
+      }
+      case 'command':
+      case 'part-select': case 'part-rename': case 'part-visibility': case 'part-delete':
+      case 'part-duplicate': case 'part-merge': case 'part-path-array': case 'part-import':
+      case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
+      case 'group-duplicate': case 'group-dissolve': case 'outliner-move': case 'role-name':
+      case 'model-rename': case 'model-import': case 'model-export': case 'model-starter':
+      case 'viewport': case 'reference': case 'uv-state': case 'uv-select': case 'uv-layout':
+      case 'uv-geometry': case 'uv-history': case 'uv-atlas': case 'uv-layer':
+      case 'paint-tool': case 'paint-variant': case 'texture-slot': case 'rig': case 'path': {
+        const result = seat.shellAction(request.action, args);
+        return seat.reply(request.action, result.ok, result.result, result.reason);
       }
       default: return seat.reply(request.action, false, undefined, `unknown seat action "${request.action}"`);
     }

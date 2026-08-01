@@ -83,7 +83,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import type { SeatPartPercept, SeatPrimitiveSpec } from '../agent/seatApi';
+import type { SeatPartPercept, SeatPrimitiveSpec, SeatShellReceipt } from '../agent/seatApi';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -161,6 +161,7 @@ import {
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
 import { normalizeModelLights } from '../model/modelLights';
+import { createTextureSlotFromSelection, normalizeModelTextureSlots } from '../model/modelTextureSlotAuthoring';
 import { connectedPieceIds, pieceSelectionVolume, rotatePieceSelection, type PieceSelectionIntent } from '../world/selection';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 import PrefabDialog from './PrefabDialog';
@@ -337,6 +338,9 @@ export default function AppFrame() {
   // commit; menu/toolbar/hotkey callers never receive setState.
   const stateRef = useRef(state);
   stateRef.current = state;
+  const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>) => SeatShellReceipt>(
+    () => ({ ok: false, reason: 'Agent Seat shell actions are not ready' }),
+  );
   useEffect(() => installDevReloadCheckpoint(() => persistState(stateRef.current)), []);
   // Per-device tool memory (req_3089): which physical device is driving the
   // cursor now, and the last tool runCommand dispatched per surface scope
@@ -3596,6 +3600,8 @@ export default function AppFrame() {
       detachSelection: seatDetachSelection,
       persist: () => saveActiveModelNow('Saved by Agent Seat'),
       partPercept: seatPartPercept,
+      registerPathPart: (range: { lo: number; hi: number }, kind: 'plane' | 'edges') => registerPathPlanePart(range, kind),
+      shellAction: (action: string, args: Record<string, unknown>) => seatShellActionRef.current(action, args),
     };
     return () => { (globalThis as any).__seatShellBridge = null; };
   }, []);
@@ -4455,6 +4461,48 @@ export default function AppFrame() {
     }));
   };
 
+  // Agent Seat form of the same path-array authority. The visible dialog only
+  // gathers these parameters; geometry still bottoms out in ModelToolApi.pathArray
+  // and metadata still comes from materializePathArrayRows.
+  const applySeatPathArray = (sourceIds: string[], rawParams: PathArrayParams): SeatShellReceipt => {
+    const live = stateRef.current;
+    const mid = activePartsModelId(live);
+    const api = modelToolApiRef.current;
+    const parts = mid ? (live.modelParts[mid] ?? []) : [];
+    const sources = sourceIds.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
+    if (!mid || !api || sources.length === 0 || sources.length !== sourceIds.length) return { ok: false, reason: 'valid source part ids are required' };
+    if (sources.some((part) => !part.visible || !partRange(part))) return { ok: false, reason: 'every source part must be visible with a stamped host range' };
+    const params = sanitizePathArrayParams(rawParams);
+    const ranges = sources.map((part) => partRange(part)!) as { lo: number; hi: number }[];
+    const hostResult = withNativeMeshActionSource('seat', () => api.pathArray(ranges, params));
+    const expectedRanges = (params.bays - 1) * sources.length;
+    if (!hostResult || hostResult.ranges.length !== expectedRanges) {
+      if (hostResult) withNativeMeshActionSource('seat', () => api.undoMesh());
+      return { ok: false, reason: 'path array failed or returned incomplete host ranges; the operation was rolled back' };
+    }
+    const materialized = materializePathArrayRows(parts, sourceIds, hostResult.ranges, live.seq);
+    if (!materialized || materialized.created.length !== expectedRanges) {
+      withNativeMeshActionSource('seat', () => api.undoMesh());
+      return { ok: false, reason: 'path array metadata failed validation; the operation was rolled back' };
+    }
+    const focusedIds = materialized.created.map((part) => part.id);
+    const primaryId = focusedIds[focusedIds.length - 1]!;
+    selectedPartIdsRef.current = focusedIds;
+    setSelectedPartIds(focusedIds);
+    pushPartSetToHost(live, materialized.parts, focusedIds, primaryId);
+    const next = {
+      ...live,
+      seq: materialized.nextSeq,
+      modelParts: { ...live.modelParts, [mid]: materialized.parts },
+      modelActivePartId: primaryId,
+      modelDirty: { ...live.modelDirty, [mid]: true },
+      status: `Agent Seat built ${params.bays}-bay path in ${materialized.groupName}`,
+    };
+    stateRef.current = next;
+    setState(next);
+    return { ok: true, result: { ids: focusedIds, primary: primaryId, group: materialized.groupName } };
+  };
+
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
   // paint stay put). The panel becomes the focused part, ready to grab with the gizmo.
   const runDetachSelection = (source = 'dock') => {
@@ -4831,6 +4879,291 @@ export default function AppFrame() {
   // first, so typing in a field never triggers a command.)
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+  seatShellActionRef.current = (action, args) => {
+    const live = stateRef.current;
+    const modelId = activePartsModelId(live);
+    const parts = modelId ? (live.modelParts[modelId] ?? []) : [];
+    const stringArray = (value: unknown): string[] => Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      : [];
+    const fail = (reason: string): SeatShellReceipt => ({ ok: false, reason });
+    const ok = (result?: unknown): SeatShellReceipt => ({ ok: true, ...(result === undefined ? {} : { result }) });
+    try {
+      if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
+        exportCharacterAs(args.role);
+        return ok({ id: 'export-character', role: args.role });
+      }
+      if (action === 'command' || action === 'viewport' || action === 'paint-tool' || action === 'model-export' || action === 'model-starter') {
+        const id = String(args.id ?? '');
+        const command = commandById(id);
+        if (!id || command.id !== id) return fail(`unknown editor command "${id}"`);
+        runCommandRef.current(id, 'seat');
+        return ok({ id, name: command.name });
+      }
+      if (action === 'part-select') {
+        if (!modelId) return fail('open a multipart model first');
+        const ids = stringArray(args.ids ?? (typeof args.id === 'string' ? [args.id] : []));
+        const selected = ids.filter((id) => parts.some((part) => part.id === id && part.visible));
+        if (selected.length !== ids.length || selected.length === 0) return fail('every selected part must exist and be visible');
+        const requestedPrimary = typeof args.primary === 'string' ? args.primary : selected[selected.length - 1]!;
+        const primary = selected.includes(requestedPrimary) ? requestedPrimary : selected[selected.length - 1]!;
+        selectedPartIdsRef.current = selected;
+        setSelectedPartIds(selected);
+        pushPartSetToHost(live, parts, selected, primary);
+        const next = { ...live, modelActivePartId: primary, status: `Agent Seat selected ${selected.length} part(s)` };
+        stateRef.current = next;
+        setState(next);
+        return ok({ ids: selected, primary });
+      }
+      if (action === 'part-rename') {
+        const id = String(args.id ?? '');
+        const name = String(args.name ?? '').trim();
+        if (!modelId || !parts.some((part) => part.id === id) || !name) return fail('part id and non-empty name are required');
+        invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId: id, name }, 'seat');
+        return ok({ id, name });
+      }
+      if (action === 'part-visibility') {
+        if (!modelId) return fail('open a multipart model first');
+        const ids = stringArray(args.ids ?? (typeof args.id === 'string' ? [args.id] : []));
+        const visible = args.visible !== false;
+        const targets = parts.filter((part) => ids.includes(part.id) && part.visible !== visible);
+        if (ids.length === 0 || targets.length === 0) return fail('no matching part needs that visibility change');
+        applyPartVisibility(modelId, parts, ids, !visible, `${targets.length} Agent Seat part(s)`, 'seat');
+        return ok({ ids, visible });
+      }
+      if (action === 'part-delete') {
+        if (!modelId) return fail('open a multipart model first');
+        const ids = stringArray(args.ids ?? (typeof args.id === 'string' ? [args.id] : []));
+        if (ids.length === 0 || ids.some((id) => !parts.some((part) => part.id === id))) return fail('valid part id(s) are required');
+        selectedPartIdsRef.current = ids;
+        setSelectedPartIds(ids);
+        deletePart(ids[0]!, 'seat');
+        return ok({ ids });
+      }
+      if (action === 'part-duplicate') {
+        const id = String(args.id ?? live.modelActivePartId ?? '');
+        const part = parts.find((row) => row.id === id);
+        const axisRaw = args.axis;
+        const axis = axisRaw === 'x' ? 0 : axisRaw === 'y' ? 1 : axisRaw === 'z' ? 2 : -1;
+        if (!part) return fail('part not found');
+        duplicatePartRows([part], axis, undefined, 'seat');
+        return ok({ id, axis });
+      }
+      if (action === 'part-merge') {
+        const ids = stringArray(args.ids);
+        if (ids.length < 2 || ids.some((id) => !parts.some((part) => part.id === id))) return fail('two or more valid part ids are required');
+        selectedPartIdsRef.current = ids;
+        setSelectedPartIds(ids);
+        mergeSelectedParts('seat');
+        return ok({ ids });
+      }
+      if (action === 'part-path-array') {
+        const ids = stringArray(args.ids);
+        if (!args.params || typeof args.params !== 'object') return fail('source part ids and path-array params are required');
+        return applySeatPathArray(ids, args.params as PathArrayParams);
+      }
+      if (action === 'part-import') {
+        const packageId = String(args.id ?? '');
+        const pkg = visibleModels.find((model) => model.id === packageId || model.name === packageId);
+        if (!pkg) return fail(`model package "${packageId}" was not found`);
+        importModelAsParts(pkg, 'seat');
+        return ok({ id: pkg.id, name: pkg.name });
+      }
+      if (action === 'parts-group' || action === 'parts-ungroup') {
+        if (!modelId) return fail('open a multipart model first');
+        const ids = stringArray(args.ids);
+        if (ids.length === 0) return fail('part ids required');
+        invokeApplicationCommand(action === 'parts-group' ? MODEL_PARTS_GROUP_COMMAND_ID : MODEL_PARTS_UNGROUP_COMMAND_ID, { modelId, partIds: ids }, 'seat');
+        return ok({ ids });
+      }
+      if (action === 'group-rename' || action === 'group-dissolve') {
+        if (!modelId) return fail('open a multipart model first');
+        const groupId = String(args.id ?? '');
+        if (!groupId) return fail('group id required');
+        if (action === 'group-rename') {
+          const name = String(args.name ?? '').trim();
+          if (!name) return fail('group name required');
+          invokeApplicationCommand(MODEL_GROUP_RENAME_COMMAND_ID, { modelId, groupId, name }, 'seat');
+        } else invokeApplicationCommand(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId, groupId }, 'seat');
+        return ok({ groupId });
+      }
+      if (action === 'group-visibility') {
+        const groupId = String(args.id ?? '');
+        if (!groupId || !parts.some((part) => partGroupPath(part).some((group) => group.id === groupId))) return fail('group not found');
+        toggleVisiblePartGroup(groupId);
+        return ok({ groupId });
+      }
+      if (action === 'group-duplicate') {
+        const groupId = String(args.id ?? '');
+        if (!groupId) return fail('group id required');
+        duplicatePartGroup(groupId);
+        return ok({ groupId });
+      }
+      if (action === 'outliner-move') {
+        if (!modelId || !args.item || !args.target) return fail('item and target descriptors are required');
+        invokeApplicationCommand(MODEL_OUTLINER_MOVE_COMMAND_ID, { modelId, item: args.item, target: args.target }, 'seat');
+        return ok();
+      }
+      if (action === 'role-name') {
+        const partId = String(args.partId ?? '');
+        const role = String(args.role ?? '').trim();
+        if (!modelId || !partId || !role || !parts.some((part) => part.id === partId)) return fail('valid partId and role are required');
+        invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId, name: role }, 'seat');
+        return ok({ partId, role });
+      }
+      if (action === 'model-rename') {
+        const id = String(args.id ?? modelId ?? '');
+        const name = String(args.name ?? '').trim();
+        if (!id || !name) return fail('model id and name are required');
+        renameModel(id, name);
+        return ok({ id, name });
+      }
+      if (action === 'model-import') {
+        const path = String(args.path ?? '').trim();
+        if (!path) return fail('a .glb, .obj, or .stl path is required');
+        if (isStlFile(path)) {
+          void (async () => {
+            const conversion = await convertStlToGlb(path);
+            if (!conversion.ok) {
+              setState((prev) => ({ ...prev, status: `Agent Seat STL import failed: ${conversion.error}` }));
+              return;
+            }
+            const imported = importStlModelFilePackage(path, conversion.outputPath);
+            openModelFileDocument(conversion.outputPath, imported ?? undefined);
+            if (imported) remove(conversion.outputPath);
+          })();
+          return ok({ path, pending: true });
+        }
+        if (!isViewerFile(path)) return fail('model import accepts .glb, .obj, or .stl');
+        openModelFileDocument(path);
+        return ok({ path });
+      }
+      if (action === 'texture-slot') {
+        if (!modelId) return fail('open a model first');
+        const pkg = visibleModels.find((model) => model.id === modelId);
+        const slots = live.modelTextureSlots[modelId] ?? pkg?.textureSlots ?? [];
+        const operation = String(args.operation ?? 'read');
+        if (operation === 'read') return ok(slots);
+        if (operation === 'replace') {
+          const normalized = normalizeModelTextureSlots(args.slots);
+          if (!normalized) return fail('slots must be an array');
+          setModelTextureSlots(modelId, normalized);
+          return ok(normalized);
+        }
+        if (operation === 'create') {
+          const purpose = args.purpose === 'screen' || args.purpose === 'flora' ? args.purpose : 'material';
+          const result = createTextureSlotFromSelection(slots, (index) => Number((globalThis as any).__mesh_texture_slot_assign?.(index) ?? 0), {
+            purpose,
+            label: typeof args.label === 'string' ? args.label : undefined,
+          });
+          if (!result.slot) return fail('select one or more faces in Face mode first');
+          setModelTextureSlots(modelId, [...result.slots]);
+          return ok({ slot: result.slot, assignedFaces: result.assignedFaces });
+        }
+        if (operation === 'clear-selected') {
+          const changed = Number((globalThis as any).__mesh_texture_slot_clear?.() ?? 0);
+          return changed > 0 ? ok({ changed }) : fail('selected faces do not carry a texture slot');
+        }
+        const index = Number(args.index);
+        if (!Number.isInteger(index) || index < 0 || index >= slots.length) return fail('a valid texture-slot index is required');
+        if (operation === 'assign') {
+          const changed = Number((globalThis as any).__mesh_texture_slot_assign?.(index) ?? 0);
+          return changed > 0 ? ok({ changed }) : fail('select one or more faces in Face mode first');
+        }
+        if (operation === 'select') {
+          const changed = Number((globalThis as any).__mesh_texture_slot_select?.(index) ?? 0);
+          return changed > 0 ? ok({ changed }) : fail('that texture slot has no faces');
+        }
+        if (operation === 'remove') {
+          (globalThis as any).__mesh_texture_slot_remove?.(index);
+          const next = slots.filter((_, at) => at !== index);
+          setModelTextureSlots(modelId, next);
+          return ok(next);
+        }
+        if (operation === 'rename' || operation === 'patch') {
+          const current = slots[index]!;
+          const patch = args.patch && typeof args.patch === 'object' ? args.patch as Record<string, unknown> : args;
+          const normalized = normalizeModelTextureSlots(slots.map((slot, at) => at === index ? { ...slot, ...patch, id: current.id } : slot));
+          if (!normalized) return fail('texture-slot patch was invalid');
+          setModelTextureSlots(modelId, normalized);
+          return ok(normalized[index]);
+        }
+        return fail(`unknown texture-slot operation "${operation}"`);
+      }
+      if (action === 'rig') {
+        if (!modelId) return fail('open a model first');
+        const pkg = visibleModels.find((model) => model.id === modelId);
+        const operation = String(args.operation ?? 'read');
+        if (operation === 'read') return ok({
+          rig: live.modelRigs[modelId] ?? (pkg?.skeleton ? skeletonToPropRig(pkg.skeleton) : {}),
+          lights: normalizeModelLights(live.modelLights[modelId] ?? pkg?.lights ?? []),
+        });
+        if (operation === 'replace') {
+          if (!args.rig || typeof args.rig !== 'object') return fail('rig must be an object');
+          setModelRig(modelId, args.rig as PropRig);
+          return ok(args.rig);
+        }
+        if (operation === 'lights-replace') {
+          if (!Array.isArray(args.lights)) return fail('lights must be an array');
+          const lights = normalizeModelLights(args.lights as LightRig[]);
+          setModelLights(modelId, lights);
+          return ok(lights);
+        }
+        return fail(`unknown rig operation "${operation}"`);
+      }
+      const bridge = (globalThis as any).__modelFocusBridge;
+      if (action === 'uv-state') return bridge?.uv ? ok(bridge.uv) : fail('UV focus bridge unavailable');
+      if (action === 'uv-select') {
+        if (!bridge) return fail('UV focus bridge unavailable');
+        const mode = String(args.mode ?? 'islands');
+        if (mode === 'island') return bridge.selectUvIsland(Number(args.index), args.additive === true) ? ok() : fail('UV island selection rejected');
+        if (mode === 'islands') return bridge.selectUvIslands(new Uint32Array((args.indices as number[]) ?? [])) ? ok() : fail('UV island-set selection rejected');
+        if (mode === 'face') return bridge.selectUvFace(Number(args.index), args.additive === true) ? ok() : fail('UV face selection rejected');
+        if (mode === 'orientation') { const count = bridge.selectUvOrientation(); return count > 0 ? ok({ count }) : fail('select one oriented face first'); }
+        return fail(`unknown UV selection mode "${mode}"`);
+      }
+      if (action === 'uv-layout') {
+        const values = Array.isArray(args.rects) ? args.rects.map(Number) : [];
+        return bridge?.applyUvLayout?.(new Uint32Array(values)) ? ok({ values: values.length }) : fail('UV layout rejected');
+      }
+      if (action === 'uv-geometry') {
+        const values = Array.isArray(args.corners) ? args.corners.map(Number) : [];
+        const historyAction = String(args.historyAction ?? 'move');
+        return bridge?.applyUvGeometry?.(new Float32Array(values), historyAction) ? ok({ values: values.length }) : fail('UV geometry rejected');
+      }
+      if (action === 'uv-history') {
+        if (!bridge) return fail('UV focus bridge unavailable');
+        const operation = String(args.operation ?? 'read');
+        if (operation === 'read') return ok(bridge.readUvHistory());
+        const message = operation === 'undo' ? bridge.undoUvHistory() : operation === 'redo' ? bridge.redoUvHistory() : null;
+        return message === null ? fail('operation must be read, undo, or redo') : ok({ message });
+      }
+      if (action === 'uv-atlas') {
+        if (!bridge) return fail('UV focus bridge unavailable');
+        const operation = String(args.operation ?? '');
+        if (operation === 'reset') return ok({ message: bridge.resetUvLayout() });
+        if (operation === 'reload') return ok({ message: bridge.reloadUvAtlas() });
+        if (operation === 'save') return ok(bridge.saveUvAtlas());
+        if (operation === 'export-wireframe') return ok(bridge.exportUvWireframe());
+        if (operation === 'export-guide') return ok(bridge.exportUvGenerationGuide(undefined, args.numbered === true));
+        if (operation === 'import') { void bridge.importUvAtlas(typeof args.path === 'string' ? args.path : undefined); return ok({ pending: true }); }
+        if (operation === 'resize') { void bridge.resizeUvAtlas(Number(args.width), Number(args.height)); return ok({ pending: true }); }
+        if (operation === 'add-layer') { void bridge.addUvTextureLayer(Number(args.x ?? 0), Number(args.y ?? 0), typeof args.path === 'string' ? args.path : undefined); return ok({ pending: true }); }
+        if (operation === 'compile-layers') { void bridge.compileUvTextureLayers(); return ok({ pending: true }); }
+        return fail(`unknown UV atlas operation "${operation}"`);
+      }
+      if (action === 'uv-layer') {
+        if (!bridge || typeof args.id !== 'string' || !args.edit) return fail('layer id and edit are required');
+        return ok({ message: bridge.editUvTextureLayer(args.id, args.edit) });
+      }
+      if (action === 'paint-variant' && String(args.operation) === 'load') {
+        return bridge?.loadPaintVariant?.(args.variant) ? ok() : fail('paint variant load rejected');
+      }
+      return fail(`shell action "${action}" is not implemented yet`);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   // ── Per-device tool memory (req_3089) ─────────────────────────────────────────
   // The host flips system:pointerDevice on the mouse ⇄ pen change edge (pen

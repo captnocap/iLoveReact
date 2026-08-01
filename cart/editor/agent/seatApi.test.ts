@@ -123,14 +123,49 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   });
   let vertexArgs: unknown[] = [];
   let edgeArgs: unknown[] = [];
+  let faceArgs: unknown[] = [];
   (globalThis as any).__mesh_edit_select_vertex = (...args: unknown[]) => { vertexArgs = args; return 1; };
   (globalThis as any).__mesh_edit_select_edge = (...args: unknown[]) => { edgeArgs = args; return 1; };
+  (globalThis as any).__mesh_edit_select_face = (...args: unknown[]) => { faceArgs = args; return 1; };
   const seat = createAgentSeat();
   assert(executeSeatRequest(seat, { action: 'elements' }).ok, 'element vocabulary was unavailable');
   assert(executeSeatRequest(seat, { action: 'select-vertex', args: { index: 2, additive: true } }).ok, 'vertex selection failed');
   assert(executeSeatRequest(seat, { action: 'select-edge', args: { index: 4 } }).ok, 'edge selection failed');
+  assert(executeSeatRequest(seat, { action: 'select-face', args: { index: 7, additive: true } }).ok, 'face selection failed');
   assert(vertexArgs[0] === 2 && vertexArgs[1] === 1, 'vertex selection arguments drifted');
   assert(edgeArgs[0] === 4 && edgeArgs[1] === 0, 'edge selection arguments drifted');
+  assert(faceArgs[0] === 7 && faceArgs[1] === 1, 'face selection arguments drifted');
+  assert(executeSeatRequest(seat, { action: 'select-elements', args: { kind: 'vertex', indices: [2, 3] } }).ok, 'multi-element selection failed');
+  assert(vertexArgs[0] === 3 && vertexArgs[1] === 1, 'multi-element selection did not add subsequent indices');
+});
+
+test('basic cut and triangle conversion use their native topology sessions', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let basic = -1;
+  (globalThis as any).__mesh_lc_begin = (kind: number) => { basic = kind; return JSON.stringify({ ok: 1 }); };
+  (globalThis as any).__mesh_lc_preview = () => JSON.stringify({ ok: 1 });
+  (globalThis as any).__mesh_lc_end = () => JSON.stringify({ ok: 1, key: 'doc', count: 64, generation: 5 });
+  (globalThis as any).__mesh_topo_tris_to_quads = () => JSON.stringify({ ok: 1, key: 'doc', count: 58, generation: 6 });
+  const seat = createAgentSeat();
+  assert(executeSeatRequest(seat, { action: 'basic-cut', args: { direction: 1, cuts: 2, offset: 0.4 } }).ok && basic === 1, 'basic cut did not select the basic-cut session');
+  assert(executeSeatRequest(seat, { action: 'tris-to-quads' }).ok, 'triangle conversion stayed unreachable');
+});
+
+test('uniform scale uses the same selection-pivot operation as the visible Scale By tool', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let factor = 0;
+  (globalThis as any).__mesh_gizmo_scale_by = (value: number) => { factor = value; return 1; };
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'scale-uniform', args: { factor: 1.25 } });
+  assert(reply.ok && factor === 1.25, 'uniform scale did not reach the resident selection-pivot door');
+});
+
+test('shell-owned modeling tools delegate through one bounded authority', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const calls: { action: string; args: Record<string, unknown> }[] = [];
+  const seat = createAgentSeat({ shellAction: (action, args) => { calls.push({ action, args }); return { ok: true, result: { accepted: action } }; } });
+  const reply = executeSeatRequest(seat, { action: 'viewport', args: { operation: 'pose', pose: [0, 0, 2, 0, 0, 0] } });
+  assert(reply.ok && calls.length === 1 && calls[0]!.action === 'viewport', 'shell action bypassed or failed to delegate');
+  assert((reply.result as any).accepted === 'viewport', 'shell receipt was not preserved');
 });
 
 test('bevel is one captured native session and cancels a rejected preview', () => {

@@ -25,11 +25,11 @@ import { buildRegionData } from '../render3d/regionFormula';
 import { ensureRegionFormula } from '../render3d/liveRegions';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
-import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
+import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { createAgentSeat, executeSeatRequest, readSeatPercept, type SeatRequest } from '../agent/seatApi';
+import { createAgentSeat, executeSeatRequest, readSeatPercept, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -49,10 +49,15 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import {
+  captureCurrentPaintLook,
   ensureImportedTexturePaintVariant,
   importedTextureVariantNeedsUvUpgrade,
   IMPORTED_TEXTURE_UV_MAPPING_VERSION,
   listPaintVariants,
+  removePaintVariant,
+  renamePaintVariant,
+  savePaintVariant,
+  updatePaintVariant,
   type PaintTarget,
   type PaintVariant,
 } from '../data/paintVariants';
@@ -232,9 +237,9 @@ export type ModelFocusBridge = {
   saveUvAtlas: () => { path: string | null; note: string };
   exportUvWireframe: (islands?: readonly UvIslandRect[]) => { path: string | null; note: string };
   exportUvGenerationGuide: (islands?: readonly UvIslandRect[], numbered?: boolean) => { path: string | null; note: string };
-  importUvAtlas: () => Promise<string>;
+  importUvAtlas: (path?: string) => Promise<string>;
   resizeUvAtlas: (width: number, height: number) => Promise<string>;
-  addUvTextureLayer: (x: number, y: number) => Promise<string>;
+  addUvTextureLayer: (x: number, y: number, path?: string) => Promise<string>;
   editUvTextureLayer: (id: string, edit: UvTextureLayerEdit) => string;
   compileUvTextureLayers: (onProgress?: (completed: number, total: number, label: string) => void) => Promise<string>;
   reloadUvAtlas: () => string;
@@ -1804,14 +1809,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
   const exportUvWireframe = (islands?: readonly UvIslandRect[]) => exportUvGuide('transparent', islands);
   const exportUvGenerationGuide = (islands?: readonly UvIslandRect[], numbered = false) => exportUvGuide('generation', islands, numbered);
-  const importUvAtlas = async (): Promise<string> => {
+  const importUvAtlas = async (sourcePath?: string): Promise<string> => {
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Import refused — save the model package first.';
     }
     if (uvPanel?.workspace) {
       return 'Import Texture would replace the compiled atlas behind an editable image workspace. Use Add Image Layer instead.';
     }
-    const path = await pickFile({
+    const path = sourcePath?.trim() || await pickFile({
       title: 'Import a texture for UV mapping',
       filters: [
         { name: 'Texture images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp'] },
@@ -1916,7 +1921,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       : `Resized the live UV total to ${plan.targetWidth}×${plan.targetHeight}, but ${persisted.error.toLowerCase()}${workspaceNote}.`;
   };
 
-  const addUvTextureLayer = async (x: number, y: number): Promise<string> => {
+  const addUvTextureLayer = async (x: number, y: number, sourcePath?: string): Promise<string> => {
     if (!paintTarget) return 'Add Image refused — this viewer has no package-backed paint target.';
     const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
     const atlas = uvPanel;
@@ -1928,7 +1933,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!persisted.ok) return `Add Image refused — ${persisted.error}`;
     const doc = ensureUvTextureWorkspace(dir, atlas.w, atlas.h);
     if (!doc) return 'Add Image refused — the current base.png could not seed the editable workspace.';
-    const path = await pickFile({
+    const path = sourcePath?.trim() || await pickFile({
       title: 'Add an image layer to the UV workspace',
       filters: [
         { name: 'Texture images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp'] },
@@ -2603,6 +2608,185 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The live Agent Seat. Dev IPC NOTICE is only the transport: requests execute
   // through the same host doors/tool adoption as this visible ModelView, and the
   // bounded /tmp reply path lets a shell-based agent receive the structured diff.
+  const seatViewActionRef = useRef<(action: string, args: Record<string, unknown>) => SeatShellReceipt | null>(() => null);
+  seatViewActionRef.current = (action, args) => {
+    const fail = (reason: string): SeatShellReceipt => ({ ok: false, reason });
+    const ok = (result?: unknown): SeatShellReceipt => ({ ok: true, ...(result === undefined ? {} : { result }) });
+    const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+    if (action === 'viewport') {
+      const operation = String(args.operation ?? 'read');
+      if (operation === 'read') {
+        let pose: unknown = null;
+        try { pose = JSON.parse(host.__model_cam_pose?.() ?? 'null'); } catch { /* honest null */ }
+        return ok({ pose, locked: camLock, wire, xray, selectionMode: selMode, gizmoTool, mirrorMask, bookmarks: camMarks });
+      }
+      if (operation === 'orbit' && finite(args.dx) && finite(args.dy)) { host.__model_orbit_drag?.(args.dx, args.dy); return ok(); }
+      if (operation === 'pan' && finite(args.dx) && finite(args.dy)) { host.__model_orbit_pan?.(args.dx, args.dy); return ok(); }
+      if (operation === 'zoom' && finite(args.delta)) { host.__model_orbit_zoom?.(args.delta); return ok(); }
+      if (operation === 'pose') {
+        const pose = Array.isArray(args.pose) ? args.pose.map(Number) : [];
+        if (pose.length !== 6 || pose.some((value) => !Number.isFinite(value))) return fail('pose must be [yaw,pitch,distance,targetX,targetY,targetZ]');
+        return host.__model_cam_set_pose?.(...pose) === 1 ? ok({ pose }) : fail('camera pose was rejected (the camera may be locked)');
+      }
+      if (operation === 'lock') { const locked = args.locked !== false; setCamLock(locked); orbitSetLocked(locked); return ok({ locked }); }
+      if (operation === 'selection-mode') {
+        const mode = Number(args.mode);
+        if (!Number.isInteger(mode) || mode < 0 || mode > 3) return fail('selection mode must be 0=view, 1=vertex, 2=edge, or 3=face');
+        toolApiRef.current?.selMode(mode);
+        return ok({ mode });
+      }
+      if (operation === 'gizmo') {
+        const tool = Number(args.tool);
+        if (!Number.isInteger(tool) || tool < 0 || tool > 2) return fail('gizmo tool must be 0=move, 1=scale, or 2=rotate');
+        toolApiRef.current?.gizmo(tool);
+        return ok({ tool });
+      }
+      if (operation === 'wire') { setWire(args.enabled === undefined ? !wire : args.enabled === true); return ok(); }
+      if (operation === 'xray') { setXray(args.enabled === undefined ? !xray : args.enabled === true); return ok(); }
+      if (operation === 'focus') { toggleFocus(); return ok(); }
+      if (operation === 'mirror') {
+        const axis = Number(args.axis);
+        if (!Number.isInteger(axis) || axis < 0 || axis > 2) return fail('mirror axis must be 0, 1, or 2');
+        toolApiRef.current?.toggleMirror(axis);
+        return ok({ axis });
+      }
+      if (operation === 'bookmark-store') { camStoreView(); return ok(); }
+      if (operation === 'bookmark-recall') { const index = Number(args.index); if (!Number.isInteger(index)) return fail('bookmark index required'); camRecallAt(index); return ok({ index }); }
+      if (operation === 'bookmark-remove') { const index = Number(args.index); if (!Number.isInteger(index)) return fail('bookmark index required'); camRemoveAt(index); return ok({ index }); }
+      return fail(`unknown viewport operation "${operation}"`);
+    }
+    if (action === 'reference') {
+      const operation = String(args.operation ?? 'read');
+      if (operation === 'read') return ok(backdrops);
+      if (operation === 'add') {
+        const made = backdropFromPath(String(args.path ?? ''), backdrops.length);
+        if (typeof made === 'string') return fail(made);
+        const patch = args.patch && typeof args.patch === 'object' ? args.patch as Partial<Backdrop> : {};
+        const added = { ...made, ...patch, id: made.id, source: made.source };
+        setBackdrops([...backdrops, added]);
+        setBackdropPanel(true);
+        setBdOpenId(added.id);
+        return ok(added);
+      }
+      const id = String(args.id ?? '');
+      const existing = backdrops.find((row) => row.id === id);
+      if (!existing) return fail('reference image id was not found');
+      if (operation === 'remove') { setBackdrops(backdrops.filter((row) => row.id !== id)); return ok({ id }); }
+      if (operation === 'update') {
+        if (!args.patch || typeof args.patch !== 'object') return fail('reference update requires a patch object');
+        const next = { ...existing, ...(args.patch as Partial<Backdrop>), id: existing.id, source: existing.source };
+        setBackdrops(backdrops.map((row) => row.id === id ? next : row));
+        return ok(next);
+      }
+      return fail(`unknown reference operation "${operation}"`);
+    }
+    if (action === 'paint-tool') {
+      const operation = String(args.operation ?? 'read');
+      if (operation === 'read') return ok({ tool: brushTool, safety, detail, brush, palette });
+      if (operation === 'tool') {
+        const tool = String(args.tool) as BrushTool;
+        if (!['fill', 'brush', 'pen', 'eyedropper'].includes(tool)) return fail('paint tool must be fill, brush, pen, or eyedropper');
+        chooseBrushTool(tool);
+        return ok({ tool });
+      }
+      if (operation === 'safety') {
+        const mode = Number(args.mode);
+        if (mode !== 0 && mode !== 1) return fail('paint safety must be 0=clip or 1=lock');
+        host.__model_paint_mode?.(mode);
+        setSafety(mode);
+        return ok({ mode });
+      }
+      if (operation === 'detail') return ok({ detail: changeDetail(Number(args.detail)) });
+      if (operation === 'brush') { if (!args.brush || typeof args.brush !== 'object') return fail('brush object required'); setBrush(args.brush as Brush); return ok(args.brush); }
+      if (operation === 'palette') { if (!args.palette || typeof args.palette !== 'object') return fail('palette object required'); setPalette(args.palette as Palette); return ok(args.palette); }
+      if (operation === 'fill') {
+        const rgb = Array.isArray(args.rgb) ? args.rgb.map(Number) : brushRgb(brush);
+        const x = Number(args.x), y = Number(args.y);
+        if (rgb.length !== 3 || rgb.some((value) => !Number.isFinite(value)) || !Number.isFinite(x) || !Number.isFinite(y)) return fail('fill needs viewport x/y and RGB bytes');
+        const painted = fillFaceAt(x, y, rgb as RGB);
+        if (painted) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); }
+        return painted ? ok() : fail('paint fill missed or the atlas is stale');
+      }
+      if (operation === 'stroke') {
+        const points = Array.isArray(args.points) ? args.points.map(Number) : [];
+        const rgb = Array.isArray(args.rgb) ? args.rgb.map(Number) : brushRgb(brush);
+        if (points.length < 2 || points.length % 2 !== 0 || points.some((value) => !Number.isFinite(value)) || rgb.length !== 3) return fail('stroke needs flat viewport [x,y,...] points and RGB bytes');
+        strokeBeginAt(points[0]!, points[1]!);
+        const radius = finite(args.radius) ? args.radius : brushRadius(brush.size);
+        for (let at = 0; at < points.length; at += 2) stampAt(points[at]!, points[at + 1]!, rgb as RGB, radius, brush);
+        host.__mesh_paint_stroke_end?.();
+        onDocumentMutated?.();
+        refreshUvIfLive();
+        return ok({ dabs: points.length / 2 });
+      }
+      if (operation === 'polygon') {
+        const points = Array.isArray(args.points) ? args.points.map(Number) : [];
+        const rgb = Array.isArray(args.rgb) ? args.rgb.map(Number) : brushRgb(brush);
+        if (points.length < 6 || points.length % 2 !== 0 || points.some((value) => !Number.isFinite(value)) || rgb.length !== 3) return fail('polygon needs normalized [x,y,...] points and RGB bytes');
+        const painted = host.__model_paint_polygon?.(new Float32Array(points), rgb[0], rgb[1], rgb[2], finite(args.flow) ? args.flow : brush.flow, Number(args.blend ?? blendModeIndex(brush.blend))) === 1;
+        if (painted) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); }
+        return painted ? ok() : fail('paint polygon must remain on one visible authored face');
+      }
+      return fail(`unknown paint-tool operation "${operation}"`);
+    }
+    if (action === 'paint-variant') {
+      if (!paintTarget) return fail('open a package-backed model first');
+      const operation = String(args.operation ?? 'read');
+      const variants = listPaintVariants(paintTarget);
+      if (operation === 'read') return ok(variants);
+      const id = String(args.id ?? '');
+      if (operation === 'load') {
+        const variant = variants.find((row) => row.id === id);
+        return variant && loadPaintVariant(variant) ? ok(variant) : fail('paint variant was not found or could not be loaded');
+      }
+      if (operation === 'rename') {
+        const variant = renamePaintVariant(paintTarget, id, String(args.name ?? ''));
+        return variant ? ok(variant) : fail('paint variant rename was rejected');
+      }
+      if (operation === 'remove') {
+        if (!variants.some((row) => row.id === id)) return fail('paint variant was not found');
+        removePaintVariant(paintTarget, id);
+        return ok({ id });
+      }
+      if (operation === 'save-new' || operation === 'update') {
+        const current = captureCurrentPaintLook();
+        if (!current) return fail('there is no current paint look to save');
+        const payload = {
+          w: current.w, h: current.h, detail: current.detail,
+          data: current.prog, format: 'program' as const,
+          atlasRgba: current.rgba, cornerUv: current.cornerUv, baselineRgba: current.baseline,
+        };
+        const variant = operation === 'update'
+          ? updatePaintVariant(paintTarget, id, payload)
+          : savePaintVariant(paintTarget, { ...payload, name: typeof args.name === 'string' ? args.name : undefined });
+        if (!variant) return fail('paint variant save was rejected');
+        writeModelArtifacts(paintTarget);
+        return ok(variant);
+      }
+      return fail(`unknown paint-variant operation "${operation}"`);
+    }
+    if (action === 'path') {
+      const operation = String(args.operation ?? 'plane');
+      const points = Array.isArray(args.points) ? args.points.map(Number) : [];
+      if (points.length < (operation === 'plane' ? 6 : 4) || points.length % 2 !== 0 || points.some((value) => !Number.isFinite(value))) return fail('path requires normalized flat [x,y,...] points');
+      const result = operation === 'plane'
+        ? meshAppendPathPlane(new Float32Array(points), partRangesRef.current.length)
+        : operation === 'edges'
+          ? meshAppendPathEdges(new Float32Array(points), args.closed === true, partRangesRef.current.length)
+          : null;
+      if (!adoptMesh(result) || result?.lo == null || result?.hi == null) return fail('path append was rejected');
+      const range = { lo: result.lo, hi: result.hi };
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [...partRangesRef.current, range];
+        meshSetPartRanges(partRangesRef.current);
+      }
+      (globalThis as any).__seatShellBridge?.registerPathPart?.(range, operation);
+      onDocumentMutated?.();
+      enterVertexModeOnPenCommit();
+      return ok(range);
+    }
+    return null;
+  };
   useEffect(() => {
     const seat = createAgentSeat({
       adoptTopology: (result) => adoptMesh(result as TopoResult | null),
@@ -2614,6 +2798,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       detachSelection: (name) => (globalThis as any).__seatShellBridge?.detachSelection?.(name) ?? null,
       persist: () => (globalThis as any).__seatShellBridge?.persist?.() === true,
       partPercept: () => (globalThis as any).__seatShellBridge?.partPercept?.() ?? { activePartId: null, parts: [] },
+      shellAction: (action, args) => seatViewActionRef.current(action, args)
+        ?? (globalThis as any).__seatShellBridge?.shellAction?.(action, args)
+        ?? { ok: false, reason: 'editor shell action bridge unavailable' },
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
       captureFrame: (path) => captureFrame(path),
     });
