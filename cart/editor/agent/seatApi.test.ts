@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compileSeatSelector, createAgentSeat, executeSeatRequest, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, seatBatchGenerationReason, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -22,6 +22,37 @@ const percept: SeatPercept = {
 test('cold agent resolves a durable name without geometry archaeology', () => {
   const query = compileSeatSelector('window.rim', percept);
   assert(query?.kind === 'region' && query.region === 7, 'name did not resolve to its durable region id');
+});
+
+test('geometric keywords cannot be shadowed by saved region names', () => {
+  const shadowed: SeatPercept = {
+    ...percept,
+    table: { version: 1, regions: [{ id: 2, name: 'top' }], nextRegionId: 3 },
+  };
+  const top = compileSeatSelector('top', shadowed);
+  const explicitTop = compileSeatSelector('extremal:top', shadowed);
+  const namedTop = compileSeatSelector('region:top', shadowed);
+  assert(top?.kind === 'extremal' && top.axis === 1 && top.sign === 1, 'saved name stole the top keyword');
+  assert(explicitTop?.kind === 'extremal', 'explicit extremal namespace did not compile');
+  assert(namedTop?.kind === 'region' && namedTop.region === 2, 'explicit region namespace did not reach the saved name');
+});
+
+test('face ranges have their own namespace and part remains reserved for Outliner ids', () => {
+  const faces = compileSeatSelector('faces:12..18', percept);
+  assert(faces?.kind === 'part' && faces.lo === 12 && faces.hi === 18, 'face range did not compile');
+  assert(compileSeatSelector('part:12..18', percept) === null, 'legacy part range remained ambiguous');
+});
+
+test('brief replies keep row outcomes but strip repeated percepts', () => {
+  const row = { ok: true, op: 'select', result: { faces: 2 }, percept };
+  const compact = compactSeatReply({ ok: true, op: 'batch', result: [row, row], percept });
+  assert(compact.brief.includes('60 faces'), 'brief formatter was not used');
+  assert(!(compact.result as any[])[0].percept, 'batch row percept survived compact transport');
+});
+
+test('per-row generation guard closes a batch after a human topology edit', () => {
+  assert(seatBatchGenerationReason(4, 4, 2) === null, 'matching generation was rejected');
+  assert(seatBatchGenerationReason(4, 5, 2)?.includes('row 3'), 'external generation bump did not close the next row');
 });
 
 test('look joins durable outliner parts to the resident semantic percept', () => {
@@ -250,6 +281,33 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
   assert(uvIslands.join(',') === '1,3', 'UV operation ignored the selected islands');
   assert(executeSeatRequest(seat, { action: 'detach', args: { name: 'roof' } }).ok, 'shell-owned detach stayed unreachable');
   assert(executeSeatRequest(seat, { action: 'save' }).ok && persisted, 'save did not cross the package persistence boundary');
+});
+
+test('save is a zero-debt durable boundary', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify({ ...percept, unnamed: 2 });
+  let persisted = false;
+  const reply = executeSeatRequest(createAgentSeat({ persist: () => { persisted = true; return true; } }), { action: 'save' });
+  assert(!reply.ok && !persisted, 'save persisted unnamed faces');
+  assert(reply.reason?.includes('zero naming debt'), 'save did not explain the durable-boundary invariant');
+});
+
+test('dial is a callable candidate recipe that seats a resident cylinder on a target face', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 2, bbox: [1, 2, 3, 1, 4, 5] });
+  (globalThis as any).__mesh_semantic_assign = () => 1;
+  const rotations: number[][] = [];
+  const moves: number[][] = [];
+  (globalThis as any).__mesh_transform_rotate_axis = (...values: number[]) => { rotations.push(values); return 1; };
+  (globalThis as any).__mesh_transform_translate = (...values: number[]) => { moves.push(values); return 1; };
+  let added: SeatPrimitiveSpec | null = null;
+  const seat = createAgentSeat({ addPrimitive: (spec) => { added = spec; return { lo: 20, hi: 44 }; } });
+  const reply = executeSeatRequest(seat, { action: 'recipe', args: {
+    recipe: 'dial', params: { name: 'tuner', target: 'region:window.rim', normal: '+x', diameter: 0.26, depth: 0.1, sides: 24 },
+  } });
+  assert(reply.ok && (reply.result as any).status === 'candidate', 'dial recipe was unavailable or prematurely approved');
+  assert(added?.kind === 'cylinder' && added.size === 0.26, 'dial did not use the resident cylinder generator');
+  assert(rotations.length === 1 && rotations[0]![6] < 0, 'dial did not orient +Y to +X');
+  assert(moves.length === 1 && moves[0]!.join(',') === '1,3,4', 'dial base was not seated at the target bbox center');
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);

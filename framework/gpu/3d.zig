@@ -24,6 +24,7 @@ const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const mesh_semantics = @import("mesh_semantics.zig");
 const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
 const mesh_journal_log = @import("mesh_journal_log.zig");
 const path_array = @import("path_array.zig");
@@ -5059,6 +5060,15 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     defer installed_semantics.deinit();
     @memcpy(installed_semantics.regions[first_new_face..], copied_semantic_regions.items);
     @memcpy(installed_semantics.instances[first_new_face..], copied_semantic_instances.items);
+    mesh_semantics.reinstanceCopy(
+        jalloc,
+        installed_semantics.instances[0..first_new_face],
+        installed_semantics.regions[first_new_face..],
+        installed_semantics.instances[first_new_face..],
+    ) catch {
+        journalDiscard(&snap);
+        return fail;
+    };
     const r = appendGroupInner(out.items, @intCast(out.items.len / 8), groups.items);
     if (!r.ok) {
         journalDiscard(&snap);
@@ -5267,6 +5277,7 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
             defer local_groups.deinit(jalloc);
             var next_local: u32 = 0;
             var copied_faces: u32 = 0;
+            const semantic_copy_start = semantic_instances.items.len;
 
             f = 0;
             while (f < cur_faces) : (f += 1) {
@@ -5298,6 +5309,12 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
                 copied_faces += 1;
             }
             if (copied_faces == 0 or next_local == 0) return fail;
+            mesh_semantics.reinstanceCopy(
+                jalloc,
+                semantic_instances.items[0..semantic_copy_start],
+                semantic_regions.items[semantic_copy_start..],
+                semantic_instances.items[semantic_copy_start..],
+            ) catch return fail;
             next_group += next_local;
             all_ranges.appendSlice(jalloc, &.{ range_start, next_group }) catch return fail;
             fresh_ranges.appendSlice(alloc, &.{ range_start, next_group }) catch return fail;

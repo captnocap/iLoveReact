@@ -6,6 +6,9 @@ const net = require('net');
 const path = require('path');
 
 const args = process.argv.slice(2);
+const briefIndex = args.indexOf('--brief');
+const brief = briefIndex >= 0;
+if (brief) args.splice(briefIndex, 1);
 const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
@@ -54,6 +57,13 @@ else if (action === 'add') {
     sides: Number(args[3] || 16),
   } };
 } else if (action === 'shot') request = { action, args: { path: args[0] } };
+else if (action === 'recipes') request = { action: 'recipe-list' };
+else if (action === 'recipe') {
+  const name = args.shift();
+  if (!name) { console.error('seat recipe expects a recipe name and JSON object'); process.exit(2); }
+  try { request = { action: 'recipe', args: { recipe: name, params: args.length ? JSON.parse(args.join(' ')) : {} } }; }
+  catch { console.error('seat recipe expects a JSON object after the recipe name'); process.exit(2); }
+}
 else if (action === 'command') request = { action, args: { id: args[0] } };
 // Escape hatch for the structured parity surface. This is deliberately one
 // action + one JSON object, not a second SDK: every row still resolves inside
@@ -68,14 +78,14 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat look|semantic-status|new <kind> [size height sides]|elements|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
   process.exit(2);
 }
 
 const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const replyPath = `/tmp/reactjit-seat-${id}.json`;
 const payload = JSON.stringify({
-  kind: 'agent-seat', id, replyPath, request,
+  kind: 'agent-seat', id, replyPath, request, brief,
   ...(process.env.RJIT_SEAT_GENERATION ? { generation: Number(process.env.RJIT_SEAT_GENERATION) } : {}),
 });
 const socketPath = process.env.RJIT_SOCKET || '/tmp/reactjit.sock';
@@ -92,8 +102,20 @@ socket.on('close', () => {
     if (fs.existsSync(replyPath)) {
       const result = fs.readFileSync(replyPath, 'utf8');
       try { fs.unlinkSync(replyPath); } catch {}
-      process.stdout.write(`${result}\n`);
-      try { process.exit(JSON.parse(result).ok ? 0 : 1); } catch { process.exit(1); }
+      try {
+        const parsed = JSON.parse(result);
+        if (!brief) process.stdout.write(`${result}\n`);
+        else {
+          const rows = parsed.op === 'batch' && Array.isArray(parsed.result) ? parsed.result : [parsed];
+          for (const row of rows) {
+            if (!row || typeof row !== 'object') continue;
+            const summary = { ok: row.ok, op: row.op, ...(row.result === undefined ? {} : { result: row.result }), ...(row.reason ? { reason: row.reason } : {}) };
+            process.stdout.write(`${JSON.stringify(summary)}\n`);
+          }
+          process.stdout.write(`${parsed.brief || 'no live mesh'}\n`);
+        }
+        process.exit(parsed.ok ? 0 : 1);
+      } catch { process.exit(1); }
     }
     if (Date.now() - started > 15000) {
       console.error(`seat: timed out waiting for ${path.basename(replyPath)}`);

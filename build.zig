@@ -1383,12 +1383,19 @@ pub fn build(b: *std.Build) void {
     stable_geometry_slot_test_step.dependOn(&run_stable_geometry_slot_test.step);
 
     // ── semantic face membership/debt invariants — headless, no GPU ─────────
-    const mesh_semantics_test_mod = b.createModule(.{
+    const mesh_semantics_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_semantics.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    const mesh_semantics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_semantics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_semantics_test_mod.addImport("mesh_semantics", mesh_semantics_impl_test_mod);
     const mesh_semantics_test = b.addTest(.{
         .name = "mesh-semantics-test",
         .root_module = mesh_semantics_test_mod,

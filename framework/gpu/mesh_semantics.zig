@@ -49,6 +49,40 @@ pub fn unnamedCount(regions: ?[]const u32, face_count: usize) usize {
     return count;
 }
 
+/// A copied part keeps its region vocabulary but becomes a fresh occurrence of
+/// each source instance family. Equal source instance ids stay equal within one
+/// copy; different copies receive disjoint ids. Unnamed faces remain semantic debt.
+pub fn reinstanceCopy(
+    allocator: std.mem.Allocator,
+    existing_instances: []const u32,
+    copied_regions: []const u32,
+    copied_instances: []u32,
+) !void {
+    if (copied_regions.len != copied_instances.len) return error.InvalidSemanticRows;
+    var next: u32 = 0;
+    for (existing_instances) |instance| {
+        if (instance != NO_ID and instance >= next) {
+            if (instance == NO_ID - 1) return error.InstanceIdExhausted;
+            next = instance + 1;
+        }
+    }
+    var families = std.AutoHashMap(u32, u32).init(allocator);
+    defer families.deinit();
+    for (copied_regions, copied_instances) |region, *instance| {
+        if (region == NO_ID) {
+            instance.* = NO_ID;
+            continue;
+        }
+        const entry = try families.getOrPut(instance.*);
+        if (!entry.found_existing) {
+            if (next == NO_ID) return error.InstanceIdExhausted;
+            entry.value_ptr.* = next;
+            next += 1;
+        }
+        instance.* = entry.value_ptr.*;
+    }
+}
+
 test "semantic rows are paired and an instance cannot exist without a region" {
     try std.testing.expect(rowsValid(null, null, 2));
     try std.testing.expect(rowsValid(&.{ 1, 2 }, &.{ 0, NO_ID }, 2));

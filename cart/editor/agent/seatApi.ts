@@ -45,11 +45,20 @@ export type InsetReceipt =
   | { ok: true; topology: TopologyReceipt; transforms: number }
   | { ok: false; stage: 'validate' | 'extrude' | 'scale-0' | 'scale-1' | 'offset'; reason: string };
 export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: SeatPercept | null; reason?: string };
+export type SeatBriefReply = Omit<SeatReply, 'percept'> & { brief: string };
 export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
   edges: { id: number; vertices: [number, number] }[];
 };
 export type SeatShellReceipt = { ok: boolean; result?: unknown; reason?: string };
+export type SeatRecipeReceipt = {
+  ok: boolean;
+  recipe: string;
+  status: 'candidate' | 'approved';
+  steps: string[];
+  result?: unknown;
+  reason?: string;
+};
 
 /** A primitive the seat asks the editor's RESIDENT generators to build (editMesh.ts
  *  cuboid/cylinder/cone/…). The seat still never emits vertex arrays — it names a
@@ -150,23 +159,27 @@ function rgbBytes(value: unknown): value is [number, number, number] {
 export function compileSeatSelector(selector: string, percept: SeatPercept): Record<string, unknown> | null {
   const text = selector.trim();
   if (text === 'all') return { kind: 'all' };
-  const named = regionByName(percept.table, text.replace(/^region:/, ''));
-  if (named) return { kind: 'region', region: named.id };
   const facing = /^facing:([+-])([xyz])(?:@(\d+(?:\.\d+)?))?$/.exec(text);
   if (facing) return { kind: 'facing', axis: axisIndex(facing[2]!)!, sign: facing[1] === '+' ? 1 : -1, tolerance_degrees: Number(facing[3] ?? 15) };
-  if (text === 'top') return { kind: 'extremal', axis: 1, sign: 1 };
-  if (text === 'bottom') return { kind: 'extremal', axis: 1, sign: -1 };
+  if (text === 'top' || text === 'extremal:top') return { kind: 'extremal', axis: 1, sign: 1 };
+  if (text === 'bottom' || text === 'extremal:bottom') return { kind: 'extremal', axis: 1, sign: -1 };
   const extremal = /^outermost:([+-])([xyz])$/.exec(text);
   if (extremal) return { kind: 'extremal', axis: axisIndex(extremal[2]!)!, sign: extremal[1] === '+' ? 1 : -1 };
   const plane = /^(above|below):([xyz])([<>])(-?\d+(?:\.\d+)?)$/.exec(text);
   if (plane) return { kind: plane[1], axis: axisIndex(plane[2]!)!, threshold: Number(plane[4]) };
-  const part = /^part:(\d+)\.\.(\d+)$/.exec(text);
-  if (part) return { kind: 'part', lo: Number(part[1]), hi: Number(part[2]) };
+  const faces = /^faces:(\d+)\.\.(\d+)$/.exec(text);
+  if (faces) return { kind: 'part', lo: Number(faces[1]), hi: Number(faces[2]) };
   const box = /^inside:box\(([^)]+)\)$/.exec(text);
   if (box) {
     const values = box[1]!.split(',').map(Number);
     if (values.length === 6 && values.every(Number.isFinite)) return { kind: 'box', min: values.slice(0, 3), max: values.slice(3) };
   }
+  // Region names live in an explicit namespace whenever they collide with a
+  // geometric keyword. Bare non-keyword names remain accepted for existing scripts,
+  // but a saved region called "top" can never steal the extremal query again.
+  const regionName = text.startsWith('region:') ? text.slice('region:'.length) : text;
+  const named = regionByName(percept.table, regionName);
+  if (named) return { kind: 'region', region: named.id };
   return null;
 }
 
@@ -181,6 +194,32 @@ export function formatSeatPercept(percept: SeatPercept): string {
   for (const row of percept.regions) lines.push(`  ${names.get(row.id) ?? `region:${row.id}`}  ${row.faces} faces${row.instances > 1 ? ` ×${row.instances}` : ''}  bbox ${row.bbox.join(',')}`);
   if (percept.unnamed > 0) lines.push(`  ⚠ unnamed  ${percept.unnamed}`);
   return lines.join('\n');
+}
+
+/** Strip repeated full percepts from a wire reply while preserving every accepted/
+ * rejected row. The live editor calls this when tools/seat requests --brief, so the
+ * formatter is the shipped transport boundary rather than unused documentation. */
+export function compactSeatReply(reply: SeatReply): SeatBriefReply {
+  const compactResult = reply.op === 'batch' && Array.isArray(reply.result)
+    ? reply.result.map((row) => {
+      if (!row || typeof row !== 'object') return row;
+      const { percept: _percept, ...rest } = row as SeatReply;
+      return rest;
+    })
+    : reply.result;
+  return {
+    ok: reply.ok,
+    op: reply.op,
+    ...(compactResult === undefined ? {} : { result: compactResult }),
+    ...(reply.reason ? { reason: reply.reason } : {}),
+    brief: reply.percept ? formatSeatPercept(reply.percept) : 'no live mesh',
+  };
+}
+
+export function seatBatchGenerationReason(expected: number, live: number, rowIndex: number): string | null {
+  return live === expected
+    ? null
+    : `batch closed before row ${rowIndex + 1} — editor generation changed from ${expected} to ${live}`;
 }
 
 export function createAgentSeat(adapter: SeatAdapter = {}) {
@@ -213,7 +252,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const percept = look();
     if (!percept) return { ok: false, reason: 'no live mesh' };
     const query = compileSeatSelector(selector, percept);
-    if (!query) return { ok: false, reason: `unknown selector "${selector}"` };
+    if (!query) {
+      if (/^part:\d+\.\.\d+$/.test(selector.trim())) return { ok: false, reason: 'face ranges use faces:<lo>..<hi>; part: is reserved for Outliner part ids' };
+      if (selector.trim().startsWith('part:')) return { ok: false, reason: 'Outliner parts are selected with part-select, not the face selector' };
+      return { ok: false, reason: `unknown selector "${selector}"` };
+    }
     // The seat's selection is face-only, and host ops gate on the edit MODE, not just the
     // selection set — meshLoopCutFaceBegin bails outright unless mode() == .face. Assert it
     // here rather than inside those verbs, because setting the mode clears the selection:
@@ -365,7 +408,17 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (operation === 'auto-size') return automation(() => host.__model_uv_auto_size?.(islands)) === 1;
     return automation(() => host.__model_uv_project_view?.(islands)) === 1;
   };
-  const save = (): boolean => adapter.persist?.() === true;
+  const save = (): SeatShellReceipt => {
+    const percept = look();
+    if (!percept) return { ok: false, reason: 'no live mesh' };
+    if (percept.unnamed > 0) return {
+      ok: false,
+      reason: `save blocked — ${percept.unnamed} unnamed faces remain; durable boundaries require zero naming debt`,
+    };
+    return adapter.persist?.() === true
+      ? { ok: true }
+      : { ok: false, reason: 'the shell could not persist the active model package' };
+  };
   const undo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_undo?.())); adapter.adoptTopology?.(result); return result; };
   const redo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_redo?.())); adapter.adoptTopology?.(result); return result; };
   /** Mirror the mesh exactly across an axis plane (0 = X, 1 = Y, 2 = Z), keeping the
@@ -409,7 +462,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const before = look();
     const range = adapter.addPrimitive(spec);
     if (!range) return null;
-    select(`part:${range.lo}..${range.hi}`);
+    select(`faces:${range.lo}..${range.hi}`);
     const declared = declareRegion(before?.table ?? { version: 1, regions: [] }, name, 'part', `add ${spec.kind}`, adapter.take?.());
     // One assign both names the new part AND writes the merged table back, repairing the reset.
     host.__mesh_semantic_assign?.(declared.region.id, 0, JSON.stringify(declared.table));
@@ -417,13 +470,69 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const newPrimitive = (spec: SeatPrimitiveSpec): boolean => adapter.newPrimitive?.(spec) === true;
   const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
+  const recipeList = () => [{
+    name: 'dial', status: 'candidate' as const,
+    description: 'Place a resident cylinder normal to one selected target face.',
+    args: ['target', 'normal', 'diameter', 'depth', 'name', 'sides?'],
+  }];
+  const runRecipe = (name: string, args: Record<string, unknown>): SeatRecipeReceipt => {
+    const status = 'candidate' as const;
+    if (name !== 'dial') return { ok: false, recipe: name, status, steps: [], reason: `unknown recipe "${name}"` };
+    const target = String(args.target ?? '');
+    const normal = String(args.normal ?? '');
+    const semanticName = String(args.name ?? '');
+    const diameter = Number(args.diameter);
+    const depth = Number(args.depth);
+    const sides = args.sides === undefined ? 24 : Number(args.sides);
+    const orientation: Record<string, { axis: [number, number, number]; degrees: number }> = {
+      '+y': { axis: [1, 0, 0], degrees: 0 }, '-y': { axis: [1, 0, 0], degrees: 180 },
+      '+x': { axis: [0, 0, 1], degrees: -90 }, '-x': { axis: [0, 0, 1], degrees: 90 },
+      '+z': { axis: [1, 0, 0], degrees: 90 }, '-z': { axis: [1, 0, 0], degrees: -90 },
+    };
+    const pose = orientation[normal];
+    if (!target || !semanticName || semanticName === '_' || !pose ||
+        !Number.isFinite(diameter) || diameter <= 0 || !Number.isFinite(depth) || depth <= 0 ||
+        !Number.isInteger(sides) || sides < 3 || sides > 96) {
+      return { ok: false, recipe: name, status, steps: [], reason: 'dial needs target, normal (+/-x/y/z), positive diameter/depth, a name, and sides 3..96' };
+    }
+    const selected = select(target);
+    if (!selected.ok || !selected.bbox || !selected.faces) {
+      return { ok: false, recipe: name, status, steps: [], reason: selected.reason ?? 'dial target resolved to no faces' };
+    }
+    const bbox = selected.bbox;
+    const center: [number, number, number] = [
+      (bbox[0] + bbox[3]) * 0.5,
+      (bbox[1] + bbox[4]) * 0.5,
+      (bbox[2] + bbox[5]) * 0.5,
+    ];
+    const steps = [`select ${target} (${selected.faces} faces)`, `add cylinder ${diameter} × ${depth} as ${semanticName}`];
+    let journalUnits = 0;
+    const rollback = (reason: string): SeatRecipeReceipt => {
+      for (let at = 0; at < journalUnits; at += 1) undo();
+      return { ok: false, recipe: name, status, steps, reason: `${reason}; ${journalUnits} recipe unit(s) rolled back` };
+    };
+    const range = addPrimitive({ kind: 'cylinder', size: diameter, height: depth, sides }, semanticName);
+    if (!range) return rollback('dial cylinder append was rejected');
+    journalUnits += 1;
+    if (pose.degrees !== 0) {
+      if (!rotate(pose.axis, [0, 0, 0], pose.degrees)) return rollback('dial orientation was rejected');
+      journalUnits += 1;
+      steps.push(`rotate ${pose.degrees}° about ${pose.axis.join(',')}`);
+    }
+    // Primitives rest with their base at y=0. Rotating around the origin points that
+    // base along the requested normal; translating to the face center seats it flush.
+    if (!move(center)) return rollback('dial placement was rejected');
+    journalUnits += 1;
+    steps.push(`move base to ${center.join(',')}`);
+    return { ok: true, recipe: name, status, steps, result: { range, target: { faces: selected.faces, bbox }, normal, center } };
+  };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
     look, elements, select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, solidify, detach, flip, glass, paint, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
-    addPrimitive, newPrimitive, shot, reply,
+    addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
   };
 }
 
@@ -534,7 +643,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const ok = seat.uv(operation);
         return seat.reply('uv', ok, undefined, ok ? undefined : 'no UV islands are selected or the operation was rejected');
       }
-      case 'save': { const ok = seat.save(); return seat.reply('save', ok, undefined, ok ? undefined : 'the shell could not persist the active model package'); }
+      case 'save': { const result = seat.save(); return seat.reply('save', result.ok, result.result, result.reason); }
       case 'mirror': {
         const result = seat.symmetrize(Number(args.axis ?? 0), args.keep !== false);
         return seat.reply('mirror', !!result, result ?? undefined, result ? undefined : 'symmetrize rejected');
@@ -583,6 +692,11 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const ok = seat.shot(path);
         return seat.reply('shot', ok, ok ? { path } : undefined, ok ? undefined
           : 'capture door unavailable — the cart must import runtime/capture.ts and the binary must be built with -Dhas-capture');
+      }
+      case 'recipe-list': return seat.reply('recipe-list', true, seat.recipeList());
+      case 'recipe': {
+        const result = seat.runRecipe(String(args.recipe ?? ''), (args.params as Record<string, unknown>) ?? {});
+        return seat.reply('recipe', result.ok, result, result.reason);
       }
       case 'command':
       case 'part-select': case 'part-rename': case 'part-visibility': case 'part-delete':

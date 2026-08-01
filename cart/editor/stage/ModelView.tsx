@@ -29,7 +29,7 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { createAgentSeat, executeSeatRequest, readSeatPercept, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { compactSeatReply, createAgentSeat, executeSeatRequest, readSeatPercept, seatBatchGenerationReason, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -2810,10 +2810,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           !payload.replyPath.startsWith('/tmp/reactjit-seat-') || !payload.replyPath.endsWith('.json')) return;
       const request = payload.request as SeatRequest | undefined;
       if (!request || typeof request.action !== 'string') return;
+      const writeReply = (reply: SeatReply) => host.__fs_write?.(
+        payload.replyPath,
+        JSON.stringify(payload.brief === true ? compactSeatReply(reply) : reply),
+      );
       const expected = Number(payload.generation);
       const current = seat.look();
       if (Number.isFinite(expected) && current && expected !== current.generation) {
-        host.__fs_write?.(payload.replyPath, JSON.stringify(seat.reply(request.action, false, undefined, `stale generation ${expected}; live generation is ${current.generation}`)));
+        writeReply(seat.reply(request.action, false, undefined, `stale generation ${expected}; live generation is ${current.generation}`));
         return;
       }
       const batch = request.action === 'batch' && Array.isArray(request.args?.requests)
@@ -2822,20 +2826,33 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (!batch) {
         const reply = executeSeatRequest(seat, request);
         setSemanticRevision((value) => value + 1);
-        host.__fs_write?.(payload.replyPath, JSON.stringify(reply));
+        writeReply(reply);
         return;
       }
       const replies: ReturnType<typeof executeSeatRequest>[] = [];
       let index = 0;
+      // Whitelist the batch's own topology generations one row at a time. Any
+      // generation that appears between rows came from the human/native editor and
+      // closes the batch before another queued action can land on changed geometry.
+      let expectedGeneration = current?.generation ?? 0;
       const runNext = () => {
         if (index >= batch.length) {
           const ok = replies.every((reply) => reply.ok);
-          host.__fs_write?.(payload.replyPath, JSON.stringify(seat.reply('batch', ok, replies, ok ? undefined : 'batch stopped at first rejection')));
+          writeReply(seat.reply('batch', ok, replies, ok ? undefined : 'batch stopped at first rejection'));
+          return;
+        }
+        const live = seat.look();
+        const generationReason = live ? seatBatchGenerationReason(expectedGeneration, live.generation, index) : null;
+        if (generationReason) {
+          replies.push(seat.reply(batch[index]!.action, false, undefined, generationReason));
+          index = batch.length;
+          setTimeout(runNext, 0);
           return;
         }
         const row = executeSeatRequest(seat, batch[index++]!);
         replies.push(row);
         setSemanticRevision((value) => value + 1);
+        expectedGeneration = row.percept?.generation ?? seat.look()?.generation ?? expectedGeneration;
         if (!row.ok) index = batch.length;
         setTimeout(runNext, 100); // visible modeling cadence is a seat feature
       };
