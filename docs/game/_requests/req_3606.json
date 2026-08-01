@@ -1,0 +1,31 @@
+{
+  "id": "req_3606",
+  "at": "2026-08-01T21:52:08.256Z",
+  "origin": "codex:019fbe1c",
+  "text": "Here are the discussed pain points to address.   1. select all silently applies to only the active part. This was the worst\n  one because it doesn't fail — it returns ok:true and moves a subset. I\n  grounded the model, got a success receipt, and only caught it because I\n  read the bboxes in the digest and saw six of seven parts hadn't moved. The\n  skill documents scope clipping for topology verbs (\"that refusal is\n  scope, not your selector\"), but for transforms it doesn't refuse, it\n  quietly does part of the job. A silent partial is worse than a rejection.\n  part-select with every id fixes it, but nothing prompts you to.\n\n  2. Paint that reports success and renders nothing. Every signal said done:\n  nine paint calls returning changed: N, save ok, semantic-status healthy,\n  and the atlas PNG on disk decoding to exactly my five colours in the right\n  pixel counts. The viewport stayed uniform white. The cause was the\n  default atlas resolution — 16 px/m, which on a 0.3 m prop is a 25×26 px\n  atlas where the lens owns 6 pixels and filters into oblivion. Nothing\n  anywhere connects \"your paint is invisible\" to \"your atlas is too small\n  for this object's scale.\" I burned about six capture round-trips first\n  suspecting display mode, then the painted-vs-base mesh, before decoding\n  the PNG by hand.\n\n  3. Camera control cost more calls than the modelling. pose returns ok:true\n  and doesn't drive the live camera. focus is a toggle, not\n  frame-the-selection — I turned it on early and it silently overrode every\n  pose after. orbit isn't callable from the skill doc at all; I had to read\n  ModelView.tsx:2623 to learn it wants dx/dy pixel deltas, then\n  hand-calibrate the ratio (~0.57°/px) across three shots. Framing a model\n  I'd already built took longer than building it.\n\n  4. scale rounds the factor to two decimals. I asked for 0.018 and got\n  0.02. Harmless here — a 2 cm plate is fine — but under the 1 unit = 1\n  metre contract, a factor capped at 1 cm granularity means you can't scale\n  a 1 m cube to anything finer than a centimetre. I caught it only because I\n  check bboxes after every op.\n\n  5. The MODEL FOCUS panel lied throughout. It kept showing bounds radius \n  0.87 u — the original 1 m cube — long after the model was 0.29 m, and 0 \n  uv'd when UVs existed. During the paint debugging it was actively pointing\n  the wrong way.\n\n  6. add names a whole primitive as one region. The bootstrap cube gives you\n  six named faces; add cylinder gives you one name for the entire thing. So\n  I couldn't say \"the hood's front cap\" — I had to hand-fit an inside:box\n  around the disc while the cylinder was still at the origin, before any\n  transform moved it. That's the no-compound-selector boundary biting\n  directly: what I wanted was region:hood & facing:+y.\n\n  7. Hiding a part throws a scary diagnostic. Toggling the Hood invisible\n  flipped semantics to LOAD MISMATCH with resident dropping to 8 regions /\n  332 faces. Benign — the saved blob was untouched — but it reads like data\n  loss.",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T21:52:16.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T22:07:13.754Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed all seven reported gaps in the normal live-editor flow: whole-model selection expands visible-part scope and any partial selector is rejected; paint preflights island texel size and recommends an atlas budget; camera orbit uses degrees, focus frames selection, programmatic poses exit the focus tool and return the native pose; exact scale factors survive; Model Focus reads live bounds and atlas state; added primitives receive surface roles with region-plus-facing selection; and hidden parts report a benign visibility-filtered semantic status. Added focused TS and Zig coverage, updated the Agent Seat skill, and produced a successful ReleaseFast editor build.",
+  "shas": [
+    "8f37a69e1",
+    "2c3c3be0c"
+  ],
+  "resolvedAt": "2026-08-01T22:07:13.754Z"
+}
