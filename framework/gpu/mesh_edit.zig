@@ -723,6 +723,22 @@ pub fn selectedVertexIndexPub() ?u32 {
     return found;
 }
 
+/// Copy the current in-scope welded-vertex selection into `out`. The returned
+/// count is the full selection size, even when `out` is smaller, so command
+/// boundaries can require exactly two vertices without allocating.
+pub fn selectedVerticesPub(out: []u32) u32 {
+    if (!ensureTopology()) return 0;
+    const selected = g_sel_vert orelse return 0;
+    var count: u32 = 0;
+    var vertex: u32 = 0;
+    while (vertex < selected.len) : (vertex += 1) {
+        if (!selected[vertex] or !vertInScopePub(vertex)) continue;
+        if (count < out.len) out[count] = vertex;
+        count += 1;
+    }
+    return count;
+}
+
 pub fn selectedVertexPartPub() ?u32 {
     const vertex = selectedVertexIndexPub() orelse return null;
     const parts = g_vert_part orelse return null;

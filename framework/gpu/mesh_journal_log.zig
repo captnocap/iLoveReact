@@ -51,6 +51,10 @@ pub const ActionKind = enum(u8) {
     // Append-only ordinal 28 (req_3547): the atlas raster and absolute UV
     // coordinate frame resize together while normalized UV placement survives.
     uv_atlas_resize,
+    // Append-only ordinals 29–30 (req_3589): structural seat verbs that were
+    // already native journal transactions but lacked action-stream identities.
+    connect_vertices,
+    bevel,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -152,6 +156,9 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "extrude edge", .extrude_edge },
         .{ "create face", .create_face },
         .{ "loop cut", .loop_cut },
+        .{ "connect vertices", .connect_vertices },
+        .{ "bevel edge", .bevel },
+        .{ "bevel vertex", .bevel },
         .{ "symmetrize", .symmetrize },
         .{ "delete selection", .delete_selection },
         .{ "delete part", .delete_part },
@@ -232,6 +239,8 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .integrity_alert => "model.mesh.integrity-alert",
         .tris_to_quads => "model.mesh.tris-to-quads",
         .uv_atlas_resize => "model.uv.resize-atlas",
+        .connect_vertices => "model.mesh.connect-vertices",
+        .bevel => "model.mesh.bevel",
     };
 }
 
@@ -258,6 +267,8 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .split_quads,
         .symmetrize,
         .tris_to_quads,
+        .connect_vertices,
+        .bevel,
         => true,
         .hide_part,
         .show_part,

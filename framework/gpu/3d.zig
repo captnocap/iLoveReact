@@ -1145,6 +1145,11 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     else
         null;
     defer if (old_semantic_instances) |rows| std.heap.c_allocator.free(rows);
+    const old_semantic_table: ?[]u8 = if (model_source.semanticTableJson()) |json|
+        (std.heap.c_allocator.dupe(u8, json) catch null)
+    else
+        null;
+    defer if (old_semantic_table) |json| std.heap.c_allocator.free(json);
     // Part ranges are pure authored-group-id spans — they survive every EDIT replace
     // (retain() clears them, which is right for a fresh LOAD but was silently destroying
     // the outliner's part identity on every topology op; req_2644). Ops that change the
@@ -1171,7 +1176,18 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // replacements with a different face count install their explicit provenance.
     if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
     if (old_semantic_regions) |regions| if (old_semantic_instances) |instances| {
-        if (regions.len == count / 3 and instances.len == count / 3) _ = model_source.setFaceSemantics(regions, instances);
+        if (regions.len == count / 3 and instances.len == count / 3) {
+            if (old_semantic_table) |table| {
+                _ = model_source.setSemanticState(regions, instances, table);
+            } else _ = model_source.setFaceSemantics(regions, instances);
+        } else if (old_semantic_table) |table| {
+            // A topology-growing caller installs its exact new rows immediately
+            // after this shared replacement. Keep the dictionary alive across
+            // retain() so those ids never become nameless in between or at commit.
+            _ = model_source.setSemanticTableJson(table);
+        }
+    } else if (old_semantic_table) |table| {
+        _ = model_source.setSemanticTableJson(table);
     };
     applyCarriedFaceColors(old_colors, count / 3);
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
@@ -1203,6 +1219,11 @@ fn replaceActiveEditMeshPreservingAtlas(
     else
         null;
     defer if (old_materials) |rows| std.heap.c_allocator.free(rows);
+    const old_semantic_table: ?[]u8 = if (model_source.semanticTableJson()) |json|
+        (std.heap.c_allocator.dupe(u8, json) catch null)
+    else
+        null;
+    defer if (old_semantic_table) |json| std.heap.c_allocator.free(json);
     const key = g_edit_key orelse return false;
     const edit_copy = std.heap.c_allocator.dupe(f32, new_verts[0..need]) catch return false;
     var edit_copy_adopted = false;
@@ -1227,6 +1248,7 @@ fn replaceActiveEditMeshPreservingAtlas(
     if (groups) |rows| model_source.setFaceGroups(rows);
     if (old_ranges) |ranges| model_source.setPartRanges(ranges);
     if (old_materials) |rows| if (rows.len == count / 3) model_source.setFaceMaterials(rows);
+    if (old_semantic_table) |table| _ = model_source.setSemanticTableJson(table);
     if (!applyExactSourceFaceColors(colors, count / 3)) return false;
     // setTargetPreservingAtlas can only retain opacity by the old displayed index.
     // Indexed subset/reorder installs provide the exact parented colour table, so
@@ -1806,6 +1828,8 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const materials = captureFaceMaterials(old_faces + added / 3) orelse return false;
     defer std.heap.c_allocator.free(materials);
     @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
+    var semantics = captureFaceSemantics(old_faces + added / 3) orelse return false;
+    defer semantics.deinit();
     const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("create face");
@@ -1817,6 +1841,11 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             return false;
         }
         model_source.setFaceMaterials(materials);
+        if (!model_source.setFaceSemantics(semantics.regions, semantics.instances)) {
+            if (snap) |*before| _ = journalInstall(before);
+            journalDiscard(&snap);
+            return false;
+        }
         // Create Face hands the next edit to its result: Face mode + exactly the new
         // authored face selected, so X can reverse an unlucky winding immediately.
         _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
@@ -2029,6 +2058,49 @@ pub fn meshTopoLoopCut() bool {
         journalCommit(&snap);
     } else journalDiscard(&snap);
     return ok;
+}
+
+/// Split the one authored face shared by exactly two selected, non-adjacent
+/// welded vertices. The new diagonal becomes the selected editable edge.
+pub fn meshTopoConnectVertices() bool {
+    if (g_lc != null or g_bevel != null or g_quadify != null or !model_paint.hasTarget()) return false;
+    var selected: [2]u32 = undefined;
+    if (mesh_edit.selectedVerticesPub(selected[0..]) != 2) return false;
+    const a = mesh_edit.vertPosPub(selected[0]);
+    const b = mesh_edit.vertPosPub(selected[1]);
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const base_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(base_colors);
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const groups_arg: ?[]const u32 = if (groups) |rows| rows else null;
+    const parts_arg: ?[]const u32 = if (parts) |rows| rows else null;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
+    defer indexed.deinit();
+    if (!(indexed.connectVertices(selected[0], selected[1]) catch return false)) return false;
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
+
+    var snap = journalSnapshotCurrent("connect vertices");
+    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
+    if (!ok) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (parts != null) renormalizePartRanges(lowered.parts, hostPartCount());
+    adoptIndexedEditMesh(&indexed, &lowered);
+    _ = selectWeldedEdgeAt(a, b);
+    mesh_edit.setMode(.edge);
+    journalCommit(&snap);
+    return true;
 }
 
 // ── Symmetrize + symmetry check (the studio's req_1190/1191/1192, host-native — req_2831) ──
@@ -8211,6 +8283,11 @@ pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
     if (g_paint_session) return false; // req_2662: selection doors are inert in paint mode
     return mesh_edit.selectFaceByIndex(idx, additive);
 }
+/// Select a welded vertex by stable topology index (no raycast).
+pub fn meshEditSelectVertex(idx: u32, additive: bool) bool {
+    if (g_paint_session) return false;
+    return mesh_edit.selectVertexByIndex(idx, additive);
+}
 /// Collect every UV island whose projection direction matches the currently
 /// selected authored face. Returns the resulting authored-face count.
 pub fn meshEditSelectUvOrientation() i32 {
@@ -8628,9 +8705,63 @@ pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
     }
     return painted;
 }
+
+/// Journaled solid-colour fill of the current authored-face selection. This is
+/// the coordinate-free paint boundary used by automation: selection supplies the
+/// noun, RGB supplies the material fact, and no viewport raycast is involved.
+pub fn meshPaintSelection(r: u8, g: u8, b: u8) u32 {
+    if (g_paint_layout_stale or !model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
+    const face_count = g_edit_count / 3;
+    if (face_count == 0) return 0;
+    const mask = jalloc.alloc(bool, face_count) catch return 0;
+    defer jalloc.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
+    var snap = journalSnapshotCurrent("paint faces");
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    var painted: u32 = 0;
+    for (mask, 0..) |selected, face| {
+        if (!selected) continue;
+        model_paint.paintFaceRgb(@intCast(face), .{ r, g, b });
+        model_source.writeColor(@intCast(face), r, g, b);
+        painted += 1;
+    }
+    if (painted == 0) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    journalCommit(&snap);
+    return painted;
+}
 /// Select an edge by welded-edge index (no raycast) — programmatic / headless.
 pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {
     return mesh_edit.selectEdgeByIndex(idx, additive);
+}
+
+/// On-demand topology vocabulary for agents. Indices are explicitly ephemeral:
+/// callers re-read this after every topology generation instead of retaining them.
+pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
+    if (!model_paint.hasTarget() or !mesh_edit.ensureTopologyPub()) return null;
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.writeAll("{\"vertices\":[") catch return null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const p = mesh_edit.vertPosPub(vertex);
+        writer.print("{s}{s}\"id\":{d},\"at\":[{d},{d},{d}]}}", .{ if (vertex == 0) "" else ",", "{", vertex, p[0], p[1], p[2] }) catch return null;
+    }
+    writer.writeAll("],\"edges\":[") catch return null;
+    var emitted: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        if (!mesh_edit.edgeIsBoundaryPub(edge)) continue;
+        const endpoints = mesh_edit.edgeEndpointsPub(edge);
+        writer.print("{s}{s}\"id\":{d},\"vertices\":[{d},{d}]}}", .{ if (emitted == 0) "" else ",", "{", edge, endpoints[0], endpoints[1] }) catch return null;
+        emitted += 1;
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
 }
 pub fn meshEditReset() void {
     mesh_edit.reset();

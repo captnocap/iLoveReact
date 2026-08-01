@@ -60,6 +60,8 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ journal_log.UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload, "model.uv.reload-texture" },
         .{ "tris to quads", .tris_to_quads, "model.mesh.tris-to-quads" },
         .{ journal_log.UV_ATLAS_RESIZE_LABEL, .uv_atlas_resize, "model.uv.resize-atlas" },
+        .{ "connect vertices", .connect_vertices, "model.mesh.connect-vertices" },
+        .{ "bevel edge", .bevel, "model.mesh.bevel" },
     };
     // integrity_alert is the one action-ring diagnostic that is not minted from
     // a journal label; every actual mutation kind must appear above.

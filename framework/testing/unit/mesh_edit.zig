@@ -916,6 +916,40 @@ test "merge faces rejects mixed material identity" {
     try testing.expectEqualSlices(u32, materials[0..], lowered.materials);
 }
 
+test "merge faces turns conflicting semantic names into explicit debt" {
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const corners = [6][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    for (corners, 0..) |position, corner| {
+        const base = corner * 8;
+        @memcpy(soup[base .. base + 3], position[0..]);
+    }
+    const groups = [_]u32{ 0, 1 };
+    const parts = [_]u32{ 0, 0 };
+    const materials = [_]u32{ 3, 3 };
+    const regions = [_]u32{ 7, 9 };
+    const instances = [_]u32{ 0, 0 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithSemantics(
+        testing.allocator,
+        soup[0..],
+        2,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+        regions[0..],
+        instances[0..],
+    );
+    defer indexed.deinit();
+    const selected = [_]bool{ true, true };
+    try testing.expect(try indexed.mergeSelected(selected[0..]));
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    for (lowered.semantic_regions) |region| try testing.expectEqual(indexed_edit_mesh.NO_SEMANTIC_ID, region);
+    for (lowered.semantic_instances) |instance| try testing.expectEqual(indexed_edit_mesh.NO_SEMANTIC_ID, instance);
+}
+
 test "merge faces rejects a connected bent surface without changing its topology" {
     // Both authored quads point generally the same way and share one full edge, but
     // the second rises out of the first quad's plane. The old 0.5 normal-dot gate
@@ -1613,9 +1647,48 @@ test "bevel vertex selection boundary restores one part-owned welded index" {
     try testing.expectEqual(@as(?u32, 0), mesh_edit.selectedVertexPartPub());
     try testing.expect(mesh_edit.selectVertexByIndex(1, true));
     try testing.expect(mesh_edit.selectedVertexIndexPub() == null);
+    var selected: [2]u32 = undefined;
+    try testing.expectEqual(@as(u32, 2), mesh_edit.selectedVerticesPub(selected[0..]));
+    try testing.expectEqualSlices(u32, &.{ 0, 1 }, selected[0..]);
     mesh_edit.clearSelection();
     try testing.expect(mesh_edit.selectVertexByIndex(0, false));
     try testing.expectEqual(@as(?u32, 0), mesh_edit.selectedVertexIndexPub());
+}
+
+test "connect vertices splits one authored face and inherits its meaning" {
+    var soup = [_]f32{0} ** (12 * 3 * 8);
+    bevelCubeSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const parts = [_]u32{7} ** 12;
+    const materials = [_]u32{3} ** 12;
+    const regions = [_]u32{11} ** 12;
+    const instances = [_]u32{2} ** 12;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithSemantics(
+        testing.allocator,
+        soup[0..],
+        12,
+        groups[0..],
+        parts[0..],
+        materials[0..],
+        regions[0..],
+        instances[0..],
+    );
+    defer indexed.deinit();
+
+    const first = indexed.faces.items[0].vertices.items;
+    try testing.expectEqual(@as(usize, 4), first.len);
+    const a = first[0];
+    const adjacent = first[1];
+    const b = first[2];
+    try testing.expect(!(try indexed.connectVertices(a, adjacent)));
+    try testing.expect(try indexed.connectVertices(a, b));
+    try testing.expectEqual(@as(usize, 7), indexed.faces.items.len);
+    const split = &indexed.faces.items[6];
+    try testing.expectEqual(@as(u32, 7), split.part);
+    try testing.expectEqual(@as(u32, 3), split.material);
+    try testing.expectEqual(@as(u32, 11), split.semantic.region);
+    try testing.expectEqual(@as(u32, 2), split.semantic.instance);
+    try testing.expect(split.group >= 6);
 }
 
 test "indexed edge bevel replaces a sharp cube edge with one durable chamfer face" {

@@ -1502,11 +1502,14 @@ pub const Mesh = struct {
         if (selected[0] >= mesh.faces.items.len or !mesh.faces.items[selected[0]].alive) return false;
         const reference_part = mesh.faces.items[selected[0]].part;
         const reference_material = mesh.faces.items[selected[0]].material;
+        const reference_semantic = mesh.faces.items[selected[0]].semantic;
+        var semantic_conflict = false;
         var source_tessellation_valid = true;
         for (selected) |face_id| {
             if (face_id >= mesh.faces.items.len) return false;
             const face = &mesh.faces.items[face_id];
             if (!face.alive or face.part != reference_part or face.material != reference_material) return false;
+            semantic_conflict = semantic_conflict or !mesh_semantics.eql(face.semantic, reference_semantic);
             source_tessellation_valid = source_tessellation_valid and face.source_tessellation_valid;
         }
         if (!selectedFacesAreCoplanar(mesh, selected)) return false;
@@ -1577,6 +1580,9 @@ pub const Mesh = struct {
             }
         }
         target.source_tessellation_valid = source_tessellation_valid;
+        // Meaning may never be chosen arbitrarily. A merge across differently
+        // named surfaces becomes explicit naming debt for the agent to resolve.
+        if (semantic_conflict) target.semantic = .{};
         for (selected) |face_id| {
             if (face_id != target_id) mesh.faces.items[face_id].alive = false;
         }
@@ -2279,6 +2285,54 @@ pub const Mesh = struct {
         try out.source_triangles.appendSlice(mesh.allocator, source.source_triangles.items);
         if (out.vertices.items.len == 4) out.diagonal = chosenQuadDiagonal(mesh, &out);
         return out;
+    }
+
+    /// Connect two non-adjacent stable vertices that share one authored face.
+    /// The retained half keeps the source group; the second half receives a fresh
+    /// group while material, part, and semantic identity inherit from the source.
+    pub fn connectVertices(mesh: *Mesh, a: u32, b: u32) !bool {
+        if (a == b or a >= mesh.vertices.items.len or b >= mesh.vertices.items.len or
+            !mesh.vertices.items[a].alive or !mesh.vertices.items[b].alive) return false;
+        var face_id: u32 = 0;
+        while (face_id < mesh.faces.items.len) : (face_id += 1) {
+            const face = &mesh.faces.items[face_id];
+            if (!face.alive or face.vertices.items.len < 4) continue;
+            const ia = indexOf(face.vertices.items, a) orelse continue;
+            const ib = indexOf(face.vertices.items, b) orelse continue;
+            const count = face.vertices.items.len;
+            if ((ia + 1) % count == ib or (ib + 1) % count == ia) continue;
+
+            var source = try face.clone(mesh.allocator);
+            defer source.deinit(mesh.allocator);
+            var first_vertices = std.ArrayListUnmanaged(u32).empty;
+            defer first_vertices.deinit(mesh.allocator);
+            var first_uvs = std.ArrayListUnmanaged(Vec2).empty;
+            defer first_uvs.deinit(mesh.allocator);
+            var second_vertices = std.ArrayListUnmanaged(u32).empty;
+            defer second_vertices.deinit(mesh.allocator);
+            var second_uvs = std.ArrayListUnmanaged(Vec2).empty;
+            defer second_uvs.deinit(mesh.allocator);
+
+            var at = ia;
+            while (true) : (at = (at + 1) % count) {
+                try first_vertices.append(mesh.allocator, source.vertices.items[at]);
+                try first_uvs.append(mesh.allocator, source.uvs.items[at]);
+                if (at == ib) break;
+            }
+            at = ib;
+            while (true) : (at = (at + 1) % count) {
+                try second_vertices.append(mesh.allocator, source.vertices.items[at]);
+                try second_uvs.append(mesh.allocator, source.uvs.items[at]);
+                if (at == ia) break;
+            }
+            if (first_vertices.items.len < 3 or second_vertices.items.len < 3) return false;
+            try mesh.replaceFaceLoop(face_id, first_vertices.items, first_uvs.items);
+            var split = try mesh.makeSplitFace(&source, second_vertices.items, second_uvs.items);
+            errdefer split.deinit(mesh.allocator);
+            try mesh.faces.append(mesh.allocator, split);
+            return true;
+        }
+        return false;
     }
 
     fn replaceFaceLoop(mesh: *Mesh, face_id: u32, vertices: []const u32, uvs: []const Vec2) !void {

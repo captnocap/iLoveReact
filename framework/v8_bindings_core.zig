@@ -1173,6 +1173,15 @@ fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_connect_vertices() → JSON {"ok","key","count"}. Split the
+/// common authored face between exactly two selected non-adjacent vertices.
+fn hostMeshTopoConnectVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshTopoConnectVertices();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth"}. Capture
 /// exactly one selected sharp manifold edge or 3+-edge corner as a host-owned live
 /// preview session. Widths are metres; the Studio popup converts them to modeling u.
@@ -2225,6 +2234,18 @@ fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setReturnNumber(info, n);
 }
 
+/// __model_paint_selection(r,g,b) → painted face count. Coordinate-free,
+/// journaled fill of the current authored-face selection.
+fn hostModelPaintSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const changed = scene3d.meshPaintSelection(r, g, b);
+    if (changed > 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
 /// __mesh_edit_select_face(idx, additive) → bool. Select a face by index (no raycast) —
 /// programmatic selection (select-all / scripting) and the headless highlight proof.
 fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2232,6 +2253,17 @@ fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const idx: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
     const additive = (argToI32(info, 1) orelse 0) != 0;
     const ok = scene3d.meshEditSelectFace(idx, additive);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_edit_select_vertex(idx, additive) → bool. Programmatic welded-vertex
+/// selection for automation and headless topology tools.
+fn hostMeshEditSelectVertex(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const idx: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const additive = (argToI32(info, 1) orelse 0) != 0;
+    const ok = scene3d.meshEditSelectVertex(idx, additive);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -2255,6 +2287,14 @@ fn hostMeshEditSelectEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const ok = scene3d.meshEditSelectEdge(idx, additive);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_edit_elements() → on-demand stable-index vertex/edge descriptors.
+fn hostMeshEditElements(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = scene3d.meshEditElementsJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
 }
 
 /// __mesh_edit_guard() → JSON {"pending","bad","faces","canSplit"}. A pending guard
@@ -4284,6 +4324,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
+    v8_runtime.registerHostFn("__mesh_topo_connect_vertices", hostMeshTopoConnectVertices);
     v8_runtime.registerHostFn("__mesh_bevel_begin", hostMeshBevelBegin);
     v8_runtime.registerHostFn("__mesh_bevel_preview", hostMeshBevelPreview);
     v8_runtime.registerHostFn("__mesh_bevel_end", hostMeshBevelEnd);
@@ -4326,6 +4367,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
+    v8_runtime.registerHostFn("__mesh_edit_select_vertex", hostMeshEditSelectVertex);
     v8_runtime.registerHostFn("__mesh_edit_select_uv_orientation", hostMeshEditSelectUvOrientation);
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
@@ -4342,7 +4384,9 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
     v8_runtime.registerHostFn("__mesh_part_ranges", hostMeshPartRanges);
     v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
+    v8_runtime.registerHostFn("__model_paint_selection", hostModelPaintSelection);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
+    v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
     v8_runtime.registerHostFn("__mesh_symmetry_report", hostMeshSymmetryReport);

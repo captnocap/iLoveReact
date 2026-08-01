@@ -40,6 +40,8 @@ export const NATIVE_MESH_ACTIONS = [
   // Append-only ordinal 28 (req_3547): raster dimensions and normalized UVs
   // move through one journal transaction.
   { kind: 'uv-atlas-resize', label: 'resize UV atlas', commandId: 'model.uv.resize-atlas' },
+  { kind: 'connect-vertices', label: 'connect vertices', commandId: 'model.mesh.connect-vertices' },
+  { kind: 'bevel', label: 'bevel', commandId: 'model.mesh.bevel' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;
