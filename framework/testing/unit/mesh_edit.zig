@@ -147,6 +147,25 @@ test "follow patch records exact selected triangles and their next adjacency rin
     try testing.expect(std.mem.indexOf(u8, after, "\"vertices\":[0,1,2]") != null);
 }
 
+test "follow merge queue retains rapid native lessons and drains them exactly once" {
+    var queue: mesh_edit.FollowMergeQueue = .{};
+    defer queue.deinit(testing.allocator);
+
+    try queue.append(testing.allocator, 2, "{\"version\":1,\"selectedTriangles\":[4,5]}", "{\"version\":1,\"selectedTriangles\":[4,5],\"selectedGroups\":[77]}");
+    try queue.append(testing.allocator, 4, "{\"version\":1,\"selectedTriangles\":[6,7]}", "{\"version\":1,\"selectedTriangles\":[6,7],\"selectedGroups\":[78]}");
+
+    const first = try queue.drainJson(testing.allocator);
+    defer testing.allocator.free(first);
+    try testing.expect(std.mem.indexOf(u8, first, "\"source\":2") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"source\":4") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"selectedTriangles\":[4,5]") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"selectedTriangles\":[6,7]") != null);
+
+    const second = try queue.drainJson(testing.allocator);
+    defer testing.allocator.free(second);
+    try testing.expectEqualStrings("{\"version\":1,\"events\":[]}", second);
+}
+
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
     var verts = [_]f32{
         // Selected triangle: +Z winding, distinct UVs on every corner.

@@ -4624,12 +4624,6 @@ export default function AppFrame() {
   // verbs journal here; tris-to-quads opens the viewer-owned confirm/cancel preview.
   const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces' | 'tris-to-quads', source = 'dock') => {
     const api = modelToolApiRef.current;
-    // Follow records the user's exact native selection before Merge Faces clears
-    // it, then re-reads those same resident triangle ids with their committed group.
-    // The live Seat owns the session; AppFrame remains only the one human command
-    // entrance, so hotkeys, dock buttons, menus, and the palette cannot drift.
-    const follow = (globalThis as any).__agentSeat;
-    const pendingFollow = kind === 'merge-faces' ? follow?.beginFollowMerge?.(source) ?? null : null;
     let ok = false;
     let okMsg = '';
     let failMsg = '';
@@ -4654,7 +4648,6 @@ export default function AppFrame() {
       okMsg = 'scanning the whole topology for the maximum quad set — review the live dry run';
       failMsg = 'tris to quads: open a model in Face mode first';
     }
-    if (kind === 'merge-faces') follow?.finishFollowMerge?.(pendingFollow, ok);
     setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
   };
 

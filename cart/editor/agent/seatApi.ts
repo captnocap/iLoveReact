@@ -102,6 +102,10 @@ export type SeatFollowSession = {
   startedGeneration: number;
   examples: SeatFollowExample[];
 };
+type NativeFollowMergeDrain = {
+  version: 1;
+  events: { source: number; before: SeatFollowPatch; after: SeatFollowPatch }[];
+};
 export type SeatShellReceipt = { ok: boolean; result?: unknown; reason?: string };
 export type SeatRecipeReceipt = {
   ok: boolean;
@@ -391,10 +395,37 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       ? value
       : null;
   };
+  const drainNativeFollowMerges = (): number => {
+    const drained = parseJson<NativeFollowMergeDrain>(host.__mesh_follow_merge_drain?.());
+    if (!drained || drained.version !== 1 || !Array.isArray(drained.events)) return 0;
+    if (!followSession?.active) return 0;
+    const sourceNames = ['native', 'menu', 'hotkey', 'toolbar', 'dock', 'context-menu', 'palette', 'viewport', 'remote', 'automation'];
+    const examples = [...followSession.examples];
+    for (const event of drained.events) {
+      const source = sourceNames[Math.trunc(Number(event.source))] ?? 'native';
+      if (source === 'automation' || source === 'remote') continue;
+      if (event.before?.version !== 1 || event.after?.version !== 1 ||
+          !Array.isArray(event.before.selectedTriangles) || !Array.isArray(event.after.selectedTriangles)) continue;
+      examples.push({
+        index: examples.length + 1,
+        action: 'merge-faces',
+        source,
+        at: Date.now(),
+        before: event.before,
+        after: event.after,
+      });
+    }
+    if (examples.length !== followSession.examples.length) storeFollow({ ...followSession, examples });
+    return examples.length - followSession.examples.length;
+  };
   const follow = (operation: string, args: Record<string, unknown> = {}): SeatShellReceipt => {
     if (operation === 'start') {
       const live = look();
       if (!live) return { ok: false, reason: 'no live mesh to follow' };
+      // A Follow session observes only work performed after READY. Native capture
+      // is a queue so rapid UI commands cannot overwrite one another; clear any
+      // pre-session residue before opening this transcript.
+      host.__mesh_follow_merge_drain?.();
       const state: SeatFollowSession = {
         version: 1,
         id: Date.now(),
@@ -407,16 +438,21 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       storeFollow(state);
       return { ok: true, result: state };
     }
-    if (operation === 'read') return followSession
-      ? { ok: true, result: followSession }
-      : { ok: false, reason: 'no Follow demonstration has been started' };
+    if (operation === 'read') {
+      drainNativeFollowMerges();
+      return followSession
+        ? { ok: true, result: followSession }
+        : { ok: false, reason: 'no Follow demonstration has been started' };
+    }
     if (operation === 'stop') {
       if (!followSession) return { ok: false, reason: 'no Follow demonstration has been started' };
+      drainNativeFollowMerges();
       const state = { ...followSession, active: false, stoppedAt: Date.now() };
       storeFollow(state);
       return { ok: true, result: state };
     }
     if (operation === 'clear') {
+      host.__mesh_follow_merge_drain?.();
       storeFollow(null);
       return { ok: true, result: { cleared: true } };
     }
@@ -427,28 +463,6 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         : { ok: false, reason: 'Follow inspect needs a live face selection or valid resident triangle ids' };
     }
     return { ok: false, reason: `unknown Follow operation "${operation}"` };
-  };
-  type PendingFollowMerge = { sessionId: number; source: string; at: number; before: SeatFollowPatch };
-  const beginFollowMerge = (source: string): PendingFollowMerge | null => {
-    if (!followSession?.active || source === 'seat' || source === 'automation' || source === 'remote') return null;
-    const before = followPatch(undefined, 2);
-    if (!before || before.selectedTriangles.length < 2) return null;
-    return { sessionId: followSession.id, source, at: Date.now(), before };
-  };
-  const finishFollowMerge = (pending: PendingFollowMerge | null, accepted: boolean): boolean => {
-    if (!pending || !accepted || !followSession?.active || followSession.id !== pending.sessionId) return false;
-    const after = followPatch(pending.before.selectedTriangles, 2);
-    if (!after) return false;
-    const example: SeatFollowExample = {
-      index: followSession.examples.length + 1,
-      action: 'merge-faces',
-      source: pending.source,
-      at: pending.at,
-      before: pending.before,
-      after,
-    };
-    storeFollow({ ...followSession, examples: [...followSession.examples, example] });
-    return true;
   };
   const selectEdge = (index: number, additive = false): boolean =>
     Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
@@ -777,7 +791,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
-    look, elements, follow, followPatch, beginFollowMerge, finishFollowMerge,
+    look, elements, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,

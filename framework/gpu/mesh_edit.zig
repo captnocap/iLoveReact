@@ -519,6 +519,77 @@ const FollowEdgeUse = struct {
     count: u32 = 1,
 };
 
+pub const FOLLOW_MERGE_CAP: usize = 64;
+
+pub const FollowMergeQueue = struct {
+    const Record = struct {
+        source: u8,
+        before: []u8,
+        after: []u8,
+    };
+
+    records: std.ArrayListUnmanaged(Record) = .empty,
+
+    pub fn deinit(queue: *FollowMergeQueue, allocator: std.mem.Allocator) void {
+        queue.clear(allocator);
+        queue.records.deinit(allocator);
+    }
+
+    pub fn clear(queue: *FollowMergeQueue, allocator: std.mem.Allocator) void {
+        for (queue.records.items) |record| {
+            allocator.free(record.before);
+            allocator.free(record.after);
+        }
+        queue.records.clearRetainingCapacity();
+    }
+
+    /// Retain every accepted native Merge Faces lesson until Follow reads it.
+    /// The queue, rather than a single "last merge" slot, is load-bearing: a user
+    /// can complete several quick strips between React/CLI polling beats.
+    pub fn append(
+        queue: *FollowMergeQueue,
+        allocator: std.mem.Allocator,
+        source: u8,
+        before: []const u8,
+        after: []const u8,
+    ) !void {
+        const owned_before = try allocator.dupe(u8, before);
+        errdefer allocator.free(owned_before);
+        const owned_after = try allocator.dupe(u8, after);
+        errdefer allocator.free(owned_after);
+        if (queue.records.items.len == FOLLOW_MERGE_CAP) {
+            const dropped = queue.records.orderedRemove(0);
+            allocator.free(dropped.before);
+            allocator.free(dropped.after);
+        }
+        try queue.records.append(allocator, .{
+            .source = source,
+            .before = owned_before,
+            .after = owned_after,
+        });
+    }
+
+    /// One destructive read: once JS has accepted these lessons into the hot
+    /// Follow session, the native queue no longer owns a second copy.
+    pub fn drainJson(queue: *FollowMergeQueue, allocator: std.mem.Allocator) ![]u8 {
+        var out: std.Io.Writer.Allocating = .init(allocator);
+        errdefer out.deinit();
+        const writer = &out.writer;
+        try writer.writeAll("{\"version\":1,\"events\":[");
+        for (queue.records.items, 0..) |record, index| {
+            try writer.print("{s}{{\"source\":{d},\"before\":{s},\"after\":{s}}}", .{
+                if (index == 0) "" else ",",
+                record.source,
+                record.before,
+                record.after,
+            });
+        }
+        try writer.writeAll("]}");
+        queue.clear(allocator);
+        return out.toOwnedSlice();
+    }
+};
+
 /// Exact, read-only topology vocabulary for an Agent Seat Follow demonstration.
 ///
 /// A merge-faces example does not move resident triangles; it changes only their

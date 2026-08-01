@@ -70,16 +70,21 @@ test('Follow records the exact native Merge Faces selection before and after its
     ],
     frontier: [{ vertices: [11, 12], inside: 4, outside: 6, nonManifold: false }],
   });
-  (globalThis as any).__mesh_follow_patch = (faces?: Uint32Array) => JSON.stringify(faces ? patch(77) : patch(31));
+  let nativeEvents: any[] = [];
+  (globalThis as any).__mesh_follow_merge_drain = () => {
+    const events = nativeEvents;
+    nativeEvents = [];
+    return JSON.stringify({ version: 1, events });
+  };
   let stored: any = null;
   const seat = createAgentSeat({ followState: { read: () => stored, write: (value) => { stored = value; } } });
 
   const started = executeSeatRequest(seat, { action: 'follow', args: { operation: 'start', label: 'torso strips' } });
   assert(started.ok && stored?.active === true, 'Follow did not enter its real recording state');
-  assert(seat.beginFollowMerge('automation') === null, 'automation was recorded as the user demonstration');
-  const pending = seat.beginFollowMerge('hotkey');
-  assert(!!pending && pending.before.selectedTriangles.join(',') === '4,5', 'Follow lost the user selection before Merge Faces');
-  assert(seat.finishFollowMerge(pending, true), 'accepted native merge did not commit an example');
+  nativeEvents.push(
+    { source: 9, before: patch(20), after: patch(21) },
+    { source: 2, before: patch(31), after: patch(77) },
+  );
 
   const read = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read' } });
   const session = read.result as any;

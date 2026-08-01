@@ -4101,6 +4101,7 @@ var g_mesh_action_seq: u32 = 0;
 var g_mesh_action_dropped: u32 = 0;
 var g_mesh_action_document_token: u32 = 0;
 var g_mesh_action_source: mesh_journal_log.ActionSource = .native;
+var g_follow_merge_queue: mesh_edit.FollowMergeQueue = .{};
 
 fn partCountFromRanges(ranges: ?[]const u32) u32 {
     return if (ranges) |rows| @intCast(rows.len / 2) else 0;
@@ -4599,6 +4600,7 @@ pub fn meshJournalClear() void {
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
     g_mesh_action_source = .native;
+    g_follow_merge_queue.clear(jalloc);
 }
 
 pub fn meshJournalNoteSet(note: []const u8) bool {
@@ -5663,7 +5665,30 @@ pub fn meshMergeSelectedFaces() bool {
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.mergeSelected(mask) catch return false)) return false;
-    return commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces");
+    var selected_count: usize = 0;
+    for (mask) |selected| if (selected) {
+        selected_count += 1;
+    };
+    const selected_faces = std.heap.c_allocator.alloc(u32, selected_count) catch return false;
+    defer std.heap.c_allocator.free(selected_faces);
+    var selected_at: usize = 0;
+    for (mask, 0..) |selected, face| {
+        if (!selected) continue;
+        selected_faces[selected_at] = @intCast(face);
+        selected_at += 1;
+    }
+    const before = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return false;
+    defer std.heap.c_allocator.free(before);
+    if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces")) return false;
+    const after = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return true;
+    defer std.heap.c_allocator.free(after);
+    g_follow_merge_queue.append(
+        std.heap.c_allocator,
+        @intFromEnum(g_mesh_action_source),
+        before,
+        after,
+    ) catch {};
+    return true;
 }
 
 // ── Whole-topology triangle → quad dry-run session ────────────────────────────
@@ -8875,6 +8900,14 @@ pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
 pub fn meshFollowPatchJson(allocator: std.mem.Allocator, faces: ?[]const u32, rings: u32) ?[]u8 {
     if (!model_paint.hasTarget()) return null;
     return mesh_edit.followPatchJson(allocator, faces, rings);
+}
+
+/// Drain every successful native Merge Faces lesson since the previous read.
+/// Capture lives in the transaction itself, so toolbar/menu/hotkey/viewport routes
+/// cannot bypass Follow and rapid consecutive demonstrations cannot overwrite one
+/// another before the agent reads them.
+pub fn meshFollowMergeDrainJson(allocator: std.mem.Allocator) ?[]u8 {
+    return g_follow_merge_queue.drainJson(allocator) catch null;
 }
 pub fn meshEditReset() void {
     mesh_edit.reset();
