@@ -60,19 +60,39 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 
 ## Verb table — the complete surface
 
-Fourteen actions. There are no others; `tools/seat <anything-else>` exits 2.
+These are the only actions; `tools/seat <anything-else>` exits 2.
 
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
 | `tools/seat look` | `{"action":"look"}` | Returns percept. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
 | `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
+| `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
+| `tools/seat select-vertex <id> [+]` | `{"action":"select-vertex","args":{"index":2,"additive":true}}` | Select vertex ids returned by `elements`. |
 | `tools/seat name <name> [instance]` | `{"action":"name","args":{"name":"…","instance":0}}` | Names the current selection, role `authored`. |
 | `tools/seat extrude <dist> <name> [instance]` | `{"action":"extrude","args":{"distance":0.2,"name":"roof","instance":0}}` | Creates `<name>.cap` + `<name>.wall`. |
+| `tools/seat extrude-edge <dist>` | `{"action":"extrude-edge","args":{"distance":0.1}}` | Extends exactly one selected edge; inherits source meaning. |
+| `tools/seat connect` | `{"action":"connect"}` | Connect exactly two selected non-adjacent vertices across one face. |
+| `tools/seat create-face <name>` | `{"action":"create-face","args":{"name":"bridge"}}` | Fill a closed 3/4-edge loop or bridge two disjoint edges; naming required. |
+| `tools/seat bevel <width>` | `{"action":"bevel","args":{"width":0.02}}` | Atomic native bevel session on one edge or vertex. Meters. |
+| `tools/seat inset …` | `{"action":"inset","args":{"distance":0.001,"name":"panel","pivot":[0,0.5,0],"axes":[[1,0,0],[0,0,1]],"factors":[0.6,0.7]}}` | Packages hairline extrude + two-axis shrink; see Inset. |
 | `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. |
 | `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":1.2}}` | Scales along one axis about a pivot. |
 | `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
 | `tools/seat undo` | `{"action":"undo"}` | |
 | `tools/seat redo` | `{"action":"redo"}` | |
+| `tools/seat delete` | `{"action":"delete"}` | Delete the selected faces, or faces touching selected edges/vertices. |
+| `tools/seat merge-faces` | `{"action":"merge-faces"}` | Merge 2+ compatible selected faces. |
+| `tools/seat weld` | `{"action":"weld"}` | Weld selected vertices; one selected edge collapses its endpoints. |
+| `tools/seat solidify <thickness>` | `{"action":"solidify","args":{"thickness":0.03}}` | Add inner skin and rim walls. Meters. |
+| `tools/seat detach <name>` | `{"action":"detach","args":{"name":"roof"}}` | Detach selected faces into a named Outliner part. |
+| `tools/seat flip` | `{"action":"flip"}` | Reverse selected face winding. |
+| `tools/seat glass` | `{"action":"glass"}` | Toggle glass on selected faces. |
+| `tools/seat paint r g b` | `{"action":"paint","args":{"rgb":[180,40,20]}}` | Journaled solid RGB fill of selected faces; bytes 0–255. |
+| `tools/seat atlas <template\|solid\|blank> [r g b] [detail]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"detail":16}}` | Explicitly rebuild a stale paint atlas after topology edits. |
+| `tools/seat material <slot\|clear>` | `{"action":"material","args":{"slot":2}}` | Assign/clear an existing texture-role slot on selected faces. |
+| `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
+| `tools/seat save` | `{"action":"save"}` | Full package save: RJMD v4 geometry + semantic table + parts + paint metadata. |
 | `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a resident primitive as a named part. **Meters.** |
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize; `-` keeps the −side. |
@@ -179,31 +199,31 @@ returns 14 copies of everything. Pipe through a compact reader when driving long
 sessions. `formatSeatPercept()` is exported from `seatApi.ts` and renders exactly this
 digest, but **the CLI does not call it** — it prints raw JSON.
 
-Each extrude adds exactly **+8 faces** (2 cap faces become 2 new cap + 8 wall).
+Extruding one authored quad adds **+8 render faces** (2 cap triangles remain plus 8 wall triangles).
 
 ---
 
 ## Recipes
 
-### Inset — the two-stage move (there is no `inset` verb)
+### Inset — packaged two-stage move
 
 **The trap:** extruding a face and then scaling its cap turns the *entire face* into a
 tapered pyramid, because the wall connects the original full perimeter straight to the
 shrunken cap. This is silent and looks plausible until rendered.
 
-**The fix** — extrude a hairline first, so the shrink happens across ~zero depth and the
-wall becomes a *flat ring* in the original plane. Then extrude again for real depth:
+**The fix** — `inset` extrudes a hairline first, then shrinks its selected cap along two
+explicit in-plane axes. The wall becomes a flat ring in the original plane. Its CLI shape is:
+
+```bash
+tools/seat inset <hairline> <name> px py pz a1x a1y a1z f1 a2x a2y a2z f2 [ox oy oz]
+```
+
+Example on an X-facing face (shrink Y and Z, then offset the footprint):
 
 ```bash
 # 1. flat inset ring: the panel stays flat, cap becomes the feature footprint
-tools/seat do '[
-  {"action":"select","args":{"selector":"right"}},
-  {"action":"extrude","args":{"distance":0.001,"name":"rightPanel"}},
-  {"action":"select","args":{"selector":"rightPanel.cap"}},
-  {"action":"scale","args":{"axis":[0,1,0],"pivot":[0,0.475,0],"factor":0.27}},
-  {"action":"scale","args":{"axis":[0,0,1],"pivot":[0,0,0],"factor":0.47}},
-  {"action":"move","args":{"delta":[0,-0.055,-0.1]}}
-]'
+tools/seat select right
+tools/seat inset 0.001 rightPanel 0 0.475 0  0 1 0 0.27  0 0 1 0.47  0 -0.055 -0.1
 # 2. now pull the real feature — a crisp nub on a flat panel
 tools/seat do '[
   {"action":"select","args":{"selector":"rightPanel.cap"}},
@@ -213,6 +233,10 @@ tools/seat do '[
 
 `rightPanel.wall` is the flat panel; `knob.wall` is the barrel. Name the pair for what the
 **wall** will mean, because the cap gets consumed (below).
+
+Inset is intentionally a compound recipe, not invented geometry. Its native extrude and
+transforms remain separate undo units; if a transform rejects, the seat rewinds every unit
+it applied. Bevel, connect, cut, and the other topology verbs are single native journal units.
 
 A **recess** is the same shape inverted: inset ring, extrude hairline, then `move` the cap
 *into* the body. That yields crisp square-sided recesses; scaling a cap after a real
@@ -236,13 +260,13 @@ Scaling a cap about an off-centre pivot collapses it *toward that point*. That i
 position a small feature on a large face — shrink to size about the face centre, then
 `move` to the target centre, or scale directly about the target.
 
-### One face yields one feature chain
+### Split before parallel features
 
-Nothing in the seat subdivides a face, so two side-by-side features on one flat face are
-**not reachable** — features nest concentrically instead. Work around it by *building* a
-new surface (extrude a raised sub-form, then use `inside:box` to isolate its front wall)
-and putting the second feature there. `__mesh_topo_loop_cut` would remove this limit
-entirely but is not exposed; see below.
+Use `cut` for ordered bands, or `elements` → two `select-vertex` calls → `connect` to split
+one authored face along a chosen diagonal. Use `create-face` to bridge disjoint selected
+edges. Re-run `elements` after every topology mutation: vertex/edge indices are reachable
+handles, not durable memory. Name the resulting face selection immediately when its meaning
+differs from the inherited source region.
 
 ---
 
@@ -259,6 +283,8 @@ entirely but is not exposed; see below.
 - Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
   (`DEFAULT_NAMING_DEBT_BUDGET`). Prefer naming everything; the budget is a backstop.
 - `name` assigns the current selection to a region with role `authored`.
+- `create-face <name>` creates then names the selected result. Those are two undo units;
+  all native geometry and its semantic table still persist together on `save`.
 - The `instance` argument exists on `name`/`extrude` and the percept reports an
   `instances` count per region, **but no verb duplicates geometry** — the seat cannot
   create an instance. Do not plan around instancing.
@@ -299,29 +325,31 @@ mesh.
 
 ## What the seat cannot do
 
-The editor underneath is far larger than the seat. The host declares **95 `__mesh_*`
-doors and the seat uses 11**; alongside them `cart/editor/model/editMesh.ts` is a ~2900-line
-modeling kernel. None of the following is reachable from the seat today. **Do not search for
-a way in — there isn't one. Tell the user what is missing and offer to build the verb.**
+The editor underneath is larger than the seat. None of the following is reachable from the
+seat today. Do not invent a pixel gesture or parallel mesh path; report the boundary and
+offer to add a resident verb.
 
 | Want | Status | Resident implementation |
 |---|---|---|
 | Scope control (which part ops apply to) | **No verb** | Native `__mesh_edit_scope`, `__mesh_edit_scope_ranges`. See the SCOPE trap above — this is the most likely cause of a "broken" verb. |
 | Parts in the percept | **Not reported** | `add` creates parts, but the percept stays face-regions only, so a cold `look` cannot see part structure. Native `__mesh_part_ranges`. |
-| Inset | **No verb** | Use the two-stage recipe above. |
-| Bevel / chamfer | **No verb** | `bevelEdge`, `bevelVertex`; native `__mesh_bevel_begin/preview/end`. Scaling a cap only *fakes* a chamfer. |
-| Edge or vertex selection | **No verb** | Selection is face-only. `extrudeEdge`, `connectVerts`, `bridgeEdges` exist unexposed. |
-| Delete / merge / weld / solidify / detach / flip | **No verb** | `deleteFaces`, `mergeFaces`, `solidifyFaces`, `detachPanel`, `flipFace`; native `__mesh_topo_*` equivalents. |
-| Save / persist the model | **No verb** | Native `__mesh_journal_checkpoint`, `__mesh_journal_note`. Hot state survives reload; a **cold restart resets it**. Semantic names are LIVE-ONLY — they do not currently ride the saved blob. |
-| UV / paint / materials | **No verb** | Extensive `__mesh_paint_*` and texture-slot doors exist. |
+| Compound/set-algebra selectors | **No verb** | No `name & facing:+z`; select a durable name, then use cuts or element topology to narrow it. |
+| Freehand/pixel paint | **No verb** | Seat paint is coordinate-free face fill. Camera-dependent brush strokes remain human tools. |
+| Texture-role creation/removal | **No verb** | `material` assigns or clears slots already authored in the Rig panel. |
+| Full UV layout editing | **Partial** | Restore, auto-size, and project-from-view are exposed; island dragging/packing/numeric corner edits remain panel tools. |
 
-Consequences to accept rather than fight: forms are still mostly **box-derived** between
-`add`ed parts (no inset/bevel verb), and part structure is invisible to a cold `look`.
+Part structure remains invisible to a cold `look`; face semantics do not. `save` persists
+the RJMD v4 semantic membership and name table with the geometry, so a cold restart retains
+the names shown by the percept.
+
+Structural topology marks the current paint layout stale. Run `atlas` before `paint`, then
+`save`; this is the same explicit “Remake Atlas” decision as the visible editor and prevents
+old UVs from being silently endorsed against new geometry.
 
 ### Why naming everything matters beyond your own session
 
-Named regions are not just agent memory. The long-term intent (req_3588) is for the
-semantics to ride the model **blob** so that **skinning** can lean on them: a mesh whose
+Named regions are not just agent memory. RJMD v4 carries the semantics in the model
+**blob**, so later **skinning** can lean on them: a mesh whose
 surfaces are already named is far cheaper to skin from a UV than one that arrives as
 anonymous faces. Name honestly and specifically even when the current session would not
 need it — you are authoring the input to a later rig, not just a handle for yourself.
