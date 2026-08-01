@@ -32,7 +32,7 @@ the agent the same removal.
 
 The survey that grounds this design. Nearly every part is already built and
 shipping — they were built for humans, for tests, and for hot reload, and they
-happen to be exactly the five organs a seat needs.
+happen to be exactly the organs a seat needs.
 
 | Organ | What's there today | File |
 |---|---|---|
@@ -52,39 +52,113 @@ already runs.**
 
 ---
 
-## The actual gap (the whole design turns on this)
+## The actual gap — corrected (req_3576)
 
-Look at the shape of every tool verb:
+> **An earlier draft of this document said: *"An agent has no hand. It cannot
+> click a face and it cannot drag a gizmo. That is the entire reason this doesn't
+> already work."* That was wrong, and wrong in a way that mattered — it made a
+> narrowing sound like a law of nature.** The user's objection: *every operation
+> is on a specific id or index; a gizmo is three axes, bidirectional, with a step
+> distance. Nothing magical.* The code agrees with the user. What follows is the
+> corrected account.
 
-```ts
-extrudeFace: () => void;
-loopCut: () => void;
-bevel: () => void;
-weld: () => void;
-solidifySelection: () => boolean;
+### Selection was never the problem
+
+```
+__mesh_edit_select_face(index, additive)      __mesh_edit_select_edge(index, additive)
+__mesh_edit_select_vertex(index, additive)    __mesh_edit_select_group_range(lo, hi, additive)
 ```
 
-**No arguments.** Every one of them gets its two essential inputs from your hand:
+Selection by index and by range has always been callable. Clicking is one input
+method for producing an index; it is not the only one, and it never was. Part 1
+(selectors) and part 2 (names) exist because **indices are unstable and
+meaningless**, not because they're unreachable.
 
-- **the noun** — *what* to operate on — comes from the live host selection you
-  made by clicking in the viewport
-- **the amount** — *how far* — comes from dragging a gizmo, or from a host-owned
-  live popup (`bevel` literally opens one)
+### The transform core is fully general — and always was
 
-An agent has no hand. It cannot click a face and it cannot drag a gizmo. That —
-not topology, not file formats, not model capability — is the entire reason this
-doesn't already work.
-
-The repo has already solved this twice, deliberately, for tests:
+`framework/gpu/mesh_edit.zig`:
 
 ```zig
-/// __mesh_gizmo_nudge(axis, amount) → bool. Headless/test hook: translate the
-/// active selection along X/Y/Z without needing a mouse drag or captured camera.
+pub fn translateSelection(delta: [3]f32) Mutation
+pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor: f32) Mutation
+pub fn scaleSelectionUniform(pivot: [3]f32, factor: f32) Mutation
+pub fn rotateSelectionAxis(axis: [3]f32, pivot: [3]f32, radians: f32) Mutation
 ```
 
-`__mesh_gizmo_scale_by(factor)` is the same idea. **The seat is the completion of
-a pattern the codebase already started** — extend "parameterized, camera-free" from
-two ops to all of them, and add a way to name the selection.
+**Arbitrary axis vectors. Arbitrary pivots. Arbitrary deltas.** Unit-tested
+(`:3039` *"axis scale and rotate operate around the selection pivot"*). This is
+strictly more general than "three bidirectional directions with a step" — the
+gizmo is a **restriction** of this API, not its source.
+
+### The real shape of the problem: three layers, each narrower than the one below
+
+| layer | what it can express | example |
+|---|---|---|
+| **Zig transform core** | arbitrary axis + arbitrary pivot + arbitrary magnitude | `rotateSelectionAxis(axis[3], pivot[3], radians)` |
+| **Host doors (JS)** | narrowed to what a screen gizmo can show | `__mesh_gizmo_nudge(axis ∈ {0,1,2}, amount)` — one **world** axis; pivot implicit; **rotate not exposed at all** |
+| **`ModelToolApi` (buttons)** | zero-arg; magnitude hardcoded | `extrudeFace: () => applyTopo(meshExtrudeFace(model.radius * 0.08))` |
+
+Each step down was a deliberate narrowing **to fit a mouse.** The agent isn't
+missing hands; it is being handed the mouse-shaped API while the general one sits
+one `registerHostFn` line away.
+
+### The honest ledger
+
+**Already fully parameterized and callable today — zero new Zig:**
+
+| door | signature |
+|---|---|
+| `__mesh_topo_extrude_face` | `(distance)` — the button throws this away and passes `radius * 0.08` |
+| `__mesh_topo_extrude_edge` | `(distance)` |
+| `__mesh_topo_solidify` | `(thickness)` — the button passes `0` |
+| `__mesh_gizmo_nudge` | `(axis, amount)` |
+| `__mesh_gizmo_scale_by` | `(factor)` |
+| `__mesh_symmetrize` | `(axis, keep)` |
+| `__mesh_topo_detach` / `__mesh_merge_parts` / `__mesh_duplicate_range` | explicit ranges |
+| all four selection doors | index / range + additive |
+
+**Written, tested, and simply unexposed — one line each:**
+`rotateSelectionAxis`, plus the `pivot[3]` and full `delta[3]` arguments that
+`translateSelection` / `scaleSelectionAxis` already accept.
+
+**Correctly parameterless** (the op has no magnitude to give):
+`weld`, `flip_faces`, `merge_faces`, `create_face`.
+
+**The one structural difference — modal sessions:** bevel, loop cut, and quadify
+are `begin → preview(params) → end(commit)`, not calls. Note the asymmetry:
+`__mesh_topo_loop_cut()` takes **no** arguments, while `__mesh_lc_preview(dir,
+cuts, off)` takes all three — **the parameterized loop cut is only reachable
+through the session.** This is a real difference, but it is about
+**transactionality**, not dexterity: host state lives between the calls, and a
+seat that dies mid-session leaves the editor modal. The fix is an atomic wrapper
+(`bevel(width, segments)` = begin+preview+end), and the doors for it already exist.
+
+### What genuinely survives: ambient context, not dexterity
+
+One thing the mouse really does supply, and it is not skill.
+
+`__mesh_gizmo_scale_by(factor)` scales around `selectionPivot()` — the centroid of
+the affected verts (`mesh_edit.zig:2055`). Deterministic, but **ambient**: the
+caller neither states it nor sees it. A person doesn't need to — the pivot is
+*drawn on screen*, the axis triad is *drawn in a specific orientation*. **The
+rendering is the specification.** Scale the roof 1.2× — about its own centre, the
+model origin, or the floor it stands on? You answer that by looking. The agent
+cannot look, so it must **say** — and `scaleSelectionAxis(axis, pivot, factor)`
+already has the parameter to say it with; the door just doesn't pass it through.
+
+So the corrected claim, which is smaller and far more actionable:
+
+> **Not:** an agent has no hand.
+> **But:** the API narrows at every layer to fit a mouse, and the general form
+> underneath is already written and tested. What the mouse actually contributes
+> is not dexterity — it is *visible context* (which frame, which pivot). The seat's
+> job is to turn that ambient context into named arguments, and to bind to the
+> transform core's shape instead of the button's.
+
+**Consequence for the build:** slice 1's Zig work is much smaller than first
+stated — widen a handful of door signatures, register `rotate`, add atomic
+wrappers for the three session ops. The hard parts of this design were never the
+verbs. They are parts 1 and 2 — **which faces, and what they mean.**
 
 ---
 
@@ -523,7 +597,7 @@ Riskiest and highest-value first; each step is independently useful.
 | # | Slice | Proves / delivers | New Zig |
 |---|---|---|---|
 | **0** | `SEAT` socket verb + `new cube` + `look` | The live channel works end to end | socket verb only |
-| **1** | **Selector resolver + the core 12 ops** | The reach. `select/extrude/inset/move/scale/loopcut/bevel/solidify/weld/mirror/part/paint` | `__mesh_select_query` + parameterized forms of the popup/gizmo verbs |
+| **1** | **Selector resolver + the core 12 ops** | The reach. `select/extrude/inset/move/scale/loopcut/bevel/solidify/weld/mirror/part/paint` | `__mesh_select_query`; **register `rotateSelectionAxis`; widen `nudge`/`scale_by` to the `delta[3]` + `pivot[3]` the core already takes; atomic wrappers for the 3 session ops.** Most verbs need no Zig at all — see the corrected gap section |
 | **2** | **The label layer** — `Face.label` inheriting as `material` does, name table, op role vocabulary, pre-named primitives, named-tree percept | **The memory.** Meaning survives cuts, undo, save, and a context wipe | `Face.label` + `Face.inheritFrom(source)` collapse, `__mesh_label_*` doors, RJMD field, `PARTS_META` + journal-note carriage |
 | **3** | **The naming-debt gate** — `as <name>` required, debt budget, `BLOCKED` reason | Anonymous complexity becomes impossible, not merely discouraged | none (CommandAuthority guard) |
 | **4** | Takes: mark, rewind, thumbnails, stagger | You can watch and revert | `__mesh_journal_mark`, `__mesh_journal_rewind` |
