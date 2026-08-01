@@ -60,7 +60,7 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 
 ## Verb table — the complete surface
 
-Ten actions. There are no others; `tools/seat <anything-else>` exits 2.
+Fourteen actions. There are no others; `tools/seat <anything-else>` exits 2.
 
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
@@ -73,7 +73,43 @@ Ten actions. There are no others; `tools/seat <anything-else>` exits 2.
 | `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
 | `tools/seat undo` | `{"action":"undo"}` | |
 | `tools/seat redo` | `{"action":"redo"}` | |
+| `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a resident primitive as a named part. **Meters.** |
+| `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
+| `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize; `-` keeps the −side. |
+| `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | The app captures its OWN frame. |
 | `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
+
+### add — resident primitives
+
+`kind` is one of `cube cylinder cone pyramid plane sphere icosphere`. `size` is the
+width (diameter for round kinds) and `height` the height, **both in meters**. `sides` is
+the resolution knob — segments for cylinder/cone/sphere (clamped 3..48), subdivisions for
+icosphere, ignored by cube/plane/pyramid. So a hexagonal dial is:
+
+```bash
+tools/seat add cylinder 0.26 0.10 6 tunerKnob
+```
+
+The part **spawns resting on y=0, centred in x/z**, and is left selected — so the very
+next `move`/`rotate` positions it. The name is required (an unnamed part is refused, like
+an anonymous extrude). Cylinders stand on their Y axis; a knob facing ±X needs a
+`rotate 0 0 1 <pivot> 90` after the add.
+
+### cut — loop cut
+
+`direction` is 0 or 1 (the face's two in-plane axes), `cuts` the number of new loops, and
+`offset` is 0..1 along the span (0.5 = even). Cut faces stay in their existing semantic
+region, so a cut never creates naming debt.
+
+### shot — the agent's eyes
+
+```bash
+tools/seat shot /tmp/model.png    # then read the PNG back
+```
+
+Captures the app's own composed frame (SELFSHOT-0606) — it never touches the desktop,
+which is banned. **Use it to check your own work** instead of asking the user what they
+see. It captures the whole editor window, chrome included, at the current camera.
 
 Transforms act on **the current selection** — they take no selector. Always `select`
 first. All values are model-space; state the axis and pivot explicitly rather than relying
@@ -182,6 +218,18 @@ A **recess** is the same shape inverted: inset ring, extrude hairline, then `mov
 *into* the body. That yields crisp square-sided recesses; scaling a cap after a real
 extrude yields sloped/chamfered ones. Pick deliberately.
 
+### Parts and SCOPE — the trap that reads as a broken verb
+
+`add` creates a new outliner **part**, and the editor makes it the **active scope**.
+Topology ops intersect your selection with that scope (`3d.zig`:
+`mask[f] and faceInScopePub(f)`), so after an `add`, a `cut` on faces belonging to a
+*different* part silently refuses — the selector happily reports 24 faces and the verb
+still says no. That refusal is scope, not your selector.
+
+**The seat has no scope verb.** Until it does: do part-spanning work *before* adding
+parts, or operate only inside the part you added last. If a topology verb refuses on a
+selection you just confirmed, suspect scope first.
+
 ### Pivot as placement
 
 Scaling a cap about an off-centre pivot collapses it *toward that point*. That is how you
@@ -258,21 +306,25 @@ a way in — there isn't one. Tell the user what is missing and offer to build t
 
 | Want | Status | Resident implementation |
 |---|---|---|
-| Add a primitive (cylinder, sphere, cone…) | **No verb** | `editMesh.ts` → `cuboid, cylinder(r,h,segments), cone, pyramid, plane, sphere, icosphere, latticePanel, wheelMesh(r,w,sides,axle)`. Sides clamp **3..48**. Editor UI: outliner `+` / Edit → Add Primitive → `addPart()` (`AppFrame.tsx:1921`). |
-| Parts / outliner tree | **Not in the percept** | Percept is face-regions only. Native `__mesh_part_ranges`, `__mesh_set_part_ranges`, `__mesh_merge_parts`. |
+| Scope control (which part ops apply to) | **No verb** | Native `__mesh_edit_scope`, `__mesh_edit_scope_ranges`. See the SCOPE trap above — this is the most likely cause of a "broken" verb. |
+| Parts in the percept | **Not reported** | `add` creates parts, but the percept stays face-regions only, so a cold `look` cannot see part structure. Native `__mesh_part_ranges`. |
 | Inset | **No verb** | Use the two-stage recipe above. |
 | Bevel / chamfer | **No verb** | `bevelEdge`, `bevelVertex`; native `__mesh_bevel_begin/preview/end`. Scaling a cap only *fakes* a chamfer. |
-| Loop cut / subdivide a face | **No verb** | `loopCut`, `loopCutFromFace`, `loopCutRange`; native `__mesh_topo_loop_cut`. |
-| Mirror / symmetry | **No verb** | `mirrorMesh`, `symmetrize`, `symmetryReport`, `mirrorEditAxes`; native `__mesh_edit_mirror`, `__mesh_symmetrize`. Mirrored features must be hand-computed. |
 | Edge or vertex selection | **No verb** | Selection is face-only. `extrudeEdge`, `connectVerts`, `bridgeEdges` exist unexposed. |
 | Delete / merge / weld / solidify / detach / flip | **No verb** | `deleteFaces`, `mergeFaces`, `solidifyFaces`, `detachPanel`, `flipFace`; native `__mesh_topo_*` equivalents. |
-| Save / persist the model | **No verb** | Native `__mesh_journal_checkpoint`, `__mesh_journal_note`. Hot state survives reload; a **cold restart resets it**. |
-| See the result | **No verb** | The agent is blind; the user is the render loop. `tools/rjit shot` boots a *headless* instance that loads the on-disk model, **not** the live hot-state mesh. `__mesh_edit_capture` is input-loop handoff, **not** a frame grab. |
+| Save / persist the model | **No verb** | Native `__mesh_journal_checkpoint`, `__mesh_journal_note`. Hot state survives reload; a **cold restart resets it**. Semantic names are LIVE-ONLY — they do not currently ride the saved blob. |
 | UV / paint / materials | **No verb** | Extensive `__mesh_paint_*` and texture-slot doors exist. |
 
-Consequences to accept rather than fight: models come out **box-derived** (no round or
-n-gon forms), symmetry is manual, and **you cannot verify your own work visually** — so
-state dimensions explicitly in your report and let the user confirm the look.
+Consequences to accept rather than fight: forms are still mostly **box-derived** between
+`add`ed parts (no inset/bevel verb), and part structure is invisible to a cold `look`.
+
+### Why naming everything matters beyond your own session
+
+Named regions are not just agent memory. The long-term intent (req_3588) is for the
+semantics to ride the model **blob** so that **skinning** can lean on them: a mesh whose
+surfaces are already named is far cheaper to skin from a UV than one that arrives as
+anonymous faces. Name honestly and specifically even when the current session would not
+need it — you are authoring the input to a later rig, not just a handle for yourself.
 
 ---
 
