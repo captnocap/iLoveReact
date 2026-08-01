@@ -27,6 +27,9 @@ export type SeatPercept = {
 };
 export type SelectorReceipt = { ok: boolean; faces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
+export type InsetReceipt =
+  | { ok: true; topology: TopologyReceipt; transforms: number }
+  | { ok: false; stage: 'validate' | 'extrude' | 'scale-0' | 'scale-1' | 'offset'; reason: string };
 export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: SeatPercept | null; reason?: string };
 export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
@@ -256,27 +259,33 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     axes: [[number, number, number], [number, number, number]],
     factors: [number, number],
     offset: [number, number, number] = [0, 0, 0],
-  ): { topology: TopologyReceipt; transforms: number } | null => {
+  ): InsetReceipt => {
     if (!Number.isFinite(distance) || !finiteVec3(pivot) || !Array.isArray(axes) || axes.length !== 2 ||
         !axes.every(finiteVec3) || !Array.isArray(factors) || factors.length !== 2 ||
-        !factors.every((factor) => Number.isFinite(factor) && factor > 0) || !finiteVec3(offset)) return null;
+        !factors.every((factor) => Number.isFinite(factor) && factor > 0) || !finiteVec3(offset)) {
+      return { ok: false, stage: 'validate', reason: 'inset arguments are malformed or non-finite' };
+    }
     const result = extrude(distance, name);
-    if (!result) return null;
+    if (!result) {
+      return { ok: false, stage: 'extrude', reason: 'hairline extrude rejected; select exactly one authored face before inset' };
+    }
     let transforms = 0;
-    const rollback = () => {
+    const rollback = (stage: 'scale-0' | 'scale-1' | 'offset', reason: string): InsetReceipt => {
       for (let step = 0; step < transforms + 1; step += 1) topology(() => host.__mesh_undo?.());
-      return null;
+      return { ok: false, stage, reason };
     };
     for (let at = 0; at < 2; at += 1) {
       if (factors[at] === 1) continue;
-      if (!scale(axes[at]!, pivot, factors[at]!)) return rollback();
+      if (!scale(axes[at]!, pivot, factors[at]!)) {
+        return rollback(`scale-${at}` as 'scale-0' | 'scale-1', `axis ${at + 1} scale rejected; the inset was rolled back`);
+      }
       transforms += 1;
     }
     if (offset.some((value) => value !== 0)) {
-      if (!move(offset)) return rollback();
+      if (!move(offset)) return rollback('offset', 'offset translate rejected; the inset was rolled back');
       transforms += 1;
     }
-    return { topology: result, transforms };
+    return { ok: true, topology: result, transforms };
   };
   const paint = (rgb: [number, number, number]): number => rgbBytes(rgb)
     ? Number(automation(() => host.__model_paint_selection?.(...rgb)) ?? 0)
@@ -412,7 +421,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
           args.factors as [number, number],
           (args.offset as [number, number, number]) ?? [0, 0, 0],
         );
-        return seat.reply('inset', !!result, result ?? undefined, result ? undefined : 'inset recipe rejected and was rolled back');
+        return seat.reply('inset', result.ok, result, result.ok ? undefined : `${result.stage}: ${result.reason}`);
       }
       case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'transform rejected'); }
       case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'transform rejected'); }

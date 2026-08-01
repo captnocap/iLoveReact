@@ -149,6 +149,18 @@ test('inset packages the proven hairline extrude and two-axis shrink recipe', ()
   assert(reply.ok && transforms.length === 3, 'inset did not execute its declared compound recipe');
 });
 
+test('inset reports the exact rejected stage instead of hiding it behind rollback', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_semantic_extrude_intent = () => 1;
+  (globalThis as any).__mesh_topo_extrude_face = () => JSON.stringify({ ok: 0 });
+  const seat = createAgentSeat();
+  const reply = executeSeatRequest(seat, { action: 'inset', args: {
+    distance: 0.001, name: 'panel', pivot: [0, 0.5, 0],
+    axes: [[1, 0, 0], [0, 0, 1]], factors: [0.5, 0.25],
+  } });
+  assert(!reply.ok && reply.reason?.startsWith('extrude:'), 'inset did not identify its rejected extrude stage');
+});
+
 test('paint, material, UV, detach, and cold save use their authoritative boundaries', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   (globalThis as any).__model_paint_selection = () => 4;
