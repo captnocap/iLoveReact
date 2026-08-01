@@ -46,12 +46,17 @@ else if (action === 'add') {
     sides: Number(args[3] || 16), name: args[4],
     ...(args.length >= 8 ? { at: numberList(args.slice(5, 8)) } : {}),
   } };
+} else if (action === 'new') {
+  request = { action, args: {
+    kind: args[0] || 'cube', size: Number(args[1] || 1), height: Number(args[2] || 1),
+    sides: Number(args[3] || 16),
+  } };
 } else if (action === 'shot') request = { action, args: { path: args[0] } };
 else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat look|semantic-status|elements|select <selector>|select-edge <id> [+]|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset <hairline> <name> px py pz a1x a1y a1z f1 a2x a2y a2z f2 [ox oy oz]|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|mirror x|y|z [-]|cut <dir> <cuts> [offset]|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas <template|solid|blank> [r g b] [detail]|material <slot|clear>|uv <restore|auto-size|project-view>|save|add <kind> <size> <height> <sides> <name> [x y z]|shot <path>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat look|semantic-status|new <kind> [size height sides]|elements|select <selector>|select-edge <id> [+]|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset <hairline> <name> px py pz a1x a1y a1z f1 a2x a2y a2z f2 [ox oy oz]|move x y z|scale ax ay az px py pz factor|rotate ax ay az px py pz degrees|mirror x|y|z [-]|cut <dir> <cuts> [offset]|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas <template|solid|blank> [r g b] [detail]|material <slot|clear>|uv <restore|auto-size|project-view>|save|add <kind> <size> <height> <sides> <name> [x y z]|shot <path>|undo|redo|do <json-array>');
   process.exit(2);
 }
 

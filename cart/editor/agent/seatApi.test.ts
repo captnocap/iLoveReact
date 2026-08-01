@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compileSeatSelector, createAgentSeat, executeSeatRequest, type SeatPercept } from './seatApi';
+import { compileSeatSelector, createAgentSeat, executeSeatRequest, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -91,6 +91,13 @@ test('an unnamed primitive is refused rather than added anonymously', () => {
   const seat = createAgentSeat({ addPrimitive: () => { appended = true; return { lo: 0, hi: 1 }; } });
   const reply = executeSeatRequest(seat, { action: 'add', args: { kind: 'cube', name: '' } });
   assert(!reply.ok && !appended, 'an anonymous part reached the mesh');
+});
+
+test('new routes through the shell document constructor instead of replacing the host mesh', () => {
+  let created: SeatPrimitiveSpec | null = null;
+  const seat = createAgentSeat({ newPrimitive: (spec) => { created = spec; return true; } });
+  const reply = executeSeatRequest(seat, { action: 'new', args: { kind: 'cube', size: 1, height: 1, sides: 4 } });
+  assert(reply.ok && created?.kind === 'cube', 'new model did not reach the shell boundary');
 });
 
 test('element inspection makes ephemeral edge and vertex indices discoverable', () => {

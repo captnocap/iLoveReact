@@ -2610,6 +2610,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // part table lives in AppFrame, and req_3465 is what their divergence costs. Same
       // global-door pattern as __modelFocusBridge, deliberately outside the prop path.
       addPrimitive: (spec) => (globalThis as any).__seatShellBridge?.addPrimitive?.(spec) ?? null,
+      newPrimitive: (spec) => (globalThis as any).__seatShellBridge?.newPrimitive?.(spec) === true,
       detachSelection: (name) => (globalThis as any).__seatShellBridge?.detachSelection?.(name) ?? null,
       persist: () => (globalThis as any).__seatShellBridge?.persist?.() === true,
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.

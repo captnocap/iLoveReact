@@ -3523,6 +3523,15 @@ export default function AppFrame() {
     if (!PRIMITIVE_MESHES.some((entry) => entry.kind === spec.kind)) return null;
     return addPrimitivePart(spec.kind as PrimitiveKind, { size: spec.size, height: spec.height, resolution: spec.sides }, 'seat');
   };
+  const seatNewPrimitive = (spec: SeatPrimitiveSpec): boolean => {
+    if (!PRIMITIVE_MESHES.some((entry) => entry.kind === spec.kind)) return false;
+    createNewMeshDocument(spec.kind as PrimitiveKind, {
+      size: spec.size,
+      height: spec.height,
+      resolution: spec.sides,
+    });
+    return true;
+  };
   const seatDetachSelection = (name: string): { lo: number; hi: number } | null => {
     const current = stateRef.current;
     const modelId = activePartsModelId(current);
@@ -3561,6 +3570,7 @@ export default function AppFrame() {
   // addPrimitivePart reads live state through stateRef/modelToolApiRef, never a closure.
   useEffect(() => {
     (globalThis as any).__seatShellBridge = {
+      newPrimitive: seatNewPrimitive,
       addPrimitive: seatAddPrimitive,
       detachSelection: seatDetachSelection,
       persist: () => saveActiveModelNow('Saved by Agent Seat'),

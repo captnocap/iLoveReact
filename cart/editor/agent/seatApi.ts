@@ -61,6 +61,9 @@ export type SeatAdapter = {
    *  stay ONE truth — req_3465 is what a cart/host part-table divergence costs.
    *  Absent = the seat reports the verb unavailable instead of half-adding. */
   addPrimitive?: (spec: SeatPrimitiveSpec) => { lo: number; hi: number } | null;
+  /** File → New Mesh through AppFrame's document constructor. A new model is
+   * workspace + outliner + package state, not a host-mesh replacement. */
+  newPrimitive?: (spec: SeatPrimitiveSpec) => boolean;
   /** Frame self-capture (SELFSHOT-0606). Absent unless the cart imports
    *  runtime/capture.ts AND the binary carries -Dhas-capture. Never touches the
    *  desktop: it reads back the frame the app itself composed. */
@@ -354,13 +357,14 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     host.__mesh_semantic_assign?.(declared.region.id, 0, JSON.stringify(declared.table));
     return range;
   };
+  const newPrimitive = (spec: SeatPrimitiveSpec): boolean => adapter.newPrimitive?.(spec) === true;
   const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
     look, elements, select, selectEdge, selectVertex, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, rotate, deleteSelection,
     mergeFaces, weld, solidify, detach, flip, glass, paint, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, addPrimitive, shot, reply,
+    undo, redo, symmetrize, loopCut, addPrimitive, newPrimitive, shot, reply,
   };
 }
 
@@ -480,6 +484,17 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const range = seat.addPrimitive(spec, String(args.name ?? ''));
         return seat.reply('add', !!range, range ?? undefined, range ? undefined
           : 'add rejected — no primitive adapter wired, Paint is active, or no model is open');
+      }
+      case 'new': {
+        const spec: SeatPrimitiveSpec = {
+          kind: String(args.kind ?? 'cube'),
+          size: Number(args.size ?? 1),
+          height: Number(args.height ?? 1),
+          sides: Number(args.sides ?? 16),
+        };
+        const ok = seat.newPrimitive(spec);
+        return seat.reply('new', ok, ok ? { kind: spec.kind } : undefined, ok ? undefined
+          : 'new rejected — unknown primitive or the editor shell bridge is unavailable');
       }
       case 'shot': {
         const path = String(args.path ?? '');
