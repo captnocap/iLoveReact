@@ -65,6 +65,12 @@ pub const PlayerState = struct {
     vz: f32 = 0,
     yaw: f32,
     grounded: bool = false,
+    /// Stood on an exact mesh-prop top last frame. The packed rect step cannot
+    /// see mesh triangle tops, so this is the mesh lane's own grounded memory —
+    /// it extends the downward mount reach to a full step (downhill snap on
+    /// placed staircases) the same way the jump law at stepNow re-authorizes
+    /// jumps from mesh tops.
+    on_mesh: bool = false,
     gait_phase: f32 = 0,
     jump_time: f32 = 0,
     /// Seated/lying on a prop (PROPUSE req_0624): movement is skipped and the

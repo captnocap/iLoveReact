@@ -81,32 +81,33 @@ test "walkable mesh triangles support the player top" {
     try testing.expectEqual(@as(f32, 0), body.vy);
 }
 
+// Three steps rising along +x — rise 0.25, tread 0.4, width 2 — then a top
+// platform. Risers are vertical quads, treads horizontal quads: the exact
+// shape of a placed stairs prop's collision triangles.
+const STAIRCASE = [_]f32{
+    // riser 1 at x=0: y 0..0.25
+    0,   0,    -1, 0,   0,    1,  0,   0.25, 1,
+    0,   0,    -1, 0,   0.25, 1,  0,   0.25, -1,
+    // tread 1: x 0..0.4 at y=0.25
+    0,   0.25, -1, 0.4, 0.25, -1, 0.4, 0.25, 1,
+    0,   0.25, -1, 0.4, 0.25, 1,  0,   0.25, 1,
+    // riser 2 at x=0.4: y 0.25..0.5
+    0.4, 0.25, -1, 0.4, 0.25, 1,  0.4, 0.5,  1,
+    0.4, 0.25, -1, 0.4, 0.5,  1,  0.4, 0.5,  -1,
+    // tread 2: x 0.4..0.8 at y=0.5
+    0.4, 0.5,  -1, 0.8, 0.5,  -1, 0.8, 0.5,  1,
+    0.4, 0.5,  -1, 0.8, 0.5,  1,  0.4, 0.5,  1,
+    // riser 3 at x=0.8: y 0.5..0.75
+    0.8, 0.5,  -1, 0.8, 0.5,  1,  0.8, 0.75, 1,
+    0.8, 0.5,  -1, 0.8, 0.75, 1,  0.8, 0.75, -1,
+    // top platform: x 0.8..2 at y=0.75
+    0.8, 0.75, -1, 2,   0.75, -1, 2,   0.75, 1,
+    0.8, 0.75, -1, 2,   0.75, 1,  0.8, 0.75, 1,
+};
+
 test "placed staircase risers within step reach mount instead of walling" {
-    // Three steps rising along +x — rise 0.25, tread 0.4, width 2 — then a top
-    // platform. Risers are vertical quads, treads horizontal quads: the exact
-    // shape of a placed stairs prop's collision triangles. Before the riser
-    // step-reach gate, riser 1 alone side-pushed the body off the first tread
-    // forever and step height was never consulted on the approach.
-    const stairs = [_]f32{
-        // riser 1 at x=0: y 0..0.25
-        0,   0,    -1, 0,   0,    1,  0,   0.25, 1,
-        0,   0,    -1, 0,   0.25, 1,  0,   0.25, -1,
-        // tread 1: x 0..0.4 at y=0.25
-        0,   0.25, -1, 0.4, 0.25, -1, 0.4, 0.25, 1,
-        0,   0.25, -1, 0.4, 0.25, 1,  0,   0.25, 1,
-        // riser 2 at x=0.4: y 0.25..0.5
-        0.4, 0.25, -1, 0.4, 0.25, 1,  0.4, 0.5,  1,
-        0.4, 0.25, -1, 0.4, 0.5,  1,  0.4, 0.5,  -1,
-        // tread 2: x 0.4..0.8 at y=0.5
-        0.4, 0.5,  -1, 0.8, 0.5,  -1, 0.8, 0.5,  1,
-        0.4, 0.5,  -1, 0.8, 0.5,  1,  0.4, 0.5,  1,
-        // riser 3 at x=0.8: y 0.5..0.75
-        0.8, 0.5,  -1, 0.8, 0.5,  1,  0.8, 0.75, 1,
-        0.8, 0.5,  -1, 0.8, 0.75, 1,  0.8, 0.75, -1,
-        // top platform: x 0.8..2 at y=0.75
-        0.8, 0.75, -1, 2,   0.75, -1, 2,   0.75, 1,
-        0.8, 0.75, -1, 2,   0.75, 1,  0.8, 0.75, 1,
-    };
+    // Before the riser step-reach gate, riser 1 alone side-pushed the body off
+    // the first tread forever and step height was never consulted on approach.
     var body: mesh_collision.Body = .{
         .x = -0.6,
         .y = 0,
@@ -120,11 +121,42 @@ test "placed staircase risers within step reach mount instead of walling" {
     var frame: usize = 0;
     while (frame < 180) : (frame += 1) {
         body.x += body.vx * dt;
-        _ = mesh_collision.resolve(&body, &stairs, .{}, mesh_collision.DEFAULT_TUNING);
+        _ = mesh_collision.resolve(&body, &STAIRCASE, .{}, mesh_collision.DEFAULT_TUNING);
         body.vx = 1.5; // walk intent is re-driven each frame by the movement integrator
     }
     try testing.expectApproxEqAbs(@as(f32, 0.75), body.y, 0.001);
     try testing.expect(body.x > 0.8);
+}
+
+test "descending the staircase glues tread to tread instead of going ballistic" {
+    // Walk from the top platform back down -x. A body that stood on the mesh
+    // last frame (grounded=true) reaches a full step DOWN, so each tread seats
+    // the feet immediately — no airborne frames, no falling animation. Before
+    // the downhill snap, the mount only reached the 0.08 m snap band and every
+    // 0.25 m step read as a fall.
+    var body: mesh_collision.Body = .{
+        .x = 1.2,
+        .y = 0.75,
+        .z = 0,
+        .vx = -1.5,
+        .radius = 0.34,
+        .height = 1.65,
+        .step_height = 0.5,
+        .grounded = true,
+    };
+    const dt: f32 = 1.0 / 60.0;
+    var frame: usize = 0;
+    while (frame < 180) : (frame += 1) {
+        body.x += body.vx * dt;
+        const result = mesh_collision.resolve(&body, &STAIRCASE, .{}, mesh_collision.DEFAULT_TUNING);
+        // Feet stay seated on a tread the whole way down while over the mesh.
+        if (body.x >= 0.05 and body.x <= 1.2) {
+            try testing.expect(result.grounded_on_mesh);
+        }
+        body.vx = -1.5;
+    }
+    try testing.expectApproxEqAbs(@as(f32, 0.25), body.y, 0.001);
+    try testing.expect(body.x < 0);
 }
 
 test "a face taller than step reach still walls a walking body" {
@@ -147,6 +179,32 @@ test "a face taller than step reach still walls a walking body" {
     try testing.expect(result.side_contacts > 0);
     try testing.expectApproxEqAbs(@as(f32, 0.16), body.x, 0.001);
     try testing.expectEqual(@as(f32, 0), body.y);
+}
+
+test "a tabletop rim crossed mid-jump does not teleport the body down" {
+    // Jumping BESIDE a table drifts the centre over the slab rim while rising.
+    // The tabletop is then a horizontal face mid-span — seating the head under
+    // it teleported the feet ~0.9 m down, below what ground support reaches:
+    // the player shot under the map. A ceiling seat may only correct a genuine
+    // head bonk (overlap within a step); anything deeper rides past and the
+    // fall mounts on top of the table instead.
+    const tabletop = [_]f32{
+        0, 0.75, -0.5, 1, 0.75, -0.5, 1, 0.75, 0.5,
+        0, 0.75, -0.5, 1, 0.75, 0.5,  0, 0.75, 0.5,
+    };
+    var body: mesh_collision.Body = .{
+        .x = 0.1,
+        .y = 0.3,
+        .z = 0,
+        .vy = 4,
+        .radius = 0.34,
+        .height = 1.65,
+        .step_height = 0.5,
+    };
+    const result = mesh_collision.resolve(&body, &tabletop, .{}, mesh_collision.DEFAULT_TUNING);
+    try testing.expect(!result.hit_ceiling);
+    try testing.expectEqual(@as(f32, 0.3), body.y);
+    try testing.expectEqual(@as(f32, 4), body.vy);
 }
 
 test "horizontal mesh triangles stop an upward head" {

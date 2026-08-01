@@ -33,6 +33,11 @@ pub const Body = struct {
     height: f32,
     step_height: f32,
     restitution: f32 = 0,
+    /// IN: the body STOOD on an exact mesh top last frame. Extends the downward
+    /// mount reach from the snap band to a full step_height — the mesh lane's
+    /// downhill snap, so walking down a placed staircase glues tread to tread
+    /// instead of going ballistic (falling animation) on every step. Set true
+    /// by resolve() whenever a mount seats the feet this frame.
     grounded: bool = false,
 };
 
@@ -333,16 +338,29 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, world_
 
     if (body.vy > 0) {
         if (ceilingSurfaceAt(triangles, x, z, y, y + height, tuning)) |ceiling| {
-            y = ceiling - height;
-            body.vy = 0;
-            result.hit_ceiling = true;
+            // Only a genuine head bonk: a rising head overlaps a real ceiling
+            // by at most one frame of travel, so the downward correction is
+            // small. A horizontal face DEEP inside the span is a tabletop rim
+            // the centre drifted over while rising beside it — seating the
+            // head under THAT teleported the body most of a metre down,
+            // below what ground support reaches, and out of the map. Let the
+            // jump carry past it; the fall mounts on top instead.
+            const seat = ceiling - height;
+            if (y - seat <= step_height) {
+                y = seat;
+                body.vy = 0;
+                result.hit_ceiling = true;
+            }
         }
     }
 
     // Pre-mount a walkable top within step reach so its vertical side does not
     // push the body away before the ordinary step-up law can seat the feet.
+    // A body that stood on this lane last frame also reaches a full step DOWN
+    // (see Body.grounded) — the rect lane's downhill snap, for descending.
     if (body.vy <= 0) {
-        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + step_height, tuning)) |ground| {
+        const reach_down: f32 = if (body.grounded) step_height else tuning.ground_snap_meters;
+        if (walkableSurfaceAt(triangles, x, z, y - reach_down, y + step_height, tuning)) |ground| {
             y = ground;
             body.vy = 0;
             body.grounded = true;
@@ -392,7 +410,8 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, world_
     // support at the final horizontal point; never clear grounding supplied by
     // the ordinary rect/heightfield lanes when no mesh top is present.
     if (body.vy <= 0) {
-        if (walkableSurfaceAt(triangles, x, z, y - tuning.ground_snap_meters, y + step_height, tuning)) |ground| {
+        const reach_down: f32 = if (body.grounded) step_height else tuning.ground_snap_meters;
+        if (walkableSurfaceAt(triangles, x, z, y - reach_down, y + step_height, tuning)) |ground| {
             y = ground;
             body.vy = 0;
             body.grounded = true;

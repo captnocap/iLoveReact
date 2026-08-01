@@ -167,6 +167,7 @@ pub fn resolveMeshPropPlayer(
     mesh: constructor.MeshPropMesh,
     inst: constructor.MeshPropInstance,
     cfg: ?constructor.PhysicsConfig,
+    was_on_mesh: bool,
 ) bool {
     if (!mesh.solid or mesh.collision_triangles.len == 0) return false;
     const radius = if (cfg) |value| value.player_radius else PLAYER_RADIUS_METERS;
@@ -188,7 +189,10 @@ pub fn resolveMeshPropPlayer(
             if (cfg) |value| value.wall_restitution else PLAYER_WALL_RESTITUTION,
             (if (cfg) |value| value.surface_restitution else PLAYER_SURFACE_RESTITUTION) * 0.15,
         ),
-        .grounded = player.grounded,
+        // The mesh lane's OWN grounded memory (PlayerState.on_mesh), not the
+        // packed step's grounded — that one is always false on a mesh top,
+        // which would leave the downhill snap permanently off.
+        .grounded = was_on_mesh,
     };
     var tuning = game_physics.mesh_collision.DEFAULT_TUNING;
     tuning.walkable_normal_y = RAMP_WALKABLE_SLOPE_COS;
@@ -210,7 +214,9 @@ pub fn resolveMeshPropPlayer(
     player.vx = body.vx;
     player.vy = body.vy;
     player.vz = body.vz;
-    player.grounded = body.grounded;
+    // Never CLEAR grounding another lane supplied (rect/heightfield support is
+    // resolved before this pass); only an actual mount adds to it.
+    player.grounded = player.grounded or result.grounded_on_mesh;
     return result.grounded_on_mesh;
 }
 

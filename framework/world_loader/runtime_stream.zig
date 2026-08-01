@@ -373,27 +373,33 @@ pub fn emitMeshPropColliders(self: anytype, oriented_tmp: []f32, oc: *usize, cli
 /// rect/heightfield step. Baked and editor-live placements share the same mesh
 /// function; the ghost preview is deliberately absent.
 pub fn resolveExactMeshProps(self: anytype, cfg: ?constructor.PhysicsConfig) bool {
+    // Last frame's mesh-grounded state, read ONCE before any resolve mutates
+    // the player: it widens the downward mount reach to a full step so a
+    // descending staircase glues tread to tread (PlayerState.on_mesh).
+    const was_on_mesh = self.player.on_mesh;
     var grounded_on_mesh = false;
     if (self.scene.mesh_props) |mp| {
         for (mp.instances) |inst| {
             const mesh_index: usize = @intCast(inst.mesh);
             if (mesh_index >= mp.meshes.len) continue;
-            grounded_on_mesh = resolveMeshPropPlayer(&self.player, mp.meshes[mesh_index], inst, cfg) or grounded_on_mesh;
+            grounded_on_mesh = resolveMeshPropPlayer(&self.player, mp.meshes[mesh_index], inst, cfg, was_on_mesh) or grounded_on_mesh;
         }
     }
-    const pending = pendingLiveMeshFor(self.node_id) orelse return grounded_on_mesh;
-    for (pending.refs) |ref| {
-        const mesh = meshForHash(self, ref.hash) orelse continue;
-        const inst: constructor.MeshPropInstance = .{
-            .mesh = 0,
-            .x = ref.x,
-            .y = ref.y,
-            .z = ref.z,
-            .yaw_degrees = ref.yaw,
-            .scale = ref.scale,
-        };
-        grounded_on_mesh = resolveMeshPropPlayer(&self.player, mesh, inst, cfg) or grounded_on_mesh;
+    if (pendingLiveMeshFor(self.node_id)) |pending| {
+        for (pending.refs) |ref| {
+            const mesh = meshForHash(self, ref.hash) orelse continue;
+            const inst: constructor.MeshPropInstance = .{
+                .mesh = 0,
+                .x = ref.x,
+                .y = ref.y,
+                .z = ref.z,
+                .yaw_degrees = ref.yaw,
+                .scale = ref.scale,
+            };
+            grounded_on_mesh = resolveMeshPropPlayer(&self.player, mesh, inst, cfg, was_on_mesh) or grounded_on_mesh;
+        }
     }
+    self.player.on_mesh = grounded_on_mesh;
     return grounded_on_mesh;
 }
 
