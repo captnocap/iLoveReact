@@ -220,21 +220,22 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
 | Selector | Meaning |
 |---|---|
 | `all` | Every face. Use this to transform the whole model. |
-| `<name>` or `region:<name>` | A named semantic region. **Checked before every pattern below.** |
+| `region:<name>` | A named semantic region. Use this explicit form for durable handles. |
 | `facing:+y` / `facing:-z@30` | Faces whose normal is within N degrees of an axis. **Default tolerance 15°.** |
-| `top` / `bottom` | Extremal face on ±y. |
+| `top` / `bottom` | Compatibility aliases for the extremal face on ±y; names cannot shadow them. |
+| `extremal:top` / `extremal:bottom` | Explicit extremal face on ±y. Preferred in new scripts. |
 | `outermost:+x` / `outermost:-z` | Extremal face on the named axis. |
 | `above:y>1.4` / `below:y>1.4` | Faces above/below a threshold on an axis. |
-| `part:12..18` | Face-index range. Index-based — never durable memory. |
+| `faces:12..18` | Face-group range. Index-based — never durable memory. |
 | `inside:box(minx,miny,minz,maxx,maxy,maxz)` | Faces fully inside an AABB. Six finite numbers. |
 
 ### Selector gotchas, all real
 
-- **Names shadow keywords.** Named-region lookup runs *before* the `top`/`bottom` checks,
-  and the cube bootstrap creates regions literally named `top`, `bottom`, `left`, `right`,
-  `front`, `back`. So `select top` resolves to the **named region**, not the extremal
-  query. They coincide on a fresh cube and silently diverge the moment you edit — after
-  raising a mast, extremal-top is the mast tip while the name `top` may not exist at all.
+- Selector keywords are reserved. `top` and `extremal:top` are geometric; `region:top`
+  is the primitive's saved semantic region. Bare non-keyword names remain a compatibility
+  convenience, but new scripts should always spell durable names as `region:<name>`.
+- `part:` belongs to Outliner identity (`part-select`). It is deliberately not a face-range
+  selector. Use `faces:<lo>..<hi>` only as an ephemeral bridge from a just-returned receipt.
 - **The comparator in `above:`/`below:` is decorative.** `above:y>1.4` and `above:y<1.4`
   compile identically; only the `above`/`below` prefix and the number are read.
 - **`inside:box` needs the face fully inside**, and coordinates are absolute. It is the
@@ -273,10 +274,10 @@ are reported as `null`, never inferred. The shell restores these rows from saved
 on a cold open. `regions[]` carries live geometry (face count + bbox per semantic id), while
 `table.regions[]` carries meaning (name, role, parent, provenance). Join those on `id`.
 
-**The reply is verbose and a batch embeds one full percept per row** — a 14-row batch
-returns 14 copies of everything. Pipe through a compact reader when driving long
-sessions. `formatSeatPercept()` is exported from `seatApi.ts` and renders exactly this
-digest, but **the CLI does not call it** — it prints raw JSON.
+Use `tools/seat --brief ...` for agent work. The live transport calls
+`formatSeatPercept()`, removes repeated per-row percepts from batches, and prints one final
+digest after the row outcomes. Omit `--brief` only when a machine consumer needs the full
+JSON percept.
 
 Extruding one authored quad adds **+8 render faces** (2 cap triangles remain plus 8 wall triangles).
 
@@ -309,7 +310,7 @@ Use this normal-flow acceptance test whenever semantic persistence changes or is
 ```bash
 tools/seat new cube 1 1 16
 tools/seat look                         # six primitive names, unnamed: 0
-tools/seat select top
+tools/seat select extremal:top
 tools/seat extrude 0.25 persistence_test
 tools/seat save
 tools/seat semantic-status              # status: healthy; saved/mount/resident agree
@@ -322,44 +323,24 @@ test.
 
 ---
 
-## Recipes
+## Callable recipes
 
-### Inset — packaged two-stage move
+Recipes are code, not worked examples. Discover them with `tools/seat --brief recipes` and
+invoke one with `tools/seat --brief recipe <name> '<json>'`. Each registry entry is either
+`candidate` or `approved`: run and visually review a candidate once; only approved recipes
+may be chosen automatically from a request like “I need a dial.”
 
-**The trap:** extruding a face and then scaling its cap turns the *entire face* into a
-tapered pyramid, because the wall connects the original full perimeter straight to the
-shrunken cap. This is silent and looks plausible until rendered.
-
-**The fix** — `inset` extrudes a hairline first, then shrinks its selected cap along two
-explicit in-plane axes. The wall becomes a flat ring in the original plane. Its CLI shape is:
+The first candidate is:
 
 ```bash
-tools/seat inset <hairline> <name> px py pz a1x a1y a1z f1 a2x a2y a2z f2 [ox oy oz]
+tools/seat --brief recipe dial \
+  '{"target":"region:faceplate","normal":"+x","diameter":0.26,"depth":0.10,"sides":24,"name":"tuner"}'
 ```
 
-Example on an X-facing face (shrink Y and Z, then offset the footprint):
-
-```bash
-# 1. flat inset ring: the panel stays flat, cap becomes the feature footprint
-tools/seat select right
-tools/seat inset 0.001 rightPanel 0 0.475 0  0 1 0 0.27  0 0 1 0.47  0 -0.055 -0.1
-# 2. now pull the real feature — a crisp nub on a flat panel
-tools/seat do '[
-  {"action":"select","args":{"selector":"rightPanel.cap"}},
-  {"action":"extrude","args":{"distance":0.1,"name":"knob"}}
-]'
-```
-
-`rightPanel.wall` is the flat panel; `knob.wall` is the barrel. Name the pair for what the
-**wall** will mean, because the cap gets consumed (below).
-
-Inset is intentionally a compound recipe, not invented geometry. Its native extrude and
-transforms remain separate undo units; if a transform rejects, the seat rewinds every unit
-it applied. Bevel, connect, cut, and the other topology verbs are single native journal units.
-
-A **recess** is the same shape inverted: inset ring, extrude hairline, then `move` the cap
-*into* the body. That yields crisp square-sided recesses; scaling a cap after a real
-extrude yields sloped/chamfered ones. Pick deliberately.
+It resolves the target bbox, creates a named resident cylinder, rotates its grounded axis
+onto the explicit face normal, and seats its base at the target centre. A rejected transform
+rewinds every journal unit the recipe created. Do not copy its internal steps into prompts;
+improve the callable when the approved flow changes.
 
 ### Parts and SCOPE — the trap that reads as a broken verb
 
@@ -400,13 +381,15 @@ differs from the inherited source region.
 - Reusing an existing name returns the **existing region** rather than making a duplicate,
   and sets it as the new pair's `parent`.
 - Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
-  (`DEFAULT_NAMING_DEBT_BUDGET`). Prefer naming everything; the budget is a backstop.
+  (`DEFAULT_NAMING_DEBT_BUDGET`). This is only a construction backstop: `save` refuses
+  whenever `unnamed > 0`, so every durable model crosses the boundary at zero debt.
 - `name` assigns the current selection to a region with role `authored`.
 - `create-face <name>` creates then names the selected result. Those are two undo units;
   all native geometry and its semantic table still persist together on `save`.
 - The `instance` argument exists on `name`/`extrude` and the percept reports an
-  `instances` count per region. Part duplication/path arrays duplicate geometry but do not
-  invent new semantic names; inspect and rename when a copy's meaning diverges.
+  `instances` count per region. Part duplication and path arrays keep the same region names
+  while native topology automatically mints a fresh instance family for each copy. Rename
+  only when a copy's meaning genuinely diverges.
 
 ---
 
@@ -435,10 +418,11 @@ tools/seat redo
 RJIT_SEAT_GENERATION=42 tools/seat extrude 0.2 roof
 ```
 
-The generation guard is checked **once, before the request runs** (and for a batch, once
-before the first row — not per row). A stale stamp is rejected with
-`stale generation N; live generation is M`. Re-run `look`; never apply an old plan to a new
-mesh.
+The generation guard is checked before a request and before **every batch row**. After each
+seat row, its resulting generation becomes the next expected value; any other generation
+bump is a human/native edit and closes the batch before another queued action lands. A stale
+single request reports `stale generation N`; an interrupted batch reports the exact row it
+closed before. Re-run `look`; never apply an old plan to a changed mesh.
 
 ---
 
