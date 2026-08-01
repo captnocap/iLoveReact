@@ -419,30 +419,31 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
   if (typeof fn !== 'function') return null;
   const verts = mesh.vertices instanceof Float32Array ? mesh.vertices : new Float32Array(mesh.vertices);
   const count = mesh.count ?? Math.floor(verts.length / 8);
-  const json = fn(mesh.key, verts, count);
+  // One native document-load boundary. The previous sequence loaded geometry and then
+  // fired three optional metadata doors whose return values were ignored; a cold mount
+  // could therefore display the right 28 faces while silently dropping RJMD v4's rigging
+  // semantics. Empty typed rows mean "absent" for legacy documents.
+  const groups = mesh.faceGroups instanceof Uint32Array
+    ? mesh.faceGroups
+    : mesh.faceGroups ? new Uint32Array(mesh.faceGroups) : new Uint32Array();
+  const materials = mesh.faceMaterials instanceof Uint32Array
+    ? mesh.faceMaterials
+    : mesh.faceMaterials ? new Uint32Array(mesh.faceMaterials) : new Uint32Array();
+  const semanticRegions = mesh.semanticRegions instanceof Uint32Array
+    ? mesh.semanticRegions
+    : mesh.semanticRegions ? new Uint32Array(mesh.semanticRegions) : new Uint32Array();
+  const semanticInstances = mesh.semanticInstances instanceof Uint32Array
+    ? mesh.semanticInstances
+    : mesh.semanticInstances ? new Uint32Array(mesh.semanticInstances) : new Uint32Array();
+  const expectsSemantics = semanticRegions.length > 0 || semanticInstances.length > 0 || !!mesh.semanticTable;
+  const json = fn(
+    mesh.key, verts, count, groups, materials, semanticRegions, semanticInstances,
+    mesh.semanticTable ? JSON.stringify(mesh.semanticTable) : '',
+  );
   if (typeof json !== 'string' || json.length === 0) return null;
   try {
     const o = JSON.parse(json);
-    if (!o || typeof o.key !== 'string') return null;
-    // Hand the host the authored-face grouping (studio models) so face select /
-    // outline works on real n-gons, not the fan triangles. Absent = plain soup.
-    const groups = mesh.faceGroups instanceof Uint32Array
-      ? mesh.faceGroups
-      : mesh.faceGroups ? new Uint32Array(mesh.faceGroups) : null;
-    if (groups && groups.length > 0) host.__mesh_set_face_groups?.(groups);
-    const materials = mesh.faceMaterials instanceof Uint32Array
-      ? mesh.faceMaterials
-      : mesh.faceMaterials ? new Uint32Array(mesh.faceMaterials) : null;
-    if (materials && materials.length > 0) host.__mesh_set_face_materials?.(materials);
-    const semanticRegions = mesh.semanticRegions instanceof Uint32Array
-      ? mesh.semanticRegions
-      : mesh.semanticRegions ? new Uint32Array(mesh.semanticRegions) : null;
-    const semanticInstances = mesh.semanticInstances instanceof Uint32Array
-      ? mesh.semanticInstances
-      : mesh.semanticInstances ? new Uint32Array(mesh.semanticInstances) : null;
-    if (semanticRegions && semanticInstances && semanticRegions.length > 0 && mesh.semanticTable) {
-      host.__mesh_set_face_semantics?.(semanticRegions, semanticInstances, JSON.stringify(mesh.semanticTable));
-    }
+    if (!o || typeof o.key !== 'string' || (expectsSemantics && o.semantics !== 1)) return null;
     // Tint each part its outliner colour (multi-part models) so a bare studio mesh isn't a
     // blank white blob and the model matches the outliner swatches.
     for (const pc of mesh.partColors ?? []) {

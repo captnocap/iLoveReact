@@ -533,10 +533,13 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, buf.written());
 }
 
-/// __mesh_load_vertices(key, float32Verts, vertCount?) → JSON {"key","count","radius"} | "".
+/// __mesh_load_vertices(key, float32Verts, vertCount?, groups?, materials?,
+/// semanticRegions?, semanticInstances?, semanticTableJson?) →
+/// JSON {"key","count","radius","semantics"} | "".
 /// Adopt already-cooked scene3d triangle data into the same resident model-viewer path
-/// as OBJ/GLB file imports. Once a model is installed into the editor, its source file
-/// no longer matters; the viewer consumes the engine-owned interleaved vertex factor.
+/// as OBJ/GLB file imports. RJMD metadata lands in the SAME native transaction as its
+/// geometry: a cold load may never display the right mesh while silently losing rigging
+/// semantics because a later optional door rejected. Empty typed rows mean absent.
 fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const key = argToStringAlloc(info, 0) orelse {
@@ -565,6 +568,26 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         return;
     };
     defer mesh.deinit(std.heap.c_allocator);
+    const face_count: usize = @intCast(mesh.vert_count / 3);
+    const typedRows = struct {
+        fn read(call: v8.FunctionCallbackInfo, index: u32, expected: usize) ?[]const u32 {
+            const bytes_arg = argBytes(call, index) orelse return &.{};
+            if (bytes_arg.len == 0) return &.{};
+            if (bytes_arg.len != expected * @sizeOf(u32)) return null;
+            return @alignCast(std.mem.bytesAsSlice(u32, bytes_arg));
+        }
+    }.read;
+    const groups = typedRows(info, 3, face_count) orelse return setReturnString(info, "");
+    const materials = typedRows(info, 4, face_count) orelse return setReturnString(info, "");
+    const semantic_regions = typedRows(info, 5, face_count) orelse return setReturnString(info, "");
+    const semantic_instances = typedRows(info, 6, face_count) orelse return setReturnString(info, "");
+    if ((semantic_regions.len == 0) != (semantic_instances.len == 0)) return setReturnString(info, "");
+    const has_semantics = semantic_regions.len > 0;
+    const semantic_table = if (has_semantics)
+        (argToStringAlloc(info, 7) orelse return setReturnString(info, ""))
+    else
+        null;
+    defer if (semantic_table) |json| std.heap.c_allocator.free(json);
     // Cooked arrivals are imports too — same winding repair before retention (req_3450).
     const rewound = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
     if (rewound > 0) std.log.warn("[mesh-load] cooked {s}: repaired {d} inconsistently wound triangle(s)", .{ key, rewound });
@@ -574,8 +597,14 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     model_source.retain(key, mesh.verts, mesh.vert_count);
     scene3d.meshEditBeginModel();
     scene3d.setPaintTarget(key, mesh.verts, mesh.vert_count);
+    if (groups.len > 0) scene3d.meshEditSetFaceGroups(groups);
+    if (materials.len > 0 and !scene3d.meshEditSetFaceMaterials(materials)) return setReturnString(info, "");
+    if (has_semantics and !scene3d.meshEditSetFaceSemantics(semantic_regions, semantic_instances, semantic_table.?))
+        return setReturnString(info, "");
     scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
-    if (!scene3d.stashHostMesh(key, mesh.verts, mesh.vert_count)) {
+    // Group adoption rebuilt UVs in the authoritative edit copy. Stash THAT copy,
+    // not the parser's pre-metadata buffer.
+    if (!scene3d.stashActiveEditMesh()) {
         setReturnString(info, "");
         return;
     }
@@ -597,7 +626,7 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
             else => w.writeByte(ch) catch return,
         }
     }
-    w.print("\",\"count\":{d},\"radius\":{d:.6}}}", .{ mesh.vert_count, mesh.radius }) catch {
+    w.print("\",\"count\":{d},\"radius\":{d:.6},\"semantics\":{d}}}", .{ mesh.vert_count, mesh.radius, @intFromBool(has_semantics) }) catch {
         setReturnString(info, "");
         return;
     };

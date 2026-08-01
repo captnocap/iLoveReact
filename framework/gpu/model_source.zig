@@ -278,6 +278,20 @@ test "semantic face membership follows displayed to source projection" {
     try std.testing.expectEqual(@as(u32, 7), semantic.instance);
 }
 
+test "cold document metadata installs membership and dictionary together" {
+    const triangle_verts = [_]f32{0} ** 48;
+    retain("semantic-cold-load", triangle_verts[0..], 6);
+    defer clear();
+    setFaceGroups(&.{ 2, 7 });
+    setPartRanges(&.{ 2, 3, 7, 8 });
+    const table = "{\"version\":1,\"regions\":[{\"id\":4,\"name\":\"panel.wall\"},{\"id\":9,\"name\":\"boss.cap\"}]}";
+    try std.testing.expect(setSemanticState(&.{ 4, 9 }, &.{ 0, 0 }, table));
+    try std.testing.expectEqualSlices(u32, &.{ 4, 9 }, faceSemanticRegions().?);
+    try std.testing.expectEqualSlices(u32, &.{ 0, 0 }, faceSemanticInstances().?);
+    try std.testing.expectEqualStrings(table, semanticTableJson().?);
+    try std.testing.expectEqualSlices(u32, &.{ 2, 3, 7, 8 }, partRanges().?);
+}
+
 test "absent face material table means every face keeps paint" {
     const triangle_verts = [_]f32{0} ** 24;
     retain("material-test", triangle_verts[0..], 3);
