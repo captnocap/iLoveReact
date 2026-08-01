@@ -30,7 +30,7 @@ function same(a: unknown, b: unknown, message: string) {
   if (aa !== bb) throw new Error(`${message}\n  got ${aa}\n want ${bb}`);
 }
 
-const KNOWN = new Set(['floor.concrete.common', 'wall.concrete.common']);
+const KNOWN = new Set(['floor.concrete.common', 'wall.concrete.common', 'stairs.wood.common']);
 const policy: PiecePlacementPolicy = {
   makePieceId: (sequence) => `bp_${sequence}`,
   validateCandidate: (candidate, index) => {
@@ -165,6 +165,30 @@ test('different semantic footprint classes coexist at the same position', () => 
   }, policy);
   assert(plan.transaction.removed.length === 0, 'floor incorrectly replaced a wall footprint');
   same(plan.next.pieces.map((p) => p.id), ['wall-1', 'bp_2'], 'coexisting wall/floor did not survive');
+});
+
+test('a staircase stands on the floor of its cell instead of evicting it (req_3582)', () => {
+  // Both plates land on the same storey-base y at the same cell centre; only
+  // the semantic kind separates them. Placing stairs must keep the floor.
+  const floor = piece('floor-1', 1.5, 4.5);
+  const plan = planPiecePlacement(world([floor], 2), {
+    documentId: 'main',
+    candidates: [candidate(1.5, 4.5, { pieceId: 'stairs.wood.common' })],
+    gestureMode: 'click',
+  }, policy);
+  assert(plan.transaction.action === 'place', 'stairs over a floor was classified as replacement');
+  assert(plan.transaction.removed.length === 0, 'stairs evicted the floor plate under it');
+  same(plan.next.pieces.map((p) => p.id), ['floor-1', 'bp_2'], 'floor did not survive under the staircase');
+
+  // Same-kind plates still contest the slot: stairs over stairs replaces.
+  const again = planPiecePlacement(plan.next, {
+    documentId: 'main',
+    candidates: [candidate(1.5, 4.5, { pieceId: 'stairs.wood.common' })],
+    gestureMode: 'click',
+  }, policy);
+  assert(again.transaction.action === 'replace', 'stairs over stairs no longer replaces');
+  same(again.transaction.removed.map((r) => r.piece.id), ['bp_2'], 'stairs replacement removed the wrong piece');
+  same(again.next.pieces.map((p) => p.id), ['floor-1', 'bp_3'], 'stairs-over-stairs left the world wrong');
 });
 
 test('duplicate submitted footprints reject the whole batch without allocation', () => {

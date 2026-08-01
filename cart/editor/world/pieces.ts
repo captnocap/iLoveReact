@@ -585,8 +585,11 @@ export function resolveRunPlacements(
  *  pieces with the same slot key fight for the same space, so a new placement
  *  REPLACES the old one there (place a window wall over a wall → the wall is
  *  gone, not double-rendered). Edge pieces key on cell edge + orientation; plates
- *  on the cell centre. Different classes (a wall vs the floor under it) never
- *  collide — their keys differ. Quantised so float jitter still matches. */
+ *  on the cell centre AND their semantic kind (req_3582): a staircase stands ON
+ *  the floor of its cell — every stairs/ramp/pillar placement was silently
+ *  deleting the floor plate under it because both landed on the same storey-base
+ *  y at the same cell centre. Same-kind plates still contest (floor over floor
+ *  replaces). Quantised so float jitter still matches. */
 export function placementSlotKey(piece: PlacedPiece): string {
   const kind = pieceKindOf(piece.pieceId);
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
@@ -597,7 +600,7 @@ export function placementSlotKey(piece: PlacedPiece): string {
   if (kind === 'prop') return `prop:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;
   return edge
     ? `edge:${q(piece.x)},${q(piece.y)},${q(piece.z)},${Math.round(piece.yawDegrees)}`
-    : `grid:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;
+    : `grid:${kind ?? 'piece'}:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;
 }
 
 /** The storey a placed piece belongs to. The RECORDED floor index wins (req_2676
