@@ -86,7 +86,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat bevel <width>` | `{"action":"bevel","args":{"width":0.02}}` | Atomic native bevel session on one edge or vertex. Meters. |
 | `tools/seat inset …` | `{"action":"inset","args":{"distance":0.001,"name":"panel","pivot":[0,0.5,0],"axes":[[1,0,0],[0,0,1]],"factors":[0.6,0.7]}}` | Packages hairline extrude + two-axis shrink; see Inset. |
 | `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. |
-| `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":1.2}}` | Scales along one axis about a pivot. |
+| `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":0.018}}` | Exact axis scale about a pivot; factors are not rounded to UI step sizes. |
 | `tools/seat scale-uniform <factor>` | `{"action":"scale-uniform","args":{"factor":1.2}}` | Uniform scale around the current selection pivot. |
 | `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
 | `tools/seat undo` | `{"action":"undo"}` | |
@@ -98,12 +98,12 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat detach <name>` | `{"action":"detach","args":{"name":"roof"}}` | Detach selected faces into a named Outliner part. |
 | `tools/seat flip` | `{"action":"flip"}` | Reverse selected face winding. |
 | `tools/seat glass` | `{"action":"glass"}` | Toggle glass on selected faces. |
-| `tools/seat paint r g b` | `{"action":"paint","args":{"rgb":[180,40,20]}}` | Journaled solid RGB fill of selected faces; bytes 0–255. |
+| `tools/seat paint r g b` | `{"action":"paint","args":{"rgb":[180,40,20]}}` | Journaled RGB fill. Rejects undersized atlases with the required `fit` instead of returning invisible success. |
 | `tools/seat atlas <template\|solid\|blank> [r g b] [fit]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"fit":1024}}` | Explicitly rebuild a stale paint atlas after topology edits. `fit` is the atlas BUDGET — 512/1024/2048/4096, default **1024²**. Replies with the sheet you got: `{density,fit,w,h}`. |
 | `tools/seat material <slot\|clear>` | `{"action":"material","args":{"slot":2}}` | Assign/clear an existing texture-role slot on selected faces. |
 | `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
 | `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
-| `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a resident primitive as a named part. **Meters.** |
+| `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a part whose surfaces are named at creation. **Meters.** |
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
 | `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Basic cut through the same atomic native session. |
 | `tools/seat tris-to-quads` | `{"action":"tris-to-quads"}` | Convert the compatible maximum triangle set. |
@@ -121,7 +121,8 @@ focus-panel, ModelToolApi, and command authorities as the visible controls.
 
 ```bash
 tools/seat action part-select '{"ids":["part:body"],"primary":"part:body"}'
-tools/seat action viewport '{"operation":"pose","pose":[45,-20,3,0,0.5,0]}'
+tools/seat action viewport '{"operation":"orbit","yawDegrees":45,"pitchDegrees":-20}'
+tools/seat action viewport '{"operation":"frame","target":"model"}'
 tools/seat action reference '{"operation":"add","path":"/tmp/front.png","patch":{"plane":"front","scale":2}}'
 tools/seat action texture-slot '{"operation":"create","purpose":"screen","label":"Display"}'
 ```
@@ -141,7 +142,7 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `model-rename` | optional model `id`, plus `name`. |
 | `model-import` | absolute `.glb`, `.obj`, or `.stl` `path`; STL replies `pending:true` while conversion completes. |
 | `model-export`, `model-starter` | editor command `id`; character export also takes `role:"player"|"npc"`. |
-| `viewport` | `read`; orbit; pan; zoom; explicit pose; lock; selection-mode; gizmo; wire; xray; focus; mirror; bookmark store/recall/remove. |
+| `viewport` | `read`; `orbit {yawDegrees,pitchDegrees}`; `frame {target:"model"|"selection"}`; pan; zoom; explicit `pose` (radians); lock; selection-mode; gizmo; wire; xray; `focus` (frame selection); `focus-tool`; mirror; bookmarks. Programmatic moves exit the focus tool first and return the actual live pose. |
 | `reference` | `read`; `add {path,patch?}`; `update {id,patch}`; `remove {id}`. |
 | `path` | `plane` or `edges`, flat normalized viewport `points:[x,y,…]`, and optional `closed`. Creates a real Outliner part. |
 | `uv-state` | Read the complete live UV panel model. |
@@ -187,6 +188,10 @@ next `move`/`rotate` positions it. The name is required (an unnamed part is refu
 an anonymous extrude). Cylinders stand on their Y axis; a knob facing ±X needs a
 `rotate 0 0 1 <pivot> 90` after the add.
 
+Surfaces are named in the same creation transaction: cubes get `.right/.left/.top/.bottom/.back/.front`;
+cylinders get `.cap.top/.cap.bottom/.wall`; cones and pyramids get `.base/.wall`; other
+primitives get `.surface`. The root name selects the whole descendant family.
+
 ### cut — loop cut
 
 `direction` is 0 or 1 (the face's two in-plane axes), `cuts` the number of new loops, and
@@ -221,6 +226,7 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
 |---|---|
 | `all` | Every face. Use this to transform the whole model. |
 | `region:<name>` | A named semantic region. Use this explicit form for durable handles. |
+| `region:<name> & facing:+y` | That named region family narrowed by an axis-facing query. |
 | `facing:+y` / `facing:-z@30` | Faces whose normal is within N degrees of an axis. **Default tolerance 15°.** |
 | `top` / `bottom` | Compatibility aliases for the extremal face on ±y; names cannot shadow them. |
 | `extremal:top` / `extremal:bottom` | Explicit extremal face on ±y. Preferred in new scripts. |
@@ -242,10 +248,10 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
   only way to isolate a sub-part of a multi-face region (e.g. the front quad of a
   `*.wall` ring), but it is brittle: a bound tuned to exclude a neighbouring quad breaks
   the moment either moves. Re-derive bounds from the live percept, never from memory.
-- **There are no compound selectors.** You cannot write `deck.wall & facing:-z`. Isolating
-  the front quad of a wall ring means hand-fitting an `inside:box` around it.
 - Geometric selectors return the real face count and bbox. Zero, or an unexpectedly broad
   result, is a reason to stop and inspect — not to proceed.
+- Every selector also compares matched faces with the active native scope. A partial match
+  is rejected and cleared. `select all` first expands scope to every visible part.
 
 ---
 
@@ -289,6 +295,7 @@ diagnostic shown in Model Focus's **SEMANTICS** section:
 | Status / UI tag | Meaning |
 |---|---|
 | `healthy` / `RESIDENT` | The mount carries names and its named-face count matches the resident mesh; inspect the saved counters too. |
+| `visibility-filtered` / `HIDDEN PARTS` | Hidden parts are absent from viewport geometry, but their saved names and face counts remain intact. |
 | `mount-mismatch` / `MOUNT DROP` | The saved blob has names, but the viewport input dropped them. |
 | `load-mismatch` / `LOAD MISMATCH` | The mount input has names, but native hydration lost them. |
 | `resident-only` / `LIVE ONLY` | Names exist live but have not yet been saved. |
@@ -342,17 +349,15 @@ onto the explicit face normal, and seats its base at the target centre. A reject
 rewinds every journal unit the recipe created. Do not copy its internal steps into prompts;
 improve the callable when the approved flow changes.
 
-### Parts and SCOPE — the trap that reads as a broken verb
+### Parts and scope
 
 `add` creates a new outliner **part**, and the editor makes it the **active scope**.
-Topology ops intersect your selection with that scope (`3d.zig`:
-`mask[f] and faceInScopePub(f)`), so after an `add`, a `cut` on faces belonging to a
-*different* part silently refuses — the selector happily reports 24 faces and the verb
-still says no. That refusal is scope, not your selector.
+Topology ops intersect selection with that scope. The selector boundary prevents silent
+partials: it reports both matched and actionable faces, clears the selection, and rejects
+when they differ. `select all` automatically scopes every visible part first.
 
-Use `part-select` before topology work on another part. It updates the Outliner selection,
-primary row, native edit scope, and selected range as one authority call. If a topology verb
-refuses, compare its face selection with `activePartId` and that part's `[lo,hi)` range.
+Use `part-select` for an intentional subset. It updates Outliner selection, primary row,
+native edit scope, and selected range as one authority call.
 
 ### Pivot as placement
 
@@ -428,10 +433,9 @@ closed before. Re-run `look`; never apply an old plan to a changed mesh.
 
 ## Remaining boundary
 
-Compound/set-algebra selectors are still absent: there is no `name & facing:+z`. Select a
-durable name, use exact element selection/cuts to narrow it, or use one geometric selector.
+General set algebra is still absent; the supported compound is `region:<name> & facing:<axis>`.
 Viewport-coordinate actions (`paint-tool` strokes and `path`) are intentionally
-camera-dependent; read/set `viewport` first and checkpoint before using them. OS-picker
+camera-dependent; frame or set `viewport` first and checkpoint before using them. OS-picker
 commands can be opened through `command`, but prefer path-bearing actions when available.
 
 Part structure and face semantics are both visible to a cold `look`: `parts[]` comes from
@@ -446,11 +450,9 @@ old UVs from being silently endorsed against new geometry.
 and the host derives texels/meter from the model's own size, so a small prop gets writing-grade
 texels and a car divides the same sheet. Omit it and you get the painter's 1024². Do not reach
 for the raw `detail` (texels/meter) door to "set the resolution": on a 0.3 m prop a plausible-
-looking density packs the whole model into a ~25×26 px sheet where a small region owns six
-pixels, and every signal still says success — `paint` returns real `changed` counts, `save`
-succeeds, `semantic-status` reads `healthy`, and the atlas on disk holds your exact colours.
-It just renders as unpainted. Read the `w`/`h` in the `atlas` reply; if the sheet is tiny for
-the object, that is the bug.
+looking density packs the whole model into a ~25×26 px sheet where small islands filter away.
+`paint` now measures live island texels first and rejects with `atlas fit=<budget>` when that
+would happen. Rebuild at the recommended budget, then paint again.
 
 ### Why naming everything matters beyond your own session
 
