@@ -78,12 +78,6 @@ function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz
   return { dx: u * cos + v * sin, dz: -u * sin + v * cos };
 }
 
-function quarterTurns(yawDegrees: number): number | null {
-  const yaw = ((yawDegrees % 360) + 360) % 360;
-  const quarter = Math.round(yaw / 90) % 4;
-  return Math.abs(yaw - quarter * 90) < 1e-6 || Math.abs(yaw - 360) < 1e-6 ? quarter : null;
-}
-
 // An OPENING is the one operation every wall edit fundamentally is: a rectangular
 // cutout in the wall. A window, a double window, an open doorway, a door, a
 // garage, an arch — all the SAME cut; they differ ONLY in the opening's rect
@@ -185,11 +179,13 @@ export function pieceVisualShapes(piece: PlacedPiece, color: string): VisualShap
     const lift = UI.faceSlabLiftMeters;
     const frontV = depthSize / 2 + lift;
     const backV = -depthSize / 2 - lift;
-    // Odd quarter-turn walls swap which slab wears the semantic front/back skin.
-    const quarter = quarterTurns(yaw);
-    const swap = quarter !== null && quarter % 2 === 1;
-    const frontSlot: FaceSlot = swap ? 'back' : 'front';
-    const backSlot: FaceSlot = swap ? 'front' : 'back';
+    // front/back are PIECE-FIXED: the local +v slab is the front at every yaw,
+    // so a painted face rotates WITH the wall. (req_3567 removed the old
+    // odd-quarter-turn tag swap — it compensated for faceRoleForHit un-rotating
+    // the hit normal with the wrong sign, and made menu-assigned front/back
+    // land on the physically opposite slab at yaw 90/270.)
+    const frontSlot: FaceSlot = 'front';
+    const backSlot: FaceSlot = 'back';
     // The wall's opening, derived from the edit's PARAMETERS (window band vs
     // floor-standing doorway) — one cut for every edit; the fill distinguishes
     // them (req_2576). No edit ⇒ no opening ⇒ a solid band.

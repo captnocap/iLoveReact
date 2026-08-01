@@ -14,7 +14,7 @@ export const editor_face_paint: DocIndex = {
       kind: 'utility',
       sourceFile: 'cart/editor/world/pieceSlots.ts',
       description:
-        'World hit normal + piece yaw → the slot role the touched face wears: wall family front/back/sides, plate family top/bottom/edges, single-surface kinds their one role. The host piece-local frame at odd quarter turns lands on the same slab pieceShapes tags via its frontSlot/backSlot swap, so no extra swap here. Quarter-turn placements only; null for non-catalog (authored/prop) ids — nothing to paint. Proven by pieceSlots.test.ts incl. the yaw-90 swap case.',
+        'World hit normal + piece yaw → the slot role the touched face wears: wall family front/back/sides, plate family top/bottom/edges, single-surface kinds their one role. Un-rotates by the exact transpose of pieceShapes localOffset (req_3567) — front/back are piece-fixed at every yaw, free angles included; the old wrong-sign recovery plus pieceShapes\' compensating odd-quarter tag swap (which flipped menu-assigned front/back at yaw 90/270) are both gone. Null for multi-role authored ids — their raycast is bounds-only. Proven by pieceSlots.test.ts incl. piece-fixed yaw 90/270 + free-yaw 45°.',
       dependsOn: ['pieceSlotRoles', '__game_build_raycast hit normal'],
       consumers: ['cart/editor/world/WorldViewport.tsx'],
       status: 'live',
@@ -64,11 +64,11 @@ export const editor_face_paint: DocIndex = {
   ],
   hazards: [
     {
-      name: 'front/back classification assumes quarter-turn yaw',
+      name: 'compensating errors around the raycast frame (RESOLVED req_3567)',
       purpose: ['building', 'interaction'],
       description:
-        'faceRoleForHit\'s u/v split (and pieceShapes\' odd-quarter frontSlot swap it mirrors) only agree at 90° steps — the piece grammar\'s rotation step. If free-yaw placement ever lands, a 45° wall would misread front/back as sides; revisit both together.',
-      evidence: ['cart/editor/world/pieceSlots.ts', 'cart/editor/world/pieceShapes.ts'],
+        'History lesson: faceRoleForHit un-rotated the hit normal with the wrong sign, and pieceShapes carried an odd-quarter frontSlot/backSlot tag swap that made touch-paint agree with it — leaving the right-click menu\'s front/back landing on the physically opposite slab at yaw 90/270 (and paint jumping sides on rotation). stickerLocalFrom was the proof of the correct inverse all along. If front/back ever misbehave again, suspect a NEW compensation before re-adding a swap.',
+      evidence: ['cart/editor/world/pieceSlots.ts', 'cart/editor/world/pieceShapes.ts', 'cart/editor/world/pieceSkins.ts stickerLocalFrom'],
       severity: 'low',
     },
   ],

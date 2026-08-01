@@ -1,7 +1,8 @@
 // cart/editor/world/pieceSlots.test.ts — faceRoleForHit (req_2879 Paint Faces):
 // the host raycast's hit normal must name the SAME slot role the skin renderer
-// reads for the slab you touched, including the odd-quarter-turn front/back swap
-// pieceShapes carries (its frontSlot/backSlot) — paint what you touch, exactly.
+// reads for the slab you touched — paint what you touch, exactly. front/back
+// are PIECE-FIXED at every yaw (req_3567 removed the old odd-quarter-turn swap;
+// a painted face now rotates with the wall).
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/pieceSlots.test.ts --bundle \
@@ -36,19 +37,26 @@ test('wall at yaw 0 — width ends and the top rim are the core, slot sides', ()
   assert(faceRoleForHit(WALL, 0, { x: 0, y: 1, z: 0 }) === 'sides', 'top rim is sides');
 });
 
-test('wall at yaw 90 — the quarter-turn swap: the world +x slab wears BACK', () => {
-  // pieceShapes places the geometric front slab toward world +x at yaw 90 and
-  // (odd quarter) tags it 'back'; the host frame lands on the same name.
-  assert(faceRoleForHit(WALL, 90, { x: 1, y: 0, z: 0 }) === 'back', '+x slab reads slots.back');
-  assert(faceRoleForHit(WALL, 90, { x: -1, y: 0, z: 0 }) === 'front', '-x slab reads slots.front');
+test('wall at yaw 90 — front is piece-fixed: the front slab turned to +x stays FRONT', () => {
+  // localOffset places the front slab (local +v) toward world +x at yaw 90;
+  // its role rotates WITH the wall (req_3567 — no quarter-turn tag swap).
+  assert(faceRoleForHit(WALL, 90, { x: 1, y: 0, z: 0 }) === 'front', '+x slab reads slots.front');
+  assert(faceRoleForHit(WALL, 90, { x: -1, y: 0, z: 0 }) === 'back', '-x slab reads slots.back');
   assert(faceRoleForHit(WALL, 90, { x: 0, y: 0, z: 1 }) === 'sides', 'the turned width end is sides');
 });
 
 test('wall at yaw 180/270 — front/back keep tracking the touched slab', () => {
   assert(faceRoleForHit(WALL, 180, { x: 0, y: 0, z: -1 }) === 'front', 'yaw 180: -z slab is front');
   assert(faceRoleForHit(WALL, 180, { x: 0, y: 0, z: 1 }) === 'back', 'yaw 180: +z slab is back');
-  assert(faceRoleForHit(WALL, 270, { x: -1, y: 0, z: 0 }) === 'back', 'yaw 270: -x slab is back');
-  assert(faceRoleForHit(WALL, 270, { x: 1, y: 0, z: 0 }) === 'front', 'yaw 270: +x slab is front');
+  assert(faceRoleForHit(WALL, 270, { x: -1, y: 0, z: 0 }) === 'front', 'yaw 270: -x slab is front');
+  assert(faceRoleForHit(WALL, 270, { x: 1, y: 0, z: 0 }) === 'back', 'yaw 270: +x slab is back');
+});
+
+test('free-yaw wall — the exact inverse classifies at any angle', () => {
+  // Front slab outward normal at yaw 45 = R(+45)·(0,0,1) = (sin45, 0, cos45).
+  const s = Math.SQRT1_2;
+  assert(faceRoleForHit(WALL, 45, { x: s, y: 0, z: s }) === 'front', 'yaw 45: turned front slab is front');
+  assert(faceRoleForHit(WALL, 45, { x: -s, y: 0, z: -s }) === 'back', 'yaw 45: turned back slab is back');
 });
 
 test('floor plate — top / bottom / edges by the hit normal', () => {

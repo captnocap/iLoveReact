@@ -82,16 +82,16 @@ const DEG = Math.PI / 180;
  *  the piece face the ray entered, named as the role `piece.slots` keys on, so
  *  painting what you TOUCHED updates exactly the slab the skin renderer draws.
  *
- *  `normal` is the outward world-space face normal __game_build_raycast returns
- *  (framework/game/build.zig raycastPieces). Rotating it back by -yaw recovers
- *  the HOST's piece-local frame — which is also the semantic frame: at odd
- *  quarter turns the host's local +z lands on the slab pieceShapes tags 'back'
- *  (the same swap its frontSlot/backSlot carries), so no extra swap here.
- *  Quarter-turn placements only (the piece grammar's rotation step); a free-yaw
- *  piece would mis-classify u/v, not crash. Null = the piece exposes no slots
- *  (a catalog piece with no roles, or an authored prop before face rigging) so
- *  there is nothing to paint. Multi-role authored meshes use the explicit
- *  right-click role menu because their current raycast is bounds-only. */
+ *  `normal` is the TRUE outward world-space face normal __game_build_raycast
+ *  returns (framework/game/build.zig raycastPieces — stickerLocalFrom is the
+ *  long-proven inverse of the same frame). Un-rotating it by the transpose of
+ *  pieceShapes' localOffset recovers the piece-local frame exactly, at ANY yaw
+ *  including free angles — front/back are piece-fixed (req_3567; the old
+ *  wrong-sign recovery here was what the pieceShapes odd-quarter tag swap
+ *  compensated for). Null = the piece exposes no slots (a catalog piece with
+ *  no roles, or an authored prop before face rigging) so there is nothing to
+ *  paint. Multi-role authored meshes use the explicit right-click role menu
+ *  because their current raycast is bounds-only. */
 export function faceRoleForHit(
   pieceId: string,
   yawDegrees: number,
@@ -106,8 +106,8 @@ export function faceRoleForHit(
   if (roles.length === 1) return roles[0]!;
   const cos = Math.cos(yawDegrees * DEG);
   const sin = Math.sin(yawDegrees * DEG);
-  const lu = normal.x * cos + normal.z * sin; // local width axis
-  const lv = -normal.x * sin + normal.z * cos; // local depth axis (+ = semantic front)
+  const lu = normal.x * cos - normal.z * sin; // local width axis
+  const lv = normal.x * sin + normal.z * cos; // local depth axis (+ = semantic front)
   const ly = normal.y;
   if (roles[0] === 'top') {
     // Plate family (floor/roof): top / bottom / edges.

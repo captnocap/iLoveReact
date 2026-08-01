@@ -1,7 +1,7 @@
 # Editor face painting (Paint Faces)
 
-Active surface: `cart/editor/` world document. Last verified: 2026-07-10.
-USER ASK req_2879.
+Active surface: `cart/editor/` world document. Last verified: 2026-08-01.
+USER ASK req_2879 (frame fix req_3567).
 
 ## In one sentence
 
@@ -28,15 +28,19 @@ never fight.
   oriented-box slab test; `runtime/game/build.ts pickBuildPieceHostHit` now
   surfaces `point`/`normal` instead of discarding them.
 - `cart/editor/world/pieceSlots.ts faceRoleForHit(pieceId, yawDegrees, normal)`
-  rotates the world normal back into the host's piece-local frame and names the
-  slot role: wall family front/back/sides, plate family top/bottom/edges,
-  single-surface kinds their one role, sign `face`. The host local frame at odd
-  quarter turns lands on the SAME slab `pieceShapes` tags via its
-  frontSlot/backSlot swap — so the painted role is exactly the slot the skin
-  renderer reads for the touched slab (`slotRefForBox`, now home in
+  un-rotates the world normal into the piece-local frame (the exact transpose
+  of `pieceShapes.ts localOffset`, req_3567) and names the slot role: wall
+  family front/back/sides, plate family top/bottom/edges, single-surface kinds
+  their one role, sign `face`. front/back are PIECE-FIXED at every yaw — a
+  painted face rotates with the wall. (History: the original recovery applied
+  the rotation with the wrong sign, and `pieceShapes` carried an odd-quarter
+  frontSlot/backSlot tag swap compensating for it; net effect was menu-assigned
+  front/back landing on the physically opposite slab at yaw 90/270 — the
+  req_3567 bug. Both halves are gone.) The painted role is exactly the slot the
+  skin renderer reads for the touched slab (`slotRefForBox`, now home in
   `pieceSlots.ts`, shared by skins + overlay colours). Proven by
-  `cart/editor/world/pieceSlots.test.ts` (11 cases incl. the yaw-90 swap and
-  the per-box governance suite).
+  `cart/editor/world/pieceSlots.test.ts` (12 cases incl. piece-fixed yaw
+  90/270, free-yaw 45°, and the per-box governance suite).
 - `cart/editor/world/worldTool.ts` maps command `paint-faces` → tool
   `paintFace`; `cart/editor/data/commands.ts` registers the Build command
   (icon Paintbrush, key `N`, not selection-gated — the touch provides the
@@ -70,8 +74,6 @@ Select.
 
 ## Known limits (this slice)
 
-- Quarter-turn placements only in the u/v classification (the piece grammar's
-  rotation step); a free-yaw piece would misread front/back vs sides.
 - A sweep records one undo entry per painted face (cap 32), not one per
   stroke.
 - Authored/exported (`model:`) pieces expose no catalog slots yet, so they
