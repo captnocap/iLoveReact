@@ -10,10 +10,9 @@ with generated code. Treat every successful reply's `percept` as the source of t
 the **resident mesh**. Use `save` and `semantic-status` for durable-state claims; a live
 percept alone does not prove what will survive a cold restart.
 
-**This document is the complete capability surface. Everything the seat can do is listed
-here, and everything it cannot do is listed under "What the seat cannot do" with the
-resident code that would implement it. Do not go grepping the editor to find out whether
-a verb exists — if it is not in the verb table below, it is not reachable from the seat.**
+**This document is the complete capability surface.** Common modeling verbs have short CLI
+forms; the rest use `tools/seat action <name> '<json-object>'`. Do not invent an unlisted
+action or bypass the resident editor.
 
 Source of truth for this file: `cart/editor/agent/seatApi.ts` (the API),
 `tools/seat` (the CLI adapter), `cart/editor/stage/ModelView.tsx:2598` (the live handler).
@@ -65,7 +64,7 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 
 ---
 
-## Verb table — the complete surface
+## Short verb table
 
 These are the only actions; `tools/seat <anything-else>` exits 2.
 
@@ -76,6 +75,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
 | `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
 | `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
+| `tools/seat select-face <id> [+]` | `{"action":"select-face","args":{"index":7,"additive":true}}` | Exact triangle selection; ephemeral, never semantic memory. |
 | `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
 | `tools/seat select-vertex <id> [+]` | `{"action":"select-vertex","args":{"index":2,"additive":true}}` | Select vertex ids returned by `elements`. |
 | `tools/seat name <name> [instance]` | `{"action":"name","args":{"name":"…","instance":0}}` | Names the current selection, role `authored`. |
@@ -87,6 +87,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat inset …` | `{"action":"inset","args":{"distance":0.001,"name":"panel","pivot":[0,0.5,0],"axes":[[1,0,0],[0,0,1]],"factors":[0.6,0.7]}}` | Packages hairline extrude + two-axis shrink; see Inset. |
 | `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. |
 | `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":1.2}}` | Scales along one axis about a pivot. |
+| `tools/seat scale-uniform <factor>` | `{"action":"scale-uniform","args":{"factor":1.2}}` | Uniform scale around the current selection pivot. |
 | `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
 | `tools/seat undo` | `{"action":"undo"}` | |
 | `tools/seat redo` | `{"action":"redo"}` | |
@@ -104,9 +105,56 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
 | `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a resident primitive as a named part. **Meters.** |
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
+| `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Basic cut through the same atomic native session. |
+| `tools/seat tris-to-quads` | `{"action":"tris-to-quads"}` | Convert the compatible maximum triangle set. |
+| `tools/seat collect-uv-orientation` | `{"action":"collect-uv-orientation"}` | Expand one selected face to the same signed UV orientation. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize; `-` keeps the −side. |
 | `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | The app captures its OWN frame. |
+| `tools/seat command <editor-command-id>` | `{"action":"command","args":{"id":"mesh-wire"}}` | Invoke an existing zero-argument editor command through `runCommand`. |
+| `tools/seat action <name> '<json>'` | Any structured action below. | Parameterized parity lane; JSON must be one object. |
 | `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
+
+## Structured editor parity
+
+Use the structured lane for cart-owned tools. These calls route into the same Outliner,
+focus-panel, ModelToolApi, and command authorities as the visible controls.
+
+```bash
+tools/seat action part-select '{"ids":["part:body"],"primary":"part:body"}'
+tools/seat action viewport '{"operation":"pose","pose":[45,-20,3,0,0.5,0]}'
+tools/seat action reference '{"operation":"add","path":"/tmp/front.png","patch":{"plane":"front","scale":2}}'
+tools/seat action texture-slot '{"operation":"create","purpose":"screen","label":"Display"}'
+```
+
+| Action | Operations / arguments |
+|---|---|
+| `select-elements` | `kind:"face"|"edge"|"vertex"`, `indices`; replaces the mode selection in one call. |
+| `part-select` | `ids`, optional `primary`; changes the native edit scope too. |
+| `part-rename`, `part-visibility`, `part-delete`, `part-duplicate` | `id`; rename adds `name`, visibility adds `visible`, duplicate adds optional `axis:"x"|"y"|"z"`. |
+| `part-merge` | `ids` with at least two rows. |
+| `part-path-array` | `ids`, `params` (`axis`, `bays`, `turnDegrees`, `riseU`, optional XYZ `points`). |
+| `part-import` | `id`: saved model package id or exact model name. |
+| `parts-group`, `parts-ungroup` | `ids`. |
+| `group-rename`, `group-visibility`, `group-duplicate`, `group-dissolve` | group `id`; rename adds `name`. |
+| `outliner-move` | Existing `{item,target}` descriptors used by the Outliner. |
+| `role-name` | `partId`, `role`. |
+| `model-rename` | optional model `id`, plus `name`. |
+| `model-import` | absolute `.glb`, `.obj`, or `.stl` `path`; STL replies `pending:true` while conversion completes. |
+| `model-export`, `model-starter` | editor command `id`; character export also takes `role:"player"|"npc"`. |
+| `viewport` | `read`; orbit; pan; zoom; explicit pose; lock; selection-mode; gizmo; wire; xray; focus; mirror; bookmark store/recall/remove. |
+| `reference` | `read`; `add {path,patch?}`; `update {id,patch}`; `remove {id}`. |
+| `path` | `plane` or `edges`, flat normalized viewport `points:[x,y,…]`, and optional `closed`. Creates a real Outliner part. |
+| `uv-state` | Read the complete live UV panel model. |
+| `uv-select` | `mode:"island"|"islands"|"face"|"orientation"` plus `index`/`indices` and optional `additive`. |
+| `uv-layout` | Full atomic `rects:[x,y,w,h,…]`. |
+| `uv-geometry` | Full atomic corner array `corners:[x,y,…]`, optional `historyAction`. |
+| `uv-history` | `operation:"read"|"undo"|"redo"`. |
+| `uv-atlas` | reset, reload, save, export-wireframe, export-guide, `import {path}`, resize, `add-layer {path,x,y}`, compile-layers. |
+| `uv-layer` | layer `id` and the existing `edit` patch. |
+| `paint-tool` | Read/set tool, safety, detail, brush, palette; viewport fill, stroke, and polygon. |
+| `paint-variant` | read, load, save-new, update, rename, remove. Load/update/remove address variant `id`. |
+| `texture-slot` | read, replace, create, assign, select, remove, rename/patch, clear-selected. Membership stays native. |
+| `rig` | read; `replace {rig}` for the prop rig; `lights-replace {lights}` for emitted point/spot lights. |
 
 ### new versus add
 
@@ -321,10 +369,9 @@ Topology ops intersect your selection with that scope (`3d.zig`:
 *different* part silently refuses — the selector happily reports 24 faces and the verb
 still says no. That refusal is scope, not your selector.
 
-**The seat has no scope-changing verb.** Read `activePartId` and `parts` before topology
-work: do part-spanning work *before* adding parts, or operate only inside the active part.
-If a topology verb refuses on a selection you just confirmed, compare that selection with
-the active part's `[lo,hi)` range before blaming the selector.
+Use `part-select` before topology work on another part. It updates the Outliner selection,
+primary row, native edit scope, and selected range as one authority call. If a topology verb
+refuses, compare its face selection with `activePartId` and that part's `[lo,hi)` range.
 
 ### Pivot as placement
 
@@ -358,8 +405,8 @@ differs from the inherited source region.
 - `create-face <name>` creates then names the selected result. Those are two undo units;
   all native geometry and its semantic table still persist together on `save`.
 - The `instance` argument exists on `name`/`extrude` and the percept reports an
-  `instances` count per region, **but no verb duplicates geometry** — the seat cannot
-  create an instance. Do not plan around instancing.
+  `instances` count per region. Part duplication/path arrays duplicate geometry but do not
+  invent new semantic names; inspect and rename when a copy's meaning diverges.
 
 ---
 
@@ -395,19 +442,13 @@ mesh.
 
 ---
 
-## What the seat cannot do
+## Remaining boundary
 
-The editor underneath is larger than the seat. None of the following is reachable from the
-seat today. Do not invent a pixel gesture or parallel mesh path; report the boundary and
-offer to add a resident verb.
-
-| Want | Status | Resident implementation |
-|---|---|---|
-| Scope control (which part ops apply to) | **No verb** | Native `__mesh_edit_scope`, `__mesh_edit_scope_ranges`. See the SCOPE trap above — this is the most likely cause of a "broken" verb. |
-| Compound/set-algebra selectors | **No verb** | No `name & facing:+z`; select a durable name, then use cuts or element topology to narrow it. |
-| Freehand/pixel paint | **No verb** | Seat paint is coordinate-free face fill. Camera-dependent brush strokes remain human tools. |
-| Texture-role creation/removal | **No verb** | `material` assigns or clears slots already authored in the Rig panel. |
-| Full UV layout editing | **Partial** | Restore, auto-size, and project-from-view are exposed; island dragging/packing/numeric corner edits remain panel tools. |
+Compound/set-algebra selectors are still absent: there is no `name & facing:+z`. Select a
+durable name, use exact element selection/cuts to narrow it, or use one geometric selector.
+Viewport-coordinate actions (`paint-tool` strokes and `path`) are intentionally
+camera-dependent; read/set `viewport` first and checkpoint before using them. OS-picker
+commands can be opened through `command`, but prefer path-bearing actions when available.
 
 Part structure and face semantics are both visible to a cold `look`: `parts[]` comes from
 the saved Outliner metadata and exact host ranges, while RJMD v4 carries semantic membership
