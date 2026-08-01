@@ -2613,6 +2613,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       newPrimitive: (spec) => (globalThis as any).__seatShellBridge?.newPrimitive?.(spec) === true,
       detachSelection: (name) => (globalThis as any).__seatShellBridge?.detachSelection?.(name) ?? null,
       persist: () => (globalThis as any).__seatShellBridge?.persist?.() === true,
+      partPercept: () => (globalThis as any).__seatShellBridge?.partPercept?.() ?? { activePartId: null, parts: [] },
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
       captureFrame: (path) => captureFrame(path),
     });

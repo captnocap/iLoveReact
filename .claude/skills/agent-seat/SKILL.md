@@ -209,14 +209,21 @@ Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
   "generation": 18,          // bump per topology change; used by the race guard
   "faces": 132,              // total triangles
   "unnamed": 0,              // naming debt
+  "activePartId": "part:body", // current Outliner/native edit scope
+  "parts": [ { "id": "part:body", "name": "Body", "kind": "cube",
+               "visible": true, "lo": 0, "hi": 24,
+               "groupPath": [ { "id": "group:shell", "name": "Shell" } ] } ],
   "regions": [ { "id": 0, "faces": 2, "instances": 1, "bbox": [minx,miny,minz,maxx,maxy,maxz] } ],
   "table": { "version": 1, "regions": [ { "id": 0, "name": "right", "role": "+x", "parent": 3,
                                           "createdBy": { "op": "extrude", "at": 1785607074856 } } ],
              "nextRegionId": 6 } }
 ```
 
-`regions[]` carries live geometry (face count + bbox per id); `table.regions[]` carries
-meaning (name, role, parent, provenance). Join them on `id`.
+`parts[]` is the durable Outliner tree joined to its host-authored `[lo,hi)` ranges;
+`activePartId` identifies the scope that topology verbs currently intersect. Missing ranges
+are reported as `null`, never inferred. The shell restores these rows from saved part metadata
+on a cold open. `regions[]` carries live geometry (face count + bbox per semantic id), while
+`table.regions[]` carries meaning (name, role, parent, provenance). Join those on `id`.
 
 **The reply is verbose and a batch embeds one full percept per row** — a 14-row batch
 returns 14 copies of everything. Pipe through a compact reader when driving long
@@ -314,9 +321,10 @@ Topology ops intersect your selection with that scope (`3d.zig`:
 *different* part silently refuses — the selector happily reports 24 faces and the verb
 still says no. That refusal is scope, not your selector.
 
-**The seat has no scope verb.** Until it does: do part-spanning work *before* adding
-parts, or operate only inside the part you added last. If a topology verb refuses on a
-selection you just confirmed, suspect scope first.
+**The seat has no scope-changing verb.** Read `activePartId` and `parts` before topology
+work: do part-spanning work *before* adding parts, or operate only inside the active part.
+If a topology verb refuses on a selection you just confirmed, compare that selection with
+the active part's `[lo,hi)` range before blaming the selector.
 
 ### Pivot as placement
 
@@ -396,15 +404,14 @@ offer to add a resident verb.
 | Want | Status | Resident implementation |
 |---|---|---|
 | Scope control (which part ops apply to) | **No verb** | Native `__mesh_edit_scope`, `__mesh_edit_scope_ranges`. See the SCOPE trap above — this is the most likely cause of a "broken" verb. |
-| Parts in the percept | **Not reported** | `add` creates parts, but the percept stays face-regions only, so a cold `look` cannot see part structure. Native `__mesh_part_ranges`. |
 | Compound/set-algebra selectors | **No verb** | No `name & facing:+z`; select a durable name, then use cuts or element topology to narrow it. |
 | Freehand/pixel paint | **No verb** | Seat paint is coordinate-free face fill. Camera-dependent brush strokes remain human tools. |
 | Texture-role creation/removal | **No verb** | `material` assigns or clears slots already authored in the Rig panel. |
 | Full UV layout editing | **Partial** | Restore, auto-size, and project-from-view are exposed; island dragging/packing/numeric corner edits remain panel tools. |
 
-Part structure remains invisible to a cold `look`; face semantics do not. `save` persists
-the RJMD v4 semantic membership and name table with the geometry, so a cold restart retains
-the names shown by the percept.
+Part structure and face semantics are both visible to a cold `look`: `parts[]` comes from
+the saved Outliner metadata and exact host ranges, while RJMD v4 carries semantic membership
+and its name table with the geometry.
 
 Structural topology marks the current paint layout stale. Run `atlas` before `paint`, then
 `save`; this is the same explicit “Remake Atlas” decision as the visible editor and prevents

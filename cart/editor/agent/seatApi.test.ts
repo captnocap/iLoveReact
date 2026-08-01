@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compileSeatSelector, createAgentSeat, executeSeatRequest, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { compileSeatSelector, createAgentSeat, executeSeatRequest, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -13,6 +13,7 @@ function assert(condition: boolean, message: string) { if (!condition) throw new
 
 const percept: SeatPercept = {
   version: 1, generation: 4, faces: 60, unnamed: 0,
+  activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
 };
@@ -21,6 +22,20 @@ const percept: SeatPercept = {
 test('cold agent resolves a durable name without geometry archaeology', () => {
   const query = compileSeatSelector('window.rim', percept);
   assert(query?.kind === 'region' && query.region === 7, 'name did not resolve to its durable region id');
+});
+
+test('look joins durable outliner parts to the resident semantic percept', () => {
+  const partPercept: SeatPartPercept = {
+    activePartId: 'part:body',
+    parts: [{
+      id: 'part:body', name: 'Radio Body', kind: 'cube', visible: true,
+      lo: 0, hi: 6, groupPath: [{ id: 'group:shell', name: 'Shell' }],
+    }],
+  };
+  const reply = executeSeatRequest(createAgentSeat({ partPercept: () => partPercept }), { action: 'look' });
+  assert(reply.ok && reply.percept?.activePartId === 'part:body', 'active part scope was omitted');
+  assert(reply.percept?.parts[0]?.name === 'Radio Body' && reply.percept.parts[0]?.lo === 0, 'named part range was omitted');
+  assert(reply.percept?.parts[0]?.groupPath[0]?.name === 'Shell', 'outliner hierarchy was omitted');
 });
 
 test('semantic-status exposes the same resident-vs-mount diagnosis as Model Focus', () => {
@@ -67,6 +82,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
     version: 1, generation: 9, faces: 132, unnamed: 0,
+    activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
   };

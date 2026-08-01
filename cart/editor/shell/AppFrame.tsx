@@ -83,7 +83,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import type { SeatPrimitiveSpec } from '../agent/seatApi';
+import type { SeatPartPercept, SeatPrimitiveSpec } from '../agent/seatApi';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -3566,6 +3566,27 @@ export default function AppFrame() {
     }));
     return range;
   };
+  const seatPartPercept = (): SeatPartPercept => {
+    const current = stateRef.current;
+    const modelId = activePartsModelId(current);
+    if (!modelId) return { activePartId: null, parts: [] };
+    const rows = current.modelParts[modelId] ?? [];
+    const activePartId = rows.some((row) => row.id === current.modelActivePartId)
+      ? current.modelActivePartId
+      : null;
+    return {
+      activePartId,
+      parts: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        kind: row.kind ?? null,
+        visible: row.visible,
+        lo: row.lo ?? null,
+        hi: row.hi ?? null,
+        groupPath: partGroupPath(row),
+      })),
+    };
+  };
   // Publish it on the global door ModelView's seat adapter reads. Mount-once is correct:
   // addPrimitivePart reads live state through stateRef/modelToolApiRef, never a closure.
   useEffect(() => {
@@ -3574,6 +3595,7 @@ export default function AppFrame() {
       addPrimitive: seatAddPrimitive,
       detachSelection: seatDetachSelection,
       persist: () => saveActiveModelNow('Saved by Agent Seat'),
+      partPercept: seatPartPercept,
     };
     return () => { (globalThis as any).__seatShellBridge = null; };
   }, []);

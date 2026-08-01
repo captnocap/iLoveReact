@@ -17,6 +17,16 @@ export type SemanticRegion = {
 };
 
 export type SemanticTable = { version: 1; regions: SemanticRegion[]; nextRegionId?: number };
+export type SeatPart = {
+  id: string;
+  name: string;
+  kind: string | null;
+  visible: boolean;
+  lo: number | null;
+  hi: number | null;
+  groupPath: { id: string; name: string }[];
+};
+export type SeatPartPercept = { activePartId: string | null; parts: SeatPart[] };
 export type SeatPercept = {
   version: 1;
   generation: number;
@@ -24,6 +34,10 @@ export type SeatPercept = {
   unnamed: number;
   regions: { id: number; faces: number; instances: number; bbox: [number, number, number, number, number, number] }[];
   table: SemanticTable;
+  /** Shell-owned Outliner identity paired with the host-authored ranges. This is
+   * durable parts.json data, not a reconstruction from semantic face names. */
+  activePartId: string | null;
+  parts: SeatPart[];
 };
 export type SelectorReceipt = { ok: boolean; faces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
@@ -71,6 +85,9 @@ export type SeatAdapter = {
   /** Full package save through AppFrame: meshdoc v4, semantic table, parts,
    *  atlas, and package metadata cross the cold-restart boundary together. */
   persist?: () => boolean;
+  /** Live shell-owned Outliner names and hierarchy. The native semantic state
+   *  intentionally knows geometry only; the seat joins both truths at look time. */
+  partPercept?: () => SeatPartPercept;
   /** Detach changes both native part ranges and the shell-owned Outliner table. */
   detachSelection?: (name: string) => { lo: number; hi: number } | null;
 };
@@ -88,7 +105,11 @@ function readTopology(raw: unknown): TopologyReceipt | null {
 export function readSeatPercept(): SeatPercept | null {
   const value = parseJson<SeatPercept>(host.__mesh_semantic_state?.());
   if (!value || value.version !== 1 || !Array.isArray(value.regions) || value.table?.version !== 1) return null;
-  return value;
+  return {
+    ...value,
+    activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
+    parts: Array.isArray(value.parts) ? value.parts : [],
+  };
 }
 
 function regionByName(table: SemanticTable, name: string): SemanticRegion | null {
@@ -148,6 +169,11 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
 export function formatSeatPercept(percept: SeatPercept): string {
   const names = new Map(percept.table.regions.map((region) => [region.id, region.name]));
   const lines = [`mesh · ${percept.faces} faces · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  for (const part of percept.parts) {
+    const range = part.lo == null || part.hi == null ? 'range pending' : `[${part.lo},${part.hi})`;
+    const folder = part.groupPath.length > 0 ? `${part.groupPath.map((row) => row.name).join('/')} / ` : '';
+    lines.push(`  part ${folder}${part.name}  ${range}${part.id === percept.activePartId ? '  ACTIVE' : ''}${part.visible ? '' : '  hidden'}`);
+  }
   for (const row of percept.regions) lines.push(`  ${names.get(row.id) ?? `region:${row.id}`}  ${row.faces} faces${row.instances > 1 ? ` ×${row.instances}` : ''}  bbox ${row.bbox.join(',')}`);
   if (percept.unnamed > 0) lines.push(`  ⚠ unnamed  ${percept.unnamed}`);
   return lines.join('\n');
@@ -160,8 +186,13 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     host.__mesh_action_source?.(9); // CommandSource 'automation'
     try { return invoke(); } finally { host.__mesh_action_source?.(0); }
   };
+  const withParts = (percept: SeatPercept | null): SeatPercept | null => {
+    if (!percept) return null;
+    const shell = adapter.partPercept?.();
+    return shell ? { ...percept, ...shell } : percept;
+  };
   const look = (): SeatPercept | null => {
-    const initial = readSeatPercept();
+    const initial = withParts(readSeatPercept());
     if (!initial || primitiveBootstrapAttempted || initial.table.regions.length > 0 || initial.unnamed !== initial.faces || initial.faces < 6 || initial.faces > 12) return initial;
     primitiveBootstrapAttempted = true;
     let table = initial.table;
@@ -171,7 +202,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       table = declared.table;
       ids.push(declared.region.id);
     }
-    if (host.__mesh_semantic_bootstrap_axes?.(new Uint32Array(ids), JSON.stringify(table)) === 1) return readSeatPercept();
+    if (host.__mesh_semantic_bootstrap_axes?.(new Uint32Array(ids), JSON.stringify(table)) === 1) return withParts(readSeatPercept());
     return initial;
   };
   const select = (selector: string): SelectorReceipt => {
