@@ -243,12 +243,21 @@ fn projectedTrianglePush(
     radius: f32,
     feet_y: f32,
     head_y: f32,
+    step_top_y: f32,
     a: Vec3,
     b: Vec3,
     c: Vec3,
     tuning: Tuning,
 ) ?Push {
     if (!overlapsVerticalRange(a, b, c, feet_y + tuning.top_side_clearance_meters, head_y)) return null;
+    // The rect lane never side-pushes a solid whose top is within step reach
+    // (grace_walkable / too_tall_to_step): its top is GROUND. Mirror that law: a
+    // steep face topping out at/below feet + step_height is a stair riser, and
+    // the mount pass (walkableSurfaceAt) owns seating the feet on the tread
+    // behind it. Without this gate every riser of a placed staircase pushed like
+    // a full wall, held the body's centre off the tread it should mount, and
+    // step height was never consulted at all on the approach.
+    if (@max(a.y, @max(b.y, c.y)) <= step_top_y) return null;
     if (!pointInsideProjectionBounds(a, b, c, point.x, point.z, radius)) return null;
     if (normalizedAbsY(normal(a, b, c)) >= tuning.walkable_normal_y) return null;
 
@@ -295,7 +304,7 @@ fn projectedTrianglePush(
 /// Resolve one vertical player cylinder against one placed triangle mesh.
 /// `triangles` is local-frame xyz×3 and immutable: the asset is baked once;
 /// only the instance transform and body state vary per frame.
-pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning: Tuning) Result {
+pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, world_tuning: Tuning) Result {
     var result: Result = .{};
     if (triangles.len == 0 or triangles.len % 9 != 0 or body.radius <= 0 or body.height <= 0) return result;
 
@@ -308,6 +317,12 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
     const radius = body.radius * inv_scale;
     const height = body.height * inv_scale;
     const step_height = body.step_height * inv_scale;
+    // Tuning distances are WORLD metres but the solve runs in local units, so
+    // they inverse-scale exactly like the body extents — a 2× prop must not
+    // read a doubled world snap band (nor a 0.5× prop a halved one).
+    var tuning = world_tuning;
+    tuning.top_side_clearance_meters *= inv_scale;
+    tuning.ground_snap_meters *= inv_scale;
     const world_dx = body.x - transform.x;
     const world_dz = body.z - transform.z;
     var x = (cs * world_dx - sn * world_dz) * inv_scale;
@@ -349,6 +364,7 @@ pub fn resolve(body: *Body, triangles: []const f32, transform: Transform, tuning
                 radius,
                 y,
                 y + height,
+                y + step_height,
                 a,
                 b,
                 c,

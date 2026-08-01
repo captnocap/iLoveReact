@@ -1224,7 +1224,15 @@ pub const HfSurface = struct { height: f32, normal_y: f32, walk_cos: f32 };
 fn heightfieldSurface(hf: *const Heightfield, x: f32, z: f32) ?HfSurface {
     const raw = rawHeight(hf, x, z) orelse return null;
     const h = hf.base_y + raw;
-    const e = hf.cell;
+    // Gradient sampled at HALF a cell. A central difference at ±cell smears a
+    // rise that happens inside ONE cell across a two-cell window, reporting
+    // half its true grade — at walk_cos 0.6 a ~69° sculpted-terrain wall still
+    // read walkable, the too-steep move-cancel never fired, and the player
+    // walked straight up cliff faces. Half-cell samples stay inside the rising
+    // cell near its centre (true grade reaches the walkability gate) while
+    // still averaging sub-cell sculpt noise instead of turning every one-cell
+    // bump into a hard wall.
+    const e = hf.cell * 0.5;
     const hx0 = rawHeight(hf, x - e, z) orelse raw;
     const hx1 = rawHeight(hf, x + e, z) orelse raw;
     const hz0 = rawHeight(hf, x, z - e) orelse raw;

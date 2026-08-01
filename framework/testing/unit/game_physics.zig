@@ -674,12 +674,43 @@ test "heightfield sample: bilinear interior height" {
     registerSlope(0.5);
     const s = physics.heightfieldSurfaceAt(1.5, 1.0).?;
     try testing.expectApproxEqAbs(@as(f32, 0.3), s.height, 1e-5);
-    // Central difference at x=1.5 with e=cell clamps at the grid edge
-    // (x+e falls outside → falls back to the centre sample), so the measured
-    // dh/dx is 0.1 here, not the analytic 0.2 — reference behavior.
+    // Central difference at x=1.5 with e=cell/2 clamps at the grid edge
+    // (x+e lands on the last column → falls back to the centre sample), so the
+    // measured dh/dx is 0.1 here, not the analytic 0.2 — reference behavior.
     try testing.expectApproxEqAbs(@as(f32, 1.0 / @sqrt(1.01)), s.normal_y, 1e-4);
     physics.clearHeightfields();
     try testing.expect(physics.heightfieldSurfaceAt(1.5, 1.0) == null);
+}
+
+test "heightfield sample: a cliff inside one cell reads its true grade" {
+    physics.clearHeightfields();
+    defer physics.clearHeightfields();
+    // Flat shelf, then a 2.5 m rise inside ONE 1 m cell (a ~68° sculpted wall),
+    // then flat top. The old ±cell central difference smeared this across two
+    // cells and read half the grade — 1.25, normal_y ≈ 0.62 — so at walk_cos
+    // 0.6 the cliff face counted as WALKABLE and the too-steep move-cancel
+    // never fired: the player walked straight up terrain walls.
+    var samples = [15]f32{
+        0, 0, 0, 2.5, 2.5,
+        0, 0, 0, 2.5, 2.5,
+        0, 0, 0, 2.5, 2.5,
+    };
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 0,
+        .origin_x = 0,
+        .origin_z = 0,
+        .cell = 1,
+        .cols = 5,
+        .rows = 3,
+        .base_y = 0,
+        .walk_cos = 0.6,
+    }, std.mem.sliceAsBytes(samples[0..])));
+    const face = physics.heightfieldSurfaceAt(2.5, 1.0).?;
+    try testing.expect(face.normal_y < face.walk_cos);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 / @sqrt(7.25)), face.normal_y, 1e-4);
+    // The flat shelf next to it stays fully walkable.
+    const shelf = physics.heightfieldSurfaceAt(1.0, 1.0).?;
+    try testing.expectApproxEqAbs(@as(f32, 1.0), shelf.normal_y, 1e-4);
 }
 
 test "one heightfield can be released without dropping its neighbors" {

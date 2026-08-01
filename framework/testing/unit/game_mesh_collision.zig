@@ -81,6 +81,74 @@ test "walkable mesh triangles support the player top" {
     try testing.expectEqual(@as(f32, 0), body.vy);
 }
 
+test "placed staircase risers within step reach mount instead of walling" {
+    // Three steps rising along +x — rise 0.25, tread 0.4, width 2 — then a top
+    // platform. Risers are vertical quads, treads horizontal quads: the exact
+    // shape of a placed stairs prop's collision triangles. Before the riser
+    // step-reach gate, riser 1 alone side-pushed the body off the first tread
+    // forever and step height was never consulted on the approach.
+    const stairs = [_]f32{
+        // riser 1 at x=0: y 0..0.25
+        0,   0,    -1, 0,   0,    1,  0,   0.25, 1,
+        0,   0,    -1, 0,   0.25, 1,  0,   0.25, -1,
+        // tread 1: x 0..0.4 at y=0.25
+        0,   0.25, -1, 0.4, 0.25, -1, 0.4, 0.25, 1,
+        0,   0.25, -1, 0.4, 0.25, 1,  0,   0.25, 1,
+        // riser 2 at x=0.4: y 0.25..0.5
+        0.4, 0.25, -1, 0.4, 0.25, 1,  0.4, 0.5,  1,
+        0.4, 0.25, -1, 0.4, 0.5,  1,  0.4, 0.5,  -1,
+        // tread 2: x 0.4..0.8 at y=0.5
+        0.4, 0.5,  -1, 0.8, 0.5,  -1, 0.8, 0.5,  1,
+        0.4, 0.5,  -1, 0.8, 0.5,  1,  0.4, 0.5,  1,
+        // riser 3 at x=0.8: y 0.5..0.75
+        0.8, 0.5,  -1, 0.8, 0.5,  1,  0.8, 0.75, 1,
+        0.8, 0.5,  -1, 0.8, 0.75, 1,  0.8, 0.75, -1,
+        // top platform: x 0.8..2 at y=0.75
+        0.8, 0.75, -1, 2,   0.75, -1, 2,   0.75, 1,
+        0.8, 0.75, -1, 2,   0.75, 1,  0.8, 0.75, 1,
+    };
+    var body: mesh_collision.Body = .{
+        .x = -0.6,
+        .y = 0,
+        .z = 0,
+        .vx = 1.5,
+        .radius = 0.34,
+        .height = 1.65,
+        .step_height = 0.5,
+    };
+    const dt: f32 = 1.0 / 60.0;
+    var frame: usize = 0;
+    while (frame < 180) : (frame += 1) {
+        body.x += body.vx * dt;
+        _ = mesh_collision.resolve(&body, &stairs, .{}, mesh_collision.DEFAULT_TUNING);
+        body.vx = 1.5; // walk intent is re-driven each frame by the movement integrator
+    }
+    try testing.expectApproxEqAbs(@as(f32, 0.75), body.y, 0.001);
+    try testing.expect(body.x > 0.8);
+}
+
+test "a face taller than step reach still walls a walking body" {
+    // One 2 m vertical face at x=0.5: no tread within step reach, so the riser
+    // gate must not apply — the body walks into it and is held at radius.
+    const wall = [_]f32{
+        0.5, 0, -1, 0.5, 0, 1, 0.5, 2, 1,
+        0.5, 0, -1, 0.5, 2, 1, 0.5, 2, -1,
+    };
+    var body: mesh_collision.Body = .{
+        .x = 0.2,
+        .y = 0,
+        .z = 0,
+        .vx = 1,
+        .radius = 0.34,
+        .height = 1.65,
+        .step_height = 0.5,
+    };
+    const result = mesh_collision.resolve(&body, &wall, .{}, mesh_collision.DEFAULT_TUNING);
+    try testing.expect(result.side_contacts > 0);
+    try testing.expectApproxEqAbs(@as(f32, 0.16), body.x, 0.001);
+    try testing.expectEqual(@as(f32, 0), body.y);
+}
+
 test "horizontal mesh triangles stop an upward head" {
     const ceiling = [_]f32{
         -1, 2, -1, 1, 2, -1, 1,  2, 1,
