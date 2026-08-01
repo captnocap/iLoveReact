@@ -99,7 +99,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat flip` | `{"action":"flip"}` | Reverse selected face winding. |
 | `tools/seat glass` | `{"action":"glass"}` | Toggle glass on selected faces. |
 | `tools/seat paint r g b` | `{"action":"paint","args":{"rgb":[180,40,20]}}` | Journaled solid RGB fill of selected faces; bytes 0–255. |
-| `tools/seat atlas <template\|solid\|blank> [r g b] [detail]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"detail":16}}` | Explicitly rebuild a stale paint atlas after topology edits. |
+| `tools/seat atlas <template\|solid\|blank> [r g b] [fit]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"fit":1024}}` | Explicitly rebuild a stale paint atlas after topology edits. `fit` is the atlas BUDGET — 512/1024/2048/4096, default **1024²**. Replies with the sheet you got: `{density,fit,w,h}`. |
 | `tools/seat material <slot\|clear>` | `{"action":"material","args":{"slot":2}}` | Assign/clear an existing texture-role slot on selected faces. |
 | `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
 | `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
@@ -441,6 +441,16 @@ and its name table with the geometry.
 Structural topology marks the current paint layout stale. Run `atlas` before `paint`, then
 `save`; this is the same explicit “Remake Atlas” decision as the visible editor and prevents
 old UVs from being silently endorsed against new geometry.
+
+**Resolution is a budget, never a density you pick.** `atlas` takes `fit` — 512/1024/2048/4096 —
+and the host derives texels/meter from the model's own size, so a small prop gets writing-grade
+texels and a car divides the same sheet. Omit it and you get the painter's 1024². Do not reach
+for the raw `detail` (texels/meter) door to "set the resolution": on a 0.3 m prop a plausible-
+looking density packs the whole model into a ~25×26 px sheet where a small region owns six
+pixels, and every signal still says success — `paint` returns real `changed` counts, `save`
+succeeds, `semantic-status` reads `healthy`, and the atlas on disk holds your exact colours.
+It just renders as unpainted. Read the `w`/`h` in the `atlas` reply; if the sheet is tiny for
+the object, that is the bug.
 
 ### Why naming everything matters beyond your own session
 

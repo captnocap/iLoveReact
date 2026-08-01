@@ -38,9 +38,13 @@ else if (action === 'basic-cut') request = { action, args: { direction: Number(a
 else if (action === 'solidify') request = { action, args: { thickness: Number(args[0] || 0) } };
 else if (action === 'detach') request = { action, args: { name: args[0] } };
 else if (action === 'paint') request = { action, args: { rgb: numberList(args.slice(0, 3)) } };
+// atlas <template|solid|blank> [r g b] [fit] — `fit` is the atlas BUDGET (512|1024|2048|4096),
+// not a density; omitted, the seat rebuilds at the painter's default 1024². Raw texels/meter
+// stays reachable as `tools/seat action atlas '{"base":"solid","detail":N}'` for the rare case
+// that wants an exact density instead of a budget.
 else if (action === 'atlas') request = { action, args: {
   base: args[0] || 'template', rgb: args.length >= 4 ? numberList(args.slice(1, 4)) : [220, 220, 225],
-  ...(args[4] === undefined ? {} : { detail: Number(args[4]) }),
+  ...(args[4] === undefined ? {} : { fit: Number(args[4]) }),
 } };
 else if (action === 'material') request = { action, args: { slot: args[0] === 'clear' ? null : Number(args[0]) } };
 else if (action === 'uv') request = { action, args: { operation: args[0] } };

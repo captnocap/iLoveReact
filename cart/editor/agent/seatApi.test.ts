@@ -265,6 +265,9 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
   (globalThis as any).__model_paint_selection = () => 4;
   (globalThis as any).__model_atlas_base = () => 1;
   (globalThis as any).__model_set_paint_detail = () => 16;
+  let appliedFit = 0;
+  (globalThis as any).__model_set_paint_fit = (texels: number) => { appliedFit = texels; return 1686; };
+  (globalThis as any).__model_paint_fit_estimate = () => JSON.stringify({ w: 798, h: 1060, density: 1686 });
   (globalThis as any).__mesh_texture_slot_assign = () => 4;
   (globalThis as any).__model_uv_selection_read = () => JSON.stringify({ islands: [1, 3], faces: [2, 4] });
   let uvIslands: number[] = [];
@@ -276,6 +279,15 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
   });
   assert(executeSeatRequest(seat, { action: 'paint', args: { rgb: [10, 20, 30] } }).ok, 'selection paint stayed unreachable');
   assert(executeSeatRequest(seat, { action: 'atlas', args: { base: 'solid', rgb: [10, 20, 30], detail: 16 } }).ok, 'atlas remake stayed unreachable');
+  assert(appliedFit === 0, 'an explicit texels/meter detail was rerouted through the atlas budget');
+  // Naming no resolution must take the painter's 1024² budget rather than inheriting whatever
+  // density is live: a small prop left on a low density paints into a handful of pixels and
+  // reads as unpainted while every other signal reports success.
+  const defaulted = executeSeatRequest(seat, { action: 'atlas', args: { base: 'solid', rgb: [10, 20, 30] } });
+  const sheet = defaulted.result as { density: number; fit: number; w: number; h: number };
+  assert(defaulted.ok && appliedFit === 1024, `atlas without a resolution did not take the 1024 budget (fit=${appliedFit})`);
+  assert(sheet.density === 1686 && sheet.w === 798 && sheet.h === 1060, 'atlas did not report the sheet it actually built');
+  assert(!executeSeatRequest(seat, { action: 'atlas', args: { base: 'solid', rgb: [10, 20, 30], fit: 900 } }).ok, 'a non-budget fit was accepted');
   assert(executeSeatRequest(seat, { action: 'material', args: { slot: 2 } }).ok, 'material role stayed unreachable');
   assert(executeSeatRequest(seat, { action: 'uv', args: { operation: 'auto-size' } }).ok, 'UV auto-size stayed unreachable');
   assert(uvIslands.join(',') === '1,3', 'UV operation ignored the selected islands');

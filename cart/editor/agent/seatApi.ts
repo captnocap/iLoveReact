@@ -44,6 +44,9 @@ export type TopologyReceipt = { ok: number; key?: string; count?: number; genera
 export type InsetReceipt =
   | { ok: true; topology: TopologyReceipt; transforms: number }
   | { ok: false; stage: 'validate' | 'extrude' | 'scale-0' | 'scale-1' | 'offset'; reason: string };
+// What the rebuilt paint sheet actually came out as: the derived texels/meter, the atlas
+// budget that derived it, and the sheet's pixel dimensions.
+export type AtlasReceipt = { density: number; fit?: number; w?: number; h?: number };
 export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: SeatPercept | null; reason?: string };
 export type SeatBriefReply = Omit<SeatReply, 'percept'> & { brief: string };
 export type SeatElements = {
@@ -389,12 +392,39 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const paint = (rgb: [number, number, number]): number => rgbBytes(rgb)
     ? Number(automation(() => host.__model_paint_selection?.(...rgb)) ?? 0)
     : 0;
-  const atlas = (base: 'template' | 'solid' | 'blank', rgb: [number, number, number], detail?: number): boolean => {
+  // Paint fidelity is an atlas BUDGET, not a hand-picked density (req_2518, the same law the
+  // visible painter's Density button cycles): the model's islands fit a texels² sheet and the
+  // host DERIVES px/m from the model's own size, so a small prop gets writing-grade texels and
+  // a car divides the same budget. An agent naming no resolution now gets the painter's proven
+  // 1024², instead of inheriting whatever density happened to be live — a 0.3m prop left on a
+  // low density packs its whole atlas into ~25×26px, where a lens region owns six pixels and
+  // reads as unpainted no matter how correct the paint program is.
+  const PAINT_FIT_LEVELS = [512, 1024, 2048, 4096];
+  const DEFAULT_PAINT_FIT = 1024;
+  const atlas = (base: 'template' | 'solid' | 'blank', rgb: [number, number, number], detail?: number, fit?: number): AtlasReceipt | null => {
     if (!['template', 'solid', 'blank'].includes(base) || !rgbBytes(rgb) ||
-        (detail !== undefined && (!Number.isInteger(detail) || detail < 1))) return false;
+        (detail !== undefined && (!Number.isInteger(detail) || detail < 1)) ||
+        (fit !== undefined && !PAINT_FIT_LEVELS.includes(fit))) return null;
     const mode = base === 'solid' ? 1 : base === 'blank' ? 2 : 0;
-    if (automation(() => host.__model_atlas_base?.(mode, ...rgb)) !== 1) return false;
-    return detail === undefined || Number(automation(() => host.__model_set_paint_detail?.(detail)) ?? -1) >= 0;
+    // Size the sheet BEFORE laying the base colour — createAtlasAndPaint's order, so the fill
+    // lands on the final layout rather than being rescaled out from under itself.
+    const budget = fit ?? (detail === undefined ? DEFAULT_PAINT_FIT : 0);
+    const density = budget
+      ? Number(automation(() => host.__model_set_paint_fit?.(budget)) ?? -1)
+      : Number(automation(() => host.__model_set_paint_detail?.(detail)) ?? -1);
+    if (!(density >= 0)) return null;
+    if (automation(() => host.__model_atlas_base?.(mode, ...rgb)) !== 1) return null;
+    // Report the sheet the agent actually got. The resolution was previously invisible from
+    // the seat, so a too-small atlas looked exactly like paint that silently did nothing.
+    let sheet: { w?: number; h?: number } = {};
+    if (budget) {
+      try {
+        const json = host.__model_paint_fit_estimate?.(budget);
+        const parsed = typeof json === 'string' && json ? JSON.parse(json) : null;
+        if (parsed && Number.isFinite(parsed.w) && Number.isFinite(parsed.h)) sheet = { w: parsed.w, h: parsed.h };
+      } catch { /* an unreadable estimate is not a failed rebuild */ }
+    }
+    return { density, ...(budget ? { fit: budget } : {}), ...sheet };
   };
   const material = (slot: number | null): number => slot !== null && (!Number.isInteger(slot) || slot < 0) ? 0 : Number(automation(() => slot == null
     ? host.__mesh_texture_slot_clear?.()
@@ -627,12 +657,13 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('paint', changed > 0, { changed }, changed > 0 ? undefined : 'select faces and use RGB bytes while the paint layout is current');
       }
       case 'atlas': {
-        const ok = seat.atlas(
+        const result = seat.atlas(
           String(args.base ?? 'template') as 'template' | 'solid' | 'blank',
           (args.rgb as [number, number, number]) ?? [220, 220, 225],
           args.detail === undefined ? undefined : Number(args.detail),
+          args.fit === undefined ? undefined : Number(args.fit),
         );
-        return seat.reply('atlas', ok, undefined, ok ? undefined : 'the active model could not rebuild its paint atlas');
+        return seat.reply('atlas', !!result, result ?? undefined, result ? undefined : 'the atlas could not rebuild — fit must be 512, 1024, 2048, or 4096, and detail a texels/meter integer ≥ 1');
       }
       case 'material': {
         const changed = seat.material(args.slot == null ? null : Number(args.slot));
