@@ -903,6 +903,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
+  // This document's stable identity — the hot-resume stamp AND the scope for per-doc
+  // working state (backdrops). Derived from props only, so it's valid from first render.
+  const hotDocId = paintTarget ? `${paintTarget.kind}:${paintTarget.id}` : initialPath ?? null;
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
@@ -927,12 +930,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // owns the reflection (mesh_edit.zig twin table); this is the toggle's UI truth.
   const [mirrorMask, setMirrorMask] = useState(toolTwig?.mirrorMask ?? 0);
   // Reference-image backdrops (req_2758 — the studio's req_1280 tracing planes). TWIG:
-  // localstore-backed working state, never model data. bdEpoch is a fresh nonce per
-  // MOUNT folded into texture/geometry keys, so a remount re-bakes the static surfaces
-  // instead of sampling a stale host texture (the studio's req_1541 lesson).
-  const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => loadBackdrops());
+  // localstore-backed working state, never model data — and scoped to THIS document
+  // (req_3621): trace planes from one model must never haunt another. bdEpoch is a
+  // fresh nonce per MOUNT folded into texture/geometry keys, so a remount re-bakes the
+  // static surfaces instead of sampling a stale host texture (the studio's req_1541 lesson).
+  const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => loadBackdrops(hotDocId));
   const setBackdrops = (u: Backdrop[] | ((p: Backdrop[]) => Backdrop[])) =>
-    setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; saveBackdrops(next); return next; });
+    setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; saveBackdrops(hotDocId, next); return next; });
   const [backdropPanel, setBackdropPanel] = useState(false);
   const [bdStatus, setBdStatus] = useState<string | null>(null);
   // The panel's one expanded backdrop (req_3080): it wears the in-viewport MOVE gizmo —
@@ -2305,7 +2309,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
   // resumes the live session only when doc AND key both still match the host.
-  const hotDocId = paintTarget ? `${paintTarget.kind}:${paintTarget.id}` : initialPath ?? null;
+  // (hotDocId itself is derived once with the state seeds at the top of the component.)
   useEffect(() => {
     if (model && hotDocId) setHotState<DocTwig>(DOC_TWIG_KEY, { docId: hotDocId, key: model.key });
   }, [model?.key, hotDocId]);

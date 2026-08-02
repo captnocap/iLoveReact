@@ -208,19 +208,26 @@ function refSource(b64: string, srcPath: string): string {
 
 // ── Twig persistence (localstore; a tracing aid, never model data) ────────────
 const NS = 'editor';
-const KEY = 'model-backdrops';
+// Keyed PER DOCUMENT (req_3621): the old single 'model-backdrops' key made every trace
+// plane a permanent global — open ANY model and someone else's translucent reference
+// quads haunted the viewport with nothing on screen explaining where they came from.
+// A backdrop is working state for the model it was traced against, nothing else.
+const KEY_PREFIX = 'model-backdrops';
+const storeKey = (docId: string) => `${KEY_PREFIX}:${docId}`;
 
-export function loadBackdrops(): Backdrop[] {
+export function loadBackdrops(docId: string | null): Backdrop[] {
+  if (!docId) return [];
   try {
-    const raw = nsGet(NS, KEY);
+    const raw = nsGet(NS, storeKey(docId));
     const list = raw ? (JSON.parse(raw) as Backdrop[]) : [];
     return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
 }
-export function saveBackdrops(list: Backdrop[]): void {
-  try { nsSet(NS, KEY, JSON.stringify(list)); } catch { /* over-cap saves fail loud in localstore */ }
+export function saveBackdrops(docId: string | null, list: Backdrop[]): void {
+  if (!docId) return;
+  try { nsSet(NS, storeKey(docId), JSON.stringify(list)); } catch { /* over-cap saves fail loud in localstore */ }
 }
 
 // each new backdrop lands on the next plane in this cycle so a front/side/top set
