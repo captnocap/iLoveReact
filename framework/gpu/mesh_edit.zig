@@ -377,6 +377,11 @@ pub fn vertPosPub(i: u32) [3]f32 {
     if (@as(usize, i) * 3 + 2 >= v.len) return .{ 0, 0, 0 };
     return .{ v[i * 3], v[i * 3 + 1], v[i * 3 + 2] };
 }
+pub fn vertPartPub(i: u32) ?u32 {
+    if (!ensureTopology()) return null;
+    const parts = g_vert_part orelse return null;
+    return if (i < parts.len) parts[i] else null;
+}
 pub fn vertSelectedPub(i: u32) bool {
     const s = g_sel_vert orelse return false;
     return i < s.len and s[i];
@@ -2451,6 +2456,21 @@ pub const SelectionFrame = struct {
     radius: f32,
 };
 
+/// One ordered row of vertices whose edge widths should be made uniform.  The
+/// row is explicit because retopology may contain poles and provisional open
+/// seams: guessing a loop from valence at this boundary is how an equalizer
+/// jumps into the wrong strip.  Open paths pin both endpoints; closed paths pin
+/// the first vertex as the phase anchor and distribute the rest around the loop.
+pub const NormalizeWidthPath = struct {
+    vertices: []const u32,
+    closed: bool = false,
+};
+
+pub const NormalizeWidthsRequest = struct {
+    paths: []const NormalizeWidthPath,
+    strength: f32 = 1,
+};
+
 /// Bounding sphere of the active logical selection. Numeric transforms use this
 /// after a large one-shot scale to keep the result in view without changing the
 /// user's orbit angle.
@@ -2465,6 +2485,159 @@ pub fn selectionFrame() ?SelectionFrame {
         radius_sq = @max(radius_sq, vecDot(rel, rel));
     }
     return .{ .center = center, .radius = @sqrt(radius_sq) };
+}
+
+fn verticesShareBoundaryEdge(a: u32, b: u32) bool {
+    const edges = g_edges orelse return false;
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!edgeIsBoundaryPub(edge)) continue;
+        const x = edges[edge * 2];
+        const y = edges[edge * 2 + 1];
+        if ((x == a and y == b) or (x == b and y == a)) return true;
+    }
+    return false;
+}
+
+fn pointDistance(a: [3]f32, b: [3]f32) f32 {
+    const d = vecSub(b, a);
+    return @sqrt(vecDot(d, d));
+}
+
+/// Equal-arc resampling over the path that already exists. Targets stay on the
+/// current piecewise-linear curve rather than a chord between its endpoints,
+/// preserving the generated surface's curvature while removing narrow/wide
+/// edge alternation.
+fn resampleWidthPath(points: []const [3]f32, closed: bool, out: [][3]f32) bool {
+    if (points.len < 3 or out.len != points.len) return false;
+    const segment_count = if (closed) points.len else points.len - 1;
+    var total: f32 = 0;
+    for (0..segment_count) |segment| {
+        const next = if (segment + 1 == points.len) 0 else segment + 1;
+        const length = pointDistance(points[segment], points[next]);
+        if (!std.math.isFinite(length) or length <= 1e-8) return false;
+        total += length;
+    }
+    if (!std.math.isFinite(total) or total <= 1e-8) return false;
+
+    for (0..points.len) |index| {
+        if (!closed and (index == 0 or index + 1 == points.len)) {
+            out[index] = points[index];
+            continue;
+        }
+        const denominator: f32 = @floatFromInt(if (closed) points.len else points.len - 1);
+        const wanted = total * (@as(f32, @floatFromInt(index)) / denominator);
+        var accumulated: f32 = 0;
+        var segment: usize = 0;
+        while (segment < segment_count) : (segment += 1) {
+            const next = if (segment + 1 == points.len) 0 else segment + 1;
+            const length = pointDistance(points[segment], points[next]);
+            if (wanted <= accumulated + length or segment + 1 == segment_count) {
+                const t = std.math.clamp((wanted - accumulated) / length, 0, 1);
+                out[index] = vecAdd(points[segment], vecMul(vecSub(points[next], points[segment]), t));
+                break;
+            }
+            accumulated += length;
+        }
+    }
+    return true;
+}
+
+fn applyExplicitVertexTargets(affected: []const bool, targets: []const f32) Mutation {
+    if (affected.len < g_vert_count or targets.len < @as(usize, g_vert_count) * 3) return .{};
+    const verts = g_verts orelse return .{};
+    const corners = g_corner_vert orelse return .{};
+    const positions = model_paint.positionsMutable() orelse return .{};
+
+    var moved = false;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!affected[vertex]) continue;
+        const base = @as(usize, vertex) * 3;
+        if (!std.math.isFinite(targets[base]) or
+            !std.math.isFinite(targets[base + 1]) or
+            !std.math.isFinite(targets[base + 2])) return .{};
+        if (@abs(verts[base] - targets[base]) +
+            @abs(verts[base + 1] - targets[base + 1]) +
+            @abs(verts[base + 2] - targets[base + 2]) > 1e-8) moved = true;
+    }
+    if (!moved) return .{};
+
+    vertex = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!affected[vertex]) continue;
+        const base = @as(usize, vertex) * 3;
+        verts[base] = targets[base];
+        verts[base + 1] = targets[base + 1];
+        verts[base + 2] = targets[base + 2];
+    }
+
+    const face_count = model_paint.faceCount();
+    var mutation = Mutation{ .first_face = face_count, .last_face = 0 };
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        var touched = false;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const logical = corners[face * 3 + corner];
+            if (logical >= affected.len or !affected[logical]) continue;
+            const dst = @as(usize, face) * 9 + @as(usize, corner) * 3;
+            const src = @as(usize, logical) * 3;
+            if (dst + 2 >= positions.len) continue;
+            positions[dst] = verts[src];
+            positions[dst + 1] = verts[src + 1];
+            positions[dst + 2] = verts[src + 2];
+            touched = true;
+        }
+        if (!touched) continue;
+        mutation.first_face = @min(mutation.first_face, face);
+        mutation.last_face = @max(mutation.last_face, face);
+        mutation.changed = true;
+    }
+    return mutation;
+}
+
+/// Normalize one or more explicitly ordered retopology rows in one mutation.
+/// Every requested step must already be a real model edge and every vertex must
+/// be in the active part scope. Paths may not overlap: shared vertices make the
+/// target ambiguous and are rejected before anything moves.
+pub fn normalizeWidths(allocator: std.mem.Allocator, request: NormalizeWidthsRequest) Mutation {
+    if (!ensureTopology() or request.paths.len == 0 or request.paths.len > 128 or
+        !std.math.isFinite(request.strength) or request.strength <= 0 or request.strength > 1) return .{};
+    const verts = g_verts orelse return .{};
+    const affected = allocator.alloc(bool, g_vert_count) catch return .{};
+    defer allocator.free(affected);
+    @memset(affected, false);
+    const targets = allocator.dupe(f32, verts) catch return .{};
+    defer allocator.free(targets);
+
+    var total_vertices: usize = 0;
+    for (request.paths) |path| {
+        if (path.vertices.len < 3) return .{};
+        total_vertices += path.vertices.len;
+        if (total_vertices > 8192) return .{};
+        for (path.vertices, 0..) |vertex, index| {
+            if (vertex >= g_vert_count or !vertInScopePub(vertex) or affected[vertex]) return .{};
+            affected[vertex] = true;
+            if (index > 0 and !verticesShareBoundaryEdge(path.vertices[index - 1], vertex)) return .{};
+        }
+        if (path.closed and !verticesShareBoundaryEdge(path.vertices[path.vertices.len - 1], path.vertices[0])) return .{};
+
+        const points = allocator.alloc([3]f32, path.vertices.len) catch return .{};
+        defer allocator.free(points);
+        const normalized = allocator.alloc([3]f32, path.vertices.len) catch return .{};
+        defer allocator.free(normalized);
+        for (path.vertices, 0..) |vertex, index| points[index] = vertPos(vertex);
+        if (!resampleWidthPath(points, path.closed, normalized)) return .{};
+        for (path.vertices, 0..) |vertex, index| {
+            const base = @as(usize, vertex) * 3;
+            const target = vecAdd(points[index], vecMul(vecSub(normalized[index], points[index]), request.strength));
+            targets[base] = target[0];
+            targets[base + 1] = target[1];
+            targets[base + 2] = target[2];
+        }
+    }
+    return applyExplicitVertexTargets(affected, targets);
 }
 
 pub const ScaleFactorTuning = struct {
@@ -3193,6 +3366,54 @@ test "two adjacent selected edges imply the missing triangle" {
     try testing.expectEqualSlices(u32, &.{ 4, 7, 9 }, &order);
     try testing.expect(!triangleFromAdjacentEdges(.{ 4, 7 }, .{ 8, 9 }, &order));
     try testing.expect(!triangleFromAdjacentEdges(.{ 4, 7 }, .{ 7, 4 }, &order));
+}
+
+test "width normalization resamples the existing curve instead of its endpoint chord" {
+    const points = [_][3]f32{
+        .{ 0, 0, 0 },
+        .{ 1, 0, 0 },
+        .{ 1, 3, 0 },
+    };
+    var normalized: [points.len][3]f32 = undefined;
+    try testing.expect(resampleWidthPath(&points, false, &normalized));
+    try testing.expectEqual(points[0], normalized[0]);
+    try testing.expectEqual(points[2], normalized[2]);
+    // Half the four-metre arc is one metre up the second segment. A chord
+    // interpolation would have incorrectly landed at (0.5, 1.5, 0).
+    try testing.expectApproxEqAbs(@as(f32, 1), normalized[1][0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1), normalized[1][1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), normalized[1][2], 0.0001);
+}
+
+test "normalizeWidths equalizes an explicit topology path and pins open endpoints" {
+    const corner_positions = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 1, 0, 0 }, .{ 4, 0, 0 }, .{ 0, 1, 0 },
+    };
+    var soup: [corner_positions.len * 8]f32 = @splat(0);
+    for (corner_positions, 0..) |point, corner| {
+        const base = corner * 8;
+        soup[base] = point[0];
+        soup[base + 1] = point[1];
+        soup[base + 2] = point[2];
+        soup[base + 5] = 1;
+    }
+    model_paint.setTarget(777, soup[0..], corner_positions.len);
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    try testing.expect(ensureTopology());
+    const left = findVertAt(.{ 0, 0, 0 }).?;
+    const uneven = findVertAt(.{ 1, 0, 0 }).?;
+    const right = findVertAt(.{ 4, 0, 0 }).?;
+    const path_vertices = [_]u32{ left, uneven, right };
+    const paths = [_]NormalizeWidthPath{.{ .vertices = &path_vertices }};
+    const mutation = normalizeWidths(testing.allocator, .{ .paths = &paths });
+    try testing.expect(mutation.changed);
+    try testing.expectApproxEqAbs(@as(f32, 0), vertPos(left)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2), vertPos(uneven)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 4), vertPos(right)[0], 0.0001);
 }
 
 test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {

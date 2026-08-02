@@ -3000,6 +3000,106 @@ pub fn meshTopoWeldSelection() bool {
     return rebuildMaskedFaces(verts, tri_count, mask, "weld", corner_positions);
 }
 
+pub const MeshRetopoWeldPairsRequest = struct {
+    pairs: []const [2]u32,
+    /// Optional safety leash in model metres. Every pair is validated before
+    /// any vertex moves, so one stale/cross-body id rejects the whole action.
+    maxDistance: ?f32 = null,
+};
+
+pub const MeshRetopoNormalizeWidthsRequest = mesh_edit.NormalizeWidthsRequest;
+
+/// Retopology seam close: collapse every explicit pair independently. The
+/// ordinary Weld command correctly merges one selection to one centroid, but
+/// applying it to a whole seam would collapse the seam into a single point.
+/// This boundary keeps pair identity, validates scope/part/uniqueness first,
+/// then removes any faces made degenerate in the same journal transaction.
+pub fn meshRetopoWeldPairs(request: MeshRetopoWeldPairsRequest) bool {
+    if (!model_paint.hasTarget() or request.pairs.len == 0 or request.pairs.len > 4096) return false;
+    const max_distance = request.maxDistance;
+    if (max_distance) |limit| if (!std.math.isFinite(limit) or limit <= 0) return false;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0 or !mesh_edit.ensureTopologyPub()) return false;
+    const vert_count = mesh_edit.vertCount();
+    if (vert_count == 0) return false;
+
+    const affected = std.heap.c_allocator.alloc(bool, vert_count) catch return false;
+    defer std.heap.c_allocator.free(affected);
+    @memset(affected, false);
+    const targets = std.heap.c_allocator.alloc(f32, @as(usize, vert_count) * 3) catch return false;
+    defer std.heap.c_allocator.free(targets);
+    @memset(targets, 0);
+
+    var moved_any = false;
+    for (request.pairs) |pair| {
+        const a = pair[0];
+        const b = pair[1];
+        if (a == b or a >= vert_count or b >= vert_count or affected[a] or affected[b] or
+            !mesh_edit.vertInScopePub(a) or !mesh_edit.vertInScopePub(b)) return false;
+        const part_a = mesh_edit.vertPartPub(a) orelse return false;
+        const part_b = mesh_edit.vertPartPub(b) orelse return false;
+        if (part_a != part_b) return false;
+        const pa = mesh_edit.vertPosPub(a);
+        const pb = mesh_edit.vertPosPub(b);
+        const dx = pb[0] - pa[0];
+        const dy = pb[1] - pa[1];
+        const dz = pb[2] - pa[2];
+        const distance = @sqrt(dx * dx + dy * dy + dz * dz);
+        if (!std.math.isFinite(distance) or (max_distance != null and distance > max_distance.?)) return false;
+        const center = [3]f32{ (pa[0] + pb[0]) * 0.5, (pa[1] + pb[1]) * 0.5, (pa[2] + pb[2]) * 0.5 };
+        for (pair) |vertex| {
+            affected[vertex] = true;
+            const base = @as(usize, vertex) * 3;
+            targets[base] = center[0];
+            targets[base + 1] = center[1];
+            targets[base + 2] = center[2];
+        }
+        if (distance > 1e-8) moved_any = true;
+    }
+    if (!moved_any) return false;
+
+    const corner_positions = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
+    defer std.heap.c_allocator.free(corner_positions);
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    var face: u32 = 0;
+    while (face < tri_count) : (face += 1) {
+        const soup_base = @as(usize, face) * 24;
+        const corner_base = @as(usize, face) * 9;
+        if (soup_base + 24 > verts.len) return false;
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            const logical = mesh_edit.cornerVertPub(face, @intCast(corner));
+            const dst = corner_base + corner * 3;
+            if (logical < vert_count and affected[logical]) {
+                const src = @as(usize, logical) * 3;
+                corner_positions[dst] = targets[src];
+                corner_positions[dst + 1] = targets[src + 1];
+                corner_positions[dst + 2] = targets[src + 2];
+            } else {
+                corner_positions[dst] = verts[soup_base + corner * 8];
+                corner_positions[dst + 1] = verts[soup_base + corner * 8 + 1];
+                corner_positions[dst + 2] = verts[soup_base + corner * 8 + 2];
+            }
+        }
+        mask[face] = weldTriangleDegenerate(corner_positions[corner_base .. corner_base + 9]);
+    }
+    return rebuildMaskedFaces(verts, tri_count, mask, "weld vertex pairs", corner_positions);
+}
+
+/// Equalize the edge widths of explicit ordered rows while retaining their
+/// current polyline curvature. This is a positional edit, not a topology
+/// rebuild, and therefore remains one ordinary journal unit.
+pub fn meshRetopoNormalizeWidths(request: MeshRetopoNormalizeWidthsRequest) bool {
+    if (!model_paint.hasTarget()) return false;
+    var snap = journalSnapshotCurrent("normalize retopo widths");
+    const mutation = mesh_edit.normalizeWidths(std.heap.c_allocator, request);
+    const ok = applyMeshMutation(mutation);
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
+}
+
 /// Two of a triangle's three FINAL corners coincide → the weld flattened it.
 fn weldTriangleDegenerate(corners: []const f32) bool {
     const eps: f32 = 1e-6;

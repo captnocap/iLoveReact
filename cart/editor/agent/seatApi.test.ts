@@ -108,6 +108,42 @@ test('Follow pairs native Delete Faces and Create Face into one demonstrated str
   assert(stopped.ok && (stopped.result as any).active === false, 'Follow transcript did not close cleanly');
 });
 
+test('retopology seam verbs preserve pair identity and require ordered disjoint width paths', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let weldRequest: any = null;
+  let normalizeRequest: any = null;
+  (globalThis as any).__mesh_retopo_weld_pairs = (json: string) => {
+    weldRequest = JSON.parse(json);
+    return JSON.stringify({ ok: 1, key: 'torso', count: 52, generation: 4 });
+  };
+  (globalThis as any).__mesh_retopo_normalize_widths = (json: string) => {
+    normalizeRequest = JSON.parse(json);
+    return JSON.stringify({ ok: 1, key: 'torso', count: 52, generation: 5 });
+  };
+  const seat = createAgentSeat();
+
+  const welded = executeSeatRequest(seat, {
+    action: 'weld-pairs', args: { pairs: [[4, 9], [5, 10]], maxDistance: 0.02 },
+  });
+  assert(welded.ok && weldRequest.pairs.length === 2, 'pairwise seam weld stayed unreachable');
+  assert(weldRequest.pairs[0].join(',') === '4,9' && weldRequest.pairs[1].join(',') === '5,10',
+    'pairwise seam weld collapsed or reordered pair identity');
+  assert(weldRequest.maxDistance === 0.02, 'pairwise weld dropped its distance leash');
+  assert(!executeSeatRequest(seat, { action: 'weld-pairs', args: { pairs: [[4, 9], [9, 10]] } }).ok,
+    'overlapping weld pairs reached native topology');
+
+  const normalized = executeSeatRequest(seat, {
+    action: 'normalize-widths',
+    args: { paths: [{ vertices: [4, 5, 6, 7] }, { vertices: [9, 10, 11], closed: true }], strength: 0.75 },
+  });
+  assert(normalized.ok && normalizeRequest.paths.length === 2, 'width normalization stayed unreachable');
+  assert(normalizeRequest.paths[1].closed === true && normalizeRequest.strength === 0.75,
+    'width normalization dropped row closure or strength');
+  assert(!executeSeatRequest(seat, {
+    action: 'normalize-widths', args: { paths: [{ vertices: [4, 5, 6] }, { vertices: [6, 7, 8] }] },
+  }).ok, 'overlapping normalization rows reached native geometry');
+});
+
 test('camera orbit uses explicit degrees instead of undocumented pixel calibration', () => {
   const pose = orbitPoseByDegrees([0, 0, 3, 1, 2, 3], 90, -45);
   assert(!!pose && Math.abs(pose[0]! - Math.PI / 2) < 1e-9 && Math.abs(pose[1]! + Math.PI / 4) < 1e-9, 'degree orbit did not convert exactly');

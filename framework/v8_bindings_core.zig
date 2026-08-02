@@ -1235,6 +1235,44 @@ fn hostMeshTopoWeld(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_retopo_weld_pairs(json) → topology receipt. JSON:
+/// {"pairs":[[a,b],...],"maxDistance":0.01}. Each pair collapses to its own
+/// midpoint; the request is rejected atomically when ids overlap, cross parts,
+/// leave scope, or exceed the optional metre leash.
+fn hostMeshRetopoWeldPairs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = argToStringAlloc(info, 0) orelse return setMeshTopoReturn(info, false);
+    defer std.heap.c_allocator.free(json);
+    const parsed = std.json.parseFromSlice(
+        scene3d.MeshRetopoWeldPairsRequest,
+        std.heap.c_allocator,
+        json,
+        .{ .ignore_unknown_fields = false },
+    ) catch return setMeshTopoReturn(info, false);
+    defer parsed.deinit();
+    const ok = scene3d.meshRetopoWeldPairs(parsed.value);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_retopo_normalize_widths(json) → topology receipt. Explicit ordered
+/// paths are arc-length resampled over their existing curve in one journal unit.
+fn hostMeshRetopoNormalizeWidths(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = argToStringAlloc(info, 0) orelse return setMeshTopoReturn(info, false);
+    defer std.heap.c_allocator.free(json);
+    const parsed = std.json.parseFromSlice(
+        scene3d.MeshRetopoNormalizeWidthsRequest,
+        std.heap.c_allocator,
+        json,
+        .{ .ignore_unknown_fields = false },
+    ) catch return setMeshTopoReturn(info, false);
+    defer parsed.deinit();
+    const ok = scene3d.meshRetopoNormalizeWidths(parsed.value);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the axis-aligned
 /// plane across the ONE selected edge (normal = the edge's dominant world axis, through
 /// its midpoint — req_2837: keeps the ring level on tapered shapes) — the host-native loop
@@ -4428,6 +4466,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+    v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
+    v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_topo_connect_vertices", hostMeshTopoConnectVertices);
     v8_runtime.registerHostFn("__mesh_bevel_begin", hostMeshBevelBegin);

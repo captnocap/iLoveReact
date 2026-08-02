@@ -127,6 +127,7 @@ export type SeatRecipeReceipt = {
   result?: unknown;
   reason?: string;
 };
+export type RetopoWidthPath = { vertices: number[]; closed?: boolean };
 
 /** A primitive the seat asks the editor's RESIDENT generators to build (editMesh.ts
  *  cuboid/cylinder/cone/…). The seat still never emits vertex arrays — it names a
@@ -574,6 +575,38 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const deleteSelection = (): TopologyReceipt | null => topology(() => host.__mesh_delete_selection?.());
   const mergeFaces = (): TopologyReceipt | null => topology(() => host.__mesh_topo_merge_faces?.());
   const weld = (): TopologyReceipt | null => topology(() => host.__mesh_topo_weld?.());
+  const weldPairs = (values: unknown, maxDistance?: number): TopologyReceipt | null => {
+    if (!Array.isArray(values) || values.length === 0 || values.length > 4096) return null;
+    const used = new Set<number>();
+    const pairs: [number, number][] = [];
+    for (const value of values) {
+      if (!Array.isArray(value) || value.length !== 2) return null;
+      const a = Number(value[0]);
+      const b = Number(value[1]);
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b || used.has(a) || used.has(b)) return null;
+      used.add(a); used.add(b); pairs.push([a, b]);
+    }
+    if (maxDistance !== undefined && (!Number.isFinite(maxDistance) || maxDistance <= 0)) return null;
+    return topology(() => host.__mesh_retopo_weld_pairs?.(JSON.stringify({ pairs, ...(maxDistance === undefined ? {} : { maxDistance }) })));
+  };
+  const normalizeWidths = (values: unknown, strength = 1): TopologyReceipt | null => {
+    if (!Array.isArray(values) || values.length === 0 || values.length > 128 ||
+        !Number.isFinite(strength) || strength <= 0 || strength > 1) return null;
+    const used = new Set<number>();
+    const paths: RetopoWidthPath[] = [];
+    let total = 0;
+    for (const value of values) {
+      if (!value || typeof value !== 'object') return null;
+      const rawVertices = (value as RetopoWidthPath).vertices;
+      if (!Array.isArray(rawVertices) || rawVertices.length < 3) return null;
+      const vertices = rawVertices.map(Number);
+      total += vertices.length;
+      if (total > 8192 || vertices.some((vertex) => !Number.isInteger(vertex) || vertex < 0 || used.has(vertex))) return null;
+      vertices.forEach((vertex) => used.add(vertex));
+      paths.push({ vertices, closed: (value as RetopoWidthPath).closed === true });
+    }
+    return topology(() => host.__mesh_retopo_normalize_widths?.(JSON.stringify({ paths, strength })));
+  };
   const solidify = (thickness: number): TopologyReceipt | null => topology(() => host.__mesh_topo_solidify?.(thickness));
   const flip = (): TopologyReceipt | null => topology(() => host.__mesh_topo_flip_faces?.());
   const glass = (): TopologyReceipt | null => topology(() => host.__mesh_topo_glass?.());
@@ -823,7 +856,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     look, elements, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
-    mergeFaces, weld, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
+    mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
   };
@@ -916,6 +949,16 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'delete': { const result = seat.deleteSelection(); return seat.reply('delete', !!result, result ?? undefined, result ? undefined : 'nothing selected to delete'); }
       case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : 'select two or more compatible faces'); }
       case 'weld': { const result = seat.weld(); return seat.reply('weld', !!result, result ?? undefined, result ? undefined : 'select at least two vertices or one edge'); }
+      case 'weld-pairs': {
+        const result = seat.weldPairs(args.pairs, args.maxDistance === undefined ? undefined : Number(args.maxDistance));
+        return seat.reply('weld-pairs', !!result, result ?? undefined,
+          result ? undefined : 'pairs must be unique in-scope same-part vertex ids; maxDistance is an optional positive metre leash');
+      }
+      case 'normalize-widths': {
+        const result = seat.normalizeWidths(args.paths, Number(args.strength ?? 1));
+        return seat.reply('normalize-widths', !!result, result ?? undefined,
+          result ? undefined : 'paths must be disjoint ordered vertex rows joined by real edges; strength must be in (0,1]');
+      }
       case 'solidify': { const result = seat.solidify(Number(args.thickness ?? 0)); return seat.reply('solidify', !!result, result ?? undefined, result ? undefined : 'select faces and provide a valid thickness'); }
       case 'detach': { const result = seat.detach(String(args.name ?? '')); return seat.reply('detach', !!result, result ?? undefined, result ? undefined : 'detach needs a named face selection in a multi-part document'); }
       case 'flip': { const result = seat.flip(); return seat.reply('flip', !!result, result ?? undefined, result ? undefined : 'select faces first'); }
