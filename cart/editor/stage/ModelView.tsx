@@ -1429,7 +1429,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
   const chooseSelMode = (m: number) => {
-    if (m === 0) setXray(false);
+    // X-Ray is opt-in PER tool entry (req_3620): any mode change drops the request, so
+    // no remembered/replayed/external toggle can ever greet the user with a ghost model.
+    setXray(false);
     setSelMode(m);
     setPaintMode(false);
     setPathPlaneMode(false);
@@ -2666,7 +2668,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         return ok({ tool });
       }
       if (operation === 'wire') { setWire(args.enabled === undefined ? !wire : args.enabled === true); return ok(); }
-      if (operation === 'xray') { setXray(args.enabled === undefined ? !xray : args.enabled === true); return ok(); }
+      if (operation === 'xray') {
+        const enabled = args.enabled === undefined ? !xray : args.enabled === true;
+        // Same containment as the toolbar (req_3620): X-Ray can only be requested while
+        // an element-edit mode owns the viewport; anywhere else the request is refused.
+        if (enabled && !meshEditXrayActive(true, selMode, paintMode)) return fail('xray needs an active vertex/edge/face mode');
+        setXray(enabled);
+        return ok({ enabled });
+      }
       if (operation === 'focus-tool') {
         const enabled = args.enabled === undefined ? !focusMode : args.enabled === true;
         if (enabled !== focusMode) toggleFocus();
