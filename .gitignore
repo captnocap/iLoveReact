@@ -1,3 +1,5 @@
+
+
 # ── Build artifacts ──────────────────────────────────────
 bin/
 .zig-cache/
@@ -30,6 +32,13 @@ tools/zig/cache/
 # Binaries from `scripts/ship` already embed this — only repo
 # contributors need it on disk for dev mode.
 .pg-bundle/
+
+
+game models
+cart/editor/data/
+# The user's personal image-generation console (embedded API key) — never git's.
+# The agent-skin skill drives it headlessly; it is not repo source.
+cart/editor/img.cjs
 
 # Compiled benchmark binaries (rebuilt from .zig source)
 tsz/bench_lua_stress
