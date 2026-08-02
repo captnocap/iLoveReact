@@ -84,14 +84,25 @@ export type SeatFollowPatch = {
     nonManifold: boolean;
   }[];
 };
+export type SeatFollowEdgePatch = {
+  version: 1;
+  selectedEdges: {
+    id: number;
+    vertices: [number, number];
+    at: [[number, number, number], [number, number, number]];
+    boundary: boolean;
+  }[];
+  patch: SeatFollowPatch | null;
+};
 export type SeatFollowExample = {
   index: number;
-  action: 'merge-faces';
+  action: 'delete-create-face';
   source: string;
   at: number;
-  before: SeatFollowPatch;
-  after: SeatFollowPatch;
+  delete: { before: SeatFollowPatch };
+  create: { before: SeatFollowEdgePatch; after: SeatFollowPatch };
 };
+type SeatFollowPendingDelete = { source: string; at: number; before: SeatFollowPatch };
 export type SeatFollowSession = {
   version: 1;
   id: number;
@@ -101,10 +112,11 @@ export type SeatFollowSession = {
   stoppedAt?: number;
   startedGeneration: number;
   examples: SeatFollowExample[];
+  pendingDelete?: SeatFollowPendingDelete;
 };
-type NativeFollowMergeDrain = {
+type NativeFollowActionDrain = {
   version: 1;
-  events: { source: number; before: SeatFollowPatch; after: SeatFollowPatch }[];
+  events: { kind: number; source: number; before: unknown; after: unknown }[];
 };
 export type SeatShellReceipt = { ok: boolean; result?: unknown; reason?: string };
 export type SeatRecipeReceipt = {
@@ -395,28 +407,45 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       ? value
       : null;
   };
-  const drainNativeFollowMerges = (): number => {
-    const drained = parseJson<NativeFollowMergeDrain>(host.__mesh_follow_merge_drain?.());
+  const isFollowPatch = (value: unknown): value is SeatFollowPatch => {
+    const patch = value as SeatFollowPatch | null;
+    return patch?.version === 1 && Array.isArray(patch.selectedTriangles) && Array.isArray(patch.frontier);
+  };
+  const isFollowEdgePatch = (value: unknown): value is SeatFollowEdgePatch => {
+    const patch = value as SeatFollowEdgePatch | null;
+    return patch?.version === 1 && Array.isArray(patch.selectedEdges) &&
+      patch.selectedEdges.length >= 2 && patch.selectedEdges.every((edge) => edge.boundary === true);
+  };
+  const drainNativeFollowActions = (): number => {
+    const drained = parseJson<NativeFollowActionDrain>(host.__mesh_follow_action_drain?.());
     if (!drained || drained.version !== 1 || !Array.isArray(drained.events)) return 0;
     if (!followSession?.active) return 0;
     const sourceNames = ['native', 'menu', 'hotkey', 'toolbar', 'dock', 'context-menu', 'palette', 'viewport', 'remote', 'automation'];
     const examples = [...followSession.examples];
+    let pendingDelete = followSession.pendingDelete;
     for (const event of drained.events) {
       const source = sourceNames[Math.trunc(Number(event.source))] ?? 'native';
       if (source === 'automation' || source === 'remote') continue;
-      if (event.before?.version !== 1 || event.after?.version !== 1 ||
-          !Array.isArray(event.before.selectedTriangles) || !Array.isArray(event.after.selectedTriangles)) continue;
+      if (event.kind === 5 && isFollowPatch(event.before)) {
+        pendingDelete = { source, at: Date.now(), before: event.before };
+        continue;
+      }
+      if (event.kind !== 2 || !pendingDelete || !isFollowEdgePatch(event.before) || !isFollowPatch(event.after)) continue;
       examples.push({
         index: examples.length + 1,
-        action: 'merge-faces',
-        source,
-        at: Date.now(),
-        before: event.before,
-        after: event.after,
+        action: 'delete-create-face',
+        source: pendingDelete.source === source ? source : `${pendingDelete.source}+${source}`,
+        at: pendingDelete.at,
+        delete: { before: pendingDelete.before },
+        create: { before: event.before, after: event.after },
       });
+      pendingDelete = undefined;
     }
-    if (examples.length !== followSession.examples.length) storeFollow({ ...followSession, examples });
-    return examples.length - followSession.examples.length;
+    const added = examples.length - followSession.examples.length;
+    if (added !== 0 || pendingDelete !== followSession.pendingDelete) {
+      storeFollow({ ...followSession, examples, ...(pendingDelete ? { pendingDelete } : { pendingDelete: undefined }) });
+    }
+    return added;
   };
   const follow = (operation: string, args: Record<string, unknown> = {}): SeatShellReceipt => {
     if (operation === 'start') {
@@ -425,7 +454,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       // A Follow session observes only work performed after READY. Native capture
       // is a queue so rapid UI commands cannot overwrite one another; clear any
       // pre-session residue before opening this transcript.
-      host.__mesh_follow_merge_drain?.();
+      host.__mesh_follow_action_drain?.();
       const state: SeatFollowSession = {
         version: 1,
         id: Date.now(),
@@ -439,20 +468,20 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       return { ok: true, result: state };
     }
     if (operation === 'read') {
-      drainNativeFollowMerges();
+      drainNativeFollowActions();
       return followSession
         ? { ok: true, result: followSession }
         : { ok: false, reason: 'no Follow demonstration has been started' };
     }
     if (operation === 'stop') {
       if (!followSession) return { ok: false, reason: 'no Follow demonstration has been started' };
-      drainNativeFollowMerges();
+      drainNativeFollowActions();
       const state = { ...followSession, active: false, stoppedAt: Date.now() };
       storeFollow(state);
       return { ok: true, result: state };
     }
     if (operation === 'clear') {
-      host.__mesh_follow_merge_drain?.();
+      host.__mesh_follow_action_drain?.();
       storeFollow(null);
       return { ok: true, result: { cleared: true } };
     }

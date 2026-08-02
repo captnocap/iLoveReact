@@ -1782,6 +1782,8 @@ fn closedEdgeLoopOrder(edges: []const mesh_edit.Edge, out: *[4]u32) ?u32 {
 
 pub fn meshTopoCreateFaceFromEdges() bool {
     if (!model_paint.hasTarget()) return false;
+    const follow_before = mesh_edit.followSelectedEdgesJson(std.heap.c_allocator, 2);
+    defer if (follow_before) |json| std.heap.c_allocator.free(json);
     var selected: [16]mesh_edit.Edge = undefined;
     const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
     if (selected_count < 2 or selected_count > selected.len) return false;
@@ -1868,6 +1870,18 @@ pub fn meshTopoCreateFaceFromEdges() bool {
         // authored face selected, so X can reverse an unlucky winding immediately.
         _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
         journalCommit(&snap);
+        if (follow_before) |before| {
+            if (mesh_edit.followPatchJson(std.heap.c_allocator, null, 2)) |after| {
+                defer std.heap.c_allocator.free(after);
+                g_follow_action_queue.append(
+                    std.heap.c_allocator,
+                    @intFromEnum(mesh_journal_log.ActionKind.create_face),
+                    @intFromEnum(g_mesh_action_source),
+                    before,
+                    after,
+                ) catch {};
+            }
+        }
     } else journalDiscard(&snap);
     return replaced;
 }
@@ -2921,7 +2935,22 @@ pub fn meshDeleteSelection() bool {
     defer std.heap.c_allocator.free(mask);
     const del = mesh_edit.buildDeleteMask(mask);
     if (del == 0) return false;
-    return deleteMaskedFaces(verts, tri_count, mask, "delete selection");
+    const follow_before = if (mesh_edit.mode() == .face)
+        mesh_edit.followPatchJson(std.heap.c_allocator, null, 2)
+    else
+        null;
+    defer if (follow_before) |json| std.heap.c_allocator.free(json);
+    const deleted = deleteMaskedFaces(verts, tri_count, mask, "delete selection");
+    if (deleted) if (follow_before) |before| {
+        g_follow_action_queue.append(
+            std.heap.c_allocator,
+            @intFromEnum(mesh_journal_log.ActionKind.delete_selection),
+            @intFromEnum(g_mesh_action_source),
+            before,
+            "{\"version\":1,\"deleted\":true}",
+        ) catch {};
+    };
+    return deleted;
 }
 
 /// WELD (req_3382) — the Blender Merge-at-Center verb: every vertex the active
@@ -4101,7 +4130,7 @@ var g_mesh_action_seq: u32 = 0;
 var g_mesh_action_dropped: u32 = 0;
 var g_mesh_action_document_token: u32 = 0;
 var g_mesh_action_source: mesh_journal_log.ActionSource = .native;
-var g_follow_merge_queue: mesh_edit.FollowMergeQueue = .{};
+var g_follow_action_queue: mesh_edit.FollowActionQueue = .{};
 
 fn partCountFromRanges(ranges: ?[]const u32) u32 {
     return if (ranges) |rows| @intCast(rows.len / 2) else 0;
@@ -4600,7 +4629,7 @@ pub fn meshJournalClear() void {
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
     g_mesh_action_source = .native;
-    g_follow_merge_queue.clear(jalloc);
+    g_follow_action_queue.clear(jalloc);
 }
 
 pub fn meshJournalNoteSet(note: []const u8) bool {
@@ -5682,8 +5711,9 @@ pub fn meshMergeSelectedFaces() bool {
     if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces")) return false;
     const after = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return true;
     defer std.heap.c_allocator.free(after);
-    g_follow_merge_queue.append(
+    g_follow_action_queue.append(
         std.heap.c_allocator,
+        @intFromEnum(mesh_journal_log.ActionKind.merge_faces),
         @intFromEnum(g_mesh_action_source),
         before,
         after,
@@ -8906,8 +8936,8 @@ pub fn meshFollowPatchJson(allocator: std.mem.Allocator, faces: ?[]const u32, ri
 /// Capture lives in the transaction itself, so toolbar/menu/hotkey/viewport routes
 /// cannot bypass Follow and rapid consecutive demonstrations cannot overwrite one
 /// another before the agent reads them.
-pub fn meshFollowMergeDrainJson(allocator: std.mem.Allocator) ?[]u8 {
-    return g_follow_merge_queue.drainJson(allocator) catch null;
+pub fn meshFollowActionDrainJson(allocator: std.mem.Allocator) ?[]u8 {
+    return g_follow_action_queue.drainJson(allocator) catch null;
 }
 pub fn meshEditReset() void {
     mesh_edit.reset();

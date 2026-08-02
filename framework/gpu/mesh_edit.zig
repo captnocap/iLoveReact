@@ -519,10 +519,11 @@ const FollowEdgeUse = struct {
     count: u32 = 1,
 };
 
-pub const FOLLOW_MERGE_CAP: usize = 64;
+pub const FOLLOW_ACTION_CAP: usize = 64;
 
-pub const FollowMergeQueue = struct {
+pub const FollowActionQueue = struct {
     const Record = struct {
+        kind: u8,
         source: u8,
         before: []u8,
         after: []u8,
@@ -530,12 +531,12 @@ pub const FollowMergeQueue = struct {
 
     records: std.ArrayListUnmanaged(Record) = .empty,
 
-    pub fn deinit(queue: *FollowMergeQueue, allocator: std.mem.Allocator) void {
+    pub fn deinit(queue: *FollowActionQueue, allocator: std.mem.Allocator) void {
         queue.clear(allocator);
         queue.records.deinit(allocator);
     }
 
-    pub fn clear(queue: *FollowMergeQueue, allocator: std.mem.Allocator) void {
+    pub fn clear(queue: *FollowActionQueue, allocator: std.mem.Allocator) void {
         for (queue.records.items) |record| {
             allocator.free(record.before);
             allocator.free(record.after);
@@ -547,8 +548,9 @@ pub const FollowMergeQueue = struct {
     /// The queue, rather than a single "last merge" slot, is load-bearing: a user
     /// can complete several quick strips between React/CLI polling beats.
     pub fn append(
-        queue: *FollowMergeQueue,
+        queue: *FollowActionQueue,
         allocator: std.mem.Allocator,
+        kind: u8,
         source: u8,
         before: []const u8,
         after: []const u8,
@@ -557,12 +559,13 @@ pub const FollowMergeQueue = struct {
         errdefer allocator.free(owned_before);
         const owned_after = try allocator.dupe(u8, after);
         errdefer allocator.free(owned_after);
-        if (queue.records.items.len == FOLLOW_MERGE_CAP) {
+        if (queue.records.items.len == FOLLOW_ACTION_CAP) {
             const dropped = queue.records.orderedRemove(0);
             allocator.free(dropped.before);
             allocator.free(dropped.after);
         }
         try queue.records.append(allocator, .{
+            .kind = kind,
             .source = source,
             .before = owned_before,
             .after = owned_after,
@@ -571,14 +574,15 @@ pub const FollowMergeQueue = struct {
 
     /// One destructive read: once JS has accepted these lessons into the hot
     /// Follow session, the native queue no longer owns a second copy.
-    pub fn drainJson(queue: *FollowMergeQueue, allocator: std.mem.Allocator) ![]u8 {
+    pub fn drainJson(queue: *FollowActionQueue, allocator: std.mem.Allocator) ![]u8 {
         var out: std.Io.Writer.Allocating = .init(allocator);
         errdefer out.deinit();
         const writer = &out.writer;
         try writer.writeAll("{\"version\":1,\"events\":[");
         for (queue.records.items, 0..) |record, index| {
-            try writer.print("{s}{{\"source\":{d},\"before\":{s},\"after\":{s}}}", .{
+            try writer.print("{s}{{\"kind\":{d},\"source\":{d},\"before\":{s},\"after\":{s}}}", .{
                 if (index == 0) "" else ",",
+                record.kind,
                 record.source,
                 record.before,
                 record.after,
@@ -589,6 +593,73 @@ pub const FollowMergeQueue = struct {
         return out.toOwnedSlice();
     }
 };
+
+/// Exact selected-edge observation for Follow's second demonstrated action:
+/// after deleting a strip, the user picks two exposed boundary edges and Create
+/// Face bridges them. The nested face patch supplies the adjacent live context;
+/// endpoints and positions make the lesson stable across later face re-keying.
+pub fn followSelectedEdgesJson(allocator: std.mem.Allocator, rings_raw: u32) ?[]u8 {
+    if (!ensureTopology() or g_mode != .edge) return null;
+    const selected_edges = g_sel_edge orelse return null;
+    const edges = g_edges orelse return null;
+    const face_count = model_paint.faceCount();
+    const corners = g_corner_vert orelse return null;
+    if (corners.len < @as(usize, face_count) * 3) return null;
+
+    var selected_keys = std.AutoHashMapUnmanaged(u64, void).empty;
+    defer selected_keys.deinit(allocator);
+    var selected_count: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < g_edge_count and edge < selected_edges.len) : (edge += 1) {
+        if (!selected_edges[edge]) continue;
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        selected_keys.put(allocator, edgeKey(@min(a, b), @max(a, b)), {}) catch return null;
+        selected_count += 1;
+    }
+    if (selected_count == 0) return null;
+
+    var adjacent: std.ArrayListUnmanaged(u32) = .empty;
+    defer adjacent.deinit(allocator);
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const base = @as(usize, face) * 3;
+        var side: usize = 0;
+        while (side < 3) : (side += 1) {
+            const a = corners[base + side];
+            const b = corners[base + ((side + 1) % 3)];
+            if (!selected_keys.contains(edgeKey(@min(a, b), @max(a, b)))) continue;
+            adjacent.append(allocator, face) catch return null;
+            break;
+        }
+    }
+    const patch = if (adjacent.items.len > 0)
+        followPatchJson(allocator, adjacent.items, rings_raw) orelse return null
+    else
+        null;
+    defer if (patch) |json| allocator.free(json);
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.writeAll("{\"version\":1,\"selectedEdges\":[") catch return null;
+    var emitted: u32 = 0;
+    edge = 0;
+    while (edge < g_edge_count and edge < selected_edges.len) : (edge += 1) {
+        if (!selected_edges[edge]) continue;
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        const pa = vertPosPub(a);
+        const pb = vertPosPub(b);
+        writer.print(
+            "{s}{{\"id\":{d},\"vertices\":[{d},{d}],\"at\":[[{d},{d},{d}],[{d},{d},{d}]],\"boundary\":{s}}}",
+            .{ if (emitted == 0) "" else ",", edge, a, b, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], if (edgeIsBoundaryPub(edge)) "true" else "false" },
+        ) catch return null;
+        emitted += 1;
+    }
+    writer.print("],\"patch\":{s}}}", .{if (patch) |json| json else "null"}) catch return null;
+    return out.toOwnedSlice() catch null;
+}
 
 /// Exact, read-only topology vocabulary for an Agent Seat Follow demonstration.
 ///

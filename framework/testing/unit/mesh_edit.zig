@@ -147,19 +147,21 @@ test "follow patch records exact selected triangles and their next adjacency rin
     try testing.expect(std.mem.indexOf(u8, after, "\"vertices\":[0,1,2]") != null);
 }
 
-test "follow merge queue retains rapid native lessons and drains them exactly once" {
-    var queue: mesh_edit.FollowMergeQueue = .{};
+test "follow action queue retains rapid native lessons and drains them exactly once" {
+    var queue: mesh_edit.FollowActionQueue = .{};
     defer queue.deinit(testing.allocator);
 
-    try queue.append(testing.allocator, 2, "{\"version\":1,\"selectedTriangles\":[4,5]}", "{\"version\":1,\"selectedTriangles\":[4,5],\"selectedGroups\":[77]}");
-    try queue.append(testing.allocator, 4, "{\"version\":1,\"selectedTriangles\":[6,7]}", "{\"version\":1,\"selectedTriangles\":[6,7],\"selectedGroups\":[78]}");
+    try queue.append(testing.allocator, 5, 2, "{\"version\":1,\"selectedTriangles\":[4,5]}", "{\"version\":1,\"deleted\":true}");
+    try queue.append(testing.allocator, 2, 4, "{\"version\":1,\"selectedEdges\":[8,9]}", "{\"version\":1,\"selectedTriangles\":[6,7],\"selectedGroups\":[78]}");
 
     const first = try queue.drainJson(testing.allocator);
     defer testing.allocator.free(first);
     try testing.expect(std.mem.indexOf(u8, first, "\"source\":2") != null);
     try testing.expect(std.mem.indexOf(u8, first, "\"source\":4") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"kind\":5") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"kind\":2") != null);
     try testing.expect(std.mem.indexOf(u8, first, "\"selectedTriangles\":[4,5]") != null);
-    try testing.expect(std.mem.indexOf(u8, first, "\"selectedTriangles\":[6,7]") != null);
+    try testing.expect(std.mem.indexOf(u8, first, "\"selectedEdges\":[8,9]") != null);
 
     const second = try queue.drainJson(testing.allocator);
     defer testing.allocator.free(second);

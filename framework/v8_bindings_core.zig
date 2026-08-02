@@ -2390,11 +2390,11 @@ fn hostMeshFollowPatch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, json);
 }
 
-/// __mesh_follow_merge_drain() → every accepted native Merge Faces before/after
-/// patch since the prior drain. The transaction owns capture; JS only persists it.
-fn hostMeshFollowMergeDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+/// __mesh_follow_action_drain() → accepted native Follow action observations.
+/// The transactions own capture; JS pairs delete-selection with create-face.
+fn hostMeshFollowActionDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const json = scene3d.meshFollowMergeDrainJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    const json = scene3d.meshFollowActionDrainJson(std.heap.c_allocator) orelse return setReturnString(info, "");
     defer std.heap.c_allocator.free(json);
     setReturnString(info, json);
 }
@@ -4493,7 +4493,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
     v8_runtime.registerHostFn("__mesh_follow_patch", hostMeshFollowPatch);
-    v8_runtime.registerHostFn("__mesh_follow_merge_drain", hostMeshFollowMergeDrain);
+    v8_runtime.registerHostFn("__mesh_follow_action_drain", hostMeshFollowActionDrain);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
     v8_runtime.registerHostFn("__mesh_symmetry_report", hostMeshSymmetryReport);

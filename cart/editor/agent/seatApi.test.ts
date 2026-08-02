@@ -55,7 +55,7 @@ test('per-row generation guard closes a batch after a human topology edit', () =
   assert(seatBatchGenerationReason(4, 5, 2)?.includes('row 3'), 'external generation bump did not close the next row');
 });
 
-test('Follow records the exact native Merge Faces selection before and after its group commit', () => {
+test('Follow pairs native Delete Faces and Create Face into one demonstrated strip lesson', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   const patch = (group: number) => ({
     version: 1, rings: 2, selectedTriangles: [4, 5], selectedGroups: [group],
@@ -70,8 +70,16 @@ test('Follow records the exact native Merge Faces selection before and after its
     ],
     frontier: [{ vertices: [11, 12], inside: 4, outside: 6, nonManifold: false }],
   });
+  const edges = {
+    version: 1,
+    selectedEdges: [
+      { id: 8, vertices: [10, 11], at: [[0, 0, 0], [1, 0, 0]], boundary: true },
+      { id: 9, vertices: [13, 12], at: [[0, 1, 0], [1, 1, 0]], boundary: true },
+    ],
+    patch: patch(90),
+  };
   let nativeEvents: any[] = [];
-  (globalThis as any).__mesh_follow_merge_drain = () => {
+  (globalThis as any).__mesh_follow_action_drain = () => {
     const events = nativeEvents;
     nativeEvents = [];
     return JSON.stringify({ version: 1, events });
@@ -82,16 +90,19 @@ test('Follow records the exact native Merge Faces selection before and after its
   const started = executeSeatRequest(seat, { action: 'follow', args: { operation: 'start', label: 'torso strips' } });
   assert(started.ok && stored?.active === true, 'Follow did not enter its real recording state');
   nativeEvents.push(
-    { source: 9, before: patch(20), after: patch(21) },
-    { source: 2, before: patch(31), after: patch(77) },
+    { kind: 5, source: 9, before: patch(20), after: { version: 1, deleted: true } },
+    { kind: 2, source: 9, before: edges, after: patch(21) },
+    { kind: 5, source: 2, before: patch(31), after: { version: 1, deleted: true } },
+    { kind: 2, source: 2, before: edges, after: patch(77) },
   );
 
   const read = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read' } });
   const session = read.result as any;
-  assert(read.ok && session.examples.length === 1, 'Follow transcript did not report the demonstrated merge');
-  assert(session.examples[0].before.selectedGroups[0] === 31 && session.examples[0].after.selectedGroups[0] === 77,
-    'Follow did not prove the exact group-only before/after change');
-  assert(session.examples[0].after.frontier[0].outside === 6, 'Follow dropped the adjacent continuation candidate');
+  assert(read.ok && session.examples.length === 1, 'Follow transcript did not report the demonstrated delete/create pair');
+  assert(session.examples[0].delete.before.selectedGroups[0] === 31 && session.examples[0].create.after.selectedGroups[0] === 77,
+    'Follow did not pair the exact delete and replacement-face observations');
+  assert(session.examples[0].create.before.selectedEdges.length === 2, 'Follow dropped the two demonstrated bridge edges');
+  assert(session.examples[0].create.after.frontier[0].outside === 6, 'Follow dropped the adjacent continuation candidate');
 
   const stopped = executeSeatRequest(seat, { action: 'follow', args: { operation: 'stop' } });
   assert(stopped.ok && (stopped.result as any).active === false, 'Follow transcript did not close cleanly');
