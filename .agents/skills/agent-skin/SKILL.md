@@ -77,6 +77,8 @@ Queue line grammar: `[prompt] [resolution] [imgs/batch] [batches] [model] [refs]
   drafting default. `gpt-image-2` — clearly better fidelity; use `[1024x1536]`-style
   resolution (max 2560x1440) + `quality=high`, and the **pink guide, never transparent**.
   Cost is not a constraint; generate 2–4 candidates per look and pick with your eyes.
+- **gpt-image-2 WxH must be multiples of 16** (`816x1248`, not `810x1245`) or the API
+  400s with INVALID_RESOLUTION. Round up to the nearest 16 and fix it in the resize step.
 
 ### Prompting
 
@@ -85,6 +87,14 @@ island silhouette or its number (numbered + gpt-image-2 only), say what material
 and demand full edge-to-edge coverage with island boundaries respected. Muted palettes
 read best in-engine. End with "no text, no logos" unless signage is wanted — and know that
 `atlas alpha is glass` in the world renderer: paint RGB, don't leave meaningful alpha.
+
+**Declare the featureless islands, not just the featured ones.** Image models decorate:
+any island you *name after* a functional part gets that part's graphics painted onto it —
+calling the strip islands "edges of the card slot" painted a literal slot slit onto the
+TOP face of a housing box (req_3690, the user caught it in the viewport). The fix that
+worked verbatim: "every small island is a plain exterior face … absolutely NO slots, NO
+slits, NO openings, NO buttons … the only openings on this machine are <the intended
+ones>." Enumerate where detail IS allowed; declare everything else featureless.
 
 ## 3 · Map back — the part that actually matters
 
