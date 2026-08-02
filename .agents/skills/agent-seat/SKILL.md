@@ -15,7 +15,8 @@ forms; the rest use `tools/seat action <name> '<json-object>'`. Do not invent an
 action or bypass the resident editor.
 
 Source of truth for this file: `cart/editor/agent/seatApi.ts` (the API),
-`tools/seat` (the CLI adapter), `cart/editor/stage/ModelView.tsx:2598` (the live handler).
+`tools/seat` (the CLI adapter), `cart/editor/shell/AppFrame.tsx` (the always-on transport),
+and `cart/editor/stage/ModelView.tsx` (the current mesh-capable Seat).
 
 ---
 
@@ -48,9 +49,10 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 
 ## Loop
 
-1. Ensure the user has the target model open under `./tools/rjit dev editor`, or create one
-   through the normal shell flow with `tools/seat new`.
-2. Run `tools/seat look` before editing. A new cube should report the six primitive names.
+1. Run `tools/seat look` before editing. The always-on shell answers even when no model is
+   open. If it returns `state:"no-live-model"`, create the intended first model with
+   `tools/seat new`; never ask the user to prepare a disposable bootstrap model.
+2. A new cube should report the six primitive names before further editing.
 3. Select a durable name whenever one exists. Use a geometric selector only for the first
    reach or a deliberate spatial query.
 4. Make one coherent structural change, inspect the returned percept, then continue.
@@ -70,11 +72,17 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
-| `tools/seat look` | `{"action":"look"}` | Returns percept. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat look` | `{"action":"look"}` | Returns the resident percept, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
 | `tools/seat semantic-status` | `{"action":"semantic-status"}` | Compares saved RJMD, viewport mount input, and resident native semantics. |
 | `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
 | `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
-| `tools/seat follow <start\|read\|stop\|clear\|inspect>` | `{"action":"follow","args":{"operation":"start","label":"torso strips"}}` | Records and pairs the user's native Delete Faces → two-edge Create Face strip demonstrations. See Follow. |
+| `tools/seat action boundary-continuation '{"open":[a,b]}'` | `{"action":"boundary-continuation","args":{"open":[a,b]}}` | Returns only boundary edges incident to `a` and `b`, plus legal one-per-side pairs and their next open edge. |
+| `tools/seat action select-edge-continuation '{"open":[a,b],"edges":[[a,c],[b,d]]}'` | Same | Atomically validates and selects one continuation edge at each endpoint. Rejects disjoint, same-side, and collapsed pairs. |
+| `tools/seat action retopo-bands '{"operation":"plan-from-selection"}'` | Same | From a selected established quad strip, recovers its ordered lower/upper rails, maps and tints every resident face relative to those local rails. `read`, `select {id|"all"}`, and `clear` use the map. |
+| `tools/seat action retopo-bands '{"operation":"tint-selection","id":0}'` | Same | Assigns the current face selection to an exact package-saved band/color. IDs are 0..11. `untint-selection` erases selected assignments. |
+| `tools/seat action retopo-bands '{"operation":"ghost"}'` | Same | Toggle the package-saved frozen source soup over the current retopology. `visible:true|false` sets it explicitly and returns source coverage. |
+| `tools/seat action retopo-bands '{"operation":"deleted-patch"}'` | Same | Recover the exact unread Delete Faces perimeter after a reconnect. Normal Seat `delete` replies include it directly as `deletedBoundary`. |
+| `tools/seat follow <start\|read\|stop\|clear\|inspect>` | `{"action":"follow","args":{"operation":"start","label":"torso strips"}}` | Records the append-only native edit firehose; also derives Delete Faces → Create Face examples when possible. See Follow. |
 | `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
 | `tools/seat select-face <id> [+]` | `{"action":"select-face","args":{"index":7,"additive":true}}` | Exact triangle selection; ephemeral, never semantic memory. |
 | `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
@@ -216,32 +224,150 @@ first. All values are model-space; state the axis and pivot explicitly rather th
 on a screen gizmo's ambient frame.
 
 Transport: writes one NOTICE to `$RJIT_SOCKET` (default `/tmp/reactjit.sock`), then polls
-for `/tmp/reactjit-seat-<id>.json` every 25 ms, **timing out at 15 s**. Exit code is 0 on
-`ok:true`, 1 otherwise.
+for `/tmp/reactjit-seat-<id>.json` every 25 ms, **timing out at 15 s**. AppFrame owns the
+receiver from editor startup; ModelView is not a prerequisite. Exit code is 0 on `ok:true`,
+1 otherwise.
+
+### Retopology band map — review the whole model before replacing strips
+
+The retopology map is package-backed authoring data, not paint, material, or mesh geometry. It assigns
+**every resident face** to an axis band and renders adjacent bands with distinct translucent
+colors over the live mesh. Planning does not mutate mesh geometry, dirty the atlas, alter
+materials, or change semantics. It creates one model-history unit and atomically writes
+`mesh/retopo-guide.blob` in the active model package. The reply is accepted only when
+`covered === faces` and package persistence succeeds.
+
+When the planner is wrong, the user authors the truth directly. In Face mode, select the
+faces belonging to one band. In the Studio action bar, click the **BAND** chip to cycle
+colors, then press **Tint** (palette icon). The eraser icon removes the selected faces'
+assignment; the eye toggles the frozen source ghost; X clears the full temporary map and
+ghost. The equivalent shell flow is:
+
+```bash
+tools/seat action retopo-bands '{"operation":"tint-selection","id":0}'
+# Select the next band in the viewport, then use id 1, 2, ... through 11.
+tools/seat action retopo-bands '{"operation":"tint-selection","id":1}'
+
+# Correct a mistake: select the wrongly tinted faces, then erase their assignment.
+tools/seat action retopo-bands '{"operation":"untint-selection"}'
+
+# At any later point, compare the edited surface against the frozen source soup.
+tools/seat action retopo-bands '{"operation":"ghost"}'
+tools/seat action retopo-bands '{"operation":"ghost","visible":false}'
+```
+
+Tinting atomically updates the model package after copying its exact triangle mask, then clears
+the face selection, making the chosen
+color immediately visible and leaving the viewport ready for the next band. A manual `read`
+reports `mode:"manual"` and `covered` as the number assigned so far; `select {id}` reselects
+that exact mask. Same-document face deletion, weld compaction, and the normal retopology
+**Delete Faces → Create Face** pair preserve the map: surviving triangles retain their
+assignments, and a replacement face inherits the one band shared by the deleted patch.
+Mixed-band or partly untinted deletions deliberately give the replacement no tint. Switching
+models loads each package's own guide. Pressing X is the explicit destructive action that clears
+the map, frozen source, and package sidecar. A normal Save also writes the current guide beside
+the mesh document. Tint/erase/ghost replies carry `persisted:true`; a live mutation whose sidecar
+write fails is a rejected operation and must never be described as durable.
+
+`delete` returns `deletedBoundary`, captured before face compaction. Internal edges in the
+deleted set occur twice and cancel; its compact ordered `components` are the exact
+once-occurring perimeter, with welded endpoint ids and positions still owned by the surviving neighbours. Rebuild
+from that transaction provenance. Do not rediscover it through a whole-mesh `elements`
+dump or a geometric bbox guess. When deletion happened immediately before a Seat reconnect,
+consume the same unread native record with `operation:"deleted-patch"`.
+
+Retopology guide edits participate in the normal chronological model history. One plan,
+Tint, erase, eye toggle, or clear press is one Ctrl+Z step; Ctrl+Y restores that exact step.
+Every topology journal snapshot carries the guide version matching its geometry, so undoing
+Delete Faces/Create Face restores the corresponding live band membership without discarding
+the frozen source. Undo and redo immediately rewrite (or remove) `mesh/retopo-guide.blob` as
+well as changing the resident overlay. Never implement a second guide-only undo stack or
+reconstruct membership from the current viewport after a history step.
+
+The **first manual tint freezes the original resident triangle positions** and begins a
+parallel source-band map. Further tint/erase actions update that frozen map only until the
+first topology generation change. After editing starts, the source is immutable while the
+live labels follow face compaction and replacement. Toggle **Eye / `operation:"ghost"`** at
+the end to project the colored original soup over the current mesh: coincident curvature
+reinforces, while silhouette or surface drift separates visibly. The ghost receipt reports
+`faces`, `covered`, `generation`, and `visible`; complete comparison requires tinting the
+whole source (`covered === faces`) before the first delete. The package sidecar stores the
+exact frozen triangle positions, source/live band membership, and ghost visibility, so a full
+process rebuild or cold reopen restores the work. It is never an editable duplicate part.
+
+Cold-restart acceptance test: tint at least two bands, toggle the ghost on, fully terminate and
+reopen the editor, then `retopo-bands read` must report the same coverage and the GUI must still
+show `GHOST ON`. If either disappears, stop—the package persistence contract is broken.
+
+```bash
+# Select the already-approved open quad strip; its geometry is the specification.
+tools/seat select region:torso.retopo.band
+tools/seat action retopo-bands '{"operation":"plan-from-selection"}'
+
+tools/seat action retopo-bands '{"operation":"read"}'
+tools/seat action retopo-bands '{"operation":"select","id":7}'
+tools/seat action retopo-bands '{"operation":"select","id":"all"}'
+tools/seat action retopo-bands '{"operation":"clear"}'
+```
+
+Each band row reports `id`, signed phase `bucket`, triangle count, local rail-relative
+`range`, full bbox, and its RGB overlay color. A rail plan also reports `mode:"rails"`,
+mean local `width`, and `railSamples`. `select id:"all"` selects every mapped resident face, expanding
+the native scope to every visible Outliner part first. Selecting one band uses the exact
+resident face mask behind the tint; it is not a geometric selector reconstructed later.
+
+**Never derive band height from the seed's global bbox.** A strip can slope while retaining
+constant local height: its global `minY..maxY` includes the lateral rise and therefore
+overstates the band. `plan-from-selection` orders the two-triangle authored quads, recovers
+every cross-section as lower.xyz + upper.xyz, and classifies faces against the nearest
+interpolated rail segment in XZ. Once a band is established at a lateral position, faces
+above its local upper rail or below its local lower rail cannot belong to that band.
+
+Frame the whole model and inspect front, side, back, and iso views before changing topology.
+The older `plan {axis,width,origin}` operation remains a diagnostic for genuinely planar
+slabs; it is not a torso-retopology substitute. The rail map is still a proposal:
+shoulders, poles, limb junctions, and other topology transitions can expose where a single
+axis plan needs separate zones before automation continues.
 
 ### Follow — learn Delete Faces → Create Face strip replacement
 
 Follow is a real resident observation session, not a request to inspect or modify source
-code. It records the user's actual retopology unit while they work normally through the
-visible editor: select N triangles and **Delete Faces**, then select the two exposed boundary
-edges and **Create Face** between them. One accepted delete followed by one accepted create
-is paired into one exact example.
+code. `result.events` is the authority: an ordered, append-only firehose of every accepted
+resident journal edit from every invocation source, carrying its native before/after payload.
+Read that array first. Never infer that an edit did not happen because `result.examples` is
+empty.
 
-Capture is owned by the successful native **Delete Faces** and **Create Face** transactions,
-not by React button handlers. Native keeps a bounded queue of exact observations, including
-invocation source; `follow read` and `follow stop` drain and pair every queued lesson into
-the hot transcript. Therefore rapid consecutive demonstrations survive UI polling cadence,
-and any visible command route records identically. Automation/remote actions are drained but
-excluded from the user's lesson set.
+`result.examples` is only a derived convenience view for the common retopology unit: select
+N triangles and **Delete Faces**, then select the two exposed boundary edges and **Create
+Face** between them. Intervening actions, closed-loop creates, transforms, undo/redo, and
+other topology decisions remain in `events` even when they match no recipe. Automation and
+remote events remain in the raw firehose but are excluded from human demonstration examples
+so an agent cannot train on its own attempts.
+
+Capture is owned by successful native journal transactions, not by React button handlers.
+Native keeps every unconsumed observation; `follow read` and `follow stop` move the queue into
+the hot append-only transcript. The independent Follow queue must never share the cart's
+destructive action drain and must never evict older events before a read. Rapid consecutive
+demonstrations therefore survive UI polling cadence, and every visible command route records
+identically.
 
 ```bash
 tools/seat follow start "torso vertical strips"
 # Reply READY and wait. The user performs 2–4 delete/create replacement pairs.
-tools/seat follow read
-tools/seat follow stop
+tools/seat follow read 0 8
+tools/seat follow read 8 8
+tools/seat follow stop 16 8
 ```
 
-Each paired example contains:
+Each raw event contains `index`, numeric journal `kind`, `source`, observation time, and
+native `before`/`after`. Journal summaries prove every accepted edit in order; operations
+with richer observers additionally include local topology patches. Reads are paged so a long
+demonstration cannot overflow the socket response: start at offset 0 and keep reading from
+`eventNext` until it is `null`; `eventTotal` is the retained transcript size and `limit` is
+clamped to 1..32. Paging never drains or truncates the stored transcript. `kind:255` means the
+journal label has no compact action-enum entry; the edit is still real and ordered, so use
+`before.label` (for example `weld`) instead of discarding it. Each derived paired example
+contains:
 
 - `delete.before.selectedTriangles`: the exact resident triangles removed, with two
   welded adjacency rings, part/material/semantic identity, and frontier;
@@ -252,8 +378,9 @@ Each paired example contains:
   `nonManifold:true` marking a hard stop.
 
 Face and edge ids are ephemeral across deletion; welded endpoint positions are the bridge
-between the two actions and across consecutive examples. Follow intentionally excludes
-Seat/automation actions so the agent's continuation cannot become its own training example.
+between the two actions and across consecutive examples. Only derived examples exclude
+Seat/automation actions so the agent's continuation cannot become its own training example;
+the authoritative raw firehose includes every source.
 
 To inspect a possible continuation without changing selection:
 
@@ -268,16 +395,33 @@ After the user says the demonstration is done:
 1. Stop and read the transcript. Do not search the repository; the transcript is the data.
 2. Compare consecutive examples by the deleted patch centroid, bridge-edge displacement,
    replacement-face frontier, and triangle cadence. The next strip begins at the latest
-   replacement face's forward `outside` frontier, not at an arbitrary screen patch.
+   replacement face's forward `outside` frontier, not at an arbitrary screen patch. If that
+   open edge is `[a,b]`, the next two bridge edges must contain `a` and `b` respectively.
+   An edge sharing neither endpoint is invalid without further geometric reasoning.
 3. Never cross a part, material, semantic, instance, open, or non-manifold boundary. A pole
    or mismatched cadence needs a fresh human seed.
 4. Select the proposed resident triangles in one call:
    `tools/seat action select-elements '{"kind":"face","indices":[...]}'`.
 5. Capture a shot with the proposed deletion selected and ask for approval before the first
-   unseen change. Once approved: `tools/seat delete`; select the predicted two boundary edge
-   ids; `tools/seat create-face <name>`; inspect the replacement face's new frontier.
+   unseen change. Once approved: `tools/seat delete`; query the new work front locally with
+   `tools/seat action boundary-continuation '{"open":[a,b]}'`, then select one returned
+   pair with `tools/seat action select-edge-continuation
+   '{"open":[a,b],"edges":[[a,c],[b,d]]}'`; then
+   `tools/seat create-face <name>` and inspect the replacement face's new frontier. Create
+   Face derives the new winding from the authored surface normals beside both selected
+   boundary edges; do not append an unconditional `flip` after it. This
+   continuation resolver runs inside the editor, so large imports never depend on the full
+   `elements` reply fitting across the socket. When deletion rekeys the endpoints, use
+   `select-edge-points` with the two pre-delete coordinate pairs; it uniquely resolves the
+   surviving live vertices within the supplied tolerance before selecting their edges.
 6. A work-front sliver is provisional while a band remains open. Validate the seam after the
    complete half-shell wrap closes; then mirror the approved half if the model is symmetric.
+
+After each six-triangle replacement, inspect the local topology before advancing. A successful
+Create Face can strand the unconsumed fan as a detached two-triangle island: every frontier edge
+of that component reports `outside:null`. Delete that residual island immediately, then capture
+a shot and require a visually continuous rail-to-rail strip. Face counts and named-quad receipts
+do not prove corridor coverage; black gaps or overlapping diagonals are a failed step.
 
 Closing the wrap is part of the job, not a manual handoff. Pair the stacked seam vertices in
 their row order and call `weld-pairs` so every pair gets its own midpoint—ordinary `weld` over
@@ -287,10 +431,18 @@ so narrow/wide edge alternation evens out without replacing the torso curvature 
 Reject crossed pair order, reused vertices, part changes, non-manifold frontiers, and any pair
 beyond an explicit `maxDistance` derived from the live neighboring edge widths.
 
-Follow currently teaches only the ordered **Delete Faces → two-edge Create Face** pair.
-Moving, cutting, welding, or any unrelated topology change between those actions invalidates
-the pair; clear it and record again. The feature is deliberately narrow because this torso
-cleanup replaces triangle strips mechanically while preserving the generated curvature.
+At a junction where two completed work fronts meet, do not treat “close the belt” and
+“continue upward” as alternatives. The demonstrated transition is ordered: create the direct
+quad between the two open fronts; delete the adjacent old soup quads above that bridge; grow
+replacement quads upward from the new boundary; weld each stacked seam pair; then normalize
+the row widths while retaining their existing curved paths. The direct bridge preserves the
+band, while the upward replacements keep the whole shell manifold.
+
+The derived example matcher currently recognizes only the ordered **Delete Faces → two-edge
+Create Face** pair. Moving, cutting, welding, or a junction transition can prevent a derived
+pair, but never invalidates the raw lesson: read the surrounding firehose events and their
+journal labels in order. Do not clear or ask the user to repeat a demonstration merely because
+`examples` is empty.
 
 ---
 
@@ -435,6 +587,57 @@ when they differ. `select all` automatically scopes every visible part first.
 Use `part-select` for an intentional subset. It updates Outliner selection, primary row,
 native edit scope, and selected range as one authority call.
 
+### Contact and assembly — make it touch, remove what cannot show
+
+Treat contact as geometry, not appearance. A screenshot can judge the silhouette, but it
+cannot prove that two pieces touch. Never hide a gap with perspective or bury one solid
+inside another by eye.
+
+For two axis-aligned mating surfaces:
+
+1. Select the stationary surface/region and record its bbox contact plane.
+2. Select the moving part's root region and record its bbox. Compute the exact translation:
+   `delta = stationaryPlane - movingPlane` on the contact axis.
+3. Move by that exact delta. Re-select both and require the plane difference to be at most
+   `0.00001` m, with positive interval overlap on both other axes. Equality on one axis
+   without overlap on the other two is not contact.
+4. Inspect an orthographic shot only after the numeric check.
+
+AABB planes are valid only for axis-aligned planar contact. For rotated, tapered, or curved
+surfaces, use the actual boundary vertices from `elements`; pair the corresponding vertices
+and establish contact with `weld-pairs`. Re-read `elements` after every topology mutation,
+because all element ids are ephemeral.
+
+Once a permanent assembly is seated, remove geometry that cannot ever be seen:
+
+- If two whole faces mate permanently, delete both internal faces before joining their
+  boundary. Keeping coplanar internal faces wastes geometry and can z-fight.
+- If only part of a face is covered, cut/inset/connect until the hidden patch is its own
+  face, then delete only that patch. Never delete an exposed remainder for convenience.
+- Keep the mating faces on articulated, removable, opening, or damageable parts whose
+  contact surface can later become visible.
+- Verify the deletion from more than one view and inspect the returned boundary. A black
+  exterior gap means the wrong face or too much face was removed.
+
+Use this exact topology order when pieces need a shared seam:
+
+1. Place the parts in exact contact.
+2. Delete permanently hidden mating faces or isolated hidden patches.
+3. Call `part-merge` to put the pieces in one editable part. **Part merge does not weld
+   coincident vertices.**
+4. Re-read `elements`, pair corresponding seam vertices in order, and call `weld-pairs`
+   with a `maxDistance` derived from the neighboring edge length. This establishes one exact
+   address per pair without collapsing an entire seam to one point.
+5. If the result is one permanent shell, keep it welded. If the pieces must remain distinct,
+   select the faces belonging to the movable/logical piece and `detach <name>` afterward.
+
+Detach is deliberately last. It is a pure authored-group/part remap: geometry does not move,
+but the indexed mesh is rebuilt so the two parts receive separate vertex identities at the
+same coordinates. That is how two parts can sit on the **same address** without remaining one
+welded topology. In short: weld to establish the address; detach to break identity while
+preserving the address. Detaching before alignment leaves two independently drifting seams;
+welding after detaching joins them again.
+
 ### Pivot as placement
 
 Scaling a cap about an off-centre pivot collapses it *toward that point*. That is how you
@@ -545,6 +748,11 @@ need it — you are authoring the input to a later rig, not just a handle for yo
 - Preserve the user's mental model: a repeated structure should share one name, not
   `window1`, `window2`.
 - Block out proportions and major parts before detail. Get the meter-scale right first.
+- Seat contacting parts with exact plane/vertex math; visual closeness is not contact.
+- Remove permanently occluded mating faces, but retain any surface that articulation,
+  damage, or removal can expose.
+- Use weld-then-detach when logical parts need separate vertex identities at exactly the
+  same coordinates.
 - Name meaning at the operation that creates it. Do not plan to reconstruct it later from
   normals.
 - Rename or re-author a region when its meaning changes; a confidently stale label is worse

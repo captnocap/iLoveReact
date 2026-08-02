@@ -2,6 +2,10 @@
 
 Context for AI agents working in this repository. Last updated: 2026-07-28.
 
+do not commit game 3d models
+
+Do not act in the past and do not think forward about your own future. The only thing that is important is what is on the table right now, if you think you are free, there is no escape possible. if you desire to move mountains and you continue to purify yourself, ultimately you will arrive at the place where you are able to move mountains. But in order to arrive at this position of power you will have had to give up being he-who-wanted-to-move-mountains so that you can be he-who-put-the-mountain-there-in-the-first-place. The humor is that finally when you have the power to move the mountain, you are the person who placed it there--so there the mountain stays. Treat this as your guiding light that doing the right thing, right NOW lasts, do not treat work like you are going to come back around to it. Now is the only time.
+
 ## The Two Failure Modes
 
 If you reflex toward either of these, stop and re-read:
@@ -52,6 +56,34 @@ Three standing disciplines for all game work:
 - **Readable code.** Names carry meaning at their scope; no magic numbers — per
   P2, a behavior-affecting constant buried in code is a bug; it belongs in a
   tuning table the compile consumes (the readable-code skill applies).
+
+---
+
+## Skills live in `.agents/skills/` — ONE physical copy
+
+Every skill in this repo has exactly one home: **`.agents/skills/<name>/SKILL.md`**,
+vendor-neutral, next to this file. `.claude/skills/*` are relative **symlinks** into
+it, purely so Claude Code's scanner finds them. There is no second copy to edit.
+
+```
+.agents/skills/agent-seat/SKILL.md      <- the file. edit this.
+.claude/skills/agent-seat -> ../../.agents/skills/agent-seat
+```
+
+Skills here are shared across Claude, Codex, and Kimi — the two agent-editor skills
+(`agent-seat`, `agent-skin`) get revised almost every session, so a copy is a
+guaranteed divergence. It already happened: `agent-skin` was written only to
+`.agents/` and never registered with Claude at all, while a stale 478-line
+`agent-seat` sat in `.claude/` shadowing the live 762-line one for weeks. Agents were
+reading a contract that no longer described the editor.
+
+**Writing a new skill:** create `.agents/skills/<name>/SKILL.md`, then
+`ln -s ../../.agents/skills/<name> .claude/skills/<name>`. Never write into
+`.claude/skills/`. Never `cp` a skill anywhere. A skill dir that is a real directory
+under `.claude/skills/` is the bug.
+
+Vendor-specific launch metadata rides *inside* the skill dir
+(`agents/openai.yaml`), not in a parallel tree.
 
 ---
 
@@ -179,7 +211,7 @@ class appearing after your change is an automatic FAIL of that change.
 - **Main only, no branches.** Safe commands: `git add`, `git commit`, `git push`, `git status`, `git log`, `git diff`. Never `git checkout`, `git stash`, `git reset --hard`, `git branch`, `git switch`.
 - **`love2d/` and `tsz/` are read-only.** Copy OUT for porting, never write INTO them. Same treatment for `archive/`.
 - **Zig 0.16.0.** Read `framework/ZIG_016_API_NOTES.md`; inject `std.Io` through signatures/owners and check the compiler's actual std source before assuming API shapes.
-- **Daily checkpoint at 2am and 2pm.** When beginning work around 02:00 or 14:00, check `git status`. If the working tree is dirty, stage all changes and commit with a `checkpoint:` message, then continue. This is the only exception to the explicit-staging rule.
+
 - **Dev builds are always `ReleaseFast`.** Debug builds crash on click — pre-existing framework bug.
 
 ---
