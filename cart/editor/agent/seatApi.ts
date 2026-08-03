@@ -37,7 +37,14 @@ export type SeatPartPercept = { activePartId: string | null; parts: SeatPart[] }
 export type SeatPercept = {
   version: 1;
   generation: number;
+  /** RENDER TRIANGLES, not authored faces. Two triangles of one authored quad count
+   * twice here, so this number alone cannot tell a quad mesh from triangle soup —
+   * read `authoredFaces` for that. */
   faces: number;
+  /** Distinct authored face groups: the quads and n-gons the modeller actually made.
+   * `faces === authoredFaces` means every quad has been split into loose triangles.
+   * Null when no atlas is readable yet and the grouping cannot be observed. */
+  authoredFaces: number | null;
   /** Logical UV islands in the resident atlas. Zero means no readable atlas yet. */
   islands: number;
   /** Exact coverage-compatible texture footprints after stacking. */
@@ -65,8 +72,119 @@ export type SeatReply = { ok: boolean; op: string; result?: unknown; percept: Se
 export type SeatBriefReply = Omit<SeatReply, 'percept'> & { brief: string };
 export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
-  edges: { id: number; vertices: [number, number] }[];
+  edges: { id: number; vertices: [number, number]; faces: number; open: boolean }[];
 };
+export type SeatBoundaryContinuation = {
+  open: [number, number];
+  endpoints: [
+    { vertex: number; at: [number, number, number]; candidates: { edge: number; vertices: [number, number]; next: number; at: [number, number, number] }[] },
+    { vertex: number; at: [number, number, number]; candidates: { edge: number; vertices: [number, number]; next: number; at: [number, number, number] }[] },
+  ];
+  pairs: { edges: [[number, number], [number, number]]; forward: [number, number] }[];
+};
+export type SeatDeletedBoundary = {
+  version: 1;
+  deletedFaces: number;
+  components: {
+    closed: boolean;
+    branched: boolean;
+    vertices: number[];
+    at: [number, number, number][];
+    outside: (number | null)[];
+    nonManifold: boolean[];
+    bbox: [number, number, number, number, number, number];
+  }[];
+};
+export type SeatRetopoBandPlan = {
+  version: 1;
+  mode: 'axis' | 'rails' | 'manual';
+  axis: 'x' | 'y' | 'z';
+  width: number;
+  origin: number;
+  railSamples: number;
+  faces: number;
+  covered: number;
+  bands: {
+    id: number;
+    bucket: number;
+    faces: number;
+    range: [number, number];
+    bbox: [number, number, number, number, number, number];
+    color: [number, number, number];
+  }[];
+};
+export type SeatRetopoSourceGhost = {
+  captured: true;
+  visible: boolean;
+  faces: number;
+  covered: number;
+  generation: number;
+};
+
+/** Recover the ordered lower/upper cross-sections of a demonstrated quad strip.
+ * Every authored quad is two triangles/four vertices; consecutive quads share
+ * exactly one cross edge. The two unshared vertices at each end are the caps. */
+export function retopoRailPairsFromPatch(patch: SeatFollowPatch): Float32Array | null {
+  const selected = patch.triangles.filter((triangle) => triangle.selected);
+  const positions = new Map(patch.vertices.map((vertex) => [vertex.id, vertex.at] as const));
+  const groups = new Map<number, Set<number>>();
+  for (const triangle of selected) {
+    const vertices = groups.get(triangle.group) ?? new Set<number>();
+    triangle.vertices.forEach((vertex) => vertices.add(vertex));
+    groups.set(triangle.group, vertices);
+  }
+  const ids = [...groups.keys()];
+  if (ids.length < 2 || ids.some((id) => groups.get(id)?.size !== 4)) return null;
+  const adjacency = new Map<number, { id: number; edge: [number, number] }[]>();
+  ids.forEach((id) => adjacency.set(id, []));
+  for (let left = 0; left < ids.length; left += 1) {
+    for (let right = left + 1; right < ids.length; right += 1) {
+      const a = ids[left]!;
+      const b = ids[right]!;
+      const shared = [...groups.get(a)!].filter((vertex) => groups.get(b)!.has(vertex));
+      if (shared.length !== 2) continue;
+      adjacency.get(a)!.push({ id: b, edge: [shared[0]!, shared[1]!] });
+      adjacency.get(b)!.push({ id: a, edge: [shared[0]!, shared[1]!] });
+    }
+  }
+  const ends = ids.filter((id) => adjacency.get(id)!.length === 1);
+  if (ends.length !== 2 || ids.some((id) => adjacency.get(id)!.length < 1 || adjacency.get(id)!.length > 2)) return null;
+  const order: number[] = [];
+  let prior: number | null = null;
+  let current = ends[0]!;
+  while (order.length < ids.length) {
+    order.push(current);
+    const next = adjacency.get(current)!.find((row) => row.id !== prior)?.id;
+    if (next === undefined) break;
+    prior = current;
+    current = next;
+  }
+  if (order.length !== ids.length || new Set(order).size !== ids.length) return null;
+  const sharedEdge = (a: number, b: number): [number, number] | null => adjacency.get(a)!.find((row) => row.id === b)?.edge ?? null;
+  const firstShared = sharedEdge(order[0]!, order[1]!);
+  const lastShared = sharedEdge(order[order.length - 2]!, order[order.length - 1]!);
+  if (!firstShared || !lastShared) return null;
+  const pairs: [number, number][] = [
+    [...groups.get(order[0]!)!].filter((vertex) => !firstShared.includes(vertex)) as [number, number],
+  ];
+  for (let at = 0; at + 1 < order.length; at += 1) {
+    const edge = sharedEdge(order[at]!, order[at + 1]!);
+    if (!edge) return null;
+    pairs.push(edge);
+  }
+  pairs.push([...groups.get(order[order.length - 1]!)!].filter((vertex) => !lastShared.includes(vertex)) as [number, number]);
+  if (pairs.some((pair) => pair.length !== 2)) return null;
+  const flattened: number[] = [];
+  for (const pair of pairs) {
+    const a = positions.get(pair[0]);
+    const b = positions.get(pair[1]);
+    if (!a || !b || a[1] === b[1]) return null;
+    const lower = a[1] < b[1] ? a : b;
+    const upper = a[1] < b[1] ? b : a;
+    flattened.push(...lower, ...upper);
+  }
+  return new Float32Array(flattened);
+}
 export type SeatFollowPatch = {
   version: 1;
   rings: number;
@@ -90,6 +208,67 @@ export type SeatFollowPatch = {
     nonManifold: boolean;
   }[];
 };
+
+export function deletedBoundaryFromPatch(patch: SeatFollowPatch): SeatDeletedBoundary | null {
+  const positions = new Map(patch.vertices.map((vertex) => [vertex.id, vertex.at] as const));
+  const incident = new Map<number, number[]>();
+  for (let index = 0; index < patch.frontier.length; index += 1) {
+    const edge = patch.frontier[index]!;
+    if (!positions.has(edge.vertices[0]) || !positions.has(edge.vertices[1])) return null;
+    for (const vertex of edge.vertices) incident.set(vertex, [...(incident.get(vertex) ?? []), index]);
+  }
+  const remaining = new Set(patch.frontier.map((_, index) => index));
+  const components: SeatDeletedBoundary['components'] = [];
+  while (remaining.size > 0) {
+    const seed = remaining.values().next().value as number;
+    const memberEdges = new Set<number>();
+    const memberVertices = new Set<number>();
+    const stack = [...patch.frontier[seed]!.vertices];
+    while (stack.length > 0) {
+      const vertex = stack.pop()!;
+      if (memberVertices.has(vertex)) continue;
+      memberVertices.add(vertex);
+      for (const edgeIndex of incident.get(vertex) ?? []) {
+        memberEdges.add(edgeIndex);
+        stack.push(...patch.frontier[edgeIndex]!.vertices);
+      }
+    }
+    memberEdges.forEach((index) => remaining.delete(index));
+    const ends = [...memberVertices].filter((vertex) => (incident.get(vertex)?.filter((edge) => memberEdges.has(edge)).length ?? 0) === 1);
+    const branched = [...memberVertices].some((vertex) => (incident.get(vertex)?.filter((edge) => memberEdges.has(edge)).length ?? 0) > 2);
+    const closed = !branched && ends.length === 0 && memberEdges.size === memberVertices.size;
+    const start = ends.length === 2 ? Math.min(...ends) : Math.min(...memberVertices);
+    const orderedVertices: number[] = [start];
+    const orderedEdges: number[] = [];
+    const unused = new Set(memberEdges);
+    let current = start;
+    while (unused.size > 0 && !branched) {
+      const edgeIndex = (incident.get(current) ?? []).find((index) => unused.has(index));
+      if (edgeIndex === undefined) break;
+      unused.delete(edgeIndex);
+      orderedEdges.push(edgeIndex);
+      const edge = patch.frontier[edgeIndex]!;
+      current = edge.vertices[0] === current ? edge.vertices[1] : edge.vertices[0];
+      if (!(closed && current === start)) orderedVertices.push(current);
+    }
+    const vertices = branched || unused.size > 0 ? [...memberVertices].sort((a, b) => a - b) : orderedVertices;
+    const edgeOrder = branched || unused.size > 0 ? [...memberEdges].sort((a, b) => a - b) : orderedEdges;
+    const at = vertices.map((vertex) => positions.get(vertex)!);
+    const bbox: [number, number, number, number, number, number] = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (const point of at) for (let axis = 0; axis < 3; axis += 1) {
+      bbox[axis] = Math.min(bbox[axis], point[axis]);
+      bbox[axis + 3] = Math.max(bbox[axis + 3], point[axis]);
+    }
+    components.push({
+      closed, branched: branched || unused.size > 0, vertices, at,
+      outside: edgeOrder.map((index) => patch.frontier[index]!.outside),
+      nonManifold: edgeOrder.map((index) => patch.frontier[index]!.nonManifold),
+      bbox,
+    });
+  }
+  components.sort((a, b) => b.vertices.length - a.vertices.length);
+  return { version: 1, deletedFaces: patch.selectedTriangles.length, components };
+}
 export type SeatFollowEdgePatch = {
   version: 1;
   selectedEdges: {
@@ -108,6 +287,14 @@ export type SeatFollowExample = {
   delete: { before: SeatFollowPatch };
   create: { before: SeatFollowEdgePatch; after: SeatFollowPatch };
 };
+export type SeatFollowEvent = {
+  index: number;
+  kind: number;
+  source: string;
+  at: number;
+  before: unknown;
+  after: unknown;
+};
 type SeatFollowPendingDelete = { source: string; at: number; before: SeatFollowPatch };
 export type SeatFollowSession = {
   version: 1;
@@ -117,6 +304,8 @@ export type SeatFollowSession = {
   startedAt: number;
   stoppedAt?: number;
   startedGeneration: number;
+  /** Append-only authority. Examples below are only a derived convenience view. */
+  events: SeatFollowEvent[];
   examples: SeatFollowExample[];
   pendingDelete?: SeatFollowPendingDelete;
 };
@@ -170,6 +359,9 @@ export type SeatAdapter = {
   /** Full package save through AppFrame: meshdoc v4, semantic table, parts,
    *  atlas, and package metadata cross the cold-restart boundary together. */
   persist?: () => boolean;
+  /** Retopology tint/ghost mutations persist immediately into the active model
+   * package; false means the live change landed but its cold-restart record did not. */
+  retopoStateChanged?: (clearWhenAbsent?: boolean) => boolean;
   /** Live shell-owned Outliner names and hierarchy. The native semantic state
    *  intentionally knows geometry only; the seat joins both truths at look time. */
   partPercept?: () => SeatPartPercept;
@@ -204,6 +396,18 @@ function readTopology(raw: unknown): TopologyReceipt | null {
   return value?.ok === 1 ? value : null;
 }
 
+/** Distinct authored face groups behind the resident triangles. `__model_atlas_read`
+ * emits `triangles` as [island, faceGroup, x0,y0, x1,y1, x2,y2] — slot 1 is the
+ * authored group every triangle belongs to, which is the only observable that separates
+ * a real quad mesh from the same vertices flattened into loose triangles. Null when no
+ * atlas is readable, because "unknown" must never be reported as "no quads". */
+function countAuthoredFaces(triangles: readonly number[] | undefined): number | null {
+  if (!Array.isArray(triangles) || triangles.length === 0 || triangles.length % 8 !== 0) return null;
+  const groups = new Set<number>();
+  for (let at = 1; at < triangles.length; at += 8) groups.add(triangles[at]!);
+  return groups.size;
+}
+
 export function readSeatPercept(): SeatPercept | null {
   const value = parseJson<SeatPercept>(host.__mesh_semantic_state?.());
   if (!value || value.version !== 1 || !Array.isArray(value.regions) || value.table?.version !== 1) return null;
@@ -221,6 +425,7 @@ export function readSeatPercept(): SeatPercept | null {
     ...value,
     islands,
     footprints,
+    authoredFaces: countAuthoredFaces(atlas?.triangles),
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
   };
@@ -322,7 +527,16 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
 
 export function formatSeatPercept(percept: SeatPercept): string {
   const names = new Map(percept.table.regions.map((region) => [region.id, region.name]));
-  const lines = [`mesh · ${percept.faces} faces · ${percept.footprints} paint footprints · ${percept.islands} logical UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  // Lead with authored faces, not triangles. A percept that reports only triangles reads
+  // identically before and after a quad mesh is flattened into soup, which is exactly how
+  // a destroyed model went unnoticed (req_3740).
+  const authored = percept.authoredFaces == null
+    ? `${percept.faces} triangles · authored faces unknown (no readable atlas)`
+    : `${percept.authoredFaces} authored faces · ${percept.faces} triangles`;
+  const lines = [`mesh · ${authored} · ${percept.footprints} paint footprints · ${percept.islands} logical UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  if (percept.authoredFaces != null && percept.authoredFaces === percept.faces && percept.faces > 0) {
+    lines.push(`  ⚠ TRIANGLE SOUP — every triangle is its own authored face; this mesh has no quads left`);
+  }
   for (const part of percept.parts) {
     const range = part.lo == null || part.hi == null ? 'range pending' : `[${part.lo},${part.hi})`;
     const folder = part.groupPath.length > 0 ? `${part.groupPath.map((row) => row.name).join('/')} / ` : '';
@@ -391,13 +605,18 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (host.__mesh_semantic_bootstrap_axes?.(new Uint32Array(ids), JSON.stringify(table)) === 1) return withParts(readSeatPercept());
     return initial;
   };
+  const expandAllVisibleParts = (percept: SeatPercept): string | null => {
+    const visiblePartIds = percept.parts.filter((part) => part.visible && part.lo != null && part.hi != null).map((part) => part.id);
+    if (visiblePartIds.length <= 1) return null;
+    const scoped = adapter.shellAction?.('part-select', { ids: visiblePartIds, primary: visiblePartIds[visiblePartIds.length - 1] });
+    return scoped?.ok ? null : scoped?.reason ?? 'could not expand native edit scope to every visible part';
+  };
   const select = (selector: string): SelectorReceipt => {
     const percept = look();
     if (!percept) return { ok: false, reason: 'no live mesh' };
-    const visiblePartIds = percept.parts.filter((part) => part.visible && part.lo != null && part.hi != null).map((part) => part.id);
-    if (selector.trim() === 'all' && visiblePartIds.length > 1) {
-      const scoped = adapter.shellAction?.('part-select', { ids: visiblePartIds, primary: visiblePartIds[visiblePartIds.length - 1] });
-      if (!scoped?.ok) return { ok: false, reason: scoped?.reason ?? 'select all could not expand the active scope to every visible part' };
+    if (selector.trim() === 'all') {
+      const scopeReason = expandAllVisibleParts(percept);
+      if (scopeReason) return { ok: false, reason: `select all ${scopeReason}` };
     }
     const query = compileSeatSelector(selector, percept);
     if (!query) {
@@ -422,6 +641,138 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return receipt;
   };
   const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
+  const readRetopoBands = (): SeatRetopoBandPlan | null => {
+    const plan = parseJson<SeatRetopoBandPlan>(host.__mesh_retopo_bands_read?.());
+    return plan?.version === 1 && Array.isArray(plan.bands) &&
+      (plan.mode === 'manual' ? plan.covered >= 0 && plan.covered <= plan.faces : plan.covered === plan.faces) ? plan : null;
+  };
+  const retopoBands = (operation: string, args: Record<string, unknown> = {}): SeatShellReceipt => {
+    const persistRetopo = (clearWhenAbsent = false): boolean => adapter.retopoStateChanged?.(clearWhenAbsent) !== false;
+    if (operation === 'clear') {
+      const changed = host.__mesh_retopo_bands_clear?.() === 1;
+      if (!changed) return { ok: false, reason: 'no retopology band preview is active' };
+      return persistRetopo(true)
+        ? { ok: true, result: { cleared: true, persisted: true } }
+        : { ok: false, result: { cleared: true, persisted: false }, reason: 'retopology map cleared live but the model-package record could not be updated' };
+    }
+    if (operation === 'read') {
+      const plan = readRetopoBands();
+      return plan ? { ok: true, result: plan } : { ok: false, reason: 'no complete retopology band preview is active' };
+    }
+    if (operation === 'deleted-patch') {
+      const events = readNativeFollowEvents();
+      applyNativeFollowEvents(events);
+      const event = [...events].reverse().find((row) => row.kind === 5 && isFollowPatch(row.before));
+      const boundary = event && isFollowPatch(event.before) ? deletedBoundaryFromPatch(event.before) : null;
+      return event && boundary
+        ? { ok: true, result: { source: followSourceName(event.source), boundary } }
+        : { ok: false, reason: 'no unread Delete Faces transaction is available' };
+    }
+    if (operation === 'tint-selection' || operation === 'untint-selection') {
+      const id = operation === 'untint-selection' ? -1 : Number(args.id);
+      if (!Number.isInteger(id) || id < -1 || id > 11) {
+        return { ok: false, reason: 'tint-selection needs id 0..11; untint-selection erases the current face selection' };
+      }
+      const tinted = Number(host.__mesh_retopo_band_tint_selection?.(id) ?? -1);
+      if (tinted <= 0) return { ok: false, reason: tinted === 0 ? 'select one or more faces before tinting' : 'manual retopology tint is unavailable' };
+      return persistRetopo()
+        ? { ok: true, result: { id: id < 0 ? 'unassigned' : id, faces: tinted, persisted: true } }
+        : { ok: false, result: { id: id < 0 ? 'unassigned' : id, faces: tinted, persisted: false }, reason: 'faces were tinted live but the model-package guide could not be written' };
+    }
+    if (operation === 'ghost') {
+      const requested = args.visible;
+      if (requested !== undefined && typeof requested !== 'boolean') {
+        return { ok: false, reason: 'ghost visible must be true or false; omit it to toggle' };
+      }
+      const raw = requested === undefined
+        ? host.__mesh_retopo_source_ghost?.()
+        : host.__mesh_retopo_source_ghost?.(requested ? 1 : 0);
+      const ghost = parseJson<SeatRetopoSourceGhost>(raw);
+      if (ghost?.captured !== true || typeof ghost.visible !== 'boolean') {
+        return { ok: false, reason: 'no frozen retopology source exists — tint the source soup before editing' };
+      }
+      return persistRetopo()
+        ? { ok: true, result: { ...ghost, persisted: true } }
+        : { ok: false, result: { ...ghost, persisted: false }, reason: 'ghost visibility changed live but the model-package guide could not be written' };
+    }
+    const live = look();
+    if (!live) return { ok: false, reason: 'no live mesh' };
+    const scopeReason = expandAllVisibleParts(live);
+    if (scopeReason) return { ok: false, reason: `retopology map ${scopeReason}` };
+    if (operation === 'plan-from-selection') {
+      const patch = followPatch(undefined, 0);
+      if (!patch) return { ok: false, reason: 'select an established open quad strip before planning from rails' };
+      const rails = retopoRailPairsFromPatch(patch);
+      if (!rails) return { ok: false, reason: 'selected seed must be a chain of 2+ authored quads sharing one cross edge each' };
+      const plan = parseJson<SeatRetopoBandPlan>(host.__mesh_retopo_bands_plan_rails?.(rails));
+      if (!plan || plan.version !== 1 || plan.mode !== 'rails' || plan.covered !== plan.faces || plan.faces !== live.faces) {
+        return { ok: false, reason: 'native rail planner rejected the seed or did not cover every resident face' };
+      }
+      return persistRetopo() ? { ok: true, result: { ...plan, persisted: true } }
+        : { ok: false, result: { ...plan, persisted: false }, reason: 'rail map was built live but the model-package guide could not be written' };
+    }
+    if (operation === 'plan') {
+      const rawAxis = args.axis ?? 'y';
+      const axis = typeof rawAxis === 'string' ? ({ x: 0, y: 1, z: 2 } as const)[rawAxis as 'x' | 'y' | 'z'] : Number(rawAxis);
+      const width = Number(args.width);
+      const origin = args.origin === undefined ? undefined : Number(args.origin);
+      if (!Number.isInteger(axis) || axis < 0 || axis > 2 || !Number.isFinite(width) || width < 0.0001 ||
+          (origin !== undefined && !Number.isFinite(origin))) {
+        return { ok: false, reason: 'plan needs axis x/y/z, width >= 0.0001 metres, and an optional finite origin' };
+      }
+      const raw = origin === undefined
+        ? host.__mesh_retopo_bands_plan?.(axis, width)
+        : host.__mesh_retopo_bands_plan?.(axis, width, origin);
+      const plan = parseJson<SeatRetopoBandPlan>(raw);
+      if (!plan || plan.version !== 1 || plan.covered !== plan.faces || plan.faces !== live.faces) {
+        return { ok: false, reason: 'native band planner rejected the dimensions or did not cover every resident face' };
+      }
+      return persistRetopo() ? { ok: true, result: { ...plan, persisted: true } }
+        : { ok: false, result: { ...plan, persisted: false }, reason: 'band map was built live but the model-package guide could not be written' };
+    }
+    if (operation === 'select') {
+      const id = args.id === 'all' ? -1 : Number(args.id);
+      if (!Number.isInteger(id) || id < -1) return { ok: false, reason: 'select needs a non-negative band id or id:"all"' };
+      const selected = Number(host.__mesh_retopo_band_select?.(id) ?? -1);
+      return selected > 0 ? { ok: true, result: { id: id < 0 ? 'all' : id, selected } }
+        : { ok: false, reason: 'band id is absent, stale, or selected no resident faces' };
+    }
+    return { ok: false, reason: `unknown retopology band operation "${operation}"` };
+  };
+  const edgePair = (value: unknown): [number, number] | null => {
+    if (!Array.isArray(value) || value.length !== 2) return null;
+    const a = Number(value[0]);
+    const b = Number(value[1]);
+    return Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b >= 0 && a !== b ? [a, b] : null;
+  };
+  const edgeKey = ([a, b]: [number, number]): string => a < b ? `${a}:${b}` : `${b}:${a}`;
+  const boundaryContinuation = (value: unknown): SeatBoundaryContinuation | null => {
+    const open = edgePair(value);
+    const topology = elements();
+    if (!open || !topology) return null;
+    const openKey = edgeKey(open);
+    if (!topology.edges.some((edge) => edge.open === true && edgeKey(edge.vertices) === openKey)) return null;
+    const positions = new Map(topology.vertices.map((vertex) => [vertex.id, vertex.at] as const));
+    const endpoint = (vertex: number) => {
+      const at = positions.get(vertex);
+      if (!at) return null;
+      const candidates = topology.edges.flatMap((edge) => {
+        if (edge.open !== true || edgeKey(edge.vertices) === openKey || !edge.vertices.includes(vertex)) return [];
+        const next = edge.vertices[0] === vertex ? edge.vertices[1] : edge.vertices[0];
+        const nextAt = positions.get(next);
+        return nextAt ? [{ edge: edge.id, vertices: [vertex, next] as [number, number], next, at: nextAt }] : [];
+      }).sort((a, b) => a.edge - b.edge);
+      return { vertex, at, candidates };
+    };
+    const a = endpoint(open[0]);
+    const b = endpoint(open[1]);
+    if (!a || !b) return null;
+    const pairs = a.candidates.flatMap((left) => b.candidates.flatMap((right) => left.next === right.next ? [] : [{
+      edges: [left.vertices, right.vertices] as [[number, number], [number, number]],
+      forward: [left.next, right.next] as [number, number],
+    }]));
+    return { open, endpoints: [a, b], pairs };
+  };
   const followPatch = (faces?: number[], rings = 1): SeatFollowPatch | null => {
     const cleanFaces = Array.isArray(faces)
       ? [...new Set(faces.map(Number).filter((face) => Number.isInteger(face) && face >= 0))]
@@ -443,15 +794,32 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return patch?.version === 1 && Array.isArray(patch.selectedEdges) &&
       patch.selectedEdges.length >= 2 && patch.selectedEdges.every((edge) => edge.boundary === true);
   };
-  const drainNativeFollowActions = (): number => {
-    const drained = parseJson<NativeFollowActionDrain>(host.__mesh_follow_action_drain?.());
-    if (!drained || drained.version !== 1 || !Array.isArray(drained.events)) return 0;
-    if (!followSession?.active) return 0;
+  const followSourceName = (source: number): string => {
     const sourceNames = ['native', 'menu', 'hotkey', 'toolbar', 'dock', 'context-menu', 'palette', 'viewport', 'remote', 'automation'];
+    return sourceNames[Math.trunc(Number(source))] ?? 'native';
+  };
+  const readNativeFollowEvents = (): NativeFollowActionDrain['events'] => {
+    const drained = parseJson<NativeFollowActionDrain>(host.__mesh_follow_action_drain?.());
+    return drained?.version === 1 && Array.isArray(drained.events) ? drained.events : [];
+  };
+  const applyNativeFollowEvents = (events: NativeFollowActionDrain['events']): number => {
+    if (!followSession?.active) return 0;
+    const recorded = [...(Array.isArray(followSession.events) ? followSession.events : [])];
     const examples = [...followSession.examples];
     let pendingDelete = followSession.pendingDelete;
-    for (const event of drained.events) {
-      const source = sourceNames[Math.trunc(Number(event.source))] ?? 'native';
+    for (const event of events) {
+      const source = followSourceName(event.source);
+      recorded.push({
+        index: recorded.length + 1,
+        kind: Math.trunc(Number(event.kind)),
+        source,
+        at: Date.now(),
+        before: event.before,
+        after: event.after,
+      });
+      // Raw events are authoritative and include every source. Demonstration
+      // examples intentionally remain human-only derived sugar so a Seat cannot
+      // train on its own continuation attempts.
       if (source === 'automation' || source === 'remote') continue;
       if (event.kind === 5 && isFollowPatch(event.before)) {
         pendingDelete = { source, at: Date.now(), before: event.before };
@@ -469,10 +837,25 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       pendingDelete = undefined;
     }
     const added = examples.length - followSession.examples.length;
-    if (added !== 0 || pendingDelete !== followSession.pendingDelete) {
-      storeFollow({ ...followSession, examples, ...(pendingDelete ? { pendingDelete } : { pendingDelete: undefined }) });
+    if (events.length !== 0 || added !== 0 || pendingDelete !== followSession.pendingDelete) {
+      storeFollow({ ...followSession, events: recorded, examples, ...(pendingDelete ? { pendingDelete } : { pendingDelete: undefined }) });
     }
     return added;
+  };
+  const drainNativeFollowActions = (): number => applyNativeFollowEvents(readNativeFollowEvents());
+  const followPage = (state: SeatFollowSession, args: Record<string, unknown>): Record<string, unknown> => {
+    const total = Array.isArray(state.events) ? state.events.length : 0;
+    const offset = Math.max(0, Math.min(total, Math.trunc(Number(args.offset ?? 0) || 0)));
+    const limit = Math.max(1, Math.min(32, Math.trunc(Number(args.limit ?? 8) || 8)));
+    const end = Math.min(total, offset + limit);
+    return {
+      ...state,
+      events: state.events.slice(offset, end),
+      eventTotal: total,
+      eventOffset: offset,
+      eventLimit: limit,
+      eventNext: end < total ? end : null,
+    };
   };
   const follow = (operation: string, args: Record<string, unknown> = {}): SeatShellReceipt => {
     if (operation === 'start') {
@@ -489,6 +872,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         active: true,
         startedAt: Date.now(),
         startedGeneration: live.generation,
+        events: [],
         examples: [],
       };
       storeFollow(state);
@@ -497,7 +881,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (operation === 'read') {
       drainNativeFollowActions();
       return followSession
-        ? { ok: true, result: followSession }
+        ? { ok: true, result: followPage(followSession, args) }
         : { ok: false, reason: 'no Follow demonstration has been started' };
     }
     if (operation === 'stop') {
@@ -505,7 +889,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       drainNativeFollowActions();
       const state = { ...followSession, active: false, stoppedAt: Date.now() };
       storeFollow(state);
-      return { ok: true, result: state };
+      return { ok: true, result: followPage(state, args) };
     }
     if (operation === 'clear') {
       host.__mesh_follow_action_drain?.();
@@ -539,6 +923,74 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     let changed = 0;
     for (let at = 0; at < indices.length; at += 1) changed += door(indices[at], at === 0 ? 0 : 1) === 1 ? 1 : 0;
     return changed;
+  };
+  const selectBoundaryEdgePairs = (values: unknown): { changed: number; edges: number[] } | null => {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const pairs: [number, number][] = [];
+    const wanted = new Set<string>();
+    for (const value of values) {
+      if (!Array.isArray(value) || value.length !== 2) return null;
+      const a = Number(value[0]);
+      const b = Number(value[1]);
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b) return null;
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (wanted.has(key)) return null;
+      wanted.add(key);
+      pairs.push([a, b]);
+    }
+    const topology = elements();
+    if (!topology) return null;
+    const byVertices = new Map<string, number>();
+    for (const edge of topology.edges) {
+      const [a, b] = edge.vertices;
+      byVertices.set(a < b ? `${a}:${b}` : `${b}:${a}`, edge.id);
+    }
+    const edgeIds = pairs.map(([a, b]) => byVertices.get(a < b ? `${a}:${b}` : `${b}:${a}`));
+    if (edgeIds.some((id) => id === undefined)) return null;
+    const edges = edgeIds as number[];
+    const changed = selectElements('edge', edges);
+    return changed === edges.length ? { changed, edges } : null;
+  };
+  const selectBoundaryContinuation = (openValue: unknown, values: unknown): { changed: number; edges: number[]; open: [number, number]; vertices: [[number, number], [number, number]]; forward: [number, number] } | null => {
+    const continuation = boundaryContinuation(openValue);
+    if (!continuation || !Array.isArray(values) || values.length !== 2) return null;
+    const requested = values.map(edgePair);
+    if (requested.some((pair) => pair === null)) return null;
+    const requestedKeys = new Set((requested as [number, number][]).map(edgeKey));
+    if (requestedKeys.size !== 2) return null;
+    const pair = continuation.pairs.find((candidate) => candidate.edges.every((edge) => requestedKeys.has(edgeKey(edge))));
+    if (!pair) return null;
+    const selected = selectBoundaryEdgePairs(pair.edges);
+    return selected ? { ...selected, open: continuation.open, vertices: pair.edges, forward: pair.forward } : null;
+  };
+  const selectBoundaryEdgePoints = (values: unknown, tolerance = 0.000001): { changed: number; edges: number[]; vertices: [number, number][] } | null => {
+    if (!Array.isArray(values) || values.length === 0 || !Number.isFinite(tolerance) || tolerance <= 0) return null;
+    const pointPairs: [[number, number, number], [number, number, number]][] = [];
+    for (const value of values) {
+      if (!Array.isArray(value) || value.length !== 2 || !finiteVec3(value[0]) || !finiteVec3(value[1])) return null;
+      pointPairs.push([value[0] as [number, number, number], value[1] as [number, number, number]]);
+    }
+    const topology = elements();
+    if (!topology) return null;
+    const limit2 = tolerance * tolerance;
+    const resolveVertex = (point: [number, number, number]): number | null => {
+      const matches = topology.vertices.filter(({ at }) => {
+        const dx = at[0] - point[0];
+        const dy = at[1] - point[1];
+        const dz = at[2] - point[2];
+        return dx * dx + dy * dy + dz * dz <= limit2;
+      });
+      return matches.length === 1 ? matches[0].id : null;
+    };
+    const pairs: [number, number][] = [];
+    for (const [aPoint, bPoint] of pointPairs) {
+      const a = resolveVertex(aPoint);
+      const b = resolveVertex(bPoint);
+      if (a === null || b === null || a === b) return null;
+      pairs.push([a, b]);
+    }
+    const selected = selectBoundaryEdgePairs(pairs);
+    return selected ? { ...selected, vertices: pairs } : null;
   };
   const nameSelection = (name: string, instance = 0, role = 'authored', op = 'name'): number => {
     const percept = look();
@@ -598,7 +1050,15 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     adapter.adoptTopology?.(result);
     return result;
   };
-  const deleteSelection = (): TopologyReceipt | null => topology(() => host.__mesh_delete_selection?.());
+  const deleteSelection = (): TopologyReceipt | null => {
+    const result = topology(() => host.__mesh_delete_selection?.());
+    if (!result) return null;
+    const events = readNativeFollowEvents();
+    applyNativeFollowEvents(events);
+    const event = [...events].reverse().find((row) => row.kind === 5 && isFollowPatch(row.before));
+    const boundary = event && isFollowPatch(event.before) ? deletedBoundaryFromPatch(event.before) : null;
+    return boundary ? { ...result, deletedBoundary: boundary } : result;
+  };
   const mergeFaces = (): TopologyReceipt | null => topology(() => host.__mesh_topo_merge_faces?.());
   const weld = (): TopologyReceipt | null => topology(() => host.__mesh_topo_weld?.());
   const weldPairs = (values: unknown, maxDistance?: number): TopologyReceipt | null => {
@@ -880,8 +1340,8 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
-    look, elements, follow, followPatch,
-    select, selectEdge, selectVertex, selectFace, selectElements, nameSelection, extrude, extrudeEdge,
+    look, elements, retopoBands, boundaryContinuation, follow, followPatch,
+    select, selectEdge, selectVertex, selectFace, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
@@ -891,6 +1351,47 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
 
 export type AgentSeat = ReturnType<typeof createAgentSeat>;
 export type SeatRequest = { action: string; args?: Record<string, unknown> };
+export type SeatBootstrapAdapter = { newPrimitive: (spec: SeatPrimitiveSpec) => boolean };
+
+const primitiveSpecFromRequest = (
+  args: Record<string, unknown>,
+  defaults: Pick<SeatPrimitiveSpec, 'size' | 'height' | 'sides'>,
+): SeatPrimitiveSpec => ({
+  kind: String(args.kind ?? 'cube'),
+  size: Number(args.size ?? defaults.size),
+  height: Number(args.height ?? defaults.height),
+  sides: Number(args.sides ?? defaults.sides),
+});
+
+/** The editor shell owns the Seat transport even before a ModelView exists.
+ * This boundary breaks the bootstrap cycle where a person had to create a
+ * disposable model merely to expose the API whose first verb is `new`. */
+export function executeSeatRequestAtShell(
+  seat: AgentSeat | null,
+  request: SeatRequest,
+  bootstrap: SeatBootstrapAdapter,
+): SeatReply {
+  if (seat) return executeSeatRequest(seat, request);
+  if (request.action === 'look') {
+    return { ok: true, op: 'look', result: { state: 'no-live-model' }, percept: null };
+  }
+  if (request.action === 'new') {
+    const spec = primitiveSpecFromRequest(request.args ?? {}, { size: 1, height: 1, sides: 16 });
+    const ok = bootstrap.newPrimitive(spec);
+    return {
+      ok,
+      op: 'new',
+      ...(ok ? { result: { kind: spec.kind } } : { reason: 'new rejected — unknown primitive or the editor shell bridge is unavailable' }),
+      percept: null,
+    };
+  }
+  return {
+    ok: false,
+    op: request.action,
+    percept: null,
+    reason: 'no live model — create one with new before using mesh actions',
+  };
+}
 
 /** Transport-neutral request dispatcher used by the live editor and tests. */
 export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatReply {
@@ -909,6 +1410,19 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'elements': {
         const result = seat.elements();
         return seat.reply('elements', !!result, result ?? undefined, result ? undefined : 'topology descriptors unavailable');
+      }
+      case 'retopo-bands': {
+        const result = seat.retopoBands(String(args.operation ?? 'read'), args);
+        return seat.reply('retopo-bands', result.ok, result.result, result.reason);
+      }
+      case 'boundary-continuation': {
+        const result = seat.boundaryContinuation(args.open);
+        return seat.reply(
+          'boundary-continuation',
+          !!result,
+          result ?? undefined,
+          result ? undefined : 'open must be one current boundary edge expressed as [vertexA,vertexB]',
+        );
       }
       case 'follow': {
         const operation = String(args.operation ?? 'read');
@@ -932,6 +1446,33 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         if (kind !== 'face' && kind !== 'edge' && kind !== 'vertex') return seat.reply('select-elements', false, undefined, 'kind must be face, edge, or vertex');
         const changed = seat.selectElements(kind, args.indices);
         return seat.reply('select-elements', changed > 0, { changed }, changed > 0 ? undefined : 'no valid in-scope element indices were selected');
+      }
+      case 'select-edge-pairs': {
+        const result = seat.selectBoundaryEdgePairs(args.pairs);
+        return seat.reply(
+          'select-edge-pairs',
+          !!result,
+          result ?? undefined,
+          result ? undefined : 'every pair must resolve to one current boundary edge; selection was left unchanged',
+        );
+      }
+      case 'select-edge-points': {
+        const result = seat.selectBoundaryEdgePoints(args.pairs, Number(args.tolerance ?? 0.000001));
+        return seat.reply(
+          'select-edge-points',
+          !!result,
+          result ?? undefined,
+          result ? undefined : 'every point must resolve uniquely to one current boundary-edge endpoint; selection was left unchanged',
+        );
+      }
+      case 'select-edge-continuation': {
+        const result = seat.selectBoundaryContinuation(args.open, args.edges);
+        return seat.reply(
+          'select-edge-continuation',
+          !!result,
+          result ?? undefined,
+          result ? undefined : 'continuation needs one boundary edge sharing each endpoint of open; disjoint, same-side, and collapsed pairs are rejected',
+        );
       }
       case 'name': {
         const changed = seat.nameSelection(String(args.name ?? ''), Number(args.instance ?? 0));
@@ -1048,12 +1589,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
           : 'add rejected — no primitive adapter wired, Paint is active, or no model is open');
       }
       case 'new': {
-        const spec: SeatPrimitiveSpec = {
-          kind: String(args.kind ?? 'cube'),
-          size: Number(args.size ?? 1),
-          height: Number(args.height ?? 1),
-          sides: Number(args.sides ?? 16),
-        };
+        const spec = primitiveSpecFromRequest(args, { size: 1, height: 1, sides: 16 });
         const ok = seat.newPrimitive(spec);
         return seat.reply('new', ok, ok ? { kind: spec.kind } : undefined, ok ? undefined
           : 'new rejected — unknown primitive or the editor shell bridge is unavailable');

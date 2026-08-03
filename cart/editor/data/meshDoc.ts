@@ -14,6 +14,9 @@
 //   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind/group), matching
 //                    doc.blob's ranges ascending — names are cart truth, geometry is
 //                    host truth, the rank ties them together.
+//   mesh/retopo-guide.blob  versioned teaching bands + the frozen original triangle
+//                    soup used for cold-restart ghost comparison. It is authored
+//                    package data but deliberately not part of runtime mesh geometry.
 //
 // Legacy packages (pre-meshdoc saves, e.g. sign_p) carry only mesh/base.blob: readable
 // as ONE part with identity face groups — the edits recover, the part split doesn't.
@@ -166,9 +169,25 @@ export function meshDocPartRangesFromRows(rows: readonly { lo?: number; hi?: num
   return ranges;
 }
 
+// A durable document that EXISTS but will not decode is NOT the same thing as "this
+// package has no document". Every save guard below asks this module what was on disk
+// before; answering "nothing was there" for a blob we merely failed to parse is what
+// let one bad read overwrite a finished model — the quad pairing became identity
+// groups, the name table went to zero, and meshDocWouldEraseSemantics saw an empty
+// prior and waved the save through (req_3740). Track the third state explicitly.
+const unreadableDocs = new Set<string>();
+
+/** True when `dir` has a doc.blob on disk that could not be decoded. Callers must
+ *  REFUSE to write rather than treat it as an absent document. */
+export function meshDocIsUnreadable(dir: string): boolean {
+  readMeshDoc(dir);
+  return unreadableDocs.has(dir);
+}
+
 export function invalidateMeshDoc(dir: string): void {
   docCache.delete(dir);
   metaCache.delete(dir);
+  unreadableDocs.delete(dir);
 }
 
 /** Transactionally write the resident host model and its exact Outliner/range table.
@@ -186,6 +205,15 @@ export function writeMeshDoc(
     return false;
   }
   const priorDoc = readMeshDoc(dir);
+  // Every gate below asks priorDoc what the durable model already had. A doc.blob that
+  // exists but would not decode reads as `null` here, which those gates cannot tell
+  // apart from "brand new package" — so they would all pass and the write would land on
+  // top of a real model nobody could read (req_3740). An undecodable document is the one
+  // case where the only safe move is to touch nothing.
+  if (meshDocIsUnreadable(dir)) {
+    console.error(`[meshdoc] REFUSING SAVE for ${dir}: ${DOC_BLOB} exists but could not be decoded, so the durable model's parts, quad grouping and name table are unknown. Saving now would overwrite it with whatever the host currently holds. Fix or move the blob first.`);
+    return false;
+  }
   const priorPartCount = readMeshDocParts(dir)?.length ?? 0;
   if (!meshDocPartMetadataCanShrink(priorDoc?.storedRangeCount, priorPartCount, parts.length, options.allowPartShrink === true)) {
     console.error(`[meshdoc] REFUSING SAVE for ${dir}: durable document has ${Math.max(priorDoc?.storedRangeCount ?? 0, priorPartCount)} part(s), but the live outliner has ${parts.length} and no explicit Delete/Merge authorization`);
@@ -272,10 +300,24 @@ export function writeMeshDoc(
 }
 
 /** The package's saved model document, or null (never saved with a meshdoc AND no
- *  legacy blob). Prefers doc.blob; falls back to legacy base.blob as one part. */
+ *  legacy blob, OR a doc.blob that exists but will not decode — see
+ *  meshDocIsUnreadable, which separates those two very different nulls).
+ *
+ *  The legacy base.blob path is reachable ONLY when doc.blob is absent. base.blob is
+ *  rewritten on every save and carries no authored structure, so reading it as a
+ *  substitute for a present-but-unparseable document hands back identity face groups
+ *  (every triangle its own authored face) and no semantics — and the caller then
+ *  persists that over the real document. Never fall back onto a document that exists. */
 export function readMeshDoc(dir: string): PackageMeshDoc | null {
   if (docCache.has(dir)) return docCache.get(dir)!;
-  const doc = parseDocBlob(dir) ?? parseLegacyBlob(dir);
+  const docExists = exists(`${dir}/${DOC_BLOB}`);
+  const doc = parseDocBlob(dir) ?? (docExists ? null : parseLegacyBlob(dir));
+  if (docExists && !doc) {
+    unreadableDocs.add(dir);
+    console.error(`[meshdoc] ${dir}/${DOC_BLOB} EXISTS but failed to decode — NOT rebuilding it from ${LEGACY_BLOB}. That fallback would return identity face groups (every quad split into loose triangles) and an empty name table, and the next Save would make it durable. Saves for this package are refused until the document reads.`);
+  } else {
+    unreadableDocs.delete(dir);
+  }
   if (doc?.storedRangeCount === 0) {
     const partCount = readMeshDocParts(dir)?.length ?? 0;
     const recovered = inferMeshDocPartRanges(doc, partCount);

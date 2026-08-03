@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { inferMeshDocPartRanges, meshDocHiddenRanges, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, meshDocSemanticsMatch, meshDocWouldEraseSemantics, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { inferMeshDocPartRanges, invalidateMeshDoc, meshDocHiddenRanges, meshDocIsUnreadable, readMeshDoc, writeMeshDoc, meshDocPartMetadataCanShrink, meshDocPartRangesComplete, meshDocPartRangesFromRows, meshDocRangeGeometry, meshDocSemanticsMatch, meshDocWouldEraseSemantics, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 import { writeModelArtifacts } from './modelPackageStore';
 
 let passed = 0, failed = 0;
@@ -208,6 +208,62 @@ test('save verification rejects geometry-only success that dropped resident name
   assert(meshDocWouldEraseSemantics({ ...resident, unnamed: 3 }, {
     semanticRegions: new Uint32Array([5, 5, 5]),
   }), 'anonymous hydration was allowed to erase a named durable document');
+});
+
+test('an undecodable doc.blob is never rebuilt from base.blob, and blocks the save', () => {
+  const host = globalThis as any;
+  const names = [
+    '__fs_exists', '__fs_read', '__fs_read_base64', '__fs_mkdir',
+    '__model_meshdoc_write', '__model_mesh_write', '__model_atlas_read', '__model_paint_program_read',
+  ];
+  const prior = new Map(names.map((name) => [name, host[name]]));
+  const dir = 'cart/editor/data/models/props/undecodable';
+  let documentWrites = 0;
+  try {
+    // A real package: a doc.blob that will NOT decode (truncated below its own header's
+    // `need`), sitting beside the base.blob that every save rewrites. This is exactly the
+    // shape that turned a finished quad model into 132 loose triangles.
+    const corrupt = docBlob(3);
+    const truncated = corrupt.slice(0, corrupt.length - 12);
+    const legacyVerts = new Uint8Array(3 * 32);
+    const toB64 = (bytes: Uint8Array) => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      let out = '';
+      for (let at = 0; at < bytes.length; at += 3) {
+        const n = (bytes[at]! << 16) | ((bytes[at + 1] ?? 0) << 8) | (bytes[at + 2] ?? 0);
+        out += chars[(n >>> 18) & 63]! + chars[(n >>> 12) & 63]!
+          + (at + 1 < bytes.length ? chars[(n >>> 6) & 63]! : '=')
+          + (at + 2 < bytes.length ? chars[n & 63]! : '=');
+      }
+      return out;
+    };
+    host.__fs_exists = (path: string) => path.endsWith('/mesh/doc.blob') || path.endsWith('/mesh/base.blob');
+    host.__fs_read = () => null;
+    host.__fs_read_base64 = (path: string) => (
+      path.endsWith('/mesh/doc.blob') ? toB64(truncated)
+        : path.endsWith('/mesh/base.blob') ? toB64(legacyVerts)
+          : null
+    );
+    host.__fs_mkdir = () => true;
+    host.__model_meshdoc_write = () => { documentWrites += 1; return 1; };
+    host.__model_mesh_write = () => 1;
+    host.__model_atlas_read = () => '{}';
+    host.__model_paint_program_read = () => '';
+
+    invalidateMeshDoc(dir);
+    assert(readMeshDoc(dir) === null, 'an undecodable doc.blob was silently rebuilt from base.blob');
+    assert(meshDocIsUnreadable(dir), 'an undecodable doc.blob was reported as an absent document');
+    assert(!writeMeshDoc(dir, partsMetaFromRows([{ name: 'Body', color: '#fff', visible: true }] as any)),
+      'a save was allowed to land on top of an undecodable document');
+    assert(documentWrites === 0, 'the host was asked to overwrite an undecodable document');
+  } finally {
+    invalidateMeshDoc(dir);
+    for (const name of names) {
+      const value = prior.get(name);
+      if (value === undefined) delete host[name];
+      else host[name] = value;
+    }
+  }
 });
 
 log(`\n${passed} passed, ${failed} failed`);

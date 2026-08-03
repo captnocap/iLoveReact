@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, seatBatchGenerationReason, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -12,7 +12,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 const percept: SeatPercept = {
-  version: 1, generation: 4, faces: 60, islands: 0, footprints: 0, unnamed: 0,
+  version: 1, generation: 4, faces: 60, authoredFaces: 30, islands: 0, footprints: 0, unnamed: 0,
   activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
@@ -46,7 +46,7 @@ test('face ranges have their own namespace and part remains reserved for Outline
 test('brief replies keep row outcomes but strip repeated percepts', () => {
   const row = { ok: true, op: 'select', result: { faces: 2 }, percept };
   const compact = compactSeatReply({ ok: true, op: 'batch', result: [row, row], percept });
-  assert(compact.brief.includes('60 faces'), 'brief formatter was not used');
+  assert(compact.brief.includes('30 authored faces · 60 triangles'), 'brief formatter was not used');
   assert(!(compact.result as any[])[0].percept, 'batch row percept survived compact transport');
 });
 
@@ -57,6 +57,22 @@ test('percept and brief distinguish logical UV islands from paint footprints', (
   assert(reply.percept?.islands === 4, 'percept discarded the logical atlas island count');
   assert(reply.percept?.footprints === 3, 'percept failed to collapse stacked texture footprints');
   assert(compactSeatReply(reply).brief.includes('3 paint footprints · 4 logical UV islands'), 'brief output conflated topology with paint cost');
+});
+
+test('shell Seat bootstraps the first model without a mounted ModelView', () => {
+  let created: SeatPrimitiveSpec | null = null;
+  const bootstrap = { newPrimitive: (spec: SeatPrimitiveSpec) => { created = spec; return true; } };
+  const empty = executeSeatRequestAtShell(null, { action: 'look' }, bootstrap);
+  assert(empty.ok && empty.percept === null && (empty.result as any).state === 'no-live-model',
+    'model-less look did not return a bounded shell state');
+  const made = executeSeatRequestAtShell(null, {
+    action: 'new', args: { kind: 'cube', size: 2, height: 3, sides: 8 },
+  }, bootstrap);
+  assert(made.ok && created?.kind === 'cube' && created.size === 2 && created.height === 3 && created.sides === 8,
+    'shell Seat could not create the first real model');
+  const rejected = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 1 } }, bootstrap);
+  assert(!rejected.ok && rejected.reason?.includes('no live model'),
+    'mesh action did not explain the missing model at the shell boundary');
 });
 
 test('per-row generation guard closes a batch after a human topology edit', () => {
@@ -107,6 +123,10 @@ test('Follow pairs native Delete Faces and Create Face into one demonstrated str
 
   const read = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read' } });
   const session = read.result as any;
+  assert(read.ok && session.events.length === 4 && session.events.map((event: any) => event.kind).join(',') === '5,2,5,2',
+    'Follow did not retain the complete native event firehose in order');
+  assert(session.events[0].source === 'automation' && session.events[1].before.selectedEdges.length === 2,
+    'Follow raw events filtered a source or discarded its exact payload');
   assert(read.ok && session.examples.length === 1, 'Follow transcript did not report the demonstrated delete/create pair');
   assert(session.examples[0].delete.before.selectedGroups[0] === 31 && session.examples[0].create.after.selectedGroups[0] === 77,
     'Follow did not pair the exact delete and replacement-face observations');
@@ -115,6 +135,100 @@ test('Follow pairs native Delete Faces and Create Face into one demonstrated str
 
   const stopped = executeSeatRequest(seat, { action: 'follow', args: { operation: 'stop' } });
   assert(stopped.ok && (stopped.result as any).active === false, 'Follow transcript did not close cleanly');
+});
+
+test('Follow retains edits that do not fit the delete-create recipe', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let nativeEvents: any[] = [];
+  (globalThis as any).__mesh_follow_action_drain = () => {
+    const events = nativeEvents;
+    nativeEvents = [];
+    return JSON.stringify({ version: 1, events });
+  };
+  let stored: any = null;
+  const seat = createAgentSeat({ followState: { read: () => stored, write: (value) => { stored = value; } } });
+  assert(executeSeatRequest(seat, { action: 'follow', args: { operation: 'start' } }).ok, 'Follow did not start');
+  nativeEvents.push(
+    { kind: 20, source: 0, before: { stream: 'journal', label: 'transform', x: 1 }, after: { x: 2 } },
+    { kind: 255, source: 0, before: { stream: 'journal', label: 'weld', x: 2 }, after: { x: 3 } },
+    { kind: 2, source: 0, before: { version: 1, selectedEdges: [] }, after: { version: 1, selectedTriangles: [] } },
+    { kind: 5, source: 0, before: { version: 1, selectedTriangles: [9], frontier: [] }, after: { deleted: true } },
+  );
+  const read = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read' } });
+  const session = read.result as any;
+  assert(read.ok && session.events.length === 4, 'Follow dropped an event that did not fit its derived recipe');
+  assert(session.events[0].before.label === 'transform' && session.events[1].kind === 255 &&
+    session.events[1].before.label === 'weld' && session.events[2].kind === 2 && session.events[3].kind === 5,
+    'Follow raw event order or payload drifted');
+  assert(session.examples.length === 0 && session.pendingDelete.before.selectedTriangles[0] === 9,
+    'Derived examples stopped being an optional view over the raw transcript');
+});
+
+test('Follow pages the retained firehose without truncating the transport', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let nativeEvents = Array.from({ length: 19 }, (_, index) => ({
+    kind: 20, source: 0,
+    before: { stream: 'journal', actionId: index + 1 },
+    after: { accepted: true, actionId: index + 1 },
+  }));
+  (globalThis as any).__mesh_follow_action_drain = () => {
+    const events = nativeEvents;
+    nativeEvents = [];
+    return JSON.stringify({ version: 1, events });
+  };
+  let stored: any = null;
+  const seat = createAgentSeat({ followState: { read: () => stored, write: (value) => { stored = value; } } });
+  assert(executeSeatRequest(seat, { action: 'follow', args: { operation: 'start' } }).ok, 'Follow did not start');
+  // Start intentionally clears pre-session native residue.
+  nativeEvents = Array.from({ length: 19 }, (_, index) => ({
+    kind: 20, source: 0,
+    before: { stream: 'journal', actionId: index + 1 },
+    after: { accepted: true, actionId: index + 1 },
+  }));
+  const first = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read', offset: 0, limit: 7 } }).result as any;
+  const last = executeSeatRequest(seat, { action: 'follow', args: { operation: 'read', offset: first.eventNext, limit: 32 } }).result as any;
+  assert(first.eventTotal === 19 && first.events.length === 7 && first.eventNext === 7,
+    'Follow first page lost total or continuation state');
+  assert(last.events.length === 12 && last.events[0].index === 8 && last.eventNext === null,
+    'Follow continuation page repeated, skipped, or truncated retained events');
+  assert(stored.events.length === 19, 'Paging mutated the append-only stored transcript');
+});
+
+test('Seat delete returns the exact pre-compaction patch instead of rediscovering its boundary', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const deletedPatch = {
+    version: 1, rings: 2, selectedTriangles: [40, 41], selectedGroups: [12],
+    vertices: [
+      { id: 10, at: [0, 0, 0] }, { id: 11, at: [1, 0, 0] },
+      { id: 12, at: [1, 1, 0] }, { id: 13, at: [0, 1, 0] },
+    ],
+    triangles: [
+      { id: 40, selected: true, group: 12, part: 0, material: 0, region: 0, instance: 0, vertices: [10, 11, 12] },
+      { id: 41, selected: true, group: 12, part: 0, material: 0, region: 0, instance: 0, vertices: [10, 12, 13] },
+    ],
+    frontier: [
+      { vertices: [10, 11], inside: 40, outside: 9, nonManifold: false },
+      { vertices: [12, 13], inside: 41, outside: 42, nonManifold: false },
+    ],
+  };
+  let events: any[] = [{ kind: 5, source: 9, before: deletedPatch, after: { version: 1, deleted: true } }];
+  (globalThis as any).__mesh_delete_selection = () => JSON.stringify({ ok: 1, key: 'doc', count: 58, generation: 5 });
+  (globalThis as any).__mesh_follow_action_drain = () => {
+    const drained = events;
+    events = [];
+    return JSON.stringify({ version: 1, events: drained });
+  };
+  const seat = createAgentSeat();
+  const deleted = executeSeatRequest(seat, { action: 'delete' });
+  assert(deleted.ok && (deleted.result as any).deletedBoundary.components.length === 2 &&
+    (deleted.result as any).deletedBoundary.components[0].at[1][0] === 1,
+    'delete receipt discarded the exact surviving boundary');
+
+  events = [{ kind: 5, source: 9, before: deletedPatch, after: { version: 1, deleted: true } }];
+  const recovered = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'deleted-patch' } });
+  assert(recovered.ok && (recovered.result as any).boundary.deletedFaces === 2 &&
+    (recovered.result as any).boundary.components[1].vertices.join(',') === '12,13',
+    'an unread delete transaction could not be recovered after a Seat reconnect');
 });
 
 test('retopology seam verbs preserve pair identity and require ordered disjoint width paths', () => {
@@ -256,7 +370,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 // layer up. The table the seat writes back must be grown from the PRE-append capture.
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
-    version: 1, generation: 9, faces: 132, islands: 0, footprints: 0, unnamed: 0,
+    version: 1, generation: 9, faces: 132, authoredFaces: 66, islands: 0, footprints: 0, unnamed: 0,
     activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
@@ -300,7 +414,7 @@ test('new routes through the shell document constructor instead of replacing the
 test('element inspection makes ephemeral edge and vertex indices discoverable', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   (globalThis as any).__mesh_edit_elements = () => JSON.stringify({
-    vertices: [{ id: 2, at: [0, 1, 0] }], edges: [{ id: 4, vertices: [2, 3] }],
+    vertices: [{ id: 2, at: [0, 1, 0] }, { id: 3, at: [1, 1, 0] }], edges: [{ id: 4, vertices: [2, 3], faces: 1, open: true }],
   });
   let vertexArgs: unknown[] = [];
   let edgeArgs: unknown[] = [];
@@ -318,6 +432,143 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   assert(faceArgs[0] === 7 && faceArgs[1] === 1, 'face selection arguments drifted');
   assert(executeSeatRequest(seat, { action: 'select-elements', args: { kind: 'vertex', indices: [2, 3] } }).ok, 'multi-element selection failed');
   assert(vertexArgs[0] === 3 && vertexArgs[1] === 1, 'multi-element selection did not add subsequent indices');
+  const paired = executeSeatRequest(seat, { action: 'select-edge-pairs', args: { pairs: [[3, 2]] } });
+  assert(paired.ok && edgeArgs[0] === 4 && edgeArgs[1] === 0, 'boundary edge pair did not resolve inside the live topology');
+  const pointed = executeSeatRequest(seat, { action: 'select-edge-points', args: { pairs: [[[-0.0000001, 1, 0], [1, 1, 0]]] } });
+  assert(pointed.ok && edgeArgs[0] === 4, 'boundary edge coordinates did not survive topology rekeying');
+  assert(!executeSeatRequest(seat, { action: 'select-edge-pairs', args: { pairs: [[2, 99]] } }).ok, 'missing boundary edge pair was partially accepted');
+});
+
+test('boundary continuation exposes and accepts only one edge anchored at each open endpoint', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_edit_elements = () => JSON.stringify({
+    vertices: [
+      { id: 1, at: [0, 0, 0] }, { id: 2, at: [1, 0, 0] },
+      { id: 3, at: [0, 1, 0] }, { id: 4, at: [0, -1, 0] },
+      { id: 5, at: [1, 1, 0] }, { id: 6, at: [2, 1, 0] },
+    ],
+    edges: [
+      { id: 10, vertices: [1, 2], faces: 1, open: true }, { id: 11, vertices: [1, 3], faces: 1, open: true },
+      { id: 12, vertices: [4, 1], faces: 1, open: true }, { id: 13, vertices: [2, 5], faces: 1, open: true },
+      { id: 14, vertices: [5, 6], faces: 2, open: false },
+    ],
+  });
+  const selected: number[] = [];
+  (globalThis as any).__mesh_edit_select_edge = (index: number) => { selected.push(index); return 1; };
+  const seat = createAgentSeat();
+  const exposed = executeSeatRequest(seat, { action: 'boundary-continuation', args: { open: [1, 2] } });
+  assert(exposed.ok, 'valid open edge was not exposed');
+  const result = exposed.result as SeatBoundaryContinuation;
+  assert(result.endpoints[0].candidates.length === 2 && result.endpoints[1].candidates.length === 1, 'local endpoint candidates were incomplete');
+  assert(result.pairs.length === 2 && result.pairs.every((pair) => pair.edges[0][0] === 1 && pair.edges[1][0] === 2), 'candidate pairs lost endpoint anchoring');
+
+  const accepted = executeSeatRequest(seat, { action: 'select-edge-continuation', args: { open: [1, 2], edges: [[3, 1], [5, 2]] } });
+  assert(accepted.ok && selected.join(',') === '11,13', 'valid anchored continuation was not selected');
+  selected.length = 0;
+  assert(!executeSeatRequest(seat, { action: 'select-edge-continuation', args: { open: [1, 2], edges: [[1, 3], [5, 6]] } }).ok, 'disjoint edge was accepted');
+  assert(!executeSeatRequest(seat, { action: 'select-edge-continuation', args: { open: [1, 2], edges: [[1, 3], [1, 4]] } }).ok, 'two edges from the same endpoint were accepted');
+  assert(selected.length === 0, 'a rejected continuation changed selection');
+});
+
+test('retopology band preview covers and selects the full resident mesh without paint', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const plan = {
+    version: 1, axis: 'y', width: 0.08, origin: 0.24, faces: 60, covered: 60,
+    bands: [
+      { id: 0, bucket: 0, faces: 28, range: [0.24, 0.32], bbox: [-1, 0.24, -1, 1, 0.32, 1], color: [0.96, 0.3, 0.24] },
+      { id: 1, bucket: 1, faces: 32, range: [0.32, 0.4], bbox: [-1, 0.32, -1, 1, 0.4, 1], color: [0.2, 0.62, 0.96] },
+    ],
+  };
+  let selected = -2;
+  let cleared = false;
+  (globalThis as any).__mesh_retopo_bands_plan = (axis: number, width: number, origin: number) => {
+    assert(axis === 1 && width === 0.08 && origin === 0.24, 'plan arguments drifted');
+    return JSON.stringify(plan);
+  };
+  (globalThis as any).__mesh_retopo_bands_read = () => JSON.stringify(plan);
+  (globalThis as any).__mesh_retopo_band_select = (id: number) => { selected = id; return 60; };
+  (globalThis as any).__mesh_retopo_bands_clear = () => { cleared = true; return 1; };
+  const seat = createAgentSeat();
+  const planned = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'plan', axis: 'y', width: 0.08, origin: 0.24 } });
+  assert(planned.ok && (planned.result as any).covered === 60, 'complete full-mesh plan was rejected');
+  assert(executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'read' } }).ok, 'installed preview could not be read');
+  assert(executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'select', id: 'all' } }).ok && selected === -1, 'select all did not use the complete mapped mask');
+  assert(executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'clear' } }).ok && cleared, 'preview clear did not stay view-only');
+});
+
+test('manual retopology tint records and erases the exact current face selection', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const calls: number[] = [];
+  (globalThis as any).__mesh_retopo_band_tint_selection = (id: number) => { calls.push(id); return 18; };
+  (globalThis as any).__mesh_retopo_bands_read = () => JSON.stringify({
+    version: 1, mode: 'manual', axis: 'y', width: 0, origin: 0, railSamples: 0,
+    faces: 60, covered: 18,
+    bands: [{ id: 3, bucket: 3, faces: 18, range: [0, 0], bbox: [0, 0, 0, 1, 1, 1], color: [0.34, 0.78, 0.42] }],
+  });
+  let persisted = 0;
+  const seat = createAgentSeat({ retopoStateChanged: () => { persisted += 1; return true; } });
+  const tinted = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'tint-selection', id: 3 } });
+  assert(tinted.ok && calls[0] === 3 && (tinted.result as any).faces === 18, 'manual band did not preserve the chosen colour id');
+  const read = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'read' } });
+  assert(read.ok && (read.result as any).mode === 'manual' && (read.result as any).covered === 18,
+    'partial user-authored map was rejected as an incomplete planner result');
+  const erased = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'untint-selection' } });
+  assert(erased.ok && calls[1] === -1, 'manual tint eraser did not reach the same exact-mask door');
+
+  const ghostCalls: number[] = [];
+  (globalThis as any).__mesh_retopo_source_ghost = (visible?: number) => {
+    ghostCalls.push(visible ?? -1);
+    return JSON.stringify({ captured: true, visible: visible === undefined ? true : visible === 1, faces: 60, covered: 18, generation: 4 });
+  };
+  const toggled = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'ghost' } });
+  assert(toggled.ok && ghostCalls[0] === -1 && (toggled.result as any).visible === true,
+    'source ghost toggle did not return its frozen comparison state');
+  const hidden = executeSeatRequest(seat, { action: 'retopo-bands', args: { operation: 'ghost', visible: false } });
+  assert(hidden.ok && ghostCalls[1] === 0 && (hidden.result as any).visible === false,
+    'source ghost explicit visibility did not reach native state');
+  assert(persisted === 4, 'each authored tint/erase/ghost change must cross the package persistence boundary');
+
+  const refused = executeSeatRequest(createAgentSeat({ retopoStateChanged: () => false }), {
+    action: 'retopo-bands', args: { operation: 'tint-selection', id: 3 },
+  });
+  assert(!refused.ok && (refused.result as any).persisted === false,
+    'a live-only tint must report package persistence failure instead of claiming durable success');
+});
+
+test('retopology rail seed recovers ordered local heights from a quad chain', () => {
+  const patch: SeatFollowPatch = {
+    version: 1, rings: 0,
+    selectedTriangles: [10, 11, 12, 13], selectedGroups: [7, 8], frontier: [],
+    vertices: [
+      { id: 1, at: [0, 0, 0] }, { id: 2, at: [0, 1, 0] },
+      { id: 3, at: [1, 0.2, 0] }, { id: 4, at: [1, 1.2, 0] },
+      { id: 5, at: [2, 0.4, 0] }, { id: 6, at: [2, 1.4, 0] },
+    ],
+    triangles: [
+      { id: 10, selected: true, group: 7, part: 0, material: 0, region: 0, instance: 0, vertices: [1, 2, 4] },
+      { id: 11, selected: true, group: 7, part: 0, material: 0, region: 0, instance: 0, vertices: [1, 4, 3] },
+      { id: 12, selected: true, group: 8, part: 0, material: 0, region: 0, instance: 0, vertices: [3, 4, 6] },
+      { id: 13, selected: true, group: 8, part: 0, material: 0, region: 0, instance: 0, vertices: [3, 6, 5] },
+    ],
+  };
+  const rails = retopoRailPairsFromPatch(patch);
+  assert(!!rails && rails.length === 18, 'quad chain did not yield three cross-sections');
+  assert(rails![1] === 0 && rails![4] === 1, 'first cap was not ordered lower then upper');
+  assert(Math.abs(rails![7] - 0.2) < 0.00001 && Math.abs(rails![10] - 1.2) < 0.00001, 'shared cross edge lost its local height');
+  assert(Math.abs(rails![13] - 0.4) < 0.00001 && Math.abs(rails![16] - 1.4) < 0.00001, 'last cap was not recovered');
+
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_follow_patch = () => JSON.stringify(patch);
+  let received = 0;
+  (globalThis as any).__mesh_retopo_bands_plan_rails = (values: Float32Array) => {
+    received = values.length;
+    return JSON.stringify({
+      version: 1, mode: 'rails', axis: 'y', width: 1, origin: 0, railSamples: 3,
+      faces: 60, covered: 60, bands: [{ id: 0, bucket: 0, faces: 60, range: [0, 1], bbox: [0, 0, 0, 2, 1.4, 0], color: [1, 0, 0] }],
+    });
+  };
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'retopo-bands', args: { operation: 'plan-from-selection' } });
+  assert(reply.ok && received === 18, 'selected quad rails did not reach the native planner');
 });
 
 test('basic cut and triangle conversion use their native topology sessions', () => {
@@ -420,7 +671,8 @@ test('inset reports the exact rejected stage instead of hiding it behind rollbac
 
 test('paint, material, UV, detach, and cold save use their authoritative boundaries', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
-  (globalThis as any).__model_paint_selection = () => 4;
+  let paintedRgb: number[] = [];
+  (globalThis as any).__model_paint_selection = (...rgb: number[]) => { paintedRgb = rgb; return 4; };
   (globalThis as any).__model_atlas_read = () => JSON.stringify({ w: 512, h: 512, detail: 256, islands: [0, 0, 32, 32, 32, 0, 16, 24] });
   (globalThis as any).__model_atlas_base = () => 1;
   (globalThis as any).__model_set_paint_detail = () => 16;
@@ -437,6 +689,7 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
     persist: () => { persisted = true; return true; },
   });
   assert(executeSeatRequest(seat, { action: 'paint', args: { rgb: [10, 20, 30] } }).ok, 'selection paint stayed unreachable');
+  assert(paintedRgb.join(',') === '10,20,30', 'selection paint changed the requested durable RGB fill');
   assert(executeSeatRequest(seat, { action: 'atlas', args: { base: 'solid', rgb: [10, 20, 30], detail: 16 } }).ok, 'atlas remake stayed unreachable');
   assert(appliedFit === 0, 'an explicit texels/meter detail was rerouted through the atlas budget');
   // Naming no resolution must take the painter's 1024² budget rather than inheriting whatever
@@ -509,6 +762,21 @@ test('dial is a callable candidate recipe that seats a resident cylinder on a ta
   assert(added?.kind === 'cylinder' && added.size === 0.26, 'dial did not use the resident cylinder generator');
   assert(rotations.length === 1 && rotations[0]![6] < 0, 'dial did not orient +Y to +X');
   assert(moves.length === 1 && moves[0]!.join(',') === '1,3,4', 'dial base was not seated at the target bbox center');
+});
+
+test('percept leads with authored faces and names triangle soup out loud', () => {
+  const quads = formatSeatPercept({ ...percept, faces: 132, authoredFaces: 66 });
+  assert(quads.includes('66 authored faces · 132 triangles'), `authored faces missing from readout: ${quads.split('\n')[0]}`);
+  assert(!quads.includes('TRIANGLE SOUP'), 'a healthy quad mesh was reported as soup');
+
+  // The exact state radio_001 was found in: same triangle count, every quad flattened.
+  // The old readout printed "132 faces" for both and could not tell them apart.
+  const soup = formatSeatPercept({ ...percept, faces: 132, authoredFaces: 132 });
+  assert(soup.includes('TRIANGLE SOUP'), 'a fully flattened mesh was not flagged');
+
+  const unknown = formatSeatPercept({ ...percept, faces: 132, authoredFaces: null });
+  assert(unknown.includes('authored faces unknown'), 'an unobservable grouping must not read as a count');
+  assert(!unknown.includes('TRIANGLE SOUP'), 'unknown grouping must never be reported as soup');
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);
