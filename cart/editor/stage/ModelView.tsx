@@ -28,8 +28,8 @@ import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
-import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type AtlasReceipt, type SeatFollowSession, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { callHost } from '@reactjit/runtime/ffi';
+import { createAgentSeat, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -67,7 +67,9 @@ import {
   modelPaintLayoutIsStale,
   readModelBasePaint,
   readModelRasterBase,
+  persistModelRetopoGuide,
   resolvePackageDir,
+  restoreModelRetopoGuide,
   writeLiveModelAtlas,
   writeModelArtifacts,
   writeModelUvGenerationGuide,
@@ -172,7 +174,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -219,6 +221,12 @@ export type ModelFocusShape = {
   mounts: number; // honest 0 until the rig slice lands
   radius: number; // live resident edit-mesh bounding radius
   center: [number, number, number] | null; // live resident edit-mesh center
+  // Hard geometry facts from the host audit (req_3750), so a disaster is visible in the
+  // panel instead of something to go chasing. `audited: false` means the mesh was over
+  // the audit budget — UNKNOWN, never rendered as a clean zero.
+  audited: boolean;
+  intersecting: number;
+  unreachable: number;
 };
 // View bookmarks on the bridge (req_3074): the focus panel lists them below the UV
 // card — row click recalls, the trash verb removes, the + verb pins the current view.
@@ -299,6 +307,9 @@ export type ModelToolApi = {
   loopCut: () => void;
   basicCut: () => void;
   deleteSelection: () => void;
+  retopoTint: (id: number) => { changed: number; persisted: boolean };
+  retopoGhost: (visible: boolean) => { visible: boolean; faces: number; covered: number; persisted: boolean } | null;
+  retopoClear: () => { cleared: boolean; persisted: boolean };
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -924,6 +935,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
+  const [retopoGhostVisible, setRetopoGhostVisible] = useState(false);
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
   // View bookmarks (req_3067/req_3074): named orbit poses the user pins and jumps back
   // to. The HOST owns the pose verbs (__model_cam_pose/__model_cam_set_pose); this list
@@ -1084,6 +1096,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setError(r.ok
       ? (r.pending > 0 ? `Credits exported — ⚠ ${r.pending} asset(s) still need attribution` : 'Credits exported ✓')
       : 'Could not write credits file');
+  };
+
+  const persistRetopoGuide = (clearWhenAbsent = false): boolean => {
+    if (!paintTarget || !paintTargetOnDisk) {
+      onDocumentMutated?.();
+      return false;
+    }
+    const persisted = persistModelRetopoGuide(paintTarget, { clearWhenAbsent });
+    return persisted;
+  };
+
+  const readRetopoGhost = (): { visible: boolean; faces: number; covered: number } | null => {
+    try {
+      const raw = host.__mesh_retopo_source_ghost_read?.();
+      const value = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+      return value?.captured === true && typeof value.visible === 'boolean'
+        ? { visible: value.visible, faces: Number(value.faces) || 0, covered: Number(value.covered) || 0 }
+        : null;
+    } catch { return null; }
   };
 
   // Apply a new quality (slider 0..1): re-decimate in the host and swap the resident
@@ -2132,6 +2163,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const adoptMeshHistoryResult = (result: TopoResult | null): boolean => {
     if (!result?.ok || !adoptMesh(result)) return false;
     const label = result.label ?? '';
+    // The native journal restores the guide in the same chronological step as
+    // geometry. Mirror that restored truth to React and the package immediately;
+    // otherwise Ctrl+Z would look correct live but a crash/reopen could resurrect
+    // the pre-undo sidecar.
+    const ghost = readRetopoGhost();
+    setRetopoGhostVisible(ghost?.visible === true);
+    if (!persistRetopoGuide(true)) {
+      console.error(`[retopo-guide] ${label || 'history step'} restored live but the model-package record could not be updated`);
+    }
     // adoptMesh already refreshes a live Paint panel. This extra branch covers app-wide
     // UV undo outside Paint without doing a second expensive atlas read in Paint.
     if (isUvDocumentHistoryLabel(label) && !paintMode) buildUvPanel();
@@ -2575,6 +2615,31 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setError('Select a face to cut (face mode)');
     },
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
+    retopoTint: (id) => {
+      const changed = Number(host.__mesh_retopo_band_tint_selection?.(id) ?? -1);
+      const ghost = readRetopoGhost();
+      setRetopoGhostVisible(ghost?.visible === true);
+      return { changed, persisted: changed > 0 ? persistRetopoGuide() : changed === 0 };
+    },
+    retopoGhost: (visible) => {
+      const raw = host.__mesh_retopo_source_ghost?.(visible ? 1 : 0);
+      try {
+        const ghost = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+        if (ghost?.captured !== true || typeof ghost.visible !== 'boolean') return null;
+        setRetopoGhostVisible(ghost.visible);
+        return {
+          visible: ghost.visible,
+          faces: Number(ghost.faces) || 0,
+          covered: Number(ghost.covered) || 0,
+          persisted: persistRetopoGuide(),
+        };
+      } catch { return null; }
+    },
+    retopoClear: () => {
+      const cleared = Number(host.__mesh_retopo_bands_clear?.() ?? 0) === 1;
+      if (cleared) setRetopoGhostVisible(false);
+      return { cleared, persisted: cleared ? persistRetopoGuide(true) : true };
+    },
     toggleMirror: (axis) => setMirrorMask((m) => m ^ (1 << axis)),
     referenceImages: () => setBackdropPanel((v) => !v),
     // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
@@ -2718,9 +2783,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // onModelToolApi only stores a ref, so this is a cheap assignment with no re-render.
   useEffect(() => { onToolApi?.(toolApiRef.current!); });
 
-  // The live Agent Seat. Dev IPC NOTICE is only the transport: requests execute
-  // through the same host doors/tool adoption as this visible ModelView, and the
-  // bounded /tmp reply path lets a shell-based agent receive the structured diff.
+  // Publish the mesh-capable half of the live Agent Seat. AppFrame owns the
+  // always-on transport so `look` and `new` also work before any ModelView exists.
   const seatViewActionRef = useRef<(action: string, args: Record<string, unknown>) => SeatShellReceipt | null>(() => null);
   seatViewActionRef.current = (action, args) => {
     const fail = (reason: string): SeatShellReceipt => ({ ok: false, reason });
@@ -2737,7 +2801,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         meshFocusTool(false);
       };
       if (operation === 'read') {
-        return ok({ pose: readPose(), locked: camLock, wire, xray, selectionMode: selMode, gizmoTool, mirrorMask, bookmarks: camMarks });
+        const shell = (globalThis as any).__seatShellBridge?.shellAction?.('editor-status', {});
+        const livePartRanges = meshPartRangesRead();
+        return ok({
+          pose: readPose(), locked: camLock, wire, xray, selectionMode: selMode,
+          gizmoTool, mirrorMask, bookmarks: camMarks, paint: paintMode,
+          focusTool: focusMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode,
+          selection: readSelInfo(),
+          partRanges: livePartRanges,
+          ownedFaces: livePartRanges?.reduce((sum, range) => sum + Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? 0), 0) ?? null,
+          // Read-back must say why the visible editor is inert. `modelDirty` is
+          // only persistence state; unresolved native/modal sessions are the
+          // actual input gate, and without this field the Seat cannot distinguish
+          // the two when helping the person recover a live document.
+          blocking,
+          guard: readGuard(),
+          shell: shell?.ok ? shell.result : null,
+        });
       }
       if (operation === 'orbit' && finite(args.yawDegrees) && finite(args.pitchDegrees)) {
         if (camLock) return fail('camera orbit was rejected because the camera is locked');
@@ -2944,6 +3024,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       newPrimitive: (spec) => (globalThis as any).__seatShellBridge?.newPrimitive?.(spec) === true,
       detachSelection: (name) => (globalThis as any).__seatShellBridge?.detachSelection?.(name) ?? null,
       persist: () => (globalThis as any).__seatShellBridge?.persist?.() === true,
+      retopoStateChanged: (clearWhenAbsent) => persistRetopoGuide(clearWhenAbsent),
       partPercept: () => (globalThis as any).__seatShellBridge?.partPercept?.() ?? { activePartId: null, parts: [] },
       shellAction: (action, args) => seatViewActionRef.current(action, args)
         ?? (globalThis as any).__seatShellBridge?.shellAction?.(action, args)
@@ -2957,62 +3038,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       captureFrame: (path) => captureFrame(path),
     });
     (globalThis as any).__agentSeat = seat;
-    const unsubscribe = subscribe('system:notification', (payload: any) => {
-      if (payload?.kind !== 'agent-seat' || typeof payload?.replyPath !== 'string' ||
-          !payload.replyPath.startsWith('/tmp/reactjit-seat-') || !payload.replyPath.endsWith('.json')) return;
-      const request = payload.request as SeatRequest | undefined;
-      if (!request || typeof request.action !== 'string') return;
-      const writeReply = (reply: SeatReply) => host.__fs_write?.(
-        payload.replyPath,
-        JSON.stringify(payload.brief === true ? compactSeatReply(reply) : reply),
-      );
-      const expected = Number(payload.generation);
-      const current = seat.look();
-      if (Number.isFinite(expected) && current && expected !== current.generation) {
-        writeReply(seat.reply(request.action, false, undefined, `stale generation ${expected}; live generation is ${current.generation}`));
-        return;
-      }
-      const batch = request.action === 'batch' && Array.isArray(request.args?.requests)
-        ? request.args!.requests as SeatRequest[]
-        : null;
-      if (!batch) {
-        const reply = executeSeatRequest(seat, request);
-        setSemanticRevision((value) => value + 1);
-        writeReply(reply);
-        return;
-      }
-      const replies: ReturnType<typeof executeSeatRequest>[] = [];
-      let index = 0;
-      // Whitelist the batch's own topology generations one row at a time. Any
-      // generation that appears between rows came from the human/native editor and
-      // closes the batch before another queued action can land on changed geometry.
-      let expectedGeneration = current?.generation ?? 0;
-      const runNext = () => {
-        if (index >= batch.length) {
-          const ok = replies.every((reply) => reply.ok);
-          writeReply(seat.reply('batch', ok, replies, ok ? undefined : 'batch stopped at first rejection'));
-          return;
-        }
-        const live = seat.look();
-        const generationReason = live ? seatBatchGenerationReason(expectedGeneration, live.generation, index) : null;
-        if (generationReason) {
-          replies.push(seat.reply(batch[index]!.action, false, undefined, generationReason));
-          index = batch.length;
-          setTimeout(runNext, 0);
-          return;
-        }
-        const row = executeSeatRequest(seat, batch[index++]!);
-        replies.push(row);
-        setSemanticRevision((value) => value + 1);
-        expectedGeneration = row.percept?.generation ?? seat.look()?.generation ?? expectedGeneration;
-        if (!row.ok) index = batch.length;
-        setTimeout(runNext, 100); // visible modeling cadence is a seat feature
-      };
-      runNext();
-    });
+    const refresh = () => setSemanticRevision((value) => value + 1);
+    (globalThis as any).__agentSeatRefresh = refresh;
     return () => {
-      unsubscribe();
       if ((globalThis as any).__agentSeat === seat) (globalThis as any).__agentSeat = null;
+      if ((globalThis as any).__agentSeatRefresh === refresh) (globalThis as any).__agentSeatRefresh = null;
     };
   }, []);
 
@@ -3064,8 +3094,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -3078,11 +3108,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const faces = authoredFaces ?? tris;
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     const diskDoc = packageDir ? readMeshDoc(packageDir) : null;
+    // One percept read serves both the semantics diagnosis and the geometry facts.
+    const percept = readSeatPercept();
     const semantics = modelFocusSemantics({
       regions: diskDoc?.semanticRegions ?? undefined,
       instances: diskDoc?.semanticInstances ?? undefined,
       table: diskDoc?.semanticTable ?? null,
-    }, readSeatPercept(), {
+    }, percept, {
       regions: initialMesh?.semanticRegions,
       instances: initialMesh?.semanticInstances,
       table: initialMesh?.semanticTable ?? null,
@@ -3143,6 +3175,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           mounts: 0,
           radius: liveFrame?.radius ?? model.radius,
           center: liveFrame?.center ?? boundsCenter,
+          audited: percept?.auditComputed === true,
+          intersecting: percept?.intersectingFaces ?? 0,
+          unreachable: percept?.unreachableFaces ?? 0,
         }
         : null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
@@ -3434,14 +3469,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // Resume HEAL (req_3058): the host process outlives window "restarts", so a
       // session whose range truth was cleared once resumes DEGRADED forever — the
       // mirror inherits nothing, no load path ever re-pushes, and every save writes
-      // a doc that reopens with merged parts. The doc's saved ranges are recovery
-      // truth: when the resumed host answers with fewer parts than the doc declares,
-      // re-seed the doc's ranges instead of mirroring the damage forward.
+      // a doc that reopens with merged parts. Count equality is not enough: Create
+      // Face can mint one group beyond a stale sole-part hi while both sides still
+      // report "1 part". The doc's saved ranges are recovery truth; re-push them
+      // whenever the live partition owns fewer faces than the resident mesh. The
+      // native single-part boundary expands that seed to include fresh groups.
       const docRanges = (initialMesh?.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
-      if (docRanges.length > partRangesRef.current.length) {
-        console.error(`[rangetrace] resumed host session carries ${partRangesRef.current.length} part range(s) but the doc declares ${docRanges.length} — re-seeding the doc's ranges (req_3058)`);
+      const residentFaces = Math.floor(session.count / 3);
+      const ownedFaces = partRangesRef.current.reduce(
+        (sum, range) => sum + Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? 0),
+        0,
+      );
+      if (docRanges.length > 0 &&
+          (docRanges.length > partRangesRef.current.length || ownedFaces !== residentFaces)) {
+        console.error(`[rangetrace] resumed host session carries ${partRangesRef.current.length} range(s) owning ${ownedFaces}/${residentFaces} faces while the doc declares ${docRanges.length} — re-seeding the doc's ranges (req_3058)`);
         partRangesRef.current = docRanges;
         meshSetPartRanges(docRanges);
+        resyncPartRanges();
       }
       const sel = adoptHostSelection();
       if (initialMesh?.faceGroups && initialMesh.faceGroups.length > 0) setAuthoredFaces(new Set(initialMesh.faceGroups).size);
@@ -3468,16 +3512,32 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       console.warn(`[modelview] resumed live host session for ${hotDocId} (${session.undo} undo · atlas ${session.atlas ? 'live' : 'none'} · mode ${sel.mode} · ${sel.sel} selected)`);
       return true;
     };
+    let resumed = false;
     if (initialFileParts) {
-      if (!resumeHostSession()) applyFileParts(initialFileParts);
+      resumed = resumeHostSession();
+      if (!resumed) applyFileParts(initialFileParts);
     } else if (initialMesh) {
-      if (!resumeHostSession()) {
+      resumed = resumeHostSession();
+      if (!resumed) {
         if (importedTextureSourcePath) refreshLegacyImportedTextureLook(importedTextureSourcePath);
         applyMesh(initialMesh);
       }
     } else {
       const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
-      if (path && !resumeHostSession()) applyPath(path);
+      resumed = resumeHostSession();
+      if (path && !resumed) applyPath(path);
+    }
+    if (resumed) {
+      const ghost = readRetopoGhost();
+      setRetopoGhostVisible(ghost?.visible === true);
+    } else if (paintTarget && paintTargetOnDisk) {
+      const guide = restoreModelRetopoGuide(paintTarget);
+      setRetopoGhostVisible(guide.status === 'restored' && guide.visible);
+      if (guide.status === 'restored') {
+        console.warn(`[retopo-guide] restored ${guide.covered}/${guide.faces} frozen source faces from ${paintTarget.id}`);
+      } else if (guide.status === 'invalid' || guide.status === 'unsupported') {
+        console.error(`[retopo-guide] ${guide.status}: preserved the package sidecar but did not install it for ${paintTarget.id}`);
+      }
     }
     // Persist the topology/atlas contract across a full process restart. The old
     // paint assets stay recoverable, but neither UI nor host may apply them until
@@ -3868,6 +3928,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       (globalThis as any).__modelFocusBridgeChanged?.();
     };
   }, []);
+
+  // Topology operations carry the live band map by provenance in native. Re-keying
+  // the mesh is the commit edge where that updated map must replace the package
+  // sidecar too; otherwise a crash between geometry autosaves can restore stale face
+  // membership even though the original frozen soup still exists.
+  useEffect(() => {
+    if (!model?.key || !paintTarget || !paintTargetOnDisk) return;
+    const active = host.__mesh_retopo_source_ghost_read?.();
+    if (typeof active !== 'string' || !active) return;
+    if (!persistModelRetopoGuide(paintTarget)) {
+      console.error(`[retopo-guide] could not persist topology-carried band membership for ${paintTarget.id}`);
+    }
+  }, [model?.key, paintTarget?.kind, paintTarget?.id, paintTargetOnDisk]);
 
   useFileDrop((path) => {
     if (allowFilePicker) applyPath(path);

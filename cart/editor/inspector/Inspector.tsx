@@ -92,7 +92,38 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
         <C.HW_FormLabel>bounds radius</C.HW_FormLabel>
         <C.HW_ReadValue>{radiusLine}</C.HW_ReadValue>
       </C.HW_ReadRow>
+      <GeometryFactRow
+        label="intersecting"
+        shape={shape}
+        count={shape?.intersecting ?? 0}
+        detail="tris through other tris"
+      />
+      <GeometryFactRow
+        label="unreachable"
+        shape={shape}
+        count={shape?.unreachable ?? 0}
+        detail="tris no camera can see"
+      />
     </C.HW_Section>
+  );
+}
+
+// The two hard geometry facts, in the panel so a disaster is visible without going to
+// look for it (req_3750). Tinted only when the count is real: an over-budget mesh reads
+// "not measured", never a clean zero it did not earn.
+function GeometryFactRow(
+  { label, shape, count, detail }: { label: string; shape: ModelFocusShape | null; count: number; detail: string },
+) {
+  const value = !shape ? '—'
+    : !shape.audited ? 'not measured'
+      : count === 0 ? `0 · ${detail}`
+        : `${fmtCount(count)} · ${detail}`;
+  const tone = shape?.audited && count > 0 ? 'warning' : 'textDim';
+  return (
+    <C.HW_ReadRow>
+      <C.HW_FormLabel>{label}</C.HW_FormLabel>
+      <C.HW_ReadValue style={{ color: accentFor(tone) }}>{value}</C.HW_ReadValue>
+    </C.HW_ReadRow>
   );
 }
 
@@ -592,7 +623,10 @@ export default function Inspector(props: {
                   <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
                 </C.HW_RenameBar>
                 <C.HW_RenameBar>
-                  <C.HW_Tag style={{ backgroundColor: accentFor(saveChipTone) }}>
+                  <C.HW_Tag
+                    tooltip={modelDirty ? 'Changes are not on disk yet. This is save state only; it does not disable editing.' : 'The model on disk matches the live editor.'}
+                    style={{ backgroundColor: accentFor(saveChipTone) }}
+                  >
                     <C.HW_TagText>{saveChip}</C.HW_TagText>
                   </C.HW_Tag>
                   <C.HW_Spacer />
