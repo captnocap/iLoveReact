@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Graph, Image, Paintable, Pressable, Row, ScrollView, Text, TextInput } from '../../../runtime/primitives';
 import { usePaintable } from '../../../runtime/hooks/usePaintable';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import { readFileBase64, remove, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
 import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
@@ -1186,34 +1186,33 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setView({ x: padding, y: padding, scale });
     setNote(`${patch.name} opened locally · fit ${indices.length} UV island${indices.length === 1 ? '' : 's'} to the source; master footprint is locked`);
   };
-  const finishTexturePatch = async (): Promise<boolean> => {
+  const finishTexturePatch = (): boolean => {
     const focus = patchFocusRef.current;
     if (!focus || patchFinishing) return !focus;
-    const encoded = readFileBase64(focus.patch.imagePath);
-    const source = encoded ? imageOps(encoded).raw() : null;
-    const masterSelected = focus.indices.map((index) => focus.masterRects[index]!).filter(Boolean);
-    const patchSelected = focus.indices.map((index) => rectsRef.current[index]!).filter(Boolean);
-    const raster = source
-      ? rasterizeUvTexturePatch(source.rgba, source.width, source.height, masterSelected, patchSelected)
-      : null;
-    if (!raster) {
-      setNote('Patch finish refused · the source image or render-face mapping changed.');
-      return false;
-    }
-    const png = encodeImage(raster.rgba, raster.width, raster.height, { format: 'png' });
-    if (!png) {
-      setNote('Patch finish refused · the local mapping could not be encoded.');
-      return false;
-    }
-    const safeId = focus.patch.id.replace(/[^a-z0-9_-]/gi, '-');
-    const stagedPath = `/tmp/reactjit-uv-patch-${safeId}-${Date.now()}.png`;
-    if (!writeFileBytesAtomic(stagedPath, png)) {
-      setNote('Patch finish refused · the compiled patch could not be staged.');
-      return false;
-    }
     setPatchFinishing(true);
     try {
-      const message = await bridge.addUvTextureLayer(raster.x, raster.y, stagedPath);
+      const encoded = readFileBase64(focus.patch.imagePath);
+      const source = encoded ? imageOps(encoded).raw() : null;
+      const masterSelected = focus.indices.map((index) => focus.masterRects[index]!).filter(Boolean);
+      const patchSelected = focus.indices.map((index) => rectsRef.current[index]!).filter(Boolean);
+      const raster = source
+        ? rasterizeUvTexturePatch(source.rgba, source.width, source.height, masterSelected, patchSelected)
+        : null;
+      if (!raster) {
+        setNote('Patch finish refused · the source image or render-face mapping changed.');
+        return false;
+      }
+      const png = encodeImage(raster.rgba, raster.width, raster.height, { format: 'png' });
+      if (!png) {
+        setNote('Patch finish refused · the local mapping could not be encoded.');
+        return false;
+      }
+      const message = bridge.addUvTexturePatchLayer(
+        raster.x,
+        raster.y,
+        png,
+        `${focus.patch.name} patch.png`,
+      );
       if (!message.startsWith('Added ')) {
         setNote(message);
         return false;
@@ -1225,13 +1224,15 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setView(fittedView());
       setNote(`Bound ${focus.patch.name} to ${focus.indices.length} island${focus.indices.length === 1 ? '' : 's'} · master footprint stayed ${raster.width}×${raster.height}px`);
       return true;
+    } catch (error) {
+      setNote(`Patch apply refused · ${error instanceof Error ? error.message : String(error)}`);
+      return false;
     } finally {
-      remove(stagedPath);
       setPatchFinishing(false);
     }
   };
   const compileImageLayers = async () => {
-    if (patchFocusRef.current && !await finishTexturePatch()) return;
+    if (patchFocusRef.current && !finishTexturePatch()) return;
     setCompileLabel('Preparing image layers');
     setNote('compiling the visible image workspace…');
     void bridge.compileUvTextureLayers((completed, total, label) => {
@@ -1497,7 +1498,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         {patchFocus ? (
           <Pressable
             tooltip="Bake this local mapping into the islands' unchanged master-atlas footprint"
-            onPress={() => { if (!patchFinishing) void finishTexturePatch(); }}
+            onPress={() => { if (!patchFinishing) finishTexturePatch(); }}
             style={{ height: 22, paddingLeft: 7, paddingRight: 7, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary'), opacity: patchFinishing ? 0.55 : 1 }}
           >
             <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{patchFinishing ? 'BAKING' : 'APPLY + SHOW ALL'}</Text>

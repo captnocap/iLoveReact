@@ -85,7 +85,25 @@ export function importUvTextureWorkspaceLayer(
 ): { doc: UvTextureWorkspaceDoc; layer: UvTextureLayer } {
   const encoded = readFileBase64(filePath);
   if (!encoded) throw new Error('The selected image could not be read.');
-  const decoded = image(encoded).raw();
+  let bytes: Uint8Array;
+  try { bytes = base64ToBytes(encoded); }
+  catch { throw new Error('The selected image bytes were invalid.'); }
+  const name = filePath.replace(/\\/g, '/').split('/').pop() || `image-${doc.nextLayer}.png`;
+  return importUvTextureWorkspaceLayerBytes(dir, doc, bytes, name, x, y);
+}
+
+/** Install an already-encoded image without routing through a picker or a
+ * temporary path. Patch-local baking uses this deep boundary so one button
+ * press either commits a model-local content address or returns an exact error. */
+export function importUvTextureWorkspaceLayerBytes(
+  dir: string,
+  doc: UvTextureWorkspaceDoc,
+  bytes: Uint8Array,
+  name: string,
+  x: number,
+  y: number,
+): { doc: UvTextureWorkspaceDoc; layer: UvTextureLayer } {
+  const decoded = image(bytes).raw();
   if (!decoded) throw new Error('The selected file is not a decodable image.');
   if (decoded.width > UV_TEXTURE_WORKSPACE_TUNING.maxDimension
     || decoded.height > UV_TEXTURE_WORKSPACE_TUNING.maxDimension
@@ -96,9 +114,8 @@ export function importUvTextureWorkspaceLayer(
   if (!png) throw new Error('The image could not be normalized to a lossless PNG source.');
   const installed = installPngSource(dir, png);
   if (!installed) throw new Error('The image source could not be stored in the model package.');
-  const name = filePath.replace(/\\/g, '/').split('/').pop() || `image-${doc.nextLayer}.png`;
   const next = appendUvTextureLayer(doc, {
-    name,
+    name: name.trim().slice(0, 256) || `image-${doc.nextLayer}.png`,
     source: installed.source,
     x: Math.round(x),
     y: Math.round(y),

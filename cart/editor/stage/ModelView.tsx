@@ -88,6 +88,7 @@ import {
   commitUvTextureWorkspaceCompile,
   ensureUvTextureWorkspace,
   importUvTextureWorkspaceLayer,
+  importUvTextureWorkspaceLayerBytes,
   rasterizeUvTextureWorkspace,
   readUvTextureWorkspace,
   writeUvTextureWorkspace,
@@ -247,6 +248,7 @@ export type ModelFocusBridge = {
   importUvAtlas: (path?: string) => Promise<string>;
   resizeUvAtlas: (width: number, height: number) => Promise<string>;
   addUvTextureLayer: (x: number, y: number, path?: string) => Promise<string>;
+  addUvTexturePatchLayer: (x: number, y: number, png: Uint8Array, name: string) => string;
   editUvTextureLayer: (id: string, edit: UvTextureLayerEdit) => string;
   compileUvTextureLayers: (onProgress?: (completed: number, total: number, label: string) => void) => Promise<string>;
   reloadUvAtlas: () => string;
@@ -2014,6 +2016,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
   };
 
+  const addUvTexturePatchLayer = (x: number, y: number, png: Uint8Array, name: string): string => {
+    if (!paintTarget) return 'Patch apply refused — this viewer has no package-backed paint target.';
+    const dir = resolvePackageDir(paintTarget.kind, paintTarget.id);
+    const atlas = uvPanel;
+    if (!dir || !atlas) return 'Patch apply refused — save and load the model package first.';
+    writeModelArtifacts(paintTarget);
+    const persisted = writeLiveModelAtlas(paintTarget);
+    if (!persisted.ok) return `Patch apply refused — ${persisted.error}`;
+    const doc = ensureUvTextureWorkspace(dir, atlas.w, atlas.h);
+    if (!doc) return 'Patch apply refused — the current base.png could not seed the editable workspace.';
+    try {
+      const result = importUvTextureWorkspaceLayerBytes(dir, doc, png, name, x, y);
+      onDocumentMutated?.();
+      buildUvPanel();
+      return `Added ${result.layer.name} at ${result.layer.x}, ${result.layer.y} · ${result.layer.width}×${result.layer.height} baked patch pixels.`;
+    } catch (error) {
+      return `Patch apply refused — ${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+
   const editUvTextureLayer = (id: string, edit: UvTextureLayerEdit): string => {
     const dir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     const doc = dir ? readUvTextureWorkspace(dir) : null;
@@ -3105,6 +3127,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       importUvAtlas,
       resizeUvAtlas,
       addUvTextureLayer,
+      addUvTexturePatchLayer,
       editUvTextureLayer,
       compileUvTextureLayers,
       reloadUvAtlas,
