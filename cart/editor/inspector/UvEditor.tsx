@@ -13,6 +13,7 @@ import {
   type UvTextureWorkspaceDoc,
 } from '../data/uvTextureWorkspace';
 import { loadTexturePackages, texturePatchPackages, type TexturePatchPackage } from '../data/texturePackage';
+import { importedSpecs } from '../textures/shaders';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
@@ -332,9 +333,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   );
   const [focusedPatchLayerId, setFocusedPatchLayerId] = useState<string | null>(null);
   const pendingPatchFocusRef = useRef(false);
+  const importedTextureCount = importedSpecs().length;
   const texturePatches = useMemo(
     () => texturePatchPackages(loadTexturePackages()),
-    [uv.key, uv.revision],
+    [uv.key, uv.revision, importedTextureCount],
   );
   const [compileLabel, setCompileLabel] = useState<string | null>(null);
   const [atlasWidthDraft, setAtlasWidthDraft] = useState(uv.w);
