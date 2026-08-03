@@ -189,7 +189,7 @@ function UvSection({
         <C.HW_AccentBar />
         <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
         <C.HW_Spacer />
-        <C.HW_ReadValue>{uv ? `${uv.w}×${uv.h} · ${uv.detail} x/m` : '—'}</C.HW_ReadValue>
+        <C.HW_ReadValue>{uv ? `${uv.w}×${uv.h} · ${uv.detail} x/m target` : '—'}</C.HW_ReadValue>
         <FocusVerb onPress={onToggleFocus} tooltip={workspace.toggleTooltip}>
           <Icon name={workspace.focused ? 'Minimize2' : 'Maximize2'} size={10} color={accentFor(workspace.focused ? 'primary' : 'textDim')} />
           <C.HW_UvFocusVerbText>{workspace.toggleLabel}</C.HW_UvFocusVerbText>

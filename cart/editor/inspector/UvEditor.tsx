@@ -1953,7 +1953,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             </Box>
             <Box style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
               <Text style={{ color: accentFor('text'), fontSize: 10, fontWeight: '800' }}>base.png</Text>
-              <Text style={{ color: accentFor('textFaint'), fontSize: 9, fontFamily: 'ui-monospace' }}>{`${uv.w}×${uv.h}px · ${uv.detail} texels/m`}</Text>
+              <Text style={{ color: accentFor('textFaint'), fontSize: 9, fontFamily: 'ui-monospace' }}>{`${uv.w}×${uv.h}px · ${uv.detail} texels/m target`}</Text>
             </Box>
             <Icon name="Save" size={13} color={accentFor('primary')} />
           </Box>
