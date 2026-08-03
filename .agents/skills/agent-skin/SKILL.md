@@ -40,8 +40,10 @@ package-saved, with named regions. Source of truth: `cart/editor/stage/ModelView
 For a two-zone skin, replace the ordinary guide export with a reviewed
 `uv-two-sheet` plan/apply. Pass semantic substrings such as `heroSemantics:["body","seat","decal"]`
 and `uniformSemantics:["fastener","cap","trim"]` when names carry the distinction; explicit
-island lists override automation. The receipt must say `densityLaw:"per-zone"` because fixed
-uniform cells intentionally break texels-per-world-meter. After apply, call
+island lists override automation. Uniform/support rows retain natural proportional size;
+only rows below `minimumReadableAreaTexels` are enlarged, bounded by
+`maximumReadabilityBoost`. The receipt must say `densityLaw:"proportional-with-floor"` and
+reports both the requested and actually packable floor. After apply, call
 `uv-two-sheet {"operation":"export-guides","token":"…"}`; it writes cropped
 `uv-ai-guide-hero.png` and `uv-ai-guide-uniform.png`, ready to generate separately and add
 back at the receipt's zone offsets before `compile-layers`.

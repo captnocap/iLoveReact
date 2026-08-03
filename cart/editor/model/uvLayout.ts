@@ -2365,6 +2365,10 @@ export type UvTwoSheetOptions = Readonly<{
   heroZoneFraction?: number;
   /** Normalize-mode safety gate passed to the repeat stacker. */
   normalizeMaxAreaTexels?: number;
+  /** Small material/support footprints may grow to this painted area, but never shrink to it. */
+  minimumReadableAreaTexels?: number;
+  /** Upper bound on readability enlargement for pathological specks and slivers. */
+  maximumReadabilityBoost?: number;
 }>;
 export type UvTwoSheetPlan = Readonly<{
   rects: UvIslandRect[];
@@ -2382,9 +2386,12 @@ export type UvTwoSheetPlan = Readonly<{
   uniformIslands: readonly number[];
   aspectClasses: Readonly<Record<UvAspectClass, number>>;
   heroScale: number;
-  uniformCellArea: number;
+  minimumReadableAreaRequested: number;
+  minimumReadableAreaAchieved: number;
+  readabilityBoostedFootprints: number;
+  readabilityCappedFootprints: number;
   zones: Readonly<{ hero: UvTwoSheetZone; uniform: UvTwoSheetZone }>;
-  densityLaw: 'per-zone';
+  densityLaw: 'proportional-with-floor';
 }>;
 
 /** Behaviour-affecting planner constants live here, not buried in the pack loop. */
@@ -2396,8 +2403,8 @@ export const UV_TWO_SHEET_TUNING = {
   squareMaximumRatio: 1.5,
   twoToOneMaximumRatio: 3,
   fourToOneMaximumRatio: 6,
-  sliverCellRatio: 8,
-  cellInsetTexels: 2,
+  minimumReadableAreaTexels: 32 * 32,
+  maximumReadabilityBoost: 4,
 } as const;
 
 export function uvAspectClass(rect: Pick<UvIslandRect, 'w' | 'h'>): UvAspectClass {
@@ -2460,6 +2467,55 @@ function largestUvPackScale(
   return { scale: low, frames: best };
 }
 
+type UvReadabilityPackRow = Readonly<{
+  id: number;
+  representative: UvIslandRect;
+  area: number;
+}>;
+
+function uvReadabilityScale(area: number, minimumArea: number, maximumBoost: number): number {
+  if (!(minimumArea > area) || !(area > 0)) return 1;
+  return Math.min(maximumBoost, Math.sqrt(minimumArea / area));
+}
+
+/** Preserve natural proportional scale and spend only spare zone capacity on a
+ * readability floor. If the requested floor does not fit, find the largest floor
+ * that does; never solve pressure by shrinking a footprint below natural scale. */
+function packUvReadabilityFloor(
+  zone: UvTwoSheetZone,
+  rows: readonly UvReadabilityPackRow[],
+  requestedMinimumArea: number,
+  maximumBoost: number,
+  gutter: number,
+): Readonly<{ minimumArea: number; frames: Map<number, UvPackedFrame> }> | null {
+  const itemsAtFloor = (minimumArea: number): UvPackItem[] => rows.map((row) => {
+    const scale = uvReadabilityScale(row.area, minimumArea, maximumBoost);
+    return {
+      id: row.id,
+      w: row.representative.w * scale + gutter,
+      h: row.representative.h * scale + gutter,
+    };
+  });
+  const requested = packUvShelves(zone, itemsAtFloor(requestedMinimumArea));
+  if (requested) return { minimumArea: requestedMinimumArea, frames: requested };
+  const natural = packUvShelves(zone, itemsAtFloor(0));
+  if (!natural) return null;
+  let low = 0;
+  let high = requestedMinimumArea;
+  let best = natural;
+  for (let iteration = 0; iteration < UV_TWO_SHEET_TUNING.packSearchIterations; iteration += 1) {
+    const middle = (low + high) * 0.5;
+    const packed = packUvShelves(zone, itemsAtFloor(middle));
+    if (packed) {
+      low = middle;
+      best = packed;
+    } else {
+      high = middle;
+    }
+  }
+  return { minimumArea: low, frames: best };
+}
+
 function splitUvTwoSheetZones(atlasW: number, atlasH: number, heroFraction: number): { hero: UvTwoSheetZone; uniform: UvTwoSheetZone } {
   const fraction = clamp(heroFraction, 0.5, 0.9);
   if (atlasW >= atlasH) {
@@ -2487,9 +2543,10 @@ function semanticIntentMatches(intent: UvIslandIntent | undefined, patterns: rea
 
 /**
  * Mutation-free two-zone atlas proposal. Detailed footprints retain their current
- * scale in zone A whenever they fit. Material-only footprints receive equal-area,
- * aspect-binned cells in zone B. The repeat stacker runs first, so identical parts
- * literally share one rect instead of merely occupying neighboring cells.
+ * scale in zone A whenever they fit. Material/support footprints retain proportional
+ * scale in zone B, while undersized rows receive a bounded readability boost. The
+ * repeat stacker runs first, so identical parts literally share one rect instead of
+ * merely occupying neighboring cells.
  */
 export function planTwoSheetUvLayout(
   rects: readonly UvIslandRect[],
@@ -2504,13 +2561,25 @@ export function planTwoSheetUvLayout(
     ? Number(options.heroZoneFraction)
     : UV_TWO_SHEET_TUNING.heroZoneFraction;
   const zones = splitUvTwoSheetZones(Math.max(1, atlasW), Math.max(1, atlasH), heroFraction);
+  const requestedMinimumArea = Math.max(0, Number.isFinite(options.minimumReadableAreaTexels)
+    ? Number(options.minimumReadableAreaTexels)
+    : UV_TWO_SHEET_TUNING.minimumReadableAreaTexels);
+  const maximumReadabilityBoost = clamp(Number.isFinite(options.maximumReadabilityBoost)
+    ? Number(options.maximumReadabilityBoost)
+    : UV_TWO_SHEET_TUNING.maximumReadabilityBoost, 1, 32);
   const fail = (reason: string): UvTwoSheetPlan => ({
     rects: [...rects], fits: false, reason,
     sourceIslands: rects.length, sourceFootprints: countUvTextureFootprints(rects),
     prestackedFootprints: countUvTextureFootprints(rects), uniqueFootprints: countUvTextureFootprints(rects),
     stackedIslands: 0, changedIslands: 0, heroFootprints: 0, uniformFootprints: 0,
     heroIslands: [], uniformIslands: [], aspectClasses: emptyClasses,
-    heroScale: 1, uniformCellArea: 0, zones, densityLaw: 'per-zone',
+    heroScale: 1,
+    minimumReadableAreaRequested: requestedMinimumArea,
+    minimumReadableAreaAchieved: 0,
+    readabilityBoostedFootprints: 0,
+    readabilityCappedFootprints: 0,
+    zones,
+    densityLaw: 'proportional-with-floor',
   });
   if (!rects.length || atlasW < 2 || atlasH < 2) return fail('two-sheet planning needs a readable atlas with UV islands');
 
@@ -2577,32 +2646,20 @@ export function planTwoSheetUvLayout(
   if (!heroPack) return fail('hero footprints cannot fit their zone even at the minimum reviewed scale');
 
   const classCounts = { ...emptyClasses };
-  const classForRow = new Map<number, UvAspectClass>();
   for (const row of uniformRows) {
     const aspectClass = uvAspectClass(row.representative);
-    classForRow.set(row.id, aspectClass);
     classCounts[aspectClass] += 1;
   }
-  const classRatio = (aspectClass: UvAspectClass): { ratio: number; wide: boolean } => {
-    if (aspectClass === 'square') return { ratio: 1, wide: true };
-    if (aspectClass === 'wide2' || aspectClass === 'tall2') return { ratio: 2, wide: aspectClass === 'wide2' };
-    if (aspectClass === 'wide4' || aspectClass === 'tall4') return { ratio: 4, wide: aspectClass === 'wide4' };
-    return { ratio: UV_TWO_SHEET_TUNING.sliverCellRatio, wide: aspectClass === 'wide-sliver' };
-  };
   const uniformPack = uniformRows.length === 0
-    ? { scale: 0, frames: new Map<number, UvPackedFrame>() }
-    : largestUvPackScale(
+    ? { minimumArea: requestedMinimumArea, frames: new Map<number, UvPackedFrame>() }
+    : packUvReadabilityFloor(
       zones.uniform,
-      (base) => uniformRows.map((row) => {
-        const shape = classRatio(classForRow.get(row.id)!);
-        const long = base * Math.sqrt(shape.ratio);
-        const short = base / Math.sqrt(shape.ratio);
-        return { id: row.id, w: shape.wide ? long : short, h: shape.wide ? short : long };
-      }),
-      Math.sqrt(zones.uniform.w * zones.uniform.h),
-      1,
+      uniformRows,
+      requestedMinimumArea,
+      maximumReadabilityBoost,
+      gutter,
     );
-  if (!uniformPack) return fail('uniform aspect cells cannot fit their zone');
+  if (!uniformPack) return fail('material/support footprints cannot fit their zone at natural scale');
 
   const next = [...prestack.rects];
   const heroIslands: number[] = [];
@@ -2624,17 +2681,12 @@ export function planTwoSheetUvLayout(
   }
   for (const row of uniformRows) {
     const cell = uniformPack.frames.get(row.id)!;
-    const inset = Math.min(UV_TWO_SHEET_TUNING.cellInsetTexels, cell.w * 0.2, cell.h * 0.2);
-    const availableW = Math.max(1, cell.w - inset * 2);
-    const availableH = Math.max(1, cell.h - inset * 2);
-    const sourceW = Math.max(1, row.representative.w);
-    const sourceH = Math.max(1, row.representative.h);
-    const scale = Math.min(availableW / sourceW, availableH / sourceH);
-    const width = sourceW * scale;
-    const height = sourceH * scale;
+    const scale = uvReadabilityScale(row.area, uniformPack.minimumArea, maximumReadabilityBoost);
+    const width = row.representative.w * scale;
+    const height = row.representative.h * scale;
     placeFootprint(row, {
-      x: cell.x + (cell.w - width) * 0.5,
-      y: cell.y + (cell.h - height) * 0.5,
+      x: cell.x + gutter * 0.5,
+      y: cell.y + gutter * 0.5,
       w: width,
       h: height,
     }, 'uniform');
@@ -2656,9 +2708,14 @@ export function planTwoSheetUvLayout(
     uniformIslands: uniformIslands.sort((left, right) => left - right),
     aspectClasses: classCounts,
     heroScale: heroPack.scale,
-    uniformCellArea: uniformPack.scale * uniformPack.scale,
+    minimumReadableAreaRequested: requestedMinimumArea,
+    minimumReadableAreaAchieved: uniformPack.minimumArea,
+    readabilityBoostedFootprints: uniformRows.filter((row) =>
+      uvReadabilityScale(row.area, uniformPack.minimumArea, maximumReadabilityBoost) > 1 + UV_LAYOUT_TUNING.geometryEpsilon).length,
+    readabilityCappedFootprints: uniformRows.filter((row) =>
+      Math.sqrt(uniformPack.minimumArea / Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, row.area)) > maximumReadabilityBoost + UV_LAYOUT_TUNING.geometryEpsilon).length,
     zones,
-    densityLaw: 'per-zone',
+    densityLaw: 'proportional-with-floor',
   };
 }
 

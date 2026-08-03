@@ -161,7 +161,7 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `uv-layout` | Full atomic `rects:[x,y,w,h,…]`. |
 | `uv-prestack` | `plan` with `mode:"exact"|"normalize"` (normalize default), then `apply` with the returned `token`. Whole-layout repeat scan; reports logical islands and exact texture footprints separately. |
 | `uv-stitch` | `plan` with `indices` + `active` (or the current UV island selection), then `apply` with the returned `token`. Joins only welded-identity seams. |
-| `uv-two-sheet` | `plan` with optional `heroIslands`/`uniformIslands` and semantic substring lists, then `apply` with its `token`. Reports hero/uniform zones, aspect bins, and the explicit `densityLaw:"per-zone"`. After apply, `export-guides` with the same token writes cropped hero + uniform guides. |
+| `uv-two-sheet` | `plan` with optional `heroIslands`/`uniformIslands`, semantic substring lists, `minimumReadableAreaTexels`, and `maximumReadabilityBoost`, then `apply` with its `token`. Natural proportional size is preserved; only undersized material/support footprints are enlarged toward the bounded readability floor. After apply, `export-guides` with the same token writes cropped hero + uniform guides. |
 | `uv-geometry` | Full atomic corner array `corners:[x,y,…]`, optional `historyAction`. |
 | `uv-history` | `operation:"read"|"undo"|"redo"`. |
 | `uv-atlas` | reset, reload, save, export-wireframe, export-guide, `import {path}`, resize, `add-layer {path,x,y}`, compile-layers. |

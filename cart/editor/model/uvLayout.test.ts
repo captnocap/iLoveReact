@@ -423,7 +423,7 @@ test('normalized repeat prestack protects congruent UV surfaces above its area t
   assert(sliverOnly.normalizationProtectedIslands === 2, 'stricter area gate did not protect both larger matches');
 });
 
-test('two-sheet planner keeps hero scale, bins uniform cells, and stacks repeats without mutation', () => {
+test('two-sheet planner preserves proportional scale, floors unreadable support parts, and stacks repeats without mutation', () => {
   const rects = parseUvIslandRects(
     [
       0, 0, 40, 40,
@@ -456,17 +456,31 @@ test('two-sheet planner keeps hero scale, bins uniform cells, and stacks repeats
       material: 1,
       semanticNames: [island === 0 ? 'body.hero.panel' : island < 3 ? 'fastener.cap' : 'trim.material'],
     })),
+    minimumReadableAreaTexels: 100,
+    maximumReadabilityBoost: 2,
   });
   assert(plan.fits, plan.reason ?? 'two-sheet plan did not fit');
-  assert(plan.densityLaw === 'per-zone', 'planner hid the deliberate per-zone density rule');
+  assert(plan.densityLaw === 'proportional-with-floor', 'planner hid the proportional readability-floor rule');
   assert(plan.heroFootprints === 1 && plan.uniformFootprints === 3, 'hero/uniform classification ignored explicit intent');
   assert(plan.prestackedFootprints === 4 && plan.uniqueFootprints === 4, 'identical uniform twins did not share one literal footprint');
   assert(plan.heroScale === 1, 'hero art was rescaled despite fitting at natural size');
+  assert(plan.minimumReadableAreaRequested === 100 && plan.minimumReadableAreaAchieved === 100,
+    'planner did not retain the reviewed readability floor');
+  assert(plan.readabilityBoostedFootprints === 2 && plan.readabilityCappedFootprints === 0,
+    'planner reported the wrong bounded readability boosts');
+  const plannedCorners = flattenUvFaceCorners(plan.rects)!;
+  const naturalCorners = [...plannedCorners.slice(18, 24)];
+  const naturalXs = [naturalCorners[0]!, naturalCorners[2]!, naturalCorners[4]!];
+  const naturalYs = [naturalCorners[1]!, naturalCorners[3]!, naturalCorners[5]!];
+  assert(Math.abs(Math.max(...naturalXs) - Math.min(...naturalXs) - 20) < 0.0001 &&
+    Math.abs(Math.max(...naturalYs) - Math.min(...naturalYs) - 10) < 0.0001,
+  'already-readable support footprint lost its natural scale');
+  assert(plan.rects[1]!.w > 10 && plan.rects[1]!.h > 10,
+    'undersized support footprint did not receive its readability floor');
   assert(plan.aspectClasses.square === 1 && plan.aspectClasses.wide2 === 1 && plan.aspectClasses['wide-sliver'] === 1,
     'uniform cells were not separated into the reviewed aspect bins');
   assert(plan.rects[0]!.x < plan.zones.uniform.x && plan.rects[1]!.x >= plan.zones.uniform.x,
     'hero and uniform footprints did not land in separate atlas zones');
-  const plannedCorners = flattenUvFaceCorners(plan.rects)!;
   assert([...plannedCorners.slice(6, 12)].join(',') === [...plannedCorners.slice(12, 18)].join(','),
     'identical uniform parts did not land on literally the same rect');
   assert([...flattenUvFaceCorners(rects)!].join(',') === sourceCorners.join(','), 'mutation-free planner changed its source UV corners');

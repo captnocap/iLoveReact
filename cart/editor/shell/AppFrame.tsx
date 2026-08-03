@@ -5225,6 +5225,8 @@ export default function AppFrame() {
             ...(args.automaticHeroAreaCoverage === undefined ? {} : { automaticHeroAreaCoverage: Number(args.automaticHeroAreaCoverage) }),
             ...(args.heroZoneFraction === undefined ? {} : { heroZoneFraction: Number(args.heroZoneFraction) }),
             ...(args.normalizeMaxAreaTexels === undefined ? {} : { normalizeMaxAreaTexels: Number(args.normalizeMaxAreaTexels) }),
+            ...(args.minimumReadableAreaTexels === undefined ? {} : { minimumReadableAreaTexels: Number(args.minimumReadableAreaTexels) }),
+            ...(args.maximumReadabilityBoost === undefined ? {} : { maximumReadabilityBoost: Number(args.maximumReadabilityBoost) }),
           });
           const summary = {
             token,
@@ -5241,7 +5243,10 @@ export default function AppFrame() {
             uniformFootprints: plan.uniformFootprints,
             aspectClasses: plan.aspectClasses,
             heroScale: plan.heroScale,
-            uniformCellArea: plan.uniformCellArea,
+            minimumReadableAreaRequested: plan.minimumReadableAreaRequested,
+            minimumReadableAreaAchieved: plan.minimumReadableAreaAchieved,
+            readabilityBoostedFootprints: plan.readabilityBoostedFootprints,
+            readabilityCappedFootprints: plan.readabilityCappedFootprints,
             zones: plan.zones,
           };
           seatUvPlanRef.current = plan.fits ? {
