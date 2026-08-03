@@ -716,6 +716,7 @@ fn clearActiveEditMesh() void {
     g_edit_key = null;
     g_edit_key_hash = 0;
     g_edit_generation = 0;
+    invalidateMeshAudit();
 }
 
 inline fn bumpEditGeneration() void {
@@ -860,6 +861,7 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     // base patches belong to the OUTGOING atlas — restoring them into the new one
     // would write stale bytes (or silently no-op) wherever the layouts differ.
     mesh_edit.reset(); // topology changed (load, quality re-mesh, or edit replace) → rebuild lazily
+    invalidateMeshAudit(); // the incoming mesh restarts at generation 1; never inherit the last model's facts
     model_paint.setTarget(hashKey(key), verts, count);
     const need = @as(usize, count) * 8;
     if (verts.len >= need) {
@@ -9135,14 +9137,27 @@ const SemanticPerceptAggregate = struct {
 /// several times per edit (and every seat reply carries one), so the facts are counted
 /// once per generation and handed back unchanged until the mesh actually changes.
 var g_audit_facts: mesh_audit.Facts = .{};
-var g_audit_generation: ?u32 = null;
+/// The mesh the cached facts actually describe. Generation ALONE is not an identity:
+/// replaceActiveEditMesh resets g_edit_generation to 1 on every load, quality re-mesh
+/// and edit-replace, so a freshly opened model collides with the last one audited and
+/// inherits its counts (req_3752 — a 12-triangle cube reported a moped's 890). The key
+/// carries the model hash and the face count beside the generation, and every path that
+/// swaps or drops the resident mesh clears it outright.
+const AuditKey = struct { hash: u64, generation: u32, faces: u32 };
+var g_audit_key: ?AuditKey = null;
+
+fn invalidateMeshAudit() void {
+    g_audit_key = null;
+    g_audit_facts = .{};
+}
 
 fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: u32) mesh_audit.Facts {
-    if (g_audit_generation) |generation| {
-        if (generation == g_edit_generation) return g_audit_facts;
+    const key = AuditKey{ .hash = g_edit_key_hash, .generation = g_edit_generation, .faces = face_count };
+    if (g_audit_key) |cached| {
+        if (cached.hash == key.hash and cached.generation == key.generation and cached.faces == key.faces) return g_audit_facts;
     }
     g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{});
-    g_audit_generation = g_edit_generation;
+    g_audit_key = key;
     return g_audit_facts;
 }
 

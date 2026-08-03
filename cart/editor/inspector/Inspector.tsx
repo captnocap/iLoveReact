@@ -114,11 +114,15 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 function GeometryFactRow(
   { label, shape, count, detail }: { label: string; shape: ModelFocusShape | null; count: number; detail: string },
 ) {
+  // A count larger than the mesh cannot describe this mesh — it belongs to another one
+  // (req_3752). Show that, rather than a number the panel knows is impossible.
+  const inconsistent = !!shape && shape.audited && count > shape.tris;
   const value = !shape ? '—'
     : !shape.audited ? 'not measured'
-      : count === 0 ? `0 · ${detail}`
-        : `${fmtCount(count)} · ${detail}`;
-  const tone = shape?.audited && count > 0 ? 'warning' : 'textDim';
+      : inconsistent ? `stale · ${fmtCount(count)} vs ${fmtCount(shape.tris)} tris`
+        : count === 0 ? `0 · ${detail}`
+          : `${fmtCount(count)} · ${detail}`;
+  const tone = inconsistent ? 'error' : shape?.audited && count > 0 ? 'warning' : 'textDim';
   return (
     <C.HW_ReadRow>
       <C.HW_FormLabel>{label}</C.HW_FormLabel>

@@ -545,6 +545,14 @@ export function formatGeometryFacts(percept: SeatPercept): string {
   const intersecting = percept.intersectingFaces ?? 0;
   const unreachable = percept.unreachableFaces ?? 0;
   const dirs = percept.auditDirections ?? 0;
+  // Neither count can exceed the mesh it describes — a triangle cannot be unreachable
+  // without existing. Over-count means the facts belong to a DIFFERENT mesh than the
+  // one being reported (req_3752: a stale host cache handed a 12-triangle cube a
+  // moped's 890, which rendered as "7417% of the mesh"). Say so; never do arithmetic on
+  // numbers that cannot both be true.
+  if (intersecting > percept.faces || unreachable > percept.faces) {
+    return `⚠ geometry facts INCONSISTENT — ${intersecting} intersecting / ${unreachable} unreachable reported against only ${percept.faces} triangles. These counts describe a different mesh; do not trust them`;
+  }
   if (intersecting === 0 && unreachable === 0) return 'geometry · 0 intersecting · 0 unreachable';
   const share = percept.faces > 0 ? Math.round((unreachable / percept.faces) * 100) : 0;
   return `⚠ geometry · ${intersecting} triangles pass through other triangles · ${unreachable} unreachable from any of ${dirs} directions (${share}% of the mesh no camera can see)`;

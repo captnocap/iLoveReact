@@ -792,6 +792,12 @@ test('geometry facts ride every reply and never invent a clean zero', () => {
   const skipped = formatGeometryFacts({ ...percept, auditComputed: false, intersectingFaces: 0, unreachableFaces: 0 });
   assert(skipped.includes('NOT MEASURED') && !skipped.includes('0 intersecting'), `over-budget was reported as clean: ${skipped}`);
 
+  // req_3752: a stale host cache handed a 12-triangle cube a moped's counts, and the
+  // readout rendered "7417% of the mesh". Impossible arithmetic must never be printed.
+  const stale = formatGeometryFacts({ ...percept, faces: 12, auditComputed: true, intersectingFaces: 1169, unreachableFaces: 890, auditDirections: 42 });
+  assert(stale.includes('INCONSISTENT'), `impossible counts were not flagged: ${stale}`);
+  assert(!stale.includes('%'), `a percentage was computed from counts that cannot both be true: ${stale}`);
+
   const old = formatGeometryFacts({ ...percept });
   assert(old.includes('host predates'), `pre-audit host was not distinguished: ${old}`);
 
