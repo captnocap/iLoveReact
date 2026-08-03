@@ -39,3 +39,23 @@ export async function pickFile(opts: PickFileOptions = {}): Promise<string | nul
   const path = (r.stdout || '').trim();
   return path || null;
 }
+
+/** Open the same native picker with multi-selection enabled. The empty array
+ * means the user cancelled (or no picker is installed). Newlines are Zenity's
+ * separator here because ordinary Linux paths cannot contain a NUL and image
+ * authoring paths containing newlines are not useful picker input. */
+export async function pickFiles(opts: PickFileOptions = {}): Promise<string[]> {
+  const title = opts.title ?? 'Pick files';
+  const start = opts.startDir ? `--filename=${shq(opts.startDir.replace(/\/?$/, '/'))} ` : '';
+  const filters = (opts.filters && opts.filters.length ? opts.filters : [{ name: 'All files', patterns: ['*'] }])
+    .map((f) => `--file-filter=${shq(`${f.name} | ${f.patterns.join(' ')}`)} `)
+    .join('');
+  const r = await execAsync(`zenity --file-selection --multiple --separator=${shq('\n')} --title=${shq(title)} ${start}${filters}`);
+  return parsePickedFiles(r.stdout || '');
+}
+
+/** Parse Zenity's newline-separated output without trimming legal spaces from
+ * either end of a filename. */
+export function parsePickedFiles(stdout: string): string[] {
+  return stdout.split(/\r?\n/).filter((path) => path.length > 0);
+}

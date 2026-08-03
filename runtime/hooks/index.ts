@@ -150,7 +150,7 @@ export type { MIDIHandle, MIDIOptions, MidiEvent, MidiEventType, MidiLearnTarget
 export { useDeej, subscribeDeej } from './useDeej';
 export type { DeejHandle, DeejMove, DeejOptions, DeejState } from './useDeej';
 export { useFileDrop } from './useFileDrop';
-export { pickFile } from './pickFile';
+export { pickFile, pickFiles } from './pickFile';
 export type { FileFilter, PickFileOptions } from './pickFile';
 export { useFileWatch, attachWatcher } from './useFileWatch';
 export { useEmbed } from './useEmbed';

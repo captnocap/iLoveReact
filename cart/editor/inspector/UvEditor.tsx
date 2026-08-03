@@ -17,6 +17,7 @@ import {
 import { loadTexturePackages, texturePatchPackages, type TexturePatchPackage } from '../data/texturePackage';
 import { importedSpecs } from '../textures/shaders';
 import { rasterizeUvTexturePatch } from '../model/uvTexturePatch';
+import TexturePatchExplorer from './TexturePatchExplorer';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
@@ -343,10 +344,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [patchFocus, setPatchFocusState] = useState<UvPatchFocus | null>(null);
   const patchFocusRef = useRef<UvPatchFocus | null>(null);
   const [patchFinishing, setPatchFinishing] = useState(false);
+  const [textureExplorerOpen, setTextureExplorerOpen] = useState(false);
+  const [textureLibraryRevision, setTextureLibraryRevision] = useState(0);
   const importedTextureCount = importedSpecs().length;
   const texturePatches = useMemo(
     () => texturePatchPackages(loadTexturePackages()),
-    [uv.key, uv.revision, importedTextureCount],
+    [uv.key, uv.revision, importedTextureCount, textureLibraryRevision],
   );
   const [compileLabel, setCompileLabel] = useState<string | null>(null);
   const [atlasWidthDraft, setAtlasWidthDraft] = useState(uv.w);
@@ -2039,27 +2042,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>REUSABLE PATCHES</Text>
           <Box style={{ flexGrow: 1 }} />
-          <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{texturePatches.length > 0 ? `${texturePatches.length} EXACT IMAGE${texturePatches.length === 1 ? '' : 'S'}` : 'IMPORT AN EXACT IMAGE'}</Text>
+          <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{texturePatches.length} IN LIBRARY</Text>
+          <Pressable
+            tooltip="Search the reusable texture library or import several images"
+            onPress={() => setTextureExplorerOpen(true)}
+            style={{ height: 21, paddingLeft: 8, paddingRight: 8, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}
+          >
+            <Icon name="FolderSearch" size={10} color={accentFor('primary')} />
+            <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>CHOOSE TEXTURE…</Text>
+          </Pressable>
         </Row>
-        {texturePatches.length > 0 ? (
-          <ScrollView style={{ maxHeight: 82 }} showScrollbar>
-            <Row style={{ flexWrap: 'wrap', gap: 5 }}>
-              {texturePatches.map((patch) => (
-                <Pressable
-                  key={`uv-patch-${patch.id}`}
-                  tooltip={`Use ${patch.name} on the selected part or UV islands`}
-                  onPress={() => applyTexturePatch(patch)}
-                  style={{ width: 116, height: 70, padding: 4, gap: 3, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('borderSoft'), borderRadius: 4 }}
-                >
-                  <Image source={patch.imagePath} style={{ width: 106, height: 44 }} />
-                  <Text numberOfLines={1} style={{ color: accentFor('textDim'), fontSize: 8, fontWeight: '800' }}>{patch.name}</Text>
-                </Pressable>
-              ))}
-            </Row>
-          </ScrollView>
-        ) : (
-          <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>Import an image as Exact Image once; it will appear here for every model.</Text>
-        )}
         <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>TEXTURES</Text>
           <Box style={{ flexGrow: 1 }} />
@@ -2461,6 +2453,20 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             </Row>
           </Box>
         </Box>
+      ) : null}
+      {textureExplorerOpen ? (
+        <TexturePatchExplorer
+          patches={texturePatches}
+          onUse={(patch) => {
+            setTextureExplorerOpen(false);
+            applyTexturePatch(patch);
+          }}
+          onImported={(message) => {
+            setTextureLibraryRevision((revision) => revision + 1);
+            setNote(message);
+          }}
+          onClose={() => setTextureExplorerOpen(false)}
+        />
       ) : null}
     </Box>
   );
