@@ -45,6 +45,17 @@ export type SeatPercept = {
    * `faces === authoredFaces` means every quad has been split into loose triangles.
    * Null when no atlas is readable yet and the grouping cannot be observed. */
   authoredFaces: number | null;
+  /** Did the host measure the geometry facts below? False means the mesh was over
+   * budget, so the counts are UNMEASURED, not zero. Undefined on a pre-audit host. */
+  auditComputed?: boolean;
+  /** Triangles that pass through another triangle. Sharing an edge or meeting on an
+   * exact plane is correct topology and is not counted. */
+  intersectingFaces?: number;
+  /** Triangles no sampled direction escapes — geometry sealed inside other geometry,
+   * reachable by no camera and deserving of no UV island. */
+  unreachableFaces?: number;
+  /** Directions sampled per face by the reachability pass. */
+  auditDirections?: number;
   /** Logical UV islands in the resident atlas. Zero means no readable atlas yet. */
   islands: number;
   /** Exact coverage-compatible texture footprints after stacking. */
@@ -525,6 +536,20 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
   return null;
 }
 
+/** The two hard facts, on every reply (req_3749). Nothing here refuses anything — a
+ * threshold would just teach a model to launder around it, while these counts only
+ * fall when the mesh is actually fixed. Never prints a zero it did not measure. */
+export function formatGeometryFacts(percept: SeatPercept): string {
+  if (percept.auditComputed === undefined) return 'geometry facts unavailable — host predates the audit pass';
+  if (!percept.auditComputed) return 'geometry facts NOT MEASURED — mesh over the audit budget; treat the counts as unknown, not clean';
+  const intersecting = percept.intersectingFaces ?? 0;
+  const unreachable = percept.unreachableFaces ?? 0;
+  const dirs = percept.auditDirections ?? 0;
+  if (intersecting === 0 && unreachable === 0) return 'geometry · 0 intersecting · 0 unreachable';
+  const share = percept.faces > 0 ? Math.round((unreachable / percept.faces) * 100) : 0;
+  return `⚠ geometry · ${intersecting} triangles pass through other triangles · ${unreachable} unreachable from any of ${dirs} directions (${share}% of the mesh no camera can see)`;
+}
+
 export function formatSeatPercept(percept: SeatPercept): string {
   const names = new Map(percept.table.regions.map((region) => [region.id, region.name]));
   // Lead with authored faces, not triangles. A percept that reports only triangles reads
@@ -537,6 +562,7 @@ export function formatSeatPercept(percept: SeatPercept): string {
   if (percept.authoredFaces != null && percept.authoredFaces === percept.faces && percept.faces > 0) {
     lines.push(`  ⚠ TRIANGLE SOUP — every triangle is its own authored face; this mesh has no quads left`);
   }
+  lines.push(`  ${formatGeometryFacts(percept)}`);
   for (const part of percept.parts) {
     const range = part.lo == null || part.hi == null ? 'range pending' : `[${part.lo},${part.hi})`;
     const folder = part.groupPath.length > 0 ? `${part.groupPath.map((row) => row.name).join('/')} / ` : '';

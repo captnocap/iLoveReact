@@ -23,6 +23,7 @@ const effects_ctx = @import("effects_ctx.zig");
 const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
+const mesh_audit = @import("mesh_audit.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const mesh_semantics = @import("mesh_semantics.zig");
 const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
@@ -849,6 +850,10 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
 /// stashHostMesh carry the paint mapping. Keyed by the intern key so the draw can find
 /// it. Called by the load door before stashing.
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    // Manual retopology bands belong to one live document topology. A genuine
+    // target load must not let an equal face count make another model inherit
+    // stale teaching colours; same-document replaces carry them explicitly.
+    _ = clearRetopoBandPreview();
     clearActiveEditMesh();
     paint_program.reset(); // a fresh model starts with an empty stroke program
     // Reset BEFORE the target swaps: reset restores any selection tint, and the saved
@@ -1045,6 +1050,28 @@ fn appendQuadSplit(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: 
         return appendTri(list, a, b, d) and appendTri(list, b, c, d);
     }
     return appendTri(list, a, b, c) and appendTri(list, a, c, d);
+}
+
+fn appendTriFacing(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32, reference: [3]f32) bool {
+    return if (vdot(normalOf(a, b, c), reference) >= 0)
+        appendTri(list, a, b, c)
+    else
+        appendTri(list, a, c, b);
+}
+
+fn appendQuadSplitFacing(
+    list: *std.ArrayListUnmanaged(f32),
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    d: [3]f32,
+    reference: [3]f32,
+) bool {
+    const area_normal = vadd(vcross(vsub(b, a), vsub(c, a)), vcross(vsub(c, a), vsub(d, a)));
+    return if (vdot(area_normal, reference) >= 0)
+        appendQuadSplit(list, a, b, c, d)
+    else
+        appendQuadSplit(list, a, d, c, b);
 }
 
 /// A face's TRUE colour: the saved pre-tint base when the face is selection-tinted,
@@ -1788,6 +1815,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
     if (selected_count < 2 or selected_count > selected.len) return false;
     const edges = selected[0..@as(usize, @intCast(selected_count))];
+    const reference_normal = mesh_edit.selectedEdgesReferenceNormalPub() orelse return false;
 
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
@@ -1807,15 +1835,16 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 c = d;
                 d = tmp;
             }
-            ok = appendQuadSplit(&verts, a, b, d, c);
+            ok = appendQuadSplitFacing(&verts, a, b, d, c, reference_normal);
         } else {
             var order: [3]u32 = undefined;
             if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
-                ok = appendTri(
+                ok = appendTriFacing(
                     &verts,
                     mesh_edit.vertPosPub(order[0]),
                     mesh_edit.vertPosPub(order[1]),
                     mesh_edit.vertPosPub(order[2]),
+                    reference_normal,
                 );
             }
         }
@@ -1825,7 +1854,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             const p0 = mesh_edit.vertPosPub(order[0]);
             const p1 = mesh_edit.vertPosPub(order[1]);
             const p2 = mesh_edit.vertPosPub(order[2]);
-            ok = if (n == 3) appendTri(&verts, p0, p1, p2) else appendQuadSplit(&verts, p0, p1, p2, mesh_edit.vertPosPub(order[3]));
+            ok = if (n == 3)
+                appendTriFacing(&verts, p0, p1, p2, reference_normal)
+            else
+                appendQuadSplitFacing(&verts, p0, p1, p2, mesh_edit.vertPosPub(order[3]), reference_normal);
         }
     }
     if (!ok) {
@@ -1852,6 +1884,13 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     defer semantics.deinit();
     const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
+    const inherited_retopo_band = if (g_retopo_pending_band_generation == g_edit_generation)
+        g_retopo_pending_band
+    else
+        mesh_edit.RETOPO_BAND_UNASSIGNED;
+    const had_retopo_bands = g_retopo_manual_bands != null;
+    var retopo_bands = prepareRetopoBandAppend(@intCast(old_faces), @intCast(added / 3), inherited_retopo_band);
+    defer if (retopo_bands) |labels| std.heap.c_allocator.free(labels);
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
@@ -1866,6 +1905,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             journalDiscard(&snap);
             return false;
         }
+        commitRetopoBandCarry(had_retopo_bands, &retopo_bands);
+        g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
+        g_retopo_pending_band_generation = 0;
         // Create Face hands the next edit to its result: Face mode + exactly the new
         // authored face selected, so X can reverse an unlucky winding immediately.
         _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
@@ -3266,6 +3308,14 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
         return false;
     };
     defer std.heap.c_allocator.free(owned);
+    const had_retopo_bands = g_retopo_manual_bands != null;
+    var retopo_bands = prepareRetopoBandCompaction(mask, @intCast(kept / 3));
+    defer if (retopo_bands) |labels| std.heap.c_allocator.free(labels);
+    const deleted_retopo_band: ?u16 = if (std.mem.eql(u8, label, "delete selection"))
+        if (g_retopo_manual_bands) |labels| mesh_edit.uniformRetopoManualBand(labels, mask) else null
+    else
+        null;
+    const retopo_carry_ready = !had_retopo_bands or retopo_bands != null;
 
     // A face delete can empty one Outliner part while leaving the rest of the
     // document alive. Carry the complete ownership partition (including hidden
@@ -3326,6 +3376,14 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
             if (kept > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout();
         } else if (kept == 0) {
             model_source.setPartRanges(&.{});
+        }
+        commitRetopoBandCarry(had_retopo_bands, &retopo_bands);
+        if (retopo_carry_ready and deleted_retopo_band != null and g_retopo_manual_bands != null) {
+            g_retopo_pending_band = deleted_retopo_band.?;
+            g_retopo_pending_band_generation = g_edit_generation;
+        } else if (std.mem.eql(u8, label, "delete selection")) {
+            g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
+            g_retopo_pending_band_generation = 0;
         }
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -4205,6 +4263,10 @@ const JournalEntry = struct {
     hidden: []JournalHidden,
     atlas: ?JournalAtlas,
     paint_state: ?*paint_program.JournalState,
+    // The teaching overlay is authored model data, not disposable viewport
+    // decoration. Every chronological model snapshot carries its exact live
+    // membership and frozen before-image so topology undo cannot erase it.
+    retopo_guide: ?mesh_edit.OwnedRetopoGuide,
     paint_layout_stale: bool,
     paint_layout_revision: u64,
     note: ?[]u8,
@@ -4271,6 +4333,43 @@ fn enqueueMeshAction(
     g_mesh_action_len += 1;
 }
 
+/// Mirror every accepted journal transaction into Follow's independent stream.
+/// This is deliberately separate from the cart action drain: both consumers are
+/// destructive readers, so sharing one queue made whichever polled first erase
+/// the user's demonstration for the other. Operation-specific observations may
+/// append richer patches after this summary; the chronological journal record is
+/// the non-lossy authority that proves the edit happened.
+fn enqueueFollowJournalAction(
+    action_id: u32,
+    raw_kind: u8,
+    phase: mesh_journal_log.ActionPhase,
+    label: []const u8,
+    before_vertices: u32,
+    after_vertices: u32,
+    before_parts: u32,
+    after_parts: u32,
+) void {
+    var before_buf: [320]u8 = undefined;
+    const before = std.fmt.bufPrint(
+        &before_buf,
+        "{{\"version\":1,\"stream\":\"journal\",\"actionId\":{d},\"phase\":{d},\"label\":\"{s}\",\"vertices\":{d},\"faces\":{d},\"parts\":{d}}}",
+        .{ action_id, @intFromEnum(phase), label, before_vertices, before_vertices / 3, before_parts },
+    ) catch return;
+    var after_buf: [320]u8 = undefined;
+    const after = std.fmt.bufPrint(
+        &after_buf,
+        "{{\"version\":1,\"stream\":\"journal\",\"actionId\":{d},\"phase\":{d},\"label\":\"{s}\",\"vertices\":{d},\"faces\":{d},\"parts\":{d},\"generation\":{d}}}",
+        .{ action_id, @intFromEnum(phase), label, after_vertices, after_vertices / 3, after_parts, g_edit_generation },
+    ) catch return;
+    g_follow_action_queue.append(
+        jalloc,
+        raw_kind,
+        @intFromEnum(g_mesh_action_source),
+        before,
+        after,
+    ) catch {};
+}
+
 pub fn meshActionSourceSet(raw: u8) void {
     g_mesh_action_source = std.enums.fromInt(mesh_journal_log.ActionSource, raw) orelse .native;
 }
@@ -4323,6 +4422,11 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
     }
     if (e.atlas) |atlas| n += atlas.rgba.len;
     if (e.paint_state) |paint_state| n += paint_program.journalStateBytes(paint_state);
+    if (e.retopo_guide) |guide| {
+        n += guide.live_bands.len * @sizeOf(u16);
+        n += guide.source_positions.len * @sizeOf(f32);
+        n += guide.source_bands.len * @sizeOf(u16);
+    }
     if (e.note) |note| n += note.len;
     return n;
 }
@@ -4348,6 +4452,7 @@ fn journalFreeEntry(e: *JournalEntry) void {
     if (e.hidden.len > 0) jalloc.free(e.hidden);
     if (e.atlas) |atlas| jalloc.free(atlas.rgba);
     if (e.paint_state) |paint_state| paint_program.journalStateFree(paint_state);
+    if (e.retopo_guide) |*guide| guide.deinit(jalloc);
     if (e.note) |n| jalloc.free(n);
 }
 
@@ -4376,6 +4481,7 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .hidden = &.{},
         .atlas = null,
         .paint_state = null,
+        .retopo_guide = null,
         .paint_layout_stale = g_paint_layout_stale,
         .paint_layout_revision = model_paint.layoutRevision(),
         .note = null,
@@ -4384,7 +4490,7 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .action_kind = null,
     };
     const restore_domain = mesh_journal_log.restoreDomainForLabel(label);
-    if (restore_domain == .atlas) {
+    if (restore_domain == .atlas or restore_domain == .paint) {
         const atlas = model_paint.atlas() orelse {
             journalFreeEntry(&entry);
             return null;
@@ -4399,7 +4505,7 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         };
         entry.atlas = .{ .rgba = rgba, .w = atlas.w, .h = atlas.h };
     }
-    if (restore_domain == .uv or restore_domain == .atlas) {
+    if (restore_domain == .uv or restore_domain == .atlas or restore_domain == .paint) {
         entry.paint_state = (if (new_document_action)
             paint_program.journalStateCaptureForNewAction()
         else
@@ -4414,6 +4520,12 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
     if (model_source.faceSemanticInstances()) |rows| entry.semantic_instances = jalloc.dupe(u32, rows) catch null;
     if (model_source.semanticTableJson()) |json| entry.semantic_table_json = jalloc.dupe(u8, json) catch null;
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
+    if (meshRetopoGuideSnapshot()) |guide| {
+        entry.retopo_guide = cloneRetopoGuide(guide) orelse {
+            journalFreeEntry(&entry);
+            return null;
+        };
+    }
     entry.colors = collectCurrentFaceColors();
     if (g_hidden_groups.items.len > 0) {
         var hs: std.ArrayListUnmanaged(JournalHidden) = .empty;
@@ -4656,11 +4768,13 @@ fn meshIntegrityCheck(context: []const u8, act: bool) bool {
 fn journalCommit(snap: *?JournalEntry) void {
     var e = snap.* orelse return;
     snap.* = null;
+    var follow_kind: u8 = 255; // unmapped journal labels still belong in the firehose
+    g_mesh_action_seq +%= 1;
+    if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
+    e.action_id = g_mesh_action_seq;
     if (mesh_journal_log.actionKindForLabel(e.label)) |kind| {
+        follow_kind = @intFromEnum(kind);
         if (mesh_journal_log.actionInvalidatesPaintLayout(kind)) g_paint_layout_stale = true;
-        g_mesh_action_seq +%= 1;
-        if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
-        e.action_id = g_mesh_action_seq;
         e.action_kind = kind;
         enqueueMeshAction(
             e.action_id,
@@ -4672,6 +4786,16 @@ fn journalCommit(snap: *?JournalEntry) void {
             currentPartCount(),
         );
     }
+    enqueueFollowJournalAction(
+        e.action_id,
+        follow_kind,
+        .applied,
+        e.label,
+        e.count,
+        g_edit_count,
+        partCountFromRanges(e.part_ranges),
+        currentPartCount(),
+    );
     armIntegrityRollCall(e.label);
     journalFreeStack(&g_journal_redo);
     g_journal_undo.append(jalloc, e) catch {
@@ -4703,10 +4827,22 @@ fn journalDropLast() void {
     if (g_journal_undo.items.len == 0) return;
     var e = g_journal_undo.items[g_journal_undo.items.len - 1];
     g_journal_undo.items.len -= 1;
-    if (e.action_kind) |kind| enqueueMeshAction(
+    if (e.action_kind) |kind| {
+        enqueueMeshAction(
+            e.action_id,
+            kind,
+            .undone,
+            g_edit_count,
+            e.count,
+            currentPartCount(),
+            partCountFromRanges(e.part_ranges),
+        );
+    }
+    enqueueFollowJournalAction(
         e.action_id,
-        kind,
+        if (e.action_kind) |kind| @intFromEnum(kind) else 255,
         .undone,
+        e.label,
         g_edit_count,
         e.count,
         currentPartCount(),
@@ -4801,6 +4937,11 @@ fn journalCurrentStateBytes(groups: ?[]const u32) usize {
         bytes += (hidden.semantic_regions.len + hidden.semantic_instances.len) * @sizeOf(u32);
     }
     if (g_journal_note) |note| bytes += note.len;
+    if (meshRetopoGuideSnapshot()) |guide| {
+        bytes += guide.live_bands.len * @sizeOf(u16);
+        bytes += guide.source_positions.len * @sizeOf(f32);
+        bytes += guide.source_bands.len * @sizeOf(u16);
+    }
     return bytes;
 }
 
@@ -4934,12 +5075,38 @@ fn journalInstallAtlas(e: *const JournalEntry) bool {
     return true;
 }
 
+/// Selection paint owns three synchronized truths: the exact raster, the
+/// replayable paint program, and source-face RGB used by later quality changes.
+/// Texture import restores only the first two; this domain restores all three.
+fn journalInstallPaint(e: *const JournalEntry) bool {
+    const atlas = e.atlas orelse return false;
+    if (e.count != g_edit_count) return false;
+    const retained_state = e.paint_state orelse return false;
+    const paint_state = paint_program.journalStateClone(retained_state) orelse return false;
+    if (!resizePaintAtlas(atlas.rgba, atlas.w, atlas.h)) {
+        paint_program.journalStateFree(paint_state);
+        return false;
+    }
+    paint_program.journalStateAdopt(paint_state);
+    if (e.colors) |colors| restoreFaceColorMetadata(colors);
+    g_paint_layout_stale = e.paint_layout_stale;
+    return true;
+}
+
+fn journalInstallRetopoGuide(e: *const JournalEntry) bool {
+    if (e.retopo_guide) |*guide| return meshRetopoGuideRestore(guide.view());
+    _ = clearRetopoBandPreview();
+    return true;
+}
+
 /// Install a snapshot as the live mesh (the undo/redo restore path). The entry's
 /// buffers stay owned by the caller — every adopt below copies.
 fn journalInstall(e: *const JournalEntry) bool {
     switch (mesh_journal_log.restoreDomainForLabel(e.label)) {
         .uv => return journalInstallUv(e),
         .atlas => return journalInstallAtlas(e),
+        .paint => return journalInstallPaint(e),
+        .retopo_guide => return journalInstallRetopoGuide(e),
         .mesh => {},
     }
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
@@ -5076,7 +5243,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     _ = ensureDisjointPartRanges("undo/redo restore");
     if (e.count > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     g_paint_layout_stale = e.paint_layout_stale;
-    return true;
+    return journalInstallRetopoGuide(e);
 }
 
 fn journalStep(from_undo: bool) bool {
@@ -5097,10 +5264,23 @@ fn journalStep(from_undo: bool) bool {
         journalFreeEntry(&c);
         return false;
     }
-    if (entry.action_kind) |kind| enqueueMeshAction(
+    const phase: mesh_journal_log.ActionPhase = if (from_undo) .undone else .redone;
+    if (entry.action_kind) |kind| {
+        enqueueMeshAction(
+            entry.action_id,
+            kind,
+            phase,
+            current.count,
+            entry.count,
+            partCountFromRanges(current.part_ranges),
+            partCountFromRanges(entry.part_ranges),
+        );
+    }
+    enqueueFollowJournalAction(
         entry.action_id,
-        kind,
-        if (from_undo) .undone else .redone,
+        if (entry.action_kind) |kind| @intFromEnum(kind) else 255,
+        phase,
+        entry.label,
         current.count,
         entry.count,
         partCountFromRanges(current.part_ranges),
@@ -6721,7 +6901,224 @@ pub fn meshEditGuardResolve(action: u8) bool {
 // gate + tool read; the gesture state itself lives in the engine event loop.
 var g_me_capture: bool = false;
 var g_me_focus_tool: bool = false;
+// Whole-mesh retopology teaching map. It never mutates atlas, material,
+// semantics, journal, or mesh geometry, but its exact membership and frozen
+// source are durable model-package authoring data.
+var g_retopo_band_plan: ?mesh_edit.RetopoBandPlan = null;
+// User-authored counterpart to the planner. Unassigned triangles retain the
+// ordinary face wash; assigned values are exact temporary masks the Seat can
+// read and reselect later.
+var g_retopo_manual_bands: ?[]u16 = null;
+const RetopoSourceGhost = struct {
+    positions: []f32,
+    bands: []u16,
+    generation: u32,
+    visible: bool = false,
+
+    fn deinit(self: *RetopoSourceGhost) void {
+        std.heap.c_allocator.free(self.positions);
+        std.heap.c_allocator.free(self.bands);
+        self.* = undefined;
+    }
+};
+// Frozen source soup captured when the teaching map begins. Unlike the live
+// manual labels, this geometry never follows topology edits: it is the visual
+// before-image used to judge whether the finished retopology retained the form.
+var g_retopo_source_ghost: ?RetopoSourceGhost = null;
+// Delete Faces followed by Create Face is the retopology primitive the teaching
+// workflow repeats. Remember a uniformly tinted deleted patch for exactly the
+// resulting mesh generation, so its replacement quad inherits the same band.
+var g_retopo_pending_band: u16 = mesh_edit.RETOPO_BAND_UNASSIGNED;
+var g_retopo_pending_band_generation: u32 = 0;
 const GizmoTool = enum(u8) { move = 0, scale = 1, rotate = 2 };
+
+const RETOPO_BAND_TINT_ALPHA: f32 = 0.42;
+const RETOPO_GHOST_TINT_ALPHA: f32 = 0.22;
+const RETOPO_BAND_PALETTE = [12][3]f32{
+    .{ 0.96, 0.30, 0.24 }, .{ 0.20, 0.62, 0.96 }, .{ 0.98, 0.72, 0.16 },
+    .{ 0.34, 0.78, 0.42 }, .{ 0.70, 0.36, 0.94 }, .{ 0.96, 0.44, 0.72 },
+    .{ 0.18, 0.78, 0.78 }, .{ 0.92, 0.52, 0.18 }, .{ 0.46, 0.54, 0.96 },
+    .{ 0.68, 0.78, 0.20 }, .{ 0.88, 0.30, 0.48 }, .{ 0.28, 0.72, 0.62 },
+};
+
+fn cloneRetopoGuide(guide: mesh_edit.RetopoGuide) ?mesh_edit.OwnedRetopoGuide {
+    const live_bands = jalloc.dupe(u16, guide.live_bands) catch return null;
+    const source_positions = jalloc.dupe(f32, guide.source_positions) catch {
+        jalloc.free(live_bands);
+        return null;
+    };
+    const source_bands = jalloc.dupe(u16, guide.source_bands) catch {
+        jalloc.free(live_bands);
+        jalloc.free(source_positions);
+        return null;
+    };
+    return .{
+        .live_bands = live_bands,
+        .source_positions = source_positions,
+        .source_bands = source_bands,
+        .ghost_visible = guide.ghost_visible,
+        .source_tracks_live = guide.source_tracks_live,
+    };
+}
+
+fn restoreRetopoGuideAndDiscard(snap: *?JournalEntry) void {
+    if (snap.*) |*entry| _ = journalInstallRetopoGuide(entry);
+    journalDiscard(snap);
+}
+
+fn retopoBandColor(id: u16) [3]f32 {
+    return RETOPO_BAND_PALETTE[@as(usize, id) % RETOPO_BAND_PALETTE.len];
+}
+
+fn clearRetopoBandPlan() bool {
+    if (g_retopo_band_plan) |*plan| plan.deinit(std.heap.c_allocator) else return false;
+    g_retopo_band_plan = null;
+    return true;
+}
+
+fn clearRetopoManualBands() bool {
+    g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
+    g_retopo_pending_band_generation = 0;
+    if (g_retopo_manual_bands) |labels| std.heap.c_allocator.free(labels) else return false;
+    g_retopo_manual_bands = null;
+    return true;
+}
+
+fn clearRetopoSourceGhost() bool {
+    if (g_retopo_source_ghost) |*ghost| ghost.deinit() else return false;
+    g_retopo_source_ghost = null;
+    return true;
+}
+
+fn captureRetopoSourceGhost(initial_bands: []const u16) bool {
+    const positions = model_paint.positions() orelse return false;
+    const face_count: usize = @intCast(model_paint.faceCount());
+    if (face_count == 0 or initial_bands.len != face_count or positions.len < face_count * 9) return false;
+    const frozen_positions = std.heap.c_allocator.dupe(f32, positions[0 .. face_count * 9]) catch return false;
+    const frozen_bands = std.heap.c_allocator.dupe(u16, initial_bands) catch {
+        std.heap.c_allocator.free(frozen_positions);
+        return false;
+    };
+    _ = clearRetopoSourceGhost();
+    g_retopo_source_ghost = .{
+        .positions = frozen_positions,
+        .bands = frozen_bands,
+        .generation = g_edit_generation,
+    };
+    return true;
+}
+
+fn ensureRetopoSourceGhost(face_count: usize) bool {
+    if (g_retopo_source_ghost) |*ghost| {
+        return mesh_edit.retopoSourceGhostTracks(ghost.generation, g_edit_generation, ghost.bands.len, face_count);
+    }
+    const empty = std.heap.c_allocator.alloc(u16, face_count) catch return false;
+    defer std.heap.c_allocator.free(empty);
+    @memset(empty, mesh_edit.RETOPO_BAND_UNASSIGNED);
+    return captureRetopoSourceGhost(empty);
+}
+
+fn prepareRetopoBandInheritance(source_faces: []const u32) ?[]u16 {
+    const current = g_retopo_manual_bands orelse return null;
+    const next = std.heap.c_allocator.alloc(u16, source_faces.len) catch return null;
+    if (!mesh_edit.inheritRetopoManualBands(current, source_faces, next)) {
+        std.heap.c_allocator.free(next);
+        return null;
+    }
+    return next;
+}
+
+fn prepareRetopoBandCompaction(removed: []const bool, kept_faces: usize) ?[]u16 {
+    const current = g_retopo_manual_bands orelse return null;
+    const next = std.heap.c_allocator.alloc(u16, kept_faces) catch return null;
+    if (!mesh_edit.compactRetopoManualBands(current, removed, next)) {
+        std.heap.c_allocator.free(next);
+        return null;
+    }
+    return next;
+}
+
+fn prepareRetopoBandAppend(old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
+    const current = g_retopo_manual_bands orelse return null;
+    if (current.len != old_faces) return null;
+    const next = std.heap.c_allocator.alloc(u16, old_faces + added_faces) catch return null;
+    @memcpy(next[0..old_faces], current);
+    @memset(next[old_faces..], inherited);
+    return next;
+}
+
+/// Commit a prepared overlay only after the geometry + metadata transaction has
+/// succeeded. Allocation failure degrades to clearing view state; it must never
+/// reject or roll back authored geometry.
+fn commitRetopoBandCarry(had_manual: bool, prepared: *?[]u16) void {
+    if (!had_manual) return;
+    if (g_retopo_manual_bands) |old| std.heap.c_allocator.free(old);
+    g_retopo_manual_bands = prepared.*;
+    prepared.* = null;
+    _ = clearRetopoBandPlan();
+}
+
+fn clearRetopoBandPreview() bool {
+    const planned = clearRetopoBandPlan();
+    const manual = clearRetopoManualBands();
+    const ghost = clearRetopoSourceGhost();
+    return planned or manual or ghost;
+}
+
+/// Package persistence view of the teaching map. Planner output is intentionally
+/// flattened to the same exact per-face labels as a manual map: cold continuation
+/// needs the authored membership and frozen source, not the algorithm that first
+/// proposed it.
+pub fn meshRetopoGuideSnapshot() ?mesh_edit.RetopoGuide {
+    const live_bands = if (g_retopo_manual_bands) |bands|
+        bands
+    else if (g_retopo_band_plan) |*plan|
+        plan.faces
+    else
+        return null;
+    const ghost = if (g_retopo_source_ghost) |*value| value else return null;
+    if (live_bands.len != model_paint.faceCount() or ghost.bands.len == 0 or ghost.positions.len != ghost.bands.len * 9) return null;
+    return .{
+        .live_bands = live_bands,
+        .source_positions = ghost.positions,
+        .source_bands = ghost.bands,
+        .ghost_visible = ghost.visible,
+        .source_tracks_live = mesh_edit.retopoSourceGhostTracks(ghost.generation, g_edit_generation, ghost.bands.len, live_bands.len),
+    };
+}
+
+/// Restore one validated package guide after the document mesh has loaded. The
+/// live labels must match that exact saved topology; the frozen source may retain
+/// the denser pre-retopology soup. Install everything or nothing.
+pub fn meshRetopoGuideRestore(guide: mesh_edit.RetopoGuide) bool {
+    const face_count: usize = @intCast(model_paint.faceCount());
+    if (face_count == 0 or guide.live_bands.len != face_count or
+        guide.source_bands.len == 0 or guide.source_positions.len != guide.source_bands.len * 9) return false;
+    const live_bands = std.heap.c_allocator.dupe(u16, guide.live_bands) catch return false;
+    const source_bands = std.heap.c_allocator.dupe(u16, guide.source_bands) catch {
+        std.heap.c_allocator.free(live_bands);
+        return false;
+    };
+    const source_positions = std.heap.c_allocator.dupe(f32, guide.source_positions) catch {
+        std.heap.c_allocator.free(live_bands);
+        std.heap.c_allocator.free(source_bands);
+        return false;
+    };
+
+    _ = clearRetopoBandPreview();
+    g_retopo_manual_bands = live_bands;
+    g_retopo_source_ghost = .{
+        .positions = source_positions,
+        .bands = source_bands,
+        // A guide captured before editing may keep accepting manual tint updates
+        // after restart. Once topology froze the source, preserve that immutability.
+        .generation = if (guide.source_tracks_live) g_edit_generation else g_edit_generation +% 1,
+        .visible = guide.ghost_visible,
+    };
+    g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
+    g_retopo_pending_band_generation = 0;
+    return true;
+}
 var g_gizmo_tool: GizmoTool = .move;
 pub fn setMeshEditCapture(on: bool) void {
     g_me_capture = on;
@@ -7946,6 +8343,67 @@ fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         polys.drawTri(a[0], a[1], bb[0], bb[1], cc[0], cc[1], col[0], col[1], col[2], col[3]);
     }
 }
+
+/// Whole-model band map. This intentionally replaces the ordinary blue/orange face
+/// wash while active so selecting every face cannot hide the plan under one colour.
+fn drawRetopoBandOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const planned = if (g_retopo_band_plan) |*value| value.faces else null;
+    const manual = g_retopo_manual_bands;
+    if (planned == null and manual == null) return;
+    const pos = model_paint.positions() orelse return;
+    const fc = model_paint.faceCount();
+    const labels = planned orelse manual.?;
+    if (fc == 0 or fc > OV_MAX_FACE_TINT or labels.len != fc) return;
+    var face: u32 = 0;
+    while (face < fc) : (face += 1) {
+        // A retopology map is explicitly a WHOLE-resident-mesh review surface.
+        // Active Outliner scope still gates edits, but must not hide planned faces.
+        const base = @as(usize, face) * 9;
+        if (base + 8 >= pos.len) break;
+        const p0: [3]f32 = .{ pos[base], pos[base + 1], pos[base + 2] };
+        const p1: [3]f32 = .{ pos[base + 3], pos[base + 4], pos[base + 5] };
+        const p2: [3]f32 = .{ pos[base + 6], pos[base + 7], pos[base + 8] };
+        const normal = vcross(vsub(p1, p0), vsub(p2, p0));
+        const centroid = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
+        if (!mesh_edit.xray() and vdot(normal, vsub(cam.eye, centroid)) <= 0) continue;
+        const a = ovProject(cam, p0, ox, oy) orelse continue;
+        const b = ovProject(cam, p1, ox, oy) orelse continue;
+        const c = ovProject(cam, p2, ox, oy) orelse continue;
+        const label = labels[face];
+        if (label != mesh_edit.RETOPO_BAND_UNASSIGNED) {
+            const color = retopoBandColor(label);
+            polys.drawTri(a[0], a[1], b[0], b[1], c[0], c[1], color[0], color[1], color[2], RETOPO_BAND_TINT_ALPHA);
+        } else {
+            const selected = mesh_edit.faceSelectedPub(face);
+            const col = if (selected) OV_FACE_TINT_SEL else if (model_paint.faceIsGlass(face)) OV_FACE_TINT_GLASS else OV_FACE_TINT;
+            polys.drawTri(a[0], a[1], b[0], b[1], c[0], c[1], col[0], col[1], col[2], col[3]);
+        }
+    }
+}
+
+/// Frozen before-image of the imported soup. It is projected in screen space over
+/// the live mesh, so coincident areas reinforce while silhouette/curvature drift
+/// visibly separates from the replacement surface. Only explicitly mapped source
+/// faces draw; unfinished teaching coverage stays honest instead of becoming gray.
+fn drawRetopoSourceGhost(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const ghost = if (g_retopo_source_ghost) |*value| value else return;
+    if (!ghost.visible or ghost.bands.len == 0 or ghost.bands.len > OV_MAX_FACE_TINT or ghost.positions.len < ghost.bands.len * 9) return;
+    for (ghost.bands, 0..) |label, face| {
+        if (label == mesh_edit.RETOPO_BAND_UNASSIGNED) continue;
+        const base = face * 9;
+        const p0: [3]f32 = .{ ghost.positions[base], ghost.positions[base + 1], ghost.positions[base + 2] };
+        const p1: [3]f32 = .{ ghost.positions[base + 3], ghost.positions[base + 4], ghost.positions[base + 5] };
+        const p2: [3]f32 = .{ ghost.positions[base + 6], ghost.positions[base + 7], ghost.positions[base + 8] };
+        const normal = vcross(vsub(p1, p0), vsub(p2, p0));
+        const centroid = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
+        if (!mesh_edit.xray() and vdot(normal, vsub(cam.eye, centroid)) <= 0) continue;
+        const a = ovProject(cam, p0, ox, oy) orelse continue;
+        const b = ovProject(cam, p1, ox, oy) orelse continue;
+        const c = ovProject(cam, p2, ox, oy) orelse continue;
+        const color = retopoBandColor(label);
+        polys.drawTri(a[0], a[1], b[0], b[1], c[0], c[1], color[0], color[1], color[2], RETOPO_GHOST_TINT_ALPHA);
+    }
+}
 const FaceDotAcc = struct { cen: [3]f32, nrm: [3]f32, w: f32, sel: bool, glass: bool };
 /// Face-mode centroid dots — the old studio's signature look: one small dot per AUTHORED
 /// face (a cube face reads as one dot, not two triangle dots), front-facing only.
@@ -8383,8 +8841,18 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // Layer 2 (capsules): tile grid + fine center sub-grid + world axes.
     drawStageLines(cam, ox, oy);
     overlayLayerBreak(ox, oy);
-    // Layer 3 (polys): face-mode translucent wash.
-    if (mode == 3) drawFaceTintOverlay(cam, ox, oy);
+    // Layer 3 (polys): an explicit whole-mesh retopo plan wins over ordinary
+    // selection wash, including when every face is selected for review.
+    const source_ghost_visible = if (g_retopo_source_ghost) |*ghost| ghost.visible else false;
+    if (!g_paint_session and source_ghost_visible) {
+        // Ghost review replaces the moving tint wash: the ordinary current mesh
+        // remains underneath while only the frozen before-image is colored.
+        drawRetopoSourceGhost(cam, ox, oy);
+    } else if (!g_paint_session and (g_retopo_band_plan != null or g_retopo_manual_bands != null)) {
+        drawRetopoBandOverlay(cam, ox, oy);
+    } else if (mode == 3) {
+        drawFaceTintOverlay(cam, ox, oy);
+    }
     overlayLayerBreak(ox, oy);
     // Layer 4 (capsules): edges, dots, loop-cut accents, gizmo, marquee.
     if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam)) {
@@ -8663,6 +9131,21 @@ const SemanticPerceptAggregate = struct {
 /// Cheap cold-agent percept: stable semantic ids grouped with counts, distinct
 /// instances, and exact model-space bounds. The versioned name table is embedded
 /// verbatim, making this sufficient to resume with an empty context window.
+/// The last audit and the topology generation it describes. The percept is read
+/// several times per edit (and every seat reply carries one), so the facts are counted
+/// once per generation and handed back unchanged until the mesh actually changes.
+var g_audit_facts: mesh_audit.Facts = .{};
+var g_audit_generation: ?u32 = null;
+
+fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: u32) mesh_audit.Facts {
+    if (g_audit_generation) |generation| {
+        if (generation == g_edit_generation) return g_audit_facts;
+    }
+    g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{});
+    g_audit_generation = g_edit_generation;
+    return g_audit_facts;
+}
+
 pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     const verts = g_edit_verts orelse return null;
     const regions = model_source.faceSemanticRegions();
@@ -8720,20 +9203,34 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     }
     std.mem.sort(u32, ids, {}, std.sort.asc(u32));
 
+    // Hard geometric facts, reported and never enforced (req_3749). `auditComputed`
+    // false means the mesh was over budget: the counts are unmeasured, NOT zero, and
+    // the reader must say so rather than imply a clean model.
+    const facts = meshAuditFacts(allocator, verts, @intCast(face_count));
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    var head_buf: [256]u8 = undefined;
-    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"hiddenFaces\":{d},\"hiddenNamedFaces\":{d},\"hiddenRegions\":{d},\"regions\":[", .{
-        g_edit_generation, face_count, unnamed, hidden_faces, hidden_named_faces, hidden_region_ids.count(),
+    var head_buf: [384]u8 = undefined;
+    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"hiddenFaces\":{d},\"hiddenNamedFaces\":{d},\"hiddenRegions\":{d},\"auditComputed\":{s},\"intersectingFaces\":{d},\"unreachableFaces\":{d},\"auditDirections\":{d},\"regions\":[", .{
+        g_edit_generation,
+        face_count,
+        unnamed,
+        hidden_faces,
+        hidden_named_faces,
+        hidden_region_ids.count(),
+        if (facts.computed) "true" else "false",
+        facts.intersecting,
+        facts.unreachable_faces,
+        facts.directions,
     }) catch return null;
     out.appendSlice(allocator, head) catch return null;
     for (ids, 0..) |id, index| {
         const aggregate = aggregates.get(id) orelse continue;
         var row_buf: [320]u8 = undefined;
-        const row = std.fmt.bufPrint(&row_buf,
+        const row = std.fmt.bufPrint(
+            &row_buf,
             "{s}{{\"id\":{d},\"faces\":{d},\"instances\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
-            .{ if (index == 0) "" else ",", id, aggregate.faces, aggregate.instances,
-                aggregate.min[0], aggregate.min[1], aggregate.min[2], aggregate.max[0], aggregate.max[1], aggregate.max[2] },
+            .{ if (index == 0) "" else ",", id, aggregate.faces, aggregate.instances, aggregate.min[0], aggregate.min[1], aggregate.min[2], aggregate.max[0], aggregate.max[1], aggregate.max[2] },
         ) catch return null;
         out.appendSlice(allocator, row) catch return null;
     }
@@ -8927,7 +9424,25 @@ pub fn meshEditSetPartRanges(pairs: []const u32) void {
     if (pairs.len < 2 and model_source.partRanges() != null) {
         log.print("[mesh] part ranges CLEARED by an empty cart push over a mesh that had {d} parts — if unintended this is the req_3049 merged-outliner save corruption\n", .{model_source.partRanges().?.len / 2});
     }
-    model_source.setPartRanges(pairs);
+    // One-part recovery is exact, not a guess: a fresh Create Face group cannot
+    // belong anywhere else. Older/hot sessions could re-push the pre-op [lo,hi)
+    // and strand that face outside the edit scope; the next save then refused
+    // because the part owned N-1/N faces. Heal that stale mirror at its boundary.
+    var healed: [2]u32 = undefined;
+    var installed = pairs;
+    if (pairs.len == 2) {
+        if (captureFaceGroups()) |groups| {
+            defer std.heap.c_allocator.free(groups);
+            if (mesh_journal_log.healedSinglePartRange(groups, pairs)) |range| {
+                healed = range;
+                installed = healed[0..];
+                log.print("[mesh] expanded the sole part range [{d},{d}) → [{d},{d}) to adopt freshly minted face groups\n", .{
+                    pairs[0], pairs[1], healed[0], healed[1],
+                });
+            }
+        }
+    }
+    model_source.setPartRanges(installed);
     _ = ensureDisjointPartRanges("cart range push");
     mesh_edit.reset();
 }
@@ -8969,14 +9484,19 @@ pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
 /// Journaled solid-colour fill of the current authored-face selection. This is
 /// the coordinate-free paint boundary used by automation: selection supplies the
 /// noun, RGB supplies the material fact, and no viewport raycast is involved.
-pub fn meshPaintSelection(r: u8, g: u8, b: u8) u32 {
+pub fn meshPaintSelection(io: std.Io, environ: *const std.process.Environ.Map, r: u8, g: u8, b: u8) u32 {
     if (g_paint_layout_stale or !model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
     const face_count = g_edit_count / 3;
     if (face_count == 0) return 0;
     const mask = jalloc.alloc(bool, face_count) catch return 0;
     defer jalloc.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
-    var snap = journalSnapshotCurrent("paint faces");
+    var snap = journalSnapshotForNewAction(mesh_journal_log.PAINT_FACES_LABEL);
+    if (snap == null or snap.?.atlas == null or snap.?.paint_state == null) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    paint_program.beginRecordedOp();
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     var painted: u32 = 0;
@@ -8984,9 +9504,15 @@ pub fn meshPaintSelection(r: u8, g: u8, b: u8) u32 {
         if (!selected) continue;
         model_paint.paintFaceRgb(@intCast(face), .{ r, g, b });
         model_source.writeColor(@intCast(face), r, g, b);
+        paint_program.recordFill(@intCast(face), false, .{ r, g, b });
         painted += 1;
     }
     if (painted == 0) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    if (!paintStrokeEnd(io, environ)) {
+        if (snap) |*entry| _ = journalInstall(entry);
         journalDiscard(&snap);
         return 0;
     }
@@ -9017,11 +9543,228 @@ pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
     while (edge < mesh_edit.edgeCount()) : (edge += 1) {
         if (!mesh_edit.edgeIsBoundaryPub(edge)) continue;
         const endpoints = mesh_edit.edgeEndpointsPub(edge);
-        writer.print("{s}{s}\"id\":{d},\"vertices\":[{d},{d}]}}", .{ if (emitted == 0) "" else ",", "{", edge, endpoints[0], endpoints[1] }) catch return null;
+        const incidence = mesh_edit.edgeFaceIncidencePub(edge);
+        const open = incidence == 1 and !mesh_edit.edgeIsWirePub(edge);
+        writer.print("{s}{s}\"id\":{d},\"vertices\":[{d},{d}],\"faces\":{d},\"open\":{s}}}", .{
+            if (emitted == 0) "" else ",", "{", edge, endpoints[0], endpoints[1], incidence, if (open) "true" else "false",
+        }) catch return null;
         emitted += 1;
     }
     writer.writeAll("]}") catch return null;
     return out.toOwnedSlice() catch null;
+}
+
+fn retopoBandPlanJson(allocator: std.mem.Allocator) ?[]u8 {
+    const plan = if (g_retopo_band_plan) |*value| value else return null;
+    if (plan.faces.len != model_paint.faceCount()) return null;
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    const axis_name: []const u8 = switch (plan.axis) {
+        0 => "x",
+        1 => "y",
+        else => "z",
+    };
+    const mode_name: []const u8 = if (plan.mode == .rails) "rails" else "axis";
+    writer.print("{{\"version\":1,\"mode\":\"{s}\",\"axis\":\"{s}\",\"width\":{d},\"origin\":{d},\"railSamples\":{d},\"faces\":{d},\"covered\":{d},\"bands\":[", .{
+        mode_name, axis_name, plan.width, plan.origin, plan.rail_samples, plan.faces.len, plan.faces.len,
+    }) catch return null;
+    for (plan.bands, 0..) |band, at| {
+        const color = retopoBandColor(band.id);
+        writer.print(
+            "{s}{{\"id\":{d},\"bucket\":{d},\"faces\":{d},\"range\":[{d},{d}],\"bbox\":[{d},{d},{d},{d},{d},{d}],\"color\":[{d},{d},{d}]}}",
+            .{ if (at == 0) "" else ",", band.id, band.bucket, band.faces, band.range[0], band.range[1], band.bbox[0], band.bbox[1], band.bbox[2], band.bbox[3], band.bbox[4], band.bbox[5], color[0], color[1], color[2] },
+        ) catch return null;
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
+}
+
+fn retopoManualBandsJson(allocator: std.mem.Allocator) ?[]u8 {
+    const labels = g_retopo_manual_bands orelse return null;
+    const positions = model_paint.positions() orelse return null;
+    const face_count = model_paint.faceCount();
+    if (labels.len != face_count or positions.len < labels.len * 9) return null;
+    var counts = [_]u32{0} ** RETOPO_BAND_PALETTE.len;
+    var bboxes: [RETOPO_BAND_PALETTE.len][6]f32 = undefined;
+    for (&bboxes) |*bbox| bbox.* = .{
+        std.math.inf(f32),  std.math.inf(f32),  std.math.inf(f32),
+        -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32),
+    };
+    var covered: u32 = 0;
+    for (labels, 0..) |label, face| {
+        if (label == mesh_edit.RETOPO_BAND_UNASSIGNED or label >= RETOPO_BAND_PALETTE.len) continue;
+        counts[label] += 1;
+        covered += 1;
+        const base = face * 9;
+        for (0..3) |corner| {
+            const at = base + corner * 3;
+            bboxes[label][0] = @min(bboxes[label][0], positions[at]);
+            bboxes[label][1] = @min(bboxes[label][1], positions[at + 1]);
+            bboxes[label][2] = @min(bboxes[label][2], positions[at + 2]);
+            bboxes[label][3] = @max(bboxes[label][3], positions[at]);
+            bboxes[label][4] = @max(bboxes[label][4], positions[at + 1]);
+            bboxes[label][5] = @max(bboxes[label][5], positions[at + 2]);
+        }
+    }
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.print("{{\"version\":1,\"mode\":\"manual\",\"axis\":\"y\",\"width\":0,\"origin\":0,\"railSamples\":0,\"faces\":{d},\"covered\":{d},\"bands\":[", .{ face_count, covered }) catch return null;
+    var emitted: u32 = 0;
+    for (counts, 0..) |count, id| {
+        if (count == 0) continue;
+        const color = retopoBandColor(@intCast(id));
+        const bbox = bboxes[id];
+        writer.print(
+            "{s}{{\"id\":{d},\"bucket\":{d},\"faces\":{d},\"range\":[0,0],\"bbox\":[{d},{d},{d},{d},{d},{d}],\"color\":[{d},{d},{d}]}}",
+            .{ if (emitted == 0) "" else ",", id, id, count, bbox[0], bbox[1], bbox[2], bbox[3], bbox[4], bbox[5], color[0], color[1], color[2] },
+        ) catch return null;
+        emitted += 1;
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
+}
+
+/// Build and install a complete, preview-only axis-band plan. Width is metres;
+/// origin may pin the phase to a user-approved strip.
+pub fn meshRetopoBandsPlanJson(allocator: std.mem.Allocator, axis: u8, width: f32, origin: ?f32) ?[]u8 {
+    const positions = model_paint.positions() orelse return null;
+    const plan = mesh_edit.planRetopoAxisBands(std.heap.c_allocator, positions, model_paint.faceCount(), axis, width, origin) catch return null;
+    var snap: ?JournalEntry = journalSnapshotCurrent(mesh_journal_log.RETOPO_GUIDE_PLAN_LABEL) orelse {
+        var rejected = plan;
+        rejected.deinit(std.heap.c_allocator);
+        return null;
+    };
+    defer journalDiscard(&snap);
+    _ = clearRetopoBandPreview();
+    if (!captureRetopoSourceGhost(plan.faces)) {
+        var rejected = plan;
+        rejected.deinit(std.heap.c_allocator);
+        restoreRetopoGuideAndDiscard(&snap);
+        return null;
+    }
+    g_retopo_band_plan = plan;
+    journalCommit(&snap);
+    return retopoBandPlanJson(allocator);
+}
+
+pub fn meshRetopoBandsPlanRailsJson(allocator: std.mem.Allocator, rail_pairs: []const f32) ?[]u8 {
+    const positions = model_paint.positions() orelse return null;
+    const plan = mesh_edit.planRetopoRailBands(std.heap.c_allocator, positions, model_paint.faceCount(), rail_pairs) catch return null;
+    var snap: ?JournalEntry = journalSnapshotCurrent(mesh_journal_log.RETOPO_GUIDE_PLAN_LABEL) orelse {
+        var rejected = plan;
+        rejected.deinit(std.heap.c_allocator);
+        return null;
+    };
+    defer journalDiscard(&snap);
+    _ = clearRetopoBandPreview();
+    if (!captureRetopoSourceGhost(plan.faces)) {
+        var rejected = plan;
+        rejected.deinit(std.heap.c_allocator);
+        restoreRetopoGuideAndDiscard(&snap);
+        return null;
+    }
+    g_retopo_band_plan = plan;
+    journalCommit(&snap);
+    return retopoBandPlanJson(allocator);
+}
+
+pub fn meshRetopoBandsReadJson(allocator: std.mem.Allocator) ?[]u8 {
+    return if (g_retopo_manual_bands != null) retopoManualBandsJson(allocator) else retopoBandPlanJson(allocator);
+}
+
+pub fn meshRetopoBandsClear() bool {
+    if (g_retopo_band_plan == null and g_retopo_manual_bands == null and g_retopo_source_ghost == null) return false;
+    var snap: ?JournalEntry = journalSnapshotCurrent(mesh_journal_log.RETOPO_GUIDE_CLEAR_LABEL) orelse return false;
+    defer journalDiscard(&snap);
+    if (!clearRetopoBandPreview()) return false;
+    journalCommit(&snap);
+    return true;
+}
+
+/// Show/hide the frozen source soup. `visible=null` toggles. Returns -1 when no
+/// teaching snapshot has been captured, otherwise the resulting 0/1 state.
+pub fn meshRetopoSourceGhostVisible(visible: ?bool) i32 {
+    const ghost = if (g_retopo_source_ghost) |*value| value else return -1;
+    const next = visible orelse !ghost.visible;
+    if (next == ghost.visible) return if (ghost.visible) 1 else 0;
+    var snap: ?JournalEntry = journalSnapshotCurrent(mesh_journal_log.RETOPO_GUIDE_GHOST_LABEL) orelse return -1;
+    defer journalDiscard(&snap);
+    ghost.visible = next;
+    journalCommit(&snap);
+    return if (ghost.visible) 1 else 0;
+}
+
+pub fn meshRetopoSourceGhostJson(allocator: std.mem.Allocator) ?[]u8 {
+    const ghost = if (g_retopo_source_ghost) |*value| value else return null;
+    const covered = mesh_edit.assignedRetopoBandCount(ghost.bands);
+    return std.fmt.allocPrint(allocator, "{{\"captured\":true,\"visible\":{s},\"faces\":{d},\"covered\":{d},\"generation\":{d}}}", .{
+        if (ghost.visible) "true" else "false",
+        ghost.bands.len,
+        covered,
+        ghost.generation,
+    }) catch null;
+}
+
+/// Assign the current face selection to one temporary manual band. `id=-1`
+/// erases those faces from the overlay. The selection is cleared afterward so
+/// the authored tint is immediately visible and the next band can be picked.
+pub fn meshRetopoBandTintSelection(id: i32) i32 {
+    if (id < -1 or id >= RETOPO_BAND_PALETTE.len or mesh_edit.mode() != .face) return -1;
+    const face_count: usize = @intCast(model_paint.faceCount());
+    if (face_count == 0) return -1;
+    const selected = std.heap.c_allocator.alloc(bool, face_count) catch return -1;
+    defer std.heap.c_allocator.free(selected);
+    const selected_count = mesh_edit.buildDeleteMask(selected);
+    if (selected_count == 0) return 0;
+
+    var snap: ?JournalEntry = journalSnapshotCurrent(mesh_journal_log.RETOPO_GUIDE_TINT_LABEL) orelse return -1;
+    defer journalDiscard(&snap);
+
+    if (g_retopo_manual_bands == null or g_retopo_manual_bands.?.len != face_count) {
+        _ = clearRetopoBandPreview();
+        const labels = std.heap.c_allocator.alloc(u16, face_count) catch {
+            restoreRetopoGuideAndDiscard(&snap);
+            return -1;
+        };
+        @memset(labels, mesh_edit.RETOPO_BAND_UNASSIGNED);
+        g_retopo_manual_bands = labels;
+    } else {
+        _ = clearRetopoBandPlan();
+    }
+    const ghost_tracks_source = ensureRetopoSourceGhost(face_count);
+    if (g_retopo_source_ghost == null) {
+        restoreRetopoGuideAndDiscard(&snap);
+        return -1;
+    }
+    const labels = g_retopo_manual_bands.?;
+    const band = if (id < 0) null else @as(u16, @intCast(id));
+    const changed = mesh_edit.assignRetopoManualBand(labels, selected, band);
+    if (ghost_tracks_source) {
+        if (g_retopo_source_ghost) |*ghost| _ = mesh_edit.assignRetopoManualBand(ghost.bands, selected, band);
+    }
+    mesh_edit.clearSelection();
+    if (changed == 0) {
+        restoreRetopoGuideAndDiscard(&snap);
+        return 0;
+    }
+    journalCommit(&snap);
+    return @intCast(changed);
+}
+
+/// Select one mapped band, or every mapped face for id=-1. The same resident
+/// triangle mask powers both the visible selection and subsequent modeling verbs.
+pub fn meshRetopoBandSelect(id: i32) i32 {
+    const labels = if (g_retopo_manual_bands) |value| value else if (g_retopo_band_plan) |*value| value.faces else return -1;
+    if (labels.len != model_paint.faceCount()) return -1;
+    const mask = std.heap.c_allocator.alloc(bool, labels.len) catch return -1;
+    defer std.heap.c_allocator.free(mask);
+    for (labels, 0..) |band, face| {
+        mask[face] = band != mesh_edit.RETOPO_BAND_UNASSIGNED and (id < 0 or band == @as(u16, @intCast(id)));
+    }
+    _ = mesh_edit.selectFacesByTriangleMask(mask);
+    return @intCast(mesh_edit.buildDeleteMask(mask));
 }
 
 /// Read-only local topology patch for Agent Seat Follow demonstrations. Null
@@ -9040,6 +9783,7 @@ pub fn meshFollowActionDrainJson(allocator: std.mem.Allocator) ?[]u8 {
     return g_follow_action_queue.drainJson(allocator) catch null;
 }
 pub fn meshEditReset() void {
+    _ = clearRetopoBandPreview();
     mesh_edit.reset();
 }
 /// Authored topology + selection counts for the HUD: {mode, verts, editable edges,

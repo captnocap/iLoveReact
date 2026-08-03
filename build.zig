@@ -1602,6 +1602,30 @@ pub fn build(b: *std.Build) void {
     const game_mesh_collision_test_step = b.step("test-game-mesh-collision", "Run exact resident-mesh collision tests");
     game_mesh_collision_test_step.dependOn(&run_game_mesh_collision_test.step);
 
+    // ── Mesh audit facts (req_3749) ────────────────────────────────
+    // framework/gpu/mesh_audit.zig counts penetrating and unreachable
+    // triangles for the seat percept. Pure math over the resident vertex
+    // buffer — no GPU, no SDL, no V8 — so it tests standalone.
+    const mesh_audit_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_audit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const mesh_audit_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_audit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_audit_test_mod.addImport("mesh_audit", mesh_audit_mod_for_tests);
+    const mesh_audit_test = b.addTest(.{
+        .name = "mesh-audit-test",
+        .root_module = mesh_audit_test_mod,
+    });
+    const run_mesh_audit_test = b.addRunArtifact(mesh_audit_test);
+    const mesh_audit_test_step = b.step("test-mesh-audit", "Run penetrating/unreachable triangle fact tests");
+    mesh_audit_test_step.dependOn(&run_mesh_audit_test.step);
+
     // ── Game pathing behavior tests (V5 capture, P4) ───────────────
     // Exercises framework/game/pathing.zig: routes found/blocked/
     // deterministic, flow + lane discipline (trio snap, junction apexes),

@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -777,6 +777,26 @@ test('percept leads with authored faces and names triangle soup out loud', () =>
   const unknown = formatSeatPercept({ ...percept, faces: 132, authoredFaces: null });
   assert(unknown.includes('authored faces unknown'), 'an unobservable grouping must not read as a count');
   assert(!unknown.includes('TRIANGLE SOUP'), 'unknown grouping must never be reported as soup');
+});
+
+test('geometry facts ride every reply and never invent a clean zero', () => {
+  const measured = { ...percept, faces: 2046, auditComputed: true, intersectingFaces: 402, unreachableFaces: 895, auditDirections: 42 };
+  const line = formatGeometryFacts(measured);
+  assert(line.includes('402 triangles pass through other triangles'), `penetration count missing: ${line}`);
+  assert(line.includes('895 unreachable') && line.includes('44%'), `unreachable count/share missing: ${line}`);
+
+  const clean = formatGeometryFacts({ ...percept, auditComputed: true, intersectingFaces: 0, unreachableFaces: 0, auditDirections: 42 });
+  assert(clean === 'geometry \u00b7 0 intersecting \u00b7 0 unreachable', `clean model was not reported plainly: ${clean}`);
+
+  // Over budget must never read as clean — that is the one way this lies.
+  const skipped = formatGeometryFacts({ ...percept, auditComputed: false, intersectingFaces: 0, unreachableFaces: 0 });
+  assert(skipped.includes('NOT MEASURED') && !skipped.includes('0 intersecting'), `over-budget was reported as clean: ${skipped}`);
+
+  const old = formatGeometryFacts({ ...percept });
+  assert(old.includes('host predates'), `pre-audit host was not distinguished: ${old}`);
+
+  // And it must actually appear in the readout an agent sees on every operation.
+  assert(formatSeatPercept(measured).includes('402 triangles pass through'), 'facts absent from the per-operation readout');
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);
