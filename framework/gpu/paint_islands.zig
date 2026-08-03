@@ -13,9 +13,10 @@
 //!   • island size = the face's PHYSICAL footprint × density (texels per meter) —
 //!     Blockbench semantics, where 16x means 16 texels to the meter, so a big sign
 //!     face gets the texels to write words on;
-//!   • box projection along the face's dominant normal axis (drop that coordinate,
-//!     fixed (u,v) order so same-axis faces align), deterministic shelf packing
-//!     (tallest first, near-square target) — same mesh, same layout, every time;
+//!   • intrinsic planar projection in each authored chart's own geometric basis —
+//!     equal physical faces keep equal texel density regardless of world rotation;
+//!   • deterministic shelf packing (tallest first, near-square target) — same mesh,
+//!     same layout, every time;
 //!   • ungrouped triangles (raw imports) each become their own island through the
 //!     SAME path — they still get area-proportional texels, no special grid.
 //!
@@ -33,19 +34,26 @@ pub const PAD_TEXELS: u32 = 2;
 /// value exactly; it is a corruption limit, not a finite canvas boundary.
 pub const MAX_SIGNED_UV_TEXELS: f32 = 16_777_216.0;
 
-// Two authored faces become one UV island when they share a real mesh edge and
-// PROJECT the same way — same dominant normal axis, same sign (req_3426, the
-// Blockbench island rule; `sameProjectionBucket`). Coplanar fans (a cylinder cap)
-// merge as before, and curved walls now fold into per-axis-quadrant charts instead
-// of one loose strip per face: a 24-side cylinder wall becomes four contiguous arc
-// charts, a UV sphere six axis charts rather than hundreds of isolated quads.
-// Projection along the shared axis stays single-valued on a convex chart; glancing
-// faces compress by the projection cosine — the same distortion Blockbench accepts.
+// Two authored faces become one newly generated UV island only when they share a
+// real mesh edge and are coplanar with matching winding. A cylinder cap therefore
+// remains one paintable fan, while curved wall quads remain separate intrinsic
+// charts that PRESTACK can reuse exactly. The former dominant-world-axis buckets
+// compressed glancing faces by the projection cosine, so equal cylinder sides got
+// unequal texel density and rotating identical geometry changed its UV topology.
+// Existing authored UVs retain their exact edge-based reconstruction rule below.
 
 /// Reconstructed layouts additionally require the two copies of a shared UV edge to
 /// coincide. Moving one fan wedge breaks that equality and therefore detaches it into
 /// its own island without changing the model's authored face groups.
 pub const UV_EDGE_MATCH_EPSILON: f32 = 0.0001;
+pub const INTRINSIC_PROJECTION_TUNING = struct {
+    /// New charts merge only across effectively coplanar, equally wound faces.
+    pub const coplanar_normal_dot: f32 = 0.99999;
+    /// Degenerate edges cannot establish a stable intrinsic chart basis.
+    pub const minimum_basis_edge_m: f32 = 0.00000001;
+    /// Stabilizes dimensions against f32 rotation noise before texel rounding.
+    pub const extent_quantum_m: f32 = 0.000001;
+};
 
 pub const Island = struct {
     /// The authored group this island carries (or NO_GROUP for a loose triangle's own island).
@@ -55,9 +63,11 @@ pub const Island = struct {
     y: u32,
     w: u32,
     h: u32,
-    /// Dominant projection axis: 0 = x, 1 = y, 2 = z; sign = which side the face looks.
-    axis: u8,
-    sign: i8,
+    /// Intrinsic chart basis. Generated layouts use this orientation-independent
+    /// frame; reconstructed authored layouts leave it at the harmless zero default.
+    origin: [3]f32,
+    basis_u: [3]f32,
+    basis_v: [3]f32,
     /// Projection window in meters (the island's 2D bounds before texel scaling) — the
     /// inverse map for painting: world point → (u,v) meters → island texel.
     min_u: f32,
@@ -103,27 +113,26 @@ fn sameProjectionBucket(a: [3]f32, b: [3]f32) bool {
     return (a[axis] < 0) == (b[axis] < 0);
 }
 
-/// Drop the dominant coordinate, then orient U so the projected triangle keeps
-/// the same handedness when viewed from the OUTSIDE of either axis side. A fixed
-/// basis alone mirrors one side of every axis pair, making text backwards on
-/// half of a box/cylinder even though no amount of UV rotation can correct it.
-fn projectVert(axis: u8, sign: i8, p: [3]f32) [2]f32 {
-    var projected: [2]f32 = switch (axis) {
-        0 => .{ p[2], p[1] }, // looking down ±X → (z, y)
-        1 => .{ p[0], p[2] }, // looking down ±Y → (x, z)
-        else => .{ p[0], p[1] }, // looking down ±Z → (x, y)
+fn sameIntrinsicPlane(a: [3]f32, b: [3]f32) bool {
+    const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    return dot >= INTRINSIC_PROJECTION_TUNING.coplanar_normal_dot;
+}
+
+fn projectIntrinsic(origin: [3]f32, basis_u: [3]f32, basis_v: [3]f32, p: [3]f32) [2]f32 {
+    const relative = [3]f32{ p[0] - origin[0], p[1] - origin[1], p[2] - origin[2] };
+    return .{
+        relative[0] * basis_u[0] + relative[1] * basis_u[1] + relative[2] * basis_u[2],
+        relative[0] * basis_v[0] + relative[1] * basis_v[1] + relative[2] * basis_v[2],
     };
-    // U×V points -X, -Y, +Z for the three bases above. The opposite-facing
-    // side reflects U so every emitted triangle has one consistent UV winding.
-    const basis_sign: i8 = if (axis == 2) 1 else -1;
-    if (sign != basis_sign) projected[0] = -projected[0];
-    return projected;
+}
+
+fn quantizeExtentMeters(value: f32) f32 {
+    const quantum = INTRINSIC_PROJECTION_TUNING.extent_quantum_m;
+    return @round(value / quantum) * quantum;
 }
 
 const RawIsland = struct {
     group: u32,
-    axis: u8,
-    sign: i8,
     min_u: f32,
     min_v: f32,
     w_m: f32, // footprint in meters
@@ -186,6 +195,57 @@ fn faceUnitNormal(positions: []const f32, face: u32) ?[3]f32 {
     return .{ nx / length, ny / length, nz / length };
 }
 
+const IntrinsicBasis = struct {
+    origin: [3]f32,
+    u: [3]f32,
+    v: [3]f32,
+};
+
+fn intrinsicBasis(positions: []const f32, face: u32, area_vector: [3]f32) ?IntrinsicBasis {
+    const base = @as(usize, face) * 9;
+    if (base + 8 >= positions.len) return null;
+    const points = [3][3]f32{
+        .{ positions[base + 0], positions[base + 1], positions[base + 2] },
+        .{ positions[base + 3], positions[base + 4], positions[base + 5] },
+        .{ positions[base + 6], positions[base + 7], positions[base + 8] },
+    };
+    const area_length = @sqrt(area_vector[0] * area_vector[0] + area_vector[1] * area_vector[1] + area_vector[2] * area_vector[2]);
+    const normal = if (area_length > INTRINSIC_PROJECTION_TUNING.minimum_basis_edge_m)
+        [3]f32{ area_vector[0] / area_length, area_vector[1] / area_length, area_vector[2] / area_length }
+    else
+        faceUnitNormal(positions, face) orelse return null;
+
+    var best_edge: [3]f32 = undefined;
+    var best_length_sq = std.math.floatMax(f32);
+    for ([3][2]u8{ .{ 0, 1 }, .{ 1, 2 }, .{ 2, 0 } }) |edge| {
+        const delta = [3]f32{
+            points[edge[1]][0] - points[edge[0]][0],
+            points[edge[1]][1] - points[edge[0]][1],
+            points[edge[1]][2] - points[edge[0]][2],
+        };
+        const normal_component = delta[0] * normal[0] + delta[1] * normal[1] + delta[2] * normal[2];
+        const planar = [3]f32{
+            delta[0] - normal_component * normal[0],
+            delta[1] - normal_component * normal[1],
+            delta[2] - normal_component * normal[2],
+        };
+        const length_sq = planar[0] * planar[0] + planar[1] * planar[1] + planar[2] * planar[2];
+        const minimum = INTRINSIC_PROJECTION_TUNING.minimum_basis_edge_m;
+        if (length_sq < minimum * minimum or length_sq >= best_length_sq) continue;
+        best_edge = planar;
+        best_length_sq = length_sq;
+    }
+    if (!std.math.isFinite(best_length_sq) or best_length_sq == std.math.floatMax(f32)) return null;
+    const edge_length = @sqrt(best_length_sq);
+    const basis_u = [3]f32{ best_edge[0] / edge_length, best_edge[1] / edge_length, best_edge[2] / edge_length };
+    const basis_v = [3]f32{
+        normal[1] * basis_u[2] - normal[2] * basis_u[1],
+        normal[2] * basis_u[0] - normal[0] * basis_u[2],
+        normal[0] * basis_u[1] - normal[1] * basis_u[0],
+    };
+    return .{ .origin = points[0], .u = basis_u, .v = basis_v };
+}
+
 fn findRoot(parents: []u32, index: u32) u32 {
     var root = index;
     while (parents[root] != root) root = parents[root];
@@ -215,9 +275,10 @@ fn uvEdgeMatches(owner: EdgeOwner, a: [2]f32, b: [2]f32) bool {
     return @abs(owner.uv_a[0] - a[0]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_a[1] - a[1]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_b[0] - b[0]) <= UV_EDGE_MATCH_EPSILON and @abs(owner.uv_b[1] - b[1]) <= UV_EDGE_MATCH_EPSILON;
 }
 
-/// Coalesce initial authored-face buckets through real shared edges. When `uvs` is
-/// present this is also the Blockbench-style UV-island rule: the shared 3D edge must
-/// still be shared in UV space. The returned ids are compact and first-face stable.
+/// Coalesce initial authored-face buckets through real shared edges. New layouts
+/// merge only coplanar faces; reconstructed layouts retain the historical dominant-
+/// axis bucket and additionally require the shared 3D edge to remain shared in UV
+/// space. The returned ids are compact and first-face stable.
 fn connectedComponents(
     alloc: std.mem.Allocator,
     positions: []const f32,
@@ -257,8 +318,9 @@ fn connectedComponents(
                 continue;
             };
             if (owner.raw == raw_of_face[face]) continue;
-            if (!sameProjectionBucket(owner.normal, normal)) continue;
-            if (normalized_uvs != null and !uvEdgeMatches(owner, uva, uvb)) continue;
+            if (normalized_uvs) |_| {
+                if (!sameProjectionBucket(owner.normal, normal) or !uvEdgeMatches(owner, uva, uvb)) continue;
+            } else if (!sameIntrinsicPlane(owner.normal, normal)) continue;
             const other = raw_of_face[face];
             const pair: RawPair = if (owner.raw < other) .{ .a = owner.raw, .b = other } else .{ .a = other, .b = owner.raw };
             const entry = joins.getOrPut(alloc, pair) catch return null;
@@ -393,8 +455,9 @@ pub fn buildFromNormalizedUv(
         .y = atlas_h - 1,
         .w = 0,
         .h = 0,
-        .axis = 0,
-        .sign = 1,
+        .origin = .{ 0, 0, 0 },
+        .basis_u = .{ 0, 0, 0 },
+        .basis_v = .{ 0, 0, 0 },
         .min_u = 0,
         .min_v = 0,
     };
@@ -484,12 +547,12 @@ fn buildImpl(
             const gop = island_of_group.getOrPut(alloc, g) catch return null;
             if (!gop.found_existing) {
                 gop.value_ptr.* = @intCast(raws.items.len);
-                raws.append(alloc, .{ .group = g, .axis = 0, .sign = 1, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = f }) catch return null;
+                raws.append(alloc, .{ .group = g, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = f }) catch return null;
             }
             tri_island[f] = gop.value_ptr.*;
         } else {
             tri_island[f] = @intCast(raws.items.len);
-            raws.append(alloc, .{ .group = NO_GROUP, .axis = 0, .sign = 1, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = f }) catch return null;
+            raws.append(alloc, .{ .group = NO_GROUP, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = f }) catch return null;
         }
     }
 
@@ -504,7 +567,7 @@ fn buildImpl(
         defer merged.deinit(alloc);
         var component: u32 = 0;
         while (component < components.count) : (component += 1) {
-            merged.append(alloc, .{ .group = NO_GROUP, .axis = 0, .sign = 1, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = std.math.maxInt(u32) }) catch return null;
+            merged.append(alloc, .{ .group = NO_GROUP, .min_u = 0, .min_v = 0, .w_m = 0, .h_m = 0, .first_tri = std.math.maxInt(u32) }) catch return null;
         }
         for (raws.items, 0..) |raw, raw_index| {
             const target = &merged.items[components.raw_to_component[raw_index]];
@@ -519,11 +582,13 @@ fn buildImpl(
         merged = .empty;
     }
 
-    // ── Per island: dominant axis from the area vector (sum of tri cross products),
-    //    then projected 2D bounds in meters. Two passes keep it allocation-light. ──
+    // ── Per island: intrinsic frame from the area vector and a stable geometric
+    //    edge, then projected 2D bounds in meters. Two passes keep it allocation-light.
     const n_islands: u32 = @intCast(raws.items.len);
     const area_vec = alloc.alloc([3]f32, n_islands) catch return null;
     defer alloc.free(area_vec);
+    const bases = alloc.alloc(IntrinsicBasis, n_islands) catch return null;
+    defer alloc.free(bases);
     @memset(area_vec, .{ 0, 0, 0 });
     f = 0;
     while (f < fc) : (f += 1) {
@@ -542,14 +607,7 @@ fn buildImpl(
         av[2] += cz;
     }
     for (raws.items, 0..) |*r, i| {
-        const av = area_vec[i];
-        r.axis = projectAxis(av[0], av[1], av[2]);
-        const comp = switch (r.axis) {
-            0 => av[0],
-            1 => av[1],
-            else => av[2],
-        };
-        r.sign = if (comp < 0) -1 else 1;
+        bases[i] = intrinsicBasis(positions, r.first_tri, area_vec[i]) orelse return null;
         r.min_u = std.math.floatMax(f32);
         r.min_v = std.math.floatMax(f32);
         r.w_m = -std.math.floatMax(f32); // temporarily max_u/max_v
@@ -558,10 +616,11 @@ fn buildImpl(
     f = 0;
     while (f < fc) : (f += 1) {
         const r = &raws.items[tri_island[f]];
+        const basis = bases[tri_island[f]];
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const base = f * 9 + k * 3;
-            const uv = projectVert(r.axis, r.sign, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
+            const uv = projectIntrinsic(basis.origin, basis.u, basis.v, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
             if (uv[0] < r.min_u) r.min_u = uv[0];
             if (uv[1] < r.min_v) r.min_v = uv[1];
             if (uv[0] > r.w_m) r.w_m = uv[0];
@@ -569,8 +628,8 @@ fn buildImpl(
         }
     }
     for (raws.items) |*r| {
-        r.w_m = @max(0, r.w_m - r.min_u); // bounds → extent in meters
-        r.h_m = @max(0, r.h_m - r.min_v);
+        r.w_m = quantizeExtentMeters(@max(0, r.w_m - r.min_u)); // bounds → extent in meters
+        r.h_m = quantizeExtentMeters(@max(0, r.h_m - r.min_v));
     }
 
     // ── FIT mode: derive the density from the model's own extent so the packed atlas
@@ -654,7 +713,19 @@ fn buildImpl(
     const islands = alloc.alloc(Island, n_islands) catch return null;
     errdefer alloc.free(islands);
     for (raws.items, 0..) |r, i| {
-        islands[i] = .{ .group = r.group, .x = r.x, .y = r.y, .w = r.w, .h = r.h, .axis = r.axis, .sign = r.sign, .min_u = r.min_u, .min_v = r.min_v };
+        const basis = bases[i];
+        islands[i] = .{
+            .group = r.group,
+            .x = r.x,
+            .y = r.y,
+            .w = r.w,
+            .h = r.h,
+            .origin = basis.origin,
+            .basis_u = basis.u,
+            .basis_v = basis.v,
+            .min_u = r.min_u,
+            .min_v = r.min_v,
+        };
     }
     const corner_uv = alloc.alloc(f32, @as(usize, fc) * 6) catch return null;
     f = 0;
@@ -663,7 +734,7 @@ fn buildImpl(
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const base = f * 9 + k * 3;
-            const uv = projectVert(isl.axis, isl.sign, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
+            const uv = projectIntrinsic(isl.origin, isl.basis_u, isl.basis_v, .{ positions[base + 0], positions[base + 1], positions[base + 2] });
             // Meters → island texel, inset half a texel so edge samples stay inside
             // the island under linear filtering (the pad gutter handles the rest).
             const tw: f32 = @floatFromInt(isl.w);
@@ -857,11 +928,11 @@ test "triangle-fan caps become coherent radial islands without merging side wall
     }
 }
 
-test "curved walls fold into per-axis-quadrant charts, continuous across merged edges" {
-    // An 8-wall open cylinder (no caps). Wall normals sit at 22.5° + k·45°, which
-    // buckets them x+/z+/z+/x−/x−/z−/z−/x+ — so the Blockbench rule (req_3426)
-    // folds 8 walls into 4 two-wall arc charts instead of 8 loose strips.
-    const walls = 8;
+test "equal cylinder walls keep equal intrinsic texel scale across world rotation" {
+    // A 6-wall open cylinder (no caps). Every wall is the same physical square.
+    // Each gets its own planar chart so PRESTACK can literally reuse all six; no
+    // side may shrink merely because its normal is diagonal to a world axis.
+    const walls = 6;
     var soup: [walls * 2 * 9]f32 = undefined;
     var groups: [walls * 2]u32 = undefined;
     // Precompute the ring so the wrap edge shares bit-identical positions — a real
@@ -888,20 +959,46 @@ test "curved walls fold into per-axis-quadrant charts, continuous across merged 
         groups[wall * 2 + 0] = @intCast(wall);
         groups[wall * 2 + 1] = @intCast(wall);
     }
+    var rotated: [walls * 2 * 9]f32 = undefined;
+    const azimuth: f32 = 0.37;
+    const elevation: f32 = -0.61;
+    const cos_a = @cos(azimuth);
+    const sin_a = @sin(azimuth);
+    const cos_e = @cos(elevation);
+    const sin_e = @sin(elevation);
+    var coordinate: usize = 0;
+    while (coordinate < soup.len) : (coordinate += 3) {
+        const x = soup[coordinate + 0];
+        const y = soup[coordinate + 1];
+        const z = soup[coordinate + 2];
+        const yaw_x = cos_a * x + sin_a * z;
+        const yaw_z = -sin_a * x + cos_a * z;
+        rotated[coordinate + 0] = yaw_x;
+        rotated[coordinate + 1] = cos_e * y - sin_e * yaw_z;
+        rotated[coordinate + 2] = sin_e * y + cos_e * yaw_z;
+    }
+
     var layout = build(testing.allocator, &soup, &groups, 16, 8192, 256 << 20).?;
     defer layout.deinit(testing.allocator);
+    var rotated_layout = build(testing.allocator, &rotated, &groups, 16, 8192, 256 << 20).?;
+    defer rotated_layout.deinit(testing.allocator);
 
-    try testing.expectEqual(@as(usize, 4), layout.islands.len);
-    // The quadrant pairs: (7,0) x+, (1,2) z+, (3,4) x−, (5,6) z−.
-    try testing.expectEqual(layout.tri_island[7 * 2], layout.tri_island[0]);
-    try testing.expectEqual(layout.tri_island[1 * 2], layout.tri_island[2 * 2]);
-    try testing.expectEqual(layout.tri_island[3 * 2], layout.tri_island[4 * 2]);
-    try testing.expectEqual(layout.tri_island[5 * 2], layout.tri_island[6 * 2]);
-    try testing.expect(layout.tri_island[0] != layout.tri_island[1 * 2]);
-    // The shared vertex top_0 (wall 7 face 14 corner 2, wall 0 face 0 corner 1) maps
-    // to ONE atlas texel — strokes travel the merged chart without a seam.
-    try testing.expectApproxEqAbs(layout.corner_uv[(14 * 3 + 2) * 2 + 0], layout.corner_uv[(0 * 3 + 1) * 2 + 0], 0.0001);
-    try testing.expectApproxEqAbs(layout.corner_uv[(14 * 3 + 2) * 2 + 1], layout.corner_uv[(0 * 3 + 1) * 2 + 1], 0.0001);
+    try testing.expectEqual(@as(usize, walls), layout.islands.len);
+    try testing.expectEqual(layout.islands.len, rotated_layout.islands.len);
+    const reference = layout.islands[layout.tri_island[0]];
+    try testing.expectEqual(@as(u32, 16), reference.w);
+    try testing.expectEqual(@as(u32, 16), reference.h);
+    wall = 0;
+    while (wall < walls) : (wall += 1) {
+        const island_index = layout.tri_island[wall * 2];
+        const rotated_index = rotated_layout.tri_island[wall * 2];
+        try testing.expectEqual(island_index, layout.tri_island[wall * 2 + 1]);
+        try testing.expectEqual(rotated_index, rotated_layout.tri_island[wall * 2 + 1]);
+        try testing.expectEqual(reference.w, layout.islands[island_index].w);
+        try testing.expectEqual(reference.h, layout.islands[island_index].h);
+        try testing.expectEqual(layout.islands[island_index].w, rotated_layout.islands[rotated_index].w);
+        try testing.expectEqual(layout.islands[island_index].h, rotated_layout.islands[rotated_index].h);
+    }
 }
 
 test "existing normalized UVs rebuild metadata without repacking" {
