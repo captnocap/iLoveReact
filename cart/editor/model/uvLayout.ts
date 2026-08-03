@@ -930,6 +930,9 @@ export type UvRepeatStackOptions = Readonly<{
    * Omit the value for an unrestricted programmatic evaluation.
    */
   normalizeMaxAreaTexels?: number;
+  /** Optional semantic/material partition. Candidates in different non-null
+   * partitions can never share a texture footprint. */
+  equivalenceKeys?: readonly (string | number | null | undefined)[];
 }>;
 
 export type UvRepeatStackGroup = Readonly<{
@@ -1246,7 +1249,9 @@ export function planRepeatedUvStacks(
   const coarse = new Map<string, number[]>();
   let unclassifiedIslands = 0;
   for (let index = 0; index < rects.length; index += 1) {
-    const key = repeatCoarseKey(rects[index]!, mode);
+    const shapeKey = repeatCoarseKey(rects[index]!, mode);
+    const partition = options.equivalenceKeys?.[index];
+    const key = shapeKey === null ? null : `${partition == null ? '' : String(partition)}|${shapeKey}`;
     if (!key) {
       unclassifiedIslands += 1;
       continue;
@@ -1334,6 +1339,39 @@ export function planRepeatedUvStacks(
     normalizeMaxAreaTexels,
     normalizationProtectedIslands,
     unclassifiedIslands,
+  };
+}
+
+/** Exact identity is always safe and must not be lost merely because an agent
+ * also asks for scale normalization. Run exact first, then let Normalize add
+ * eligible families on top of that landed proposal. */
+export function planProgressiveRepeatedUvStacks(
+  rects: readonly UvIslandRect[],
+  atlasW: number,
+  atlasH: number,
+  options: UvRepeatStackOptions = {},
+): UvRepeatStackPlan {
+  const exact = planRepeatedUvStacks(rects, 'exact', atlasW, atlasH, options);
+  const normalized = planRepeatedUvStacks(exact.rects, 'normalize', atlasW, atlasH, options);
+  const groups = new Map<string, UvRepeatStackGroup>();
+  for (const group of [...exact.groups, ...normalized.groups]) {
+    const islands = [...group.islands].sort((left, right) => left - right);
+    groups.set(islands.join(','), { representative: group.representative, islands });
+  }
+  const uniqueFootprints = countUvTextureFootprints(normalized.rects);
+  return {
+    mode: 'normalize',
+    rects: normalized.rects,
+    groups: [...groups.values()].sort((left, right) => left.representative - right.representative),
+    sourceIslands: rects.length,
+    sourceFootprints: exact.sourceFootprints,
+    uniqueFootprints,
+    stackedIslands: Math.max(0, exact.sourceFootprints - uniqueFootprints),
+    changedIslands: normalized.rects.filter((rect, index) => rect !== rects[index]).length,
+    normalizedIslands: normalized.normalizedIslands,
+    normalizeMaxAreaTexels: normalized.normalizeMaxAreaTexels,
+    normalizationProtectedIslands: normalized.normalizationProtectedIslands,
+    unclassifiedIslands: Math.max(exact.unclassifiedIslands, normalized.unclassifiedIslands),
   };
 }
 
@@ -2299,6 +2337,329 @@ export function groupUvTextureFootprints(
  * stacked on the same corners intentionally count once. */
 export function countUvTextureFootprints(rects: readonly UvIslandRect[]): number {
   return groupUvTextureFootprints(rects).length;
+}
+
+export type UvTwoSheetClass = 'hero' | 'uniform';
+export type UvAspectClass = 'square' | 'wide2' | 'tall2' | 'wide4' | 'tall4' | 'wide-sliver' | 'tall-sliver';
+export type UvIslandIntent = Readonly<{
+  semanticNames?: readonly string[];
+  material?: number | null;
+}>;
+export type UvTwoSheetZone = Readonly<{
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}>;
+export type UvTwoSheetOptions = Readonly<{
+  /** Exact agent/user decisions win over every automatic classification. */
+  heroIslands?: readonly number[];
+  uniformIslands?: readonly number[];
+  /** Case-insensitive semantic substrings; hero wins if both lists match. */
+  heroSemantics?: readonly string[];
+  uniformSemantics?: readonly string[];
+  intents?: readonly UvIslandIntent[];
+  /** Cumulative UV surface share retained at natural scale when no prior decides. */
+  automaticHeroAreaCoverage?: number;
+  /** Long-axis share reserved for detailed art. */
+  heroZoneFraction?: number;
+  /** Normalize-mode safety gate passed to the repeat stacker. */
+  normalizeMaxAreaTexels?: number;
+}>;
+export type UvTwoSheetPlan = Readonly<{
+  rects: UvIslandRect[];
+  fits: boolean;
+  reason: string | null;
+  sourceIslands: number;
+  sourceFootprints: number;
+  prestackedFootprints: number;
+  uniqueFootprints: number;
+  stackedIslands: number;
+  changedIslands: number;
+  heroFootprints: number;
+  uniformFootprints: number;
+  heroIslands: readonly number[];
+  uniformIslands: readonly number[];
+  aspectClasses: Readonly<Record<UvAspectClass, number>>;
+  heroScale: number;
+  uniformCellArea: number;
+  zones: Readonly<{ hero: UvTwoSheetZone; uniform: UvTwoSheetZone }>;
+  densityLaw: 'per-zone';
+}>;
+
+/** Behaviour-affecting planner constants live here, not buried in the pack loop. */
+export const UV_TWO_SHEET_TUNING = {
+  heroZoneFraction: 0.72,
+  automaticHeroAreaCoverage: 0.68,
+  minimumHeroScale: 0.05,
+  packSearchIterations: 24,
+  squareMaximumRatio: 1.5,
+  twoToOneMaximumRatio: 3,
+  fourToOneMaximumRatio: 6,
+  sliverCellRatio: 8,
+  cellInsetTexels: 2,
+} as const;
+
+export function uvAspectClass(rect: Pick<UvIslandRect, 'w' | 'h'>): UvAspectClass {
+  const width = Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, rect.w);
+  const height = Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, rect.h);
+  const ratio = Math.max(width, height) / Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, Math.min(width, height));
+  if (ratio <= UV_TWO_SHEET_TUNING.squareMaximumRatio) return 'square';
+  const wide = width >= height;
+  if (ratio <= UV_TWO_SHEET_TUNING.twoToOneMaximumRatio) return wide ? 'wide2' : 'tall2';
+  if (ratio <= UV_TWO_SHEET_TUNING.fourToOneMaximumRatio) return wide ? 'wide4' : 'tall4';
+  return wide ? 'wide-sliver' : 'tall-sliver';
+}
+
+type UvPackItem = Readonly<{ id: number; w: number; h: number }>;
+type UvPackedFrame = Readonly<{ x: number; y: number; w: number; h: number }>;
+
+function packUvShelves(zone: UvTwoSheetZone, items: readonly UvPackItem[]): Map<number, UvPackedFrame> | null {
+  const ordered = [...items].sort((left, right) => right.h - left.h || right.w - left.w || left.id - right.id);
+  const out = new Map<number, UvPackedFrame>();
+  let x = zone.x;
+  let y = zone.y;
+  let rowHeight = 0;
+  for (const item of ordered) {
+    if (!(item.w > 0) || !(item.h > 0) || item.w > zone.w + UV_LAYOUT_TUNING.geometryEpsilon || item.h > zone.h + UV_LAYOUT_TUNING.geometryEpsilon) return null;
+    if (x > zone.x && x + item.w > zone.x + zone.w + UV_LAYOUT_TUNING.geometryEpsilon) {
+      x = zone.x;
+      y += rowHeight;
+      rowHeight = 0;
+    }
+    if (y + item.h > zone.y + zone.h + UV_LAYOUT_TUNING.geometryEpsilon) return null;
+    out.set(item.id, { x, y, w: item.w, h: item.h });
+    x += item.w;
+    rowHeight = Math.max(rowHeight, item.h);
+  }
+  return out;
+}
+
+function largestUvPackScale(
+  zone: UvTwoSheetZone,
+  itemsAtScale: (scale: number) => readonly UvPackItem[],
+  maximum: number,
+  minimum: number,
+): Readonly<{ scale: number; frames: Map<number, UvPackedFrame> }> | null {
+  const full = packUvShelves(zone, itemsAtScale(maximum));
+  if (full) return { scale: maximum, frames: full };
+  let low = minimum;
+  let high = maximum;
+  let best = packUvShelves(zone, itemsAtScale(low));
+  if (!best) return null;
+  for (let iteration = 0; iteration < UV_TWO_SHEET_TUNING.packSearchIterations; iteration += 1) {
+    const middle = (low + high) * 0.5;
+    const packed = packUvShelves(zone, itemsAtScale(middle));
+    if (packed) {
+      low = middle;
+      best = packed;
+    } else {
+      high = middle;
+    }
+  }
+  return { scale: low, frames: best };
+}
+
+function splitUvTwoSheetZones(atlasW: number, atlasH: number, heroFraction: number): { hero: UvTwoSheetZone; uniform: UvTwoSheetZone } {
+  const fraction = clamp(heroFraction, 0.5, 0.9);
+  if (atlasW >= atlasH) {
+    const heroW = Math.max(1, Math.floor(atlasW * fraction));
+    return {
+      hero: { x: 0, y: 0, w: heroW, h: atlasH },
+      uniform: { x: heroW, y: 0, w: Math.max(1, atlasW - heroW), h: atlasH },
+    };
+  }
+  const heroH = Math.max(1, Math.floor(atlasH * fraction));
+  return {
+    hero: { x: 0, y: 0, w: atlasW, h: heroH },
+    uniform: { x: 0, y: heroH, w: atlasW, h: Math.max(1, atlasH - heroH) },
+  };
+}
+
+function semanticIntentMatches(intent: UvIslandIntent | undefined, patterns: readonly string[]): boolean {
+  if (!intent?.semanticNames?.length || patterns.length === 0) return false;
+  const normalized = patterns.map((pattern) => pattern.trim().toLowerCase()).filter(Boolean);
+  return intent.semanticNames.some((name) => {
+    const candidate = name.toLowerCase();
+    return normalized.some((pattern) => candidate.includes(pattern));
+  });
+}
+
+/**
+ * Mutation-free two-zone atlas proposal. Detailed footprints retain their current
+ * scale in zone A whenever they fit. Material-only footprints receive equal-area,
+ * aspect-binned cells in zone B. The repeat stacker runs first, so identical parts
+ * literally share one rect instead of merely occupying neighboring cells.
+ */
+export function planTwoSheetUvLayout(
+  rects: readonly UvIslandRect[],
+  atlasW: number,
+  atlasH: number,
+  options: UvTwoSheetOptions = {},
+): UvTwoSheetPlan {
+  const emptyClasses: Record<UvAspectClass, number> = {
+    square: 0, wide2: 0, tall2: 0, wide4: 0, tall4: 0, 'wide-sliver': 0, 'tall-sliver': 0,
+  };
+  const heroFraction = Number.isFinite(options.heroZoneFraction)
+    ? Number(options.heroZoneFraction)
+    : UV_TWO_SHEET_TUNING.heroZoneFraction;
+  const zones = splitUvTwoSheetZones(Math.max(1, atlasW), Math.max(1, atlasH), heroFraction);
+  const fail = (reason: string): UvTwoSheetPlan => ({
+    rects: [...rects], fits: false, reason,
+    sourceIslands: rects.length, sourceFootprints: countUvTextureFootprints(rects),
+    prestackedFootprints: countUvTextureFootprints(rects), uniqueFootprints: countUvTextureFootprints(rects),
+    stackedIslands: 0, changedIslands: 0, heroFootprints: 0, uniformFootprints: 0,
+    heroIslands: [], uniformIslands: [], aspectClasses: emptyClasses,
+    heroScale: 1, uniformCellArea: 0, zones, densityLaw: 'per-zone',
+  });
+  if (!rects.length || atlasW < 2 || atlasH < 2) return fail('two-sheet planning needs a readable atlas with UV islands');
+
+  const heroSet = new Set((options.heroIslands ?? []).filter((index) => Number.isInteger(index) && index >= 0 && index < rects.length));
+  const uniformSet = new Set((options.uniformIslands ?? []).filter((index) => Number.isInteger(index) && index >= 0 && index < rects.length));
+  const heroPatterns = options.heroSemantics ?? [];
+  const uniformPatterns = options.uniformSemantics ?? [];
+  const sourceRows = rects.map((rect, island) => ({
+    island,
+    area: Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, repeatUvSurfaceArea(rect)),
+    explicitHero: heroSet.has(island),
+    explicitUniform: uniformSet.has(island),
+    semanticHero: semanticIntentMatches(options.intents?.[island], heroPatterns),
+    semanticUniform: semanticIntentMatches(options.intents?.[island], uniformPatterns),
+  }));
+  const classByIsland: UvTwoSheetClass[] = new Array(rects.length);
+  for (const row of sourceRows) {
+    if (row.explicitHero || row.semanticHero) classByIsland[row.island] = 'hero';
+    else if (row.explicitUniform || row.semanticUniform) classByIsland[row.island] = 'uniform';
+  }
+  const undecided = sourceRows.filter((row) => classByIsland[row.island] === undefined)
+    .sort((left, right) => right.area - left.area || left.island - right.island);
+  const undecidedArea = undecided.reduce((sum, row) => sum + row.area, 0);
+  const automaticCoverage = clamp(Number.isFinite(options.automaticHeroAreaCoverage)
+    ? Number(options.automaticHeroAreaCoverage)
+    : UV_TWO_SHEET_TUNING.automaticHeroAreaCoverage, 0, 1);
+  let retainedArea = 0;
+  for (const row of undecided) {
+    const keepHero = undecidedArea > 0 && retainedArea / undecidedArea < automaticCoverage;
+    classByIsland[row.island] = keepHero ? 'hero' : 'uniform';
+    if (keepHero) retainedArea += row.area;
+  }
+  // Material-only rows may share by material. Detailed rows additionally require
+  // the same semantic prior, preventing congruent but unrelated hero surfaces from
+  // silently sampling one painting.
+  const equivalenceKeys = rects.map((_rect, island) => {
+    const intent = options.intents?.[island];
+    const material = intent?.material == null ? 'material:none' : `material:${intent.material}`;
+    const semantics = [...(intent?.semanticNames ?? [])].sort().join(',') || `island:${island}`;
+    return classByIsland[island] === 'uniform'
+      ? `uniform|${material}`
+      : `hero|${material}|${semantics}`;
+  });
+
+  const prestack = planProgressiveRepeatedUvStacks(rects, atlasW, atlasH, {
+    normalizeMaxAreaTexels: options.normalizeMaxAreaTexels ?? UV_LAYOUT_TUNING.repeatNormalizeDefaultMaxAreaTexels,
+    equivalenceKeys,
+  });
+  const footprints = groupUvTextureFootprints(prestack.rects);
+  const rows = footprints.map((footprint, id) => {
+    const representative = prestack.rects[footprint.representative]!;
+    const area = Math.max(UV_LAYOUT_TUNING.minimumIslandTexels, repeatUvSurfaceArea(representative));
+    return { id, footprint, representative, area, classification: classByIsland[footprint.representative]! };
+  });
+  const heroRows = rows.filter((row) => row.classification === 'hero');
+  const uniformRows = rows.filter((row) => row.classification === 'uniform');
+  const gutter = UV_LAYOUT_TUNING.gutterTexels;
+  const heroPack = largestUvPackScale(
+    zones.hero,
+    (scale) => heroRows.map((row) => ({ id: row.id, w: row.representative.w * scale + gutter, h: row.representative.h * scale + gutter })),
+    1,
+    UV_TWO_SHEET_TUNING.minimumHeroScale,
+  );
+  if (!heroPack) return fail('hero footprints cannot fit their zone even at the minimum reviewed scale');
+
+  const classCounts = { ...emptyClasses };
+  const classForRow = new Map<number, UvAspectClass>();
+  for (const row of uniformRows) {
+    const aspectClass = uvAspectClass(row.representative);
+    classForRow.set(row.id, aspectClass);
+    classCounts[aspectClass] += 1;
+  }
+  const classRatio = (aspectClass: UvAspectClass): { ratio: number; wide: boolean } => {
+    if (aspectClass === 'square') return { ratio: 1, wide: true };
+    if (aspectClass === 'wide2' || aspectClass === 'tall2') return { ratio: 2, wide: aspectClass === 'wide2' };
+    if (aspectClass === 'wide4' || aspectClass === 'tall4') return { ratio: 4, wide: aspectClass === 'wide4' };
+    return { ratio: UV_TWO_SHEET_TUNING.sliverCellRatio, wide: aspectClass === 'wide-sliver' };
+  };
+  const uniformPack = uniformRows.length === 0
+    ? { scale: 0, frames: new Map<number, UvPackedFrame>() }
+    : largestUvPackScale(
+      zones.uniform,
+      (base) => uniformRows.map((row) => {
+        const shape = classRatio(classForRow.get(row.id)!);
+        const long = base * Math.sqrt(shape.ratio);
+        const short = base / Math.sqrt(shape.ratio);
+        return { id: row.id, w: shape.wide ? long : short, h: shape.wide ? short : long };
+      }),
+      Math.sqrt(zones.uniform.w * zones.uniform.h),
+      1,
+    );
+  if (!uniformPack) return fail('uniform aspect cells cannot fit their zone');
+
+  const next = [...prestack.rects];
+  const heroIslands: number[] = [];
+  const uniformIslands: number[] = [];
+  const placeFootprint = (row: typeof rows[number], frame: UvTransformFrame, target: UvTwoSheetClass) => {
+    for (const island of row.footprint.islands) {
+      next[island] = pasteUvTransform(prestack.rects[island]!, undefined, frame, atlasW, atlasH);
+      (target === 'hero' ? heroIslands : uniformIslands).push(island);
+    }
+  };
+  for (const row of heroRows) {
+    const cell = heroPack.frames.get(row.id)!;
+    placeFootprint(row, {
+      x: cell.x + gutter * 0.5,
+      y: cell.y + gutter * 0.5,
+      w: row.representative.w * heroPack.scale,
+      h: row.representative.h * heroPack.scale,
+    }, 'hero');
+  }
+  for (const row of uniformRows) {
+    const cell = uniformPack.frames.get(row.id)!;
+    const inset = Math.min(UV_TWO_SHEET_TUNING.cellInsetTexels, cell.w * 0.2, cell.h * 0.2);
+    const availableW = Math.max(1, cell.w - inset * 2);
+    const availableH = Math.max(1, cell.h - inset * 2);
+    const sourceW = Math.max(1, row.representative.w);
+    const sourceH = Math.max(1, row.representative.h);
+    const scale = Math.min(availableW / sourceW, availableH / sourceH);
+    const width = sourceW * scale;
+    const height = sourceH * scale;
+    placeFootprint(row, {
+      x: cell.x + (cell.w - width) * 0.5,
+      y: cell.y + (cell.h - height) * 0.5,
+      w: width,
+      h: height,
+    }, 'uniform');
+  }
+
+  return {
+    rects: next,
+    fits: true,
+    reason: null,
+    sourceIslands: rects.length,
+    sourceFootprints: countUvTextureFootprints(rects),
+    prestackedFootprints: footprints.length,
+    uniqueFootprints: countUvTextureFootprints(next),
+    stackedIslands: prestack.stackedIslands,
+    changedIslands: next.filter((rect, index) => rect !== rects[index]).length,
+    heroFootprints: heroRows.length,
+    uniformFootprints: uniformRows.length,
+    heroIslands: heroIslands.sort((left, right) => left - right),
+    uniformIslands: uniformIslands.sort((left, right) => left - right),
+    aspectClasses: classCounts,
+    heroScale: heroPack.scale,
+    uniformCellArea: uniformPack.scale * uniformPack.scale,
+    zones,
+    densityLaw: 'per-zone',
+  };
 }
 
 /** Repack every distinct footprint into equal cells while preserving the current

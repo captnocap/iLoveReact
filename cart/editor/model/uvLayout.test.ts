@@ -17,7 +17,9 @@ import {
   panUvCanvasView,
   parseUvIslandRects,
   pasteUvTransform,
+  planProgressiveRepeatedUvStacks,
   planRepeatedUvStacks,
+  planTwoSheetUvLayout,
   resizeUvIsland,
   resizeUvIslandFromCorner,
   rotateUvSelection,
@@ -31,6 +33,7 @@ import {
   snapUvTranslationToGridAndGuides,
   toggleUvGridGuide,
   uniformUvPack,
+  uvAspectClass,
   uvContextMenuPosition,
   uvSelectionModeAfterDoubleClick,
   uvScaleDragPoint,
@@ -381,6 +384,9 @@ test('normalized repeat prestack adopts the largest congruent family footprint',
     [...corners.slice(0, 6)].join(',') === [...corners.slice(6, 12)].join(','),
     'normalized family did not sample the representative triangle exactly',
   );
+  const progressive = planProgressiveRepeatedUvStacks(rects, 128, 128);
+  assert(progressive.uniqueFootprints <= exact.uniqueFootprints,
+    'Normalize mode discarded exact wins instead of adding scale-normalized families');
 });
 
 test('normalized repeat prestack protects congruent UV surfaces above its area threshold', () => {
@@ -415,6 +421,57 @@ test('normalized repeat prestack protects congruent UV surfaces above its area t
   assert(sliverOnly.groups.length === 0, 'one below-threshold sliver invented a stack family');
   assert(sliverOnly.stackedIslands === 0, 'one below-threshold sliver changed the UV layout');
   assert(sliverOnly.normalizationProtectedIslands === 2, 'stricter area gate did not protect both larger matches');
+});
+
+test('two-sheet planner keeps hero scale, bins uniform cells, and stacks repeats without mutation', () => {
+  const rects = parseUvIslandRects(
+    [
+      0, 0, 40, 40,
+      60, 0, 10, 10,
+      80, 0, 10, 10,
+      100, 0, 20, 10,
+      130, 0, 32, 2,
+    ],
+    [10, 20, 30, 40, 50],
+    [
+      0, 10, 0, 0, 40, 0, 0, 40,
+      1, 20, 60, 0, 70, 0, 60, 10,
+      2, 30, 80, 0, 90, 0, 80, 10,
+      3, 40, 100, 0, 120, 0, 100, 10,
+      4, 50, 130, 0, 162, 0, 130, 2,
+    ],
+    [
+      0, 1, 2,
+      10, 11, 12,
+      20, 21, 22,
+      30, 31, 32,
+      40, 41, 42,
+    ],
+  );
+  const sourceCorners = [...flattenUvFaceCorners(rects)!];
+  const plan = planTwoSheetUvLayout(rects, 256, 256, {
+    heroIslands: [0],
+    uniformIslands: [1, 2, 3, 4],
+    intents: rects.map((_rect, island) => ({
+      material: 1,
+      semanticNames: [island === 0 ? 'body.hero.panel' : island < 3 ? 'fastener.cap' : 'trim.material'],
+    })),
+  });
+  assert(plan.fits, plan.reason ?? 'two-sheet plan did not fit');
+  assert(plan.densityLaw === 'per-zone', 'planner hid the deliberate per-zone density rule');
+  assert(plan.heroFootprints === 1 && plan.uniformFootprints === 3, 'hero/uniform classification ignored explicit intent');
+  assert(plan.prestackedFootprints === 4 && plan.uniqueFootprints === 4, 'identical uniform twins did not share one literal footprint');
+  assert(plan.heroScale === 1, 'hero art was rescaled despite fitting at natural size');
+  assert(plan.aspectClasses.square === 1 && plan.aspectClasses.wide2 === 1 && plan.aspectClasses['wide-sliver'] === 1,
+    'uniform cells were not separated into the reviewed aspect bins');
+  assert(plan.rects[0]!.x < plan.zones.uniform.x && plan.rects[1]!.x >= plan.zones.uniform.x,
+    'hero and uniform footprints did not land in separate atlas zones');
+  const plannedCorners = flattenUvFaceCorners(plan.rects)!;
+  assert([...plannedCorners.slice(6, 12)].join(',') === [...plannedCorners.slice(12, 18)].join(','),
+    'identical uniform parts did not land on literally the same rect');
+  assert([...flattenUvFaceCorners(rects)!].join(',') === sourceCorners.join(','), 'mutation-free planner changed its source UV corners');
+  assert(uvAspectClass({ w: 9, h: 8 }) === 'square' && uvAspectClass({ w: 30, h: 2 }) === 'wide-sliver',
+    'aspect bucket thresholds drifted');
 });
 
 test('repeat prestack matches identical coverage despite different triangulation and source bookkeeping', () => {

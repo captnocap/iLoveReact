@@ -85,6 +85,17 @@ import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit,
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import type { SeatPartPercept, SeatPrimitiveSpec, SeatShellReceipt } from '../agent/seatApi';
 import {
+  countUvTextureFootprints,
+  flattenUvFaceCorners,
+  planProgressiveRepeatedUvStacks,
+  planRepeatedUvStacks,
+  planTwoSheetUvLayout,
+  stitchUvIslands,
+  UV_LAYOUT_TUNING,
+  type UvIslandRect,
+  type UvTwoSheetZone,
+} from '../model/uvLayout';
+import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
   COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
@@ -341,6 +352,31 @@ export default function AppFrame() {
   const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>) => SeatShellReceipt>(
     () => ({ ok: false, reason: 'Agent Seat shell actions are not ready' }),
   );
+  // Agent UV plans are bounded, mutation-free proposals. Only the latest plan is
+  // retained, and apply requires the same live UV revision so a human edit cannot
+  // be overwritten by a stale agent review.
+  const seatUvPlanRef = useRef<{
+    token: string;
+    kind: 'prestack' | 'stitch' | 'two-sheet';
+    uvKey: string;
+    uvRevision: number;
+    rects: UvIslandRect[];
+    historyAction: 'stack' | 'stitch';
+    summary: Record<string, unknown>;
+    zones?: {
+      hero: { zone: UvTwoSheetZone; islands: number[] };
+      uniform: { zone: UvTwoSheetZone; islands: number[] };
+    };
+  } | null>(null);
+  const seatAppliedTwoSheetRef = useRef<{
+    token: string;
+    rects: UvIslandRect[];
+    zones: {
+      hero: { zone: UvTwoSheetZone; islands: number[] };
+      uniform: { zone: UvTwoSheetZone; islands: number[] };
+    };
+  } | null>(null);
+  const seatUvPlanSerialRef = useRef(0);
   useEffect(() => installDevReloadCheckpoint(() => persistState(stateRef.current)), []);
   // Per-device tool memory (req_3089): which physical device is driving the
   // cursor now, and the last tool runCommand dispatched per surface scope
@@ -5125,6 +5161,163 @@ export default function AppFrame() {
       if (action === 'uv-layout') {
         const values = Array.isArray(args.rects) ? args.rects.map(Number) : [];
         return bridge?.applyUvLayout?.(new Uint32Array(values)) ? ok({ values: values.length }) : fail('UV layout rejected');
+      }
+      if (action === 'uv-prestack' || action === 'uv-stitch' || action === 'uv-two-sheet') {
+        if (!bridge?.uv) return fail('UV focus bridge unavailable');
+        const operation = String(args.operation ?? 'plan');
+        if (action === 'uv-two-sheet' && operation === 'export-guides') {
+          const applied = seatAppliedTwoSheetRef.current;
+          const token = String(args.token ?? '');
+          if (!applied || applied.token !== token) return fail('applied two-sheet token is missing or expired');
+          const hero = bridge.exportUvGenerationZoneGuide(
+            applied.zones.hero.islands.map((index) => applied.rects[index]!),
+            applied.zones.hero.zone,
+            'hero',
+            args.numbered === true,
+          );
+          const uniform = bridge.exportUvGenerationZoneGuide(
+            applied.zones.uniform.islands.map((index) => applied.rects[index]!),
+            applied.zones.uniform.zone,
+            'uniform',
+            args.numbered === true,
+          );
+          return hero.path && uniform.path ? ok({ hero, uniform }) : fail(hero.path ? uniform.note : hero.note);
+        }
+        if (operation === 'apply') {
+          const pending = seatUvPlanRef.current;
+          const token = String(args.token ?? '');
+          const expectedKind = action === 'uv-prestack' ? 'prestack' : action === 'uv-stitch' ? 'stitch' : 'two-sheet';
+          if (!pending || pending.kind !== expectedKind || pending.token !== token) {
+            return fail('UV plan token is missing or no longer current; run plan again');
+          }
+          if (bridge.uv.key !== pending.uvKey || bridge.uv.revision !== pending.uvRevision) {
+            seatUvPlanRef.current = null;
+            return fail('UV plan expired because the live atlas changed; run plan again');
+          }
+          const corners = flattenUvFaceCorners(pending.rects);
+          if (!corners || !bridge.applyUvGeometry(corners, pending.historyAction)) {
+            seatUvPlanRef.current = null;
+            return fail('UV plan was rejected by the live atlas');
+          }
+          if (pending.kind === 'two-sheet' && pending.zones) {
+            seatAppliedTwoSheetRef.current = { token: pending.token, rects: pending.rects, zones: pending.zones };
+          }
+          seatUvPlanRef.current = null;
+          return ok({ ...pending.summary, applied: true });
+        }
+        if (operation !== 'plan') return fail('UV operation must be plan or apply');
+
+        const uv = bridge.uv;
+        const token = `uv-${action}-${uv.revision}-${++seatUvPlanSerialRef.current}`;
+        if (action === 'uv-two-sheet') {
+          const numericIndices = (value: unknown): number[] => Array.isArray(value)
+            ? value.map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < uv.islands.length)
+            : [];
+          const stringPatterns = (value: unknown): string[] => Array.isArray(value)
+            ? value.filter((pattern): pattern is string => typeof pattern === 'string' && pattern.trim().length > 0)
+            : [];
+          const plan = planTwoSheetUvLayout(uv.islands, uv.w, uv.h, {
+            intents: uv.intents,
+            heroIslands: numericIndices(args.heroIslands),
+            uniformIslands: numericIndices(args.uniformIslands),
+            heroSemantics: stringPatterns(args.heroSemantics),
+            uniformSemantics: stringPatterns(args.uniformSemantics),
+            ...(args.automaticHeroAreaCoverage === undefined ? {} : { automaticHeroAreaCoverage: Number(args.automaticHeroAreaCoverage) }),
+            ...(args.heroZoneFraction === undefined ? {} : { heroZoneFraction: Number(args.heroZoneFraction) }),
+            ...(args.normalizeMaxAreaTexels === undefined ? {} : { normalizeMaxAreaTexels: Number(args.normalizeMaxAreaTexels) }),
+          });
+          const summary = {
+            token,
+            fits: plan.fits,
+            reason: plan.reason,
+            densityLaw: plan.densityLaw,
+            sourceIslands: plan.sourceIslands,
+            sourceFootprints: plan.sourceFootprints,
+            prestackedFootprints: plan.prestackedFootprints,
+            uniqueFootprints: plan.uniqueFootprints,
+            stackedIslands: plan.stackedIslands,
+            changedIslands: plan.changedIslands,
+            heroFootprints: plan.heroFootprints,
+            uniformFootprints: plan.uniformFootprints,
+            aspectClasses: plan.aspectClasses,
+            heroScale: plan.heroScale,
+            uniformCellArea: plan.uniformCellArea,
+            zones: plan.zones,
+          };
+          seatUvPlanRef.current = plan.fits ? {
+            token, kind: 'two-sheet', uvKey: uv.key, uvRevision: uv.revision,
+            rects: plan.rects, historyAction: 'stack', summary,
+            zones: {
+              hero: { zone: plan.zones.hero, islands: [...plan.heroIslands] },
+              uniform: { zone: plan.zones.uniform, islands: [...plan.uniformIslands] },
+            },
+          } : null;
+          return ok(summary);
+        }
+        if (action === 'uv-prestack') {
+          const mode = String(args.mode ?? 'normalize');
+          if (mode !== 'exact' && mode !== 'normalize') return fail('prestack mode must be exact or normalize');
+          const requestedArea = args.normalizeMaxAreaTexels === undefined
+            ? UV_LAYOUT_TUNING.repeatNormalizeDefaultMaxAreaTexels
+            : Number(args.normalizeMaxAreaTexels);
+          if (!Number.isFinite(requestedArea) || requestedArea < 0) return fail('normalizeMaxAreaTexels must be a non-negative number');
+          const equivalenceKeys = uv.intents.map((intent: { material?: number | null; semanticNames?: readonly string[] }, island: number) => {
+            const material = intent.material == null ? 'material:none' : `material:${intent.material}`;
+            const semantics = [...(intent.semanticNames ?? [])].sort().join(',') || `island:${island}`;
+            return `${material}|${semantics}`;
+          });
+          const plan = mode === 'normalize'
+            ? planProgressiveRepeatedUvStacks(uv.islands, uv.w, uv.h, { normalizeMaxAreaTexels: requestedArea, equivalenceKeys })
+            : planRepeatedUvStacks(uv.islands, 'exact', uv.w, uv.h, { equivalenceKeys });
+          const summary = {
+            token,
+            mode,
+            sourceIslands: plan.sourceIslands,
+            sourceFootprints: plan.sourceFootprints,
+            uniqueFootprints: plan.uniqueFootprints,
+            families: plan.groups.length,
+            stackedIslands: plan.stackedIslands,
+            changedIslands: plan.changedIslands,
+            normalizedIslands: plan.normalizedIslands,
+            normalizationProtectedIslands: plan.normalizationProtectedIslands,
+            unclassifiedIslands: plan.unclassifiedIslands,
+            normalizeMaxAreaTexels: plan.normalizeMaxAreaTexels,
+          };
+          seatUvPlanRef.current = {
+            token, kind: 'prestack', uvKey: uv.key, uvRevision: uv.revision,
+            rects: plan.rects, historyAction: 'stack', summary,
+          };
+          return ok(summary);
+        }
+
+        const indices = (Array.isArray(args.indices) ? args.indices : uv.selectedIslands)
+          .map(Number)
+          .filter((index: number) => Number.isInteger(index) && index >= 0 && index < uv.islands.length);
+        const uniqueIndices = [...new Set<number>(indices)];
+        const active = Number(args.active === undefined ? uniqueIndices[0] : args.active);
+        if (uniqueIndices.length < 2 || !Number.isInteger(active) || !uniqueIndices.includes(active)) {
+          return fail('stitch plan needs two or more island indices and an active member');
+        }
+        const plan = stitchUvIslands(uv.islands, uniqueIndices, active, uv.w, uv.h);
+        const summary = {
+          token,
+          sourceIslands: uv.islands.length,
+          sourceFootprints: countUvTextureFootprints(uv.islands),
+          uniqueFootprints: countUvTextureFootprints(plan.rects),
+          selectedIslands: uniqueIndices.length,
+          active,
+          stitchedIslands: plan.stitched,
+          unmatchedIslands: plan.unmatched,
+          blockedIslands: plan.blocked,
+          seamEdges: plan.seamEdges,
+          seamVertices: plan.seamVertices,
+          evaluatedCandidates: plan.evaluatedCandidates,
+        };
+        seatUvPlanRef.current = {
+          token, kind: 'stitch', uvKey: uv.key, uvRevision: uv.revision,
+          rects: plan.rects, historyAction: 'stitch', summary,
+        };
+        return ok(summary);
       }
       if (action === 'uv-geometry') {
         const values = Array.isArray(args.corners) ? args.corners.map(Number) : [];

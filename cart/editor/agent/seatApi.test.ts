@@ -12,7 +12,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 const percept: SeatPercept = {
-  version: 1, generation: 4, faces: 60, unnamed: 0,
+  version: 1, generation: 4, faces: 60, islands: 0, unnamed: 0,
   activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
@@ -48,6 +48,14 @@ test('brief replies keep row outcomes but strip repeated percepts', () => {
   const compact = compactSeatReply({ ok: true, op: 'batch', result: [row, row], percept });
   assert(compact.brief.includes('60 faces'), 'brief formatter was not used');
   assert(!(compact.result as any[])[0].percept, 'batch row percept survived compact transport');
+});
+
+test('percept and brief expose the resident UV island cost', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__model_atlas_read = () => JSON.stringify({ islands: [0, 0, 8, 8, 8, 0, 4, 4, 12, 0, 2, 2] });
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'look' });
+  assert(reply.percept?.islands === 3, 'percept discarded the atlas island count');
+  assert(compactSeatReply(reply).brief.includes('3 UV islands'), 'brief output hid the UV cost');
 });
 
 test('per-row generation guard closes a batch after a human topology edit', () => {
@@ -247,7 +255,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 // layer up. The table the seat writes back must be grown from the PRE-append capture.
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
-    version: 1, generation: 9, faces: 132, unnamed: 0,
+    version: 1, generation: 9, faces: 132, islands: 0, unnamed: 0,
     activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
@@ -443,6 +451,26 @@ test('paint, material, UV, detach, and cold save use their authoritative boundar
   assert(uvIslands.join(',') === '1,3', 'UV operation ignored the selected islands');
   assert(executeSeatRequest(seat, { action: 'detach', args: { name: 'roof' } }).ok, 'shell-owned detach stayed unreachable');
   assert(executeSeatRequest(seat, { action: 'save' }).ok && persisted, 'save did not cross the package persistence boundary');
+});
+
+test('Seat atlas uses the visible paint-atlas transaction when the editor provides it', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let directCalls = 0;
+  (globalThis as any).__model_set_paint_fit = () => { directCalls += 1; return 1; };
+  let request: any = null;
+  const seat = createAgentSeat({
+    createAtlasAndPaint: (value) => {
+      request = value;
+      return { density: 441, fit: value.fit, w: 1651, h: 1899 };
+    },
+  });
+  const reply = executeSeatRequest(seat, {
+    action: 'atlas', args: { base: 'solid', rgb: [10, 20, 30], fit: 2048 },
+  });
+  assert(reply.ok && request?.base === 'solid' && request?.fit === 2048,
+    'Seat atlas did not route through the editor-owned atlas transaction');
+  assert((reply.result as any).w === 1651 && directCalls === 0,
+    'Seat atlas bypassed the cart paint gate or lost its actual sheet receipt');
 });
 
 test('paint rejects an atlas whose islands filter into invisibility and recommends a budget', () => {

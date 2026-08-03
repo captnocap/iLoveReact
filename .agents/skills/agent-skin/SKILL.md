@@ -23,13 +23,28 @@ package-saved, with named regions. Source of truth: `cart/editor/stage/ModelView
 1. **Model open + package saved.** `tools/seat look`, then `tools/seat save` if needed.
    Every uv-atlas operation refuses without a package dir on disk.
 2. **Atlas built.** `tools/seat atlas solid 200 200 200 1024` (or `template`/`blank`; fit
-   512/1024/2048/4096). The reply's `{w,h}` are the atlas pixel dimensions — record them,
-   the whole pipeline is keyed to them.
-3. **Paint mode entered once:** `tools/seat command mesh-paint`. The UV panel model
-   (`uvPanel`) only builds when paint mode engages; until then `uv-state` fails with
-   "UV focus bridge unavailable" and export-guide refuses with "no authored UV geometry
-   to draw" **even though the atlas exists**. This gate is invisible and looks like a
-   missing-UV bug; it is not. Re-shot after entering to confirm the Paint panel is up.
+   512/1024/2048/4096). This uses the same transaction as the visible Create Paint Atlas
+   dialog: it clears the stale-layout gate, persists `atlases/base.png`, and enters Paint.
+   The reply's `{w,h}` are the atlas pixel dimensions — record them, the whole pipeline is
+   keyed to them. If `uv-state` is unavailable after an accepted atlas receipt, stop: the
+   shared atlas transaction regressed.
+
+3. **Prestack reviewed and applied.** Before every guide export, dry-run repeat stacking:
+   `tools/seat action uv-prestack '{"operation":"plan","mode":"normalize"}'`. Review
+   `sourceFootprints → uniqueFootprints`, then pass its exact `token` to
+   `tools/seat action uv-prestack '{"operation":"apply","token":"…"}'`. A token expires
+   after any intervening UV edit. Logical island count may stay constant because disconnected
+   mesh shells remain independently selectable; the texture-footprint reduction is the paint
+   cost that stacking removes.
+
+For a two-zone skin, replace the ordinary guide export with a reviewed
+`uv-two-sheet` plan/apply. Pass semantic substrings such as `heroSemantics:["body","seat","decal"]`
+and `uniformSemantics:["fastener","cap","trim"]` when names carry the distinction; explicit
+island lists override automation. The receipt must say `densityLaw:"per-zone"` because fixed
+uniform cells intentionally break texels-per-world-meter. After apply, call
+`uv-two-sheet {"operation":"export-guides","token":"…"}`; it writes cropped
+`uv-ai-guide-hero.png` and `uv-ai-guide-uniform.png`, ready to generate separately and add
+back at the receipt's zone offsets before `compile-layers`.
 
 ## 1 · Export the guide — pick the export for the target model
 
@@ -150,8 +165,8 @@ skinning untouched (it is rigging data; dropping it is a bug, not a cost).
 
 ## Hazards
 
-- **The paint-mode gate** (step 0.3) — "no authored UV geometry" almost never means what
-  it says; it means nobody entered paint mode yet.
+- **Atlas receipt without Paint/UV state** — the Seat and visible dialog now share one
+  transaction. Treat a missing UV bridge after success as a regression, not a second manual gate.
 - **DEFAULT_BATCHES=25** — an unbounded queue line fires 25 batches.
 - **Numbered-label leak** on cheap models; numbered guides pair with gpt-image-2 only.
 - **gpt-image-2 + transparent wireframe = garbage.** Pink guide, always.

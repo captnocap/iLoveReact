@@ -29,7 +29,7 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost, subscribe } from '@reactjit/runtime/ffi';
-import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type SeatFollowSession, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { compactSeatReply, createAgentSeat, executeSeatRequest, orbitPoseByDegrees, readSeatPercept, seatBatchGenerationReason, type AtlasReceipt, type SeatFollowSession, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
@@ -71,12 +71,13 @@ import {
   writeLiveModelAtlas,
   writeModelArtifacts,
   writeModelUvGenerationGuide,
+  writeModelUvGenerationZoneGuide,
   writeModelUvWireframe,
 } from '../data/modelPackageStore';
 import { readMeshDoc } from '../data/meshDoc';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
-import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandRect } from '../model/uvLayout';
+import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandIntent, type UvIslandRect, type UvTwoSheetZone } from '../model/uvLayout';
 import { planUvAtlasResize, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
   setUvTextureLayerLocked,
@@ -184,6 +185,8 @@ export type ModelFocusUv = {
   revision: number;
   rgba: Uint8Array | null;
   islands: UvIslandRect[];
+  /** Durable semantic/material priors joined to the render-face rows in each island. */
+  intents: UvIslandIntent[];
   selectedIslands: number[];
   selectedFaces: number[];
   w: number;
@@ -238,6 +241,7 @@ export type ModelFocusBridge = {
   saveUvAtlas: () => { path: string | null; note: string };
   exportUvWireframe: (islands?: readonly UvIslandRect[]) => { path: string | null; note: string };
   exportUvGenerationGuide: (islands?: readonly UvIslandRect[], numbered?: boolean) => { path: string | null; note: string };
+  exportUvGenerationZoneGuide: (islands: readonly UvIslandRect[], zone: UvTwoSheetZone, name: 'hero' | 'uniform', numbered?: boolean) => { path: string | null; note: string };
   importUvAtlas: (path?: string) => Promise<string>;
   resizeUvAtlas: (width: number, height: number) => Promise<string>;
   addUvTextureLayer: (x: number, y: number, path?: string) => Promise<string>;
@@ -1465,6 +1469,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // an older saved painting. Its UV contract is stale and requires an explicit
   // Remake Paint Atlas decision first.
   const atlasInvalidatedRef = useRef(false);
+  const seatAtlasCreateRef = useRef<(request: {
+    base: 'template' | 'solid' | 'blank';
+    rgb: [number, number, number];
+    detail?: number;
+    fit?: number;
+  }) => AtlasReceipt | null>(() => null);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
   // The atlas base TYPE (Blockbench's Create Texture "Type"), picked in the SAME gate as the
   // size since both gate painting (req_2546): Texture Template = per-island colours, Solid =
@@ -1536,6 +1546,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       revision: ++uvRevisionRef.current,
       rgba: null,
       islands: [],
+      intents: [],
       selectedIslands: [],
       selectedFaces: [],
       w,
@@ -1580,11 +1591,36 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         ? rect
         : { ...rect, x: rect.x + atlasOriginX, y: rect.y + atlasOriginY }
     ));
+    const semanticDoc = packageDir ? readMeshDoc(packageDir) : null;
+    const semanticRegions = semanticDoc?.semanticRegions ?? initialMesh?.semanticRegions ?? [];
+    const faceMaterials = semanticDoc?.faceMaterials ?? initialMesh?.faceMaterials ?? [];
+    const semanticRows = ((semanticDoc?.semanticTable ?? initialMesh?.semanticTable) as any)?.regions;
+    const semanticNames = new Map<number, string>(Array.isArray(semanticRows)
+      ? semanticRows
+        .filter((row: any) => Number.isInteger(row?.id) && typeof row?.name === 'string')
+        .map((row: any) => [Number(row.id), String(row.name)] as [number, string])
+      : []);
+    const intents: UvIslandIntent[] = islands.map((rect) => {
+      const names = new Set<string>();
+      const materials = new Set<number>();
+      for (const triangle of rect.triangles ?? []) {
+        const region = Number((semanticRegions as any)[triangle.face]);
+        const name = semanticNames.get(region);
+        if (name) names.add(name);
+        const material = Number((faceMaterials as any)[triangle.face]);
+        if (Number.isInteger(material) && material >= 0) materials.add(material);
+      }
+      return {
+        semanticNames: [...names].sort(),
+        material: materials.size === 1 ? [...materials][0]! : null,
+      };
+    });
     setUvPanel({
       key: `${model?.key ?? 'model'}-${o.w}x${o.h}-${atlasOriginX},${atlasOriginY}`,
       revision: ++uvRevisionRef.current,
       rgba,
       islands,
+      intents,
       selectedIslands: selection.islands,
       selectedFaces: selection.faces,
       w: o.w,
@@ -1816,6 +1852,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
   const exportUvWireframe = (islands?: readonly UvIslandRect[]) => exportUvGuide('transparent', islands);
   const exportUvGenerationGuide = (islands?: readonly UvIslandRect[], numbered = false) => exportUvGuide('generation', islands, numbered);
+  const exportUvGenerationZoneGuide = (
+    islands: readonly UvIslandRect[],
+    zone: UvTwoSheetZone,
+    name: 'hero' | 'uniform',
+    numbered = false,
+  ): { path: string | null; note: string } => {
+    if (!paintTarget) return { path: null, note: 'Export refused — this viewer has no package-backed paint target.' };
+    if (islands.length === 0 || zone.w < 1 || zone.h < 1) return { path: null, note: `Export refused — the ${name} zone is empty.` };
+    const local = islands.map((rect) => ({ ...rect, x: rect.x - zone.x, y: rect.y - zone.y }));
+    const raster = rasterizeUvWireframe(local, zone.w, zone.h, { kind: 'generation', numberFootprints: numbered });
+    if (!raster) return { path: null, note: `Export refused — the ${name} zone exceeded the live atlas limit.` };
+    const result = writeModelUvGenerationZoneGuide(paintTarget, raster.rgba, raster.width, raster.height, name);
+    return result.ok
+      ? { path: result.path, note: `exported ${name} zone guide · ${result.width}×${result.height}${numbered ? ' · numbered' : ''}` }
+      : { path: null, note: result.error };
+  };
   const importUvAtlas = async (sourcePath?: string): Promise<string> => {
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Import refused — save the model package first.';
@@ -2246,16 +2298,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     chooseGizmoTool(0);
     chooseSelMode(1);
   };
-  // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
-  const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
-    if (paintTarget && !paintTargetOnDisk && !(onRequireFirstSave?.() ?? false)) return;
-    if (fillOnly) changeDetail(1);
-    else changeFit(fitTexels);
+  // One atlas transaction for both the visible prompt and the Agent Seat. It is
+  // deliberately still an explicit human dialog in interactive use; the Seat gets
+  // a programmatic authority that lands the identical gate/persistence state.
+  const createAtlasForPaint = (request: {
+    base: 'template' | 'solid' | 'blank';
+    rgb: [number, number, number];
+    detail?: number;
+    fit?: number;
+  }): AtlasReceipt | null => {
+    if (paintTarget && !paintTargetOnDisk && !(onRequireFirstSave?.() ?? false)) return null;
+    const budget = request.fit;
+    const density = budget === undefined
+      ? changeDetail(request.detail ?? 1)
+      : changeFit(budget);
+    if (!(density >= 0)) return null;
     // Lay the chosen base TYPE onto the fresh atlas (req_2546): 0 template, 1 solid, 2 blank.
     // Solid uses the current ink colour so "flat colour" means the one you're holding.
-    const mode = baseType === 'solid' ? 1 : baseType === 'blank' ? 2 : 0;
-    const [sr, sg, sb] = baseType === 'solid' ? brushRgb(brush) : [220, 220, 225];
-    host.__model_atlas_base?.(mode, sr, sg, sb);
+    const mode = request.base === 'solid' ? 1 : request.base === 'blank' ? 2 : 0;
+    if (host.__model_atlas_base?.(mode, ...request.rgb) !== 1) return null;
     atlasReadyRef.current = true;
     atlasInvalidatedRef.current = false;
     // The moment the atlas is made + coloured, persist it as the model's base atlas + mesh
@@ -2263,6 +2324,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (paintTarget) writeModelArtifacts(paintTarget, undefined, undefined, { captureUvResetBaseline: true });
     setAtlasPrompt(false);
     enterPaint();
+    let sheet: { w?: number; h?: number } = {};
+    if (budget !== undefined) {
+      try {
+        const estimate = JSON.parse(host.__model_paint_fit_estimate?.(budget) ?? 'null');
+        if (Number.isFinite(estimate?.w) && Number.isFinite(estimate?.h)) sheet = { w: estimate.w, h: estimate.h };
+      } catch { /* the atlas landed; an unreadable size estimate does not undo it */ }
+    }
+    return { density, ...(budget === undefined ? {} : { fit: budget }), ...sheet };
+  };
+  seatAtlasCreateRef.current = createAtlasForPaint;
+  // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
+  const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
+    const selectedBase = baseType;
+    const selectedRgb = selectedBase === 'solid' ? brushRgb(brush) : [220, 220, 225] as [number, number, number];
+    createAtlasForPaint({
+      base: selectedBase,
+      rgb: selectedRgb,
+      ...(fillOnly ? { detail: 1 } : { fit: fitTexels }),
+    });
   };
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setPathPlaneMode(false); setPathEdgesMode(false); setSelMode(0); meshSetMode(0); } return nv; });
   // Camera lock is a pure view toggle — it doesn't leave the current tool/mode; the
@@ -2842,6 +2922,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       shellAction: (action, args) => seatViewActionRef.current(action, args)
         ?? (globalThis as any).__seatShellBridge?.shellAction?.(action, args)
         ?? { ok: false, reason: 'editor shell action bridge unavailable' },
+      createAtlasAndPaint: (request) => seatAtlasCreateRef.current(request),
       followState: {
         read: () => getHotState<SeatFollowSession | null>('editor.agent-seat.follow.v1', null),
         write: (state) => setHotState('editor.agent-seat.follow.v1', state),
@@ -3016,6 +3097,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       saveUvAtlas,
       exportUvWireframe,
       exportUvGenerationGuide,
+      exportUvGenerationZoneGuide,
       importUvAtlas,
       resizeUvAtlas,
       addUvTextureLayer,

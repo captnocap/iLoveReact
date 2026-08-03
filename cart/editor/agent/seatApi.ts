@@ -36,6 +36,8 @@ export type SeatPercept = {
   version: 1;
   generation: number;
   faces: number;
+  /** Logical UV islands in the resident atlas. Zero means no readable atlas yet. */
+  islands: number;
   unnamed: number;
   hiddenFaces?: number;
   hiddenNamedFaces?: number;
@@ -170,6 +172,14 @@ export type SeatAdapter = {
   /** Existing shell/Outliner/focus-panel authority for human-facing commands
    *  whose truth is cart-owned rather than a native mesh operation. */
   shellAction?: (action: string, args: Record<string, unknown>) => SeatShellReceipt;
+  /** The same atlas transaction used by the visible Create Paint Atlas dialog.
+   * It owns the cart-side paint gate, package persistence, and Paint entry. */
+  createAtlasAndPaint?: (request: {
+    base: 'template' | 'solid' | 'blank';
+    rgb: [number, number, number];
+    detail?: number;
+    fit?: number;
+  }) => AtlasReceipt | null;
   /** Detach changes both native part ranges and the shell-owned Outliner table. */
   detachSelection?: (name: string) => { lo: number; hi: number } | null;
   /** Follow is short-lived editor working state. It survives a dev hot reload in
@@ -193,8 +203,13 @@ function readTopology(raw: unknown): TopologyReceipt | null {
 export function readSeatPercept(): SeatPercept | null {
   const value = parseJson<SeatPercept>(host.__mesh_semantic_state?.());
   if (!value || value.version !== 1 || !Array.isArray(value.regions) || value.table?.version !== 1) return null;
+  const atlas = parseJson<{ islands?: unknown[] }>(host.__model_atlas_read?.(0));
+  const islands = Array.isArray(atlas?.islands) && atlas.islands.length % 4 === 0
+    ? atlas.islands.length / 4
+    : 0;
   return {
     ...value,
+    islands,
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
   };
@@ -296,7 +311,7 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
 
 export function formatSeatPercept(percept: SeatPercept): string {
   const names = new Map(percept.table.regions.map((region) => [region.id, region.name]));
-  const lines = [`mesh · ${percept.faces} faces · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  const lines = [`mesh · ${percept.faces} faces · ${percept.islands} UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
   for (const part of percept.parts) {
     const range = part.lo == null || part.hi == null ? 'range pending' : `[${part.lo},${part.hi})`;
     const folder = part.groupPath.length > 0 ? `${part.groupPath.map((row) => row.name).join('/')} / ` : '';
@@ -684,6 +699,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!['template', 'solid', 'blank'].includes(base) || !rgbBytes(rgb) ||
         (detail !== undefined && (!Number.isInteger(detail) || detail < 1)) ||
         (fit !== undefined && !PAINT_ATLAS_TUNING.fitLevels.includes(fit))) return null;
+    if (adapter.createAtlasAndPaint) return adapter.createAtlasAndPaint({ base, rgb, detail, fit });
     const mode = base === 'solid' ? 1 : base === 'blank' ? 2 : 0;
     // Size the sheet BEFORE laying the base colour — createAtlasAndPaint's order, so the fill
     // lands on the final layout rather than being rescaled out from under itself.
@@ -1048,7 +1064,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
       case 'group-duplicate': case 'group-dissolve': case 'outliner-move': case 'role-name':
       case 'model-rename': case 'model-import': case 'model-export': case 'model-starter':
-      case 'viewport': case 'reference': case 'uv-state': case 'uv-select': case 'uv-layout':
+      case 'viewport': case 'reference': case 'uv-state': case 'uv-select': case 'uv-layout': case 'uv-prestack': case 'uv-stitch': case 'uv-two-sheet':
       case 'uv-geometry': case 'uv-history': case 'uv-atlas': case 'uv-layer':
       case 'paint-tool': case 'paint-variant': case 'texture-slot': case 'rig': case 'path': {
         const result = seat.shellAction(request.action, args);

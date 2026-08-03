@@ -72,7 +72,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
-| `tools/seat look` | `{"action":"look"}` | Returns the resident percept, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat look` | `{"action":"look"}` | Returns the resident percept, including its live UV island count, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
 | `tools/seat semantic-status` | `{"action":"semantic-status"}` | Compares saved RJMD, viewport mount input, and resident native semantics. |
 | `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
 | `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
@@ -159,6 +159,9 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `uv-state` | Read the complete live UV panel model. |
 | `uv-select` | `mode:"island"|"islands"|"face"|"orientation"` plus `index`/`indices` and optional `additive`. |
 | `uv-layout` | Full atomic `rects:[x,y,w,h,…]`. |
+| `uv-prestack` | `plan` with `mode:"exact"|"normalize"` (normalize default), then `apply` with the returned `token`. Whole-layout repeat scan; reports logical islands and exact texture footprints separately. |
+| `uv-stitch` | `plan` with `indices` + `active` (or the current UV island selection), then `apply` with the returned `token`. Joins only welded-identity seams. |
+| `uv-two-sheet` | `plan` with optional `heroIslands`/`uniformIslands` and semantic substring lists, then `apply` with its `token`. Reports hero/uniform zones, aspect bins, and the explicit `densityLaw:"per-zone"`. After apply, `export-guides` with the same token writes cropped hero + uniform guides. |
 | `uv-geometry` | Full atomic corner array `corners:[x,y,…]`, optional `historyAction`. |
 | `uv-history` | `operation:"read"|"undo"|"redo"`. |
 | `uv-atlas` | reset, reload, save, export-wireframe, export-guide, `import {path}`, resize, `add-layer {path,x,y}`, compile-layers. |
@@ -491,6 +494,7 @@ Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
 { "version": 1,
   "generation": 18,          // bump per topology change; used by the race guard
   "faces": 132,              // total triangles
+  "islands": 27,             // logical UV islands; 0 until an atlas is readable
   "unnamed": 0,              // naming debt
   "activePartId": "part:body", // current Outliner/native edit scope
   "parts": [ { "id": "part:body", "name": "Body", "kind": "cube",

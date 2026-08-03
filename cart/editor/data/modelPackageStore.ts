@@ -771,6 +771,24 @@ export function writeModelUvGenerationGuide(
   return writeModelUvGuide(pkg, rgba, width, height, MODEL_UV_GENERATION_GUIDE_FILE, 'numbered UV AI guide');
 }
 
+/** Persist one cropped two-sheet generation zone without overwriting the other. */
+export function writeModelUvGenerationZoneGuide(
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+  zone: 'hero' | 'uniform',
+): LiveAtlasWriteResult {
+  return writeModelUvGuide(
+    pkg,
+    rgba,
+    width,
+    height,
+    `atlases/uv-ai-guide-${zone}.png`,
+    `${zone} UV AI guide`,
+  );
+}
+
 export const PACKAGE_COLLISION_FILE = 'mesh/collision.blob';
 
 // The stamp naming the geometry revision a collision bake belongs to. doc.blob's
