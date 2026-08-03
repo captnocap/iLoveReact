@@ -91,6 +91,7 @@ import {
   planRepeatedUvStacks,
   planTwoSheetUvLayout,
   stitchUvIslands,
+  uvRepeatSemanticFamily,
   UV_LAYOUT_TUNING,
   type UvIslandRect,
   type UvTwoSheetZone,
@@ -5148,7 +5149,23 @@ export default function AppFrame() {
         return fail(`unknown rig operation "${operation}"`);
       }
       const bridge = (globalThis as any).__modelFocusBridge;
-      if (action === 'uv-state') return bridge?.uv ? ok(bridge.uv) : fail('UV focus bridge unavailable');
+      if (action === 'uv-state') {
+        if (!bridge?.uv) return fail('UV focus bridge unavailable');
+        if (Array.isArray(args.indices)) {
+          const indices = [...new Set(args.indices
+            .map(Number)
+            .filter((index: number) => Number.isInteger(index) && index >= 0 && index < bridge.uv.islands.length))];
+          return ok({
+            key: bridge.uv.key,
+            revision: bridge.uv.revision,
+            w: bridge.uv.w,
+            h: bridge.uv.h,
+            selectedIslands: bridge.uv.selectedIslands,
+            rows: indices.map((index) => ({ index, rect: bridge.uv.islands[index], intent: bridge.uv.intents[index] })),
+          });
+        }
+        return ok(bridge.uv);
+      }
       if (action === 'uv-select') {
         if (!bridge) return fail('UV focus bridge unavailable');
         const mode = String(args.mode ?? 'islands');
@@ -5268,12 +5285,15 @@ export default function AppFrame() {
           if (!Number.isFinite(requestedArea) || requestedArea < 0) return fail('normalizeMaxAreaTexels must be a non-negative number');
           const equivalenceKeys = uv.intents.map((intent: { material?: number | null; semanticNames?: readonly string[] }, island: number) => {
             const material = intent.material == null ? 'material:none' : `material:${intent.material}`;
-            const semantics = [...(intent.semanticNames ?? [])].sort().join(',') || `island:${island}`;
+            const semantics = uvRepeatSemanticFamily(intent.semanticNames, island);
             return `${material}|${semantics}`;
           });
           const plan = mode === 'normalize'
             ? planProgressiveRepeatedUvStacks(uv.islands, uv.w, uv.h, { normalizeMaxAreaTexels: requestedArea, equivalenceKeys })
             : planRepeatedUvStacks(uv.islands, 'exact', uv.w, uv.h, { equivalenceKeys });
+          const inspectedIndices = new Set((Array.isArray(args.indices) ? args.indices : [])
+            .map(Number)
+            .filter((index: number) => Number.isInteger(index) && index >= 0 && index < uv.islands.length));
           const summary = {
             token,
             mode,
@@ -5287,6 +5307,9 @@ export default function AppFrame() {
             normalizationProtectedIslands: plan.normalizationProtectedIslands,
             unclassifiedIslands: plan.unclassifiedIslands,
             normalizeMaxAreaTexels: plan.normalizeMaxAreaTexels,
+            ...(inspectedIndices.size === 0 ? {} : {
+              inspectedFamilies: plan.groups.filter((group) => group.islands.some((index) => inspectedIndices.has(index))),
+            }),
           };
           seatUvPlanRef.current = {
             token, kind: 'prestack', uvKey: uv.key, uvRevision: uv.revision,
@@ -5309,6 +5332,7 @@ export default function AppFrame() {
           sourceIslands: uv.islands.length,
           sourceFootprints: countUvTextureFootprints(uv.islands),
           uniqueFootprints: countUvTextureFootprints(plan.rects),
+          indices: uniqueIndices,
           selectedIslands: uniqueIndices.length,
           active,
           stitchedIslands: plan.stitched,

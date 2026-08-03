@@ -52,6 +52,12 @@ export const UV_LAYOUT_TUNING = {
   repeatExactTexelEpsilon: 0.01,
   /** Normalized shape matching ignores scale, but not visible silhouette drift. */
   repeatNormalizedEpsilon: 0.0001,
+  /** Auto-projected mirror twins can land one half-texel apart even though the
+   * source geometry is an exact reflection. That sub-pixel drift is not a
+   * distinct paint footprint. */
+  repeatProjectionDriftTexels: 0.55,
+  /** Scale-free counterpart of the half-texel projection allowance. */
+  repeatNormalizedProjectionDrift: 0.005,
   /** Default Normalize gate: only repeated UV surfaces at or below 64×64 texels may change scale. */
   repeatNormalizeDefaultMaxAreaTexels: 64 * 64,
   /** Yield once so the topology-scan affordance paints before a large dry run. */
@@ -935,6 +941,18 @@ export type UvRepeatStackOptions = Readonly<{
   equivalenceKeys?: readonly (string | number | null | undefined)[];
 }>;
 
+/** Collapse only explicit delimited left/right markers. Mirrored semantic twins
+ * remain one repeat family; unrelated named surfaces still cannot share paint. */
+export function uvRepeatSemanticFamily(
+  semanticNames: readonly string[] | null | undefined,
+  island: number,
+): string {
+  const names = (semanticNames ?? []).map((name) => (
+    name.replace(/(^|[._\s-])(left|right|l|r)(?=$|[._\s-])/gi, '$1{mirror}')
+  )).sort();
+  return names.join(',') || `island:${island}`;
+}
+
 export type UvRepeatStackGroup = Readonly<{
   /** The largest member in normalize mode; deterministic first member on exact ties. */
   representative: number;
@@ -985,6 +1003,7 @@ type UvRepeatCandidate = Readonly<{
   spanX: number;
   spanY: number;
   canonicalPoints: ReadonlyMap<string, UvIslandVertex>;
+  canonicalEdges: readonly (readonly [number, number, number, number])[];
 }>;
 
 // The eight quarter-turn/reflection transforms. Imported box/cylinder projections
@@ -1080,6 +1099,29 @@ function repeatBoundarySignature(
   return `${edges.length}|${points.size}|${edges.sort().join(';')}`;
 }
 
+function repeatCanonicalBoundaryEdges(
+  rect: UvIslandRect,
+  orientation: UvRepeatOrientation,
+  originX: number,
+  originY: number,
+  divisor: number,
+): readonly (readonly [number, number, number, number])[] | null {
+  const boundary = uvIslandBoundarySegments([rect], 1, 1);
+  if (boundary.length === 0) return null;
+  const edges: (readonly [number, number, number, number])[] = [];
+  for (let at = 0; at + 3 < boundary.length; at += 4) {
+    const a = repeatOrientationPoint(orientation, boundary[at]!, boundary[at + 1]!);
+    const b = repeatOrientationPoint(orientation, boundary[at + 2]!, boundary[at + 3]!);
+    edges.push([
+      (a.x - originX) / divisor,
+      (a.y - originY) / divisor,
+      (b.x - originX) / divisor,
+      (b.y - originY) / divisor,
+    ]);
+  }
+  return edges;
+}
+
 function repeatCandidateAtOrientation(
   rect: UvIslandRect,
   index: number,
@@ -1142,6 +1184,8 @@ function repeatCandidateAtOrientation(
   }
   const key = repeatBoundarySignature(rect, orientation, lowX, lowY, divisor, epsilon);
   if (!key) return null;
+  const canonicalEdges = repeatCanonicalBoundaryEdges(rect, orientation, lowX, lowY, divisor);
+  if (!canonicalEdges) return null;
   return {
     index,
     rect,
@@ -1154,6 +1198,7 @@ function repeatCandidateAtOrientation(
     spanX,
     spanY,
     canonicalPoints,
+    canonicalEdges,
   };
 }
 
@@ -1179,6 +1224,64 @@ function repeatCanonicalPointToken(candidate: UvRepeatCandidate, x: number, y: n
   );
 }
 
+function repeatProjectionTolerance(mode: UvRepeatStackMode): number {
+  return mode === 'normalize'
+    ? UV_LAYOUT_TUNING.repeatNormalizedProjectionDrift
+    : UV_LAYOUT_TUNING.repeatProjectionDriftTexels;
+}
+
+function repeatEdgesApproximatelyEqual(
+  left: UvRepeatCandidate,
+  right: UvRepeatCandidate,
+  mode: UvRepeatStackMode,
+): boolean {
+  if (left.key === right.key) return true;
+  if (left.canonicalEdges.length !== right.canonicalEdges.length) return false;
+  const tolerance = repeatProjectionTolerance(mode);
+  const used = new Set<number>();
+  const close = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by) <= tolerance;
+  for (const edge of left.canonicalEdges) {
+    let match = -1;
+    for (let index = 0; index < right.canonicalEdges.length; index += 1) {
+      if (used.has(index)) continue;
+      const other = right.canonicalEdges[index]!;
+      const sameDirection = close(edge[0], edge[1], other[0], other[1])
+        && close(edge[2], edge[3], other[2], other[3]);
+      const oppositeDirection = close(edge[0], edge[1], other[2], other[3])
+        && close(edge[2], edge[3], other[0], other[1]);
+      if (sameDirection || oppositeDirection) {
+        match = index;
+        break;
+      }
+    }
+    if (match < 0) return false;
+    used.add(match);
+  }
+  return true;
+}
+
+function repeatNearestCanonicalPoint(
+  representative: UvRepeatCandidate,
+  normalizedX: number,
+  normalizedY: number,
+  mode: UvRepeatStackMode,
+): UvIslandVertex | null {
+  const tolerance = repeatProjectionTolerance(mode);
+  let nearest: UvIslandVertex | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const point of representative.canonicalPoints.values()) {
+    const distance = Math.hypot(
+      point.x / representative.divisor - normalizedX,
+      point.y / representative.divisor - normalizedY,
+    );
+    if (distance < nearestDistance) {
+      nearest = point;
+      nearestDistance = distance;
+    }
+  }
+  return nearestDistance <= tolerance ? nearest : null;
+}
+
 function repeatUvSurfaceArea(rect: UvIslandRect): number {
   let area = 0;
   for (const triangle of rect.triangles ?? []) {
@@ -1196,6 +1299,7 @@ function stackRepeatCandidate(
   representative: UvRepeatCandidate,
   atlasW: number,
   atlasH: number,
+  mode: UvRepeatStackMode,
 ): UvIslandRect | null {
   const triangles = absoluteTriangles(candidate.rect);
   let changed = false;
@@ -1207,10 +1311,11 @@ function stackRepeatCandidate(
       const token = repeatCanonicalPointToken(candidate, sourceX, sourceY);
       const canonical = representative.canonicalPoints.get(token);
       const candidatePoint = repeatOrientationPoint(candidate.orientation, sourceX, sourceY);
-      const targetCanonical = canonical ?? {
-        x: ((candidatePoint.x - candidate.originX) / candidate.divisor) * representative.divisor,
-        y: ((candidatePoint.y - candidate.originY) / candidate.divisor) * representative.divisor,
-      };
+      const normalizedX = (candidatePoint.x - candidate.originX) / candidate.divisor;
+      const normalizedY = (candidatePoint.y - candidate.originY) / candidate.divisor;
+      const targetCanonical = canonical
+        ?? repeatNearestCanonicalPoint(representative, normalizedX, normalizedY, mode)
+        ?? { x: normalizedX * representative.divisor, y: normalizedY * representative.divisor };
       const target = repeatInverseOrientationPoint(
         representative.orientation,
         representative.originX + targetCanonical.x,
@@ -1261,21 +1366,30 @@ export function planRepeatedUvStacks(
     else coarse.set(key, [index]);
   }
 
-  const exact = new Map<string, UvRepeatCandidate[]>();
-  for (const [coarseKey, bucket] of coarse) {
+  const candidateFamilies: UvRepeatCandidate[][] = [];
+  for (const bucket of coarse.values()) {
     if (bucket.length < 2) continue;
+    const exact = new Map<string, UvRepeatCandidate[]>();
     for (const index of bucket) {
       const candidate = repeatCandidate(rects[index]!, index, mode);
       if (!candidate) continue;
-      const familyKey = `${coarseKey}|${candidate.key}`;
-      const matches = exact.get(familyKey);
+      const matches = exact.get(candidate.key);
       if (matches) matches.push(candidate);
-      else exact.set(familyKey, [candidate]);
+      else exact.set(candidate.key, [candidate]);
     }
+    const merged: UvRepeatCandidate[][] = [];
+    for (const exactFamily of exact.values()) {
+      const approximateFamily = merged.find((family) => (
+        repeatEdgesApproximatelyEqual(family[0]!, exactFamily[0]!, mode)
+      ));
+      if (approximateFamily) approximateFamily.push(...exactFamily);
+      else merged.push([...exactFamily]);
+    }
+    candidateFamilies.push(...merged);
   }
 
   let normalizationProtectedIslands = 0;
-  const families = [...exact.values()]
+  const families = candidateFamilies
     .filter((candidates) => candidates.length > 1)
     .map((candidates) => {
       const eligible = normalizeMaxAreaTexels === null
@@ -1309,7 +1423,7 @@ export function planRepeatedUvStacks(
     const applied: number[] = [family.representative.index];
     for (const candidate of family.candidates) {
       if (candidate.index === family.representative.index) continue;
-      const stacked = stackRepeatCandidate(candidate, family.representative, atlasW, atlasH);
+      const stacked = stackRepeatCandidate(candidate, family.representative, atlasW, atlasH, mode);
       if (!stacked) continue;
       next[candidate.index] = stacked;
       applied.push(candidate.index);
@@ -2618,7 +2732,7 @@ export function planTwoSheetUvLayout(
   const equivalenceKeys = rects.map((_rect, island) => {
     const intent = options.intents?.[island];
     const material = intent?.material == null ? 'material:none' : `material:${intent.material}`;
-    const semantics = [...(intent?.semanticNames ?? [])].sort().join(',') || `island:${island}`;
+    const semantics = uvRepeatSemanticFamily(intent?.semanticNames, island);
     return classByIsland[island] === 'uniform'
       ? `uniform|${material}`
       : `hero|${material}|${semantics}`;

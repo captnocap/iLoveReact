@@ -156,10 +156,10 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `viewport` | `read`; `orbit {yawDegrees,pitchDegrees}`; `frame {target:"model"|"selection"}`; pan; zoom; explicit `pose` (radians); lock; selection-mode; gizmo; wire; xray; `focus` (frame selection); `focus-tool`; mirror; bookmarks. Programmatic moves exit the focus tool first and return the actual live pose. |
 | `reference` | `read`; `add {path,patch?}`; `update {id,patch}`; `remove {id}`. |
 | `path` | `plane` or `edges`, flat normalized viewport `points:[x,y,…]`, and optional `closed`. Creates a real Outliner part. |
-| `uv-state` | Read the complete live UV panel model. |
+| `uv-state` | Read the complete live UV panel model. Optional `indices:[…]` returns only those island rects/intents plus the current selection, avoiding the full atlas-pixel payload. |
 | `uv-select` | `mode:"island"|"islands"|"face"|"orientation"` plus `index`/`indices` and optional `additive`. |
 | `uv-layout` | Full atomic `rects:[x,y,w,h,…]`. |
-| `uv-prestack` | `plan` with `mode:"exact"|"normalize"` (normalize default), then `apply` with the returned `token`. Whole-layout repeat scan; reports logical islands and exact texture footprints separately. |
+| `uv-prestack` | `plan` with `mode:"exact"|"normalize"` (normalize default), optional diagnostic `indices:[…]`, then `apply` with the returned `token`. Whole-layout repeat scan; reports logical islands and exact texture footprints separately; inspected indices return their matched families. |
 | `uv-stitch` | `plan` with `indices` + `active` (or the current UV island selection), then `apply` with the returned `token`. Joins only welded-identity seams. |
 | `uv-two-sheet` | `plan` with optional `heroIslands`/`uniformIslands`, semantic substring lists, `minimumReadableAreaTexels`, and `maximumReadabilityBoost`, then `apply` with its `token`. Natural proportional size is preserved; only undersized material/support footprints are enlarged toward the bounded readability floor. After apply, `export-guides` with the same token writes cropped hero + uniform guides. |
 | `uv-geometry` | Full atomic corner array `corners:[x,y,…]`, optional `historyAction`. |

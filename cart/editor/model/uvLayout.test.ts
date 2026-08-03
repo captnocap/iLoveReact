@@ -46,6 +46,7 @@ import {
   uvIslandsIntersectingMarquee,
   uvIslandVertices,
   uvIslandSetBounds,
+  uvRepeatSemanticFamily,
   uvSelectionBounds,
   uvTranslationSnapStep,
   uvWorkspaceGridSegments,
@@ -578,6 +579,50 @@ test('repeat prestack explicitly walks four turns and horizontal flip plus four 
   assert(plan.sourceFootprints === 8 && plan.uniqueFootprints === 1, 'eight-orientation walk did not produce one footprint');
   assert(plan.stackedIslands === 7 && plan.changedIslands === 7, 'eight-orientation walk reported the wrong move count');
   assert(plan.rects[7]!.triangles?.[0]?.vertices?.join(',') === '70,71,72', 'mirrored peer lost its welded source identities');
+});
+
+test('repeat prestack absorbs half-texel auto-projection drift on mirrored shells', () => {
+  const rects = parseUvIslandRects(
+    [0, 0, 134, 275, 200, 0, 134, 275],
+    [424, 425],
+    [
+      0, 424, 52.8974, 274, 19.52145, 182.5419, 124.09973, 182.5419,
+      0, 424, 52.8974, 274, 124.09973, 182.5419, 133.00003, 274,
+      0, 432, 106.29929, 0, 115.19943, 91.02, 1.72086, 91.02,
+      0, 432, 106.29929, 0, 1.72086, 91.02, 0, 0,
+      0, 433, 115.19943, 91.02, 124.09973, 182.5419, 19.52145, 182.5419,
+      0, 433, 115.19943, 91.02, 19.52145, 182.5419, 1.72086, 91.02,
+      1, 425, 208.39594, 182.5419, 312.9744, 182.5419, 279.5983, 274,
+      1, 425, 208.39594, 182.5419, 279.5983, 274, 200, 274,
+      1, 428, 330.77496, 91.02, 217.2963, 91.02, 226.19653, 0,
+      1, 428, 330.77496, 91.02, 226.19653, 0, 333, 0,
+      1, 429, 312.9744, 182.5419, 208.39594, 182.5419, 217.2963, 91.02,
+      1, 429, 312.9744, 182.5419, 217.2963, 91.02, 330.77496, 91.02,
+    ],
+  );
+  const plan = planRepeatedUvStacks(rects, 'exact', 512, 512);
+  assert(plan.groups.length === 1 && plan.groups[0]!.islands.join(',') === '0,1',
+    'sub-pixel mirror projection drift split one repeated shell family');
+  assert(plan.sourceFootprints === 2 && plan.uniqueFootprints === 1 && plan.changedIslands === 1,
+    'sub-pixel mirror family did not land on one exact paint footprint');
+  const corners = flattenUvFaceCorners(plan.rects)!;
+  const pointSet = (start: number, count: number) => {
+    const points: string[] = [];
+    for (let at = start; at < start + count; at += 2) points.push(`${corners[at]},${corners[at + 1]}`);
+    return [...new Set(points)].sort().join('|');
+  };
+  assert(pointSet(0, 36) === pointSet(36, 36), 'fuzzy mirror match did not land on the representative corners exactly');
+});
+
+test('repeat semantic partitions preserve mirrored left/right twins without merging unrelated surfaces', () => {
+  assert(
+    uvRepeatSemanticFamily(['legShield.left'], 70) === uvRepeatSemanticFamily(['legShield.right'], 71),
+    'explicit left/right semantic twins were split before repeat matching',
+  );
+  assert(
+    uvRepeatSemanticFamily(['legShield.front'], 70) !== uvRepeatSemanticFamily(['legShield.left'], 71),
+    'unrelated semantic surfaces were collapsed into one repeat family',
+  );
 });
 
 test('repeat prestack buckets a production-sized repeated topology sweep into one deterministic family', () => {
