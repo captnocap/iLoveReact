@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Graph, Image, Paintable, Pressable, Row, ScrollView, Text, TextInput } from '../../../runtime/primitives';
 import { usePaintable } from '../../../runtime/hooks/usePaintable';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
+import { readFileBase64, remove, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
 import { Icon } from '../../../runtime/icons/Icon';
 import { parseClampedNumericDraft, replacementDraftAfterEdit } from '../../../runtime/paint/numericInput';
 import { C, accentFor } from '../workspace.cls';
@@ -14,6 +16,7 @@ import {
 } from '../data/uvTextureWorkspace';
 import { loadTexturePackages, texturePatchPackages, type TexturePatchPackage } from '../data/texturePackage';
 import { importedSpecs } from '../textures/shaders';
+import { rasterizeUvTexturePatch } from '../model/uvTexturePatch';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
@@ -116,6 +119,12 @@ type UvRepeatStackReview = Readonly<{
   normalize: UvRepeatStackPlan;
 }>;
 type UvRepeatStackExport = 'none' | 'wireframe' | 'generation' | 'generation-numbered';
+type UvPatchFocus = Readonly<{
+  modelKey: string;
+  patch: TexturePatchPackage;
+  masterRects: UvIslandRect[];
+  indices: number[];
+}>;
 type Gesture =
   | { kind: 'pan'; start: ScreenPoint; seed: UvCanvasView }
   | { kind: 'marquee'; start: ScreenPoint; current: ScreenPoint; screenStart: ScreenPoint; activated: boolean; additive: boolean; seedIndices: number[]; seedPrimary: number }
@@ -331,8 +340,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(
     uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null,
   );
-  const [focusedPatchLayerId, setFocusedPatchLayerId] = useState<string | null>(null);
-  const pendingPatchFocusRef = useRef(false);
+  const [patchFocus, setPatchFocusState] = useState<UvPatchFocus | null>(null);
+  const patchFocusRef = useRef<UvPatchFocus | null>(null);
+  const [patchFinishing, setPatchFinishing] = useState(false);
   const importedTextureCount = importedSpecs().length;
   const texturePatches = useMemo(
     () => texturePatchPackages(loadTexturePackages()),
@@ -534,6 +544,17 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     repeatStackScanGenerationRef.current += 1;
     setRepeatStackScanning(false);
     setRepeatStackReview(null);
+    const livePatchFocus = patchFocusRef.current;
+    if (livePatchFocus && livePatchFocus.modelKey === uv.key) {
+      workspaceDocRef.current = uv.workspace;
+      setWorkspaceDoc(uv.workspace);
+      if (uv.rgba) texture.paint.upload(uv.rgba);
+      return;
+    }
+    if (livePatchFocus) {
+      patchFocusRef.current = null;
+      setPatchFocusState(null);
+    }
     const next = initialRects();
     setRects(next);
     rectsRef.current = next;
@@ -564,6 +585,14 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setSelectedIndices(indices);
     setSelected(primary);
     setSelectedFace(null);
+  };
+  const interactiveRects = (): readonly UvIslandRect[] => {
+    const focus = patchFocusRef.current;
+    if (!focus) return rectsRef.current;
+    const editable = new Set(focus.indices);
+    return rectsRef.current.map((rect, index) => editable.has(index)
+      ? rect
+      : { ...rect, x: UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate * 2, y: UV_TEXTURE_WORKSPACE_TUNING.maxCoordinate * 2 });
   };
   const selectIslandAt = (index: number, additive: boolean): number[] => {
     const current = selectedIndicesRef.current;
@@ -599,6 +628,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     y: (screen.y - viewRef.current.y) / Math.max(UV_LAYOUT_TUNING.minimumZoom, viewRef.current.scale),
   });
   const commit = (next: UvIslandRect[], label: string, action: UvHistoryAction): boolean => {
+    if (patchFocusRef.current) {
+      setNote(`${label} · patch-local; master UV scale unchanged`);
+      return true;
+    }
     const corners = flattenUvFaceCorners(next);
     if (!corners || !bridge.applyUvGeometry(corners, action)) {
       const restored = initialRects();
@@ -730,6 +763,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     );
   };
   const restoreSelectedShapes = () => {
+    if (patchFocusRef.current) {
+      setNote('Restore Shape changes the master UV. Finish the local patch first.');
+      return;
+    }
     const indices = selectedIndicesRef.current;
     if (selectionMode !== 'island' || indices.length === 0) {
       setNote('Select one or more complete UV islands first.');
@@ -763,26 +800,6 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   } : null;
   const selectedGroupBounds = multiIslandSelection ? uvIslandSetBounds(rects, selectedIndices) : null;
   const selectionBounds = selectedGroupBounds ?? primarySelectionBounds;
-  useEffect(() => {
-    if (!pendingPatchFocusRef.current || !uv.workspace) return;
-    const layer = uv.workspace.layers[uv.workspace.layers.length - 1];
-    if (!layer) return;
-    pendingPatchFocusRef.current = false;
-    setFocusedPatchLayerId(layer.id);
-    setSelectedLayerId(layer.id);
-    setSurfaceMode('uv');
-    const uvBounds = uvIslandSetBounds(rectsRef.current, selectedIndicesRef.current);
-    const left = Math.min(layer.x, uvBounds?.x ?? layer.x);
-    const top = Math.min(layer.y, uvBounds?.y ?? layer.y);
-    const right = Math.max(layer.x + layer.width, uvBounds ? uvBounds.x + uvBounds.w : layer.x + layer.width);
-    const bottom = Math.max(layer.y + layer.height, uvBounds ? uvBounds.y + uvBounds.h : layer.y + layer.height);
-    const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
-    const scale = clamp(Math.min(
-      Math.max(1, surfaceSize.width - padding * 2) / Math.max(1, right - left),
-      Math.max(1, surfaceSize.height - padding * 2) / Math.max(1, bottom - top),
-    ), UV_LAYOUT_TUNING.minimumZoom, UV_LAYOUT_TUNING.maximumZoom);
-    setView({ x: padding - left * scale, y: padding - top * scale, scale });
-  }, [uv.revision, uv.workspace]);
   const selectedOutlineLocalRect = useMemo(() => selectedLocalRect && selectedTarget
     ? { ...selectedLocalRect, triangles: selectedLocalRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
     : selectedLocalRect, [selectedLocalRect, selectedTarget?.face, selectedTarget?.group]);
@@ -794,7 +811,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     cacheRef.current = { rects: [...items], geometry };
     return geometry;
   };
-  const fixedRects = focusedPatchLayerId
+  const fixedRects = patchFocus
     ? []
     : rects.filter((_rect, index) => !selectedIndexSet.has(index));
   const fixedLines = cachedLineGeometry(fixedLineCacheRef, fixedRects);
@@ -983,7 +1000,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         );
       }
       if (gesture.activated) {
-        const hits = uvIslandsIntersectingMarquee(rectsRef.current, gesture.start, gesture.current);
+        const hits = uvIslandsIntersectingMarquee(interactiveRects(), gesture.start, gesture.current);
         const seeded = new Set(gesture.seedIndices);
         const next = gesture.additive
           ? [...gesture.seedIndices, ...hits.filter((index) => !seeded.has(index))]
@@ -1014,6 +1031,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const canUndoUv = historyAvailable.undo;
   const canRedoUv = historyAvailable.redo;
   const stepHistory = (redo: boolean) => {
+    if (patchFocusRef.current) {
+      setNote('Model UV history is locked while the patch mapping is local. Apply the patch first.');
+      return;
+    }
     setNote(redo ? bridge.redoUvHistory() : bridge.undoUvHistory());
     setDocumentHistory(bridge.readUvHistory());
   };
@@ -1127,24 +1148,90 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     });
   };
   const applyTexturePatch = (patch: TexturePatchPackage) => {
+    if (patchFocusRef.current) {
+      setNote('Finish the current local patch before opening another one.');
+      return;
+    }
     if (!selectionBounds || selectedIndicesRef.current.length === 0) {
       setNote('Select the part or UV islands that should use this texture patch first.');
       return;
     }
-    pendingPatchFocusRef.current = true;
-    setNote(`adding reusable patch ${patch.name}…`);
-    void bridge.addUvTextureLayer(
-      Math.round(selectionBounds.x),
-      Math.round(selectionBounds.y),
-      patch.imagePath,
-    ).then((message) => {
-      if (!message.startsWith('Added ')) pendingPatchFocusRef.current = false;
-      setNote(message.startsWith('Added ')
-        ? `${message} · focused ${selectedIndicesRef.current.length} selected UV island${selectedIndicesRef.current.length === 1 ? '' : 's'}`
-        : message);
-    });
+    const masterRects = rectsRef.current.map((rect) => ({
+      ...rect,
+      ...(rect.triangles ? { triangles: rect.triangles.map((triangle) => ({ ...triangle, points: [...triangle.points] as typeof triangle.points })) } : {}),
+    }));
+    const indices = [...selectedIndicesRef.current];
+    const selectedBounds = uvIslandSetBounds(masterRects, indices);
+    if (!selectedBounds) {
+      setNote('The selected UVs have no editable bounds.');
+      return;
+    }
+    const selectedSet = new Set(indices);
+    const localRects = masterRects.map((rect, index) => selectedSet.has(index)
+      ? { ...rect, x: rect.x - selectedBounds.x, y: rect.y - selectedBounds.y }
+      : rect);
+    const focus = { modelKey: uv.key, patch, masterRects, indices };
+    patchFocusRef.current = focus;
+    setPatchFocusState(focus);
+    rectsRef.current = localRects;
+    setRects(localRects);
+    setSurfaceMode('uv');
+    const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
+    const right = Math.max(patch.width, selectedBounds.w);
+    const bottom = Math.max(patch.height, selectedBounds.h);
+    const scale = clamp(Math.min(
+      Math.max(1, surfaceSize.width - padding * 2) / Math.max(1, right),
+      Math.max(1, surfaceSize.height - padding * 2) / Math.max(1, bottom),
+    ), UV_LAYOUT_TUNING.minimumZoom, UV_LAYOUT_TUNING.maximumZoom);
+    setView({ x: padding, y: padding, scale });
+    setNote(`${patch.name} opened locally · fit ${indices.length} UV island${indices.length === 1 ? '' : 's'} to the source; master footprint is locked`);
   };
-  const compileImageLayers = () => {
+  const finishTexturePatch = async (): Promise<boolean> => {
+    const focus = patchFocusRef.current;
+    if (!focus || patchFinishing) return !focus;
+    const encoded = readFileBase64(focus.patch.imagePath);
+    const source = encoded ? imageOps(encoded).raw() : null;
+    const masterSelected = focus.indices.map((index) => focus.masterRects[index]!).filter(Boolean);
+    const patchSelected = focus.indices.map((index) => rectsRef.current[index]!).filter(Boolean);
+    const raster = source
+      ? rasterizeUvTexturePatch(source.rgba, source.width, source.height, masterSelected, patchSelected)
+      : null;
+    if (!raster) {
+      setNote('Patch finish refused · the source image or render-face mapping changed.');
+      return false;
+    }
+    const png = encodeImage(raster.rgba, raster.width, raster.height, { format: 'png' });
+    if (!png) {
+      setNote('Patch finish refused · the local mapping could not be encoded.');
+      return false;
+    }
+    const safeId = focus.patch.id.replace(/[^a-z0-9_-]/gi, '-');
+    const stagedPath = `/tmp/reactjit-uv-patch-${safeId}-${Date.now()}.png`;
+    if (!writeFileBytesAtomic(stagedPath, png)) {
+      setNote('Patch finish refused · the compiled patch could not be staged.');
+      return false;
+    }
+    setPatchFinishing(true);
+    try {
+      const message = await bridge.addUvTextureLayer(raster.x, raster.y, stagedPath);
+      if (!message.startsWith('Added ')) {
+        setNote(message);
+        return false;
+      }
+      patchFocusRef.current = null;
+      setPatchFocusState(null);
+      rectsRef.current = focus.masterRects;
+      setRects(focus.masterRects);
+      setView(fittedView());
+      setNote(`Bound ${focus.patch.name} to ${focus.indices.length} island${focus.indices.length === 1 ? '' : 's'} · master footprint stayed ${raster.width}×${raster.height}px`);
+      return true;
+    } finally {
+      remove(stagedPath);
+      setPatchFinishing(false);
+    }
+  };
+  const compileImageLayers = async () => {
+    if (patchFocusRef.current && !await finishTexturePatch()) return;
     setCompileLabel('Preparing image layers');
     setNote('compiling the visible image workspace…');
     void bridge.compileUvTextureLayers((completed, total, label) => {
@@ -1272,6 +1359,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     applyIslandSetEdit(next, 'moved UV selection to the cursor', 'move-here');
   };
   const autoSizeSelected = () => {
+    if (patchFocusRef.current) {
+      setNote('Auto UV changes master texel density. Apply the local patch first.');
+      return;
+    }
     const indices = selectedIndicesRef.current;
     if (selectionMode !== 'island' || indices.length === 0) {
       setNote('Select one or more complete UV islands first.');
@@ -1285,6 +1376,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setNote(`sized ${indices.length} UV ${indices.length === 1 ? 'island' : 'islands'} to the real face size at ${uv.detail} texels/m`);
   };
   const projectSelectedFromView = () => {
+    if (patchFocusRef.current) {
+      setNote('Project From View changes master UV geometry. Apply the local patch first.');
+      return;
+    }
     const indices = selectedIndicesRef.current;
     if (selectionMode !== 'island' || indices.length === 0) {
       setNote('Select one or more complete UV islands first.');
@@ -1309,7 +1404,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     if (selectAtPointer) {
       const point = menuAtlasPointRef.current;
       if (selectionMode === 'face') {
-        const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+        const faceHit = hitUvFace(interactiveRects(), point.x, point.y);
         if (faceHit) {
           selectedIndicesRef.current = [faceHit.island];
           setSelectedIndices([faceHit.island]);
@@ -1318,7 +1413,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           bridge.selectUvFace(faceHit.target.face, false);
         }
       } else {
-        const index = hitUvIsland(rectsRef.current, point.x, point.y);
+        const index = hitUvIsland(interactiveRects(), point.x, point.y);
         if (index >= 0 && !selectedIndicesRef.current.includes(index)) {
           publishIslandSelection([index], index);
           bridge.selectUvIsland(index, false);
@@ -1392,20 +1487,20 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         </Pressable>
         <Pressable
           tooltip={workspaceDoc ? 'Move unlocked images; locked-image and empty-space drags pass through to UVs' : 'Add an image layer to create the editable workspace'}
-          onPress={() => workspaceDoc && setSurfaceMode('images')}
-          style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'images' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'images' ? accentFor('primary') : accentFor('border'), opacity: workspaceDoc ? 1 : 0.55 }}
+          onPress={() => workspaceDoc && !patchFocus && setSurfaceMode('images')}
+          style={{ height: 22, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 4, backgroundColor: surfaceMode === 'images' ? accentFor('segActiveBg') : accentFor('surfaceRaised'), borderWidth: 1, borderColor: surfaceMode === 'images' ? accentFor('primary') : accentFor('border'), opacity: workspaceDoc && !patchFocus ? 1 : 0.55 }}
         >
           <Icon name="Images" size={10} color={surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim')} />
           <Text style={{ color: surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>IMAGES</Text>
         </Pressable>
-        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{focusedPatchLayerId ? 'PATCH FOCUS' : surfaceMode === 'images' ? `${workspaceDoc?.layers.length ?? 0} LAYERS` : selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
-        {focusedPatchLayerId ? (
+        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{patchFocus ? 'PATCH LOCAL · MASTER LOCKED' : surfaceMode === 'images' ? `${workspaceDoc?.layers.length ?? 0} LAYERS` : selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
+        {patchFocus ? (
           <Pressable
-            tooltip="Return to the complete atlas; the patch layer and UV placement stay intact"
-            onPress={() => { setFocusedPatchLayerId(null); setView(fittedView()); setNote('returned to the complete atlas'); }}
-            style={{ height: 22, paddingLeft: 7, paddingRight: 7, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}
+            tooltip="Bake this local mapping into the islands' unchanged master-atlas footprint"
+            onPress={() => { if (!patchFinishing) void finishTexturePatch(); }}
+            style={{ height: 22, paddingLeft: 7, paddingRight: 7, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary'), opacity: patchFinishing ? 0.55 : 1 }}
           >
-            <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>SHOW ALL</Text>
+            <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>{patchFinishing ? 'BAKING' : 'APPLY + SHOW ALL'}</Text>
           </Pressable>
         ) : null}
         <Box style={{ flexGrow: 1 }} />
@@ -1516,7 +1611,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           const doubleClick = isUvDoubleClick(lastClickRef.current, clickStamp);
           if (doubleClick) {
             lastClickRef.current = null;
-            const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+            const faceHit = hitUvFace(interactiveRects(), point.x, point.y);
             if (faceHit) {
               const nextMode = uvSelectionModeAfterDoubleClick(selectionMode, true);
               selectedIndicesRef.current = [faceHit.island];
@@ -1539,7 +1634,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             }
           }
           if (selectionMode === 'face') {
-            const faceHit = hitUvFace(rectsRef.current, point.x, point.y);
+            const faceHit = hitUvFace(interactiveRects(), point.x, point.y);
             if (!faceHit && toggleGridGuideAt(point)) return;
             const faceSelection = faceHit ? [faceHit.island] : [];
             selectedIndicesRef.current = faceSelection;
@@ -1554,7 +1649,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             }
             return;
           }
-          const index = hitUvIsland(rectsRef.current, point.x, point.y);
+          const index = hitUvIsland(interactiveRects(), point.x, point.y);
           if (index < 0 && toggleGridGuideAt(point)) return;
           const additive = Boolean(event?.shiftKey);
           const nextSelection = selectIslandAt(index, additive);
@@ -1681,9 +1776,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         style={{ flexGrow: 1, minHeight: 300, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('border'), backgroundColor: '#07090d' }}
       >
         <Effect shader={WORKSPACE_CHECKER_SHADER} data={workspaceCheckerData} style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height }} />
-        {workspaceDoc && uv.packageDir ? (
+        {patchFocus ? (
           <>
-            {workspaceDoc.layers.filter((layer) => layer.visible && (!focusedPatchLayerId || layer.id === focusedPatchLayerId)).map((layer) => (
+            <Image
+              source={patchFocus.patch.imagePath}
+              style={{
+                position: 'absolute',
+                left: view.x,
+                top: view.y,
+                width: patchFocus.patch.width * view.scale,
+                height: patchFocus.patch.height * view.scale,
+                pointerEvents: 'none',
+              }}
+            />
+            <Box style={{ position: 'absolute', left: view.x, top: view.y, width: patchFocus.patch.width * view.scale, height: patchFocus.patch.height * view.scale, borderWidth: 2, borderColor: accentFor('primary'), pointerEvents: 'none' }} />
+          </>
+        ) : workspaceDoc && uv.packageDir ? (
+          <>
+            {workspaceDoc.layers.filter((layer) => layer.visible).map((layer) => (
               <Image
                 key={`uv-workspace-image-${layer.id}-${layer.source}`}
                 source={`${uv.packageDir}/${layer.source}`}
@@ -1838,7 +1948,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       <Row style={{ height: 14, alignItems: 'center' }}>
         <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', letterSpacing: 0.4 }}>{`${multiIslandSelection ? `${selectedIndices.length} ISLANDS · RIGID SNAP ${translationSnapStep}px` : `GRID SNAP ${translationSnapStep}px`} · CTRL DRAG = AREA SELECT · ${selectedGuides.length > 0 ? `${selectedGuides.length} GUIDE${selectedGuides.length === 1 ? '' : 'S'}` : 'CLICK GRID = GUIDE'}`}</Text>
         <Box style={{ flexGrow: 1 }} />
-        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{`INFINITE WORKSPACE · ATLAS ${uv.w}×${uv.h} @ ${uv.atlasOriginX},${uv.atlasOriginY}`}</Text>
+        <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{patchFocus ? `LOCAL SOURCE ${patchFocus.patch.width}×${patchFocus.patch.height} · MASTER SCALE LOCKED` : `INFINITE WORKSPACE · ATLAS ${uv.w}×${uv.h} @ ${uv.atlasOriginX},${uv.atlasOriginY}`}</Text>
       </Row>
 
       <Row style={{ height: 29, alignItems: 'center', gap: 4 }}>
@@ -1848,7 +1958,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           value={atlasWidthDraft}
           min={UV_ATLAS_SIZE_TUNING.minDimension}
           max={UV_ATLAS_SIZE_TUNING.maxDimension}
-          disabled={atlasResizePending}
+          disabled={atlasResizePending || Boolean(patchFocus)}
           onCommit={setAtlasWidthDraft}
         />
         <UvNumberField
@@ -1856,7 +1966,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           value={atlasHeightDraft}
           min={UV_ATLAS_SIZE_TUNING.minDimension}
           max={UV_ATLAS_SIZE_TUNING.maxDimension}
-          disabled={atlasResizePending}
+          disabled={atlasResizePending || Boolean(patchFocus)}
           onCommit={setAtlasHeightDraft}
         />
         <Text
@@ -1869,7 +1979,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           tooltip={atlasResizeResult.ok
             ? `Resize the atlas coordinate frame ${uv.w}×${uv.h} → ${atlasWidthDraft}×${atlasHeightDraft}; normalized UV placement stays fixed`
             : atlasResizeResult.error}
-          onPress={() => atlasResizePlan?.changed && !atlasResizePending && !compileLabel && applyAtlasResize()}
+          onPress={() => atlasResizePlan?.changed && !atlasResizePending && !compileLabel && !patchFocus && applyAtlasResize()}
           style={{
             width: 58,
             height: 29,
@@ -1879,7 +1989,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
             backgroundColor: atlasResizePlan?.changed ? accentFor('segActiveBg') : accentFor('surfaceRaised'),
             borderWidth: 1,
             borderColor: atlasResizePlan?.changed ? accentFor('primary') : accentFor('border'),
-            opacity: atlasResizePlan?.changed && !atlasResizePending && !compileLabel ? 1 : 0.5,
+            opacity: atlasResizePlan?.changed && !atlasResizePending && !compileLabel && !patchFocus ? 1 : 0.5,
           }}
         >
           <Text style={{ color: atlasResizePlan?.changed ? accentFor('primary') : accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>
@@ -2162,7 +2272,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
                 icon="RotateCcw"
                 label="Reset UV Layout"
                 detail="ATLAS START"
-                enabled={rects.length > 0}
+                enabled={rects.length > 0 && !patchFocus}
                 tooltip="Restore every UV corner to the immutable layout saved when this atlas was created; one undo step"
                 onPress={() => runMenuAction(() => setNote(bridge.resetUvLayout()))}
               />
