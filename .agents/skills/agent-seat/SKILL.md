@@ -58,9 +58,14 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 4. Make one coherent structural change, inspect the returned percept, then continue.
 5. Use a named operation for every face-creating change. Rewind with `tools/seat undo` as
    soon as a result diverges from the requested form.
-6. Run `tools/seat save`, then `tools/seat semantic-status`. Require `status:"healthy"`
+6. Before any final atlas, paint, or save, clear the **Topology finish gate** below —
+   junction by junction, naming each one. A pile of `add`-ed solids is a blockout; shipping
+   it throws away ~43% of the model as geometry no camera can reach. `part-merge` resolves
+   NOTHING: it welds no vertex and deletes no face, and using it to tidy the Outliner over
+   unjoined solids is the worse of the two failures, not the fix.
+7. Run `tools/seat save`, then `tools/seat semantic-status`. Require `status:"healthy"`
    and matching nonzero saved/mount/resident counts before claiming that names are durable.
-7. Report changes in terms of semantic names and dimensions, not face indices. When cold
+8. Report changes in terms of semantic names and dimensions, not face indices. When cold
    persistence is material to the task, fully stop and reopen the editor and prove the names
    with a generation-1 `look`.
 
@@ -143,7 +148,7 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `select-elements` | `kind:"face"|"edge"|"vertex"`, `indices`; replaces the mode selection in one call. |
 | `part-select` | `ids`, optional `primary`; changes the native edit scope too. |
 | `part-rename`, `part-visibility`, `part-delete`, `part-duplicate` | `id`; rename adds `name`, visibility adds `visible`, duplicate adds optional `axis:"x"|"y"|"z"`. |
-| `part-merge` | `ids` with at least two rows. |
+| `part-merge` | `ids` with at least two rows. Merges authoring scope while preserving each face's semantic region; it does not weld vertices or remove hidden faces. |
 | `part-path-array` | `ids`, `params` (`axis`, `bays`, `turnDegrees`, `riseU`, optional XYZ `points`). |
 | `part-import` | `id`: saved model package id or exact model name. |
 | `parts-group`, `parts-ungroup` | `ids`. |
@@ -205,6 +210,19 @@ an anonymous extrude). Cylinders stand on their Y axis; a knob facing ±X needs 
 Surfaces are named in the same creation transaction: cubes get `.right/.left/.top/.bottom/.back/.front`;
 cylinders get `.cap.top/.cap.bottom/.wall`; cones and pyramids get `.base/.wall`; other
 primitives get `.surface`. The root name selects the whole descendant family.
+
+**`add` produces a sealed solid, and a pile of sealed solids is a BLOCKOUT, not a model.**
+This verb is the cheapest thing in the seat: it never fails, it auto-names all six surfaces
+so naming debt never rises, and it needs no `elements` read and no topology reasoning. That
+is exactly why it is the trap — across this repo's 216 model packages, **1,203 of 1,305
+region creations came from `add`, and 12 came from actually editing a mesh.** Every one of
+those models measures ~43% unreachable geometry (see the Topology finish gate).
+
+Blocking out with `add` is correct and expected. STOPPING there is not. Every place two
+primitives end up permanently joined is a junction you owe: delete the mating faces on both
+sides, bridge the openings, weld the seam. If you are not going to pay that, do not add the
+primitive — extrude, inset, or cut the surface you already have instead, which produces
+joined topology for free.
 
 ### cut — loop cut
 
@@ -592,6 +610,98 @@ when they differ. `select all` automatically scopes every visible part first.
 Use `part-select` for an intentional subset. It updates Outliner selection, primary row,
 native edit scope, and selected range as one authority call.
 
+### Topology finish gate — TWO ways to fail, both unacceptable
+
+Measured on real models in this repo, by casting a 42-direction visibility fan off every
+face (req_3742):
+
+| model | triangles | unreachable from ANY angle |
+|---|---|---|
+| Stepthrough_Moped — ~32 primitives, never joined | 2,436 | **1,058 (43%)** |
+| Moped_50 — 63 primitives, never joined | 2,046 | **895 (44%)** |
+| radio_001 — box-modelled from ONE cube | 132 | 4 (3%) |
+
+**Dropping primitives and not joining them throws away 43% of the model.** Those triangles
+sit inside other solids. They are paid for four times over: transformed in the vertex buffer
+every frame, baked into `collision.blob` (36 bytes/triangle, filtered only by Outliner
+hide/show — nothing else), given their own UV islands and their share of the atlas budget,
+and then multiplied by every instance placed in the world.
+
+None of that appears in `unnamed`, in `semantic-status`, or in a screenshot. A model can read
+`unnamed: 0 · healthy · save ok:true` and still be 43% garbage. Those receipts measure
+bookkeeping. They do not measure whether you built a model.
+
+**FAILURE 1 — soup.** Leaving N intersecting sealed solids that merely touch or overlap. Each
+one keeps its entire closed surface including the parts buried inside its neighbours, and no
+two of them share a vertex — so their UV islands can NEVER be stitched, because
+`stitchUvIslands` matches on shared **mesh vertex index**, not position
+(`cart/editor/model/uvLayout.ts`). Touching in 3D is not joining. Perfect contact is not
+joining. 216 packages in this repo are in this state and cannot be skinned coherently.
+
+**FAILURE 2 — the fake merge, and it is WORSE than failure 1.** Running `part-merge` until
+the Outliner looks tidy while the geometry underneath is untouched. **`part-merge` does not
+weld one vertex and does not delete one hidden face.** It changes which row owns which faces,
+nothing else. A model merged from 33 solids down to 4 rows carries exactly the same 43% dead
+geometry it had before — now hidden from the one panel that made it visible. That is not
+progress, it is concealment, and the next agent inherits a lie. Do not do it.
+
+**Row count is not the metric and never was.** You may finish a model with 78 Outliner rows.
+Rows are authoring scope — they organize, they hide, they hold names. Whether the SURFACE is
+continuous is a completely separate question, and it is the only one that matters here. Parts
+and welding are orthogonal: *weld to establish the address; detach to break identity while
+preserving the address.*
+
+#### The unit of work is the JUNCTION, not the row
+
+For every place two permanently-joined pieces meet:
+
+1. Seat them in exact contact — numerically, per **Contact and assembly** below. Not by eye.
+2. **Delete the mating faces on BOTH sides.** The faces that only ever point into the other
+   piece are deleted, not hidden, not excluded, not left for later.
+3. **Bridge the two openings** with `create-face` so the two surfaces become one continuous
+   shell across the join.
+4. **`weld-pairs` the seam** so each corresponding vertex pair collapses to one shared
+   address. Now the islands either side of that join are stitchable, forever.
+
+Repeat per junction. There is no bulk shortcut and looking for one is how both failures above
+happened. It is work. Do the work.
+
+#### Worked reference — Moped 50's centre stand (req_3744)
+
+The user's own demonstration, and the shape to copy:
+
+- `centerStandLeg.bottom` **deleted outright** — the cap that only ever faced into the bar.
+- The bar's end caps **opened from 10 triangles to 3** where each leg lands.
+- The openings **bridged**: +19 verts, +20 edges, +6 triangles. Authored faces unchanged.
+- Result: the bar and both legs are ONE surface.
+- **Outliner rows afterwards: still three. Still 78 total. Nothing was merged.**
+
+Verify a junction the same way, from `look` alone: the two regions' bboxes share
+bit-identical bounds where they join.
+
+```
+centerStandBar.cap.top  y-min 0.1401715     centerStandLeg.back  y-max 0.1401715
+centerStandBar.wall     y-max 0.18163764    centerStandLeg.front y-max 0.18163764
+```
+
+Solids that merely touch never produce bit-identical bounds across regions. That is what a
+weld looks like in the percept.
+
+#### Finish acceptance
+
+Do not call a model finished until you can state all four in your own words:
+
+1. **Every permanent junction is resolved by the four steps above — name them, one by one.**
+   "I merged the rows" is not an answer to this question.
+2. **No mating face survives** anywhere two pieces are permanently joined. Keep mating faces
+   ONLY on parts that articulate, open, detach, or break — where that surface can become
+   visible.
+3. **Atlas rebuilt only AFTER the topology pass**, never before. Compare `islands` against the
+   blockout; islands that did not fall are buried faces you did not remove.
+4. `save`, then `semantic-status` still `healthy`. Losing regions during this work is a bug —
+   but keeping primitive rows to protect their names is not an acceptable workaround, because
+   rows were never what you needed to change.
+
 ### Contact and assembly — make it touch, remove what cannot show
 
 Treat contact as geometry, not appearance. A screenshot can judge the silhouette, but it
@@ -627,14 +737,19 @@ Once a permanent assembly is seated, remove geometry that cannot ever be seen:
 Use this exact topology order when pieces need a shared seam:
 
 1. Place the parts in exact contact.
-2. Delete permanently hidden mating faces or isolated hidden patches.
-3. Call `part-merge` to put the pieces in one editable part. **Part merge does not weld
-   coincident vertices.**
+2. Delete the permanently hidden mating faces or isolated hidden patches on BOTH sides.
+3. Bridge the two openings with `create-face` so the surfaces become one shell across the
+   join.
 4. Re-read `elements`, pair corresponding seam vertices in order, and call `weld-pairs`
    with a `maxDistance` derived from the neighboring edge length. This establishes one exact
    address per pair without collapsing an entire seam to one point.
-5. If the result is one permanent shell, keep it welded. If the pieces must remain distinct,
-   select the faces belonging to the movable/logical piece and `detach <name>` afterward.
+5. If the pieces must remain distinct authoring objects, `detach <name>` afterward.
+
+`part-merge` is **not** in this list. It is an Outliner-scope convenience and it changes no
+geometry whatsoever — it welds nothing and deletes nothing. Reaching for it here is the fake
+merge described in the finish gate above: it makes the rows look resolved while leaving every
+buried face and every duplicate vertex exactly where they were. Merge rows when you want one
+editing scope, never as a step toward joined topology, and never as evidence of it.
 
 Detach is deliberately last. It is a pure authored-group/part remap: geometry does not move,
 but the indexed mesh is rebuilt so the two parts receive separate vertex identities at the
@@ -753,6 +868,10 @@ need it — you are authoring the input to a later rig, not just a handle for yo
 - Preserve the user's mental model: a repeated structure should share one name, not
   `window1`, `window2`.
 - Block out proportions and major parts before detail. Get the meter-scale right first.
+- Treat a pile of `add`-ed solids as a blockout, never a finished prop. Resolve it junction
+  by junction: delete the mating faces on both sides, bridge the openings, weld the seam.
+  Rows may stay exactly as they are — row count was never the metric, and `part-merge`
+  changes no geometry at all.
 - Seat contacting parts with exact plane/vertex math; visual closeness is not contact.
 - Remove permanently occluded mating faces, but retain any surface that articulation,
   damage, or removal can expose.
