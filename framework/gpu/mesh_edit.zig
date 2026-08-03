@@ -1717,11 +1717,33 @@ pub fn selectFacesByTriangleMask(mask: []const bool) u32 {
     return selCount();
 }
 
-/// Expand the current authored-face selection to every UV island projected from
-/// the same dominant surface direction. The paint layout already classifies each
-/// island as one of the six direction-sensitive axis faces (±X/±Y/±Z); using that
-/// existing truth is both more useful for a fragmented atlas and more stable than
-/// re-bucketing normals independently in the cart.
+const SurfaceDirection = struct {
+    axis: u8,
+    sign: i8,
+};
+
+pub const UV_ORIENTATION_TUNING = struct {
+    /// Reject triangles/islands too degenerate to supply a stable surface direction.
+    pub const minimum_area_vector_length_sq: f32 = 0.000000000001;
+};
+
+fn dominantSurfaceDirection(area_vector: [3]f32) ?SurfaceDirection {
+    const magnitude_sq = vecDot(area_vector, area_vector);
+    if (!std.math.isFinite(magnitude_sq) or magnitude_sq <= UV_ORIENTATION_TUNING.minimum_area_vector_length_sq) return null;
+    const absolute = [3]f32{ @abs(area_vector[0]), @abs(area_vector[1]), @abs(area_vector[2]) };
+    const axis: u8 = if (absolute[0] >= absolute[1] and absolute[0] >= absolute[2])
+        0
+    else if (absolute[1] >= absolute[2])
+        1
+    else
+        2;
+    return .{ .axis = axis, .sign = if (area_vector[axis] < 0) -1 else 1 };
+}
+
+/// Expand the current authored-face selection to every UV island whose mesh surface
+/// has the same dominant direction. Direction is derived from current 3D geometry,
+/// not UV projection metadata: intrinsic generated charts and historical saved UVs
+/// therefore share one correct ±X/±Y/±Z selection contract.
 ///
 /// The first selected displayed triangle supplies the direction. A normal click
 /// selects one authored face, so this remains deterministic while still accepting
@@ -1731,10 +1753,27 @@ pub fn selectSameUvOrientation() u32 {
     if (g_mode != .face or !ensureFaceSel()) return 0;
     const selected = g_sel_face orelse return 0;
     const islands = model_paint.layoutIslands() orelse return 0;
+    const positions = model_paint.positions() orelse return 0;
     const face_count = model_paint.faceCount();
+    if (positions.len < @as(usize, face_count) * 9) return 0;
+
+    const area_vectors = alloc.alloc([3]f32, islands.len) catch return 0;
+    defer alloc.free(area_vectors);
+    @memset(area_vectors, .{ 0, 0, 0 });
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const island_index = model_paint.islandIndexForFace(face) orelse continue;
+        if (island_index >= area_vectors.len) continue;
+        const base = @as(usize, face) * 9;
+        const a = [3]f32{ positions[base + 0], positions[base + 1], positions[base + 2] };
+        const b = [3]f32{ positions[base + 3], positions[base + 4], positions[base + 5] };
+        const c = [3]f32{ positions[base + 6], positions[base + 7], positions[base + 8] };
+        const cross = vecCross(vecSub(b, a), vecSub(c, a));
+        area_vectors[island_index] = vecAdd(area_vectors[island_index], cross);
+    }
 
     var seed_island: ?u32 = null;
-    var face: u32 = 0;
+    face = 0;
     while (face < face_count and face < selected.len) : (face += 1) {
         if (!selected[face]) continue;
         const island_index = model_paint.islandIndexForFace(face) orelse continue;
@@ -1742,7 +1781,7 @@ pub fn selectSameUvOrientation() u32 {
         seed_island = island_index;
         break;
     }
-    const seed = islands[seed_island orelse return 0];
+    const seed = dominantSurfaceDirection(area_vectors[seed_island orelse return 0]) orelse return 0;
 
     @memset(selected, false);
     face = 0;
@@ -1750,8 +1789,8 @@ pub fn selectSameUvOrientation() u32 {
         if (!faceInScope(face)) continue;
         const island_index = model_paint.islandIndexForFace(face) orelse continue;
         if (island_index >= islands.len) continue;
-        const island = islands[island_index];
-        selected[face] = island.axis == seed.axis and island.sign == seed.sign;
+        const direction = dominantSurfaceDirection(area_vectors[island_index]) orelse continue;
+        selected[face] = direction.axis == seed.axis and direction.sign == seed.sign;
     }
     applyFaceHighlight();
     return selCount();
