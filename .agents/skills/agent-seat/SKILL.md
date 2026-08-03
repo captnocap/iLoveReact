@@ -72,7 +72,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 
 | CLI | JSON `{action, args}` | Notes |
 |---|---|---|
-| `tools/seat look` | `{"action":"look"}` | Returns the resident percept, including its live UV island count, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
+| `tools/seat look` | `{"action":"look"}` | Returns the resident percept, including separate logical UV-island and independently painted footprint counts, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
 | `tools/seat semantic-status` | `{"action":"semantic-status"}` | Compares saved RJMD, viewport mount input, and resident native semantics. |
 | `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
 | `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
@@ -495,6 +495,7 @@ Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
   "generation": 18,          // bump per topology change; used by the race guard
   "faces": 132,              // total triangles
   "islands": 27,             // logical UV islands; 0 until an atlas is readable
+  "footprints": 19,          // exact independently painted regions after stacking
   "unnamed": 0,              // naming debt
   "activePartId": "part:body", // current Outliner/native edit scope
   "parts": [ { "id": "part:body", "name": "Body", "kind": "cube",

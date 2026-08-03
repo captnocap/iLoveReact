@@ -12,7 +12,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 const percept: SeatPercept = {
-  version: 1, generation: 4, faces: 60, islands: 0, unnamed: 0,
+  version: 1, generation: 4, faces: 60, islands: 0, footprints: 0, unnamed: 0,
   activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
@@ -50,12 +50,13 @@ test('brief replies keep row outcomes but strip repeated percepts', () => {
   assert(!(compact.result as any[])[0].percept, 'batch row percept survived compact transport');
 });
 
-test('percept and brief expose the resident UV island cost', () => {
+test('percept and brief distinguish logical UV islands from paint footprints', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
-  (globalThis as any).__model_atlas_read = () => JSON.stringify({ islands: [0, 0, 8, 8, 8, 0, 4, 4, 12, 0, 2, 2] });
+  (globalThis as any).__model_atlas_read = () => JSON.stringify({ islands: [0, 0, 8, 8, 0, 0, 8, 8, 8, 0, 4, 4, 12, 0, 2, 2] });
   const reply = executeSeatRequest(createAgentSeat(), { action: 'look' });
-  assert(reply.percept?.islands === 3, 'percept discarded the atlas island count');
-  assert(compactSeatReply(reply).brief.includes('3 UV islands'), 'brief output hid the UV cost');
+  assert(reply.percept?.islands === 4, 'percept discarded the logical atlas island count');
+  assert(reply.percept?.footprints === 3, 'percept failed to collapse stacked texture footprints');
+  assert(compactSeatReply(reply).brief.includes('3 paint footprints · 4 logical UV islands'), 'brief output conflated topology with paint cost');
 });
 
 test('per-row generation guard closes a batch after a human topology edit', () => {
@@ -255,7 +256,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 // layer up. The table the seat writes back must be grown from the PRE-append capture.
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
-    version: 1, generation: 9, faces: 132, islands: 0, unnamed: 0,
+    version: 1, generation: 9, faces: 132, islands: 0, footprints: 0, unnamed: 0,
     activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },

@@ -77,7 +77,7 @@ import {
 import { readMeshDoc } from '../data/meshDoc';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { encode as encodeImage, image as imageOps } from '../../../runtime/image';
-import { flattenUvFaceCorners, parseUvIslandRects, type UvIslandIntent, type UvIslandRect, type UvTwoSheetZone } from '../model/uvLayout';
+import { countUvTextureFootprints, flattenUvFaceCorners, parseUvIslandRects, type UvIslandIntent, type UvIslandRect, type UvTwoSheetZone } from '../model/uvLayout';
 import { planUvAtlasResize, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
   setUvTextureLayerLocked,
@@ -185,6 +185,8 @@ export type ModelFocusUv = {
   revision: number;
   rgba: Uint8Array | null;
   islands: UvIslandRect[];
+  /** Exact coverage-compatible atlas regions that require independent paint. */
+  footprints: number;
   /** Durable semantic/material priors joined to the render-face rows in each island. */
   intents: UvIslandIntent[];
   selectedIslands: number[];
@@ -1591,6 +1593,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         ? rect
         : { ...rect, x: rect.x + atlasOriginX, y: rect.y + atlasOriginY }
     ));
+    const footprints = countUvTextureFootprints(islands);
     const semanticDoc = packageDir ? readMeshDoc(packageDir) : null;
     const semanticRegions = semanticDoc?.semanticRegions ?? initialMesh?.semanticRegions ?? [];
     const faceMaterials = semanticDoc?.faceMaterials ?? initialMesh?.faceMaterials ?? [];
@@ -1620,6 +1623,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       revision: ++uvRevisionRef.current,
       rgba,
       islands,
+      footprints,
       intents,
       selectedIslands: selection.islands,
       selectedFaces: selection.faces,
@@ -1627,7 +1631,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       h: o.h,
       detail: o.detail,
       note: islands.length ? null : 'atlas has no editable island metadata',
-      scope: `whole model · ${islands.length} islands`,
+      scope: `whole model · ${footprints} paint footprints · ${islands.length} logical islands`,
       atlasOriginX,
       atlasOriginY,
       workspace,

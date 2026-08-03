@@ -1353,7 +1353,10 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Box style={{ flexGrow: 1 }} />
         <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
         <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
-        <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>{`${rects.length} islands`}</Text>
+        <Text
+          tooltip="Paint footprints count exact UV regions that need independent texture work; logical islands remain separately selectable mesh charts"
+          style={{ color: accentFor('textFaint'), fontSize: 9 }}
+        >{`${uv.footprints} footprints · ${rects.length} logical`}</Text>
       </Row>
 
       <Paintable id={texture.id} w={uv.w} h={uv.h} rgba />

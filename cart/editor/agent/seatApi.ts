@@ -3,6 +3,8 @@
 // used by ModelView, while semantic names make topology addressable after context
 // loss. Transports (CLI/dev socket) are adapters around this module.
 
+import { countUvTextureFootprints, parseUvIslandRects } from '../model/uvLayout';
+
 export const NO_SEMANTIC_ID = 0xffffffff;
 export const DEFAULT_NAMING_DEBT_BUDGET = 8;
 const PAINT_ATLAS_TUNING = {
@@ -38,6 +40,8 @@ export type SeatPercept = {
   faces: number;
   /** Logical UV islands in the resident atlas. Zero means no readable atlas yet. */
   islands: number;
+  /** Exact coverage-compatible texture footprints after stacking. */
+  footprints: number;
   unnamed: number;
   hiddenFaces?: number;
   hiddenNamedFaces?: number;
@@ -203,13 +207,20 @@ function readTopology(raw: unknown): TopologyReceipt | null {
 export function readSeatPercept(): SeatPercept | null {
   const value = parseJson<SeatPercept>(host.__mesh_semantic_state?.());
   if (!value || value.version !== 1 || !Array.isArray(value.regions) || value.table?.version !== 1) return null;
-  const atlas = parseJson<{ islands?: unknown[] }>(host.__model_atlas_read?.(0));
+  const atlas = parseJson<{ islands?: number[]; groups?: number[]; triangles?: number[]; cornerVertices?: number[] }>(host.__model_atlas_read?.(0));
   const islands = Array.isArray(atlas?.islands) && atlas.islands.length % 4 === 0
     ? atlas.islands.length / 4
     : 0;
+  const footprints = countUvTextureFootprints(parseUvIslandRects(
+    atlas?.islands,
+    atlas?.groups,
+    atlas?.triangles,
+    atlas?.cornerVertices,
+  ));
   return {
     ...value,
     islands,
+    footprints,
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
   };
@@ -311,7 +322,7 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
 
 export function formatSeatPercept(percept: SeatPercept): string {
   const names = new Map(percept.table.regions.map((region) => [region.id, region.name]));
-  const lines = [`mesh · ${percept.faces} faces · ${percept.islands} UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  const lines = [`mesh · ${percept.faces} faces · ${percept.footprints} paint footprints · ${percept.islands} logical UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
   for (const part of percept.parts) {
     const range = part.lo == null || part.hi == null ? 'range pending' : `[${part.lo},${part.hi})`;
     const folder = part.groupPath.length > 0 ? `${part.groupPath.map((row) => row.name).join('/')} / ` : '';
