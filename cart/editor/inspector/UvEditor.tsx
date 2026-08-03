@@ -12,6 +12,7 @@ import {
   uvTextureWorkspaceIsStale,
   type UvTextureWorkspaceDoc,
 } from '../data/uvTextureWorkspace';
+import { loadTexturePackages, texturePatchPackages, type TexturePatchPackage } from '../data/texturePackage';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
@@ -328,6 +329,12 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   const workspaceDocRef = useRef<UvTextureWorkspaceDoc | null>(uv.workspace);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(
     uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null,
+  );
+  const [focusedPatchLayerId, setFocusedPatchLayerId] = useState<string | null>(null);
+  const pendingPatchFocusRef = useRef(false);
+  const texturePatches = useMemo(
+    () => texturePatchPackages(loadTexturePackages()),
+    [uv.key, uv.revision],
   );
   const [compileLabel, setCompileLabel] = useState<string | null>(null);
   const [atlasWidthDraft, setAtlasWidthDraft] = useState(uv.w);
@@ -754,6 +761,26 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
   } : null;
   const selectedGroupBounds = multiIslandSelection ? uvIslandSetBounds(rects, selectedIndices) : null;
   const selectionBounds = selectedGroupBounds ?? primarySelectionBounds;
+  useEffect(() => {
+    if (!pendingPatchFocusRef.current || !uv.workspace) return;
+    const layer = uv.workspace.layers[uv.workspace.layers.length - 1];
+    if (!layer) return;
+    pendingPatchFocusRef.current = false;
+    setFocusedPatchLayerId(layer.id);
+    setSelectedLayerId(layer.id);
+    setSurfaceMode('uv');
+    const uvBounds = uvIslandSetBounds(rectsRef.current, selectedIndicesRef.current);
+    const left = Math.min(layer.x, uvBounds?.x ?? layer.x);
+    const top = Math.min(layer.y, uvBounds?.y ?? layer.y);
+    const right = Math.max(layer.x + layer.width, uvBounds ? uvBounds.x + uvBounds.w : layer.x + layer.width);
+    const bottom = Math.max(layer.y + layer.height, uvBounds ? uvBounds.y + uvBounds.h : layer.y + layer.height);
+    const padding = UV_LAYOUT_TUNING.canvasPaddingPx;
+    const scale = clamp(Math.min(
+      Math.max(1, surfaceSize.width - padding * 2) / Math.max(1, right - left),
+      Math.max(1, surfaceSize.height - padding * 2) / Math.max(1, bottom - top),
+    ), UV_LAYOUT_TUNING.minimumZoom, UV_LAYOUT_TUNING.maximumZoom);
+    setView({ x: padding - left * scale, y: padding - top * scale, scale });
+  }, [uv.revision, uv.workspace]);
   const selectedOutlineLocalRect = useMemo(() => selectedLocalRect && selectedTarget
     ? { ...selectedLocalRect, triangles: selectedLocalRect.triangles?.filter((triangle) => selectedTarget.group !== NO_UV_GROUP ? triangle.group === selectedTarget.group : triangle.face === selectedTarget.face) }
     : selectedLocalRect, [selectedLocalRect, selectedTarget?.face, selectedTarget?.group]);
@@ -765,7 +792,9 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     cacheRef.current = { rects: [...items], geometry };
     return geometry;
   };
-  const fixedRects = rects.filter((_rect, index) => !selectedIndexSet.has(index));
+  const fixedRects = focusedPatchLayerId
+    ? []
+    : rects.filter((_rect, index) => !selectedIndexSet.has(index));
   const fixedLines = cachedLineGeometry(fixedLineCacheRef, fixedRects);
   const secondarySelectedRects = rects.filter((_rect, index) => selectedIndexSet.has(index) && index !== selected);
   const secondarySelectedLines = useMemo(
@@ -1095,6 +1124,24 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       setNote(message);
     });
   };
+  const applyTexturePatch = (patch: TexturePatchPackage) => {
+    if (!selectionBounds || selectedIndicesRef.current.length === 0) {
+      setNote('Select the part or UV islands that should use this texture patch first.');
+      return;
+    }
+    pendingPatchFocusRef.current = true;
+    setNote(`adding reusable patch ${patch.name}…`);
+    void bridge.addUvTextureLayer(
+      Math.round(selectionBounds.x),
+      Math.round(selectionBounds.y),
+      patch.imagePath,
+    ).then((message) => {
+      if (!message.startsWith('Added ')) pendingPatchFocusRef.current = false;
+      setNote(message.startsWith('Added ')
+        ? `${message} · focused ${selectedIndicesRef.current.length} selected UV island${selectedIndicesRef.current.length === 1 ? '' : 's'}`
+        : message);
+    });
+  };
   const compileImageLayers = () => {
     setCompileLabel('Preparing image layers');
     setNote('compiling the visible image workspace…');
@@ -1349,7 +1396,16 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           <Icon name="Images" size={10} color={surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim')} />
           <Text style={{ color: surfaceMode === 'images' ? accentFor('primary') : accentFor('textDim'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>IMAGES</Text>
         </Pressable>
-        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{surfaceMode === 'images' ? `${workspaceDoc?.layers.length ?? 0} LAYERS` : selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
+        <Text numberOfLines={1} style={{ color: accentFor('primary'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '900', letterSpacing: 0.7 }}>{focusedPatchLayerId ? 'PATCH FOCUS' : surfaceMode === 'images' ? `${workspaceDoc?.layers.length ?? 0} LAYERS` : selectionMode === 'face' ? selectedFace ? 'FACE ISOLATED' : 'FACE SELECT' : 'ISLAND SELECT'}</Text>
+        {focusedPatchLayerId ? (
+          <Pressable
+            tooltip="Return to the complete atlas; the patch layer and UV placement stay intact"
+            onPress={() => { setFocusedPatchLayerId(null); setView(fittedView()); setNote('returned to the complete atlas'); }}
+            style={{ height: 22, paddingLeft: 7, paddingRight: 7, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: accentFor('segActiveBg'), borderWidth: 1, borderColor: accentFor('primary') }}
+          >
+            <Text style={{ color: accentFor('primary'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '900' }}>SHOW ALL</Text>
+          </Pressable>
+        ) : null}
         <Box style={{ flexGrow: 1 }} />
         <Text numberOfLines={1} style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace', fontWeight: '800' }}>WHEEL ZOOM · MMB PAN · RMB ACTIONS</Text>
         <Text style={{ minWidth: 42, textAlign: 'right', color: accentFor('textDim'), fontSize: 9, fontFamily: 'ui-monospace', fontWeight: '800' }}>{`${Math.round(view.scale * 100)}%`}</Text>
@@ -1625,7 +1681,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
         <Effect shader={WORKSPACE_CHECKER_SHADER} data={workspaceCheckerData} style={{ position: 'absolute', left: 0, top: 0, width: surfaceSize.width, height: surfaceSize.height }} />
         {workspaceDoc && uv.packageDir ? (
           <>
-            {workspaceDoc.layers.filter((layer) => layer.visible).map((layer) => (
+            {workspaceDoc.layers.filter((layer) => layer.visible && (!focusedPatchLayerId || layer.id === focusedPatchLayerId)).map((layer) => (
               <Image
                 key={`uv-workspace-image-${layer.id}-${layer.source}`}
                 source={`${uv.packageDir}/${layer.source}`}
@@ -1867,6 +1923,30 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
       {note ? <Text numberOfLines={1} style={{ color: accentFor('textDim'), fontSize: 9 }}>{note}</Text> : null}
 
       <Box style={{ borderTopWidth: 1, borderTopColor: accentFor('borderSoft'), paddingTop: 7, gap: 5 }}>
+        <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
+          <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>REUSABLE PATCHES</Text>
+          <Box style={{ flexGrow: 1 }} />
+          <Text style={{ color: accentFor('textFaint'), fontSize: 8, fontFamily: 'ui-monospace' }}>{texturePatches.length > 0 ? `${texturePatches.length} EXACT IMAGE${texturePatches.length === 1 ? '' : 'S'}` : 'IMPORT AN EXACT IMAGE'}</Text>
+        </Row>
+        {texturePatches.length > 0 ? (
+          <ScrollView style={{ maxHeight: 82 }} showScrollbar>
+            <Row style={{ flexWrap: 'wrap', gap: 5 }}>
+              {texturePatches.map((patch) => (
+                <Pressable
+                  key={`uv-patch-${patch.id}`}
+                  tooltip={`Use ${patch.name} on the selected part or UV islands`}
+                  onPress={() => applyTexturePatch(patch)}
+                  style={{ width: 116, height: 70, padding: 4, gap: 3, backgroundColor: accentFor('surfaceRaised'), borderWidth: 1, borderColor: accentFor('borderSoft'), borderRadius: 4 }}
+                >
+                  <Image source={patch.imagePath} style={{ width: 106, height: 44 }} />
+                  <Text numberOfLines={1} style={{ color: accentFor('textDim'), fontSize: 8, fontWeight: '800' }}>{patch.name}</Text>
+                </Pressable>
+              ))}
+            </Row>
+          </ScrollView>
+        ) : (
+          <Text style={{ color: accentFor('textFaint'), fontSize: 9 }}>Import an image as Exact Image once; it will appear here for every model.</Text>
+        )}
         <Row style={{ height: 23, alignItems: 'center', gap: 5 }}>
           <Text style={{ color: accentFor('textDim'), fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>TEXTURES</Text>
           <Box style={{ flexGrow: 1 }} />

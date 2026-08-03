@@ -59,12 +59,43 @@ export type TexturePackage = {
   pixel?: PixelPayload;
 };
 
+/** An exact imported image that can be reused as a UV source. The texture
+ * package remains the shared authoring asset; ModelView installs a hashed PNG
+ * into a model only when the patch is actually used there. */
+export type TexturePatchPackage = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  imagePath: string;
+};
+
 export function textureSlug(name: string): string {
   return name.toLowerCase().replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'texture';
 }
 
 export function textureDir(slug: string): string {
   return `${TEXTURES_HOME}/${slug}`;
+}
+
+export function exactTextureImagePath(manifest: TextureManifest): string | null {
+  if (manifest.source !== 'exact-image') return null;
+  const extension = manifest.originalName.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (!extension) return null;
+  return `${textureDir(textureSlug(manifest.name))}/image.${extension}`;
+}
+
+export function texturePatchPackages(packages: readonly TexturePackage[]): TexturePatchPackage[] {
+  return packages.flatMap((pkg) => {
+    const imagePath = exactTextureImagePath(pkg.manifest);
+    return imagePath ? [{
+      id: pkg.manifest.id,
+      name: pkg.manifest.name,
+      width: pkg.manifest.width,
+      height: pkg.manifest.height,
+      imagePath,
+    }] : [];
+  });
 }
 
 const hexByte = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
@@ -152,11 +183,8 @@ export function loadTexturePackages(): TexturePackage[] {
 
 /** The exact-image bytes as base64 (for <Image>/blob previews). */
 export function exactImageBase64(manifest: TextureManifest): string | null {
-  const dir = textureDir(textureSlug(manifest.name));
-  for (const entry of listDir(dir)) {
-    if (entry.startsWith('image.')) return readFileBase64(`${dir}/${entry}`);
-  }
-  return null;
+  const path = exactTextureImagePath(manifest);
+  return path ? readFileBase64(path) : null;
 }
 
 /** Materialize a texture package as a ShaderSpec so it is a first-class

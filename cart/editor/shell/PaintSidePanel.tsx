@@ -320,7 +320,7 @@ function ShaderLibrary(props: {
         <TextInput
           value={props.query}
           onChange={props.onQuery}
-          placeholder="Search shaders..."
+          placeholder="Search materials..."
           style={{ flexGrow: 1, minWidth: 0, height: 26, paddingLeft: 8, paddingRight: 8, borderRadius: 6, borderWidth: 1, borderColor: LINE, backgroundColor: '#0d1015', color: TEXT, fontSize: 11 }}
         />
         {props.query ? (
@@ -371,7 +371,7 @@ function ShaderLibrary(props: {
             </Col>
           </Box>
         ) : null}
-        {hits.length === 0 ? <Text style={{ color: DIM, fontSize: 11 }}>{`no shader matches "${props.query}"`}</Text> : null}
+        {hits.length === 0 ? <Text style={{ color: DIM, fontSize: 11 }}>{`no material matches "${props.query}"`}</Text> : null}
       </StaticSurface>
 
       {props.shaderInk && props.onEditMaterial ? (

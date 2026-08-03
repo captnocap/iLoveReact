@@ -154,14 +154,14 @@ export default function ModelShaderBucket(props: {
     return (
       <Col style={{ gap: 8, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: DARK_THEME.frame }}>
         <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          {label('PAINT BUCKET · SHADER')}
+          {label('PAINT BUCKET · MATERIAL')}
           {editing ? (
             <Pressable onPress={() => setShowList(false)}>
               <Text style={{ color: '#6ea8fe', fontSize: 10 }}>done</Text>
             </Pressable>
           ) : null}
         </Row>
-        <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>Dip the brush into a shader and paint it onto the model.</Text>
+        <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>Paint with reusable imported art or a retained procedural material.</Text>
         {editing ? (
           <Col style={{ gap: 5 }}>
             <Row style={{ alignItems: 'center', gap: 7 }}>

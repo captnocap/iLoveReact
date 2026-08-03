@@ -61,7 +61,7 @@ test('committed roads render as continuous curve ribbons over the gameplay raste
   assert(EDITOR_GROUND_FORMULA.includes('bestRoadAlong, crosswalkAlongM'), 'crosswalk phase can switch to the nearest crossing ribbon');
 });
 
-test('the default ground module is tree-shaken, not the 410-material catalog', () => {
+test('the default ground module carries only its retained procedural set', () => {
   assert(
     EDITOR_GROUND_FORMULA.length < 200_000,
     `default ground formula is ${EDITOR_GROUND_FORMULA.length}B — full-catalog composition is back (req_3473: ~90s boot compile)`,
@@ -95,12 +95,12 @@ test('per-material fill modules are small and keep the FILL_SHADER contract', ()
   assert(fillShaderFor(['no_such_material_fn']) === FILL_SHADER, 'unknown fn must fall back to the full catalog, not break rendering');
 });
 
-test('every generated fill spec resolves its registry fn and composes shaken', () => {
+test('every retained fill spec resolves its registry fn and composes shaken', () => {
   // The regression this guards: FillMaterial carries no fn, so fillSpec must
-  // resolve it via fnForMaterialRow — a bad lookup made all 409 specs fall
-  // back to the full catalog (and spam one console error each, req_3485).
+  // resolve it via fnForMaterialRow. The catalog is intentionally small now;
+  // every retained entry still has to compose independently.
   const fillSpecs = EDITOR_SHADERS.filter((spec) => spec.fillFn !== undefined);
-  assert(fillSpecs.length > 300, `only ${fillSpecs.length} fill specs carry fillFn — the registry fn lookup is broken again`);
+  assert(fillSpecs.length === MATERIALS.length, `${fillSpecs.length} fill specs did not match ${MATERIALS.length} retained materials`);
   for (const spec of fillSpecs) {
     assert(spec.shader !== FILL_SHADER, `spec '${spec.id}' fell back to the full-catalog shader`);
     assert(spec.shader.includes(`fn ${spec.fillFn}(uv: vec2f`), `spec '${spec.id}' module is missing its own material body '${spec.fillFn}'`);
