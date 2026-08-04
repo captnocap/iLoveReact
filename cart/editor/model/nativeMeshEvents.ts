@@ -42,6 +42,8 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'uv-atlas-resize', label: 'resize UV atlas', commandId: 'model.uv.resize-atlas' },
   { kind: 'connect-vertices', label: 'connect vertices', commandId: 'model.mesh.connect-vertices' },
   { kind: 'bevel', label: 'bevel', commandId: 'model.mesh.bevel' },
+  { kind: 'paint-faces', label: 'paint faces', commandId: 'model.paint.fill-selection' },
+  { kind: 'retopo-guide', label: 'edit retopology guide', commandId: 'model.retopology.edit-guide' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

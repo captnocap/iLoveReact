@@ -55,6 +55,12 @@ pub const ActionKind = enum(u8) {
     // already native journal transactions but lacked action-stream identities.
     connect_vertices,
     bevel,
+    // Append-only ordinal 31: coordinate-free selection paint is one exact
+    // atlas/program/source-colour transaction, not a topology mutation.
+    paint_faces,
+    // Append-only ordinal 32: exact retopology teaching membership, frozen
+    // source, and ghost visibility are one authored guide document.
+    retopo_guide,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -91,6 +97,11 @@ pub const UV_AUTO_SIZE_LABEL = "auto UV size";
 pub const UV_PROJECT_VIEW_LABEL = "project UV from view";
 pub const UV_STITCH_LABEL = "stitch UV seams";
 pub const UV_RESET_LABEL = "reset UV layout";
+pub const PAINT_FACES_LABEL = "paint faces";
+pub const RETOPO_GUIDE_TINT_LABEL = "tint retopology guide";
+pub const RETOPO_GUIDE_CLEAR_LABEL = "clear retopology guide";
+pub const RETOPO_GUIDE_GHOST_LABEL = "toggle retopology ghost";
+pub const RETOPO_GUIDE_PLAN_LABEL = "plan retopology guide";
 pub const UV_EQUIVALENCE_EPSILON: f32 = 0.0001;
 
 pub fn uvActionLabel(raw: i32) ?[]const u8 {
@@ -159,6 +170,11 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "connect vertices", .connect_vertices },
         .{ "bevel edge", .bevel },
         .{ "bevel vertex", .bevel },
+        .{ PAINT_FACES_LABEL, .paint_faces },
+        .{ RETOPO_GUIDE_TINT_LABEL, .retopo_guide },
+        .{ RETOPO_GUIDE_CLEAR_LABEL, .retopo_guide },
+        .{ RETOPO_GUIDE_GHOST_LABEL, .retopo_guide },
+        .{ RETOPO_GUIDE_PLAN_LABEL, .retopo_guide },
         .{ "symmetrize", .symmetrize },
         .{ "delete selection", .delete_selection },
         .{ "delete part", .delete_part },
@@ -241,6 +257,8 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .uv_atlas_resize => "model.uv.resize-atlas",
         .connect_vertices => "model.mesh.connect-vertices",
         .bevel => "model.mesh.bevel",
+        .paint_faces => "model.paint.fill-selection",
+        .retopo_guide => "model.retopology.edit-guide",
     };
 }
 
@@ -282,11 +300,13 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .uv_texture_reload,
         .uv_atlas_resize,
         .integrity_alert,
+        .paint_faces,
+        .retopo_guide,
         => false,
     };
 }
 
-pub const RestoreDomain = enum { mesh, uv, atlas };
+pub const RestoreDomain = enum { mesh, uv, atlas, paint, retopo_guide };
 
 /// The resident journal is chronological across mesh and UV authoring, but each
 /// state kind has a different exact restore boundary.
@@ -295,6 +315,8 @@ pub fn restoreDomainForLabel(label: []const u8) RestoreDomain {
     return switch (kind) {
         .uv_edit => .uv,
         .uv_texture_import, .uv_texture_reload, .uv_atlas_resize => .atlas,
+        .paint_faces => .paint,
+        .retopo_guide => .retopo_guide,
         else => .mesh,
     };
 }
@@ -471,6 +493,30 @@ pub fn ownsExactPartPartition(groups: []const u32, ranges: []const u32, expected
         if (!owns_face) return false;
     }
     return true;
+}
+
+/// A document with exactly one declared part has no ambiguous ownership choice:
+/// every grouped resident face belongs to that part. Expand (never shrink) its
+/// range when a topology op minted a fresh group just beyond the stale upper
+/// bound. Multi-part documents deliberately return null because assigning an
+/// unowned face there requires the op's explicit source-part provenance.
+pub fn healedSinglePartRange(groups: []const u32, ranges: []const u32) ?[2]u32 {
+    if (ranges.len != 2 or ranges[1] <= ranges[0]) return null;
+    var lo = ranges[0];
+    var hi = ranges[1];
+    var changed = false;
+    for (groups) |group| {
+        if (group == NO_FACE_GROUP) continue;
+        if (group < lo) {
+            lo = group;
+            changed = true;
+        }
+        if (group >= hi) {
+            hi = group +| 1;
+            changed = true;
+        }
+    }
+    return if (changed) .{ lo, hi } else null;
 }
 
 /// Return the same ordered range table with declarations that own no resident

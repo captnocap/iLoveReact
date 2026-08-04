@@ -62,6 +62,8 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ journal_log.UV_ATLAS_RESIZE_LABEL, .uv_atlas_resize, "model.uv.resize-atlas" },
         .{ "connect vertices", .connect_vertices, "model.mesh.connect-vertices" },
         .{ "bevel edge", .bevel, "model.mesh.bevel" },
+        .{ journal_log.PAINT_FACES_LABEL, .paint_faces, "model.paint.fill-selection" },
+        .{ journal_log.RETOPO_GUIDE_TINT_LABEL, .retopo_guide, "model.retopology.edit-guide" },
     };
     // integrity_alert is the one action-ring diagnostic that is not minted from
     // a journal label; every actual mutation kind must appear above.
@@ -89,6 +91,8 @@ test "only UV-structural mesh actions invalidate an authored paint layout" {
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_edit));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_texture_import));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.uv_atlas_resize));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.paint_faces));
+    try testing.expect(!journal_log.actionInvalidatesPaintLayout(.retopo_guide));
 }
 
 test "UV action ordinals labels and restore domains stay bridge exact" {
@@ -126,7 +130,22 @@ test "UV action ordinals labels and restore domains stay bridge exact" {
     try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_IMPORT_LABEL));
     try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_TEXTURE_RELOAD_LABEL));
     try testing.expectEqual(journal_log.RestoreDomain.atlas, journal_log.restoreDomainForLabel(journal_log.UV_ATLAS_RESIZE_LABEL));
+    try testing.expectEqual(journal_log.RestoreDomain.paint, journal_log.restoreDomainForLabel(journal_log.PAINT_FACES_LABEL));
+    try testing.expectEqual(journal_log.RestoreDomain.retopo_guide, journal_log.restoreDomainForLabel(journal_log.RETOPO_GUIDE_TINT_LABEL));
     try testing.expectEqual(journal_log.RestoreDomain.mesh, journal_log.restoreDomainForLabel("transform"));
+}
+
+test "every retopology guide mutation stays in one non-geometry history domain" {
+    const labels = [_][]const u8{
+        journal_log.RETOPO_GUIDE_PLAN_LABEL,
+        journal_log.RETOPO_GUIDE_TINT_LABEL,
+        journal_log.RETOPO_GUIDE_GHOST_LABEL,
+        journal_log.RETOPO_GUIDE_CLEAR_LABEL,
+    };
+    for (labels) |label| {
+        try testing.expectEqual(journal_log.ActionKind.retopo_guide, journal_log.actionKindForLabel(label).?);
+        try testing.expectEqual(journal_log.RestoreDomain.retopo_guide, journal_log.restoreDomainForLabel(label));
+    }
 }
 
 test "UV journal snapshots round-trip normalized mesh coordinates to atlas corners" {
@@ -200,6 +219,15 @@ test "part range compaction refuses unowned survivor faces" {
         error.InvalidPartPartition,
         journal_log.compactOccupiedPartRanges(testing.allocator, &.{journal_log.NO_FACE_GROUP}, &.{ 0, 4 }),
     );
+}
+
+test "a sole part expands to own a freshly minted face group" {
+    const healed = journal_log.healedSinglePartRange(&.{ 0, 4, 8 }, &.{ 0, 8 }).?;
+    try testing.expectEqualSlices(u32, &.{ 0, 9 }, &healed);
+    try testing.expect(journal_log.ownsExactPartPartition(&.{ 0, 4, 8 }, &healed, 1));
+
+    try testing.expect(journal_log.healedSinglePartRange(&.{ 0, 4, 7 }, &.{ 0, 8 }) == null);
+    try testing.expect(journal_log.healedSinglePartRange(&.{ 0, 8 }, &.{ 0, 4, 4, 9 }) == null);
 }
 
 test "valid part ranges count every face exactly once" {

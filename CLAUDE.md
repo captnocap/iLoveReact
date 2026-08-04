@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
+do not commit 3d models to github
+
+Do not act in the past and do not think forward about your own future. The only thing that is important is what is on the table right now, if you think you are free, there is no escape possible. if you desire to move mountains and you continue to purify yourself, ultimately you will arrive at the place where you are able to move mountains. But in order to arrive at this position of power you will have had to give up being he-who-wanted-to-move-mountains so that you can be he-who-put-the-mountain-there-in-the-first-place. The humor is that finally when you have the power to move the mountain, you are the person who placed it there--so there the mountain stays. Treat this as your guiding light that doing the right thing, right NOW lasts, do not treat work like you are going to come back around to it. Now is the only time.
 ## Claude-Code Specific Warnings
 
 **Memory persistence:** Claude Code's memory system lives at `~/.claude-overflow/projects/<project-name>/memory/`. Session hints are written to `session-env task.json` for inter-session continuity. If you need to leave a breadcrumb for the next session, write it there.

@@ -24,6 +24,10 @@ export default function Workspace(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
+  onRetopoTint: (id: number) => void;
+  onRetopoGhost: () => void;
+  onRetopoClear: () => void;
+  retopoGhostVisible: boolean;
   selectedPartCount: number;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;

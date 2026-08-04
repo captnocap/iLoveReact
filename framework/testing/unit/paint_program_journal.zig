@@ -74,3 +74,21 @@ test "history swaps retain paint redo while a new UV action abandons the old bra
     paint_program.journalStateAdopt(new_action_restore);
     try testing.expectEqual([2]u32{ 0, 0 }, paint_program.historyCounts());
 }
+
+test "selection fills commit as one durable paint-program unit" {
+    paint_program.reset();
+    defer paint_program.reset();
+
+    paint_program.beginRecordedOp();
+    paint_program.recordFill(3, false, .{ 10, 20, 30 });
+    paint_program.recordFill(7, false, .{ 10, 20, 30 });
+    try testing.expect(paint_program.endStrokeUnit());
+    try testing.expect(!paint_program.isEmpty());
+    try testing.expectEqual([2]u32{ 1, 0 }, paint_program.historyCounts());
+    try testing.expectEqualStrings("fill", paint_program.undoLabel());
+
+    const blob = paint_program.serialize() orelse return error.TestUnexpectedResult;
+    defer std.heap.c_allocator.free(blob);
+    try testing.expect(blob.len > 8);
+    try testing.expect(paint_program.programDetail(blob) != null);
+}

@@ -18,7 +18,13 @@ else if (action === 'follow') {
   if (operation === 'inspect') {
     const faces = String(args[0] || '').split(',').filter(Boolean).map(Number);
     request = { action, args: { operation, ...(faces.length ? { faces } : {}), rings: Number(args[1] || 2) } };
-  } else request = { action, args: { operation, ...(operation === 'start' ? { label: args.join(' ') } : {}) } };
+  } else request = { action, args: {
+    operation,
+    ...(operation === 'start' ? { label: args.join(' ') } : {}),
+    ...((operation === 'read' || operation === 'stop') && args.length ? {
+      offset: Number(args[0] || 0), limit: Number(args[1] || 8),
+    } : {}),
+  } };
 }
 else if (action === 'select') request = { action, args: { selector: args.join(' ') } };
 else if (action === 'select-edge' || action === 'select-vertex' || action === 'select-face') request = { action, args: { index: Number(args[0]), additive: args[1] === '+' } };

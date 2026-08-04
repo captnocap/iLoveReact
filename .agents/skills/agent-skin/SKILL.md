@@ -86,8 +86,8 @@ Queue line grammar: `[prompt] [resolution] [imgs/batch] [batches] [model] [refs]
 - **Always set batches explicitly** — the default is 25.
 - Reference paths are absolute **without the file extension** (the loader appends
   .png/.jpg/... itself).
-- The script auto-appends a UV safety instruction to any img2img run ("fill in the uv,
-  remove the wireframe, no trademarks") — do not duplicate it in the prompt.
+- If Generating a UV, append a UV safety instruction to any img2img run ("fill in the uv,
+  remove the wireframe, no trademarks").
 - `aspect_ratio` should approximate the atlas w:h (valid: 21:9 16:9 9:16 5:4 4:3 3:4 2:3
   3:2 square auto). Exact dims come later from the resize step, not from the API.
 - Models (both proven): `nano-banana-2-lite` — dirt-cheap, ~12 s, halfway-decent; the

@@ -38,6 +38,14 @@ import { hasUvCoverageRasterWriter, writeUvCoverageRasters } from './uvCoverageR
 import { readUvTextureWorkspace } from './uvTextureWorkspaceStore';
 
 const host = globalThis as any;
+export const MODEL_RETOPO_GUIDE_FILE = 'mesh/retopo-guide.blob';
+
+export type ModelRetopoGuideLoad = {
+  status: 'absent' | 'restored' | 'invalid' | 'unsupported';
+  visible: boolean;
+  faces: number;
+  covered: number;
+};
 
 export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
 
@@ -845,6 +853,49 @@ export function writePackageCollision(dir: string): boolean {
 // skipped when its host door or data is absent. Call on any save of the active model.
 // Returns true when the meshdoc landed
 // (callers strip their seed geometry only then — disk truth must exist first).
+/** Persist only the current model's retopology teaching record. This is a small,
+ * atomic sidecar written after every tint/ghost change as well as every model
+ * save, so annotation work never waits behind the geometry autosave cadence. */
+export function persistModelRetopoGuide(
+  pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
+  options: { clearWhenAbsent?: boolean } = {},
+): boolean {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return false;
+  const path = `${dir}/${MODEL_RETOPO_GUIDE_FILE}`;
+  const prior = exists(path);
+  if (typeof host.__mesh_retopo_guide_write !== 'function') {
+    let active = false;
+    try {
+      const raw = host.__mesh_retopo_bands_read?.();
+      active = typeof raw === 'string' && raw !== '';
+    } catch { active = false; }
+    return !active && !prior;
+  }
+  const result = Number(host.__mesh_retopo_guide_write(path) ?? 0);
+  if (result === 1) return true;
+  if (result === 2) return prior && options.clearWhenAbsent === true ? remove(path) : true;
+  return false;
+}
+
+/** Restore the exact live band membership and frozen source soup after the mesh
+ * itself has hydrated. A malformed/stale sidecar is preserved for diagnosis and
+ * never partially installed. */
+export function restoreModelRetopoGuide(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>): ModelRetopoGuideLoad {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  const path = dir ? `${dir}/${MODEL_RETOPO_GUIDE_FILE}` : null;
+  if (!path || !exists(path)) return { status: 'absent', visible: false, faces: 0, covered: 0 };
+  if (typeof host.__mesh_retopo_guide_load !== 'function') return { status: 'unsupported', visible: false, faces: 0, covered: 0 };
+  try {
+    const raw = host.__mesh_retopo_guide_load(path);
+    const value = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+    if (value?.captured === true && typeof value.visible === 'boolean' && Number.isInteger(value.faces) && Number.isInteger(value.covered)) {
+      return { status: 'restored', visible: value.visible, faces: value.faces, covered: value.covered };
+    }
+  } catch { /* native rejected malformed or topology-mismatched guide */ }
+  return { status: 'invalid', visible: false, faces: 0, covered: 0 };
+}
+
 export function writeModelArtifacts(
   pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
   parts?: MeshDocPartMeta[],
@@ -863,6 +914,7 @@ export function writeModelArtifacts(
     ? writeMeshDoc(dir, parts, recoveryRanges, options)
     : exists(`${meshDir}/doc.blob`);
   if (parts && docWritten) host.__model_mesh_write?.(`${meshDir}/base.blob`);
+  const retopoGuideWritten = docWritten && persistModelRetopoGuide(pkg);
   // Every save re-anchors the package's persisted collision bake to the doc
   // revision that just landed (paint-only saves self-heal a missing/stale one).
   if (docWritten) writePackageCollision(dir);
@@ -881,7 +933,7 @@ export function writeModelArtifacts(
     })));
     const paintedMetaPath = `${meshDir}/painted.json`;
     if (exists(paintedMetaPath)) remove(paintedMetaPath);
-    return docWritten && markerWritten;
+    return docWritten && retopoGuideWritten && markerWritten;
   }
   // An explicit Create/Remake Paint Atlas cleared the host gate. This save now
   // establishes the current atlas as belonging to the current mesh document.
@@ -982,7 +1034,7 @@ export function writeModelArtifacts(
       if (exists(basePaintPath)) remove(basePaintPath);
     }
   } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
-  return docWritten && paintProgramWritten;
+  return docWritten && retopoGuideWritten && paintProgramWritten;
 }
 
 // Re-exported so callers get the category mapping without reaching past the store.

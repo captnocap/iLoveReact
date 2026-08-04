@@ -1,14 +1,14 @@
 // SECTION D — Action Bar (see shell/regions.ts SECTIONS): THE toolbar — the
 // tool row pinned above the stage (mesh tools, snap, floor, paint
 // segment, map-paint bar).
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { commandById, meshToolCommands, meshToolActive, meshTopoCommands, worldActionBarCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
 import type { EditorState } from '../data/types';
 import MapPaintBar from './MapPaintBar';
-import { Effect } from '../../../runtime/primitives';
+import { Box, Effect } from '../../../runtime/primitives';
 import { importedSpecs } from '../textures/shaders';
 
 // Place Sticker (req_3025): the stamp scale presets the rail cycles through.
@@ -20,6 +20,12 @@ const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-sym-x', 'mesh-paint']);
 // Live mirror toggles (req_2758) read as their AXIS LETTER — the letter IS the value
 // (which plane), the old studio's X/Y/Z mirror-chip treatment.
 const MESH_SYM_LETTER: Record<string, string> = { 'mesh-sym-x': 'X', 'mesh-sym-y': 'Y', 'mesh-sym-z': 'Z' };
+// Presentation mirror of the native review-overlay palette. The id is the durable
+// teaching handle; this swatch only previews which one the next Tint press assigns.
+const RETOPO_BAND_COLORS = [
+  '#f54d3d', '#339ef5', '#fabb29', '#57c76b', '#b35cf0', '#f570b8',
+  '#2ec7c7', '#eb852e', '#758af5', '#adc733', '#e04d7a', '#47b89e',
+] as const;
 
 export default function ToolOptions(props: {
   state: EditorState;
@@ -34,7 +40,13 @@ export default function ToolOptions(props: {
   /** Explicit outliner selection size. A 2+ part selection owns Merge, so the generic
    *  face-dissolve verb must not be offered for the same host face selection. */
   selectedPartCount: number;
+  /** Inspectable retopology teaching overlay, persisted beside the model mesh. */
+  onRetopoTint: (id: number) => void;
+  onRetopoGhost: () => void;
+  onRetopoClear: () => void;
+  retopoGhostVisible: boolean;
 }) {
+  const [retopoBandId, setRetopoBandId] = useState(0);
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
   const mergePartsCommand = props.selectedPartCount >= 2 ? commandById('mesh-merge-down') : null;
@@ -77,6 +89,54 @@ export default function ToolOptions(props: {
             <C.HW_OptionDivider />
             <C.HW_IconButton tooltip={`${mergePartsCommand.name} (${props.selectedPartCount})`} onPress={() => props.onCommand(mergePartsCommand.id, 'action bar')}>
               <Icon name={mergePartsCommand.icon} size={14} color={accentFor('primary')} />
+            </C.HW_IconButton>
+          </Fragment>
+        ) : null}
+        {props.state.modelTool.selMode === 3 && !props.state.modelTool.paint ? (
+          <Fragment>
+            <C.HW_OptionDivider />
+            <C.HW_Pill
+              tooltip="Retopology teaching band — click to cycle the next package-saved tint color"
+              onPress={() => setRetopoBandId((id) => (id + 1) % RETOPO_BAND_COLORS.length)}
+            >
+              <Box style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: RETOPO_BAND_COLORS[retopoBandId] }} />
+              <C.HW_OptionLabel>BAND</C.HW_OptionLabel>
+              <C.HW_PillText>{retopoBandId + 1}</C.HW_PillText>
+            </C.HW_Pill>
+            <C.HW_IconButton
+              tooltip={props.state.modelTool.sel > 0
+                ? `Tint selected faces as teaching band ${retopoBandId + 1}`
+                : 'Select faces, then tint them as this teaching band'}
+              onPress={() => props.onRetopoTint(retopoBandId)}
+              style={{ opacity: props.state.modelTool.sel > 0 ? 1 : 0.4 }}
+            >
+              <Icon name="Palette" size={14} color={accentFor('primary')} />
+            </C.HW_IconButton>
+            <C.HW_IconButton
+              tooltip="Erase the saved band assignment from the selected faces"
+              onPress={() => props.onRetopoTint(-1)}
+              style={{ opacity: props.state.modelTool.sel > 0 ? 1 : 0.4 }}
+            >
+              <Icon name="Eraser" size={14} color={accentFor('textSecondary')} />
+            </C.HW_IconButton>
+            {props.retopoGhostVisible ? (
+              <C.HW_PillOn
+                tooltip="SOURCE GHOST ON — the frozen old soup is drawn over live edits. Click to return to the editable mesh."
+                onPress={props.onRetopoGhost}
+              >
+                <Icon name="Eye" size={14} color={accentFor('primary')} />
+                <C.HW_PillTextOn>GHOST ON</C.HW_PillTextOn>
+              </C.HW_PillOn>
+            ) : (
+              <C.HW_IconButton
+                tooltip="Show the frozen source soup over the current retopology for comparison"
+                onPress={props.onRetopoGhost}
+              >
+                <Icon name="Eye" size={14} color={accentFor('textSecondary')} />
+              </C.HW_IconButton>
+            )}
+            <C.HW_IconButton tooltip="Clear the entire saved retopology guide and frozen source" onPress={props.onRetopoClear}>
+              <Icon name="X" size={14} color={accentFor('textDim')} />
             </C.HW_IconButton>
           </Fragment>
         ) : null}
