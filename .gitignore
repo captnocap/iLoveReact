@@ -34,15 +34,21 @@ tools/zig/cache/
 .pg-bundle/
 
 
-# "game models" once ignored the WHOLE cart/editor/data/ directory — which is
-# the editor's SOURCE tree (73 tracked .ts files), not asset data. Tracked files
-# survived, but every NEW source file added there would have gone invisible to
-# git. The three asset dirs it was aiming at (models/, textures/, stickers/) are
-# named exactly, further down under the req_3772 ruling.
+# ── cart/editor/data: game models. The whole directory is ignored ────────────
+# USER RULING (req_3772 follow-up): "that directory is to be ignored". Every
+# asset the editor writes here — models/, textures/, stickers/, and whatever
+# asset dir it grows next — never reaches GitHub, with no rule to remember.
 #
-# `game models` was also a stray non-comment line: git read it as a pattern for
-# a file literally named "game models".
-#
+# The `*` + re-include form is deliberate. Ignoring `cart/editor/data/` outright
+# makes git skip the directory without descending, so nothing inside can ever be
+# re-included — and this directory is ALSO the editor's source tree (73 .ts
+# files: commands, types, meshDoc, the stores). Those stayed tracked only
+# because git keeps tracking what it already tracks; every NEW source file added
+# here was silently invisible to git. Ignoring the directory's CONTENTS and
+# exempting source keeps both halves of the ruling true.
+/cart/editor/data/*
+!/cart/editor/data/*.ts
+
 # The user's personal image-generation console (embedded API key) — never git's.
 # The agent-skin skill drives it headlessly; it is not repo source.
 cart/editor/img.cjs
@@ -371,8 +377,8 @@ cart/hmsc-int/data/decal-pixels/
 # ── 3D models + image textures stay LOCAL — never published (USER RULING req_3772,
 # "do not publish the 3d models or image based textures to github"; matches the
 # GitHub-web directory deletions of 2026-08-03) ─────────────────────────────────
-/cart/editor/data/models/
-/cart/editor/data/textures/
+# cart/editor/data's assets (models/, textures/, stickers/, anything later) are
+# covered wholesale at the top of this file — one rule, nothing to keep in sync.
 /cart/hmsc-int/assets/tex/
 /cart/hmsc-int/exports/*.png
 /cart/hmsc-int/exports/.cache/
@@ -385,4 +391,3 @@ cart/hmsc-int/data/decal-pixels/
 /design_handoff_color_studio/
 /_MODEL_RECOVERY_BACKUP_20260629/
 /research_runs/2026-07-28__auto-skinning-weights/
-/cart/editor/data/stickers/
