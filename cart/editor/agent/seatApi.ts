@@ -1542,14 +1542,14 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         );
         return seat.reply('inset', result.ok, result, result.ok ? undefined : `${result.stage}: ${result.reason}`);
       }
-      case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'transform rejected'); }
-      case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'transform rejected'); }
-      case 'scale-uniform': { const ok = seat.scaleUniform(Number(args.factor)); return seat.reply('scale-uniform', ok, undefined, ok ? undefined : 'uniform scale rejected'); }
-      case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'transform rejected'); }
+      case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'move rejected — needs delta:[x,y,z] finite meters and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
+      case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'scale rejected — needs axis:[x,y,z], pivot:[x,y,z], finite nonzero factor, and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
+      case 'scale-uniform': { const ok = seat.scaleUniform(Number(args.factor)); return seat.reply('scale-uniform', ok, undefined, ok ? undefined : 'uniform scale rejected — needs a finite nonzero factor and an in-scope vertex/edge/face selection'); }
+      case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'rotate rejected — needs axis:[x,y,z], pivot:[x,y,z], finite degrees, and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
       case 'delete': { const result = seat.deleteSelection(); return seat.reply('delete', !!result, result ?? undefined, result ? undefined : 'nothing selected to delete'); }
-      case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : 'select two or more compatible faces'); }
+      case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : 'Merge Faces joins exactly two triangles across a shared diagonal (a quadifier, not an n-gon builder) — to push a multi-face patch, select it and extrude: a region selection extrudes as one shell'); }
       case 'weld': { const result = seat.weld(); return seat.reply('weld', !!result, result ?? undefined, result ? undefined : 'select at least two vertices or one edge'); }
       case 'weld-pairs': {
         const result = seat.weldPairs(args.pairs, args.maxDistance === undefined ? undefined : Number(args.maxDistance));
@@ -1596,11 +1596,11 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'cut': {
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5));
-        return seat.reply('cut', !!result, result ?? undefined, result ? undefined : 'loop cut rejected — it needs a face selection to cut across');
+        return seat.reply('cut', !!result, result ?? undefined, result ? undefined : 'loop cut rejected — it needs a face selection to cut across (note: cut PROPAGATES the edge ring around the whole body; basic-cut subdivides only the selected faces)');
       }
       case 'basic-cut': {
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5), true);
-        return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : 'basic cut rejected — select one or more faces');
+        return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : 'basic cut rejected — select one or more faces (basic-cut subdivides ONLY the selection; use cut when you want the ring to propagate around the body)');
       }
       case 'tris-to-quads': {
         const result = seat.trisToQuads();

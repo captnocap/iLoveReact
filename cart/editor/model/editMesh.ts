@@ -775,15 +775,18 @@ export function cylinder(radius: number, height: number, segments = 16): EditMes
     // +Y, so bottom→top→top+1→bottom+1 gives radial-out).
     faces.push({ loop: [bottom(i), top(i), top(i + 1), bottom(i + 1)] });
   }
-  const bottomCenter = verts.length;
-  verts.push([0, -y, 0]);
-  const topCenter = verts.length;
-  verts.push([0, y, 0]);
+  // Caps are single authored n-gon faces (req_3763 P1-4), exactly like the cone's
+  // base — so `select region:<name>.cap.top` is ONE face and extrude/inset accept
+  // it, instead of a center-vertex triangle fan they refuse. Ascending ring order
+  // gives −Y (bottom out); the reversed ring gives +Y (top out).
+  const bottomLoop: number[] = [];
+  const topLoop: number[] = [];
   for (let i = 0; i < seg; i += 1) {
-    // Opposite rim winding to the side quad; normals point out of each cap.
-    faces.push({ loop: [top(i), topCenter, top(i + 1)] });
-    faces.push({ loop: [bottom(i), bottom(i + 1), bottomCenter] });
+    bottomLoop.push(bottom(i));
+    topLoop.push(top(seg - 1 - i));
   }
+  faces.push({ loop: topLoop });
+  faces.push({ loop: bottomLoop });
   return fullFaceUV({ verts, faces });
 }
 

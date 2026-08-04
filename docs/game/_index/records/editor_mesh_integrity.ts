@@ -6,8 +6,18 @@ export const editor_mesh_integrity: DocIndex = {
   cart: 'cart/editor/stage/ModelView.tsx',
   purpose: ['persistence', 'host_bridge', 'geometry', 'ui'],
   summary:
-    'req_3484 + req_3507/3511–3513: every topology transaction gets a commit-time part-ledger roll call, and Tris to Quads now scans the whole model into a reversible live dry run before one confirmed journal transaction. An exact maximum matching preserves resident render rows/UV/paint/material/part ownership, leaves unmatched triangles alone, reports the projected counts, and offers three deterministic maximum-cardinality evaluations.',
+    'req_3484 + req_3507/3511–3513 + req_3763: every topology transaction gets a commit-time part-ledger roll call; Tris to Quads scans the whole model into a reversible live dry run before one confirmed journal transaction; and the outliner ROW table reconciles against host range truth instead of latching on a count mismatch (the police_sedan corruption class) — restore from the host-restored journal note, else rebuild rows from geometry + semantic regions, always loud.',
   interfaces: [
+    {
+      name: 'reconcilePartRows / __editor_reconcile_parts',
+      purpose: ['persistence', 'ui'],
+      kind: 'module',
+      sourceFile: 'cart/editor/shell/AppFrame.tsx',
+      description:
+        'req_3763 P0-1/P0-2. __modelPartRangesChanged used to drop the re-stamp whenever native part count != outliner row count — a permanent latch, since the blocked re-stamp was the only re-convergence path; any native-door undo across a structural boundary (the Agent Seat undo calls __mesh_undo directly, bypassing the shell note-restore) armed it. Now a mismatch defers ~280ms (a structural op’s own handler gets its beat to land the row) then reconciles loudly: adopt the journal note the host restored with the geometry (__mesh_journal_note() read-back — row identity survives undo/redo on every path), else rebuild rows from geometry (follow-patch sweep tallies each range’s dominant semantic region; part:rebuild:* rows named from it). meshUndoRedo refuses to apply a note whose count disagrees with host ranges. Regression: tools/part-sync-parity (shellparts/shelladd/shelldetach/reconcile/partsdump harness ops; scenarios A1–A6 + B + C).',
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/agent/seatApi.ts'],
+      status: 'live',
+    },
     {
       name: 'meshIntegrityRollCall',
       purpose: ['persistence'],

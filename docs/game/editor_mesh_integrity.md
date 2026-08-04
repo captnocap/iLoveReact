@@ -132,6 +132,41 @@ The journal action remains append-only ordinal 27
 `__mesh_topo_tris_to_quads` bridge drives Balanced begin/preview/apply only for
 automation; the interactive editor always requires the dry-run confirmation.
 
+## Outliner row ↔ range reconciler — req_3763 (P0-1/P0-2)
+
+The roll call proves the HOST partition; the outliner ROW table (cart state)
+had its own failure mode. `__modelPartRangesChanged` re-stamped rows by rank
+only when row count equalled range count, and silently dropped the update
+otherwise — a permanent latch, because the blocked re-stamp was the only
+mechanism that could re-converge them. Any native-door undo across a
+structural boundary (the Agent Seat's `undo` calls `__mesh_undo` directly,
+bypassing the shell's note-restore in `meshUndoRedo`) armed it, and from then
+on every row addressed foreign geometry (the police_sedan corruption:
+19 native parts, 13 frozen rows, "Cabin" selecting a seat backrest).
+
+Now (`cart/editor/shell/AppFrame.tsx`):
+
+- counts equal → rank re-stamp, unchanged fast path;
+- counts differ → **deferred reconcile** (~280ms — a structural op's own
+  handler gets its beat to land the row): re-read live truth, then restore
+  rows from the journal note the host itself restored with the geometry
+  (`__mesh_journal_note()` read-back — row identity, names, colors survive an
+  undo/redo no matter which path drove it), else **rebuild from geometry** —
+  one follow-patch sweep tallies each range's dominant semantic region and
+  mints `part:rebuild:*` rows named after it. Loud on both surfaces
+  (`[partsync]` line + status). Never a silent no-op.
+- `meshUndoRedo` refuses to apply a note whose row count disagrees with the
+  host ranges (blind application was how a desync installed itself) and hands
+  off to the same reconciler.
+- Manual door: `__editor_reconcile_parts()`.
+
+Regression: `tools/part-sync-parity` (RJIT_MESHOPS ops `shellparts` /
+`shelladd` / `shelldetach` / `reconcile` / `partsdump`) proves A1–A6
+(add / loop-cut re-stamp / cut undo / detach / native-door undo heal via
+note with ids preserved / post-mismatch re-stamps still flow), B (a
+native-only detach the shell never mirrored → geometry rebuild), and C
+(region extrude partition + undo settle).
+
 ## Why commit-time, not gate-time
 
 The pre-existing guards (`ownsExactPartPartition` before an append, the

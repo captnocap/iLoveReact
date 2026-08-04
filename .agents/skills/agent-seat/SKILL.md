@@ -52,6 +52,7 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 1. Run `tools/seat look` before editing. The always-on shell answers even when no model is
    open. If it returns `state:"no-live-model"`, create the intended first model with
    `tools/seat new`; never ask the user to prepare a disposable bootstrap model.
+1.1 Gather your context images. Use the image generation script provided*
 2. A new cube should report the six primitive names before further editing.
 3. Select a durable name whenever one exists. Use a geometric selector only for the first
    reach or a deliberate spatial query.
@@ -69,6 +70,40 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
    persistence is material to the task, fully stop and reopen the editor and prove the names
    with a generation-1 `look`.
 
+*(
+`cart/editor/img.cjs` is the user's generation console (nano-gpt API through the local
+SOCKS proxy on 127.0.0.1:9050). Agent lane is `--headless` + a queue file; everything is
+env-overridable, so keep the whole run in a scratch workdir:
+
+```bash
+W=<scratch>/skin-<model>; mkdir -p $W/prompts $W/out
+cat > $W/prompts/<name>.txt <<'EOF'
+<the texture prompt — see Prompting below>
+EOF
+echo '[<name>] [2k] [1] [3] [nano-banana-2-lite] [<ABS-PATH-TO-GUIDE-WITHOUT-EXTENSION>] [none] [aspect_ratio=2:3]' > $W/queue.txt
+cd $W && NANO_PROMPTS_DIR=$W/prompts NANO_IMG2IMG_DIR=$W NANO_OUTPUT_DIR=$W/out \
+  NANO_QUEUE_FILE=$W/queue.txt NANO_QUEUE_LOG_FILE=$W/queue.log \
+  NANO_IMAGE_RESULTS_LOG=$W/results.csv \
+  node /home/siah/creative/reactjit/cart/editor/img.cjs --headless
+```
+
+Queue line grammar: `[prompt] [resolution] [imgs/batch] [batches] [model] [refs] [style] [k=v,...]`.
+
+- **Always set batches explicitly** — the default is 25.
+- Reference paths are absolute **without the file extension** (the loader appends
+  .png/.jpg/... itself).
+- If Generating a UV, append a UV safety instruction to any img2img run ("fill in the uv,
+  remove the wireframe, no trademarks").
+- `aspect_ratio` should approximate the atlas w:h (valid: 21:9 16:9 9:16 5:4 4:3 3:4 2:3
+  3:2 square auto). Exact dims come later from the resize step, not from the API.
+- Models (both proven): `nano-banana-2-lite` — dirt-cheap, ~12 s, halfway-decent; the
+  drafting default. `gpt-image-2` — clearly better fidelity; use `[1024x1536]`-style
+  resolution (max 2560x1440) + `quality=high`, and the **pink guide, never transparent**.
+  Cost is not a constraint; generate 2–4 candidates per look and pick with your eyes.
+- **gpt-image-2 WxH must be multiples of 16** (`816x1248`, not `810x1245`) or the API
+  400s with INVALID_RESOLUTION. Round up to the nearest 16 and fix it in the resize step.
+)
+
 ---
 
 ## Short verb table
@@ -80,7 +115,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat look` | `{"action":"look"}` | Returns the resident percept, including separate logical UV-island and independently painted footprint counts, or `state:"no-live-model"` from the always-on shell. Bootstraps cube names on a virgin 6–12 face mesh. |
 | `tools/seat semantic-status` | `{"action":"semantic-status"}` | Compares saved RJMD, viewport mount input, and resident native semantics. |
 | `tools/seat new <kind> [size height sides]` | `{"action":"new","args":{"kind":"cube","size":1,"height":1,"sides":16}}` | Creates a model document through the editor shell's normal New Model flow. |
-| `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. |
+| `tools/seat elements` | `{"action":"elements"}` | Returns ephemeral vertex positions and boundary-edge endpoints. Re-read after topology changes. HONOURS the active part scope: scope to a part first and only its elements return (ids stay global). For whole-mesh reads on large models, page with `follow inspect` instead of one giant reply. |
 | `tools/seat action boundary-continuation '{"open":[a,b]}'` | `{"action":"boundary-continuation","args":{"open":[a,b]}}` | Returns only boundary edges incident to `a` and `b`, plus legal one-per-side pairs and their next open edge. |
 | `tools/seat action select-edge-continuation '{"open":[a,b],"edges":[[a,c],[b,d]]}'` | Same | Atomically validates and selects one continuation edge at each endpoint. Rejects disjoint, same-side, and collapsed pairs. |
 | `tools/seat action retopo-bands '{"operation":"plan-from-selection"}'` | Same | From a selected established quad strip, recovers its ordered lower/upper rails, maps and tints every resident face relative to those local rails. `read`, `select {id|"all"}`, and `clear` use the map. |
@@ -93,20 +128,20 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
 | `tools/seat select-vertex <id> [+]` | `{"action":"select-vertex","args":{"index":2,"additive":true}}` | Select vertex ids returned by `elements`. |
 | `tools/seat name <name> [instance]` | `{"action":"name","args":{"name":"…","instance":0}}` | Names the current selection, role `authored`. |
-| `tools/seat extrude <dist> <name> [instance]` | `{"action":"extrude","args":{"distance":0.2,"name":"roof","instance":0}}` | Creates `<name>.cap` + `<name>.wall`. |
+| `tools/seat extrude <dist> <name> [instance]` | `{"action":"extrude","args":{"distance":0.2,"name":"roof","instance":0}}` | Creates `<name>.cap` + `<name>.wall`. A MULTI-face selection region-extrudes as ONE shell: the patch translates along its average normal as the cap and walls rise only on the selection boundary — never between selected faces. One part per selection; wire faces, non-manifold selection edges, and closed selections are refused. |
 | `tools/seat extrude-edge <dist>` | `{"action":"extrude-edge","args":{"distance":0.1}}` | Extends exactly one selected edge; inherits source meaning. |
 | `tools/seat connect` | `{"action":"connect"}` | Connect exactly two selected non-adjacent vertices across one face. |
 | `tools/seat create-face <name>` | `{"action":"create-face","args":{"name":"bridge"}}` | Fill a closed 3/4-edge loop or bridge two disjoint edges; naming required. |
 | `tools/seat bevel <width>` | `{"action":"bevel","args":{"width":0.02}}` | Atomic native bevel session on one edge or vertex. Meters. |
 | `tools/seat inset …` | `{"action":"inset","args":{"distance":0.001,"name":"panel","pivot":[0,0.5,0],"axes":[[1,0,0],[0,0,1]],"factors":[0.6,0.7]}}` | Packages hairline extrude + two-axis shrink; see Inset. |
-| `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. |
-| `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":0.018}}` | Exact axis scale about a pivot; factors are not rounded to UI step sizes. |
+| `tools/seat move x y z` | `{"action":"move","args":{"delta":[0,0.1,0]}}` | Translates the selection. Transforms act on the IN-SCOPE selection in any mode — a face selection resolves to its corner vertices; view mode (0) transforms nothing. |
+| `tools/seat scale ax ay az px py pz f` | `{"action":"scale","args":{"axis":[1,0,0],"pivot":[0,0,0],"factor":0.018}}` | Exact axis scale about a pivot; factors are not rounded to UI step sizes. All SEVEN args are required — a short arg list is the usual cause of "scale rejected". For signed numerics, the `action` JSON form is the reliable lane if your shell/wrapper eats a leading `-`. |
 | `tools/seat scale-uniform <factor>` | `{"action":"scale-uniform","args":{"factor":1.2}}` | Uniform scale around the current selection pivot. |
 | `tools/seat rotate ax ay az px py pz deg` | `{"action":"rotate","args":{"axis":[0,1,0],"pivot":[0,0,0],"degrees":15}}` | Degrees, converted to radians internally. |
 | `tools/seat undo` | `{"action":"undo"}` | |
 | `tools/seat redo` | `{"action":"redo"}` | |
 | `tools/seat delete` | `{"action":"delete"}` | Delete the selected faces, or faces touching selected edges/vertices. |
-| `tools/seat merge-faces` | `{"action":"merge-faces"}` | Merge 2+ compatible selected faces. |
+| `tools/seat merge-faces` | `{"action":"merge-faces"}` | Joins exactly TWO triangles across a shared diagonal into one quad — a quadifier, not an n-gon builder. To push a multi-face patch, select it and `extrude` (region extrude). |
 | `tools/seat weld` | `{"action":"weld"}` | Weld selected vertices; one selected edge collapses its endpoints. |
 | `tools/seat action weld-pairs '{"pairs":[[a,b],[c,d]],"maxDistance":0.01}'` | Pairwise seam weld. | Each pair collapses independently to its midpoint; the optional metre leash rejects stale/cross-body matches. |
 | `tools/seat action normalize-widths '{"paths":[{"vertices":[a,b,c]}],"strength":1}'` | Equalize retopology row widths. | Ordered real-edge paths only. Open endpoints stay pinned; closed rows retain the first vertex as their phase anchor. |
@@ -120,8 +155,8 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
 | `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
 | `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a part whose surfaces are named at creation. **Meters.** |
-| `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut the current face selection. |
-| `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Basic cut through the same atomic native session. |
+| `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut: PROPAGATES the edge ring around the whole body — one hood cut also cuts windshield/roof/underbody (measured: +66 tris where basic-cut adds +6). Reach for it only when you want the full ring. |
+| `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Subdivides ONLY the selected faces — the bounded local cut. This is the one you want for a local detail line; it never walks the ring. |
 | `tools/seat tris-to-quads` | `{"action":"tris-to-quads"}` | Convert the compatible maximum triangle set. |
 | `tools/seat collect-uv-orientation` | `{"action":"collect-uv-orientation"}` | Expand one selected face to the same signed UV orientation. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize; `-` keeps the −side. |
@@ -158,7 +193,7 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 | `model-rename` | optional model `id`, plus `name`. |
 | `model-import` | absolute `.glb`, `.obj`, or `.stl` `path`; STL replies `pending:true` while conversion completes. |
 | `model-export`, `model-starter` | editor command `id`; character export also takes `role:"player"|"npc"`. |
-| `viewport` | `read`; `orbit {yawDegrees,pitchDegrees}`; `frame {target:"model"|"selection"}`; pan; zoom; explicit `pose` (radians); lock; selection-mode; gizmo; wire; xray; `focus` (frame selection); `focus-tool`; mirror; bookmarks. Programmatic moves exit the focus tool first and return the actual live pose. |
+| `viewport` | `read`; `orbit {yawDegrees,pitchDegrees}`; `frame {target:"model"|"selection"}`; pan; zoom; explicit `pose` — the 6-array `[yaw,pitch,dist,tx,ty,tz]` or named `{yaw,pitch,distance,target}` merged over the live pose (radians; POSITIVE pitch looks down from above, negative puts the camera below the model); lock; selection-mode (names or 0-3); gizmo (names or 0-2); wire; xray; `focus` (frame selection); `focus-tool`; mirror; bookmarks. Programmatic moves exit the focus tool first and return the actual live pose. |
 | `reference` | `read`; `add {path,patch?}`; `update {id,patch}`; `remove {id}`. |
 | `path` | `plane` or `edges`, flat normalized viewport `points:[x,y,…]`, and optional `closed`. Creates a real Outliner part. |
 | `uv-state` | Read the complete live UV panel model. Optional `indices:[…]` returns only those island rects/intents plus the current selection, avoiding the full atlas-pixel payload. |
@@ -224,11 +259,21 @@ sides, bridge the openings, weld the seam. If you are not going to pay that, do 
 primitive — extrude, inset, or cut the surface you already have instead, which produces
 joined topology for free.
 
-### cut — loop cut
+### cut vs basic-cut — ring propagation vs local subdivide
 
 `direction` is 0 or 1 (the face's two in-plane axes), `cuts` the number of new loops, and
 `offset` is 0..1 along the span (0.5 = even). Cut faces stay in their existing semantic
 region, so a cut never creates naming debt.
+
+The two verbs differ in REACH, and picking the wrong one costs an order of magnitude of
+budget (req_3763 P1-3, measured on an identical `region:hood` selection at offset 0.5):
+
+- `cut` walks the edge ring around the entire body: `966 → 1032 (+66)`, touching
+  noseTop, hood, windshield, roof, backlight, trunkLid, underbody, rearFascia, frontFascia.
+  Use it when the model needs a full station line (a new cross-section loop).
+- `basic-cut` subdivides only the selected faces: `966 → 972 (+6)`, `{hood: 6}`. Use it
+  for every local detail line — panel breaks, recess edges, arch rounding. Rounding a
+  wheel-well roof with `cut` costs ~140 tris; with `basic-cut` it costs ~6.
 
 ### shot — the agent's eyes
 
