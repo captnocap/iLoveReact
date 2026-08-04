@@ -532,7 +532,8 @@ type QuadifyPlan = TopoResult & {
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshSetXray = (on: boolean) => host.__mesh_edit_xray?.(on ? 1 : 0);
-// Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
+// Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at the model origin —
+// the same fixed plane Mirror Part and symmetrize use (Center the model first, req_1538/req_3795).
 const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
 // Symmetry trust layer (studio req_1190-1192 ported, req_2831): the live off-count badge
 // + the keep+/keep− repair, against the SAME plane the armed mirror overlay draws.

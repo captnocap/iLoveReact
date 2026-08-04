@@ -1430,6 +1430,14 @@ pub fn build(b: *std.Build) void {
         .root_module = mesh_edit_test_mod,
     });
     const run_mesh_edit_test = b.addRunArtifact(mesh_edit_test);
+    // The impl module's own inline tests (mirror twins, follow, weld) only run when the
+    // module is a test ROOT — tests never cross a module import boundary, so without
+    // this target they silently ran nowhere (found via req_3795).
+    const mesh_edit_impl_test = b.addTest(.{
+        .name = "mesh-edit-impl-test",
+        .root_module = mesh_edit_impl_test_mod,
+    });
+    const run_mesh_edit_impl_test = b.addRunArtifact(mesh_edit_impl_test);
     const indexed_edit_mesh_test = b.addTest(.{
         .name = "indexed-edit-mesh-test",
         .root_module = indexed_edit_mesh_test_mod,
@@ -1437,6 +1445,7 @@ pub fn build(b: *std.Build) void {
     const run_indexed_edit_mesh_test = b.addRunArtifact(indexed_edit_mesh_test);
     const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
+    mesh_edit_test_step.dependOn(&run_mesh_edit_impl_test.step);
     mesh_edit_test_step.dependOn(&run_indexed_edit_mesh_test.step);
 
     // ── mesh journal log (history ownership diagnostics + JSON) unit tests ─

@@ -39,6 +39,446 @@ pub const Mutation = struct {
 };
 pub const Edge = [2]u32;
 
+/// Preview-only retopology bands. The planner deliberately owns no mesh mutation:
+/// it partitions every displayed triangle by the centroid's coordinate on one
+/// explicit axis, then the renderer may tint those assignments for review.
+pub const RetopoBandTuning = struct {
+    pub const min_width_m: f32 = 0.0001;
+    pub const max_bands: u16 = 128;
+};
+
+// Durable model-package record for the teaching map and its frozen before-image.
+// The overlay is not render/material data, but it is authored work: losing it at a
+// process boundary destroys the user's demonstrated topology plan. Keep the wire
+// format small and versioned so a 10k-face source costs hundreds of KB, not a huge
+// JSON bridge allocation.
+pub const RETOPO_GUIDE_MAGIC: u32 = 0x44475452; // "RTGD" little-endian
+pub const RETOPO_GUIDE_VERSION: u32 = 1;
+const RETOPO_GUIDE_HEADER_WORDS: usize = 6;
+const RETOPO_GUIDE_FLAG_GHOST_VISIBLE: u32 = 1 << 0;
+const RETOPO_GUIDE_FLAG_SOURCE_TRACKS_LIVE: u32 = 1 << 1;
+
+pub const RetopoGuide = struct {
+    live_bands: []const u16,
+    source_positions: []const f32,
+    source_bands: []const u16,
+    ghost_visible: bool,
+    source_tracks_live: bool,
+};
+
+pub const OwnedRetopoGuide = struct {
+    live_bands: []u16,
+    source_positions: []f32,
+    source_bands: []u16,
+    ghost_visible: bool,
+    source_tracks_live: bool,
+
+    pub fn deinit(self: *OwnedRetopoGuide, allocator: std.mem.Allocator) void {
+        allocator.free(self.live_bands);
+        allocator.free(self.source_positions);
+        allocator.free(self.source_bands);
+        self.* = undefined;
+    }
+
+    pub fn view(self: *const OwnedRetopoGuide) RetopoGuide {
+        return .{
+            .live_bands = self.live_bands,
+            .source_positions = self.source_positions,
+            .source_bands = self.source_bands,
+            .ghost_visible = self.ghost_visible,
+            .source_tracks_live = self.source_tracks_live,
+        };
+    }
+};
+
+fn validRetopoGuideBand(value: u16) bool {
+    return value == RETOPO_BAND_UNASSIGNED or value < RetopoBandTuning.max_bands;
+}
+
+fn writeRetopoGuideWord(bytes: []u8, word: usize, value: u32) void {
+    const at = word * @sizeOf(u32);
+    std.mem.writeInt(u32, bytes[at..][0..4], value, .little);
+}
+
+fn readRetopoGuideWord(bytes: []const u8, word: usize) u32 {
+    const at = word * @sizeOf(u32);
+    return std.mem.readInt(u32, bytes[at..][0..4], .little);
+}
+
+pub fn encodeRetopoGuide(allocator: std.mem.Allocator, guide: RetopoGuide) ![]u8 {
+    if (guide.live_bands.len == 0 or guide.source_bands.len == 0) return error.InvalidRetopoGuide;
+    if (guide.live_bands.len > std.math.maxInt(u32) or guide.source_bands.len > std.math.maxInt(u32)) return error.InvalidRetopoGuide;
+    const source_position_words = std.math.mul(usize, guide.source_bands.len, 9) catch return error.InvalidRetopoGuide;
+    if (guide.source_positions.len != source_position_words) return error.InvalidRetopoGuide;
+    for (guide.live_bands) |band| if (!validRetopoGuideBand(band)) return error.InvalidRetopoGuide;
+    for (guide.source_bands) |band| if (!validRetopoGuideBand(band)) return error.InvalidRetopoGuide;
+
+    var total_words = std.math.add(usize, RETOPO_GUIDE_HEADER_WORDS, guide.live_bands.len) catch return error.InvalidRetopoGuide;
+    total_words = std.math.add(usize, total_words, guide.source_bands.len) catch return error.InvalidRetopoGuide;
+    total_words = std.math.add(usize, total_words, source_position_words) catch return error.InvalidRetopoGuide;
+    const byte_count = std.math.mul(usize, total_words, @sizeOf(u32)) catch return error.InvalidRetopoGuide;
+    const bytes = try allocator.alloc(u8, byte_count);
+    errdefer allocator.free(bytes);
+
+    const flags = (if (guide.ghost_visible) RETOPO_GUIDE_FLAG_GHOST_VISIBLE else 0) |
+        (if (guide.source_tracks_live) RETOPO_GUIDE_FLAG_SOURCE_TRACKS_LIVE else 0);
+    writeRetopoGuideWord(bytes, 0, RETOPO_GUIDE_MAGIC);
+    writeRetopoGuideWord(bytes, 1, RETOPO_GUIDE_VERSION);
+    writeRetopoGuideWord(bytes, 2, @intCast(guide.live_bands.len));
+    writeRetopoGuideWord(bytes, 3, @intCast(guide.source_bands.len));
+    writeRetopoGuideWord(bytes, 4, flags);
+    writeRetopoGuideWord(bytes, 5, 0);
+    var word = RETOPO_GUIDE_HEADER_WORDS;
+    for (guide.live_bands) |band| {
+        writeRetopoGuideWord(bytes, word, band);
+        word += 1;
+    }
+    for (guide.source_bands) |band| {
+        writeRetopoGuideWord(bytes, word, band);
+        word += 1;
+    }
+    for (guide.source_positions) |position| {
+        if (!std.math.isFinite(position)) return error.InvalidRetopoGuide;
+        writeRetopoGuideWord(bytes, word, @bitCast(position));
+        word += 1;
+    }
+    return bytes;
+}
+
+pub fn decodeRetopoGuide(allocator: std.mem.Allocator, bytes: []const u8) !OwnedRetopoGuide {
+    if (bytes.len < RETOPO_GUIDE_HEADER_WORDS * @sizeOf(u32) or bytes.len % @sizeOf(u32) != 0) return error.InvalidRetopoGuide;
+    if (readRetopoGuideWord(bytes, 0) != RETOPO_GUIDE_MAGIC or readRetopoGuideWord(bytes, 1) != RETOPO_GUIDE_VERSION) return error.InvalidRetopoGuide;
+    const live_count: usize = @intCast(readRetopoGuideWord(bytes, 2));
+    const source_count: usize = @intCast(readRetopoGuideWord(bytes, 3));
+    const flags = readRetopoGuideWord(bytes, 4);
+    if (live_count == 0 or source_count == 0 or flags & ~(RETOPO_GUIDE_FLAG_GHOST_VISIBLE | RETOPO_GUIDE_FLAG_SOURCE_TRACKS_LIVE) != 0) return error.InvalidRetopoGuide;
+    const source_position_words = std.math.mul(usize, source_count, 9) catch return error.InvalidRetopoGuide;
+    var expected_words = std.math.add(usize, RETOPO_GUIDE_HEADER_WORDS, live_count) catch return error.InvalidRetopoGuide;
+    expected_words = std.math.add(usize, expected_words, source_count) catch return error.InvalidRetopoGuide;
+    expected_words = std.math.add(usize, expected_words, source_position_words) catch return error.InvalidRetopoGuide;
+    if (bytes.len / @sizeOf(u32) != expected_words) return error.InvalidRetopoGuide;
+
+    const live_bands = try allocator.alloc(u16, live_count);
+    errdefer allocator.free(live_bands);
+    const source_bands = try allocator.alloc(u16, source_count);
+    errdefer allocator.free(source_bands);
+    const source_positions = try allocator.alloc(f32, source_position_words);
+    errdefer allocator.free(source_positions);
+    var word = RETOPO_GUIDE_HEADER_WORDS;
+    for (live_bands) |*band| {
+        const raw = readRetopoGuideWord(bytes, word);
+        if (raw > std.math.maxInt(u16)) return error.InvalidRetopoGuide;
+        band.* = @intCast(raw);
+        if (!validRetopoGuideBand(band.*)) return error.InvalidRetopoGuide;
+        word += 1;
+    }
+    for (source_bands) |*band| {
+        const raw = readRetopoGuideWord(bytes, word);
+        if (raw > std.math.maxInt(u16)) return error.InvalidRetopoGuide;
+        band.* = @intCast(raw);
+        if (!validRetopoGuideBand(band.*)) return error.InvalidRetopoGuide;
+        word += 1;
+    }
+    for (source_positions) |*position| {
+        position.* = @bitCast(readRetopoGuideWord(bytes, word));
+        if (!std.math.isFinite(position.*)) return error.InvalidRetopoGuide;
+        word += 1;
+    }
+    return .{
+        .live_bands = live_bands,
+        .source_positions = source_positions,
+        .source_bands = source_bands,
+        .ghost_visible = flags & RETOPO_GUIDE_FLAG_GHOST_VISIBLE != 0,
+        .source_tracks_live = flags & RETOPO_GUIDE_FLAG_SOURCE_TRACKS_LIVE != 0,
+    };
+}
+pub const RETOPO_BAND_UNASSIGNED: u16 = std.math.maxInt(u16);
+
+/// Apply one user-authored preview label to an exact displayed-triangle mask.
+/// `label=null` erases the tint. This is deliberately geometry-agnostic: the
+/// user's face selection is the specification, so no planner may reinterpret it.
+pub fn assignRetopoManualBand(labels: []u16, selected: []const bool, label: ?u16) u32 {
+    if (selected.len < labels.len) return 0;
+    var changed: u32 = 0;
+    for (labels, 0..) |*current, face| {
+        if (!selected[face]) continue;
+        current.* = label orelse RETOPO_BAND_UNASSIGNED;
+        changed += 1;
+    }
+    return changed;
+}
+
+/// Carry preview-only retopology labels through an indexed topology result.
+/// `source_faces` is the same provenance map used by paint/material inheritance:
+/// every output triangle names the input triangle from which it was minted.
+pub fn inheritRetopoManualBands(labels_in: []const u16, source_faces: []const u32, labels_out: []u16) bool {
+    if (labels_out.len != source_faces.len) return false;
+    for (source_faces) |source| {
+        if (source >= labels_in.len) return false;
+    }
+    for (source_faces, 0..) |source, output| labels_out[output] = labels_in[source];
+    return true;
+}
+
+/// Compact labels through a face-removal mask. Output order exactly matches the
+/// survivor order used by the resident triangle-soup delete/weld rebuild.
+pub fn compactRetopoManualBands(labels_in: []const u16, removed: []const bool, labels_out: []u16) bool {
+    if (removed.len != labels_in.len) return false;
+    var output: usize = 0;
+    for (labels_in, 0..) |label, face| {
+        if (removed[face]) continue;
+        if (output >= labels_out.len) return false;
+        labels_out[output] = label;
+        output += 1;
+    }
+    return output == labels_out.len;
+}
+
+/// Return the one authored band shared by every face in a non-empty mask. An
+/// unassigned or mixed selection deliberately has no inheritable band.
+pub fn uniformRetopoManualBand(labels: []const u16, selected: []const bool) ?u16 {
+    if (selected.len != labels.len) return null;
+    var found: ?u16 = null;
+    for (labels, 0..) |label, face| {
+        if (!selected[face]) continue;
+        if (label == RETOPO_BAND_UNASSIGNED) return null;
+        if (found) |current| {
+            if (current != label) return null;
+        } else found = label;
+    }
+    return found;
+}
+
+/// The frozen source accepts tint edits only while the resident topology is the
+/// exact generation/face domain it captured. After the first topology mutation,
+/// live labels may continue evolving but the before-image is immutable.
+pub fn retopoSourceGhostTracks(captured_generation: u32, resident_generation: u32, ghost_faces: usize, resident_faces: usize) bool {
+    return captured_generation == resident_generation and ghost_faces == resident_faces;
+}
+
+pub fn assignedRetopoBandCount(labels: []const u16) u32 {
+    var count: u32 = 0;
+    for (labels) |label| if (label != RETOPO_BAND_UNASSIGNED) {
+        count += 1;
+    };
+    return count;
+}
+pub const RetopoBandMode = enum { axis, rails };
+pub const RetopoBandSummary = struct {
+    id: u16,
+    bucket: i32,
+    faces: u32 = 0,
+    range: [2]f32,
+    bbox: [6]f32 = .{
+        std.math.inf(f32),  std.math.inf(f32),  std.math.inf(f32),
+        -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32),
+    },
+};
+pub const RetopoBandPlan = struct {
+    mode: RetopoBandMode = .axis,
+    axis: u8,
+    width: f32,
+    origin: f32,
+    rail_samples: u16 = 0,
+    faces: []u16,
+    bands: []RetopoBandSummary,
+
+    pub fn deinit(self: *RetopoBandPlan, allocator: std.mem.Allocator) void {
+        allocator.free(self.faces);
+        allocator.free(self.bands);
+        self.* = undefined;
+    }
+};
+
+/// Partition packed triangle positions (`xyz` × 3 per face) into complete,
+/// phase-adjustable axis bands. `origin=null` anchors band zero at the lowest
+/// face centroid. Negative buckets are normalized to dense ids while retained in
+/// each summary, so a demonstrated belt can be used as the phase origin.
+pub fn planRetopoAxisBands(
+    allocator: std.mem.Allocator,
+    positions: []const f32,
+    face_count: u32,
+    axis: u8,
+    width: f32,
+    requested_origin: ?f32,
+) !RetopoBandPlan {
+    if (axis > 2 or !std.math.isFinite(width) or width < RetopoBandTuning.min_width_m) return error.InvalidArguments;
+    const count: usize = @intCast(face_count);
+    if (count == 0 or positions.len < count * 9) return error.InvalidArguments;
+
+    var minimum_centroid = std.math.inf(f32);
+    var face: usize = 0;
+    while (face < count) : (face += 1) {
+        const base = face * 9 + axis;
+        const centroid = (positions[base] + positions[base + 3] + positions[base + 6]) / 3.0;
+        if (!std.math.isFinite(centroid)) return error.InvalidArguments;
+        minimum_centroid = @min(minimum_centroid, centroid);
+    }
+    const origin = requested_origin orelse minimum_centroid;
+    if (!std.math.isFinite(origin)) return error.InvalidArguments;
+
+    var min_bucket: i32 = std.math.maxInt(i32);
+    var max_bucket: i32 = std.math.minInt(i32);
+    face = 0;
+    while (face < count) : (face += 1) {
+        const base = face * 9 + axis;
+        const centroid = (positions[base] + positions[base + 3] + positions[base + 6]) / 3.0;
+        const raw = @floor((centroid - origin) / width);
+        if (raw < @as(f32, @floatFromInt(std.math.minInt(i32))) or raw > @as(f32, @floatFromInt(std.math.maxInt(i32)))) return error.TooManyBands;
+        const bucket: i32 = @intFromFloat(raw);
+        min_bucket = @min(min_bucket, bucket);
+        max_bucket = @max(max_bucket, bucket);
+    }
+    const band_count_i64 = @as(i64, max_bucket) - @as(i64, min_bucket) + 1;
+    if (band_count_i64 < 1 or band_count_i64 > RetopoBandTuning.max_bands) return error.TooManyBands;
+    const band_count: usize = @intCast(band_count_i64);
+    const labels = try allocator.alloc(u16, count);
+    errdefer allocator.free(labels);
+    const summaries = try allocator.alloc(RetopoBandSummary, band_count);
+    errdefer allocator.free(summaries);
+    for (summaries, 0..) |*summary, id| {
+        const bucket = min_bucket + @as(i32, @intCast(id));
+        summary.* = .{
+            .id = @intCast(id),
+            .bucket = bucket,
+            .range = .{ origin + @as(f32, @floatFromInt(bucket)) * width, origin + @as(f32, @floatFromInt(bucket + 1)) * width },
+        };
+    }
+
+    face = 0;
+    while (face < count) : (face += 1) {
+        const base = face * 9;
+        const centroid = (positions[base + axis] + positions[base + 3 + axis] + positions[base + 6 + axis]) / 3.0;
+        const bucket: i32 = @intFromFloat(@floor((centroid - origin) / width));
+        const id: u16 = @intCast(bucket - min_bucket);
+        labels[face] = id;
+        const summary = &summaries[id];
+        summary.faces += 1;
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            const at = base + corner * 3;
+            summary.bbox[0] = @min(summary.bbox[0], positions[at]);
+            summary.bbox[1] = @min(summary.bbox[1], positions[at + 1]);
+            summary.bbox[2] = @min(summary.bbox[2], positions[at + 2]);
+            summary.bbox[3] = @max(summary.bbox[3], positions[at]);
+            summary.bbox[4] = @max(summary.bbox[4], positions[at + 1]);
+            summary.bbox[5] = @max(summary.bbox[5], positions[at + 2]);
+        }
+    }
+    return .{ .axis = axis, .width = width, .origin = origin, .faces = labels, .bands = summaries };
+}
+
+/// Classify every face relative to an ordered pair of locally vertical rails.
+/// Each sample is lower.xyz + upper.xyz; consecutive samples form the curved
+/// bottom/top paths. A face projects to the nearest XZ rail segment and uses that
+/// segment's interpolated local lower/upper Y, so a sloped established belt never
+/// becomes one global min/max slab.
+pub fn planRetopoRailBands(
+    allocator: std.mem.Allocator,
+    positions: []const f32,
+    face_count: u32,
+    rail_pairs: []const f32,
+) !RetopoBandPlan {
+    const count: usize = @intCast(face_count);
+    if (count == 0 or positions.len < count * 9 or rail_pairs.len < 12 or rail_pairs.len % 6 != 0) return error.InvalidArguments;
+    const sample_count = rail_pairs.len / 6;
+    if (sample_count > std.math.maxInt(u16)) return error.InvalidArguments;
+    var mean_height: f32 = 0;
+    for (0..sample_count) |sample| {
+        const at = sample * 6;
+        const height = rail_pairs[at + 4] - rail_pairs[at + 1];
+        if (!std.math.isFinite(height) or height < RetopoBandTuning.min_width_m) return error.InvalidArguments;
+        mean_height += height;
+    }
+    mean_height /= @floatFromInt(sample_count);
+
+    const buckets = try allocator.alloc(i32, count);
+    defer allocator.free(buckets);
+    var min_bucket: i32 = std.math.maxInt(i32);
+    var max_bucket: i32 = std.math.minInt(i32);
+    var face: usize = 0;
+    while (face < count) : (face += 1) {
+        const base = face * 9;
+        const cx = (positions[base] + positions[base + 3] + positions[base + 6]) / 3.0;
+        const cy = (positions[base + 1] + positions[base + 4] + positions[base + 7]) / 3.0;
+        const cz = (positions[base + 2] + positions[base + 5] + positions[base + 8]) / 3.0;
+        if (!std.math.isFinite(cx) or !std.math.isFinite(cy) or !std.math.isFinite(cz)) return error.InvalidArguments;
+        var best_distance = std.math.inf(f32);
+        var local_lower: f32 = 0;
+        var local_upper: f32 = 0;
+        var segment: usize = 0;
+        while (segment + 1 < sample_count) : (segment += 1) {
+            const a = segment * 6;
+            const b = (segment + 1) * 6;
+            const dx = rail_pairs[b] - rail_pairs[a];
+            const dz = rail_pairs[b + 2] - rail_pairs[a + 2];
+            const length_sq = dx * dx + dz * dz;
+            const t = if (length_sq > 1e-12)
+                std.math.clamp(((cx - rail_pairs[a]) * dx + (cz - rail_pairs[a + 2]) * dz) / length_sq, 0, 1)
+            else
+                0;
+            const px = rail_pairs[a] + dx * t;
+            const pz = rail_pairs[a + 2] + dz * t;
+            const distance = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+            if (distance >= best_distance) continue;
+            best_distance = distance;
+            local_lower = rail_pairs[a + 1] + (rail_pairs[b + 1] - rail_pairs[a + 1]) * t;
+            local_upper = rail_pairs[a + 4] + (rail_pairs[b + 4] - rail_pairs[a + 4]) * t;
+        }
+        const local_height = local_upper - local_lower;
+        if (local_height < RetopoBandTuning.min_width_m) return error.InvalidArguments;
+        const raw = @floor((cy - local_lower) / local_height);
+        if (raw < @as(f32, @floatFromInt(std.math.minInt(i32))) or raw > @as(f32, @floatFromInt(std.math.maxInt(i32)))) return error.TooManyBands;
+        const bucket: i32 = @intFromFloat(raw);
+        buckets[face] = bucket;
+        min_bucket = @min(min_bucket, bucket);
+        max_bucket = @max(max_bucket, bucket);
+    }
+
+    const band_count_i64 = @as(i64, max_bucket) - @as(i64, min_bucket) + 1;
+    if (band_count_i64 < 1 or band_count_i64 > RetopoBandTuning.max_bands) return error.TooManyBands;
+    const band_count: usize = @intCast(band_count_i64);
+    const labels = try allocator.alloc(u16, count);
+    errdefer allocator.free(labels);
+    const summaries = try allocator.alloc(RetopoBandSummary, band_count);
+    errdefer allocator.free(summaries);
+    for (summaries, 0..) |*summary, id| {
+        const bucket = min_bucket + @as(i32, @intCast(id));
+        summary.* = .{
+            .id = @intCast(id),
+            .bucket = bucket,
+            .range = .{ @as(f32, @floatFromInt(bucket)) * mean_height, @as(f32, @floatFromInt(bucket + 1)) * mean_height },
+        };
+    }
+    face = 0;
+    while (face < count) : (face += 1) {
+        const id: u16 = @intCast(buckets[face] - min_bucket);
+        labels[face] = id;
+        const summary = &summaries[id];
+        summary.faces += 1;
+        const base = face * 9;
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            const at = base + corner * 3;
+            summary.bbox[0] = @min(summary.bbox[0], positions[at]);
+            summary.bbox[1] = @min(summary.bbox[1], positions[at + 1]);
+            summary.bbox[2] = @min(summary.bbox[2], positions[at + 2]);
+            summary.bbox[3] = @max(summary.bbox[3], positions[at]);
+            summary.bbox[4] = @max(summary.bbox[4], positions[at + 1]);
+            summary.bbox[5] = @max(summary.bbox[5], positions[at + 2]);
+        }
+    }
+    return .{
+        .mode = .rails,
+        .axis = 1,
+        .width = mean_height,
+        .origin = 0,
+        .rail_samples = @intCast(sample_count),
+        .faces = labels,
+        .bands = summaries,
+    };
+}
+
 // The resident model-view mesh format: position3 / normal3 / uv2, three rows per
 // render triangle. These are layout constants, not tuning values.
 const EDIT_VERTEX_FLOATS: usize = 8;
@@ -301,6 +741,10 @@ var g_edge_count: u32 = 0;
 // carries no grouping at all (a plain triangle soup — every edge is real). Selection and the
 // edit overlay use ONLY boundary edges, so a cube reads as 12 edges, not 18. (req_2367)
 var g_edge_boundary: ?[]bool = null;
+// Number of distinct rasterizing/source faces incident to each welded edge. This is
+// different from `g_edge_boundary`: boundary means an authored edge rather than a
+// triangulation diagonal, while incidence==1 means an actually OPEN mesh edge.
+var g_edge_incidence: ?[]u16 = null;
 // Per welded edge: is it a naked WIRE edge — contributed ONLY by degenerate (repeated-
 // corner) triangles, the Pen Edges format? Wire edges have no rasterizing face at all,
 // so the view-mode overlay must draw them or the committed wire is invisible outside
@@ -324,15 +768,22 @@ var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the act
 
 // ── Live mirror editing (req_2758 — the Studio's req_1183/1186 symmetric editing, host-native) ──
 // With one or more planes enabled (bit 0 = X, 1 = Y, 2 = Z), every selection transform also
-// lands on each moved vertex's MIRROR TWIN inside the same outliner part. The mirror plane is
-// the part's own bounds center, not workspace/model coordinate 0: an offset part still mirrors
-// top↔bottom / left↔right against itself. Twins are matched by position ONCE per topology into
-// an index table, so a vertex stays paired with its twin through the whole modeling session
-// even mid-drag; per-frame deltas then reflect through plain index lookups, no per-frame
-// hashing. Multiple planes compose: every non-empty subset of the enabled axes is one
-// reflection (X+Y on → the X twin, the Y twin, AND the XY-diagonal twin all follow). A vertex
-// with no counterpart in its part simply doesn't mirror — same honesty as the Studio's
-// mirrorEditAxes.
+// lands on each moved vertex's MIRROR TWIN. The mirror plane is MIRROR_PLANE_CENTER — the
+// model origin, the same plane Mirror Part duplicates across and the Center button (req_1538)
+// aligns a model to. It is a fixed coordinate authority, NEVER derived from mesh, part, or
+// selection bounds: a bounds-derived plane moves the moment a one-sided edit lands, which
+// silently invalidated the very symmetry it was supposed to maintain (req_3795 — the chair
+// whose arm dragged the "center" to x=0.05). Twins are matched by reflected position ONCE per
+// topology into an index table — same outliner part preferred, any part otherwise (a
+// mirror-duplicated part pairs with its twin part) — so a vertex stays paired through the
+// whole modeling session even mid-drag; per-frame deltas then reflect through plain index
+// lookups, no per-frame hashing. Multiple planes compose: every non-empty subset of the
+// enabled axes is one reflection (X+Y on → the X twin, the Y twin, AND the XY-diagonal twin
+// all follow). A vertex with no counterpart simply doesn't mirror — same honesty as the
+// Studio's mirrorEditAxes.
+/// The one symmetry-plane authority every mirror feature shares (live mirror, symmetrize,
+/// the symmetry report, the plane overlay, and indexed diagonal sync via injection).
+pub const MIRROR_PLANE_CENTER: [3]f32 = .{ 0, 0, 0 };
 const MIRROR_NONE: u32 = 0xffff_ffff;
 /// Twin matching quantization: positions rounded to this many units/metre must coincide.
 /// Deliberately coarser than WELD_Q — mirrored halves come from float-reflected geometry
@@ -524,8 +975,6 @@ const FollowEdgeUse = struct {
     count: u32 = 1,
 };
 
-pub const FOLLOW_ACTION_CAP: usize = 64;
-
 pub const FollowActionQueue = struct {
     const Record = struct {
         kind: u8,
@@ -564,11 +1013,6 @@ pub const FollowActionQueue = struct {
         errdefer allocator.free(owned_before);
         const owned_after = try allocator.dupe(u8, after);
         errdefer allocator.free(owned_after);
-        if (queue.records.items.len == FOLLOW_ACTION_CAP) {
-            const dropped = queue.records.orderedRemove(0);
-            allocator.free(dropped.before);
-            allocator.free(dropped.after);
-        }
         try queue.records.append(allocator, .{
             .kind = kind,
             .source = source,
@@ -1182,6 +1626,28 @@ pub fn selectedEdgesCommonPartPub() ?u32 {
     return owner;
 }
 
+/// The authored surface direction beside the selected boundary edges. Create Face
+/// uses this to make winding a topology-derived postcondition instead of an accident
+/// of edge-table enumeration. Every selected edge must have a valid adjacent face;
+/// disagreeing source normals reject rather than minting an arbitrarily flipped face.
+pub fn selectedEdgesReferenceNormalPub() ?[3]f32 {
+    if (!ensureTopology()) return null;
+    const selected = g_sel_edge orelse return null;
+    var sum: [3]f32 = .{ 0, 0, 0 };
+    var count: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < selected.len and edge < g_edge_count) : (edge += 1) {
+        if (!selected[edge]) continue;
+        const frame = edgeExtrusionFramePub(edge) orelse return null;
+        if (count > 0 and vecDot(sum, frame.face_normal) <= 0) return null;
+        sum = vecAdd(sum, frame.face_normal);
+        count += 1;
+    }
+    if (count == 0) return null;
+    const normal = vecNorm(sum);
+    return if (vecDot(normal, normal) >= 0.5) normal else null;
+}
+
 /// Geometry needed to extend one selected edge without inventing a perpendicular
 /// flap. The outer edge stays in the adjacent authored face's plane; the caller
 /// chooses only the distance and owns the topology transaction.
@@ -1392,6 +1858,7 @@ pub fn reset() void {
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
     if (g_edge_boundary) |b| alloc.free(b);
+    if (g_edge_incidence) |i| alloc.free(i);
     if (g_edge_wire) |w| alloc.free(w);
     if (g_scope_vert) |s| alloc.free(s);
     if (g_scope_edge) |s| alloc.free(s);
@@ -1413,6 +1880,7 @@ pub fn reset() void {
     g_corner_vert = null;
     g_edges = null;
     g_edge_boundary = null;
+    g_edge_incidence = null;
     g_edge_wire = null;
     g_scope_vert = null;
     g_scope_edge = null;
@@ -2097,8 +2565,34 @@ fn ensureTopology() bool {
     // hide). This is what makes a cube read as 12 edges instead of 18.
     g_edge_boundary = alloc.alloc(bool, g_edge_count) catch return false;
     const boundary = g_edge_boundary.?;
+    g_edge_incidence = alloc.alloc(u16, g_edge_count) catch return false;
+    const incidence = g_edge_incidence.?;
+    @memset(incidence, 0);
     g_edge_wire = alloc.alloc(bool, g_edge_count) catch return false;
     const wire = g_edge_wire.?;
+    // Count each distinct edge once per face regardless of authored grouping. The
+    // resident Seat needs this to distinguish the perimeter of a deleted patch from
+    // ordinary selectable face edges around the same vertex.
+    f = 0;
+    while (f < fc) : (f += 1) {
+        var face_edges: [3]u32 = undefined;
+        var face_edge_count: usize = 0;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const va = corner_vert[f * 3 + k];
+            const vb = corner_vert[f * 3 + (k + 1) % 3];
+            if (va == vb) continue;
+            const idx = emap.get(edgeKey(va, vb)) orelse continue;
+            var repeat = false;
+            for (face_edges[0..face_edge_count]) |prior| {
+                if (prior == idx) repeat = true;
+            }
+            if (repeat) continue;
+            face_edges[face_edge_count] = idx;
+            face_edge_count += 1;
+            if (incidence[idx] < std.math.maxInt(u16)) incidence[idx] += 1;
+        }
+    }
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     if (!has_groups) {
         @memset(boundary, true);
@@ -2112,10 +2606,7 @@ fn ensureTopology() bool {
         defer alloc.free(first_group);
         const seen = alloc.alloc(bool, g_edge_count) catch return false;
         defer alloc.free(seen);
-        const incidence = alloc.alloc(u16, g_edge_count) catch return false;
-        defer alloc.free(incidence);
         @memset(seen, false);
-        @memset(incidence, 0);
         f = 0;
         while (f < fc) : (f += 1) {
             const g = model_source.faceGroupOf(f);
@@ -2143,7 +2634,6 @@ fn ensureTopology() bool {
                 face_edges[face_edge_count] = idx;
                 face_edge_count += 1;
                 if (!face_degenerate) wire[idx] = false;
-                if (incidence[idx] < std.math.maxInt(u16)) incidence[idx] += 1;
                 if (!seen[idx]) {
                     seen[idx] = true;
                     first_group[idx] = g;
@@ -2265,8 +2755,32 @@ pub fn adoptSameFaceTriangulation() bool {
     const new_boundary = alloc.alloc(bool, new_edge_count) catch return false;
     var boundary_adopted = false;
     defer if (!boundary_adopted) alloc.free(new_boundary);
+    const new_incidence = alloc.alloc(u16, new_edge_count) catch return false;
+    var incidence_adopted = false;
+    defer if (!incidence_adopted) alloc.free(new_incidence);
+    @memset(new_incidence, 0);
     const new_wire = alloc.alloc(bool, new_edge_count) catch return false;
     defer if (!boundary_adopted) alloc.free(new_wire);
+    face = 0;
+    while (face < face_count) : (face += 1) {
+        var face_edges: [3]u32 = undefined;
+        var face_edge_count: usize = 0;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const a = new_corners[face * 3 + corner];
+            const b = new_corners[face * 3 + (corner + 1) % 3];
+            if (a == b) continue;
+            const edge = edge_map.get(edgeKey(a, b)) orelse continue;
+            var repeat = false;
+            for (face_edges[0..face_edge_count]) |prior| {
+                if (prior == edge) repeat = true;
+            }
+            if (repeat) continue;
+            face_edges[face_edge_count] = edge;
+            face_edge_count += 1;
+            if (new_incidence[edge] < std.math.maxInt(u16)) new_incidence[edge] += 1;
+        }
+    }
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     if (!has_groups) {
         @memset(new_boundary, true);
@@ -2278,10 +2792,7 @@ pub fn adoptSameFaceTriangulation() bool {
         defer alloc.free(first_group);
         const seen = alloc.alloc(bool, new_edge_count) catch return false;
         defer alloc.free(seen);
-        const incidence = alloc.alloc(u16, new_edge_count) catch return false;
-        defer alloc.free(incidence);
         @memset(seen, false);
-        @memset(incidence, 0);
         face = 0;
         while (face < face_count) : (face += 1) {
             const group = model_source.faceGroupOf(face);
@@ -2307,7 +2818,6 @@ pub fn adoptSameFaceTriangulation() bool {
                 face_edges[face_edge_count] = edge;
                 face_edge_count += 1;
                 if (!face_degenerate) new_wire[edge] = false;
-                if (incidence[edge] < std.math.maxInt(u16)) incidence[edge] += 1;
                 if (!seen[edge]) {
                     seen[edge] = true;
                     first_group[edge] = group;
@@ -2318,7 +2828,7 @@ pub fn adoptSameFaceTriangulation() bool {
         }
         var edge: u32 = 0;
         while (edge < new_edge_count) : (edge += 1) {
-            if (incidence[edge] != 2) new_boundary[edge] = true;
+            if (new_incidence[edge] != 2) new_boundary[edge] = true;
         }
     }
 
@@ -2337,6 +2847,7 @@ pub fn adoptSameFaceTriangulation() bool {
     if (g_corner_vert) |old| alloc.free(old);
     if (g_edges) |old| alloc.free(old);
     if (g_edge_boundary) |old| alloc.free(old);
+    if (g_edge_incidence) |old| alloc.free(old);
     if (g_edge_wire) |old| alloc.free(old);
     if (g_sel_edge) |old| alloc.free(old);
     if (g_scope_vert) |old| alloc.free(old);
@@ -2345,6 +2856,7 @@ pub fn adoptSameFaceTriangulation() bool {
     g_corner_vert = new_corners;
     g_edges = owned_edges;
     g_edge_boundary = new_boundary;
+    g_edge_incidence = new_incidence;
     g_edge_wire = new_wire;
     g_sel_edge = new_selection;
     g_scope_vert = null;
@@ -2356,6 +2868,7 @@ pub fn adoptSameFaceTriangulation() bool {
     corners_adopted = true;
     edges_adopted = true;
     boundary_adopted = true;
+    incidence_adopted = true;
     selection_adopted = true;
     return true;
 }
@@ -2365,6 +2878,13 @@ pub fn adoptSameFaceTriangulation() bool {
 pub fn edgeIsBoundaryPub(e: u32) bool {
     const b = g_edge_boundary orelse return true;
     return e >= b.len or b[e];
+}
+
+/// Distinct source-face incidence for an authored welded edge. One means the edge
+/// is open; two is manifold; values above two are non-manifold.
+pub fn edgeFaceIncidencePub(e: u32) u16 {
+    const incidence = g_edge_incidence orelse return 0;
+    return if (e < incidence.len) incidence[e] else 0;
 }
 
 /// A naked Pen Edges wire edge — no rasterizing face anywhere on it. The view-mode
@@ -2751,35 +3271,27 @@ pub fn mirrorMask() u8 {
 
 pub const MirrorFrame = struct { center: [3]f32, radius: f32 };
 
-/// The visual mirror frame for the current edit scope: scoped part(s) when the outliner
-/// focuses them, else the whole mesh. The actual twin solve still mirrors per part; this
-/// frame is the UI cue for the common one-focused-part case.
+/// The visual mirror frame: the shared plane at MIRROR_PLANE_CENTER, sized so the overlay
+/// reaches the current edit scope's geometry wherever it sits relative to the plane.
 pub fn mirrorFramePub() ?MirrorFrame {
     if (!ensureTopology()) return null;
-    var mn: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
-    var mx: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var reach: f32 = 0;
     var any = false;
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
         if (!vertInScopePub(i)) continue;
         const p = vertPos(i);
+        var d2: f32 = 0;
         var a: usize = 0;
         while (a < 3) : (a += 1) {
-            mn[a] = @min(mn[a], p[a]);
-            mx[a] = @max(mx[a], p[a]);
+            const d = p[a] - MIRROR_PLANE_CENTER[a];
+            d2 += d * d;
         }
+        reach = @max(reach, d2);
         any = true;
     }
     if (!any) return null;
-    const center: [3]f32 = .{
-        (mn[0] + mx[0]) * 0.5,
-        (mn[1] + mx[1]) * 0.5,
-        (mn[2] + mx[2]) * 0.5,
-    };
-    const dx = mx[0] - mn[0];
-    const dy = mx[1] - mn[1];
-    const dz = mx[2] - mn[2];
-    return .{ .center = center, .radius = @max(0.6, @sqrt(dx * dx + dy * dy + dz * dz) * 0.6) };
+    return .{ .center = MIRROR_PLANE_CENTER, .radius = @max(0.6, @sqrt(reach) * 1.1) };
 }
 
 const MirrorKey = struct { part: u32, x: i32, y: i32, z: i32 };
@@ -2800,97 +3312,70 @@ fn reflectPointAround(p: [3]f32, subset: u8, center: [3]f32) [3]f32 {
     return r;
 }
 
-const PartBounds = struct { min: [3]f32, max: [3]f32 };
+/// Sentinel part id for the any-part position map — never a real part index.
+const ANY_PART: u32 = MIRROR_NONE;
 
-fn includePartBounds(bounds: *PartBounds, p: [3]f32) void {
-    var a: usize = 0;
-    while (a < 3) : (a += 1) {
-        bounds.min[a] = @min(bounds.min[a], p[a]);
-        bounds.max[a] = @max(bounds.max[a], p[a]);
+/// Position→vertex lookup for twin matching: the same-part map keeps welded identity
+/// domains self-consistent; the any-part map lets a mirror-duplicated part pair with
+/// its twin part across the shared plane. Same part always wins.
+const MirrorMap = struct {
+    by_part: std.AutoHashMapUnmanaged(MirrorKey, u32) = .empty,
+    any_part: std.AutoHashMapUnmanaged(MirrorKey, u32) = .empty,
+
+    fn deinit(self: *MirrorMap) void {
+        self.by_part.deinit(alloc);
+        self.any_part.deinit(alloc);
     }
-}
 
-/// Current bounds-center for every logical vertex's own outliner part. Rebuilt per
-/// transform so translating a whole part carries its local symmetry plane with it.
-fn buildMirrorCentersPerVert() ?[]f32 {
-    const parts = g_vert_part orelse return null;
-    if (parts.len < g_vert_count) return null;
-    const centers = alloc.alloc(f32, @as(usize, g_vert_count) * 3) catch return null;
-    var by_part = std.AutoHashMapUnmanaged(u32, PartBounds).empty;
-    defer by_part.deinit(alloc);
-
-    var i: u32 = 0;
-    while (i < g_vert_count) : (i += 1) {
-        const idx: usize = @intCast(i);
-        const p = vertPos(i);
-        const gop = by_part.getOrPut(alloc, parts[idx]) catch {
-            alloc.free(centers);
-            return null;
-        };
-        if (!gop.found_existing) {
-            gop.value_ptr.* = .{ .min = p, .max = p };
-        } else {
-            includePartBounds(gop.value_ptr, p);
+    fn build(parts: []const u32) ?MirrorMap {
+        var map = MirrorMap{};
+        var i: u32 = 0;
+        while (i < g_vert_count) : (i += 1) {
+            const p = vertPos(i);
+            map.by_part.put(alloc, mirrorKey(parts[@intCast(i)], p), i) catch {
+                map.deinit();
+                return null;
+            };
+            map.any_part.put(alloc, mirrorKey(ANY_PART, p), i) catch {
+                map.deinit();
+                return null;
+            };
         }
+        return map;
     }
 
-    i = 0;
-    while (i < g_vert_count) : (i += 1) {
-        const idx: usize = @intCast(i);
-        const b = by_part.get(parts[idx]) orelse {
-            alloc.free(centers);
-            return null;
-        };
-        const base = idx * 3;
-        centers[base + 0] = (b.min[0] + b.max[0]) * 0.5;
-        centers[base + 1] = (b.min[1] + b.max[1]) * 0.5;
-        centers[base + 2] = (b.min[2] + b.max[2]) * 0.5;
+    fn get(self: *const MirrorMap, part: u32, p: [3]f32) ?u32 {
+        if (self.by_part.get(mirrorKey(part, p))) |v| return v;
+        return self.any_part.get(mirrorKey(ANY_PART, p));
     }
-    return centers;
-}
-
-fn mirrorCenterAt(centers: []const f32, v: u32) [3]f32 {
-    const base = @as(usize, v) * 3;
-    if (base + 2 >= centers.len) return .{ 0, 0, 0 };
-    return .{ centers[base + 0], centers[base + 1], centers[base + 2] };
-}
+};
 
 /// Build (or reuse) the twin table: for every non-empty subset of ALL three axes, each
-/// vertex's position-matched reflection partner. Built for the full 7 subsets so a mask
-/// change alone can reuse it; rebuilt when the topology (vert count) changes or a toggle
-/// forces it. Returns null when there's no topology or allocation fails.
+/// vertex's reflection partner across MIRROR_PLANE_CENTER. Built for the full 7 subsets
+/// so a mask change alone can reuse it; rebuilt when the topology (vert count) changes
+/// or a toggle forces it. Returns null when there's no topology or allocation fails.
 fn ensureMirrorTwins() ?[]u32 {
     if (!ensureTopology()) return null;
     if (g_mirror_twin != null and g_mirror_built_for == g_vert_count and g_mirror_built_mask == g_mirror_mask) return g_mirror_twin;
     const parts = g_vert_part orelse return null;
     if (parts.len < g_vert_count) return null;
-    const centers = buildMirrorCentersPerVert() orelse return null;
-    defer alloc.free(centers);
     if (g_mirror_twin) |t| alloc.free(t);
     g_mirror_twin = null;
     const total: usize = @as(usize, g_vert_count) * 7;
     const twins = alloc.alloc(u32, total) catch return null;
     @memset(twins, MIRROR_NONE);
-    var by_pos = std.AutoHashMapUnmanaged(MirrorKey, u32).empty;
-    defer by_pos.deinit(alloc);
-    by_pos.ensureTotalCapacity(alloc, g_vert_count) catch {
+    var map = MirrorMap.build(parts) orelse {
         alloc.free(twins);
         return null;
     };
+    defer map.deinit();
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
-        const idx: usize = @intCast(i);
-        by_pos.put(alloc, mirrorKey(parts[idx], vertPos(i)), i) catch {};
-    }
-    i = 0;
-    while (i < g_vert_count) : (i += 1) {
-        const idx: usize = @intCast(i);
-        const part = parts[idx];
+        const part = parts[@intCast(i)];
         const p = vertPos(i);
-        const center = mirrorCenterAt(centers, i);
         var s: u8 = 1;
         while (s <= 7) : (s += 1) {
-            if (by_pos.get(mirrorKey(part, reflectPointAround(p, s, center)))) |t| {
+            if (map.get(part, reflectPointAround(p, s, MIRROR_PLANE_CENTER))) |t| {
                 twins[@as(usize, s - 1) * g_vert_count + i] = t;
             }
         }
@@ -2901,35 +3386,27 @@ fn ensureMirrorTwins() ?[]u32 {
     return twins;
 }
 
-/// Live symmetry report against the exact same identity domains and per-part
-/// bounds centers as mirrored transforms. Only vertices in the current outliner
-/// scope contribute; coincident vertices in different parts can never pair.
+/// Live symmetry report against the exact same identity domains and
+/// the shared MIRROR_PLANE_CENTER plane as mirrored transforms. Only vertices in the
+/// current outliner scope contribute; pairing prefers the vertex's own part and falls
+/// back to any part, exactly like the twin table.
 pub fn symmetryReportPub(axis: u8) ?[3]f32 {
     if (axis > 2 or !ensureTopology()) return null;
     const parts = g_vert_part orelse return null;
     if (parts.len < g_vert_count) return null;
-    const centers = buildMirrorCentersPerVert() orelse return null;
-    defer alloc.free(centers);
-    var by_position = std.AutoHashMapUnmanaged(MirrorKey, u32).empty;
-    defer by_position.deinit(alloc);
-    by_position.ensureTotalCapacity(alloc, g_vert_count) catch return null;
-    var vertex: u32 = 0;
-    while (vertex < g_vert_count) : (vertex += 1) {
-        const index: usize = @intCast(vertex);
-        by_position.put(alloc, mirrorKey(parts[index], vertPos(vertex)), vertex) catch return null;
-    }
+    var map = MirrorMap.build(parts) orelse return null;
+    defer map.deinit();
 
     const subset: u8 = @as(u8, 1) << @intCast(axis);
     const epsilon: f32 = 1.5 / MIRROR_Q;
     var unmatched: u32 = 0;
     var total: u32 = 0;
-    vertex = 0;
+    var vertex: u32 = 0;
     while (vertex < g_vert_count) : (vertex += 1) {
         if (!vertInScopePub(vertex)) continue;
-        const index: usize = @intCast(vertex);
         total += 1;
-        const reflected = reflectPointAround(vertPos(vertex), subset, mirrorCenterAt(centers, vertex));
-        const twin = by_position.get(mirrorKey(parts[index], reflected)) orelse {
+        const reflected = reflectPointAround(vertPos(vertex), subset, MIRROR_PLANE_CENTER);
+        const twin = map.get(parts[@intCast(vertex)], reflected) orelse {
             unmatched += 1;
             continue;
         };
@@ -2941,8 +3418,7 @@ pub fn symmetryReportPub(axis: u8) ?[3]f32 {
             unmatched += 1;
         }
     }
-    const frame = mirrorFramePub() orelse return null;
-    return .{ frame.center[axis], @floatFromInt(unmatched), @floatFromInt(total) };
+    return .{ MIRROR_PLANE_CENTER[axis], @floatFromInt(unmatched), @floatFromInt(total) };
 }
 
 fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [3]f32, scalar: f32) Mutation {
@@ -2955,8 +3431,6 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     // Twin table must exist BEFORE the move loop — it pairs by position, and a fresh
     // build against half-moved verts would find nothing on the reflected side.
     const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
-    const mirror_centers_opt: ?[]f32 = if (g_mirror_mask != 0) buildMirrorCentersPerVert() else null;
-    defer if (mirror_centers_opt) |c| alloc.free(c);
 
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
@@ -2975,7 +3449,6 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     var mmask: ?[]bool = null;
     if (g_mirror_mask != 0) mirror: {
         const twins = twins_opt orelse break :mirror;
-        const mirror_centers = mirror_centers_opt orelse break :mirror;
         if (g_mirror_affect == null or g_mirror_affect.?.len != g_vert_count) {
             if (g_mirror_affect) |m| alloc.free(m);
             g_mirror_affect = alloc.alloc(bool, g_vert_count) catch null;
@@ -2991,7 +3464,7 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
                 if ((s & g_mirror_mask) != s) continue; // only subsets of the ENABLED planes
                 const t = twins[@as(usize, s - 1) * g_vert_count + v];
                 if (t == MIRROR_NONE or t == v or t >= g_vert_count or mask[t]) continue;
-                const rp = reflectPointAround(np, s, mirrorCenterAt(mirror_centers, v));
+                const rp = reflectPointAround(np, s, MIRROR_PLANE_CENTER);
                 verts[t * 3 + 0] = rp[0];
                 verts[t * 3 + 1] = rp[1];
                 verts[t * 3 + 2] = rp[2];
@@ -3843,7 +4316,7 @@ test "mirror X: translating a vertex drags its position twin to the reflected sp
     try testing.expect(found);
 }
 
-test "mirror Y uses the outliner part center, not workspace zero" {
+test "mirror Y is the workspace-origin plane — an off-origin part does not self-mirror" {
     var soup: [12 * 3 * 8]f32 = undefined;
     buildCubeSoup(&soup);
     var i: usize = 0;
@@ -3860,7 +4333,7 @@ test "mirror Y uses the outliner part center, not workspace zero" {
         model_source.clear();
         setMirrorMask(0);
     }
-    setMirrorMask(2); // Y plane, centered on the part bounds at y=3, not workspace y=0.
+    setMirrorMask(2); // Y plane at workspace y=0 — nothing sits across it from this cube.
     setMode(.vertex);
     try testing.expect(ensureTopology());
     const vi = findVertAt(.{ -0.5, 3.5, -0.5 }).?;
@@ -3870,12 +4343,87 @@ test "mirror Y uses the outliner part center, not workspace zero" {
     const m = translateSelection(.{ 0, 0.25, 0 });
     try testing.expect(m.changed);
     try testing.expectApproxEqAbs(@as(f32, 3.75), vertPos(vi)[1], 0.0001);
-    try testing.expectApproxEqAbs(@as(f32, 2.25), vertPos(ti)[1], 0.0001);
+    // y=2.5 is NOT the reflection of y=3.5 across the origin plane — it stays put.
+    // (The old part-bounds-center plane dragged it, and drifted on every one-sided edit.)
+    try testing.expectApproxEqAbs(@as(f32, 2.5), vertPos(ti)[1], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[2], 0.0001);
 }
 
-test "symmetry report measures only scoped vertices against each part's own plane" {
+test "mirror X: one-sided geometry cannot drift the plane (req_3795)" {
+    // The chair-arm failure distilled: a cube symmetric about x=0 grows a one-sided
+    // detail far out on +X. A bounds-derived plane would shift to the new midpoint and
+    // unpair every twin; the origin plane keeps the cube mirroring exactly as before.
+    var soup: [13 * 3 * 8]f32 = undefined;
+    buildCubeSoup(soup[0 .. 12 * 3 * 8]);
+    const arm = [3][3]f32{ .{ 2.0, 0.3, 0.1 }, .{ 2.2, 0.5, 0.1 }, .{ 2.4, 0.1, 0.2 } };
+    for (arm, 0..) |p, corner| {
+        const base = (12 * 3 + corner) * 8;
+        soup[base + 0] = p[0];
+        soup[base + 1] = p[1];
+        soup[base + 2] = p[2];
+        @memset(soup[base + 3 .. base + 8], 0);
+    }
+    model_paint.setTarget(797, soup[0..], 39);
+    defer {
+        reset();
+        model_paint.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(1); // X plane
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, -0.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+
+    const m = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(m.changed);
+    // The +X twin followed across x=0 even though the mesh bounds midpoint is now +0.7.
+    try testing.expect(findVertAt(.{ 0.5, -0.25, -0.5 }) != null);
+    // The one-sided arm itself never moved.
+    try testing.expect(findVertAt(.{ 2.0, 0.3, 0.1 }) != null);
+}
+
+test "mirror X pairs across outliner parts — a mirror-duplicated part follows its twin part" {
+    var first: [12 * 3 * 8]f32 = undefined;
+    var second: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&first);
+    buildCubeSoup(&second);
+    var corner: usize = 0;
+    while (corner < 12 * 3) : (corner += 1) {
+        first[corner * 8 + 0] -= 2;
+        second[corner * 8 + 0] += 2;
+    }
+    var soup: [24 * 3 * 8]f32 = undefined;
+    @memcpy(soup[0..first.len], first[0..]);
+    @memcpy(soup[first.len..], second[0..]);
+    var groups: [24]u32 = undefined;
+    for (0..12) |face| {
+        groups[face] = @intCast(face / 2);
+        groups[12 + face] = @intCast(6 + face / 2);
+    }
+    model_source.setFaceGroups(groups[0..]);
+    model_source.setPartRanges(&.{ 0, 6, 6, 12 });
+    model_paint.setTarget(798, soup[0..], 72);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(1); // X plane
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -2.5, -0.5, -0.5 }).?; // left cube, part 0
+    g_sel_vert.?[vi] = true;
+
+    const m = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(m.changed);
+    // Its reflection lives in the OTHER part and still followed.
+    try testing.expect(findVertAt(.{ 2.5, -0.25, -0.5 }) != null);
+}
+
+test "symmetry report measures scoped vertices against the shared origin plane" {
     var first: [12 * 3 * 8]f32 = undefined;
     var second: [12 * 3 * 8]f32 = undefined;
     buildCubeSoup(&first);
@@ -3902,14 +4450,19 @@ test "symmetry report measures only scoped vertices against each part's own plan
         model_source.clear();
     }
 
+    // Focused scope: the origin-centered cube is symmetric about x=0 — nothing unmatched.
     setEditScope(0, 6);
     const focused = symmetryReportPub(0).?;
+    try testing.expectEqual(@as(f32, 0), focused[0]);
     try testing.expectEqual(@as(f32, 0), focused[1]);
     try testing.expectEqual(@as(f32, 8), focused[2]);
 
+    // Whole model: the second cube sits entirely at x≈20 with no reflection across x=0,
+    // so the report honestly counts all 8 of its vertices as unmatched. (The old
+    // per-part bounds plane called it symmetric — the drift the report exists to catch.)
     setEditScope(0, 0);
     const whole = symmetryReportPub(0).?;
-    try testing.expectEqual(@as(f32, 0), whole[1]);
+    try testing.expectEqual(@as(f32, 8), whole[1]);
     try testing.expectEqual(@as(f32, 16), whole[2]);
 }
 

@@ -1685,7 +1685,7 @@ test "symmetrize is bounded by the focused outliner part" {
         before[corner] = indexed.vertices.items[vertex_id].position;
     }
 
-    try testing.expect(try indexed.symmetrizeParts(0, true, &.{ true, false }));
+    try testing.expect(try indexed.symmetrizeParts(0, 0, true, &.{ true, false }));
     try testing.expect(indexed.faces.items[1].alive);
     for (indexed.faces.items[1].vertices.items, 0..) |vertex_id, corner| {
         try testing.expectEqual(before[corner], indexed.vertices.items[vertex_id].position);
@@ -2048,6 +2048,98 @@ test "indexed bevel rejects boundary edges and flat triangulation seams" {
 
     try testing.expect(indexed.resolveBevelEdge(corners[0], corners[1], 7) == null);
     try testing.expect(indexed.resolveBevelEdge(corners[0], corners[2], 7) == null);
+}
+
+test "opposite-corner weld removes the authored quad whose boundary cancels" {
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const corners = [6][3]f32{
+        .{ 0, 0, 0 }, .{ 0, 0, 1 },     .{ 0.2, 0, 1.1 },
+        .{ 0, 0, 0 }, .{ 0.2, 0, 1.1 }, .{ 0.2, 0, 0.9 },
+    };
+    for (corners, 0..) |position, corner| {
+        const base = corner * 8;
+        @memcpy(soup[base .. base + 3], position[0..]);
+    }
+    const merged = [3]f32{ 0.1, 0, 0.95 };
+    var final_positions = [_]f32{
+        0, 0, 0, merged[0], merged[1], merged[2], 0.2,       0,         1.1,
+        0, 0, 0, 0.2,       0,         1.1,       merged[0], merged[1], merged[2],
+    };
+    const groups = [_]u32{ 8, 8 };
+    const parts = [_]u32{ 0, 0 };
+    const untouched = [_]bool{ false, false };
+    const touched = [_]bool{ true, true };
+    var mask = [_]bool{ false, false };
+
+    // The repair is scoped to this weld. A malformed group elsewhere is not
+    // silently removed when the user edits another surface.
+    try testing.expectEqual(
+        @as(u32, 0),
+        try indexed_edit_mesh.maskMalformedWeldFaceGroups(
+            testing.allocator,
+            soup[0..],
+            final_positions[0..],
+            2,
+            groups[0..],
+            parts[0..],
+            untouched[0..],
+            mask[0..],
+        ),
+    );
+    try testing.expectEqualSlices(bool, &.{ false, false }, mask[0..]);
+
+    try testing.expectEqual(
+        @as(u32, 2),
+        try indexed_edit_mesh.maskMalformedWeldFaceGroups(
+            testing.allocator,
+            soup[0..],
+            final_positions[0..],
+            2,
+            groups[0..],
+            parts[0..],
+            touched[0..],
+            mask[0..],
+        ),
+    );
+    try testing.expectEqualSlices(bool, &.{ true, true }, mask[0..]);
+}
+
+test "adjacent-corner weld keeps the valid triangle left by a collapsed quad" {
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    const corners = [6][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    for (corners, 0..) |position, corner| {
+        const base = corner * 8;
+        @memcpy(soup[base .. base + 3], position[0..]);
+    }
+    // The first triangle has already been removed by Weld's local repeated-
+    // corner check. The second is a real triangle and must remain.
+    const merged = [3]f32{ 0.5, 0, 0 };
+    var final_positions = [_]f32{
+        merged[0], merged[1], merged[2], merged[0], merged[1], merged[2], 1, 1, 0,
+        merged[0], merged[1], merged[2], 1,         1,         0,         0, 1, 0,
+    };
+    const groups = [_]u32{ 4, 4 };
+    const parts = [_]u32{ 0, 0 };
+    const touched = [_]bool{ true, true };
+    var mask = [_]bool{ true, false };
+
+    try testing.expectEqual(
+        @as(u32, 0),
+        try indexed_edit_mesh.maskMalformedWeldFaceGroups(
+            testing.allocator,
+            soup[0..],
+            final_positions[0..],
+            2,
+            groups[0..],
+            parts[0..],
+            touched[0..],
+            mask[0..],
+        ),
+    );
+    try testing.expectEqualSlices(bool, &.{ true, false }, mask[0..]);
 }
 
 // Keep the mesh module's co-located lower-level tests in this unit target too.

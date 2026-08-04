@@ -309,8 +309,11 @@ pub const BevelSelection = struct {
 };
 
 const MirrorPositionKey = struct { part: u32, x: i32, y: i32, z: i32 };
-const MirrorQuadKey = struct { part: u32, a: u32, b: u32, c: u32, d: u32 };
-const MirrorPartBounds = struct { min: Vec3, max: Vec3 };
+/// Sentinel part id for any-part position lookups — never a real part index.
+const MIRROR_ANY_PART: u32 = std.math.maxInt(u32);
+// Quad identity is its sorted vertex ids — those are already mesh-global, so twin
+// quads resolve across outliner parts too.
+const MirrorQuadKey = struct { a: u32, b: u32, c: u32, d: u32 };
 
 pub const CutOrigin = struct {
     edge: [2]u32,
@@ -1294,29 +1297,19 @@ pub const Mesh = struct {
         return mesh.symmetrizeForPart(axis, center, keep_positive, null);
     }
 
-    /// Composite-model symmetrize. Each requested outliner part is repaired around
-    /// its own bounds center, matching live mirror editing. Parts absent from the
-    /// mask are strict pass-through geometry: they are neither cut nor reflected.
-    pub fn symmetrizeParts(mesh: *Mesh, axis: u8, keep_positive: bool, target_parts: []const bool) !bool {
+    /// Composite-model symmetrize. Every requested outliner part is repaired at the
+    /// SAME injected plane (the caller's symmetry authority — mesh_edit's model-origin
+    /// plane in the editor). The plane is deliberately not derived from any bounds:
+    /// a bounds midpoint moves with every one-sided edit, which made "mirror" cut at
+    /// a plane the user never chose (req_3795). Parts absent from the mask are strict
+    /// pass-through geometry: they are neither cut nor reflected.
+    pub fn symmetrizeParts(mesh: *Mesh, axis: u8, center: f32, keep_positive: bool, target_parts: []const bool) !bool {
         if (axis > 2) return false;
         var changed = false;
         for (target_parts, 0..) |target, part_index| {
             if (!target) continue;
             const part: u32 = @intCast(part_index);
-            var lo = std.math.floatMax(f32);
-            var hi = -std.math.floatMax(f32);
-            var any = false;
-            for (mesh.faces.items) |*face| {
-                if (!face.alive or face.part != part) continue;
-                for (face.vertices.items) |vertex_id| {
-                    const coordinate = mesh.vertices.items[vertex_id].position[axis];
-                    lo = @min(lo, coordinate);
-                    hi = @max(hi, coordinate);
-                    any = true;
-                }
-            }
-            if (!any) continue;
-            changed = (try mesh.symmetrizeForPart(axis, (lo + hi) * 0.5, keep_positive, part)) or changed;
+            changed = (try mesh.symmetrizeForPart(axis, center, keep_positive, part)) or changed;
         }
         return changed;
     }
@@ -1340,7 +1333,7 @@ pub const Mesh = struct {
         return reflected;
     }
 
-    fn sortedQuadKey(part: u32, vertices: [4]u32) MirrorQuadKey {
+    fn sortedQuadKey(vertices: [4]u32) MirrorQuadKey {
         var sorted = vertices;
         var index: usize = 1;
         while (index < sorted.len) : (index += 1) {
@@ -1351,7 +1344,7 @@ pub const Mesh = struct {
             }
             sorted[cursor] = value;
         }
-        return .{ .part = part, .a = sorted[0], .b = sorted[1], .c = sorted[2], .d = sorted[3] };
+        return .{ .a = sorted[0], .b = sorted[1], .c = sorted[2], .d = sorted[3] };
     }
 
     fn sameUndirectedEdge(a: [2]u32, b: [2]u32) bool {
@@ -1362,30 +1355,15 @@ pub const Mesh = struct {
     /// table. The physical diagonal is topology too: if already-authored mirror quads
     /// retain opposite imported diagonals, identical mirrored positions fold in
     /// opposite directions as soon as the quads become non-planar. Resolve every
-    /// reflected quad pair inside the same outliner part and copy one canonical
-    /// physical edge across each enabled mirror subset. Position tolerance is used
-    /// only to identify the existing mirror relation; the stored result is stable ids.
-    pub fn synchronizeMirrorDiagonals(mesh: *Mesh, mirror_mask_raw: u8) !u32 {
+    /// reflected quad pair across the INJECTED plane (the caller's one symmetry
+    /// authority — never a bounds midpoint) and copy one canonical physical edge
+    /// across each enabled mirror subset. Reflected vertices resolve same-part first,
+    /// any part otherwise, so a mirror-duplicated part synchronizes with its twin
+    /// part. Position tolerance is used only to identify the existing mirror
+    /// relation; the stored result is stable ids.
+    pub fn synchronizeMirrorDiagonals(mesh: *Mesh, mirror_mask_raw: u8, center: Vec3) !u32 {
         const mirror_mask = mirror_mask_raw & 7;
         if (mirror_mask == 0) return 0;
-
-        var bounds_by_part = std.AutoHashMapUnmanaged(u32, MirrorPartBounds).empty;
-        defer bounds_by_part.deinit(mesh.allocator);
-        for (mesh.faces.items) |*face| {
-            if (!face.alive) continue;
-            for (face.vertices.items) |vertex_id| {
-                const position = mesh.vertices.items[vertex_id].position;
-                const entry = try bounds_by_part.getOrPut(mesh.allocator, face.part);
-                if (!entry.found_existing) {
-                    entry.value_ptr.* = .{ .min = position, .max = position };
-                } else {
-                    inline for (0..3) |axis| {
-                        entry.value_ptr.min[axis] = @min(entry.value_ptr.min[axis], position[axis]);
-                        entry.value_ptr.max[axis] = @max(entry.value_ptr.max[axis], position[axis]);
-                    }
-                }
-            }
-        }
 
         var vertices_by_position = std.AutoHashMapUnmanaged(MirrorPositionKey, u32).empty;
         defer vertices_by_position.deinit(mesh.allocator);
@@ -1394,32 +1372,30 @@ pub const Mesh = struct {
         for (mesh.faces.items) |*face| {
             if (!face.alive) continue;
             for (face.vertices.items) |vertex_id| {
-                try vertices_by_position.put(
-                    mesh.allocator,
-                    mirrorPositionKey(face.part, mesh.vertices.items[vertex_id].position),
-                    vertex_id,
-                );
+                const position = mesh.vertices.items[vertex_id].position;
+                try vertices_by_position.put(mesh.allocator, mirrorPositionKey(face.part, position), vertex_id);
+                try vertices_by_position.put(mesh.allocator, mirrorPositionKey(MIRROR_ANY_PART, position), vertex_id);
             }
             if (face.vertices.items.len != 4) continue;
-            try quads_by_vertices.put(mesh.allocator, sortedQuadKey(face.part, .{
+            try quads_by_vertices.put(mesh.allocator, sortedQuadKey(.{
                 face.vertices.items[0],
                 face.vertices.items[1],
                 face.vertices.items[2],
                 face.vertices.items[3],
             }), face.id);
         }
+        const resolve = struct {
+            fn at(map: *const std.AutoHashMapUnmanaged(MirrorPositionKey, u32), part: u32, position: Vec3) ?u32 {
+                if (map.get(mirrorPositionKey(part, position))) |vertex| return vertex;
+                return map.get(mirrorPositionKey(MIRROR_ANY_PART, position));
+            }
+        }.at;
 
         var changed: u32 = 0;
         var source_id: u32 = 0;
         while (source_id < mesh.faces.items.len) : (source_id += 1) {
             const source = &mesh.faces.items[source_id];
             if (!source.alive or source.vertices.items.len != 4) continue;
-            const bounds = bounds_by_part.get(source.part) orelse continue;
-            const center = Vec3{
-                (bounds.min[0] + bounds.max[0]) * 0.5,
-                (bounds.min[1] + bounds.max[1]) * 0.5,
-                (bounds.min[2] + bounds.max[2]) * 0.5,
-            };
             var subset: u8 = 1;
             while (subset <= 7) : (subset += 1) {
                 if ((subset & mirror_mask) != subset) continue;
@@ -1428,24 +1404,18 @@ pub const Mesh = struct {
                 while (corner < reflected_vertices.len) : (corner += 1) {
                     const source_vertex = source.vertices.items[corner];
                     const reflected = reflectedPoint(mesh.vertices.items[source_vertex].position, subset, center);
-                    reflected_vertices[corner] = vertices_by_position.get(mirrorPositionKey(source.part, reflected)) orelse break;
+                    reflected_vertices[corner] = resolve(&vertices_by_position, source.part, reflected) orelse break;
                 }
                 if (corner != reflected_vertices.len) continue;
-                const twin_id = quads_by_vertices.get(sortedQuadKey(source.part, reflected_vertices)) orelse continue;
+                const twin_id = quads_by_vertices.get(sortedQuadKey(reflected_vertices)) orelse continue;
                 // A pair is canonicalized once from the lower stable face id. A quad
                 // reflected onto itself cannot own a mirror-invariant single diagonal;
                 // changing it here would only oscillate between its two choices.
                 if (twin_id <= source_id or twin_id >= mesh.faces.items.len) continue;
                 const diagonal = source.diagonal orelse chosenQuadDiagonal(mesh, source);
                 const reflected_diagonal = [2]u32{
-                    vertices_by_position.get(mirrorPositionKey(
-                        source.part,
-                        reflectedPoint(mesh.vertices.items[diagonal[0]].position, subset, center),
-                    )) orelse continue,
-                    vertices_by_position.get(mirrorPositionKey(
-                        source.part,
-                        reflectedPoint(mesh.vertices.items[diagonal[1]].position, subset, center),
-                    )) orelse continue,
+                    resolve(&vertices_by_position, source.part, reflectedPoint(mesh.vertices.items[diagonal[0]].position, subset, center)) orelse continue,
+                    resolve(&vertices_by_position, source.part, reflectedPoint(mesh.vertices.items[diagonal[1]].position, subset, center)) orelse continue,
                 };
                 const twin = &mesh.faces.items[twin_id];
                 if (quadDiagonalKind(twin, reflected_diagonal) == null) continue;
@@ -3248,6 +3218,95 @@ pub fn inferQuadFaceGroups(
     return groups;
 }
 
+/// Extend a weld's per-triangle deletion mask to whole authored faces that the
+/// final vertex positions can no longer reconstruct. This is deliberately
+/// evaluated through `Mesh.fromSoup`, the same boundary authority used by loop
+/// cut, so Weld cannot accept a face that the next indexed edit rejects.
+///
+/// `touched` limits the repair to authored groups changed by this weld. A stale
+/// malformed group elsewhere in the document must not be silently deleted as a
+/// side effect of welding an unrelated surface.
+pub fn maskMalformedWeldFaceGroups(
+    allocator: std.mem.Allocator,
+    interleaved: []const f32,
+    final_positions: []const f32,
+    tri_count: u32,
+    groups: []const u32,
+    parts: ?[]const u32,
+    touched: []const bool,
+    mask: []bool,
+) !u32 {
+    const triangle_count: usize = @intCast(tri_count);
+    if (interleaved.len < triangle_count * 24 or
+        final_positions.len < triangle_count * 9 or
+        groups.len < triangle_count or
+        touched.len < triangle_count or
+        mask.len < triangle_count) return error.InvalidSoup;
+    if (parts) |rows| if (rows.len < triangle_count) return error.InvalidParts;
+
+    var candidates = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer candidates.deinit(allocator);
+    for (0..triangle_count) |triangle| {
+        const group = groups[triangle];
+        if (touched[triangle] and group != NO_GROUP) try candidates.put(allocator, group, {});
+    }
+
+    var newly_masked: u32 = 0;
+    var candidate_it = candidates.keyIterator();
+    while (candidate_it.next()) |group_ptr| {
+        const group = group_ptr.*;
+        var survivor_count: usize = 0;
+        for (0..triangle_count) |triangle| {
+            if (groups[triangle] == group and !mask[triangle]) survivor_count += 1;
+        }
+        // A lone surviving triangle is already a valid authored face. This is
+        // the normal adjacent-corner collapse of a quad: one degenerate source
+        // triangle leaves and the other remains.
+        if (survivor_count <= 1) continue;
+
+        const probe_soup = try allocator.alloc(f32, survivor_count * 24);
+        defer allocator.free(probe_soup);
+        const probe_groups = try allocator.alloc(u32, survivor_count);
+        defer allocator.free(probe_groups);
+        const probe_parts = if (parts != null) try allocator.alloc(u32, survivor_count) else null;
+        defer if (probe_parts) |rows| allocator.free(rows);
+
+        var output_triangle: usize = 0;
+        for (0..triangle_count) |triangle| {
+            if (groups[triangle] != group or mask[triangle]) continue;
+            const source_base = triangle * 24;
+            const output_base = output_triangle * 24;
+            @memcpy(probe_soup[output_base .. output_base + 24], interleaved[source_base .. source_base + 24]);
+            for (0..3) |corner| {
+                const position_base = triangle * 9 + corner * 3;
+                const corner_base = output_base + corner * 8;
+                @memcpy(probe_soup[corner_base .. corner_base + 3], final_positions[position_base .. position_base + 3]);
+            }
+            probe_groups[output_triangle] = group;
+            if (probe_parts) |rows| rows[output_triangle] = parts.?[triangle];
+            output_triangle += 1;
+        }
+
+        var probe = Mesh.fromSoup(
+            allocator,
+            probe_soup,
+            @intCast(survivor_count),
+            probe_groups,
+            probe_parts,
+        ) catch |err| {
+            if (err != error.MalformedFaceBoundary) return err;
+            for (0..triangle_count) |triangle| {
+                if (groups[triangle] != group or mask[triangle]) continue;
+                mask[triangle] = true;
+                newly_masked += 1;
+            }
+            continue;
+        };
+        probe.deinit();
+    }
+    return newly_masked;
+}
+
 fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
     const a = mesh.render_triangles.items[first];
     const b = mesh.render_triangles.items[second];
@@ -3910,7 +3969,7 @@ test "part symmetrize cannot cut or reflect an unfocused outliner part" {
         untouched_positions[corner] = mesh.vertices.items[vertex_id].position;
     }
 
-    try std.testing.expect(try mesh.symmetrizeParts(0, true, &.{ true, false }));
+    try std.testing.expect(try mesh.symmetrizeParts(0, 0, true, &.{ true, false }));
     try std.testing.expect(mesh.faces.items[1].alive);
     try std.testing.expectEqualSlices(u32, untouched_face.vertices.items, mesh.faces.items[1].vertices.items);
     try std.testing.expectEqual(untouched_face.diagonal, mesh.faces.items[1].diagonal);
@@ -4008,8 +4067,8 @@ test "live mirror synchronizes opposite imported quad diagonals by stable ids" {
     const before_swapped = samePoint(before_reflected[0], before_left_positions[1]) and samePoint(before_reflected[1], before_left_positions[0]);
     try std.testing.expect(!before_direct and !before_swapped);
 
-    try std.testing.expectEqual(@as(u32, 1), try mesh.synchronizeMirrorDiagonals(1));
-    try std.testing.expectEqual(@as(u32, 0), try mesh.synchronizeMirrorDiagonals(1));
+    try std.testing.expectEqual(@as(u32, 1), try mesh.synchronizeMirrorDiagonals(1, .{ 0, 0, 0 }));
+    try std.testing.expectEqual(@as(u32, 0), try mesh.synchronizeMirrorDiagonals(1, .{ 0, 0, 0 }));
     const after_left = mesh.faces.items[1].diagonal.?;
     const after_left_positions = [2]Vec3{
         mesh.vertices.items[after_left[0]].position,

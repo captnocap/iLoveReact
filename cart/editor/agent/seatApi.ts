@@ -1251,9 +1251,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const undo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_undo?.())); adapter.adoptTopology?.(result); return result; };
   const redo = (): TopologyReceipt | null => { const result = readTopology(automation(() => host.__mesh_redo?.())); adapter.adoptTopology?.(result); return result; };
-  /** Mirror the mesh exactly across an axis plane (0 = X, 1 = Y, 2 = Z), keeping the
-   *  +side or the −side. One host op, journaled — the seat never hand-computes a
-   *  reflection, which is what made mirrored features drift when it could not. */
+  /** Mirror the mesh exactly across the model-origin axis plane (0 = X, 1 = Y, 2 = Z),
+   *  keeping the +side or the −side. The plane is the fixed workspace origin — never a
+   *  bounds midpoint, which drifted with every one-sided edit (req_3795). One host op,
+   *  journaled — the seat never hand-computes a reflection. */
   const symmetrize = (axis: number, keepPositive: boolean): TopologyReceipt | null => {
     const result = readTopology(automation(() => host.__mesh_symmetrize?.(axis, keepPositive ? 1 : 0)));
     adapter.adoptTopology?.(result);

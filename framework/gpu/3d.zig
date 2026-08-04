@@ -829,7 +829,7 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
         {
             clearIndexedEditMesh();
         } else if (mesh_edit.mirrorMask() != 0 and model_source.count() == g_edit_count) {
-            mirror_triangulation_changed = (mesh.synchronizeMirrorDiagonals(mesh_edit.mirrorMask()) catch sync_failed: {
+            mirror_triangulation_changed = (mesh.synchronizeMirrorDiagonals(mesh_edit.mirrorMask(), mesh_edit.MIRROR_PLANE_CENTER) catch sync_failed: {
                 log.print("[mesh] live mirror could not synchronize indexed quad diagonals\n", .{});
                 clearIndexedEditMesh();
                 break :sync_failed 0;
@@ -2407,20 +2407,25 @@ pub fn meshTopoConnectVertices() bool {
 
 // ── Symmetrize + symmetry check (the studio's req_1190/1191/1192, host-native — req_2831) ──
 // The trust layer the mirror planes shipped without: a live "is it symmetric?" count and
-// the keep+/− repair. Both use the same per-outliner-part identity domains and bounds
-// centers as live mirrored transforms. Scope is authoritative: focused parts are repaired,
-// and every other part passes through untouched.
+// the keep+/− repair. Both use the same identity domains and the same fixed plane as live
+// mirrored transforms: mesh_edit.MIRROR_PLANE_CENTER, the model origin. Never a bounds
+// midpoint — a derived plane moved with every one-sided edit and cut where the user never
+// asked (req_3795). Scope is authoritative: focused parts are repaired, and every other
+// part passes through untouched.
 
-/// Returns {display center, unmatched, total} for logical vertices in the current
-/// outliner scope. Pairing is part-local, exactly like live mirrored transforms.
+/// Returns {plane center, unmatched, total} for logical vertices in the current
+/// outliner scope. Pairing prefers a vertex's own part and falls back to any part,
+/// exactly like live mirrored transforms.
 pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
     if (axis > 2 or !model_paint.hasTarget()) return null;
     return mesh_edit.symmetryReportPub(axis);
 }
 
 /// Port of Studio symmetrize (req_1190): repair the active outliner part(s), not the
-/// composed model. Each part cuts at its own live-mirror center, drops the far half,
-/// and emits reflected reverse-wound twins. Selection clears, as in the original UI.
+/// composed model. Each focused part cuts at the shared model-origin plane, drops the
+/// far half, and emits reflected reverse-wound twins — the same plane Mirror Part
+/// duplicates across, so "center, then mirror" is the whole workflow (req_1538).
+/// Selection clears, as in the original UI.
 pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (axis > 2 or !model_paint.hasTarget()) return false;
     const original_mode = mesh_edit.mode();
@@ -2449,10 +2454,9 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
             const part_index: usize = @intCast(part);
             if (part_index < target_parts.len) target_parts[part_index] = true;
         }
-        if (!(indexed.symmetrizeParts(axis, keep_positive, target_parts) catch return false)) return false;
+        if (!(indexed.symmetrizeParts(axis, mesh_edit.MIRROR_PLANE_CENTER[axis], keep_positive, target_parts) catch return false)) return false;
     } else {
-        const frame = mesh_edit.mirrorFramePub() orelse return false;
-        if (!(indexed.symmetrize(axis, frame.center[axis], keep_positive) catch return false)) return false;
+        if (!(indexed.symmetrize(axis, mesh_edit.MIRROR_PLANE_CENTER[axis], keep_positive) catch return false)) return false;
     }
     var lowered = indexed.lower() catch return false;
     defer lowered.deinit();
@@ -3225,9 +3229,9 @@ pub fn meshDeleteSelection() bool {
 
 /// WELD (req_3382) — the Blender Merge-at-Center verb: every vertex the active
 /// selection affects (selected verts in vertex mode, edge endpoints in edge
-/// mode) collapses to the selection centroid. Faces the collapse degenerates
-/// (two corners now coincident) leave the mesh in the SAME masked rebuild, so
-/// the whole weld is one journal step ("weld") and one undo.
+/// mode) collapses to the selection centroid. Triangles the collapse degenerates
+/// and authored faces whose whole boundary cancels leave in the SAME masked
+/// rebuild, so the whole weld is one journal step ("weld") and one undo.
 pub fn meshTopoWeldSelection() bool {
     if (!model_paint.hasTarget()) return false;
     const verts = g_edit_verts orelse return false;
@@ -3249,24 +3253,32 @@ pub fn meshTopoWeldSelection() bool {
     defer std.heap.c_allocator.free(corner_positions);
     const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
     defer std.heap.c_allocator.free(mask);
+    const touched = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(touched);
     var moved_any = false;
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         const soup_base = @as(usize, f) * 24;
         const cp_base = @as(usize, f) * 9;
-        if (soup_base + 24 > verts.len) break;
+        if (soup_base + 24 > verts.len) return false;
+        var touched_face = false;
         var k: usize = 0;
         while (k < 3) : (k += 1) {
             const lv = mesh_edit.cornerVertPub(f, @intCast(k));
             const collapse = lv < vert_count and affected[lv];
-            if (collapse) moved_any = true;
+            if (collapse) {
+                moved_any = true;
+                touched_face = true;
+            }
             corner_positions[cp_base + k * 3 + 0] = if (collapse) center[0] else verts[soup_base + k * 8 + 0];
             corner_positions[cp_base + k * 3 + 1] = if (collapse) center[1] else verts[soup_base + k * 8 + 1];
             corner_positions[cp_base + k * 3 + 2] = if (collapse) center[2] else verts[soup_base + k * 8 + 2];
         }
+        touched[f] = touched_face;
         mask[f] = weldTriangleDegenerate(corner_positions[cp_base .. cp_base + 9]);
     }
     if (!moved_any) return false;
+    if (!maskMalformedWeldFaceGroups(verts, tri_count, corner_positions, touched, mask)) return false;
     return rebuildMaskedFaces(verts, tri_count, mask, "weld", corner_positions);
 }
 
@@ -3333,16 +3345,20 @@ pub fn meshRetopoWeldPairs(request: MeshRetopoWeldPairsRequest) bool {
     defer std.heap.c_allocator.free(corner_positions);
     const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
     defer std.heap.c_allocator.free(mask);
+    const touched = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(touched);
     var face: u32 = 0;
     while (face < tri_count) : (face += 1) {
         const soup_base = @as(usize, face) * 24;
         const corner_base = @as(usize, face) * 9;
         if (soup_base + 24 > verts.len) return false;
+        var touched_face = false;
         var corner: usize = 0;
         while (corner < 3) : (corner += 1) {
             const logical = mesh_edit.cornerVertPub(face, @intCast(corner));
             const dst = corner_base + corner * 3;
             if (logical < vert_count and affected[logical]) {
+                touched_face = true;
                 const src = @as(usize, logical) * 3;
                 corner_positions[dst] = targets[src];
                 corner_positions[dst + 1] = targets[src + 1];
@@ -3353,8 +3369,10 @@ pub fn meshRetopoWeldPairs(request: MeshRetopoWeldPairsRequest) bool {
                 corner_positions[dst + 2] = verts[soup_base + corner * 8 + 2];
             }
         }
+        touched[face] = touched_face;
         mask[face] = weldTriangleDegenerate(corner_positions[corner_base .. corner_base + 9]);
     }
+    if (!maskMalformedWeldFaceGroups(verts, tri_count, corner_positions, touched, mask)) return false;
     return rebuildMaskedFaces(verts, tri_count, mask, "weld vertex pairs", corner_positions);
 }
 
@@ -3383,6 +3401,41 @@ fn weldTriangleDegenerate(corners: []const f32) bool {
         }
     }
     return false;
+}
+
+/// Weld and indexed-edit operations share one authored-boundary authority. A
+/// per-triangle mask alone misses the opposite-corner quad collapse: both
+/// surviving triangles have three distinct points, but together their boundary
+/// cancels and loop cut cannot import the result.
+fn maskMalformedWeldFaceGroups(
+    verts: []const f32,
+    tri_count: u32,
+    corner_positions: []const f32,
+    touched: []const bool,
+    mask: []bool,
+) bool {
+    if (model_source.faceGroups() == null) return true;
+    // Indexed edits can change the displayed triangle count without rewriting
+    // the source-owned rows immediately. Use the same displayed-face snapshot
+    // as every other topology transaction; reading faceGroups() directly here
+    // rejects a valid weld after a cut because that slice still has the saved
+    // triangle count.
+    const groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(groups);
+    if (groups.len < tri_count) return false;
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    _ = indexed_edit_mesh.maskMalformedWeldFaceGroups(
+        std.heap.c_allocator,
+        verts,
+        corner_positions,
+        tri_count,
+        groups,
+        parts,
+        touched,
+        mask,
+    ) catch return false;
+    return true;
 }
 
 /// Delete every face whose authored group id is in [lo, hi) — the outliner removing a
@@ -7841,8 +7894,8 @@ fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: 
 }
 
 /// Live mirror planes (req_2758): each enabled symmetry plane draws as an axis-colored
-/// square outline through the current outliner scope's local center — the standing
-/// signal that edits on one side land on the other. Edit dressing: paint mode hides it.
+/// square outline through the shared model-origin plane — the standing signal that
+/// edits on one side land on the other. Edit dressing: paint mode hides it.
 fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     const mask = mesh_edit.mirrorMask();
     if (mask == 0) return;
@@ -7852,8 +7905,8 @@ fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     var axis: u3 = 0;
     while (axis < 3) : (axis += 1) {
         if (mask & (@as(u8, 1) << axis) == 0) continue;
-        // The plane's rect spans the two OTHER axes; the plane axis stays at the
-        // scoped part center, not workspace zero.
+        // The plane's rect spans the two OTHER axes at MIRROR_PLANE_CENTER, sized to
+        // reach the scope's geometry.
         const b: u3 = if (axis == 0) 1 else 0;
         const cx: u3 = if (axis == 2) 1 else 2;
         var corners: [4][3]f32 = .{ center, center, center, center };
