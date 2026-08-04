@@ -96,6 +96,7 @@ import {
   writeUvTextureWorkspace,
 } from '../data/uvTextureWorkspaceStore';
 import { rasterizeUvWireframe } from '../model/uvWireframe';
+import { claimModelDocSession, modelDocSessionId, readModelDocSession } from '../model/docSession';
 import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
 import { meshEditXrayActive, triangleWireframeVisible } from '../model/viewportPresentation';
 import {
@@ -568,9 +569,10 @@ const orbitSetLocked = (on: boolean) => host.__model_orbit_lock?.(on ? 1 : 0);
 //               selection, journal, atlas, camera all survive); mismatch ⇒ normal load.
 //   TOOL twig — how you were holding the tool (wire/lock/brush/palette/lights…),
 //               re-seeded into fresh React state on mount.
-const DOC_TWIG_KEY = 'editor:meshdoc:v1';
+// The DOC twig lives in ../model/docSession: the shell must release the claim
+// when a document closes, so its key and lifecycle belong to one owner, not to
+// a string literal spelled the same way in two files (req_3773).
 const TOOL_TWIG_KEY = 'editor:meshtool:v1';
-type DocTwig = { docId: string; key: string };
 // A view bookmark (req_3067/req_3074): a named orbit pose, exactly what
 // __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
 export type CamBookmark = { name: string; pose: number[] };
@@ -924,7 +926,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
   // This document's stable identity — the hot-resume stamp AND the scope for per-doc
   // working state (backdrops). Derived from props only, so it's valid from first render.
-  const hotDocId = paintTarget ? `${paintTarget.kind}:${paintTarget.id}` : initialPath ?? null;
+  const hotDocId = paintTarget ? modelDocSessionId(paintTarget.kind, paintTarget.id) : initialPath ?? null;
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
@@ -2457,7 +2459,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // resumes the live session only when doc AND key both still match the host.
   // (hotDocId itself is derived once with the state seeds at the top of the component.)
   useEffect(() => {
-    if (model && hotDocId) setHotState<DocTwig>(DOC_TWIG_KEY, { docId: hotDocId, key: model.key });
+    if (model && hotDocId) claimModelDocSession(hotDocId, model.key);
   }, [model?.key, hotDocId]);
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
@@ -3479,7 +3481,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // load, exactly as before.
     const resumeHostSession = (): boolean => {
       if (!hotDocId) return false;
-      const twig = getHotState<DocTwig | null>(DOC_TWIG_KEY, null);
+      const twig = readModelDocSession();
       if (!twig || twig.docId !== hotDocId) return false;
       const session = readModelSession();
       if (!session || session.key !== twig.key) return false;
@@ -3979,8 +3981,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // holds mid-edit, exactly what the next remount checks before adopting.
         else if (name === 'session') {
           const s = readModelSession();
-          const t = getHotState<DocTwig | null>(DOC_TWIG_KEY, null);
-          console.error(`[meshops] session=${JSON.stringify(s)} twig=${JSON.stringify(t)} match=${!!(s && t && s.key === t.key)}`);
+          const t = readModelDocSession();
+          console.error(`[meshops] session=${JSON.stringify(s)} twig=${JSON.stringify(t)} match=${!!(s && t && s.key === t.key)} doc=${hotDocId ?? 'none'}`);
         }
         else if (name === 'atlas') dumpAtlasPng(a.join(','));
         else if (name !== 'wait') console.error(`[meshops] unknown op: ${name}`);

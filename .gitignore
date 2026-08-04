@@ -34,8 +34,15 @@ tools/zig/cache/
 .pg-bundle/
 
 
-game models
-cart/editor/data/
+# "game models" once ignored the WHOLE cart/editor/data/ directory — which is
+# the editor's SOURCE tree (73 tracked .ts files), not asset data. Tracked files
+# survived, but every NEW source file added there would have gone invisible to
+# git. The three asset dirs it was aiming at (models/, textures/, stickers/) are
+# named exactly, further down under the req_3772 ruling.
+#
+# `game models` was also a stray non-comment line: git read it as a pattern for
+# a file literally named "game models".
+#
 # The user's personal image-generation console (embedded API key) — never git's.
 # The agent-skin skill drives it headlessly; it is not repo source.
 cart/editor/img.cjs

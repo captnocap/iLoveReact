@@ -7,6 +7,7 @@ import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveMo
 import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
 import { playerStarterSkeleton } from '../model/playerStarter';
+import { mintedModelIds } from '../model/docSession';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
 import type { BuildKind } from '../world/buildCatalog';
@@ -231,9 +232,10 @@ export function playerModelPackage(id: string): ModelPackage {
 }
 
 // The next pristine player-model doc id — same collision rules as
-// nextPrimitiveDocId (open docs AND saved packages AND synthesized names).
+// nextPrimitiveDocId (open docs AND saved packages AND synthesized names AND
+// every identity this session already minted).
 export function nextPlayerModelDocId(docs: WorkspaceDocument[]): string {
-  return allocatePlayerModelId(docs, MODEL_PACKAGES, (id) => isMaterialized('character', id));
+  return allocatePlayerModelId(docs, MODEL_PACKAGES, (id) => isMaterialized('character', id), mintedModelIds());
 }
 
 /** A fresh semantic build starter. Its mesh lives in AppFrame's modelParts until
@@ -269,7 +271,7 @@ export function buildStarterModelPackage(id: string): ModelPackage {
 }
 
 export function nextBuildStarterDocId(starterId: BuildPieceStarterId, docs: WorkspaceDocument[]): string {
-  return allocateBuildStarterModelId(starterId, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id));
+  return allocateBuildStarterModelId(starterId, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id), mintedModelIds());
 }
 
 /** Headless-harness lookup (req_3406): RJIT_MODELDOC=open:<name> boots a SAVED
@@ -314,9 +316,11 @@ export function effectiveModelPackage(
 
 // The next pristine `primitive:<kind>:<n>` document id. The package store is
 // queried independently from the browser catalog: a presentation filter may
-// never make a durable identity reusable (req_2873).
+// never make a durable identity reusable (req_2873), and the session ledger
+// covers the one case none of the others can see — a document closed before it
+// ever reached disk (req_3773).
 export function nextPrimitiveDocId(kind: PrimitiveKind, docs: WorkspaceDocument[]): string {
-  return allocatePrimitiveModelId(kind, docs, MODEL_PACKAGES, (id) => isMaterialized('prop', id));
+  return allocatePrimitiveModelId(kind, docs, MODEL_PACKAGES, (id) => isMaterialized('prop', id), mintedModelIds());
 }
 
 // Register a first-saved package into the live catalog roster so THIS session's

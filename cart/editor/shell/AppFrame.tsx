@@ -187,8 +187,8 @@ import { subscribe } from '@reactjit/runtime/ffi';
 // Live modifier state (no re-render) — the outliner's shift-click multi-select
 // (req_2659) reads shift at press time instead of threading it through every row.
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
-import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
+import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
 import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import {
@@ -3793,11 +3793,15 @@ export default function AppFrame() {
   // when a model is already open. This is what makes New ≠ Add: File → New Mesh never appends to
   // whatever's in view; it spawns its own document (req_2542).
   const createNewMeshDocument = (kind: PrimitiveKind, params: PrimitiveParams) => {
+    // Collision-free id: skips open docs AND saved library packages — once
+    // primitive:cube:1 is materialized on disk it is a model forever, and the
+    // old open-doc count would have reused its id after a restart (req_2620 S).
+    // Minted OUTSIDE the updater and retired immediately: a document closed
+    // before its first save leaves no tab, no package, and no file, so this
+    // ledger is the only thing that stops the id coming back (req_3773).
+    const mid = nextPrimitiveDocId(kind, stateRef.current.workspaceDocuments);
+    rememberMintedModelId(mid);
     setState((prev) => {
-      // Collision-free id: skips open docs AND saved library packages — once
-      // primitive:cube:1 is materialized on disk it is a model forever, and the
-      // old open-doc count would have reused its id after a restart (req_2620 S).
-      const mid = nextPrimitiveDocId(kind, prev.workspaceDocuments);
       const doc = modelDocument(primitiveModelPackage(mid));
       const base = makePart(kind, [], prev.seq, params);
       const range = composeModelParts([base]).ranges[0];
@@ -3829,13 +3833,16 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, openMenu: null, status: `unknown build-piece starter: ${starterId}` }));
       return;
     }
+    const seeded = buildPieceStarterParts(starterId);
+    if (seeded.length === 0) {
+      setState((prev) => ({ ...prev, openMenu: null, status: `${starter.name} has no catalog geometry` }));
+      return;
+    }
+    // Minted + retired before the document exists — see createNewMeshDocument.
+    const mid = nextBuildStarterDocId(starterId, stateRef.current.workspaceDocuments);
+    rememberMintedModelId(mid);
     setState((prev) => {
-      const mid = nextBuildStarterDocId(starterId, prev.workspaceDocuments);
       const doc = modelDocument(buildStarterModelPackage(mid));
-      const seeded = buildPieceStarterParts(starterId);
-      if (seeded.length === 0) {
-        return { ...prev, openMenu: null, status: `${starter.name} has no catalog geometry` };
-      }
       const rangeById = new Map(composeModelParts(seeded).ranges.map((range) => [range.id, range]));
       const parts = seeded.map((part) => {
         const range = rangeById.get(part.id);
@@ -3862,8 +3869,10 @@ export default function AppFrame() {
   // reads as the skeleton), the body formation riding the package as rig truth.
   // No size dialog: the starter's stand-pose table IS its dimensions.
   const createPlayerModelDocument = () => {
+    // Minted + retired before the document exists — see createNewMeshDocument.
+    const mid = nextPlayerModelDocId(stateRef.current.workspaceDocuments);
+    rememberMintedModelId(mid);
     setState((prev) => {
-      const mid = nextPlayerModelDocId(prev.workspaceDocuments);
       const doc = modelDocument(playerModelPackage(mid));
       const seeded = playerStarterParts();
       const rangeById = new Map(composeModelParts(seeded).ranges.map((r) => [r.id, r]));
@@ -6123,7 +6132,7 @@ export default function AppFrame() {
    * A never-materialized model has no durable identity, so its pending override
    * and session catalog row leave with the working copy too. */
   const discardModelWorkingCopy = (modelId: string) => {
-    removeHotState('editor:meshdoc:v1');
+    releaseModelDocSession();
     const current = stateRef.current;
     const pkg = effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes);
     const materialized = Boolean(pkg && isMaterialized(pkg.kind, pkg.id));
@@ -6263,10 +6272,20 @@ export default function AppFrame() {
       );
       return;
     }
-    if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId === documentId) {
+    // Prompt whenever closing WOULD LOSE WORK. Autosave alone is not that proof:
+    // it is bounded to models that already exist on disk, so a brand-new model —
+    // exactly the one whose edits are least recoverable — was closed silently
+    // with nothing written anywhere (req_3773). The gate is what autosave will
+    // actually cover, not whether the setting is on.
+    if (!bypassUnsavedPrompt && state.activeWorkspaceDocumentId === documentId) {
       const currentDoc = state.workspaceDocuments.find((doc) => doc.id === documentId);
       const currentModelId = currentDoc?.kind === 'model' ? currentDoc.sourceId : null;
-      if (currentModelId && state.modelDirty[currentModelId]) {
+      const currentPkg = currentModelId
+        ? effectiveModelPackage(currentModelId, state.modelOverrides, state.modelDupes)
+        : null;
+      const autosaveCovers = persistenceSettings.autosave
+        && Boolean(currentPkg && isMaterialized(currentPkg.kind, currentPkg.id));
+      if (currentModelId && state.modelDirty[currentModelId] && !autosaveCovers) {
         requestUnsavedDecision(
           currentDoc?.title ?? 'Model',
           () => { if (saveActiveModelNow()) closeWorkspaceDocument(documentId, true); },
@@ -6281,6 +6300,15 @@ export default function AppFrame() {
     // Closing the ACTIVE model doc is a doc-switch too — same bounded autosave
     // (dirty + already-on-disk only), before the viewer unmounts (req_2620 T).
     const autosaved = state.activeWorkspaceDocumentId === documentId ? autosaveActiveModelDoc(state) : null;
+    // Release this document's claim on the host's live mesh. A lease outliving
+    // its document is what let the NEXT document resume a closed model's mesh
+    // and outliner (req_3773/req_3774); a background close leaves the active
+    // document's claim alone because the twig names one document only.
+    const closingDoc = state.workspaceDocuments.find((doc) => doc.id === documentId);
+    const closingPkg = closingDoc?.kind === 'model' && closingDoc.sourceId
+      ? effectiveModelPackage(closingDoc.sourceId, state.modelOverrides, state.modelDupes)
+      : null;
+    if (closingPkg) releaseModelDocSession(modelDocSessionId(closingPkg.kind, closingPkg.id));
     setState((prev) => {
       const remaining = prev.workspaceDocuments.filter((doc) => doc.id !== documentId);
       const nextActive = prev.activeWorkspaceDocumentId === documentId
