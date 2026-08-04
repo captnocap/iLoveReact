@@ -166,10 +166,22 @@ fn sampleDirection(index: u32, count: u32) Vec3 {
 
 /// Count the two facts. Returns `computed = false` with zero counts when the mesh is
 /// over budget — the caller must not present that as "nothing wrong".
-pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, budget: Budget) Facts {
+///
+/// `transparent` (optional, one bool per face): glass faces. A camera SEES THROUGH
+/// glass, so a transparent face never blocks another face's reachability ray —
+/// without this every glazed cabin reported its whole interior unreachable
+/// (req_3763 P3-1: 184 of 187 "unreachable" triangles were visible through the
+/// windows). Transparent faces are still audited as candidates themselves, and
+/// intersection counting ignores the flag entirely — glass through a fender is
+/// still a penetration.
+pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, budget: Budget, transparent: ?[]const bool) Facts {
     if (face_count == 0) return .{ .computed = true, .directions = budget.directions };
     if (budget.directions == 0 or face_count > budget.max_faces) return .{};
     if (verts.len < @as(usize, face_count) * 24) return .{};
+    const glass: ?[]const bool = if (transparent) |rows|
+        (if (rows.len == face_count) rows else null)
+    else
+        null;
 
     const boxes = allocator.alloc(Box, face_count) catch return .{};
     defer allocator.free(boxes);
@@ -243,6 +255,9 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
             for (0..face_count) |other| {
                 const oi: u32 = @intCast(other);
                 if (oi == self_index) continue;
+                if (glass) |rows| {
+                    if (rows[oi]) continue; // rays pass through glass
+                }
                 if (!rayHitsBox(origin, inv, boxes[oi], far)) continue;
                 const oa = corner(verts, oi, 0);
                 const ob = corner(verts, oi, 1);
