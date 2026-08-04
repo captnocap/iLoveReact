@@ -6165,10 +6165,18 @@ fn commitIndexedFaceGrouping(
     return true;
 }
 
-/// Fuse selected faces into one authored face without rewriting the resident render
-/// mesh. Shared seams disappear from edit topology because the selected triangles now
-/// share one group, while their exact winding, UVs, atlas pixels, materials, colours,
-/// part ownership, and Outliner ranges stay byte-stable.
+/// Fuse selected faces into one authored face. When the fused boundary keeps every
+/// source corner, the resident render mesh is untouched: shared seams disappear from
+/// edit topology purely because the selected triangles now share one group, and their
+/// exact winding, UVs, atlas pixels, materials, colours, part ownership, and Outliner
+/// ranges stay byte-stable. When the clean boundary DROPS corners — the inverse of a
+/// loop cut, where seam verts turn collinear or interior (req_3771) — and the loop is
+/// convex, the face is re-tessellated from its clean loop through the same
+/// lower()+install path Loop Cut uses, so those dead verts actually leave the mesh
+/// instead of lingering as cornerless dots. (Concave fusions always stay byte-stable:
+/// a re-fan would flip their render triangles.) The loop keeps its original
+/// per-corner UVs, so paint that lived in one contiguous atlas region (the
+/// cut-then-merge case) stays where it was.
 pub fn meshMergeSelectedFaces() bool {
     if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return false;
     const verts = g_edit_verts orelse return false;
@@ -6201,7 +6209,7 @@ pub fn meshMergeSelectedFaces() bool {
 
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
-    if (!(indexed.mergeSelected(mask) catch return false)) return false;
+    const merged = (indexed.mergeSelected(mask) catch return false) orelse return false;
     var selected_count: usize = 0;
     for (mask) |selected| if (selected) {
         selected_count += 1;
@@ -6216,8 +6224,62 @@ pub fn meshMergeSelectedFaces() bool {
     }
     const before = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return false;
     defer std.heap.c_allocator.free(before);
-    if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces")) return false;
-    const after = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return true;
+
+    if (!merged.retessellated) {
+        // Every source corner survives on the fused boundary (or the loop is
+        // concave, where a re-fan would flip triangles) — the byte-stable
+        // group-only commit keeps geometry, UVs, and atlas pixels untouched.
+        if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "merge faces")) return false;
+        const after = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return true;
+        defer std.heap.c_allocator.free(after);
+        g_follow_action_queue.append(
+            std.heap.c_allocator,
+            @intFromEnum(mesh_journal_log.ActionKind.merge_faces),
+            @intFromEnum(g_mesh_action_source),
+            before,
+            after,
+        ) catch {};
+        return true;
+    }
+
+    // Dissolve commit (req_3771): the fused boundary dropped seam corners, so the
+    // resident rows must be rebuilt from the clean loop — the Loop Cut / Connect
+    // Vertices install path. A group-only commit here would leave the dropped verts
+    // alive in the soup as dots no authored edge runs through.
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    if (lowered.tri_count == 0) return false;
+    const dissolve_colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(dissolve_colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, dissolve_colors)) return false;
+    const part_count = hostPartCount();
+    var snap = journalSnapshotCurrent("merge faces");
+    const installed = lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        lowered.groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        dissolve_colors,
+    );
+    if (!installed) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (parts != null) renormalizePartRanges(lowered.parts, part_count);
+    adoptIndexedEditMesh(&indexed, &lowered);
+    journalCommit(&snap);
+
+    // Follow rows for the agent journal: the merged face's NEW resident triangles
+    // (the pre-merge ids no longer exist after the re-tessellation).
+    var after_faces = std.ArrayListUnmanaged(u32).empty;
+    defer after_faces.deinit(std.heap.c_allocator);
+    for (lowered.face_ids, 0..) |face_id, row| {
+        if (face_id == merged.face_id) after_faces.append(std.heap.c_allocator, @intCast(row)) catch break;
+    }
+    const after = mesh_edit.followPatchJson(std.heap.c_allocator, after_faces.items, 2) orelse return true;
     defer std.heap.c_allocator.free(after);
     g_follow_action_queue.append(
         std.heap.c_allocator,

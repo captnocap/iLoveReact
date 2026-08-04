@@ -132,6 +132,47 @@ The journal action remains append-only ordinal 27
 `__mesh_topo_tris_to_quads` bridge drives Balanced begin/preview/apply only for
 automation; the interactive editor always requires the dry-run confirmation.
 
+## Merge Faces — the dissolve commit (req_3771)
+
+Merge Faces fuses a coplanar face selection into one authored face
+(`meshMergeSelectedFaces` / `__mesh_topo_merge_faces`). Two commit paths,
+chosen by what the fused boundary keeps:
+
+- **Byte-stable (group-only)** — when every corner the recorded resident rows
+  reference survives on the clean boundary (a plain two-triangle → quad fuse),
+  the resident render mesh is untouched: the seam disappears purely because
+  the triangles now share one group; winding, UVs, atlas pixels, colours, part
+  ownership, and Outliner ranges stay byte-identical
+  (`commitIndexedFaceGrouping`).
+- **Dissolve (re-tessellate)** — when the clean boundary DROPS corners (the
+  inverse of a loop cut: seam verts turned collinear, grid centres turned
+  interior) and the loop is CONVEX, the face is rebuilt from its clean loop
+  through the same `lower()` + install path Loop Cut uses. The dead verts
+  actually leave the resident soup instead of lingering as selectable dots no
+  authored edge runs through (the req_3771 screenshot). The loop keeps its
+  original per-corner UVs, so paint over one contiguous atlas region (the
+  cut-then-merge case) stays where it was.
+
+Concave fusions ALWAYS stay byte-stable even with dropped corners: `lower()`'s
+loop tessellation is a fan, and re-fanning a concave perimeter reverses render
+triangles (the bookshelf-side corruption, unit-pinned in
+`framework/testing/unit/mesh_edit.zig`). A vert still referenced by a
+neighbouring face's rows honestly survives until that neighbour merges or
+welds too.
+
+Headless proof (RJIT_MESHOPS): cube → ring loop cut (20 tris / 12 welded
+verts) → pick + merge the top halves (18 tris, verts stay 12 — the ring verts
+still corner the neighbouring cut faces) → merge the right-face halves
+(16 tris, **12 → 11 verts**: the ring vert shared only by the two merged faces
+dissolves). Undo/redo restore the exact pre/post rows under the one
+`merge faces` journal entry.
+
+Repair recipe for a face merged BEFORE this fix (dead verts already baked
+inside one authored face): merge it with any coplanar neighbour — the dissolve
+detection covers every source corner missing from the fused boundary, so the
+old debris drops with it. For an isolated face, loop cut it once and merge the
+halves back.
+
 ## Outliner row ↔ range reconciler — req_3763 (P0-1/P0-2)
 
 The roll call proves the HOST partition; the outliner ROW table (cart state)

@@ -6,7 +6,7 @@ export const editor_mesh_integrity: DocIndex = {
   cart: 'cart/editor/stage/ModelView.tsx',
   purpose: ['persistence', 'host_bridge', 'geometry', 'ui'],
   summary:
-    'req_3484 + req_3507/3511–3513 + req_3763: every topology transaction gets a commit-time part-ledger roll call; Tris to Quads scans the whole model into a reversible live dry run before one confirmed journal transaction; and the outliner ROW table reconciles against host range truth instead of latching on a count mismatch (the police_sedan corruption class) — restore from the host-restored journal note, else rebuild rows from geometry + semantic regions, always loud.',
+    'req_3484 + req_3507/3511–3513 + req_3763 + req_3771: every topology transaction gets a commit-time part-ledger roll call; Tris to Quads scans the whole model into a reversible live dry run before one confirmed journal transaction; the outliner ROW table reconciles against host range truth instead of latching on a count mismatch (the police_sedan corruption class) — restore from the host-restored journal note, else rebuild rows from geometry + semantic regions, always loud; and Merge Faces actually dissolves dropped seam/interior verts on convex fusions instead of leaving them in the soup as cornerless dots.',
   interfaces: [
     {
       name: 'reconcilePartRows / __editor_reconcile_parts',
@@ -37,6 +37,17 @@ export const editor_mesh_integrity: DocIndex = {
         'ActionKind ordinal 26 (model.mesh.integrity-alert) on the existing mesh action ring — append-only bridge contract, pinned by nativeMeshEvents.test.ts. AppFrame’s drain loop special-cases it: calls ModelToolApi.resyncFromHost() (re-adopt session key, adoptHostSelection, resyncPartRanges) and sets a visible ⚠ mesh-integrity status naming what was healed, then boards the editor bus like every native action.',
       dependsOn: ['meshIntegrityRollCall'],
       consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/stage/ModelView.tsx'],
+      status: 'live',
+    },
+    {
+      name: 'meshMergeSelectedFaces / __mesh_topo_merge_faces',
+      purpose: ['geometry', 'host_bridge'],
+      kind: 'host_fn',
+      sourceFile: 'framework/gpu/3d.zig',
+      description:
+        'req_3771 dual commit. Fuses a coplanar face selection into one authored face. When the fused boundary keeps every corner the recorded resident rows reference, the commit is group-only and byte-stable (commitIndexedFaceGrouping — winding/UVs/atlas/parts untouched). When the clean boundary DROPS corners (the inverse of a loop cut: collinear seam verts, interior grid verts) and the loop is CONVEX, indexed_edit_mesh.mergeFaceIds invalidates the source tessellation and the op commits through the Loop Cut lower()+lcInstallLowered path, so the dead verts actually leave the resident soup instead of lingering as selectable dots no authored edge runs through. Concave fusions always stay byte-stable — re-fanning a concave perimeter reverses render triangles (bookshelf corruption, unit-pinned). Verts still referenced by neighbouring faces survive until those merge/weld too. Headless proof: cube → ring cut → merge top halves (20→18 tris) → merge right halves (16 tris, 12→11 welded verts); undo/redo atomic.',
+      dependsOn: ['meshIntegrityRollCall'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/agent/seatApi.ts'],
       status: 'live',
     },
     {

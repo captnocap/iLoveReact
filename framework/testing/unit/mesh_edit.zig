@@ -6,6 +6,121 @@ const testing = std.testing;
 const mesh_edit = @import("mesh_edit");
 const indexed_edit_mesh = @import("indexed_edit_mesh");
 
+test "manual retopology tint preserves the user's exact face mask" {
+    var labels = [_]u16{mesh_edit.RETOPO_BAND_UNASSIGNED} ** 6;
+    const first = [_]bool{ false, true, true, false, true, false };
+    try testing.expectEqual(@as(u32, 3), mesh_edit.assignRetopoManualBand(labels[0..], first[0..], 4));
+    try testing.expectEqualSlices(u16, &.{ mesh_edit.RETOPO_BAND_UNASSIGNED, 4, 4, mesh_edit.RETOPO_BAND_UNASSIGNED, 4, mesh_edit.RETOPO_BAND_UNASSIGNED }, labels[0..]);
+
+    const erase = [_]bool{ false, false, true, false, true, false };
+    try testing.expectEqual(@as(u32, 2), mesh_edit.assignRetopoManualBand(labels[0..], erase[0..], null));
+    try testing.expectEqualSlices(u16, &.{ mesh_edit.RETOPO_BAND_UNASSIGNED, 4, mesh_edit.RETOPO_BAND_UNASSIGNED, mesh_edit.RETOPO_BAND_UNASSIGNED, mesh_edit.RETOPO_BAND_UNASSIGNED, mesh_edit.RETOPO_BAND_UNASSIGNED }, labels[0..]);
+}
+
+test "manual retopology tint follows topology provenance and face compaction" {
+    const labels = [_]u16{ 2, 2, 7, mesh_edit.RETOPO_BAND_UNASSIGNED };
+    const sources = [_]u32{ 0, 0, 1, 2, 2, 3 };
+    var inherited: [sources.len]u16 = undefined;
+    try testing.expect(mesh_edit.inheritRetopoManualBands(labels[0..], sources[0..], inherited[0..]));
+    try testing.expectEqualSlices(u16, &.{ 2, 2, 2, 7, 7, mesh_edit.RETOPO_BAND_UNASSIGNED }, inherited[0..]);
+    try testing.expect(!mesh_edit.inheritRetopoManualBands(labels[0..], &.{ 0, 4 }, inherited[0..2]));
+
+    const removed = [_]bool{ false, true, false, true };
+    var compacted: [2]u16 = undefined;
+    try testing.expect(mesh_edit.compactRetopoManualBands(labels[0..], removed[0..], compacted[0..]));
+    try testing.expectEqualSlices(u16, &.{ 2, 7 }, compacted[0..]);
+
+    try testing.expectEqual(@as(?u16, 2), mesh_edit.uniformRetopoManualBand(labels[0..], &.{ true, true, false, false }));
+    try testing.expectEqual(@as(?u16, null), mesh_edit.uniformRetopoManualBand(labels[0..], &.{ true, false, true, false }));
+    try testing.expectEqual(@as(?u16, null), mesh_edit.uniformRetopoManualBand(labels[0..], &.{ false, false, false, true }));
+
+    try testing.expect(mesh_edit.retopoSourceGhostTracks(4, 4, 4, 4));
+    try testing.expect(!mesh_edit.retopoSourceGhostTracks(4, 5, 4, 4));
+    try testing.expect(!mesh_edit.retopoSourceGhostTracks(4, 4, 4, 5));
+    try testing.expectEqual(@as(u32, 3), mesh_edit.assignedRetopoBandCount(labels[0..]));
+}
+
+test "retopology teaching guide survives an exact package round trip" {
+    const live = [_]u16{ 2, mesh_edit.RETOPO_BAND_UNASSIGNED, 7 };
+    const source = [_]u16{ 2, 2, 7, mesh_edit.RETOPO_BAND_UNASSIGNED };
+    const positions = [_]f32{
+        0, 0, 0, 1, 0, 0, 0, 1, 0,
+        1, 0, 0, 1, 1, 0, 0, 1, 0,
+        0, 1, 0, 1, 1, 0, 0, 2, 0,
+        1, 1, 0, 1, 2, 0, 0, 2, 0,
+    };
+    const bytes = try mesh_edit.encodeRetopoGuide(testing.allocator, .{
+        .live_bands = &live,
+        .source_positions = &positions,
+        .source_bands = &source,
+        .ghost_visible = true,
+        .source_tracks_live = false,
+    });
+    defer testing.allocator.free(bytes);
+    var decoded = try mesh_edit.decodeRetopoGuide(testing.allocator, bytes);
+    defer decoded.deinit(testing.allocator);
+
+    try testing.expectEqualSlices(u16, &live, decoded.live_bands);
+    try testing.expectEqualSlices(u16, &source, decoded.source_bands);
+    try testing.expectEqualSlices(f32, &positions, decoded.source_positions);
+    try testing.expect(decoded.ghost_visible);
+    try testing.expect(!decoded.source_tracks_live);
+}
+
+test "retopology teaching guide rejects stale or corrupt records" {
+    try testing.expectError(error.InvalidRetopoGuide, mesh_edit.encodeRetopoGuide(testing.allocator, .{
+        .live_bands = &.{mesh_edit.RetopoBandTuning.max_bands},
+        .source_positions = &.{ 0, 0, 0, 1, 0, 0, 0, 1, 0 },
+        .source_bands = &.{0},
+        .ghost_visible = false,
+        .source_tracks_live = true,
+    }));
+    try testing.expectError(error.InvalidRetopoGuide, mesh_edit.decodeRetopoGuide(testing.allocator, &.{ 1, 2, 3, 4 }));
+}
+
+test "retopology axis bands cover every face and retain phase-relative buckets" {
+    const positions = [_]f32{
+        0, 0.10, 0, 1, 0.10, 0, 0, 0.10, 1,
+        0, 0.60, 0, 1, 0.60, 0, 0, 0.60, 1,
+        0, 1.10, 0, 1, 1.10, 0, 0, 1.10, 1,
+    };
+    var plan = try mesh_edit.planRetopoAxisBands(testing.allocator, positions[0..], 3, 1, 0.5, 0.25);
+    defer plan.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 1), plan.axis);
+    try testing.expectEqual(@as(usize, 3), plan.faces.len);
+    try testing.expectEqualSlices(u16, &.{ 0, 1, 2 }, plan.faces);
+    try testing.expectEqual(@as(usize, 3), plan.bands.len);
+    try testing.expectEqual(@as(i32, -1), plan.bands[0].bucket);
+    try testing.expectEqual(@as(i32, 0), plan.bands[1].bucket);
+    try testing.expectEqual(@as(i32, 1), plan.bands[2].bucket);
+    var covered: u32 = 0;
+    for (plan.bands) |band| covered += band.faces;
+    try testing.expectEqual(@as(u32, 3), covered);
+}
+
+test "retopology rail bands follow local sloped rails instead of global y slabs" {
+    const positions = [_]f32{
+        0.4, 0.60,  0, 0.6, 0.60,  0, 0.5, 0.60,  0.1,
+        0.4, 1.60,  0, 0.6, 1.60,  0, 0.5, 1.60,  0.1,
+        0.4, -0.40, 0, 0.6, -0.40, 0, 0.5, -0.40, 0.1,
+    };
+    // At x=.5 the interpolated rails are y=.1 and y=1.1. The three
+    // triangles therefore land inside, one band above, and one below.
+    const rails = [_]f32{
+        0, 0,   0, 0, 1,   0,
+        1, 0.2, 0, 1, 1.2, 0,
+    };
+    var plan = try mesh_edit.planRetopoRailBands(testing.allocator, positions[0..], 3, rails[0..]);
+    defer plan.deinit(testing.allocator);
+    try testing.expectEqual(mesh_edit.RetopoBandMode.rails, plan.mode);
+    try testing.expectEqual(@as(u16, 2), plan.rail_samples);
+    try testing.expectEqualSlices(u16, &.{ 1, 2, 0 }, plan.faces);
+    try testing.expectEqual(@as(i32, -1), plan.bands[0].bucket);
+    try testing.expectEqual(@as(i32, 0), plan.bands[1].bucket);
+    try testing.expectEqual(@as(i32, 1), plan.bands[2].bucket);
+}
+
 test "meshdoc range table must exactly match the declared Outliner count" {
     const healthy = [_]u32{ 0, 4, 4, 9, 12, 15 };
     try testing.expect(mesh_edit.partRangesValid(healthy[0..], 3));
@@ -166,6 +281,26 @@ test "follow action queue retains rapid native lessons and drains them exactly o
     const second = try queue.drainJson(testing.allocator);
     defer testing.allocator.free(second);
     try testing.expectEqualStrings("{\"version\":1,\"events\":[]}", second);
+}
+
+test "follow action queue never evicts an unconsumed demonstration" {
+    var queue: mesh_edit.FollowActionQueue = .{};
+    defer queue.deinit(testing.allocator);
+
+    var index: usize = 0;
+    while (index < 96) : (index += 1) {
+        try queue.append(
+            testing.allocator,
+            @intCast(index % 33),
+            0,
+            "{\"version\":1,\"stream\":\"journal\"}",
+            "{\"version\":1,\"accepted\":true}",
+        );
+    }
+    const drained = try queue.drainJson(testing.allocator);
+    defer testing.allocator.free(drained);
+    try testing.expectEqual(@as(usize, 96), std.mem.count(u8, drained, "\"stream\":\"journal\""));
+    try testing.expectEqual(@as(usize, 96), std.mem.count(u8, drained, "\"accepted\":true"));
 }
 
 test "flipping selected winding reverses the normal and keeps corner UVs attached" {
@@ -466,6 +601,34 @@ test "detached seam create-face selection carries the detached part owner" {
     try testing.expect(mesh_edit.selectedEdgesCommonPartPub() == null);
 }
 
+test "create-face reference normal follows the neighboring authored surface" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3632, soup[0..], 6, &.{ 0, 0 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var selected: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount() and selected < 2) : (edge += 1) {
+        if (!mesh_edit.edgeIsBoundaryPub(edge)) continue;
+        try testing.expect(mesh_edit.selectEdgeByIndex(edge, selected != 0));
+        selected += 1;
+    }
+    try testing.expectEqual(@as(u32, 2), selected);
+    const normal = mesh_edit.selectedEdgesReferenceNormalPub().?;
+    try testing.expectApproxEqAbs(@as(f32, 0), normal[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), normal[1], 0.0001);
+    try testing.expect(normal[2] > 0.999);
+}
+
 test "exact uniform scale multiplies the selection frame around a stable pivot" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,
@@ -570,10 +733,13 @@ test "merging authored faces dissolves their shared selectable edge (req_2871)" 
     try testing.expectEqual(@as(u32, 6), mesh_edit.boundaryEdgeCount());
 }
 
-test "dissolving an irregular four-quad grid cleans authored boundary without rebuilding render triangles" {
+test "dissolving an irregular four-quad grid re-tessellates the clean boundary and drops seam verts" {
     // A sheared/transformed plane, not the unit-cube convenience case.  The four
     // selected authored quads contain nine welded vertices and twelve visible edge
     // runs before dissolve; the clean outer boundary is four corners / four runs.
+    // The convex boundary dropped five corners (centre + four collinear seams),
+    // so the merge must re-tessellate (req_3771): a byte-stable commit would
+    // leave those verts alive in the soup as dots no authored edge runs through.
     const p = [_][3]f32{
         .{ 3, -2, 5 },     .{ 5, -1, 5.5 },   .{ 7, 0, 6 },
         .{ 2.5, 1, 5.25 }, .{ 4.5, 2, 5.75 }, .{ 6.5, 3, 6.25 },
@@ -604,12 +770,24 @@ test "dissolving an irregular four-quad grid cleans authored boundary without re
     const selected = [_]bool{true} ** 8;
     var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 8, groups[0..], null);
     defer indexed.deinit();
-    try testing.expect(try indexed.mergeSelected(selected[0..]));
+    const merged = (try indexed.mergeSelected(selected[0..])).?;
+    try testing.expect(merged.retessellated);
     var lowered = try indexed.lower();
     defer lowered.deinit();
-    try testing.expectEqual(@as(u32, 8), lowered.tri_count);
-    try testing.expectEqualSlices(u32, &.{ 10, 10, 10, 10, 10, 10, 10, 10 }, lowered.groups);
+    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
+    try testing.expectEqualSlices(u32, &.{ 10, 10 }, lowered.groups);
     try testing.expectEqual(@as(usize, 4), indexed.faces.items[0].vertices.items.len);
+    // The centre vert and the four collinear seam verts left the soup entirely.
+    for ([_]usize{ 1, 3, 4, 5, 7 }) |dropped| {
+        var row: usize = 0;
+        while (row < lowered.tri_count * 3) : (row += 1) {
+            const base = row * 3;
+            const dx = lowered.positions[base] - p[dropped][0];
+            const dy = lowered.positions[base + 1] - p[dropped][1];
+            const dz = lowered.positions[base + 2] - p[dropped][2];
+            try testing.expect(dx * dx + dy * dy + dz * dz > 1e-6);
+        }
+    }
 }
 
 test "tris to quads recovers every selected cell instead of pairing across grid seams" {
@@ -918,7 +1096,11 @@ test "sequential concave face merges preserve resident triangles uv and part own
 
     var first_selection = [_]bool{false} ** 12;
     @memset(first_selection[0..6], true);
-    try testing.expect(try indexed.mergeSelected(first_selection[0..]));
+    // The concave perimeter drops its collinear top-run corners but must NOT
+    // re-tessellate — a re-fan would flip triangles — so the merge stays
+    // byte-stable and every resident row below survives verbatim.
+    const first_merge = (try indexed.mergeSelected(first_selection[0..])).?;
+    try testing.expect(!first_merge.retessellated);
     var resident_groups: [12]u32 = undefined;
     var resident_parts: [12]u32 = undefined;
     var resident_materials: [12]u32 = undefined;
@@ -942,7 +1124,8 @@ test "sequential concave face merges preserve resident triangles uv and part own
     indexed.adoptLoweredMetadata(&first, first.groups, first.parts);
     var second_selection = [_]bool{false} ** 12;
     @memset(second_selection[6..12], true);
-    try testing.expect(try indexed.mergeSelected(second_selection[0..]));
+    const second_merge = (try indexed.mergeSelected(second_selection[0..])).?;
+    try testing.expect(!second_merge.retessellated);
     var second = try indexed.lower();
     defer second.deinit();
     try testing.expectEqual(@as(u32, 12), second.tri_count);
@@ -991,7 +1174,7 @@ test "merge faces rejects mixed material identity" {
     );
     defer indexed.deinit();
 
-    try testing.expect(!(try indexed.mergeSelected(selected[0..])));
+    try testing.expect((try indexed.mergeSelected(selected[0..])) == null);
     var lowered = try indexed.lower();
     defer lowered.deinit();
     try testing.expectEqualSlices(u32, groups[0..], lowered.groups);
@@ -1025,7 +1208,7 @@ test "merge faces turns conflicting semantic names into explicit debt" {
     );
     defer indexed.deinit();
     const selected = [_]bool{ true, true };
-    try testing.expect(try indexed.mergeSelected(selected[0..]));
+    try testing.expect((try indexed.mergeSelected(selected[0..])) != null);
     var lowered = try indexed.lower();
     defer lowered.deinit();
     for (lowered.semantic_regions) |region| try testing.expectEqual(indexed_edit_mesh.NO_SEMANTIC_ID, region);
@@ -1063,7 +1246,7 @@ test "merge faces rejects a connected bent surface without changing its topology
     var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 4, groups[0..], parts[0..]);
     defer indexed.deinit();
 
-    try testing.expect(!(try indexed.mergeSelected(selected[0..])));
+    try testing.expect((try indexed.mergeSelected(selected[0..])) == null);
     var lowered = try indexed.lower();
     defer lowered.deinit();
     try testing.expectEqual(@as(u32, 4), lowered.tri_count);
@@ -1122,12 +1305,15 @@ test "merge faces discards cached ownership after structural part merge" {
     defer refreshed.deinit();
     try testing.expect(refreshed.residentMetadataMatches(4, merged_groups[0..], merged_parts[0..], null));
     const selected = [_]bool{true} ** 4;
-    try testing.expect(try refreshed.mergeSelected(selected[0..]));
+    // The convex 2x1 boundary drops its two collinear seam verts, so this merge
+    // re-tessellates (req_3771): one clean quad, still under the surviving part.
+    const merged = (try refreshed.mergeSelected(selected[0..])).?;
+    try testing.expect(merged.retessellated);
     var lowered = try refreshed.lower();
     defer lowered.deinit();
-    try testing.expectEqual(@as(u32, 4), lowered.tri_count);
-    try testing.expectEqualSlices(u32, &.{ 8, 8, 8, 8 }, lowered.groups);
-    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0 }, lowered.parts);
+    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
+    try testing.expectEqualSlices(u32, &.{ 8, 8 }, lowered.groups);
+    try testing.expectEqualSlices(u32, &.{ 0, 0 }, lowered.parts);
 }
 
 test "loop cut ignores collapsed quad members in an unrelated outliner part" {
@@ -1609,6 +1795,8 @@ test "pen edge wire triangles weld into naked selectable boundary edges" {
     // them through the view-mode wire overlay.
     try testing.expect(mesh_edit.edgeIsWirePub(0));
     try testing.expect(mesh_edit.edgeIsWirePub(1));
+    try testing.expectEqual(@as(u16, 1), mesh_edit.edgeFaceIncidencePub(0));
+    try testing.expectEqual(@as(u16, 1), mesh_edit.edgeFaceIncidencePub(1));
 }
 
 test "a real face's edges never classify as pen wire" {

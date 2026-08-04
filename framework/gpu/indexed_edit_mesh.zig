@@ -69,6 +69,18 @@ const QuadPair = struct {
     diagonal: [2]u32,
 };
 
+/// What a face fusion actually produced. `retessellated` is the dissolve signal
+/// (req_3771): the fused boundary dropped corners the recorded resident rows still
+/// reference (interior grid verts, collinear cut-seam verts), and the loop is CONVEX,
+/// so the face was marked for a fresh loop tessellation — the only way the dead verts
+/// actually leave the mesh. Concave fusions always stay byte-stable instead: a naive
+/// re-fan of a concave perimeter reverses render triangles (the bookshelf-side bug),
+/// so their recorded rows are kept even when the clean boundary dropped corners.
+pub const MergedFace = struct {
+    face_id: u32,
+    retessellated: bool,
+};
+
 const QuadCandidate = struct {
     pair: QuadPair,
     score: f32,
@@ -1497,22 +1509,22 @@ pub const Mesh = struct {
 
     /// Dissolve known connected coplanar faces into one ordered boundary face.
     /// Shared seams cancel by vertex-id edge keys; no position reconstruction occurs.
-    fn mergeFaceIds(mesh: *Mesh, selected: []const u32, preferred_diagonal: ?[2]u32) !bool {
-        if (selected.len < 2) return false;
-        if (selected[0] >= mesh.faces.items.len or !mesh.faces.items[selected[0]].alive) return false;
+    fn mergeFaceIds(mesh: *Mesh, selected: []const u32, preferred_diagonal: ?[2]u32) !?MergedFace {
+        if (selected.len < 2) return null;
+        if (selected[0] >= mesh.faces.items.len or !mesh.faces.items[selected[0]].alive) return null;
         const reference_part = mesh.faces.items[selected[0]].part;
         const reference_material = mesh.faces.items[selected[0]].material;
         const reference_semantic = mesh.faces.items[selected[0]].semantic;
         var semantic_conflict = false;
         var source_tessellation_valid = true;
         for (selected) |face_id| {
-            if (face_id >= mesh.faces.items.len) return false;
+            if (face_id >= mesh.faces.items.len) return null;
             const face = &mesh.faces.items[face_id];
-            if (!face.alive or face.part != reference_part or face.material != reference_material) return false;
+            if (!face.alive or face.part != reference_part or face.material != reference_material) return null;
             semantic_conflict = semantic_conflict or !mesh_semantics.eql(face.semantic, reference_semantic);
             source_tessellation_valid = source_tessellation_valid and face.source_tessellation_valid;
         }
-        if (!selectedFacesAreCoplanar(mesh, selected)) return false;
+        if (!selectedFacesAreCoplanar(mesh, selected)) return null;
 
         const Directed = struct { from: u32, to: u32, uv: Vec2, key: u64 };
         var uses = std.AutoHashMapUnmanaged(u64, u32).empty;
@@ -1538,12 +1550,12 @@ pub const Mesh = struct {
         for (directed.items, 0..) |edge, index| {
             if ((uses.get(edge.key) orelse 0) != 1) continue;
             const entry = try next.getOrPut(mesh.allocator, edge.from);
-            if (entry.found_existing) return false;
+            if (entry.found_existing) return null;
             entry.value_ptr.* = @intCast(index);
             if (start == null) start = edge.from;
             boundary_count += 1;
         }
-        if (boundary_count < 3) return false;
+        if (boundary_count < 3) return null;
         var loop = std.ArrayListUnmanaged(u32).empty;
         defer loop.deinit(mesh.allocator);
         var uvs = std.ArrayListUnmanaged(Vec2).empty;
@@ -1551,16 +1563,41 @@ pub const Mesh = struct {
         var current = start.?;
         var consumed: usize = 0;
         while (consumed < boundary_count) : (consumed += 1) {
-            const edge_index = next.get(current) orelse return false;
+            const edge_index = next.get(current) orelse return null;
             const edge = directed.items[edge_index];
             try loop.append(mesh.allocator, edge.from);
             try uvs.append(mesh.allocator, edge.uv);
             current = edge.to;
             if (current == start.?) break;
         }
-        if (current != start.? or loop.items.len != boundary_count) return false;
+        if (current != start.? or loop.items.len != boundary_count) return null;
         dropCollinearFaceLoop(mesh, &loop, &uvs);
-        if (loop.items.len < 3) return false;
+        if (loop.items.len < 3) return null;
+
+        // The dissolve test (req_3771): would the byte-stable resident rows still
+        // reference a corner the fused boundary no longer owns? Interior grid verts
+        // and collinear cut-seam verts fail this; they only actually leave the mesh
+        // if this face is re-tessellated from its clean loop instead of re-emitting
+        // its recorded source triangles.
+        var dropped_corners = false;
+        detect: for (selected) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            for (face.vertices.items) |vertex_id| {
+                if (!vertexInLoop(loop.items, vertex_id)) {
+                    dropped_corners = true;
+                    break :detect;
+                }
+            }
+            for (face.source_triangles.items) |source_triangle| {
+                if (source_triangle >= mesh.render_triangles.items.len) continue;
+                for (mesh.render_triangles.items[source_triangle]) |vertex_id| {
+                    if (!vertexInLoop(loop.items, vertex_id)) {
+                        dropped_corners = true;
+                        break :detect;
+                    }
+                }
+            }
+        }
 
         const target_id = selected[0];
         var sources = std.ArrayListUnmanaged(u32).empty;
@@ -1579,20 +1616,32 @@ pub const Mesh = struct {
                 if (quadDiagonalKind(target, diagonal) != null) target.diagonal = diagonal;
             }
         }
-        target.source_tessellation_valid = source_tessellation_valid;
+        // A dropped corner means the recorded rows still triangulate the OLD
+        // boundary; invalidating them makes the next lower() rebuild this face
+        // from its clean loop, which is what actually dissolves the dead verts.
+        // CONVEX loops only: lower()'s loop tessellation is a fan, and re-fanning
+        // a concave perimeter reverses render triangles (the bookshelf-side bug),
+        // so concave fusions keep their byte-stable rows even with dropped corners.
+        const retessellated = dropped_corners and !faceIsConcave(mesh, target);
+        target.source_tessellation_valid = source_tessellation_valid and !retessellated;
         // Meaning may never be chosen arbitrarily. A merge across differently
         // named surfaces becomes explicit naming debt for the agent to resolve.
         if (semantic_conflict) target.semantic = .{};
         for (selected) |face_id| {
             if (face_id != target_id) mesh.faces.items[face_id].alive = false;
         }
-        return true;
+        return .{ .face_id = target_id, .retessellated = retessellated };
+    }
+
+    fn vertexInLoop(loop: []const u32, vertex_id: u32) bool {
+        for (loop) |kept| if (kept == vertex_id) return true;
+        return false;
     }
 
     /// Dissolve a connected coplanar face selection into one ordered boundary face.
     /// A two-triangle merge records their real resident diagonal so later geometric
     /// edits never have to guess how the authored quad was physically tessellated.
-    pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !bool {
+    pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
         var selected = std.ArrayListUnmanaged(u32).empty;
         defer selected.deinit(mesh.allocator);
         for (mesh.faces.items) |*face| {
@@ -1886,7 +1935,7 @@ pub const Mesh = struct {
                 stats.plan_signature = (stats.plan_signature ^ value) *% 16777619;
             }
             const face_ids = [2]u32{ pair.first_face, pair.second_face };
-            if (try mesh.mergeFaceIds(face_ids[0..], pair.diagonal)) changed += 1;
+            if ((try mesh.mergeFaceIds(face_ids[0..], pair.diagonal)) != null) changed += 1;
         }
         stats.quads = changed;
         stats.authored_faces_after = stats.authored_faces_before - changed;
