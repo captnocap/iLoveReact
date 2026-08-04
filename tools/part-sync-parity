@@ -62,10 +62,20 @@ C_OPS='shelladd:cube,1;wait:8;shellparts'
 C_OPS="$C_OPS;scope:0,6;mode:3;range:0,1;rangeadd:2,3;extrudeface:0.15;wait:8;shellparts"
 C_OPS="$C_OPS;undo;wait:8;shellparts;wait:60;shellparts"
 
+# Scenario D — BILATERAL mirror extrude (req_3796): with the X mirror armed, extruding
+# one X face of the first cube lands on BOTH sides in one journal transaction — the
+# selection extends to the face's origin-plane twin and each patch pushes along its
+# own normal. Part 1 = 4 untouched quads + 2 caps + 8 walls = [0,14), part 2
+# renumbers to [14,20); ONE undo restores the original partition.
+D_OPS='shelladd:cube,1;wait:8;shellparts'
+D_OPS="$D_OPS;scope:0,6;mode:3;mirror:1;sel:10;add:11;extrudeface:0.15;wait:8;shellparts"
+D_OPS="$D_OPS;undo;wait:8;shellparts;wait:60;shellparts"
+
 status=0
 run_scenario A "$A_OPS" || status=1
 run_scenario B "$B_OPS" || status=1
 run_scenario C "$C_OPS" || status=1
+run_scenario D "$D_OPS" || status=1
 
 check() { # check <tag> <expected "rows/native/verdict" per shellparts line, in order>
   local tag="$1"; shift
@@ -105,6 +115,18 @@ if ! sed -n '4p' "$OUT/C.parts" 2>/dev/null | grep -E 'verdict=SYNCED' | grep -q
   echo 'part-sync-parity: C undo did not settle back to the pre-extrude partition'
   sed 's/^/  /' "$OUT/C.parts" 2>/dev/null || true; status=1
 fi
+check D 2/2/SYNCED 2/2/SYNCED || status=1
+# The bilateral partition: 4 untouched quads + 2 caps + 8 walls = [0,14), part 2
+# renumbers to [14,20). A unilateral extrude would read [0,10)/[10,16) — the exact
+# regression this scenario exists to catch. One undo settles back exactly.
+if ! sed -n '2p' "$OUT/D.parts" 2>/dev/null | grep -qF 'native={[0,14) [14,20)}'; then
+  echo 'part-sync-parity: D mirror extrude did not land on both sides ([0,14)/[14,20))'
+  sed 's/^/  /' "$OUT/D.parts" 2>/dev/null || true; status=1
+fi
+if ! sed -n '4p' "$OUT/D.parts" 2>/dev/null | grep -E 'verdict=SYNCED' | grep -qF 'native={[0,6) [6,12)}'; then
+  echo 'part-sync-parity: D undo did not settle back to the pre-extrude partition'
+  sed 's/^/  /' "$OUT/D.parts" 2>/dev/null || true; status=1
+fi
 
-if [ "$status" = 0 ]; then echo 'part-sync-parity: PASS (A1–A6 + B + C)'; fi
+if [ "$status" = 0 ]; then echo 'part-sync-parity: PASS (A1–A6 + B + C + D)'; fi
 exit "$status"

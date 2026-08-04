@@ -1493,6 +1493,150 @@ fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_fac
     return true;
 }
 
+/// Live mirror editing (req_3796): the selection extension that makes extrude land on
+/// BOTH sides. For every fully-selected authored face, find the authored face whose
+/// distinct corner positions are exactly the reflection of its own across
+/// mesh_edit.MIRROR_PLANE_CENTER (per enabled plane subset) and add its triangles to
+/// the mask. Matching is positional and quantized (mesh_edit's MIRROR_Q class), never
+/// by triangle tessellation — a twin quad split on the OTHER diagonal still pairs. A
+/// face with no complete twin, a twin outside the edit scope, a partially-selected
+/// source, or a self-twin (a face straddling the plane) simply doesn't extend — the
+/// same honesty as mirrored transforms.
+fn extendExtrudeMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: []bool) void {
+    const mirror_mask = mesh_edit.mirrorMask() & 7;
+    if (mirror_mask == 0 or tri_count == 0) return;
+    const alloc = std.heap.c_allocator;
+    const Q: f32 = 1000.0; // same tolerance class as mesh_edit's MIRROR_Q
+    const PosKey = [3]i32;
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    const helpers = struct {
+        fn quant(p: [3]f32) PosKey {
+            return .{
+                @intFromFloat(@round(p[0] * Q)),
+                @intFromFloat(@round(p[1] * Q)),
+                @intFromFloat(@round(p[2] * Q)),
+            };
+        }
+        fn corner(verts: []const f32, face: u32, slot: usize) [3]f32 {
+            const base = (@as(usize, face) * 3 + slot) * 8;
+            return .{ verts[base], verts[base + 1], verts[base + 2] };
+        }
+        fn posLess(a: PosKey, b: PosKey) bool {
+            inline for (0..3) |axis| {
+                if (a[axis] != b[axis]) return a[axis] < b[axis];
+            }
+            return false;
+        }
+        fn keyHash(sorted: []const PosKey) u64 {
+            var h = std.hash.Wyhash.init(0x726a_3796);
+            for (sorted) |k| h.update(std.mem.asBytes(&k));
+            return h.final();
+        }
+        /// Dedupe-insert keeping the list sorted — corner sets are tiny.
+        fn addKey(list: *std.ArrayListUnmanaged(PosKey), a: std.mem.Allocator, k: PosKey) bool {
+            for (list.items) |have| {
+                if (have[0] == k[0] and have[1] == k[1] and have[2] == k[2]) return true;
+            }
+            list.append(a, k) catch return false;
+            var i = list.items.len - 1;
+            while (i > 0 and posLess(list.items[i], list.items[i - 1])) : (i -= 1) {
+                std.mem.swap(PosKey, &list.items[i], &list.items[i - 1]);
+            }
+            return true;
+        }
+        fn sameKeys(a: []const PosKey, b: []const PosKey) bool {
+            if (a.len != b.len) return false;
+            for (a, b) |ka, kb| {
+                if (ka[0] != kb[0] or ka[1] != kb[1] or ka[2] != kb[2]) return false;
+            }
+            return true;
+        }
+    };
+    // The authored-face identity of a triangle: its group, or itself (high-bit tagged
+    // so it can't collide with a real group id) when ungrouped.
+    const aid_of = struct {
+        fn at(grouped: bool, f: u32) u32 {
+            if (!grouped) return 0x8000_0000 | f;
+            const g = model_source.faceGroupOf(f);
+            return if (g == model_source.NO_FACE_GROUP) 0x8000_0000 | f else g;
+        }
+    }.at;
+
+    var tris_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
+    var keys_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(PosKey)).empty;
+    defer {
+        var t_it = tris_of.valueIterator();
+        while (t_it.next()) |list| list.deinit(alloc);
+        tris_of.deinit(alloc);
+        var k_it = keys_of.valueIterator();
+        while (k_it.next()) |list| list.deinit(alloc);
+        keys_of.deinit(alloc);
+    }
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (@as(usize, f) * 24 + 24 > cur_verts.len) return;
+        const aid = aid_of(has_groups, f);
+        const t_gop = tris_of.getOrPut(alloc, aid) catch return;
+        if (!t_gop.found_existing) t_gop.value_ptr.* = .empty;
+        t_gop.value_ptr.append(alloc, f) catch return;
+        const k_gop = keys_of.getOrPut(alloc, aid) catch return;
+        if (!k_gop.found_existing) k_gop.value_ptr.* = .empty;
+        var slot: usize = 0;
+        while (slot < 3) : (slot += 1) {
+            if (!helpers.addKey(k_gop.value_ptr, alloc, helpers.quant(helpers.corner(cur_verts, f, slot)))) return;
+        }
+    }
+    var aid_by_hash = std.AutoHashMapUnmanaged(u64, u32).empty;
+    defer aid_by_hash.deinit(alloc);
+    var hash_it = keys_of.iterator();
+    while (hash_it.next()) |entry| {
+        aid_by_hash.put(alloc, helpers.keyHash(entry.value_ptr.items), entry.key_ptr.*) catch return;
+    }
+    // Twice the quantized plane coordinate per axis: reflected key = qc2 − key.
+    var qc2: PosKey = undefined;
+    inline for (0..3) |axis| qc2[axis] = @intFromFloat(@round(mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 * Q));
+
+    var source_it = tris_of.iterator();
+    while (source_it.next()) |entry| {
+        var all_masked = true;
+        for (entry.value_ptr.items) |tri| {
+            if (!mask[tri]) {
+                all_masked = false;
+                break;
+            }
+        }
+        if (!all_masked) continue;
+        const source_keys = (keys_of.get(entry.key_ptr.*) orelse continue).items;
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            if ((subset & mirror_mask) != subset) continue;
+            var reflected = std.ArrayListUnmanaged(PosKey).empty;
+            defer reflected.deinit(alloc);
+            for (source_keys) |k| {
+                var r = k;
+                inline for (0..3) |axis| {
+                    if (subset & (@as(u8, 1) << @intCast(axis)) != 0) r[axis] = qc2[axis] - r[axis];
+                }
+                if (!helpers.addKey(&reflected, alloc, r)) return;
+            }
+            const twin_aid = aid_by_hash.get(helpers.keyHash(reflected.items)) orelse continue;
+            if (twin_aid == entry.key_ptr.*) continue; // straddles the plane — its own twin
+            const twin_keys = keys_of.get(twin_aid) orelse continue;
+            if (!helpers.sameKeys(twin_keys.items, reflected.items)) continue; // hash collision
+            const twin_tris = tris_of.get(twin_aid) orelse continue;
+            var extendable = true;
+            for (twin_tris.items) |tri| {
+                if (!mesh_edit.faceInScopePub(tri)) {
+                    extendable = false;
+                    break;
+                }
+            }
+            if (!extendable) continue;
+            for (twin_tris.items) |tri| mask[tri] = true;
+        }
+    }
+}
+
 pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     defer semanticMintIntentClear();
     if (!model_paint.hasTarget()) return false;
@@ -1505,6 +1649,11 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     defer std.heap.c_allocator.free(mask);
     const selected = mesh_edit.buildDeleteMask(mask);
     if (selected == 0) return false;
+    // Live mirror editing (req_3796): a mirrored extrude is the SAME extrude landing on
+    // two faces — each pushes along its own normal. Extend the selection with every
+    // selected authored face's mirror twin BEFORE choosing the path, so both sides
+    // extrude in one journal transaction.
+    if (mesh_edit.mirrorMask() != 0) extendExtrudeMaskWithMirrorTwins(cur_verts, tri_count, mask);
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     var entity: ?FaceExtrudeEntity = null;
@@ -1531,11 +1680,13 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         };
     }
     const ent = entity orelse return false;
-    // Region extrude (req_3763 P1-1): a multi-face selection extrudes as ONE shell —
-    // the selected patch becomes the translated cap (authored faces preserved), and
-    // walls rise only along the selection boundary. The single-face path below stays
-    // byte-identical (mesh-port-parity pins its fixtures).
-    if (multi) return meshTopoExtrudeRegion(mask, tri_count, distance_raw, ent);
+    // Region extrude (req_3763 P1-1, per-patch req_3796): a multi-face selection
+    // extrudes as connected shells — each edge-connected patch becomes a translated
+    // cap pushed along ITS OWN aggregate normal (a face and its mirror twin are two
+    // patches going opposite ways), and walls rise only along each patch boundary.
+    // The single-face path below stays byte-identical (mesh-port-parity pins its
+    // fixtures).
+    if (multi) return meshTopoExtrudeRegion(mask, tri_count, distance_raw);
 
     const old_groups: ?[]u32 = if (has_groups) (captureFaceGroups() orelse return false) else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
@@ -1678,18 +1829,21 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     return true;
 }
 
-/// Region extrude (req_3763 P1-1) — the multi-face half of meshTopoExtrudeFace.
-/// The selected patch translates along its area-weighted average normal to become
-/// the cap: every authored face survives with its own group/colour/material/UVs/
-/// semantics (the 24-float rows copy verbatim, only positions shift). New side
-/// walls rise ONLY along the selection boundary — edges used by exactly one
-/// selected face — wound outward by the owning face's own winding, so interior
-/// edges never grow walls and a 6-quad panel extrudes as one shell instead of six
-/// boxes. Refusals (atomic, nothing mutates): a wire/degenerate face in the
-/// selection, a selection spanning parts or mixing grouped/ungrouped faces, a
-/// non-manifold selection edge (3+ selected uses), and a closed or folded
-/// selection (no boundary, or no net normal to extrude along).
-fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, ent: FaceExtrudeEntity) bool {
+/// Region extrude (req_3763 P1-1, per-patch req_3796) — the multi-face half of
+/// meshTopoExtrudeFace. The selection is split into edge-connected PATCHES, and each
+/// patch translates along its OWN area-weighted average normal to become a cap — so a
+/// face and its mirror twin are two patches pushing opposite ways, the same extrude
+/// on two faces (there is no single "selection direction" to average away). Every
+/// authored face survives with its own group/colour/material/UVs/semantics (the
+/// 24-float rows copy verbatim, only positions shift). New side walls rise ONLY
+/// along each patch boundary — edges used by exactly one selected face — wound
+/// outward by the owning face's own winding, so interior edges never grow walls and
+/// a 6-quad panel extrudes as one shell instead of six boxes. Refusals (atomic,
+/// nothing mutates): a wire/degenerate face in the selection, a patch spanning
+/// parts or a selection mixing grouped/ungrouped faces, a non-manifold selection
+/// edge (3+ selected uses), and a closed or folded patch (no boundary, or no net
+/// normal to extrude along).
+fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32) bool {
     const alloc = std.heap.c_allocator;
     const cur_verts = g_edit_verts orelse return false;
     const mesh_grouped = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
@@ -1713,12 +1867,33 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
         }
     };
 
+    // Union-find over selected triangles: an edge used by two selected faces joins
+    // them into one patch. Path-halving keeps it near-constant.
+    const parent = alloc.alloc(u32, tri_count) catch return false;
+    defer alloc.free(parent);
+    for (parent, 0..) |*p, i| p.* = @intCast(i);
+    const uf = struct {
+        fn find(pa: []u32, start: u32) u32 {
+            var x = start;
+            while (pa[x] != x) {
+                pa[x] = pa[pa[x]];
+                x = pa[x];
+            }
+            return x;
+        }
+        fn join(pa: []u32, a: u32, b: u32) void {
+            const ra = find(pa, a);
+            const rb = find(pa, b);
+            if (ra != rb) pa[rb] = ra;
+        }
+    };
+
     // Validate the selection and census its edges in one pass. Coincident corners
     // are bit-identical within a part (the same fact canonicalFaceBits relies on),
     // so exact position bits are the weld-correct edge identity here.
-    var census = std.AutoHashMapUnmanaged(EdgeKey, u32).empty;
+    const EdgeUse = struct { count: u32, face: u32 };
+    var census = std.AutoHashMapUnmanaged(EdgeKey, EdgeUse).empty;
     defer census.deinit(alloc);
-    var normal_sum: [3]f32 = .{ 0, 0, 0 };
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
@@ -1728,31 +1903,55 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
         if (mesh_grouped) {
             const g = model_source.faceGroupOf(f);
             if (g == model_source.NO_FACE_GROUP) return false;
-            if (model_source.partIndexOf(g) != ent.part) return false; // one part per shell
         }
-        const p0 = keys.pos(cur_verts, f, 0);
-        const p1 = keys.pos(cur_verts, f, 1);
-        const p2 = keys.pos(cur_verts, f, 2);
-        normal_sum = vadd(normal_sum, vcross(vsub(p1, p0), vsub(p2, p0))); // area-weighted
         var slot: usize = 0;
         while (slot < 3) : (slot += 1) {
             const key = keys.edge(keys.corner(cur_verts, f, slot), keys.corner(cur_verts, f, (slot + 1) % 3));
             const gop = census.getOrPut(alloc, key) catch return false;
-            if (!gop.found_existing) gop.value_ptr.* = 0;
-            gop.value_ptr.* += 1;
-            if (gop.value_ptr.* > 2) return false; // non-manifold inside the selection
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{ .count = 0, .face = f };
+            } else {
+                uf.join(parent, gop.value_ptr.face, f);
+            }
+            gop.value_ptr.count += 1;
+            if (gop.value_ptr.count > 2) return false; // non-manifold inside the selection
         }
     }
     var boundary_edges: u32 = 0;
     var census_it = census.valueIterator();
-    while (census_it.next()) |uses| {
-        if (uses.* == 1) boundary_edges += 1;
+    while (census_it.next()) |use| {
+        if (use.count == 1) boundary_edges += 1;
     }
     if (boundary_edges == 0) return false; // a closed selection has no rim to wall
-    const nlen = @sqrt(vdot(normal_sum, normal_sum));
-    if (nlen < 1e-9) return false; // folded selection — no net direction
+
+    // Per patch: the area-weighted normal (accumulated in face scan order, so a
+    // single-patch selection sums bit-identically to the pre-patch code) and the one
+    // part the whole patch must live in.
+    const Patch = struct { normal: [3]f32, part: u32, off: [3]f32 };
+    var patches = std.AutoHashMapUnmanaged(u32, Patch).empty;
+    defer patches.deinit(alloc);
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const face_part = if (mesh_grouped) model_source.partIndexOf(model_source.faceGroupOf(f)) else model_source.NO_PART;
+        const gop = patches.getOrPut(alloc, uf.find(parent, f)) catch return false;
+        if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .normal = .{ 0, 0, 0 }, .part = face_part, .off = .{ 0, 0, 0 } };
+        } else if (gop.value_ptr.part != face_part) {
+            return false; // one part per shell
+        }
+        const p0 = keys.pos(cur_verts, f, 0);
+        const p1 = keys.pos(cur_verts, f, 1);
+        const p2 = keys.pos(cur_verts, f, 2);
+        gop.value_ptr.normal = vadd(gop.value_ptr.normal, vcross(vsub(p1, p0), vsub(p2, p0))); // area-weighted
+    }
     const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
-    const off = vmul(vmul(normal_sum, 1.0 / nlen), dist);
+    var patch_it = patches.valueIterator();
+    while (patch_it.next()) |patch| {
+        const nlen = @sqrt(vdot(patch.normal, patch.normal));
+        if (nlen < 1e-9) return false; // folded patch — no net direction
+        patch.off = vmul(vmul(patch.normal, 1.0 / nlen), dist);
+    }
 
     const old_groups: ?[]u32 = if (mesh_grouped) (captureFaceGroups() orelse return false) else null;
     defer if (old_groups) |g| alloc.free(g);
@@ -1792,12 +1991,14 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
         semantic_instances.append(alloc, semantic.instance) catch return false;
     }
 
-    // The cap: the selected faces themselves, shifted — rows copy verbatim so UVs,
-    // normals, group ids, paint, and per-face semantics all survive the move.
+    // The cap: the selected faces themselves, each shifted by ITS patch's offset —
+    // rows copy verbatim so UVs, normals, group ids, paint, and per-face semantics
+    // all survive the move.
     const cap_start_face: u32 = @intCast(out.items.len / 24);
     f = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
+        const off = (patches.get(uf.find(parent, f)) orelse return false).off;
         const base = @as(usize, f) * 24;
         var row: [24]f32 = undefined;
         @memcpy(&row, cur_verts[base .. base + 24]);
@@ -1811,7 +2012,7 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
         if (mesh_grouped) {
             const g = old_groups.?[f];
             groups.append(alloc, g) catch return false;
-            if (part_count > 0) face_part.append(alloc, ent.part) catch return false;
+            if (part_count > 0) face_part.append(alloc, model_source.partIndexOf(g)) catch return false;
         }
         if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
         materials.append(alloc, model_source.faceMaterialOf(f)) catch return false;
@@ -1821,17 +2022,20 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
     }
     const cap_face_count: u32 = @intCast(out.items.len / 24 - cap_start_face);
 
-    // Walls along the selection boundary, in face/edge scan order (deterministic).
+    // Walls along each patch boundary, in face/edge scan order (deterministic).
     // Each count==1 edge appears exactly once among selected faces, directed a→b by
-    // its owner's winding — quad (a, b, b+off, a+off) then faces outward.
+    // its owner's winding — quad (a, b, b+off, a+off) then faces outward, with off
+    // the owning face's patch offset.
     var next_group: u32 = if (mesh_grouped) @intCast(maxGroupId(old_groups.?) + 1) else 0;
     f = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
+        const off = (patches.get(uf.find(parent, f)) orelse return false).off;
+        const wall_part = if (mesh_grouped and part_count > 0) model_source.partIndexOf(old_groups.?[f]) else model_source.NO_PART;
         var slot: usize = 0;
         while (slot < 3) : (slot += 1) {
             const key = keys.edge(keys.corner(cur_verts, f, slot), keys.corner(cur_verts, f, (slot + 1) % 3));
-            if ((census.get(key) orelse 0) != 1) continue;
+            if (((census.get(key) orelse continue).count) != 1) continue;
             const a = keys.pos(cur_verts, f, slot);
             const b = keys.pos(cur_verts, f, (slot + 1) % 3);
             if (!appendQuadSplit(&out, a, b, vadd(b, off), vadd(a, off))) return false;
@@ -1840,8 +2044,8 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
                 groups.append(alloc, next_group) catch return false;
                 next_group += 1;
                 if (part_count > 0) {
-                    face_part.append(alloc, ent.part) catch return false;
-                    face_part.append(alloc, ent.part) catch return false;
+                    face_part.append(alloc, wall_part) catch return false;
+                    face_part.append(alloc, wall_part) catch return false;
                 }
             }
             const wall_color = trueFaceColor(f);
