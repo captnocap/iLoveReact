@@ -21,6 +21,7 @@ const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
+const mesh_edit = @import("gpu/mesh_edit.zig");
 const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");
 const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
 const mesh_import = @import("world/mesh_import.zig");
@@ -715,7 +716,8 @@ fn hostMeshLiveFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const frame = scene3d.meshLiveFrame() orelse return setReturnString(info, "");
     var buf: [160]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf,
+    const json = std.fmt.bufPrint(
+        &buf,
         "{{\"center\":[{d},{d},{d}],\"radius\":{d}}}",
         .{ frame.center[0], frame.center[1], frame.center[2], frame.radius },
     ) catch return setReturnString(info, "");
@@ -916,7 +918,8 @@ fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const result = scene3d.meshSelectQuery(parsed.value) orelse
         return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh\"}");
     var buf: [320]u8 = undefined;
-    const reply = std.fmt.bufPrint(&buf,
+    const reply = std.fmt.bufPrint(
+        &buf,
         "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
         .{ result.faces, result.actionable_faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
     ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
@@ -1195,8 +1198,12 @@ fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_topo_extrude_face(distance) → JSON {"ok","key","count"}. Extrude exactly
-/// one selected authored face, capping it and adding side-wall quads.
+/// __mesh_topo_extrude_face(distance) → JSON {"ok","key","count"}. One selected
+/// authored face extrudes as before (cap + side walls). A MULTI-face selection
+/// region-extrudes as one shell (req_3763 P1-1): the patch translates along its
+/// average normal as the cap and walls rise only on the selection boundary —
+/// never between selected faces. The selection must stay inside one part; wire
+/// faces, non-manifold selection edges, and closed selections are refused.
 fn hostMeshTopoExtrudeFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
@@ -2350,10 +2357,11 @@ fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
 /// journaled fill of the current authored-face selection.
 fn hostModelPaintSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
     const r: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 255));
     const g: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 255));
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
-    const changed = scene3d.meshPaintSelection(r, g, b);
+    const changed = scene3d.meshPaintSelection(host.io, host.environ, r, g, b);
     if (changed > 0) state.markDirty();
     setReturnNumber(info, changed);
 }
@@ -2409,6 +2417,147 @@ fn hostMeshEditElements(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, json);
 }
 
+/// __mesh_retopo_bands_plan(axis, widthMeters, origin?) → complete preview plan JSON.
+/// View-only: it changes neither geometry nor saved paint/material data.
+fn hostMeshRetopoBandsPlan(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw_axis = argToI32(info, 0) orelse return setReturnString(info, "");
+    if (raw_axis < 0 or raw_axis > 2) return setReturnString(info, "");
+    const axis: u8 = @intCast(raw_axis);
+    const width: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const origin: ?f32 = if (info.length() > 2) @floatCast(argToF64(info, 2) orelse return setReturnString(info, "")) else null;
+    const json = scene3d.meshRetopoBandsPlanJson(std.heap.c_allocator, axis, width, origin) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    state.markDirty();
+    setReturnString(info, json);
+}
+
+/// __mesh_retopo_bands_plan_rails(Float32Array[lower.xyz,upper.xyz,...]) → JSON.
+/// The ordered rail pairs come from an already-authored quad strip.
+fn hostMeshRetopoBandsPlanRails(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnString(info, "");
+    if (bytes.len % @sizeOf(f32) != 0) return setReturnString(info, "");
+    const rails: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    if (rails.len < 12 or rails.len % 6 != 0) return setReturnString(info, "");
+    const json = scene3d.meshRetopoBandsPlanRailsJson(std.heap.c_allocator, rails) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    state.markDirty();
+    setReturnString(info, json);
+}
+
+/// __mesh_retopo_bands_read() → current preview plan JSON.
+fn hostMeshRetopoBandsRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = scene3d.meshRetopoBandsReadJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
+}
+
+/// __mesh_retopo_bands_clear() → 1 when a preview was removed.
+fn hostMeshRetopoBandsClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const changed = scene3d.meshRetopoBandsClear();
+    if (changed) state.markDirty();
+    setReturnNumber(info, if (changed) 1 else 0);
+}
+
+/// __mesh_retopo_band_tint_selection(id) → selected triangle count.
+/// id 0..11 assigns a temporary overlay colour; -1 erases the selection's tint.
+fn hostMeshRetopoBandTintSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const changed = scene3d.meshRetopoBandTintSelection(argToI32(info, 0) orelse -2);
+    if (changed >= 0) state.markDirty();
+    setReturnNumber(info, changed);
+}
+
+/// __mesh_retopo_band_select(id) → selected triangle count; -1 selects every mapped face.
+fn hostMeshRetopoBandSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const selected = scene3d.meshRetopoBandSelect(argToI32(info, 0) orelse -2);
+    if (selected >= 0) state.markDirty();
+    setReturnNumber(info, selected);
+}
+
+/// __mesh_retopo_source_ghost(visible?) → frozen-source overlay status JSON.
+/// Omit the argument to toggle; pass 0/1 to set an explicit state.
+fn hostMeshRetopoSourceGhost(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const requested: ?bool = if (info.length() > 0)
+        (argToI32(info, 0) orelse return setReturnString(info, "")) != 0
+    else
+        null;
+    const visible = scene3d.meshRetopoSourceGhostVisible(requested);
+    if (visible < 0) return setReturnString(info, "");
+    const json = scene3d.meshRetopoSourceGhostJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    state.markDirty();
+    setReturnString(info, json);
+}
+
+/// __mesh_retopo_source_ghost_read() → current frozen-source status JSON.
+fn hostMeshRetopoSourceGhostRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = scene3d.meshRetopoSourceGhostJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
+}
+
+/// __mesh_retopo_guide_write(path) → 1 written · 2 no active guide · 0 failed.
+/// The complete teaching map is package authoring data, including the frozen
+/// source soup. Write atomically so a reset cannot turn a partial annotation into
+/// an apparently valid guide.
+fn hostMeshRetopoGuideWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(path);
+    const guide = scene3d.meshRetopoGuideSnapshot() orelse return setReturnNumber(info, 2);
+    const bytes = mesh_edit.encodeRetopoGuide(alloc, guide) catch return setReturnNumber(info, 0);
+    defer alloc.free(bytes);
+
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, host.io).toNanoseconds() }) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(host.io, tmp_path, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(host.io, bytes) catch {
+        file.close(host.io);
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
+    file.sync(host.io) catch {
+        file.close(host.io);
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
+    file.close(host.io);
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, host.io) catch {
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        return setReturnNumber(info, 0);
+    };
+    setReturnNumber(info, 1);
+}
+
+/// __mesh_retopo_guide_load(path) → restored ghost status JSON, or empty on a
+/// missing/invalid/mismatched guide. The resident face count is validated by the
+/// scene boundary before any prior live overlay is replaced.
+fn hostMeshRetopoGuideLoad(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnString(info, "");
+    defer alloc.free(path);
+    const bytes = std.Io.Dir.cwd().readFileAlloc(host.io, path, alloc, .limited(512 * 1024 * 1024)) catch return setReturnString(info, "");
+    defer alloc.free(bytes);
+    var guide = mesh_edit.decodeRetopoGuide(alloc, bytes) catch return setReturnString(info, "");
+    defer guide.deinit(alloc);
+    if (!scene3d.meshRetopoGuideRestore(guide.view())) return setReturnString(info, "");
+    const json = scene3d.meshRetopoSourceGhostJson(alloc) orelse return setReturnString(info, "");
+    defer alloc.free(json);
+    state.markDirty();
+    setReturnString(info, json);
+}
+
 /// __mesh_follow_patch(faceIds?, rings?) → exact selected/local topology JSON.
 /// Omit faceIds to read the current native face selection. Passing the recorded
 /// ids after Merge Faces reads those same triangles with their new group ids.
@@ -2428,8 +2577,9 @@ fn hostMeshFollowPatch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, json);
 }
 
-/// __mesh_follow_action_drain() → accepted native Follow action observations.
-/// The transactions own capture; JS pairs delete-selection with create-face.
+/// __mesh_follow_action_drain() → append-only accepted native edit observations.
+/// The resident journal owns the firehose; JS stores raw events before deriving
+/// any higher-level demonstration recipes from them.
 fn hostMeshFollowActionDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const json = scene3d.meshFollowActionDrainJson(std.heap.c_allocator) orelse return setReturnString(info, "");
@@ -4532,6 +4682,16 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_selection", hostModelPaintSelection);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_plan", hostMeshRetopoBandsPlan);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_plan_rails", hostMeshRetopoBandsPlanRails);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_read", hostMeshRetopoBandsRead);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_clear", hostMeshRetopoBandsClear);
+    v8_runtime.registerHostFn("__mesh_retopo_band_tint_selection", hostMeshRetopoBandTintSelection);
+    v8_runtime.registerHostFn("__mesh_retopo_band_select", hostMeshRetopoBandSelect);
+    v8_runtime.registerHostFn("__mesh_retopo_source_ghost", hostMeshRetopoSourceGhost);
+    v8_runtime.registerHostFn("__mesh_retopo_source_ghost_read", hostMeshRetopoSourceGhostRead);
+    v8_runtime.registerHostFn("__mesh_retopo_guide_write", hostMeshRetopoGuideWrite);
+    v8_runtime.registerHostFn("__mesh_retopo_guide_load", hostMeshRetopoGuideLoad);
     v8_runtime.registerHostFn("__mesh_follow_patch", hostMeshFollowPatch);
     v8_runtime.registerHostFn("__mesh_follow_action_drain", hostMeshFollowActionDrain);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);

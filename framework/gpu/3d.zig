@@ -1508,6 +1508,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     var entity: ?FaceExtrudeEntity = null;
+    var multi = false;
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
@@ -1515,7 +1516,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         const grouped = has_groups and g != model_source.NO_FACE_GROUP;
         if (entity) |e| {
             if (grouped and e.grouped and e.group == g) continue;
-            return false; // face extrude is intentionally one authored face at a time
+            multi = true; // more than one authored face — the region path takes it
+            continue;
         }
         entity = .{
             .grouped = grouped,
@@ -1529,6 +1531,11 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         };
     }
     const ent = entity orelse return false;
+    // Region extrude (req_3763 P1-1): a multi-face selection extrudes as ONE shell —
+    // the selected patch becomes the translated cap (authored faces preserved), and
+    // walls rise only along the selection boundary. The single-face path below stays
+    // byte-identical (mesh-port-parity pins its fixtures).
+    if (multi) return meshTopoExtrudeRegion(mask, tri_count, distance_raw, ent);
 
     const old_groups: ?[]u32 = if (has_groups) (captureFaceGroups() orelse return false) else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
@@ -1665,6 +1672,225 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
         _ = mesh_edit.selectFacesByGroupRange(cap_group_after, cap_group_after + 1, false);
     } else {
         _ = mesh_edit.selectFaceByIndex(cap_start_face, false);
+    }
+    mesh_edit.setMode(.face);
+    journalCommit(&snap);
+    return true;
+}
+
+/// Region extrude (req_3763 P1-1) — the multi-face half of meshTopoExtrudeFace.
+/// The selected patch translates along its area-weighted average normal to become
+/// the cap: every authored face survives with its own group/colour/material/UVs/
+/// semantics (the 24-float rows copy verbatim, only positions shift). New side
+/// walls rise ONLY along the selection boundary — edges used by exactly one
+/// selected face — wound outward by the owning face's own winding, so interior
+/// edges never grow walls and a 6-quad panel extrudes as one shell instead of six
+/// boxes. Refusals (atomic, nothing mutates): a wire/degenerate face in the
+/// selection, a selection spanning parts or mixing grouped/ungrouped faces, a
+/// non-manifold selection edge (3+ selected uses), and a closed or folded
+/// selection (no boundary, or no net normal to extrude along).
+fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, ent: FaceExtrudeEntity) bool {
+    const alloc = std.heap.c_allocator;
+    const cur_verts = g_edit_verts orelse return false;
+    const mesh_grouped = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+
+    const EdgeKey = [6]u32; // canonical (min,max) pair of exact corner-position bits
+    const keys = struct {
+        fn corner(verts: []const f32, face: u32, slot: usize) [3]u32 {
+            const base = (@as(usize, face) * 3 + slot) * 8;
+            return .{ @bitCast(verts[base]), @bitCast(verts[base + 1]), @bitCast(verts[base + 2]) };
+        }
+        fn edge(a: [3]u32, b: [3]u32) EdgeKey {
+            const a_first = std.mem.order(u32, &a, &b) != .gt;
+            var out: EdgeKey = undefined;
+            @memcpy(out[0..3], if (a_first) &a else &b);
+            @memcpy(out[3..6], if (a_first) &b else &a);
+            return out;
+        }
+        fn pos(verts: []const f32, face: u32, slot: usize) [3]f32 {
+            const base = (@as(usize, face) * 3 + slot) * 8;
+            return .{ verts[base], verts[base + 1], verts[base + 2] };
+        }
+    };
+
+    // Validate the selection and census its edges in one pass. Coincident corners
+    // are bit-identical within a part (the same fact canonicalFaceBits relies on),
+    // so exact position bits are the weld-correct edge identity here.
+    var census = std.AutoHashMapUnmanaged(EdgeKey, u32).empty;
+    defer census.deinit(alloc);
+    var normal_sum: [3]f32 = .{ 0, 0, 0 };
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) return false;
+        if (canonicalFaceBits(cur_verts, f) == null) return false; // wire faces never extrude
+        if (mesh_grouped) {
+            const g = model_source.faceGroupOf(f);
+            if (g == model_source.NO_FACE_GROUP) return false;
+            if (model_source.partIndexOf(g) != ent.part) return false; // one part per shell
+        }
+        const p0 = keys.pos(cur_verts, f, 0);
+        const p1 = keys.pos(cur_verts, f, 1);
+        const p2 = keys.pos(cur_verts, f, 2);
+        normal_sum = vadd(normal_sum, vcross(vsub(p1, p0), vsub(p2, p0))); // area-weighted
+        var slot: usize = 0;
+        while (slot < 3) : (slot += 1) {
+            const key = keys.edge(keys.corner(cur_verts, f, slot), keys.corner(cur_verts, f, (slot + 1) % 3));
+            const gop = census.getOrPut(alloc, key) catch return false;
+            if (!gop.found_existing) gop.value_ptr.* = 0;
+            gop.value_ptr.* += 1;
+            if (gop.value_ptr.* > 2) return false; // non-manifold inside the selection
+        }
+    }
+    var boundary_edges: u32 = 0;
+    var census_it = census.valueIterator();
+    while (census_it.next()) |uses| {
+        if (uses.* == 1) boundary_edges += 1;
+    }
+    if (boundary_edges == 0) return false; // a closed selection has no rim to wall
+    const nlen = @sqrt(vdot(normal_sum, normal_sum));
+    if (nlen < 1e-9) return false; // folded selection — no net direction
+    const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
+    const off = vmul(vmul(normal_sum, 1.0 / nlen), dist);
+
+    const old_groups: ?[]u32 = if (mesh_grouped) (captureFaceGroups() orelse return false) else null;
+    defer if (old_groups) |g| alloc.free(g);
+    const part_count = hostPartCount();
+
+    var out: std.ArrayListUnmanaged(f32) = .empty;
+    defer out.deinit(alloc);
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
+    defer groups.deinit(alloc);
+    var face_part: std.ArrayListUnmanaged(u32) = .empty;
+    defer face_part.deinit(alloc);
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
+    defer colors.deinit(alloc);
+    var materials: std.ArrayListUnmanaged(u32) = .empty;
+    defer materials.deinit(alloc);
+    var semantic_regions: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_regions.deinit(alloc);
+    var semantic_instances: std.ArrayListUnmanaged(u32) = .empty;
+    defer semantic_instances.deinit(alloc);
+
+    // Unselected faces keep everything.
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) return false;
+        if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+        if (mesh_grouped) {
+            const g = old_groups.?[f];
+            groups.append(alloc, g) catch return false;
+            if (part_count > 0) face_part.append(alloc, model_source.partIndexOf(g)) catch return false;
+        }
+        if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
+        materials.append(alloc, model_source.faceMaterialOf(f)) catch return false;
+        const semantic = model_source.faceSemanticOf(f);
+        semantic_regions.append(alloc, semantic.region) catch return false;
+        semantic_instances.append(alloc, semantic.instance) catch return false;
+    }
+
+    // The cap: the selected faces themselves, shifted — rows copy verbatim so UVs,
+    // normals, group ids, paint, and per-face semantics all survive the move.
+    const cap_start_face: u32 = @intCast(out.items.len / 24);
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        var row: [24]f32 = undefined;
+        @memcpy(&row, cur_verts[base .. base + 24]);
+        var slot: usize = 0;
+        while (slot < 3) : (slot += 1) {
+            row[slot * 8 + 0] += off[0];
+            row[slot * 8 + 1] += off[1];
+            row[slot * 8 + 2] += off[2];
+        }
+        if (!appendFloats(&out, &row)) return false;
+        if (mesh_grouped) {
+            const g = old_groups.?[f];
+            groups.append(alloc, g) catch return false;
+            if (part_count > 0) face_part.append(alloc, ent.part) catch return false;
+        }
+        if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
+        materials.append(alloc, model_source.faceMaterialOf(f)) catch return false;
+        const semantic = model_source.faceSemanticOf(f);
+        semantic_regions.append(alloc, if (g_semantic_mint_intent) |intent| intent.cap_region else semantic.region) catch return false;
+        semantic_instances.append(alloc, if (g_semantic_mint_intent) |intent| intent.instance else semantic.instance) catch return false;
+    }
+    const cap_face_count: u32 = @intCast(out.items.len / 24 - cap_start_face);
+
+    // Walls along the selection boundary, in face/edge scan order (deterministic).
+    // Each count==1 edge appears exactly once among selected faces, directed a→b by
+    // its owner's winding — quad (a, b, b+off, a+off) then faces outward.
+    var next_group: u32 = if (mesh_grouped) @intCast(maxGroupId(old_groups.?) + 1) else 0;
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        var slot: usize = 0;
+        while (slot < 3) : (slot += 1) {
+            const key = keys.edge(keys.corner(cur_verts, f, slot), keys.corner(cur_verts, f, (slot + 1) % 3));
+            if ((census.get(key) orelse 0) != 1) continue;
+            const a = keys.pos(cur_verts, f, slot);
+            const b = keys.pos(cur_verts, f, (slot + 1) % 3);
+            if (!appendQuadSplit(&out, a, b, vadd(b, off), vadd(a, off))) return false;
+            if (mesh_grouped) {
+                groups.append(alloc, next_group) catch return false;
+                groups.append(alloc, next_group) catch return false;
+                next_group += 1;
+                if (part_count > 0) {
+                    face_part.append(alloc, ent.part) catch return false;
+                    face_part.append(alloc, ent.part) catch return false;
+                }
+            }
+            const wall_color = trueFaceColor(f);
+            if (!appendFaceColor(&colors, wall_color) or !appendFaceColor(&colors, wall_color)) return false;
+            materials.append(alloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
+            materials.append(alloc, indexed_edit_mesh.NO_MATERIAL) catch return false;
+            const semantic = model_source.faceSemanticOf(f);
+            const wall_region = if (g_semantic_mint_intent) |intent| intent.wall_region else semantic.region;
+            const wall_instance = if (g_semantic_mint_intent) |intent| intent.instance else semantic.instance;
+            semantic_regions.append(alloc, wall_region) catch return false;
+            semantic_regions.append(alloc, wall_region) catch return false;
+            semantic_instances.append(alloc, wall_instance) catch return false;
+            semantic_instances.append(alloc, wall_instance) catch return false;
+        }
+    }
+
+    const new_count: u32 = @intCast(out.items.len / 8);
+    if (new_count == g_edit_count) return false;
+    var snap = journalSnapshotCurrent("extrude face");
+    mesh_edit.clearSelection();
+    if (!replaceActiveEditMesh(out.items, new_count)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (mesh_grouped) {
+        model_source.setFaceGroups(groups.items);
+        if (part_count > 0) renormalizePartRanges(face_part.items, part_count) else _ = refreshPaintLayout();
+    }
+    model_source.setFaceMaterials(materials.items);
+    const semantics_installed = if (g_semantic_mint_intent) |intent|
+        model_source.setSemanticState(semantic_regions.items, semantic_instances.items, intent.table_json)
+    else
+        model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items);
+    if (!semantics_installed) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        return false;
+    }
+    model_paint.applyColors(colors.items);
+    if (model_source.colors()) |src| {
+        const nbytes = @min(src.len, colors.items.len);
+        if (nbytes > 0) @memcpy(src[0..nbytes], colors.items[0..nbytes]);
+    }
+    ensureGlassTrailing();
+    // The reply selection is the CAP — face indices are append-order stable, so the
+    // translated patch is exactly [cap_start_face, cap_start_face + cap_face_count).
+    var cap: u32 = 0;
+    while (cap < cap_face_count) : (cap += 1) {
+        _ = mesh_edit.selectFaceByIndex(cap_start_face + cap, cap != 0);
     }
     mesh_edit.setMode(.face);
     journalCommit(&snap);
@@ -9143,7 +9369,7 @@ var g_audit_facts: mesh_audit.Facts = .{};
 /// inherits its counts (req_3752 — a 12-triangle cube reported a moped's 890). The key
 /// carries the model hash and the face count beside the generation, and every path that
 /// swaps or drops the resident mesh clears it outright.
-const AuditKey = struct { hash: u64, generation: u32, faces: u32 };
+const AuditKey = struct { hash: u64, generation: u32, faces: u32, verts_digest: u64 };
 var g_audit_key: ?AuditKey = null;
 
 fn invalidateMeshAudit() void {
@@ -9152,11 +9378,38 @@ fn invalidateMeshAudit() void {
 }
 
 fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: u32) mesh_audit.Facts {
-    const key = AuditKey{ .hash = g_edit_key_hash, .generation = g_edit_generation, .faces = face_count };
+    // Pure vertex transforms patch positions in place WITHOUT bumping the
+    // generation, so generation+hash+faces alone kept serving pre-move counts —
+    // a probe moved through a solid reported its old intersections (req_3763
+    // P3-2). The verts digest makes any position change its own invalidation;
+    // one Wyhash pass over the resident soup is trivial next to the audit.
+    const key = AuditKey{
+        .hash = g_edit_key_hash,
+        .generation = g_edit_generation,
+        .faces = face_count,
+        .verts_digest = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(verts)),
+    };
     if (g_audit_key) |cached| {
-        if (cached.hash == key.hash and cached.generation == key.generation and cached.faces == key.faces) return g_audit_facts;
+        if (cached.hash == key.hash and cached.generation == key.generation and
+            cached.faces == key.faces and cached.verts_digest == key.verts_digest) return g_audit_facts;
     }
-    g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{});
+    // Glass faces do not block reachability rays (req_3763 P3-1): a glazed cabin's
+    // interior is visible through the windows, so treating glass as opaque reported
+    // every seat and dashboard as unreachable. The face colour's alpha channel IS
+    // the durable glass state (model_paint.isGlassAlpha).
+    const glass_rows: ?[]bool = allocator.alloc(bool, face_count) catch null;
+    defer if (glass_rows) |rows| allocator.free(rows);
+    var transparent: ?[]const bool = null;
+    if (glass_rows) |rows| {
+        var any_glass = false;
+        for (rows, 0..) |*row, face| {
+            const color = model_source.colorOf(@intCast(face));
+            row.* = if (color) |c| model_paint.isGlassAlpha(c[3]) else false;
+            if (row.*) any_glass = true;
+        }
+        if (any_glass) transparent = rows;
+    }
+    g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{}, transparent);
     g_audit_key = key;
     return g_audit_facts;
 }
@@ -9546,17 +9799,25 @@ pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     defer out.deinit();
     const writer = &out.writer;
+    // Scope-honouring (req_3763 P2-1): when a part scope is active, only in-scope
+    // elements emit — ids stay GLOBAL (stable handles for select-vertex/edge), so
+    // a scoped read is a filter, never a renumbering. An unscoped mesh still
+    // returns everything; large whole-mesh reads should page via follow inspect.
     writer.writeAll("{\"vertices\":[") catch return null;
+    var vertex_emitted: u32 = 0;
     var vertex: u32 = 0;
     while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        if (!mesh_edit.vertInScopePub(vertex)) continue;
         const p = mesh_edit.vertPosPub(vertex);
-        writer.print("{s}{s}\"id\":{d},\"at\":[{d},{d},{d}]}}", .{ if (vertex == 0) "" else ",", "{", vertex, p[0], p[1], p[2] }) catch return null;
+        writer.print("{s}{s}\"id\":{d},\"at\":[{d},{d},{d}]}}", .{ if (vertex_emitted == 0) "" else ",", "{", vertex, p[0], p[1], p[2] }) catch return null;
+        vertex_emitted += 1;
     }
     writer.writeAll("],\"edges\":[") catch return null;
     var emitted: u32 = 0;
     var edge: u32 = 0;
     while (edge < mesh_edit.edgeCount()) : (edge += 1) {
         if (!mesh_edit.edgeIsBoundaryPub(edge)) continue;
+        if (!mesh_edit.edgeInScopePub(edge)) continue;
         const endpoints = mesh_edit.edgeEndpointsPub(edge);
         const incidence = mesh_edit.edgeFaceIncidencePub(edge);
         const open = incidence == 1 and !mesh_edit.edgeIsWirePub(edge);
