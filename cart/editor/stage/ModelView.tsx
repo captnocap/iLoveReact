@@ -4051,8 +4051,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <Scene3D.AmbientLight color="#ffffff" intensity={paintMode || litFlat ? 1.0 : (litFill ? 0.65 : 0.45)} />
         {/* The key is ALWAYS mounted, zeroed when off: with no directional child the host
             keeps its DEFAULT warm sun (light_color (1.0, 0.95, 0.9), 3d.zig) — which is why
-            "Flat" never actually looked flat. Only an explicit intensity 0 kills it. */}
-        <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={paintMode || litFlat || !litKey ? 0 : (litFill ? 0.35 : 0.55)} />
+            "Flat" never actually looked flat. Only an explicit intensity 0 kills it.
+            DIRECTION is TOWARD the light (the shader does max(dot(N, light_dir), 0)) —
+            the old [-0.5,-0.8,-0.5] pointed at the model's UNDERSIDE, so every up/side
+            face got flat ambient and the whole body read as one mass (req_3763 P1-0:
+            75% of a car body inside a 1.3/255 luminance band). This key sits high
+            front-right and SEPARATES the principal axes: N·L ≈ 0.82 top / 0.49 front /
+            0.36 side, with the far flank falling to ambient — form reads again. */}
+        <Scene3D.DirectionalLight direction={[0.35, 0.8, 0.48]} color="#ffffff" intensity={paintMode || litFlat || !litKey ? 0 : (litFill ? 0.35 : 0.55)} />
         {/* Rig emitters stay mounted in ordinary model view so placement-local
             positions, aim, color, reach, and cone are judged against the mesh.
             Paint mode suppresses them: authored atlas color remains exact. */}
