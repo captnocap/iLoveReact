@@ -275,6 +275,17 @@ budget (req_3763 P1-3, measured on an identical `region:hood` selection at offse
   for every local detail line — panel breaks, recess edges, arch rounding. Rounding a
   wheel-well roof with `cut` costs ~140 tris; with `basic-cut` it costs ~6.
 
+### The stage reads form now — matcap shading (req_3766)
+
+The model stage shades by VIEW-SPACE normal (sculpt-app solid mode): distinct
+faces get distinct tones AND hues (warm right / cool left / bright top), and
+grazing faces darken, so edges, creases, and silhouettes read in a plain shot
+without the vert/edge overlays. Limits to know: a SMOOTH-shaded surface (normals
+smoothed across edges) still blends across its interior — the overlay remains
+the exact-topology instrument there; and Paint mode / the Flat switch disable
+matcap so colour judging stays exact. Verify shape work from shots first, and
+drop to overlays only when you need indices.
+
 ### shot — the agent's eyes
 
 ```bash

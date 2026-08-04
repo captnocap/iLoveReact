@@ -773,7 +773,7 @@ const scene3d_decls =
     \\    fog_far: f32,
     \\    fog_sky: f32,
     \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
-    \\    _pad4b: f32,
+    \\    matcap: f32,    // 156 — shade by view-space normal, req_3766; only scene3d_wgsl reads it (was _pad4b)
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,
@@ -975,7 +975,30 @@ const scene3d_fs =
     \\        let vis = select(1.0, svis, SH.has_shadow > 0.5 && i == caster);
     \\        placed = placed + lt.color * (base * ndl + sp) * falloff * vis;
     \\    }
-    \\    let lit = ambient + diffuse + specular + placed;
+    \\    var lit = ambient + diffuse + specular + placed;
+    \\    // ── Matcap (S.matcap == 1, req_3766): shade by the VIEW-SPACE normal so
+    \\    // EVERY normal change reads as a tone/hue step. Flat N·L collapses any
+    \\    // low-dihedral edge — and even a sharp crease whose two normals sit
+    \\    // symmetric about L — into one band, which is why a modelled body renders
+    \\    // as one mass. The sculpt-app answer: a top-lit sphere ramp over the view
+    \\    // basis, a warm/cool lateral split (hue disambiguates normals the ramp
+    \\    // alone cannot), and grazing-angle darkening so crease walls and the
+    \\    // silhouette read dark. Placed lights still add (lamp previews survive).
+    \\    if (S.matcap > 0.5) {
+    \\        let ndv = clamp(dot(N, V), 0.0, 1.0);
+    \\        let axis = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(V.y) > 0.94);
+    \\        let side = normalize(cross(axis, V));
+    \\        let upv = cross(V, side);
+    \\        let nx = dot(N, side);
+    \\        let ny = dot(N, upv);
+    \\        let ball = 0.62 + 0.46 * ny;
+    \\        let graze = 0.30 + 0.70 * smoothstep(0.0, 0.5, ndv);
+    \\        let warm_cool = vec3f(0.085 * nx, 0.02 * ny, -0.095 * nx);
+    \\        let mc = base * ball * graze + warm_cool + placed;
+    \\        let mc_a = in.inst_color.a * tex_sample.a;
+    \\        if (mc_a <= 0.01) { discard; }
+    \\        return vec4f(mc * mc_a, mc_a);
+    \\    }
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
     \\    // Aerial perspective: fade toward the sky colour in this fragment's screen
     \\    // direction (the same vertical gradient drawSky paints), so geometry melts
@@ -1200,7 +1223,7 @@ pub const grass_wgsl = oct_decode_wgsl ++
     \\    fog_far: f32,
     \\    fog_sky: f32,
     \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
-    \\    _pad4b: f32,
+    \\    matcap: f32,    // 156 — shade by view-space normal, req_3766; only scene3d_wgsl reads it (was _pad4b)
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,
@@ -1357,7 +1380,7 @@ pub const water_wgsl = oct_decode_wgsl ++
     \\    fog_far: f32,
     \\    fog_sky: f32,
     \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
-    \\    _pad4b: f32,
+    \\    matcap: f32,    // 156 — shade by view-space normal, req_3766; only scene3d_wgsl reads it (was _pad4b)
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,
@@ -1569,7 +1592,7 @@ pub const frond_wgsl = oct_decode_wgsl ++
     \\    fog_far: f32,
     \\    fog_sky: f32,
     \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
-    \\    _pad4b: f32,
+    \\    matcap: f32,    // 156 — shade by view-space normal, req_3766; only scene3d_wgsl reads it (was _pad4b)
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,
@@ -1812,7 +1835,7 @@ pub const scene3d_ground_prefix = oct_decode_wgsl ++
     \\    fog_far: f32,
     \\    fog_sky: f32,
     \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
-    \\    _pad4b: f32,
+    \\    matcap: f32,    // 156 — shade by view-space normal, req_3766; only scene3d_wgsl reads it (was _pad4b)
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
     \\    sky_zenith: vec4f,

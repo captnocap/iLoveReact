@@ -466,7 +466,7 @@ function _scaleVec3(v: any): [number, number, number] {
   return [1, 1, 1];
 }
 const _AUTO_FOG_COLOR = [-1, -1, -1];
-const Scene3DBase: any = ({ wireframe, ...rest }: any) =>
+const Scene3DBase: any = ({ wireframe, matcap, ...rest }: any) =>
   h('View', {
     ...rest,
     scene3d: true,
@@ -474,6 +474,10 @@ const Scene3DBase: any = ({ wireframe, ...rest }: any) =>
     // every mesh in this scene (host-side, barycentric — pixel-locked to the surface
     // at any zoom). A viewport-wide toggle, ideal for a mesh editor.
     scene3dWireframe: !!wireframe,
+    // `matcap` shades every mesh by its VIEW-SPACE normal (sculpt-app solid mode):
+    // any normal change reads as a tone/hue change, so edges and creases stay
+    // legible where flat N·L shading collapses them into one band (req_3766).
+    scene3dMatcap: !!matcap,
   }, rest.children);
 // `far` = draw radius in world units: the hard clip plane AND the per-mesh cull
 // distance (meshes whose nearest point is past `far` are skipped entirely). `near`

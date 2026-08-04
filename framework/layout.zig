@@ -468,6 +468,7 @@ pub const Node = struct {
     scene3d_camera: bool = false, // true = 3D.Camera
     scene3d_camera_orbit: bool = false, // true = host-driven orbit camera (drop-to-view); ignores pos/look props
     scene3d_wireframe: bool = false, // true = draw a barycentric wireframe over every mesh in this Scene3D
+    scene3d_matcap: bool = false, // true = shade meshes by view-space normal (sculpt-style form reading), req_3766
     scene3d_light: bool = false, // true = 3D.Light
     scene3d_group: bool = false, // true = 3D.Group
     scene3d_light_type: ?[]const u8 = null, // "ambient", "directional", "point"

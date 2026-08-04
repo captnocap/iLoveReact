@@ -4035,6 +4035,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         backgroundColor="#0b0d12"
         showAxes={false}
         wireframe={triangleWireframeVisible(wire, selMode)}
+        // Sculpt-style form reading (req_3766): shade by view-space normal so
+        // edges/creases stay legible without the vert/edge overlays. Paint mode
+        // and Flat both kill it — while judging colour, shading must not
+        // editorialize (the req_2545 rule).
+        matcap={!paintMode && !litFlat}
       >
         {/* The host owns this camera: position comes from orbit state seeded by the
             load door and driven by the overlay's drag/wheel — never from props here. */}
