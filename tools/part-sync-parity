@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Outliner-row ↔ native-part-range sync regression (req_3763, P0-1 + P0-2 of the
+# police_sedan work order). Proves, headlessly:
+#   A1  a shell-path Add lands row + range together                     → SYNCED 2/2
+#   A2  a loop cut renumbers groups and the rows FOLLOW the ranges      → SYNCED 2/2
+#   A3  undoing the cut re-stamps the rows back                         → SYNCED 2/2
+#   A4  a shell-path detach lands its row                               → SYNCED 3/3
+#   A5  a NATIVE-DOOR undo of the detach (the Agent Seat's __mesh_undo
+#       bypass — the exact P0-2 arming vector) leaves a 3-row/2-part
+#       mismatch that the deferred reconciler heals from the restored
+#       journal note instead of latching forever                        → SYNCED 2/2, ids preserved
+#   A6  re-stamps still flow AFTER a mismatch episode (the old guard
+#       latched permanently once counts ever diverged)                  → SYNCED 2/2
+#   B   a native-only structural op the shell never mirrored leaves the
+#       journal note unable to vouch for the rows (count mismatch); the
+#       reconciler rebuilds the row table from geometry + semantic
+#       regions rather than freezing                                    → SYNCED, part:rebuild ids
+# Assertions read the partsdump file the harness writes — the shot pipeline
+# filters app console output, so files are the only assertion surface (the
+# same reason mesh-port-parity asserts via contract: dumps).
+# Run: tools/part-sync-parity            (builds the editor once, 2 shots)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+OUT="${TMPDIR:-/tmp}/rjit-part-sync-parity-$$"
+mkdir -p "$OUT"
+trap 'rm -rf "$OUT"' EXIT
+SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor >/dev/null
+
+run_scenario() {
+  local tag="$1" ops="$2"
+  RJIT_MODELDOC=cube RJIT_MESHOPS="$ops;partsdump:$OUT/$tag.parts" \
+    ./tools/rjit shot editor --frames 2400 --timeout 110 --out "$OUT/$tag.png" >"$OUT/$tag.log" 2>&1 || {
+      echo "part-sync-parity: $tag shot FAILED"; sed -n '1,40p' "$OUT/$tag.log"; return 1; }
+  test -s "$OUT/$tag.parts" || {
+    echo "part-sync-parity: $tag wrote no partsdump (script did not finish — raise --frames)"; return 1; }
+}
+
+# Scenario A — cut/undo re-stamp + detach/native-undo mismatch recovery. Adding a
+# part scopes editing to it, so every gesture on the FIRST cube re-scopes to its
+# authored range [0,6) before selecting (the outliner-click twin).
+A_OPS='shelladd:cube,1;wait:8;shellparts'
+A_OPS="$A_OPS;scope:0,6;mode:3;sel:0;lcbegin;lcprev:0,1,0.5;lcend:1;wait:8;shellparts"
+A_OPS="$A_OPS;undo;wait:8;shellparts"
+A_OPS="$A_OPS;scope:0,6;mode:3;sel:0;shelldetach:probe;wait:8;shellparts"
+A_OPS="$A_OPS;undo;wait:40;shellparts"
+A_OPS="$A_OPS;scope:0,6;mode:3;sel:0;lcbegin;lcprev:0,1,0.5;lcend:1;wait:8;shellparts"
+
+# Scenario B — a NATIVE-ONLY detach the shell never hears about (ModelView's raw
+# detach op — the sedan-class desync: native parts move, no row, and the journal
+# note's row count no longer matches the partition). The reconciler cannot lean on
+# the note here and must prove the rebuild-from-geometry floor.
+B_OPS='shelladd:cube,1;wait:8;shellparts'
+B_OPS="$B_OPS;scope:0,6;mode:3;sel:0;detach;wait:40;shellparts"
+
+# Scenario C — REGION extrude (req_3763 P1-1): two adjacent authored faces of the
+# first cube extrude as ONE shell. The cap keeps its two authored groups and only
+# boundary walls are minted, so part 1 grows by exactly 6 wall groups ([0,6) →
+# [0,12)) while part 2 renumbers to [12,18); rows must follow, and one undo must
+# restore the original partition exactly.
+C_OPS='shelladd:cube,1;wait:8;shellparts'
+C_OPS="$C_OPS;scope:0,6;mode:3;range:0,1;rangeadd:2,3;extrudeface:0.15;wait:8;shellparts"
+C_OPS="$C_OPS;undo;wait:8;shellparts;wait:60;shellparts"
+
+status=0
+run_scenario A "$A_OPS" || status=1
+run_scenario B "$B_OPS" || status=1
+run_scenario C "$C_OPS" || status=1
+
+check() { # check <tag> <expected "rows/native/verdict" per shellparts line, in order>
+  local tag="$1"; shift
+  local got expected i=0
+  mapfile -t got < <(sed -E 's/^rows=([0-9]+) native=([0-9]+)( note=[a-zA-Z0-9]+)? verdict=([A-Z]+).*/\1\/\2\/\4/' "$OUT/$tag.parts" 2>/dev/null || true)
+  for expected in "$@"; do
+    if [ "${got[$i]:-missing}" != "$expected" ]; then
+      echo "part-sync-parity: $tag shellparts[$i] = ${got[$i]:-missing}, expected $expected"
+      sed 's/^/  /' "$OUT/$tag.parts" 2>/dev/null || true
+      return 1
+    fi
+    i=$((i + 1))
+  done
+}
+
+check A 2/2/SYNCED 2/2/SYNCED 2/2/SYNCED 3/3/SYNCED 2/2/SYNCED 2/2/SYNCED || status=1
+# A5 must have healed from the restored journal note: rows keep their ORIGINAL ids
+# (a geometry rebuild would have minted part:rebuild:* ids).
+if sed -n '5p' "$OUT/A.parts" 2>/dev/null | grep -q 'part:rebuild:'; then
+  echo 'part-sync-parity: A5 rebuilt from geometry — expected journal-note restore'; status=1
+fi
+check B 2/2/SYNCED 3/3/SYNCED || status=1
+# B's heal cannot lean on the (2-row) journal note — rows must be geometry-rebuilt.
+if ! sed -n '2p' "$OUT/B.parts" 2>/dev/null | grep -q 'part:rebuild:'; then
+  echo 'part-sync-parity: B did not rebuild from geometry'; status=1
+fi
+check C 2/2/SYNCED 2/2/SYNCED || status=1
+# The region extrude's exact partition: cap keeps groups {top,front}, 6 boundary
+# walls mint, so part 1 = [0,12) and part 2 renumbers to [12,18); undo restores.
+# Line 3 (208ms after undo) is allowed to be a transient; line 4 (after the
+# reconciler's beat) must be settled and exact.
+if ! sed -n '2p' "$OUT/C.parts" 2>/dev/null | grep -qF 'native={[0,12) [12,18)}'; then
+  echo 'part-sync-parity: C region extrude did not produce the [0,12)/[12,18) partition'
+  sed 's/^/  /' "$OUT/C.parts" 2>/dev/null || true; status=1
+fi
+if ! sed -n '4p' "$OUT/C.parts" 2>/dev/null | grep -E 'verdict=SYNCED' | grep -qF 'native={[0,6) [6,12)}'; then
+  echo 'part-sync-parity: C undo did not settle back to the pre-extrude partition'
+  sed 's/^/  /' "$OUT/C.parts" 2>/dev/null || true; status=1
+fi
+
+if [ "$status" = 0 ]; then echo 'part-sync-parity: PASS (A1–A6 + B + C)'; fi
+exit "$status"

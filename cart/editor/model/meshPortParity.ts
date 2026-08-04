@@ -30,10 +30,14 @@ function doc(path: string): Doc {
   // produces this adjacent base64 text artifact from the host-written RJMD.
   const b64 = __fs_read(path); if (!b64) throw new Error(`missing ${path}`);
   const bytes = b64bytes(b64); const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  const h = new Uint32Array(buf, 0, 7);
-  if (h[0] !== 0x444d4a52 || h[1] !== 2 || !h[4]) throw new Error(`${path}: expected grouped RJMD v2`);
-  const at = 28 + h[2] * 32;
-  return { vertices: new Float32Array(buf, 28, h[2] * 8), groups: new Uint32Array(buf, at, h[3]) };
+  // RJMD v4 (v8_bindings_core.zig hostModelMeshdocWrite is the format owner):
+  // header u32×10 [magic, version, vertCount, faceCount, hasGroups, rangeCount,
+  // glassFirstVertex, hasMaterials, hasSemantics, semanticJsonBytes]; the parity
+  // contract needs only verts + authored groups, so the later sections stay unread.
+  const h = new Uint32Array(buf, 0, 10);
+  if (h[0] !== 0x444d4a52 || h[1] !== 4 || !h[4]) throw new Error(`${path}: expected grouped RJMD v4`);
+  const at = 40 + h[2] * 32;
+  return { vertices: new Float32Array(buf, 40, h[2] * 8), groups: new Uint32Array(buf, at, h[3]) };
 }
 function key(p: V3): string { return `${Math.round(p[0] / EPS)},${Math.round(p[1] / EPS)},${Math.round(p[2] / EPS)}`; }
 function fromDoc(d: Doc): EditMesh {

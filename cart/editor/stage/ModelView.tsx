@@ -2832,8 +2832,27 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (operation === 'pan' && finite(args.dx) && finite(args.dy)) { if (camLock) return fail('camera is locked'); leaveFocusTool(); host.__model_orbit_pan?.(args.dx, args.dy); return ok({ pose: readPose() }); }
       if (operation === 'zoom' && finite(args.delta)) { if (camLock) return fail('camera is locked'); leaveFocusTool(); host.__model_orbit_zoom?.(args.delta); return ok({ pose: readPose() }); }
       if (operation === 'pose') {
-        const pose = Array.isArray(args.pose) ? args.pose.map(Number) : [];
-        if (pose.length !== 6 || pose.some((value) => !Number.isFinite(value))) return fail('pose must be [yaw,pitch,distance,targetX,targetY,targetZ]');
+        // Two accepted spellings (req_3763 P2-6): the 6-element array, or named
+        // fields merged over the CURRENT pose ({yaw,pitch,distance,target:[x,y,z]}
+        // — radians; positive pitch looks down from above, negative from below).
+        // The named form used to be silently ignored and replied ok.
+        let pose: number[];
+        if (Array.isArray(args.pose)) {
+          pose = args.pose.map(Number);
+        } else if (args.yaw !== undefined || args.pitch !== undefined || args.distance !== undefined || args.target !== undefined) {
+          const live = readPose();
+          if (!Array.isArray(live) || live.length !== 6) return fail('camera pose is unreadable — cannot merge named fields');
+          const target = Array.isArray(args.target) ? args.target.map(Number) : live.slice(3).map(Number);
+          pose = [
+            args.yaw === undefined ? Number(live[0]) : Number(args.yaw),
+            args.pitch === undefined ? Number(live[1]) : Number(args.pitch),
+            args.distance === undefined ? Number(live[2]) : Number(args.distance),
+            ...target,
+          ];
+        } else {
+          pose = [];
+        }
+        if (pose.length !== 6 || pose.some((value) => !Number.isFinite(value))) return fail('pose must be [yaw,pitch,distance,targetX,targetY,targetZ] or named {yaw,pitch,distance,target}');
         leaveFocusTool();
         return host.__model_cam_set_pose?.(...pose) === 1 ? ok({ pose: readPose() }) : fail('camera pose was rejected (the camera may be locked)');
       }
@@ -2846,14 +2865,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       }
       if (operation === 'lock') { const locked = args.locked !== false; setCamLock(locked); orbitSetLocked(locked); return ok({ locked }); }
       if (operation === 'selection-mode') {
-        const mode = Number(args.mode);
-        if (!Number.isInteger(mode) || mode < 0 || mode > 3) return fail('selection mode must be 0=view, 1=vertex, 2=edge, or 3=face');
+        // The refusal used to READ as if names were accepted while only numbers
+        // were (req_3763 P2-7) — accept both spellings.
+        const namedModes: Record<string, number> = { view: 0, vertex: 1, edge: 2, face: 3 };
+        const mode = typeof args.mode === 'string' && args.mode in namedModes ? namedModes[args.mode]! : Number(args.mode);
+        if (!Number.isInteger(mode) || mode < 0 || mode > 3) return fail('selection mode must be view|vertex|edge|face (or 0-3)');
         toolApiRef.current?.selMode(mode);
         return ok({ mode });
       }
       if (operation === 'gizmo') {
-        const tool = Number(args.tool);
-        if (!Number.isInteger(tool) || tool < 0 || tool > 2) return fail('gizmo tool must be 0=move, 1=scale, or 2=rotate');
+        const namedTools: Record<string, number> = { move: 0, scale: 1, rotate: 2 };
+        const tool = typeof args.tool === 'string' && args.tool in namedTools ? namedTools[args.tool]! : Number(args.tool);
+        if (!Number.isInteger(tool) || tool < 0 || tool > 2) return fail('gizmo tool must be move|scale|rotate (or 0-2)');
         toolApiRef.current?.gizmo(tool);
         return ok({ tool });
       }
@@ -3664,6 +3687,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // progread stashes the serialized stroke program here; progapply replays it —
       // the in-session round-trip proof for the layer-carrying blob (req_2672).
       const progRef = { current: null as string | null };
+      // Every shellparts verdict of this run, in order — partsdump writes them to a
+      // file so tools/part-sync-parity can assert them (req_3763).
+      const partSyncLines: string[] = [];
       const dumpAtlasPng = (path: string) => {
         const j = host.__model_atlas_read?.();
         if (typeof j !== 'string' || !j) { console.error('[meshops] atlas: no atlas'); return; }
@@ -3864,6 +3890,62 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           let owned = 0;
           for (const pr of ranges ?? []) owned += Number(host.__mesh_group_face_count?.(pr.lo, pr.hi) ?? 0);
           console.error(`[meshops] parts → ${JSON.stringify(ranges)} ownedFaces=${owned} totalFaces=${total} partition=${ranges && owned === total ? 'OK' : 'BROKEN'}`);
+        }
+        // ── Shell row ↔ native range agreement (req_3763) ───────────────────────
+        // shellparts: the outliner ROWS (through the seat shell bridge — the exact
+        // table the user sees) against the host's range truth, with a machine-
+        // checkable verdict. This is the assertion surface for the part-sync
+        // regression: SYNCED iff counts match and every rank-ordered row carries
+        // its native [lo,hi) exactly.
+        else if (name === 'shellparts') {
+          const percept = (globalThis as any).__seatShellBridge?.partPercept?.();
+          const rows = (percept?.parts ?? []) as { id: string; name: string; lo: number | null; hi: number | null }[];
+          const ranges = meshPartRangesRead() ?? [];
+          const ranked = rows.slice().sort((x, y) => ((x.lo ?? Number.MAX_SAFE_INTEGER) - (y.lo ?? Number.MAX_SAFE_INTEGER)));
+          const sorted = ranges.slice().sort((x, y) => x.lo - y.lo);
+          const synced = ranked.length === sorted.length &&
+            ranked.every((row, i) => row.lo === sorted[i]!.lo && row.hi === sorted[i]!.hi);
+          // Row IDS ride the line: a note-restored row keeps its original id while a
+          // geometry-rebuilt row is minted part:rebuild:* — the dump distinguishes
+          // WHICH recovery path healed a mismatch without needing the console.
+          const rowsText = ranked.map((row) => `${row.name}#${row.id}[${row.lo},${row.hi})`).join(' ');
+          const nativeText = sorted.map((r) => `[${r.lo},${r.hi})`).join(' ');
+          // note=N is the HOST journal note's row count — the reconciler's restore
+          // source — so a dump line shows all three tables at once.
+          let noteRows = 'none';
+          try {
+            const note = JSON.parse(host.__mesh_journal_note?.() || 'null');
+            if (Array.isArray(note?.parts)) noteRows = String(note.parts.length);
+          } catch { /* unreadable note reads as none */ }
+          const line = `rows=${ranked.length} native=${sorted.length} note=${noteRows} verdict=${synced ? 'SYNCED' : 'DESYNC'} rows={${rowsText}} native={${nativeText}}`;
+          partSyncLines.push(line);
+          console.error(`[shellparts] ${line}`);
+        }
+        // partsdump:/abs/path — write every shellparts line collected so far to a
+        // file. The shot pipeline filters app console output down to SCREENSHOT
+        // lines, so file dumps are the only assertion surface a runner can read
+        // (the same reason `contract:` dumps exist).
+        else if (name === 'partsdump') {
+          const path = a.join(',');
+          const ok = path ? host.__fs_write?.(path, partSyncLines.join('\n') + '\n') : false;
+          console.error(`[meshops] partsdump → ${ok} (${partSyncLines.length} line(s)) ${path}`);
+        }
+        // shelladd:kind — append a primitive part through the SHELL bridge (row +
+        // host range + journal note move together, the real outliner Add path).
+        else if (name === 'shelladd') {
+          const r = (globalThis as any).__seatShellBridge?.addPrimitive?.({ kind: a[0] || 'cube', size: Number(a[1]) || 1, height: Number(a[2]) || 1, sides: num(a[3]) || 12 });
+          console.error(`[meshops] shelladd:${a[0]} → ${JSON.stringify(r)}`);
+        }
+        // shelldetach:name — detach the current face selection through the SHELL
+        // bridge (adds the outliner row and stamps the journal note, the seat path).
+        else if (name === 'shelldetach') {
+          const r = (globalThis as any).__seatShellBridge?.detachSelection?.(a[0] || 'detached');
+          console.error(`[meshops] shelldetach:${a[0]} → ${JSON.stringify(r)}`);
+        }
+        // reconcile — force the shell's row↔range reconcile pass (the manual door).
+        else if (name === 'reconcile') {
+          (globalThis as any).__editor_reconcile_parts?.();
+          console.error('[meshops] reconcile → requested');
         }
         // duprange:lo,hi — raw native duplicate boundary, useful for proving a stale
         // cart range is rejected instead of silently cloning a partial part.

@@ -42,6 +42,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
+import { subscribe } from '../../../runtime/ffi';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -83,7 +84,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import type { SeatPartPercept, SeatPrimitiveSpec, SeatShellReceipt } from '../agent/seatApi';
+import { compactSeatReply, executeSeatRequestAtShell, seatBatchGenerationReason, type AgentSeat, type SeatPartPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import {
   countUvTextureFootprints,
   flattenUvFaceCorners,
@@ -430,6 +431,8 @@ export default function AppFrame() {
   const persistenceSettings = useMemo(editorPersistenceSettings, [settingsRevision]);
   const [manualWorldDirty, setManualWorldDirty] = useState(false);
   const [modelMutationRevision, setModelMutationRevision] = useState(0);
+  const retopoGhostVisibleRef = useRef(state.modelTool.retopoGhostVisible);
+  retopoGhostVisibleRef.current = state.modelTool.retopoGhostVisible;
   // Destructive part-count changes require a one-shot capability tied to the exact
   // resulting row count. Hydration and autosave cannot mint it, so a fallback one-row
   // projection can never overwrite a multi-part document (req_3234).
@@ -3643,6 +3646,113 @@ export default function AppFrame() {
     return () => { (globalThis as any).__seatShellBridge = null; };
   }, []);
 
+  // The Seat controls model creation, so its transport must outlive ModelView.
+  // A model-less editor still answers `look`, and `new` creates the first real
+  // document instead of requiring the person to prepare a disposable bootstrap.
+  useEffect(() => {
+    const currentSeat = (): AgentSeat | null => (globalThis as any).__agentSeat ?? null;
+    const refreshSeatUi = () => (globalThis as any).__agentSeatRefresh?.();
+    const bootstrap = { newPrimitive: seatNewPrimitive };
+    const unsubscribe = subscribe('system:notification', (payload: any) => {
+      if (payload?.kind !== 'agent-seat' || typeof payload?.replyPath !== 'string' ||
+          !payload.replyPath.startsWith('/tmp/reactjit-seat-') || !payload.replyPath.endsWith('.json')) return;
+      const request = payload.request as SeatRequest | undefined;
+      if (!request || typeof request.action !== 'string') return;
+      const writeReply = (reply: SeatReply) => (globalThis as any).__fs_write?.(
+        payload.replyPath,
+        JSON.stringify(payload.brief === true ? compactSeatReply(reply) : reply),
+      );
+      const run = (row: SeatRequest): SeatReply => executeSeatRequestAtShell(currentSeat(), row, bootstrap);
+      const expected = Number(payload.generation);
+      const current = currentSeat()?.look() ?? null;
+      if (Number.isFinite(expected) && (!current || expected !== current.generation)) {
+        writeReply({
+          ok: false,
+          op: request.action,
+          percept: current,
+          reason: current
+            ? `stale generation ${expected}; live generation is ${current.generation}`
+            : `stale generation ${expected}; no live model is mounted`,
+        });
+        return;
+      }
+      const batch = request.action === 'batch' && Array.isArray(request.args?.requests)
+        ? request.args.requests as SeatRequest[]
+        : null;
+      if (!batch) {
+        const hadSeat = currentSeat() !== null;
+        const reply = run(request);
+        refreshSeatUi();
+        // Creating the first document schedules ModelView's mount. Do not tell the
+        // caller `new` is complete until the mesh-capable Seat is actually ready.
+        if (!hadSeat && request.action === 'new' && reply.ok) {
+          const started = Date.now();
+          const finishBootstrap = () => {
+            const live = currentSeat()?.look() ?? null;
+            if (live || Date.now() - started >= 2_000) {
+              writeReply({ ...reply, percept: live });
+              return;
+            }
+            setTimeout(finishBootstrap, 25);
+          };
+          finishBootstrap();
+        } else writeReply(reply);
+        return;
+      }
+      const replies: SeatReply[] = [];
+      let index = 0;
+      let expectedGeneration: number | null = current?.generation ?? null;
+      let bootstrapStartedAt: number | null = null;
+      const finishBatch = () => {
+        const ok = replies.every((reply) => reply.ok);
+        writeReply({
+          ok,
+          op: 'batch',
+          result: replies,
+          percept: currentSeat()?.look() ?? null,
+          ...(ok ? {} : { reason: 'batch stopped at first rejection' }),
+        });
+      };
+      const runNext = () => {
+        const seat = currentSeat();
+        const live = seat?.look() ?? null;
+        if (bootstrapStartedAt !== null && !live && Date.now() - bootstrapStartedAt < 2_000) {
+          setTimeout(runNext, 25);
+          return;
+        }
+        bootstrapStartedAt = null;
+        if (expectedGeneration === null && live) expectedGeneration = live.generation;
+        if (index >= batch.length) {
+          finishBatch();
+          return;
+        }
+        if (expectedGeneration !== null) {
+          const generationReason = live
+            ? seatBatchGenerationReason(expectedGeneration, live.generation, index)
+            : `batch closed before row ${index + 1} — live model was unmounted`;
+          if (generationReason) {
+            replies.push({ ok: false, op: batch[index]!.action, percept: live, reason: generationReason });
+            index = batch.length;
+            setTimeout(runNext, 0);
+            return;
+          }
+        }
+        const rowRequest = batch[index++]!;
+        const hadSeat = seat !== null;
+        const row = run(rowRequest);
+        replies.push(row);
+        refreshSeatUi();
+        const after = currentSeat()?.look() ?? row.percept;
+        expectedGeneration = after?.generation ?? (rowRequest.action === 'new' ? null : expectedGeneration);
+        if (!hadSeat && rowRequest.action === 'new' && row.ok) bootstrapStartedAt = Date.now();
+        if (!row.ok) index = batch.length;
+        setTimeout(runNext, 100); // visible modeling cadence is a seat feature
+      };
+      runNext();
+    });
+    return unsubscribe;
+  }, []);
+
   // A Pen Plane / Pen Edges part is generated against the live host camera, so its
   // geometry never takes a cart-side seed detour. Register only the metadata/range that
   // the host append reports, then focus the new row like every other Add Part flow.
@@ -4777,6 +4887,161 @@ export default function AppFrame() {
     });
     return stamped;
   };
+  // Re-scope the focused SET to its refreshed ranges: the move gizmo must always
+  // drive the selected parts' true faces, never a stale span. Multi-select
+  // (req_2659) re-pushes the whole union; the UV filter's active-range global
+  // follows the primary.
+  const rescopeStampedRows = (prev: EditorState, stamped: ModelPart[]) => {
+    const active = stamped.find((p) => p.id === prev.modelActivePartId) ?? stamped[0];
+    if (active && active.lo != null && active.hi != null) {
+      (globalThis as any).__modelActivePartRange = { lo: active.lo, hi: active.hi };
+      const sel = selectedPartIdsRef.current.filter((sid) => stamped.some((p) => p.id === sid));
+      if (!prev.modelTool.paint && sel.length > 1) {
+        const pairs: number[] = [];
+        for (const sid of sel) {
+          const p = stamped.find((pp) => pp.id === sid);
+          if (p && p.lo != null && p.hi != null) pairs.push(p.lo, p.hi);
+        }
+        (globalThis as any).__mesh_edit_scope_ranges?.(new Uint32Array(pairs));
+      } else {
+        (globalThis as any).__mesh_edit_scope?.(active.lo, active.hi);
+      }
+    }
+  };
+  // The parts-metadata note the host journal carries for its CURRENT state. After an
+  // undo/redo the host restored the note along with the geometry (journalInstall), so
+  // this is the row table that was live at the restored state — readable no matter
+  // which path drove the undo (shell hotkey, Agent Seat door, harness op).
+  const readHostJournalNoteParts = (mid: string): ModelPart[] | null => {
+    try {
+      const j = (globalThis as any).__mesh_journal_note?.();
+      if (typeof j !== 'string' || !j) return null;
+      const o = JSON.parse(j);
+      if (o?.modelId !== mid || !Array.isArray(o.parts)) return null;
+      return (o.parts as ModelPart[]).map((p) => {
+        const seed = partMeshSeedsRef.current[p.id];
+        return seed ? { ...p, mesh: seed } : p;
+      });
+    } catch {
+      return null;
+    }
+  };
+  // Rebuild the row table from what the mesh itself knows: one follow-patch sweep
+  // gives every displayed face its part index + semantic region, and the semantic
+  // table names the regions. Rows whose [lo,hi) exactly matches a live range keep
+  // their identity (name/color/visibility/seed); every other range gets a fresh row
+  // named after its dominant region. This is the recovery floor: it cannot invent
+  // geometry, only re-describe the host's authoritative partition.
+  const partRowsFromGeometry = (ranges: { lo: number; hi: number }[], oldRows: ModelPart[]): ModelPart[] => {
+    const host = globalThis as any;
+    const regionNames = new Map<number, string>();
+    try {
+      const stateJson = host.__mesh_semantic_state?.();
+      if (typeof stateJson === 'string' && stateJson) {
+        const table = JSON.parse(stateJson)?.table;
+        for (const r of table?.regions ?? []) {
+          if (typeof r?.id === 'number' && typeof r?.name === 'string') regionNames.set(r.id, r.name);
+        }
+      }
+    } catch { /* unnamed model — rows fall back to Part N */ }
+    // Sweep displayed faces in pages; tally faces + dominant region per part index.
+    const faceCount = Number(host.__model_face_count?.() ?? 0);
+    const tally = ranges.map(() => ({ faces: 0, regions: new Map<number, number>() }));
+    for (let at = 0; at < faceCount; at += 128) {
+      const ids = new Uint32Array(Math.min(128, faceCount - at));
+      for (let i = 0; i < ids.length; i += 1) ids[i] = at + i;
+      try {
+        const page = JSON.parse(host.__mesh_follow_patch?.(ids, 0) || 'null');
+        for (const tri of page?.triangles ?? []) {
+          const part = tally[tri?.part];
+          if (!part) continue;
+          part.faces += 1;
+          if (typeof tri.region === 'number' && regionNames.has(tri.region)) {
+            part.regions.set(tri.region, (part.regions.get(tri.region) ?? 0) + 1);
+          }
+        }
+      } catch { break; }
+    }
+    const usedNames = new Map<string, number>();
+    return ranges.map((range, index) => {
+      const kept = oldRows.find((p) => p.lo === range.lo && p.hi === range.hi);
+      if (kept) return kept;
+      let name = '';
+      let best = 0;
+      for (const [id, faces] of tally[index]!.regions) {
+        if (faces > best) { best = faces; name = regionNames.get(id) ?? ''; }
+      }
+      if (!name) name = `Part ${index + 1}`;
+      const nth = (usedNames.get(name) ?? 0) + 1;
+      usedNames.set(name, nth);
+      return {
+        id: `part:rebuild:${stateRef.current.seq}:${index}`,
+        name: nth > 1 ? `${name} ${nth}` : name,
+        visible: tally[index]!.faces > 0,
+        color: PART_TINTS[index % PART_TINTS.length]!,
+        lo: range.lo,
+        hi: range.hi,
+      };
+    });
+  };
+  // ── The row ↔ range reconciler (req_3763) ────────────────────────────────────
+  // Counts equal → rank re-stamp (renumbering ops preserve part order). Counts
+  // differ → the rows CANNOT self-heal by rank; the old guard froze here forever
+  // (once the counts diverged nothing could ever re-converge them — the req_3756/
+  // 3757/3758/3759 corruption). Now a mismatch reconciles LOUDLY against host
+  // truth: first from the journal note the host restored (an undo/redo that
+  // crossed a structural boundary outside the shell's own undo path — the Agent
+  // Seat's __mesh_undo bypass), else rebuilt from geometry + semantic regions.
+  const partReconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconcilePartRows = (reason: string) => {
+    const s = stateRef.current;
+    const mid = activePartsModelId(s);
+    if (!mid) return;
+    const ranges = readHostPartRanges();
+    if (!ranges || ranges.length === 0) return;
+    const rows = s.modelParts[mid] ?? [];
+    if (rows.length === ranges.length) {
+      // The mid-flight structural op landed its own row meanwhile — cheap re-stamp.
+      const stamped = stampRowsByRank(rows, ranges);
+      setState((prev) => {
+        rescopeStampedRows(prev, stamped);
+        return { ...prev, modelParts: { ...prev.modelParts, [mid]: stamped } };
+      });
+      return;
+    }
+    const noteParts = readHostJournalNoteParts(mid);
+    const fromNote = noteParts && noteParts.length === ranges.length;
+    const next = stampRowsByRank(fromNote ? noteParts : partRowsFromGeometry(ranges, rows), ranges);
+    console.error(`[partsync] reconciled rows=${rows.length} → parts=${ranges.length} via ${fromNote ? 'journal note' : 'geometry'} (${reason})`);
+    if (next.length < rows.length) authorizedPartShrinkTargetRef.current.set(mid, next.length);
+    else authorizedPartShrinkTargetRef.current.delete(mid);
+    const activeId = next.some((p) => p.id === s.modelActivePartId) ? s.modelActivePartId : (next[0]?.id ?? null);
+    const keepSelected = selectedPartIdsRef.current.filter((sid) => next.some((p) => p.id === sid));
+    selectedPartIdsRef.current = keepSelected.length > 0 ? keepSelected : (activeId ? [activeId] : []);
+    setSelectedPartIds(selectedPartIdsRef.current);
+    setState((prev) => {
+      rescopeStampedRows({ ...prev, modelActivePartId: activeId }, next);
+      return {
+        ...prev,
+        modelParts: { ...prev.modelParts, [mid]: next },
+        modelActivePartId: activeId,
+        status: `outliner reconciled to the mesh — ${next.length} part(s), was ${rows.length} row(s) (${fromNote ? 'restored from the undo journal' : 'rebuilt from geometry'})`,
+      };
+    });
+    markActiveModelDirty();
+  };
+  // A count mismatch is AMBIGUOUS at announce time: a structural op's own handler
+  // may be about to land its row (append/detach/delete add and remove rows with the
+  // op's range). Defer one beat; if the counts still disagree, reconcile for real —
+  // reconcilePartRows re-reads live state either way and degrades to a plain
+  // re-stamp when the counts have already re-converged.
+  const schedulePartRowReconcile = (reason: string) => {
+    if (partReconcileTimerRef.current) return;
+    partReconcileTimerRef.current = setTimeout(() => {
+      partReconcileTimerRef.current = null;
+      reconcilePartRows(reason);
+    }, 280);
+  };
   // ModelView announces moved ranges through this global (same pattern as
   // __meshEditSelChanged) right after any adopt whose resync saw new values.
   useEffect(() => {
@@ -4786,33 +5051,24 @@ export default function AppFrame() {
       if (!mid) return;
       setState((prev) => {
         const rows = prev.modelParts[mid] ?? [];
-        // A count mismatch means a STRUCTURAL change is mid-flight (append/detach/
-        // delete) — its own handler adds/removes the row with the op's range.
-        if (rows.length === 0 || rows.length !== ranges.length) return prev;
-        const stamped = stampRowsByRank(rows, ranges);
-        // The focused SET re-scopes to its refreshed ranges: the move gizmo must
-        // always drive the selected parts' true faces, never a stale span. Multi-
-        // select (req_2659) re-pushes the whole union; the UV filter's active-range
-        // global follows the primary.
-        const active = stamped.find((p) => p.id === prev.modelActivePartId);
-        if (active && active.lo != null && active.hi != null) {
-          (globalThis as any).__modelActivePartRange = { lo: active.lo, hi: active.hi };
-          const sel = selectedPartIdsRef.current.filter((sid) => stamped.some((p) => p.id === sid));
-          if (!prev.modelTool.paint && sel.length > 1) {
-            const pairs: number[] = [];
-            for (const sid of sel) {
-              const p = stamped.find((pp) => pp.id === sid);
-              if (p && p.lo != null && p.hi != null) pairs.push(p.lo, p.hi);
-            }
-            (globalThis as any).__mesh_edit_scope_ranges?.(new Uint32Array(pairs));
-          } else {
-            (globalThis as any).__mesh_edit_scope?.(active.lo, active.hi);
-          }
+        if (rows.length === 0 || rows.length !== ranges.length) {
+          // NEVER a silent latch (req_3763): either a structural handler lands the
+          // row within the beat, or the deferred reconcile re-converges loudly.
+          schedulePartRowReconcile(`ranges announced ${ranges.length} vs ${rows.length} row(s)`);
+          return prev;
         }
+        const stamped = stampRowsByRank(rows, ranges);
+        rescopeStampedRows(prev, stamped);
         return { ...prev, modelParts: { ...prev.modelParts, [mid]: stamped } };
       });
     };
-    return () => { (globalThis as any).__modelPartRangesChanged = undefined; };
+    // Manual recovery door: the Agent Seat / harness / console can force a
+    // reconcile pass without waiting for the next range announcement.
+    (globalThis as any).__editor_reconcile_parts = () => reconcilePartRows('manual door');
+    return () => {
+      (globalThis as any).__modelPartRangesChanged = undefined;
+      (globalThis as any).__editor_reconcile_parts = undefined;
+    };
   }, []);
 
   // ── Mesh undo/redo (host journal; req_2520) ──────────────────────────────────
@@ -4843,8 +5099,17 @@ export default function AppFrame() {
     if (restored && mid) {
       // UNDO SAFETY (req_2644): the journal restored the HOST's part ranges along with
       // the geometry — re-stamp the restored rows' lo/hi from that read-back instead of
-      // trusting only the note (a stale note must never outvote the mesh).
+      // trusting only the note (a stale note must never outvote the mesh). A note whose
+      // COUNT disagrees with the host is stale outright: applying its rows anyway is
+      // how a desync used to install itself (req_3763) — reconcile instead.
       const hostRanges = readHostPartRanges();
+      if (hostRanges && hostRanges.length !== restored.length) {
+        console.error(`[partsync] ${verb} note carries ${restored.length} row(s) but the host restored ${hostRanges.length} part(s) — reconciling instead of applying the stale note`);
+        setState((prev) => ({ ...prev, status: `${verb} ${r.label}` }));
+        markActiveModelDirty();
+        schedulePartRowReconcile(`${verb} note/${restored.length} vs host/${hostRanges.length}`);
+        return;
+      }
       if (hostRanges && hostRanges.length === restored.length) {
         restored = stampRowsByRank(restored, hostRanges);
       }
@@ -4926,6 +5191,14 @@ export default function AppFrame() {
     const fail = (reason: string): SeatShellReceipt => ({ ok: false, reason });
     const ok = (result?: unknown): SeatShellReceipt => ({ ok: true, ...(result === undefined ? {} : { result }) });
     try {
+      if (action === 'editor-status') {
+        const block = blockingNowRef.current(live);
+        return ok({
+          status: live.status,
+          blocking: block ? { id: block.id, label: block.label } : null,
+          unsavedDocumentName,
+        });
+      }
       if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
         exportCharacterAs(args.role);
         return ok({ id: 'export-character', role: args.role });
@@ -6509,6 +6782,33 @@ export default function AppFrame() {
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
+            onRetopoTint={guarded((id) => {
+              const result = modelToolApiRef.current?.retopoTint(id) ?? { changed: -1, persisted: false };
+              const changed = result.changed;
+              setState((prev) => ({
+                ...prev,
+                status: changed > 0
+                  ? `${id < 0 ? `removed teaching tint from ${changed} faces` : `tinted ${changed} faces as band ${id + 1}`}${result.persisted ? ' — saved in model package' : ' — PACKAGE WRITE FAILED'}`
+                  : changed === 0 ? 'select one or more faces before tinting' : 'retopology tint is unavailable — restart into the rebuilt editor',
+              }));
+            })}
+            onRetopoGhost={guarded(() => {
+              const requested = !retopoGhostVisibleRef.current;
+              const ghost = modelToolApiRef.current?.retopoGhost(requested) ?? null;
+              setState((prev) => ({
+                ...prev,
+                status: ghost
+                  ? `source ghost ${ghost.visible ? 'ON — live edits remain underneath the frozen source' : 'off'} — ${ghost.covered}/${ghost.faces} original faces mapped${ghost.persisted ? ' — saved in model package' : ' — PACKAGE WRITE FAILED'}`
+                  : 'no frozen source ghost yet — tint the original soup before editing',
+              }));
+            })}
+            onRetopoClear={guarded(() => {
+              const result = modelToolApiRef.current?.retopoClear() ?? { cleared: false, persisted: false };
+              setState((prev) => ({ ...prev, status: result.cleared
+                ? `cleared the retopology guide${result.persisted ? ' from the model package' : ' live — PACKAGE WRITE FAILED'}`
+                : 'no retopology tint map is active' }));
+            })}
+            retopoGhostVisible={state.modelTool.retopoGhostVisible}
             onMapPaint={patchMapPaint}
             // Doc switching mid-blocking-session would unmount the surface that owns the
             // session (loop cut's captured base mesh dies with it) — guarded (req_2626 HH).
