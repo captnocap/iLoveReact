@@ -1,4 +1,0 @@
-# Repo-tracked home for ingested image-texture bytes (req_1774).
-# Uploaded face/decal images are copied here, content-addressed (<hash>.<ext>),
-# so the references travel with git instead of pointing at an absolute path on
-# one machine. Keep this file so the empty dir is tracked.

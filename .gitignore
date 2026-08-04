@@ -360,3 +360,21 @@ cart/hmsc-int/data/**/_compact_backup/
 # Editor-baked decal pixel files (DECALPIXFILE-0610) — derived cache the
 # DecalPixelBaker regenerates from the stored DecalDocs; never git's.
 cart/hmsc-int/data/decal-pixels/
+
+# ── 3D models + image textures stay LOCAL — never published (USER RULING req_3772,
+# "do not publish the 3d models or image based textures to github"; matches the
+# GitHub-web directory deletions of 2026-08-03) ─────────────────────────────────
+/cart/editor/data/models/
+/cart/editor/data/textures/
+/cart/hmsc-int/assets/tex/
+/cart/hmsc-int/exports/*.png
+/cart/hmsc-int/exports/.cache/
+/cart/hmsc-int/texture.png
+/cart/hmsc-int/Desk.glb
+/cart/hmsc-int/car.obj
+/pics/
+/world/knowledge/
+/tmp/
+/design_handoff_color_studio/
+/_MODEL_RECOVERY_BACKUP_20260629/
+/research_runs/2026-07-28__auto-skinning-weights/
