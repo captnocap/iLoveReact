@@ -926,6 +926,11 @@ differs from the inherited source region.
   own, since that is what a cold agent will see.
 - Reusing an existing name returns the **existing region** rather than making a duplicate,
   and sets it as the new pair's `parent`.
+- The user has the same verb in the GUI (req_3872): a "name faces…" input + tag button in
+  the Face-mode action bar, landing on the same table and host door as `name`. Regions you
+  did not create may therefore appear between your calls — re-read the percept's table
+  instead of assuming you are the only author, and never rename a human-authored region
+  without being asked.
 - Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
   (`DEFAULT_NAMING_DEBT_BUDGET`). This is only a construction backstop: `save` refuses
   whenever `unnamed > 0`, so every durable model crosses the boundary at zero debt.

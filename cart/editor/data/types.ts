@@ -190,6 +190,9 @@ export type ModelToolApi = {
   retopoTint: (id: number) => { changed: number; persisted: boolean };
   retopoGhost: (visible: boolean) => { visible: boolean; faces: number; covered: number; persisted: boolean } | null;
   retopoClear: () => { cleared: boolean; persisted: boolean };
+  // GUI semantic naming (req_3872): name the current face selection as a durable
+  // region (same table+door as the Seat's `name` verb). null = host door absent.
+  nameSelection: (name: string) => { changed: number } | null;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".

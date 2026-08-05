@@ -467,7 +467,7 @@ function regionFamily(table: SemanticTable, name: string): number[] {
   }).map((region) => region.id);
 }
 
-function declareRegion(table: SemanticTable, name: string, role: string, op: string, take?: number, parent?: number): { table: SemanticTable; region: SemanticRegion } {
+export function declareRegion(table: SemanticTable, name: string, role: string, op: string, take?: number, parent?: number): { table: SemanticTable; region: SemanticRegion } {
   const existing = regionByName(table, name);
   if (existing) return { table, region: existing };
   const occupied = new Set(table.regions.map((region) => region.id));

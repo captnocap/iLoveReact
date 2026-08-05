@@ -6866,6 +6866,19 @@ export default function AppFrame() {
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
+            onNameSelection={guarded((name: string) => {
+              const trimmed = name.trim();
+              const result = modelToolApiRef.current?.nameSelection(trimmed);
+              setState((prev) => ({
+                ...prev,
+                status: result == null
+                  ? 'semantic naming is unavailable — restart into the rebuilt editor'
+                  : result.changed > 0
+                    ? `named ${result.changed} faces "${trimmed}" — save to make it durable`
+                    : trimmed ? 'select one or more faces before naming' : 'type a region name first',
+              }));
+              if ((result?.changed ?? 0) > 0) markActiveModelDirty();
+            })}
             onRetopoTint={guarded((id) => {
               const result = modelToolApiRef.current?.retopoTint(id) ?? { changed: -1, persisted: false };
               const changed = result.changed;

@@ -28,6 +28,8 @@ export default function Workspace(props: {
   onRetopoGhost: () => void;
   onRetopoClear: () => void;
   retopoGhostVisible: boolean;
+  /** Name the current face selection as a durable semantic region (req_3872). */
+  onNameSelection: (name: string) => void;
   selectedPartCount: number;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;

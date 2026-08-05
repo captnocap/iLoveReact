@@ -29,7 +29,7 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost } from '@reactjit/runtime/ffi';
-import { createAgentSeat, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt } from '../agent/seatApi';
+import { createAgentSeat, declareRegion, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt, type SemanticTable } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
 import { captureFrame } from '@reactjit/capture';
@@ -313,6 +313,10 @@ export type ModelToolApi = {
   retopoTint: (id: number) => { changed: number; persisted: boolean };
   retopoGhost: (visible: boolean) => { visible: boolean; faces: number; covered: number; persisted: boolean } | null;
   retopoClear: () => { cleared: boolean; persisted: boolean };
+  // GUI semantic naming (req_3872): assign the current face selection to a named
+  // region — the same table+door the Agent Seat's `name` verb uses, but recorded
+  // as a toolbar action, not automation. null = the host door is absent.
+  nameSelection: (name: string) => { changed: number } | null;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -2661,6 +2665,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const ghost = readRetopoGhost();
       setRetopoGhostVisible(ghost?.visible === true);
       return { changed, persisted: changed > 0 ? persistRetopoGuide() : changed === 0 };
+    },
+    nameSelection: (name) => {
+      const trimmed = name.trim();
+      if (!host.__mesh_semantic_assign || !host.__mesh_semantic_state) return null;
+      if (!trimmed || trimmed === '_') return { changed: 0 };
+      let table: SemanticTable = { version: 1, regions: [] };
+      try {
+        const parsed = JSON.parse(String(host.__mesh_semantic_state() ?? 'null'));
+        if (parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) table = parsed.table;
+      } catch { /* a fresh mesh reports no table yet — declare into an empty one */ }
+      const declared = declareRegion(table, trimmed, 'authored', 'name');
+      host.__mesh_action_source?.(3); // CommandSource 'toolbar' — a human named this, not automation
+      let changed = 0;
+      try {
+        changed = Number(host.__mesh_semantic_assign(declared.region.id, 0, JSON.stringify(declared.table)) ?? 0);
+      } finally { host.__mesh_action_source?.(0); }
+      if (changed > 0) setSemanticRevision((value) => value + 1);
+      return { changed };
     },
     retopoGhost: (visible) => {
       const raw = host.__mesh_retopo_source_ghost?.(visible ? 1 : 0);
