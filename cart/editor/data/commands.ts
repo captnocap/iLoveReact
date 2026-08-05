@@ -223,6 +223,9 @@ export const COMMANDS: Command[] = [
   // UV direction collection (req_3388): one selected 3D face expands to every
   // atlas island projected from the same signed axis, without joining the mesh.
   { id: 'mesh-select-uv-orientation', menu: 'Edit', scope: 'model', name: 'Collect Same UV Orientation', icon: 'Layers3', key: '', context: true, native: true, undoable: false, tool: true, needsSelection: true },
+  // GUI semantic naming (req_3872/req_3880): a blocking popover, not an action-bar
+  // chip — the bar is full. N in face mode; assigns the selection to a durable region.
+  { id: 'mesh-name-faces', menu: 'Edit', scope: 'model', name: 'Name Faces…', icon: 'Tag', key: 'N', context: true, native: true, undoable: true, needsSelection: true },
   { id: 'mesh-move', menu: 'Edit', scope: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-scale', menu: 'Edit', scope: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-scale-by', menu: 'Edit', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
@@ -411,7 +414,7 @@ const section = (label: string): MenuNode => ({ kind: 'section', label });
 const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
-    section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'),
+    section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-faces'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),

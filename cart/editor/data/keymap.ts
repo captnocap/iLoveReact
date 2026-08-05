@@ -89,6 +89,9 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'b', commandId: 'mesh-paint-fill', mode: 'paint' },
   { key: 'b', commandId: 'mesh-glass', mode: 'face' },
   { key: 'n', commandId: 'mesh-paint-brush', mode: 'paint' },
+  // N is contextual like B/M/X: Free Brush while painting (above), Name Faces on a
+  // face selection — the popover lane for durable semantic regions (req_3880).
+  { key: 'n', commandId: 'mesh-name-faces', mode: 'face' },
   { key: 'x', commandId: 'mesh-paint-safety', mode: 'paint' },
   { key: 'y', commandId: 'mesh-paint-detail', mode: 'paint' },
 ];

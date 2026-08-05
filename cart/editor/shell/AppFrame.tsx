@@ -16,6 +16,7 @@ import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
 import ScaleByDialog from './ScaleByDialog';
+import NameFacesDialog from './NameFacesDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
 import { PaintPanel } from './PaintSidePanel';
 import PerformancePopover from './PerformancePopover';
@@ -414,6 +415,7 @@ export default function AppFrame() {
   const roleNamerRef = useRef(roleNamerSession);
   roleNamerRef.current = roleNamerSession;
   const [scaleByOpen, setScaleByOpen] = useState(false);
+  const [nameFacesOpen, setNameFacesOpen] = useState(false);
   const [prefabCaptureOpen, setPrefabCaptureOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
@@ -533,6 +535,7 @@ export default function AppFrame() {
     if (stlConversionName) return { id: 'stl-conversion', label: 'STL Conversion' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
+    if (nameFacesOpen) return { id: 'name-faces', label: 'Name Faces' };
     if (prefabCaptureOpen) return { id: 'prefab-capture', label: 'Create Prefab' };
     if (preferencesOpen) return { id: 'preferences', label: 'Preferences', closerCommandId: 'open-preferences' };
     if (hotUpdatePromptOpen) return { id: 'hot-update', label: 'Code Update' };
@@ -1833,8 +1836,36 @@ export default function AppFrame() {
   };
 
   const scaleBySourceRef = useRef('dock');
+  const nameFacesSourceRef = useRef('dock');
   const pathArraySourceRef = useRef('dock');
   const addPartSourceRef = useRef('dock');
+  // The live semantic table's names — the dialog's reuse chips. Read straight off
+  // the resident door; an unreadable/absent table is just "no chips yet".
+  const residentRegionNames = (): string[] => {
+    try {
+      const parsed = JSON.parse(String((globalThis as any).__mesh_semantic_state?.() ?? 'null'));
+      if (parsed?.table?.version !== 1 || !Array.isArray(parsed.table.regions)) return [];
+      return (parsed.table.regions as { name?: unknown }[])
+        .map((region) => String(region?.name ?? ''))
+        .filter((name) => name.length > 0)
+        .sort();
+    } catch { return []; }
+  };
+  const applyNameFaces = (name: string) => {
+    const result = withNativeMeshActionSource(nameFacesSourceRef.current, () => modelToolApiRef.current?.nameSelection(name));
+    setNameFacesOpen(false);
+    setState((prev) => ({
+      ...prev,
+      contextOpen: false,
+      openMenu: null,
+      status: result == null
+        ? 'semantic naming is unavailable — restart into the rebuilt editor'
+        : result.changed > 0
+          ? `named ${result.changed} faces "${name}" — save to make it durable`
+          : 'select one or more faces before naming',
+    }));
+    if ((result?.changed ?? 0) > 0) markActiveModelDirty();
+  };
   const applyScaleBy = (factor: number) => {
     const ok = withNativeMeshActionSource(scaleBySourceRef.current, () => modelToolApiRef.current?.scaleBy(factor) ?? false);
     setScaleByOpen(false);
@@ -2023,6 +2054,12 @@ export default function AppFrame() {
       scaleBySourceRef.current = source;
       setScaleByOpen(true);
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Scale By opened — ${source}` }));
+      return;
+    }
+    if (commandId === 'mesh-name-faces') {
+      nameFacesSourceRef.current = source;
+      setNameFacesOpen(true);
+      setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Name Faces opened — ${source}` }));
       return;
     }
     if (commandId === 'mesh-select-uv-orientation') {
@@ -5893,6 +5930,7 @@ export default function AppFrame() {
         else if (block.id === 'import-part') setImportPartOpen(false);
         else if (block.id === 'path-array') setPathArrayPrompt(null);
         else if (block.id === 'scale-by') setScaleByOpen(false);
+        else if (block.id === 'name-faces') setNameFacesOpen(false);
         else if (block.id === 'prefab-capture') setPrefabCaptureOpen(false);
         return;
       }
@@ -6866,19 +6904,6 @@ export default function AppFrame() {
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
-            onNameSelection={guarded((name: string) => {
-              const trimmed = name.trim();
-              const result = modelToolApiRef.current?.nameSelection(trimmed);
-              setState((prev) => ({
-                ...prev,
-                status: result == null
-                  ? 'semantic naming is unavailable — restart into the rebuilt editor'
-                  : result.changed > 0
-                    ? `named ${result.changed} faces "${trimmed}" — save to make it durable`
-                    : trimmed ? 'select one or more faces before naming' : 'type a region name first',
-              }));
-              if ((result?.changed ?? 0) > 0) markActiveModelDirty();
-            })}
             onRetopoTint={guarded((id) => {
               const result = modelToolApiRef.current?.retopoTint(id) ?? { changed: -1, persisted: false };
               const changed = result.changed;
@@ -7158,6 +7183,16 @@ export default function AppFrame() {
           <ScaleByDialog
             onCancel={() => { setScaleByOpen(false); setState((prev) => ({ ...prev, status: 'scale by cancelled' })); }}
             onApply={applyScaleBy}
+          />
+        </RenderProbe>
+      ) : null}
+      {nameFacesOpen ? (
+        <RenderProbe id="Name Faces Dialog">
+          <NameFacesDialog
+            selectedFaces={state.modelTool.sel}
+            existingNames={residentRegionNames()}
+            onCancel={() => { setNameFacesOpen(false); setState((prev) => ({ ...prev, status: 'name faces cancelled' })); }}
+            onApply={applyNameFaces}
           />
         </RenderProbe>
       ) : null}

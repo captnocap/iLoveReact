@@ -2666,6 +2666,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setRetopoGhostVisible(ghost?.visible === true);
       return { changed, persisted: changed > 0 ? persistRetopoGuide() : changed === 0 };
     },
+    // The caller (AppFrame) wraps this in withNativeMeshActionSource — no source
+    // stamping here, or the inner set would clobber the invocation's provenance.
     nameSelection: (name) => {
       const trimmed = name.trim();
       if (!host.__mesh_semantic_assign || !host.__mesh_semantic_state) return null;
@@ -2676,11 +2678,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         if (parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) table = parsed.table;
       } catch { /* a fresh mesh reports no table yet — declare into an empty one */ }
       const declared = declareRegion(table, trimmed, 'authored', 'name');
-      host.__mesh_action_source?.(3); // CommandSource 'toolbar' — a human named this, not automation
-      let changed = 0;
-      try {
-        changed = Number(host.__mesh_semantic_assign(declared.region.id, 0, JSON.stringify(declared.table)) ?? 0);
-      } finally { host.__mesh_action_source?.(0); }
+      const changed = Number(host.__mesh_semantic_assign(declared.region.id, 0, JSON.stringify(declared.table)) ?? 0);
       if (changed > 0) setSemanticRevision((value) => value + 1);
       return { changed };
     },

@@ -8,7 +8,7 @@ import { commandById, meshToolCommands, meshToolActive, meshTopoCommands, worldA
 import { SNAP_MODES } from '../data/content';
 import type { EditorState } from '../data/types';
 import MapPaintBar from './MapPaintBar';
-import { Box, Effect, TextInput } from '../../../runtime/primitives';
+import { Box, Effect } from '../../../runtime/primitives';
 import { importedSpecs } from '../textures/shaders';
 
 // Place Sticker (req_3025): the stamp scale presets the rail cycles through.
@@ -45,11 +45,8 @@ export default function ToolOptions(props: {
   onRetopoGhost: () => void;
   onRetopoClear: () => void;
   retopoGhostVisible: boolean;
-  /** Name the current face selection as a durable semantic region (req_3872). */
-  onNameSelection: (name: string) => void;
 }) {
   const [retopoBandId, setRetopoBandId] = useState(0);
-  const [regionNameDraft, setRegionNameDraft] = useState('');
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
   const mergePartsCommand = props.selectedPartCount >= 2 ? commandById('mesh-merge-down') : null;
@@ -97,30 +94,6 @@ export default function ToolOptions(props: {
         ) : null}
         {props.state.modelTool.selMode === 3 && !props.state.modelTool.paint ? (
           <Fragment>
-            {/* GUI semantic naming (req_3872): the Seat always had `name`; this is the
-                human's lane — select faces, type, press the tag (or Enter). */}
-            <C.HW_OptionDivider />
-            <TextInput
-              value={regionNameDraft}
-              onChange={setRegionNameDraft}
-              onKeyDown={(event: any) => {
-                if (event?.key === 'Enter' && regionNameDraft.trim() && props.state.modelTool.sel > 0) {
-                  props.onNameSelection(regionNameDraft);
-                }
-                if (event?.key === 'Escape') setRegionNameDraft('');
-              }}
-              placeholder="name faces…"
-              style={{ width: 96, height: 22, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11 }}
-            />
-            <C.HW_IconButton
-              tooltip={props.state.modelTool.sel > 0
-                ? (regionNameDraft.trim() ? `Name the selected faces "${regionNameDraft.trim()}" — a durable region the rig and Seat can address` : 'Type a region name, then press to assign it to the selected faces')
-                : 'Select faces, then name them as a durable semantic region'}
-              onPress={() => props.onNameSelection(regionNameDraft)}
-              style={{ opacity: props.state.modelTool.sel > 0 && regionNameDraft.trim() ? 1 : 0.4 }}
-            >
-              <Icon name="Tag" size={14} color={accentFor('primary')} />
-            </C.HW_IconButton>
             <C.HW_OptionDivider />
             <C.HW_Pill
               tooltip="Retopology teaching band — click to cycle the next package-saved tint color"
