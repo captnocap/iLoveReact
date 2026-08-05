@@ -258,8 +258,8 @@ export const COMMANDS: Command[] = [
   // Weld (req_3382): merge the selected vertices at their center — Blender's
   // Merge-at-Center. Edge mode collapses the selected edges' endpoints.
   { id: 'mesh-weld', menu: 'Edit', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
-  // Studio bevel: one selected sharp manifold edge or 3+-edge corner opens the
-  // shared live width popup; Apply is one native topology journal entry.
+  // Studio bevel: one selected sharp manifold edge, one 3+-edge corner, or one
+  // complete 3+ edge open-boundary loop opens the shared live width popup.
   { id: 'mesh-bevel', menu: 'Edit', scope: 'model', name: 'Bevel', icon: 'Slice', key: 'B', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
@@ -507,7 +507,11 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
     // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
     return tool.sel === 1
       ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-loopcut'), commandById('mesh-weld')]
-      : [commandById('mesh-create-face'), commandById('mesh-weld')];
+      : [
+          commandById('mesh-create-face'),
+          ...(tool.sel >= 3 ? [{ ...commandById('mesh-bevel'), name: 'Chamfer Boundary' }] : []),
+          commandById('mesh-weld'),
+        ];
   }
   return [];
 }

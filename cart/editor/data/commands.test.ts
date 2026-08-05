@@ -61,15 +61,18 @@ test('face mode exposes the whole-topology quad scan without a selection', () =>
   assert(commands.join('|') === 'mesh-tris-to-quads', 'empty Face mode did not expose exactly the global topology scan');
 });
 
-test('bevel is contextual to exactly one vertex or edge', () => {
+test('bevel is contextual to one corner, one sharp edge, or a 3+ edge boundary loop', () => {
   const vertex = ids(meshTopoCommands({ selMode: 1, sel: 1 }));
   const vertices = ids(meshTopoCommands({ selMode: 1, sel: 2 }));
   const edge = ids(meshTopoCommands({ selMode: 2, sel: 1 }));
   const edges = ids(meshTopoCommands({ selMode: 2, sel: 2 }));
+  const boundary = ids(meshTopoCommands({ selMode: 2, sel: 4 }));
   assert(vertex.join('|') === 'mesh-bevel', 'single-vertex Bevel is not the strict contextual action');
   assert(!vertices.includes('mesh-bevel') && vertices.includes('mesh-weld'), 'multi-vertex selection still exposes Bevel');
   assert(edge.includes('mesh-bevel'), 'single-edge Bevel disappeared');
   assert(!edges.includes('mesh-bevel'), 'multi-edge selection still exposes Bevel');
+  assert(boundary.includes('mesh-bevel'), 'closed 3+ edge boundary loop cannot reach Chamfer Boundary');
+  assert(meshTopoCommands({ selMode: 2, sel: 4 }).find((command) => command.id === 'mesh-bevel')?.name === 'Chamfer Boundary', 'boundary-loop action kept the ambiguous single-edge label');
 });
 
 test('B invokes Bevel in vertex and edge modes without stealing Face or Paint B', () => {

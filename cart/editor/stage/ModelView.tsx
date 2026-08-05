@@ -644,8 +644,17 @@ const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
-// Bevel: a host-owned captured-base session shared by one vertex or one edge.
-type BevelInfo = { ok: number; kind?: 'edge' | 'vertex'; defaultWidth?: number; minimumWidth?: number; maxWidth?: number };
+// Bevel: a host-owned captured-base session shared by one vertex, one sharp edge,
+// or every corner of one selected open boundary loop.
+type BevelInfo = {
+  ok: number;
+  kind?: 'edge' | 'vertex' | 'boundary';
+  defaultWidth?: number;
+  minimumWidth?: number;
+  maxWidth?: number;
+  sidesBefore?: number;
+  sidesAfter?: number;
+};
 const meshBevelBegin = (): BevelInfo | null => {
   try {
     const j = host.__mesh_bevel_begin?.();
@@ -1224,29 +1233,39 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
   };
 
-  // ── Bevel popup: exactly one selected edge or vertex, one shared native session.
+  // ── Bevel popup: one selected edge/vertex or one complete open boundary loop.
   // Width is displayed in modeling units (16 u = 1 m), while the host keeps geometry
   // and limits in metres. Every step rebuilds from the captured base; Apply commits
   // one journal entry and Cancel restores the base plus its original selection.
   const [bv, setBv] = useState<null | {
-    kind: 'edge' | 'vertex';
+    kind: 'edge' | 'vertex' | 'boundary';
     width: number;
     min: number;
     max: number;
+    sidesBefore: number;
+    sidesAfter: number;
     fallbackReason: string | null;
   }>(null);
   const openBevel = () => {
     const info = meshBevelBegin();
-    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex') ||
+    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex' && info.kind !== 'boundary') ||
         typeof info.defaultWidth !== 'number' || typeof info.minimumWidth !== 'number' || typeof info.maxWidth !== 'number') {
-      setError('Select one sharp manifold edge, or one corner with at least 3 edges');
+      setError('Select one sharp manifold edge, one corner with at least 3 edges, or every edge of one open boundary loop');
       return;
     }
     const min = roundBevelUnits(info.minimumWidth * U_PER_TILE);
     const max = Math.max(min, roundBevelUnits(info.maxWidth * U_PER_TILE));
     const width = Math.max(min, Math.min(max, roundBevelUnits(info.defaultWidth * U_PER_TILE)));
     const preview = meshBevelPreview(width / U_PER_TILE);
-    setBv({ kind: info.kind, width, min, max, fallbackReason: preview?.fallbackReason ?? null });
+    setBv({
+      kind: info.kind,
+      width,
+      min,
+      max,
+      sidesBefore: info.kind === 'boundary' ? Math.max(0, Math.trunc(info.sidesBefore ?? 0)) : 0,
+      sidesAfter: info.kind === 'boundary' ? Math.max(0, Math.trunc(info.sidesAfter ?? 0)) : 0,
+      fallbackReason: preview?.fallbackReason ?? null,
+    });
     adoptMesh(preview);
   };
   const changeBevel = (widthRaw: number) => {
@@ -4590,16 +4609,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
                     </Pressable>
                   )}
-                  {selInfo.sel === 1 && (
+                  {(selInfo.sel === 1 || selInfo.sel >= 3) && (
                     <Pressable
                       onPress={openBevel}
-                      tooltip="Bevel selected sharp manifold edge — opens a live width preview"
+                      tooltip={selInfo.sel === 1
+                        ? 'Bevel selected sharp manifold edge — opens a live width preview'
+                        : 'Chamfer the complete selected open boundary loop — N sides become 2N'}
                       style={{
                         paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
                         backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
                       }}
                     >
-                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Bevel</Text>
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>{selInfo.sel === 1 ? 'Bevel' : 'Chamfer Boundary'}</Text>
                     </Pressable>
                   )}
                   {selInfo.sel === 1 && (
@@ -4829,10 +4850,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Box>
       ) : null}
 
-      {/* Bevel sizing: the old Studio edge/vertex chamfer brought onto the current
-          host-native indexed mesh. Width is modeling u; every step is a fresh preview
-          from the captured base. Apply journals once, while ✕ / Esc restores the base
-          and the exact original selection. */}
+      {/* Bevel sizing: one corner/sharp edge or one complete open boundary loop on
+          the host-native indexed mesh. Width is modeling u; every step is a fresh
+          preview from the captured base. Apply journals once, while ✕ / Esc restores
+          the base and the exact original selection. */}
       {bv ? (
         <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
           <Col
@@ -4844,7 +4865,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           >
             <Row style={{ alignItems: 'center' }}>
               <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
-                {`Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
+                {bv.kind === 'boundary'
+                  ? `Chamfer Boundary${bv.sidesBefore > 0 ? ` · ${bv.sidesBefore} → ${bv.sidesAfter} sides` : ''}`
+                  : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
               </Text>
               <Pressable
                 onPress={() => closeBevel(false)}

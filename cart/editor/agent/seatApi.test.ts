@@ -626,6 +626,8 @@ test('bevel is one captured native session and cancels a rejected preview', () =
   (globalThis as any).__mesh_bevel_preview = () => JSON.stringify({ ok: 1, key: 'preview', count: 36 });
   (globalThis as any).__mesh_bevel_end = (commit: number) => { ended = commit; return JSON.stringify({ ok: 1, key: 'doc', count: 36 }); };
   assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02 } }).ok && ended === 1, 'valid bevel did not commit atomically');
+  (globalThis as any).__mesh_bevel_begin = () => JSON.stringify({ ok: 1, kind: 'boundary', sidesBefore: 4, sidesAfter: 8 });
+  assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02 } }).ok && ended === 1, 'generalized boundary chamfer stayed unreachable through Bevel');
 });
 
 test('resident destructive and constructive topology doors are reachable', () => {

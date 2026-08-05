@@ -1655,7 +1655,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'bevel': {
         const result = seat.bevel(Number(args.width ?? 0));
-        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge or vertex and use a valid width');
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge/vertex or one complete 3+ edge open boundary loop, then use a valid width');
       }
       case 'inset': {
         const result = seat.inset(
