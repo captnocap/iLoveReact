@@ -6,7 +6,7 @@
 //     --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-library-search.test.js
-import { searchLibrary } from './librarySearch';
+import { librarySearchHitKey, resolveLibrarySearchSelection, searchLibrary } from './librarySearch';
 import type { Asset, ModelPackage } from './types';
 
 let passed = 0, failed = 0;
@@ -50,6 +50,19 @@ test('name matches rank ahead of metadata-only matches', () => {
 test('blank and unmatched queries return no result rows', () => {
   assert(searchLibrary('   ', [asset({})], [model({})]).length === 0, 'blank query created a global dump');
   assert(searchLibrary('no-such-asset', [asset({})], [model({})]).length === 0, 'unmatched query returned an item');
+});
+
+test('mixed model and material results resolve to exactly one highlighted row', () => {
+  const hits = searchLibrary('source', [asset({ id: 'water', name: 'Water', sourceId: 'source' })], [
+    model({ id: 'speaker_001', name: 'Speaker', source: 'source model' }),
+  ]);
+  const initial = resolveLibrarySearchSelection(hits, null, 'water', 'model:speaker_001');
+  assert(initial === 'asset:water', `independent active states did not collapse to one row: ${initial}`);
+  assert(hits.filter((hit) => librarySearchHitKey(hit) === initial).length === 1, 'more than one row owned the initial highlight');
+
+  const clickedModel = resolveLibrarySearchSelection(hits, 'model:speaker_001', 'water', 'model:speaker_001');
+  assert(clickedModel === 'model:speaker_001', 'the last clicked result did not take exclusive selection');
+  assert(hits.filter((hit) => librarySearchHitKey(hit) === clickedModel).length === 1, 'more than one row owned the clicked highlight');
 });
 
 if (failed > 0) throw new Error(`${failed} library-search test(s) failed`);

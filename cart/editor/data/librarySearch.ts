@@ -8,6 +8,33 @@ export type LibrarySearchHit =
   | { kind: 'model'; model: ModelPackage }
   | { kind: 'asset'; asset: Asset };
 
+export function librarySearchHitKey(hit: LibrarySearchHit): string {
+  return hit.kind === 'model' ? `model:${hit.model.id}` : `asset:${hit.asset.id}`;
+}
+
+/**
+ * A mixed result list has one selection, even though the editor separately
+ * retains an open model document and a last-used catalog asset. A click-owned
+ * preferred key wins; on first render the catalog selection wins when present,
+ * then the open model is the fallback.
+ */
+export function resolveLibrarySearchSelection(
+  hits: readonly LibrarySearchHit[],
+  preferredKey: string | null,
+  activeAssetId: string,
+  activeDocumentId: string,
+): string | null {
+  const available = new Set(hits.map(librarySearchHitKey));
+  if (preferredKey && available.has(preferredKey)) return preferredKey;
+  const assetKey = `asset:${activeAssetId}`;
+  if (available.has(assetKey)) return assetKey;
+  if (activeDocumentId.startsWith('model:')) {
+    const modelKey = `model:${activeDocumentId.slice('model:'.length)}`;
+    if (available.has(modelKey)) return modelKey;
+  }
+  return null;
+}
+
 function normalizedQuery(query: string): string {
   return query.trim().toLowerCase();
 }

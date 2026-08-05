@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { Asset, ModelPackage } from '../data/types';
-import type { LibrarySearchHit } from '../data/librarySearch';
+import { librarySearchHitKey, resolveLibrarySearchSelection, type LibrarySearchHit } from '../data/librarySearch';
 
 function assetKind(asset: Asset): string {
   if (asset.tab === 'Skins') return 'MATERIAL';
@@ -16,6 +17,13 @@ export default function LibrarySearchResults(props: {
   onAsset: (asset: Asset) => void;
   onModel: (model: ModelPackage) => void;
 }) {
+  const [preferredSelection, setPreferredSelection] = useState<string | null>(null);
+  const selectedKey = resolveLibrarySearchSelection(
+    props.hits,
+    preferredSelection,
+    props.activeAssetId,
+    props.activeDocumentId,
+  );
   return (
     <C.HW_ContentTree>
       {props.hits.length === 0 ? (
@@ -25,17 +33,20 @@ export default function LibrarySearchResults(props: {
         </C.HW_EmptyState>
       ) : props.hits.map((hit) => {
         const item = hit.kind === 'model' ? hit.model : hit.asset;
-        const active = hit.kind === 'model'
-          ? props.activeDocumentId === `model:${hit.model.id}`
-          : props.activeAssetId === hit.asset.id;
+        const key = librarySearchHitKey(hit);
+        const active = key === selectedKey;
         const Row = active ? C.HW_TreeRowOn : C.HW_TreeRow;
         const Label = active ? C.HW_TreeLabelOn : C.HW_TreeLabel;
         const Count = active ? C.HW_TreeCountOn : C.HW_TreeCount;
         const color = accentFor(active ? 'stageBadgeText' : 'textDim');
         return (
           <Row
-            key={`${hit.kind}:${item.id}`}
-            onPress={() => hit.kind === 'model' ? props.onModel(hit.model) : props.onAsset(hit.asset)}
+            key={key}
+            onPress={() => {
+              setPreferredSelection(key);
+              if (hit.kind === 'model') props.onModel(hit.model);
+              else props.onAsset(hit.asset);
+            }}
           >
             <Icon name={hit.kind === 'model' ? 'Box' : hit.asset.tab === 'Skins' ? 'Palette' : 'Package'} size={13} color={color} />
             <Label numberOfLines={1} noWrap>{item.name}</Label>
