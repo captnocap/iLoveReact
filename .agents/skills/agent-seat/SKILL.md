@@ -544,6 +544,69 @@ pair, but never invalidates the raw lesson: read the surrounding firehose events
 journal labels in order. Do not clear or ask the user to repeat a demonstration merely because
 `examples` is empty.
 
+### Retopology playbook — the measured reference retopo
+
+The repo carries one complete, finished exemplar of this whole workflow, done by the user's
+own hand: a Tripo-generated triangle soup
+(`cart/editor/data/models/props/Van_Seat_Soup/mesh/van_seat_soup.glb` — 1,998 tris, 1,049
+verts, **26 intersecting shells**, zero mirror symmetry) retopologized into
+`cart/editor/data/models/props/car_backseats/mesh/doc.blob` (RJMD v4). Every number below is
+measured from those two files. The blob's face-group ids run in creation order, so the build
+sequence itself is recoverable data. When asked to retopologize a soup, this is the shape of
+DONE — state your plan against these metrics before the first delete.
+
+**Target metrics (what the finished exemplar measures):**
+
+- **~50% of the soup's triangle budget.** 1,998 → 1,015 tris = 531 authored faces. A retopo
+  that lands near or above the soup's count is not a retopo.
+- **≈90% quads.** 480 quads, 49 lone triangles, 2 three-tri faces. Lone triangles are legal
+  ONLY at curvature poles and corner terminations — in the exemplar they cluster at the
+  headrest crowns and cushion corners, while the long band rows are 25-quad runs with ZERO
+  triangles. A lone triangle in the middle of a flat band is a defect, not a style.
+- **Shells collapse ~4×.** 26 soup shells → 6. Everything permanently joined fused into ONE
+  continuous shell (cushion + backrest + side bolsters, 746 tris); genuinely separate pieces
+  stayed separate small shells (the two headrests, headrest posts as 12-tri boxes).
+- **Median ~8 mm surface fidelity** to the source on a ~1 m object. The p99 (85 mm) is
+  where detail was deliberately dropped, not error — see the next point.
+- **Symmetry is IMPOSED, never inherited.** The soup has 0 exactly-mirrored verts; the
+  retopo is 95% bilateral within 4 mm with 27 verts pinned on the centerline. AI soups are
+  always slightly askew; the retopo is where the model becomes symmetric.
+- **Adaptive quad size.** Edge lengths 14–190 mm (median 48 mm), aspect ratio median ~2.9:
+  small quads follow curvature, long strip quads cross flat panels. Uniform density is
+  wrong in both directions.
+
+**Drop detail on purpose.** The soup's bolt heads, floor sliders, and a ~350-tri
+seatbelt-buckle hardware cluster simply do not exist in the retopo (its bbox floor rose from
+y=0 to y=0.087 — the under-floor rails were cut entirely). Sub-centimeter hardware becomes
+paint, not topology. Spend the budget on silhouette and the big readable surfaces.
+
+**The measured build order** (replayed from the blob's group-id sequence):
+
+1. **One half first.** The right half of the body went down as side panel → back corner →
+   headrest + its posts (faces 0–74 of 531).
+2. **Mirror it, then repair the seam.** The left half lands as one contiguous block (faces
+   75–174) and carries the densest lone-triangle cleanup. Today that whole step is
+   `mirror-replace` (or an armed Mirror Edit from the start) plus `weld-pairs` down the
+   centerline — the exemplar is what that verb was built from.
+3. **Full-width band rows.** Backrest front, cushion top, cushion front, backrest top,
+   headrest crowns, underside — each laid as full-width quad strips (the zero-triangle
+   25-quad blocks). This is exactly the retopo-bands + Delete Faces → Create Face corridor
+   work described above, row by row, `normalize-widths` per row.
+4. **Closeout.** Underside faces and a last handful of bridging quads.
+
+**Name as you go — do better than the exemplar.** The reference blob's semantic table is
+EMPTY and it has a single part (`backseats`, one range): it predates the naming ruling and
+is exactly the debt SEMBLOB-0801 outlaws. Your retopo names each band and region at the
+operation that creates it (`create-face <name>`, `name`) — `cushion`, `backrest`,
+`bolster`, `headrest`… — because the entire point of a retopo is a skinnable, riggable
+surface, and names are that rig's input. `unnamed: 0` at save, as everywhere else.
+
+**Session mechanics for a retopo specifically:** tint the whole source and freeze it with
+the retopo-bands ghost BEFORE the first delete; keep the corridor manifold at every step
+(delete mating soup faces on both sides, bridge, `weld-pairs` each seam pair); and finish by
+toggling the ghost over the result — coincident curvature reinforces, silhouette drift
+separates visibly.
+
 ---
 
 ## Selector grammar — complete
