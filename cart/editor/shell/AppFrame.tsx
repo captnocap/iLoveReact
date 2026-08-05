@@ -24,6 +24,7 @@ import PreferencesDialog from './PreferencesDialog';
 import HotUpdateDialog from './HotUpdateDialog';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
+import ModelActionMenu from '../library/ModelActionMenu';
 import WorldBibleIndexPanel from '../worldBible/WorldBibleIndexPanel';
 import { requestWorldBibleReview, worldBibleController, worldBibleHasDrafts } from '../worldBible/controller';
 import Workspace from '../stage/Workspace';
@@ -1246,6 +1247,12 @@ export default function AppFrame() {
   // (the stage is offset right by the rail + content browser). The trigger spreads
   // onto the model surface deep in the tree.
   const modelMenu = useContextMenu();
+
+  // Content-browser menus must mount here too. Mounting this inside the left
+  // panel clipped it at the panel/stage boundary even with a high z-index,
+  // because z-order cannot change an absolute node's containing block.
+  const libraryModelMenu = useContextMenu();
+  const [libraryMenuModelId, setLibraryMenuModelId] = useState<string | null>(null);
 
   // The WORLD surface's right-click quick menu (req_2733) — same root treatment.
   // The viewport picks the piece under the cursor and reports it here with the
@@ -6334,6 +6341,9 @@ export default function AppFrame() {
     () => visibleModelPackages(state.modelOverrides, state.modelDupes),
     [state.modelOverrides, state.modelDupes],
   );
+  const libraryMenuModel = libraryMenuModelId
+    ? visibleModels.find((model) => model.id === libraryMenuModelId) ?? null
+    : null;
   // The tree HOLDS ITS SHAPE while a rename is typing (req_3246): its Models rows
   // are name-sorted, so every keystroke would re-rank the renamed row through the
   // keyed sibling list — a reorder this reconciler answers with ghost/dropped rows
@@ -6774,12 +6784,13 @@ export default function AppFrame() {
             contentTree={contentTreeNodes}
             models={visibleModels}
             modelRenamingId={state.modelRenamingId}
-            onModelStartRename={startRenameModel}
             onModelRename={renameModel}
             onModelFinishRename={finishRenameModel}
             onModelFavorite={favoriteModel}
-            onModelDuplicate={duplicateModel}
-            onModelDelete={deleteModel}
+            onModelContext={(model, event) => {
+              setLibraryMenuModelId(model.id);
+              libraryModelMenu.triggerProps.onRightClick(event);
+            }}
           />}
         </RenderProbe> : null}
         <RenderProbe id="Workspace">
@@ -7216,6 +7227,23 @@ export default function AppFrame() {
           </RenderProbe>
         );
       })() : null}
+      {/* Content-browser model menu — late root mount is the clipping boundary,
+          exactly like the model-stage and world-piece menus below. */}
+      {libraryMenuModel ? (
+        <libraryModelMenu.ContextMenu onDismiss={() => setLibraryMenuModelId(null)}>
+          <ModelActionMenu
+            model={libraryMenuModel}
+            onRename={startRenameModel}
+            onFavorite={favoriteModel}
+            onDuplicate={duplicateModel}
+            onDelete={deleteModel}
+            onClose={() => {
+              libraryModelMenu.close();
+              setLibraryMenuModelId(null);
+            }}
+          />
+        </libraryModelMenu.ContextMenu>
+      ) : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor
           (window origin) and hit-tests above everything (paint order). Self-gates
           on right-click; the kind check keeps it out of non-model surfaces. */}

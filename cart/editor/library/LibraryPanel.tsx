@@ -10,12 +10,10 @@
 // the measured space — no fixed page size leaving dead rows. Selecting a
 // single model shows its parent folder's gallery with that cell highlighted,
 // and the detail card resolves models as well as materials in both states.
-import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Box, Image } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useMeasure } from '../../../runtime/hooks/useMeasure';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelPackage, WorldObject } from '../data/types';
 import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT } from '../data/catalog';
@@ -33,7 +31,6 @@ import {
 } from '../data/content';
 import ContentTree from './ContentTree';
 import ModelPackageBrowser from './ModelPackageBrowser';
-import ModelActionMenu from './ModelActionMenu';
 import ModelDetailCard from './ModelDetailCard';
 import MaterialCatalogRow from './MaterialCatalogRow';
 import FolderSummary from './FolderSummary';
@@ -65,15 +62,13 @@ export default function LibraryPanel(props: {
   contentTree: ContentNode[];
   models: ModelPackage[];
   modelRenamingId: string | null;
-  onModelStartRename: (id: string) => void;
   onModelRename: (id: string, name: string) => void;
   onModelFinishRename: () => void;
   onModelFavorite: (id: string) => void;
-  onModelDuplicate: (model: ModelPackage) => void;
-  onModelDelete: (id: string) => void;
+  /** AppFrame owns floating menus at window origin; the panel only identifies
+   *  the model and forwards the host's window-space pointer coordinates. */
+  onModelContext: (model: ModelPackage, event: { x: number; y: number }) => void;
 }) {
-  const modelMenu = useContextMenu();
-  const [menuModel, setMenuModel] = useState<ModelPackage | null>(null);
   const gridArea = useMeasure();
   const expanded = props.state.libraryExpanded;
   const renamingModel = props.modelRenamingId
@@ -133,8 +128,7 @@ export default function LibraryPanel(props: {
     // Only model-home rows (whose id is a model's folderId) open the menu.
     const model = props.models.find((item) => item.folderId === id);
     if (!model) return;
-    setMenuModel(model);
-    modelMenu.triggerProps.onRightClick(event);
+    props.onModelContext(model, event);
   };
 
   const favSelected = props.contentFolder === 'materials-favorites';
@@ -214,7 +208,7 @@ export default function LibraryPanel(props: {
       selectedFolderId={selectedModel ? props.contentFolder : undefined}
       models={props.models}
       onModel={props.onModel}
-      onModelRightClick={(model, event) => { setMenuModel(model); modelMenu.triggerProps.onRightClick(event); }}
+      onModelRightClick={props.onModelContext}
     />
   ) : showMaterialCatalog ? (
     <C.HW_LibMaterialGrid>
@@ -338,18 +332,6 @@ export default function LibraryPanel(props: {
       ) : folderTab ? (
         <ContextToolControls mode={props.mode} activeObject={props.activeObject} />
       ) : null}
-      <modelMenu.ContextMenu>
-        {menuModel ? (
-          <ModelActionMenu
-            model={menuModel}
-            onRename={props.onModelStartRename}
-            onFavorite={props.onModelFavorite}
-            onDuplicate={props.onModelDuplicate}
-            onDelete={props.onModelDelete}
-            onClose={modelMenu.close}
-          />
-        ) : null}
-      </modelMenu.ContextMenu>
     </Panel>
   );
 }
