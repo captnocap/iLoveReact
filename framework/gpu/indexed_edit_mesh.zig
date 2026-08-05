@@ -1478,7 +1478,10 @@ pub const Mesh = struct {
     }
 
     /// Dissolve known connected coplanar faces into one ordered boundary face.
-    /// Shared seams cancel by vertex-id edge keys; no position reconstruction occurs.
+    /// Shared seams cancel by vertex-id edge keys after every edge is split at the
+    /// selection vertices lying strictly inside it — a T-junction seam (one side
+    /// spans in one run what the other side splits mid-way) is the same geometry
+    /// and must cancel just like an exactly-shared edge (req_3800).
     fn mergeFaceIds(mesh: *Mesh, selected: []const u32, preferred_diagonal: ?[2]u32) !?MergedFace {
         if (selected.len < 2) return null;
         if (selected[0] >= mesh.faces.items.len or !mesh.faces.items[selected[0]].alive) return null;
@@ -1496,21 +1499,79 @@ pub const Mesh = struct {
         }
         if (!selectedFacesAreCoplanar(mesh, selected)) return null;
 
+        // Every vertex the selection references: candidate T-points for edge splitting.
+        var cluster = std.ArrayListUnmanaged(u32).empty;
+        defer cluster.deinit(mesh.allocator);
+        var cluster_seen = std.AutoHashMapUnmanaged(u32, void).empty;
+        defer cluster_seen.deinit(mesh.allocator);
+        for (selected) |face_id| {
+            for (mesh.faces.items[face_id].vertices.items) |vertex_id| {
+                const entry = try cluster_seen.getOrPut(mesh.allocator, vertex_id);
+                if (!entry.found_existing) try cluster.append(mesh.allocator, vertex_id);
+            }
+        }
+
         const Directed = struct { from: u32, to: u32, uv: Vec2, key: u64 };
         var uses = std.AutoHashMapUnmanaged(u64, u32).empty;
         defer uses.deinit(mesh.allocator);
         var directed = std.ArrayListUnmanaged(Directed).empty;
         defer directed.deinit(mesh.allocator);
+        const Split = struct { t: f32, vertex: u32 };
+        var splits = std.ArrayListUnmanaged(Split).empty;
+        defer splits.deinit(mesh.allocator);
         for (selected) |face_id| {
             const face = &mesh.faces.items[face_id];
+            const corner_count = face.vertices.items.len;
             for (face.vertices.items, 0..) |from, corner| {
-                const to = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                const to = face.vertices.items[(corner + 1) % corner_count];
                 if (from == to) continue;
-                const key = edgeKey(from, to);
+                // A T-junction seam: this edge spans in one run what the facing
+                // side splits at mid-run vertices. Cancellation is by edge key, so
+                // decompose the run at every selection vertex strictly inside it —
+                // the sub-edges then cancel exactly against the split side.
+                const from_position = mesh.vertices.items[from].position;
+                const to_position = mesh.vertices.items[to].position;
+                const axis = sub3(to_position, from_position);
+                const axis_length_squared = dot3(axis, axis);
+                splits.clearRetainingCapacity();
+                if (axis_length_squared > 1e-12) {
+                    const line_tolerance = @max(MERGE_FACE_PLANE_ABS_EPS, @sqrt(axis_length_squared) * MERGE_FACE_PLANE_REL_EPS);
+                    const weld_squared = IMPORT_WELD_EPS * IMPORT_WELD_EPS;
+                    for (cluster.items) |vertex_id| {
+                        if (vertex_id == from or vertex_id == to) continue;
+                        const point = mesh.vertices.items[vertex_id].position;
+                        const t = dot3(sub3(point, from_position), axis) / axis_length_squared;
+                        if (t <= 0 or t >= 1) continue;
+                        if (length3(sub3(point, lerp3(from_position, to_position, t))) > line_tolerance) continue;
+                        if (distanceSquared(point, from_position) <= weld_squared) continue;
+                        if (distanceSquared(point, to_position) <= weld_squared) continue;
+                        try splits.append(mesh.allocator, .{ .t = t, .vertex = vertex_id });
+                    }
+                    std.mem.sort(Split, splits.items, {}, struct {
+                        fn lessThan(_: void, first: Split, second: Split) bool {
+                            return first.t < second.t;
+                        }
+                    }.lessThan);
+                }
+                const uv_from = face.uvs.items[corner];
+                const uv_to = face.uvs.items[(corner + 1) % corner_count];
+                var run_from = from;
+                var run_uv = uv_from;
+                for (splits.items) |split| {
+                    if (split.vertex == run_from) continue;
+                    const key = edgeKey(run_from, split.vertex);
+                    const entry = try uses.getOrPut(mesh.allocator, key);
+                    if (!entry.found_existing) entry.value_ptr.* = 0;
+                    entry.value_ptr.* += 1;
+                    try directed.append(mesh.allocator, .{ .from = run_from, .to = split.vertex, .uv = run_uv, .key = key });
+                    run_from = split.vertex;
+                    run_uv = lerp2(uv_from, uv_to, split.t);
+                }
+                const key = edgeKey(run_from, to);
                 const entry = try uses.getOrPut(mesh.allocator, key);
                 if (!entry.found_existing) entry.value_ptr.* = 0;
                 entry.value_ptr.* += 1;
-                try directed.append(mesh.allocator, .{ .from = from, .to = to, .uv = face.uvs.items[corner], .key = key });
+                try directed.append(mesh.allocator, .{ .from = run_from, .to = to, .uv = run_uv, .key = key });
             }
         }
         var next = std.AutoHashMapUnmanaged(u32, u32).empty;

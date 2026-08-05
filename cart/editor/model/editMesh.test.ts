@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-edit-mesh.test.js
 
-import { cylinder, editMeshToGeometry, extrudeEdge, loopCutFromFace, mirrorEditAxes, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
+import { cylinder, editMeshToGeometry, extrudeEdge, loopCutFromFace, mergeFaces, mirrorEditAxes, mirrorMesh, plane, symmetrize, type EditMesh, type V3 } from './editMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -210,6 +210,42 @@ test('a shared selected edge overrides the direction slider like the reference',
   };
   const cut = loopCutFromFace(mesh, { face: 0, direction: 0, cuts: 1, offset: 0.5, selectedFaces: [0, 1] });
   assert(cut.faces.length === 4, `both selected quads should split across their shared edge, got ${cut.faces.length}`);
+});
+
+test('merge faces dissolves a T-junction seam the staged path could already merge (req_3800)', () => {
+  // One tall left quad beside two stacked right quads: the seam at x=1 is a
+  // T-junction (the left face spans it in one run, the right pair splits it at
+  // y=1). Geometrically this region is one flat rectangle — the one-shot merge
+  // must accept it, not force the user through staged sub-merges.
+  const mesh: EditMesh = {
+    verts: [
+      [0, 0, 0], [1, 0, 0], [2, 0, 0],
+      [1, 1, 0], [2, 1, 0],
+      [0, 2, 0], [1, 2, 0], [2, 2, 0],
+    ],
+    faces: [
+      { loop: [0, 1, 6, 5] },  // left tall quad
+      { loop: [1, 2, 4, 3] },  // right bottom quad
+      { loop: [3, 4, 7, 6] },  // right top quad
+    ],
+  };
+  const merged = mergeFaces(mesh, [0, 1, 2]);
+  assert(merged !== null, 'T-junction region must merge in one shot');
+  assert(merged!.faces.length === 1, `expected one fused face, got ${merged!.faces.length}`);
+  assert(merged!.faces[0].loop.length === 4, `expected a clean quad, got a ${merged!.faces[0].loop.length}-gon`);
+});
+
+test('merge faces still refuses a genuinely holed selection', () => {
+  // A 3x3 grid of quads minus its centre: the 8-face ring has two boundary
+  // loops; the T-junction fix must not soften this into a broken n-gon.
+  const ring: EditMesh = { verts: [], faces: [] };
+  for (let y = 0; y <= 3; y += 1) for (let x = 0; x <= 3; x += 1) ring.verts.push([x, y, 0]);
+  const at = (x: number, y: number) => y * 4 + x;
+  for (let y = 0; y < 3; y += 1) for (let x = 0; x < 3; x += 1) {
+    if (x === 1 && y === 1) continue;
+    ring.faces.push({ loop: [at(x, y), at(x + 1, y), at(x + 1, y + 1), at(x, y + 1)] });
+  }
+  assert(mergeFaces(ring, ring.faces.map((_, i) => i)) === null, 'holed ring must still refuse to merge');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

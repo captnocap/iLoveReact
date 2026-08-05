@@ -173,6 +173,26 @@ detection covers every source corner missing from the fused boundary, so the
 old debris drops with it. For an isolated face, loop cut it once and merge the
 halves back.
 
+### T-junction seams merge in one shot (req_3800)
+
+Seam cancellation is geometric, not id-exact. A T-junction seam — one face
+spans in a single edge run what the facing side splits at a mid-run vertex
+(cuts landing at different heights per column produce these) — is the same
+geometry as an exactly-shared edge and dissolves the same way: before the
+directed-edge cancellation, `mergeFaceIds` splits every selected face's edge
+at any selection vertex lying strictly inside it (line tolerance
+`max(MERGE_FACE_PLANE_ABS_EPS, len × MERGE_FACE_PLANE_REL_EPS)`, endpoints
+excluded by `IMPORT_WELD_EPS`), so partially-overlapping seam runs decompose
+into sub-edges that cancel exactly. Previously such a region refused to merge
+one-shot and forced the user through staged sub-merges (whose collinear-drop
+happened to dissolve the offending T-verts) — a fake restriction, since the
+staged path reached the same single face. Genuine refusals stand: holed
+selections (two boundary loops) and pinched boundaries (two outgoing boundary
+edges at one vertex) still return null. The TS twin
+(`cart/editor/model/editMesh.ts mergeFaces`) carries the identical split rule.
+Unit-pinned in `framework/testing/unit/mesh_edit.zig` and
+`cart/editor/model/editMesh.test.ts`.
+
 ## Outliner row ↔ range reconciler — req_3763 (P0-1/P0-2)
 
 The roll call proves the HOST partition; the outliner ROW table (cart state)

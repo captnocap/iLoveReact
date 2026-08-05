@@ -2798,15 +2798,66 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
   // b→a, since adjacent faces wind oppositely on it) — those cancel. A BOUNDARY edge
   // appears only one way; `next[a] = b` chains it into the outer loop, already wound
   // consistently with the selected faces.
-  const dir = new Set<string>();
-  for (const f of selFaces) { const L = f.loop; for (let i = 0; i < L.length; i += 1) dir.add(`${L[i]}>${L[(i + 1) % L.length]}`); }
-  const next = new Map<number, number>();
+  //
+  // Cancellation is geometric, not id-exact (req_3800): a T-junction seam — one side
+  // spans in one run what the other side splits at a mid-run vertex — is the same
+  // geometry as an exactly-shared edge and must dissolve the same way. Every edge is
+  // split at the selection vertices lying strictly inside it before matching, so
+  // partially-overlapping seam runs decompose into sub-edges that cancel exactly.
+  const clusterIds: number[] = [];
+  {
+    const seen = new Set<number>();
+    for (const f of selFaces) for (const vi of f.loop) if (!seen.has(vi)) { seen.add(vi); clusterIds.push(vi); }
+  }
+  const MERGE_WELD_EPS = 1 / 1024;               // matches indexed_edit_mesh IMPORT_WELD_EPS
+  const MERGE_LINE_ABS_EPS = MERGE_WELD_EPS * 2; // matches MERGE_FACE_PLANE_ABS_EPS
+  const MERGE_LINE_REL_EPS = 0.00001;            // matches MERGE_FACE_PLANE_REL_EPS
+  const uses = new Map<string, number>();
+  const subEdges: Array<[number, number]> = [];
   for (const f of selFaces) {
     const L = f.loop;
     for (let i = 0; i < L.length; i += 1) {
-      const a = L[i], b = L[(i + 1) % L.length];
-      if (!dir.has(`${b}>${a}`)) next.set(a, b); // reverse absent → it's a boundary edge
+      const from = L[i], to = L[(i + 1) % L.length];
+      if (from === to) continue;
+      const a = m.verts[from], b = m.verts[to];
+      const axis = sub(b, a);
+      const axisLenSq = dot(axis, axis);
+      const splits: Array<{ t: number; vertex: number }> = [];
+      if (axisLenSq > 1e-12) {
+        const lineTol = Math.max(MERGE_LINE_ABS_EPS, Math.sqrt(axisLenSq) * MERGE_LINE_REL_EPS);
+        for (const vi of clusterIds) {
+          if (vi === from || vi === to) continue;
+          const p = m.verts[vi];
+          const t = dot(sub(p, a), axis) / axisLenSq;
+          if (t <= 0 || t >= 1) continue;
+          const off: V3 = [p[0] - (a[0] + axis[0] * t), p[1] - (a[1] + axis[1] * t), p[2] - (a[2] + axis[2] * t)];
+          if (Math.hypot(off[0], off[1], off[2]) > lineTol) continue;
+          const da = sub(p, a), db = sub(p, b);
+          if (Math.hypot(da[0], da[1], da[2]) <= MERGE_WELD_EPS) continue;
+          if (Math.hypot(db[0], db[1], db[2]) <= MERGE_WELD_EPS) continue;
+          splits.push({ t, vertex: vi });
+        }
+        splits.sort((x, y) => x.t - y.t);
+      }
+      let run = from;
+      for (const s of splits) {
+        if (s.vertex === run) continue;
+        const key = run < s.vertex ? `${run}:${s.vertex}` : `${s.vertex}:${run}`;
+        uses.set(key, (uses.get(key) ?? 0) + 1);
+        subEdges.push([run, s.vertex]);
+        run = s.vertex;
+      }
+      const key = run < to ? `${run}:${to}` : `${to}:${run}`;
+      uses.set(key, (uses.get(key) ?? 0) + 1);
+      subEdges.push([run, to]);
     }
+  }
+  const next = new Map<number, number>();
+  for (const [a, b] of subEdges) {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (uses.get(key) !== 1) continue; // shared (cancelled) seam run
+    if (next.has(a)) return null;      // pinched boundary — two outgoing edges
+    next.set(a, b);
   }
   if (next.size < 3) return null;
 

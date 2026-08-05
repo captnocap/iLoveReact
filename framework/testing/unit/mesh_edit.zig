@@ -790,6 +790,48 @@ test "dissolving an irregular four-quad grid re-tessellates the clean boundary a
     }
 }
 
+test "merge faces dissolves a T-junction seam the staged path could already merge (req_3800)" {
+    // One tall left quad next to two stacked right quads. The seam at x=1 is a
+    // T-junction: the left face spans it with ONE edge (y 0→2) while the right
+    // faces split it at y=1 — a vertex the left face never references. The user
+    // proved this region merges fine when staged (merge the right pair first,
+    // then the two full-height faces), so the one-shot merge refusing it is a
+    // fake restriction: edge cancellation by vertex id alone can't see that the
+    // overlapping seam runs are the same geometry.
+    const p = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 },
+        .{ 1, 1, 0 }, .{ 2, 1, 0 },
+        .{ 0, 2, 0 }, .{ 1, 2, 0 }, .{ 2, 2, 0 },
+    };
+    const triangles = [_][3]usize{
+        // left tall quad (0,0)-(1,0)-(1,2)-(0,2)
+        .{ 0, 1, 6 }, .{ 0, 6, 5 },
+        // right bottom quad (1,0)-(2,0)-(2,1)-(1,1)
+        .{ 1, 2, 4 }, .{ 1, 4, 3 },
+        // right top quad (1,1)-(2,1)-(2,2)-(1,2)
+        .{ 3, 4, 7 }, .{ 3, 7, 6 },
+    };
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], p[point][0..]);
+        }
+    }
+    const groups = [_]u32{ 30, 30, 31, 31, 32, 32 };
+    const selected = [_]bool{true} ** triangles.len;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], triangles.len, groups[0..], null);
+    defer indexed.deinit();
+    const merged = (try indexed.mergeSelected(selected[0..])).?;
+    // The T-vertex (1,1) and the collinear rim verts (1,0),(1,2),(2,1) all leave
+    // the boundary, so the merge re-tessellates down to one clean 2x2 quad.
+    try testing.expect(merged.retessellated);
+    try testing.expectEqual(@as(usize, 4), indexed.faces.items[merged.face_id].vertices.items.len);
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 2), lowered.tri_count);
+}
+
 test "tris to quads recovers every selected cell instead of pairing across grid seams" {
     // Two adjacent squares arrive as four independent triangles. The middle vertical
     // edge is also a legal triangle adjacency, so an arbitrary first-match walk can
