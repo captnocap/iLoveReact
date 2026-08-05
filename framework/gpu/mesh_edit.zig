@@ -1061,7 +1061,10 @@ fn faceCameraFacing(cam: model_paint.Camera, face: u32) bool {
 
 /// Refresh the camera-derived vertex/edge target masks. Overlay presentation,
 /// click candidates, and marquee selection all consume this one boundary.
-pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
+/// (vp_w, vp_h) is the REAL viewport: edge occlusion samples are concentrated on
+/// the on-screen span of each edge, so a zoomed-in edge whose endpoints are far
+/// off-screen (or hidden) still draws where you can actually see it (req_3859).
+pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bool {
     if (!ensureTopology()) return false;
     if (g_camera_visible_vert == null or g_camera_visible_vert.?.len != g_vert_count) {
         if (g_camera_visible_vert) |mask| alloc.free(mask);
@@ -1084,25 +1087,58 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
 
     const corners = g_corner_vert orelse return false;
     const face_count = model_paint.faceCount();
+    // Pass 1: face-touch candidates — every corner of a front-facing in-scope face.
+    // This back-face mask is the edge precondition even where occlusion later prunes
+    // the vertex markers themselves, so keep it separate from the final mask.
+    const touched = alloc.alloc(bool, g_vert_count) catch return false;
+    defer alloc.free(touched);
+    @memset(touched, false);
     var face: u32 = 0;
     while (face < face_count) : (face += 1) {
         if (!faceInScope(face) or !faceCameraFacing(cam, face)) continue;
         var corner: u32 = 0;
         while (corner < 3) : (corner += 1) {
             const vertex = corners[face * 3 + corner];
-            if (vertex < visible_vertices.len) visible_vertices[vertex] = true;
+            if (vertex < touched.len) touched[vertex] = true;
         }
     }
-    // Surface mode hides what the surface hides (req_3856): a camera-facing vertex
-    // sitting BEHIND a nearer front face (greebles under a hull, the model's far
-    // side) must not draw or catch marquees — the same rule picking already
-    // enforces per-click via model_paint.occluded. Grid build failure degrades to
-    // the historical back-face-only mask rather than blanking the overlay.
+    // Pass 2 (req_3856): Surface mode hides what the surface hides — a camera-facing
+    // vertex sitting BEHIND a nearer front face (greebles under a hull, the model's
+    // far side) must not draw or catch marquees, the same rule picking already
+    // enforces per-click via model_paint.occluded. A silhouette corner can be
+    // covered by a sliver of its own hull at grazing angles, so a corner also
+    // counts as visible when a point nudged onto an incident front face is clear
+    // (req_3859). Grid build failure degrades to the back-face-only mask.
     if (occBuildGrid(cam)) {
-        var vertex: u32 = 0;
-        while (vertex < g_vert_count) : (vertex += 1) {
-            if (visible_vertices[vertex] and occPointHidden(vertPos(vertex))) visible_vertices[vertex] = false;
+        const tan_h = @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
+        face = 0;
+        while (face < face_count) : (face += 1) {
+            if (!faceInScope(face) or !faceCameraFacing(cam, face)) continue;
+            const centroid = faceCentroid(face) orelse continue;
+            var corner: u32 = 0;
+            while (corner < 3) : (corner += 1) {
+                const vertex = corners[face * 3 + corner];
+                if (vertex >= visible_vertices.len or visible_vertices[vertex]) continue;
+                const p = vertPos(vertex);
+                if (!occPointHidden(p)) {
+                    visible_vertices[vertex] = true;
+                    continue;
+                }
+                // The rescue probe is a few SCREEN pixels onto the incident face —
+                // grazing-angle cover is a sub-pixel sliver, while a corner
+                // genuinely behind a wall stays hidden beyond a few pixels.
+                const depth = occViewDepth(cam, p);
+                if (depth <= OCC_EDGE_NEAR_Z or vp_h <= 0) continue;
+                const world_per_px = depth * 2.0 * tan_h / vp_h;
+                const toward = occSub(centroid, p);
+                const reach = @sqrt(toward[0] * toward[0] + toward[1] * toward[1] + toward[2] * toward[2]);
+                if (reach < 1e-9) continue;
+                const step = @min(1.0, OCC_CORNER_RESCUE_PX * world_per_px / reach);
+                if (!occPointHidden(occLerp(p, centroid, step))) visible_vertices[vertex] = true;
+            }
         }
+    } else {
+        @memcpy(visible_vertices, touched);
     }
     const edges = g_edges orelse return false;
     var edge: u32 = 0;
@@ -1110,10 +1146,115 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
         const a = edges[edge * 2];
         const b = edges[edge * 2 + 1];
         // A Pen Edges wire has no surface normal; the wire is the authored object.
-        visible_edges[edge] = edgeIsWirePub(edge) or
-            (a < visible_vertices.len and b < visible_vertices.len and visible_vertices[a] and visible_vertices[b]);
+        if (edgeIsWirePub(edge)) {
+            visible_edges[edge] = true;
+            continue;
+        }
+        if (a >= touched.len or b >= touched.len or !touched[a] or !touched[b]) continue;
+        // A visible endpoint marker proves the edge's end is on screen and clear.
+        // Otherwise the edge may STILL be visible in its interior — endpoints far
+        // off-screen or tucked behind other parts while the middle crosses the view
+        // (req_3859) — so walk occlusion samples across its on-screen span.
+        visible_edges[edge] = visible_vertices[a] or visible_vertices[b] or
+            !g_occ_ready or edgeSpanVisible(cam, vp_w, vp_h, vertPos(a), vertPos(b));
     }
     return true;
+}
+
+const OCC_CORNER_RESCUE_PX: f32 = 3; // silhouette-corner rescue probe distance, in screen pixels
+const OCC_EDGE_NEAR_Z: f32 = 1e-3; // view-depth near clip for edge span sampling
+const OCC_EDGE_SAMPLE_PX: f32 = 48; // one occlusion probe per this many on-screen pixels
+const OCC_EDGE_MAX_SAMPLES: u32 = 16;
+
+fn occLerp(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
+    return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+}
+
+fn occSub(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+}
+
+/// The authored centroid of one displayed triangle, from the live position stream.
+fn faceCentroid(face: u32) ?[3]f32 {
+    const pos = model_paint.positions() orelse return null;
+    const base = @as(usize, face) * 9;
+    if (base + 8 >= pos.len) return null;
+    return .{
+        (pos[base + 0] + pos[base + 3] + pos[base + 6]) / 3.0,
+        (pos[base + 1] + pos[base + 4] + pos[base + 7]) / 3.0,
+        (pos[base + 2] + pos[base + 5] + pos[base + 8]) / 3.0,
+    };
+}
+
+fn occViewDepth(cam: model_paint.Camera, p: [3]f32) f32 {
+    const fwd = [3]f32{ cam.target[0] - cam.eye[0], cam.target[1] - cam.eye[1], cam.target[2] - cam.eye[2] };
+    const len = @sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+    if (len < 1e-9) return 0;
+    return ((p[0] - cam.eye[0]) * fwd[0] + (p[1] - cam.eye[1]) * fwd[1] + (p[2] - cam.eye[2]) * fwd[2]) / len;
+}
+
+/// Is any point of segment (a,b) unoccluded within the real viewport? Clips the
+/// segment to the near plane and the viewport rect, then probes occlusion at
+/// screen-uniform steps mapped back to world perspective-correctly. Samples lie ON
+/// the edge's incident surfaces, so occPointHidden's own-face slack keeps honest
+/// samples clear; only genuinely covering geometry hides them.
+fn edgeSpanVisible(cam: model_paint.Camera, vp_w: f32, vp_h: f32, a: [3]f32, b: [3]f32) bool {
+    if (vp_w <= 0 or vp_h <= 0) return false;
+    const za = occViewDepth(cam, a);
+    const zb = occViewDepth(cam, b);
+    if (za <= OCC_EDGE_NEAR_Z and zb <= OCC_EDGE_NEAR_Z) return false; // fully behind the camera
+    // Clip to the near plane in world parameter space (view depth is linear in t).
+    var t0: f32 = 0;
+    var t1: f32 = 1;
+    if (za < OCC_EDGE_NEAR_Z) t0 = (OCC_EDGE_NEAR_Z - za) / (zb - za);
+    if (zb < OCC_EDGE_NEAR_Z) t1 = (OCC_EDGE_NEAR_Z - za) / (zb - za);
+    if (t1 <= t0) return false;
+    const wa = occLerp(a, b, t0);
+    const wb = occLerp(a, b, t1);
+    const pa = model_paint.projectDepth(cam, vp_w, vp_h, wa) orelse return false;
+    const pb = model_paint.projectDepth(cam, vp_w, vp_h, wb) orelse return false;
+    // Clip the projected segment to the viewport rect (Liang–Barsky, screen params).
+    var s0: f32 = 0;
+    var s1: f32 = 1;
+    const dx = pb[0] - pa[0];
+    const dy = pb[1] - pa[1];
+    const bounds = [4][2]f32{
+        .{ -dx, pa[0] - 0 },
+        .{ dx, vp_w - pa[0] },
+        .{ -dy, pa[1] - 0 },
+        .{ dy, vp_h - pa[1] },
+    };
+    for (bounds) |edge_clip| {
+        const p = edge_clip[0];
+        const q = edge_clip[1];
+        if (@abs(p) < 1e-9) {
+            if (q < 0) return false; // parallel and outside
+            continue;
+        }
+        const r = q / p;
+        if (p < 0) {
+            if (r > s1) return false;
+            if (r > s0) s0 = r;
+        } else {
+            if (r < s0) return false;
+            if (r < s1) s1 = r;
+        }
+    }
+    if (s1 <= s0) return false;
+    const span_px = @sqrt(dx * dx + dy * dy) * (s1 - s0);
+    const samples: u32 = @min(OCC_EDGE_MAX_SAMPLES, 2 + @as(u32, @intFromFloat(span_px / OCC_EDGE_SAMPLE_PX)));
+    var k: u32 = 0;
+    while (k < samples) : (k += 1) {
+        const s = s0 + (s1 - s0) * (@as(f32, @floatFromInt(k)) + 0.5) / @as(f32, @floatFromInt(samples));
+        // Perspective-correct screen→world parameter within the near-clipped span.
+        const zca = pa[2];
+        const zcb = pb[2];
+        const denom = zcb + s * (zca - zcb);
+        if (@abs(denom) < 1e-9) continue;
+        const u = s * zca / denom;
+        if (!occPointHidden(occLerp(wa, wb, u))) return true;
+    }
+    return false;
 }
 
 pub fn vertexCameraVisiblePub(vertex: u32) bool {
@@ -3964,7 +4105,7 @@ pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, add
     // paint. Vertex/edge modes build (once) the welded topology they project against.
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
-    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam);
+    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam, vp_w, vp_h);
 
     var hit: i32 = switch (g_mode) {
         .face => model_paint.pick(cam, vp_w, vp_h, mx, my),
@@ -4039,7 +4180,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
     if (g_mode == .none) return -1;
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
-    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam);
+    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam, vp_w, vp_h);
     const minx = @min(x0, x1);
     const maxx = @max(x0, x1);
     const miny = @min(y0, y1);
@@ -4482,7 +4623,7 @@ test "surface mode rejects occluded element handles and xray deliberately restor
     const sp = model_paint.project(cam, 800, 600, hidden_vert).?;
     setXray(false);
     try testing.expectEqual(@as(i32, 0), pick(cam, 800, 600, sp[0], sp[1], false));
-    try testing.expect(refreshCameraVisibility(cam));
+    try testing.expect(refreshCameraVisibility(cam, 800, 600));
     // Camera-facing but behind the front part: the drawn-overlay mask now agrees
     // with the pick gate — Surface mode hides it entirely (req_3856).
     try testing.expect(!vertexCameraVisiblePub(0));
@@ -4504,6 +4645,59 @@ test "surface mode rejects occluded element handles and xray deliberately restor
     setXray(true);
     try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, ep[0], ep[1], false));
     try testing.expectEqual(@as(u32, 1), selectedEdgeCountPub());
+}
+
+test "an edge with both endpoints occluded still draws where its middle crosses the view" {
+    // The zoomed-in regression (req_3859): a long hull edge runs across the whole
+    // viewport while both of its endpoints sit off-screen BEHIND other parts. The
+    // endpoint-derived rule alone would hide an edge you are looking straight at;
+    // span sampling must keep it, while the hidden endpoint markers stay hidden.
+    var verts = [_]f32{
+        // scoped part, group 0: one wide triangle, bottom edge x ∈ [-6, 6] at z=0
+        -6.0, 0.0,  0.0, 0, 0, 1, 0, 0,
+        6.0,  0.0,  0.0, 0, 0, 1, 0, 0,
+        0.0,  1.0,  0.0, 0, 0, 1, 0, 0,
+        // occluder part, group 1+2: two panels at z=2 covering only the endpoint rays
+        2.5,  -3.0, 2.0, 0, 0, 1, 0, 0,
+        8.0,  -3.0, 2.0, 0, 0, 1, 0, 0,
+        5.0,  6.0,  2.0, 0, 0, 1, 0, 0,
+        -8.0, -3.0, 2.0, 0, 0, 1, 0, 0,
+        -2.5, -3.0, 2.0, 0, 0, 1, 0, 0,
+        -5.0, 6.0,  2.0, 0, 0, 1, 0, 0,
+    };
+    model_paint.setTarget(795, verts[0..], 9);
+    model_source.setFaceGroups(&[_]u32{ 0, 1, 2 });
+    model_source.setPartRanges(&[_]u32{ 0, 1, 1, 3 });
+    setEditScope(0, 1);
+    defer {
+        setXray(false);
+        setEditScope(0, 0);
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+
+    const cam = model_paint.Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
+    try testing.expect(model_paint.occluded(cam, .{ -6, 0, 0 }));
+    try testing.expect(model_paint.occluded(cam, .{ 6, 0, 0 }));
+    try testing.expect(!model_paint.occluded(cam, .{ 0, 0, 0 })); // the middle is in plain view
+
+    try testing.expect(ensureTopology());
+    setMode(.edge);
+    setXray(false);
+    try testing.expect(refreshCameraVisibility(cam, 800, 600));
+    try testing.expect(!vertexCameraVisiblePub(0)); // endpoint markers stay honest
+    try testing.expect(!vertexCameraVisiblePub(1));
+    try testing.expect(vertexCameraVisiblePub(2)); // apex is unobstructed
+
+    var span_edge: ?u32 = null;
+    var edge: u32 = 0;
+    while (edge < edgeCount()) : (edge += 1) {
+        const ends = edgeEndpointsPub(edge);
+        if ((ends[0] == 0 and ends[1] == 1) or (ends[0] == 1 and ends[1] == 0)) span_edge = edge;
+    }
+    try testing.expect(span_edge != null);
+    try testing.expect(edgeCameraVisiblePub(span_edge.?));
 }
 
 test "box select grabs every element inside the rect; additive unions the snapshot" {

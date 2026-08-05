@@ -9999,7 +9999,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // camera masks AND the Surface-mode occlusion grid the face wash and face dots
     // consult — so it must run before the face-tint layer, not just the edge layer
     // (req_3856).
-    const vis_ready = (mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam);
+    const vis_ready = (mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam, g_paint_vp_w, g_paint_vp_h);
     // Clip everything to the pane, and use segment breaks to layer polys under capsules.
     core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
     // Layer 1 (polys): the tile-panel fills. Always drawn in the model doc view — the
