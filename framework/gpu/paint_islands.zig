@@ -112,25 +112,6 @@ pub const Layout = struct {
     }
 };
 
-fn projectAxis(nx: f32, ny: f32, nz: f32) u8 {
-    const ax = @abs(nx);
-    const ay = @abs(ny);
-    const az = @abs(nz);
-    if (ax >= ay and ax >= az) return 0;
-    if (ay >= az) return 1;
-    return 2;
-}
-
-/// The island-merge criterion (req_3426): two face normals belong to the same
-/// projection bucket when they share the dominant axis AND the sign along it.
-/// See the doc block above `UV_EDGE_MATCH_EPSILON` for why this replaces the old
-/// strict-coplanarity rule.
-fn sameProjectionBucket(a: [3]f32, b: [3]f32) bool {
-    const axis = projectAxis(a[0], a[1], a[2]);
-    if (axis != projectAxis(b[0], b[1], b[2])) return false;
-    return (a[axis] < 0) == (b[axis] < 0);
-}
-
 fn projectIntrinsic(origin: [3]f32, basis_u: [3]f32, basis_v: [3]f32, p: [3]f32) [2]f32 {
     const relative = [3]f32{ p[0] - origin[0], p[1] - origin[1], p[2] - origin[2] };
     return .{
@@ -161,7 +142,6 @@ const PointBits = struct { x: u32, y: u32, z: u32 };
 const EdgeKey = struct { a: PointBits, b: PointBits };
 const EdgeOwner = struct {
     raw: u32,
-    normal: [3]f32,
     uv_a: [2]f32,
     uv_b: [2]f32,
 };
@@ -289,10 +269,12 @@ fn uvEdgeMatches(owner: EdgeOwner, a: [2]f32, b: [2]f32) bool {
 }
 
 /// Coalesce initial authored-face buckets through real shared edges — the
-/// RECONSTRUCTION rule for already-authored UV layouts: the historical dominant-
-/// axis bucket plus the requirement that the shared 3D edge remains shared in UV
-/// space. Newly generated layouts use unfoldCharts instead. The returned ids are
-/// compact and first-face stable.
+/// RECONSTRUCTION rule for already-authored UV layouts: two faces are one island
+/// exactly when their shared 3D edge remains shared in UV space. That is the
+/// honest continuity test; the projection-era dominant-axis gate that also used
+/// to apply here re-shredded unfolded charts at every 90° bucket wall on
+/// save/reload adoption (req_3879). Newly generated layouts use unfoldCharts
+/// instead. The returned ids are compact and first-face stable.
 fn connectedComponents(
     alloc: std.mem.Allocator,
     positions: []const f32,
@@ -315,7 +297,8 @@ fn connectedComponents(
     defer joins.deinit(alloc);
     var face: u32 = 0;
     while (face < face_count) : (face += 1) {
-        const normal = faceUnitNormal(positions, face) orelse continue;
+        // Degenerate faces have no stable island membership to contribute.
+        if (faceUnitNormal(positions, face) == null) continue;
         var edge: u32 = 0;
         while (edge < 3) : (edge += 1) {
             const ca = edge;
@@ -328,11 +311,11 @@ fn connectedComponents(
             const uva = uvPoint(normalized_uvs, face, if (forward) ca else cb);
             const uvb = uvPoint(normalized_uvs, face, if (forward) cb else ca);
             const owner = edges.get(key) orelse {
-                edges.put(alloc, key, .{ .raw = raw_of_face[face], .normal = normal, .uv_a = uva, .uv_b = uvb }) catch return null;
+                edges.put(alloc, key, .{ .raw = raw_of_face[face], .uv_a = uva, .uv_b = uvb }) catch return null;
                 continue;
             };
             if (owner.raw == raw_of_face[face]) continue;
-            if (!sameProjectionBucket(owner.normal, normal) or !uvEdgeMatches(owner, uva, uvb)) continue;
+            if (!uvEdgeMatches(owner, uva, uvb)) continue;
             const other = raw_of_face[face];
             const pair: RawPair = if (owner.raw < other) .{ .a = owner.raw, .b = other } else .{ .a = other, .b = owner.raw };
             const entry = joins.getOrPut(alloc, pair) catch return null;
@@ -1528,6 +1511,32 @@ test "a fold past the unfold limit stays an honest seam" {
     defer layout.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 2), layout.islands.len);
     try testing.expect(layout.tri_island[0] != layout.tri_island[2]);
+}
+
+test "reconstruction honors UV continuity across a 90° fold — no bucket shredding" {
+    // An unfolded chart carries folds up to 92°; when its corner UVs are adopted
+    // back (save/reload, structural edit), the reconstruction lane must keep the
+    // chart whole wherever the UVs are continuous — the projection-era dominant-
+    // axis gate split it at every bucket wall instead (req_3879).
+    const positions = [_]f32{
+        // quad A, z=0 plane (normal +z)
+        0, 0, 0, 1, 0, 0, 1, 1, 0,
+        0, 0, 0, 1, 1, 0, 0, 1, 0,
+        // quad B folds 90° at the shared edge y=1,z=0 (normal +y)
+        0, 1, 0, 1, 1, 0, 1, 1, -1,
+        0, 1, 0, 1, 1, -1, 0, 1, -1,
+    };
+    const uvs = [_]f32{
+        0.1, 0.1, 0.3, 0.1, 0.3, 0.5,
+        0.1, 0.1, 0.3, 0.5, 0.1, 0.5,
+        0.1, 0.5, 0.3, 0.5, 0.3, 0.7,
+        0.1, 0.5, 0.3, 0.7, 0.1, 0.7,
+    };
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    var layout = buildFromNormalizedUv(std.testing.allocator, &positions, &uvs, &groups, 128, 128, 16) orelse return error.OutOfMemory;
+    defer layout.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), layout.islands.len);
+    try std.testing.expectEqual(layout.tri_island[0], layout.tri_island[2]);
 }
 
 test "existing normalized UVs rebuild metadata without repacking" {
