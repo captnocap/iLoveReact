@@ -127,3 +127,39 @@ export function modelFocusSemantics(
     rows,
   };
 }
+
+/** One horizon's line in the SEMANTICS readout. */
+export type SemanticHorizonLine = { label: string; value: string };
+
+/** Collapse the saved/mount/resident horizons into what actually needs saying.
+ *
+ * The three horizons exist to LOCATE a semantic drop — which is information only
+ * when they disagree. Printing all three when they carry identical numbers said
+ * "7 regions · 124/762" three times in a row and buried the one case that matters
+ * (req_3889). Agreement is one line; divergence keeps every horizon so the drop is
+ * still readable, plus hidden-face detail whenever the resident mesh is filtered.
+ *
+ * The counts are per TRIANGLE (the percept aggregates that way), so they are
+ * labelled as such rather than dressed up as faces (req_3888). */
+export function semanticHorizonLines(semantics: ModelFocusSemantics): SemanticHorizonLine[] {
+  const hidden = semantics.residentHiddenFaces > 0
+    ? ` · ${semantics.residentHiddenNamedFaces}/${semantics.residentHiddenFaces} hidden`
+    : '';
+  const agree = semantics.savedRegions === semantics.mountRegions
+    && semantics.mountRegions === semantics.residentRegions
+    && semantics.savedNamedFaces === semantics.mountNamedFaces
+    && semantics.mountNamedFaces === semantics.residentNamedFaces
+    && semantics.savedFaces === semantics.mountFaces
+    && semantics.mountFaces === semantics.residentFaces;
+  if (agree) {
+    return [{
+      label: 'saved · mount · live',
+      value: `${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} tris${hidden}`,
+    }];
+  }
+  return [
+    { label: 'saved blob', value: `${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} tris` },
+    { label: `mount ${semantics.mountSource ?? ''}`.trim(), value: `${semantics.mountRegions} regions · ${semantics.mountNamedFaces}/${semantics.mountFaces} tris` },
+    { label: 'resident', value: `${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} tris${hidden}` },
+  ];
+}

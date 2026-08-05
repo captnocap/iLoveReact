@@ -32,7 +32,7 @@ import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
 import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
-import type { ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import {
   modelSelectionModeName,
   summarizeSelectedFaces,
@@ -129,7 +129,10 @@ function SelectionSection({ selection, semantics }: {
   } else if (selection?.mode === 3) {
     for (const face of faces) {
       const faceId = face.group === null ? `tri ${face.triangleIds[0]}` : `group ${face.group}`;
-      detailRows.push({
+      // With ONE face selected the summary above already said its triangle and
+      // welded-vertex counts; repeating them here was the same number a third time
+      // on screen (req_3889). With several faces this is real per-face detail.
+      if (faces.length > 1) detailRows.push({
         key: `${face.key}-face`,
         label: `face ${faceId}`,
         value: `${face.triangleIds.length} tris · ${face.vertices.length} verts`,
@@ -340,7 +343,13 @@ function GeometryFactRow(
   );
 }
 
-function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSemantics; onRefresh: () => void }) {
+function SemanticsSection({ semantics, onRefresh, onOpenNames }: {
+  semantics: ModelFocusSemantics;
+  onRefresh: () => void;
+  /** The region list lives in its own pane now — this row goes there instead of
+   *  printing a second, smaller copy of it (req_3889). */
+  onOpenNames: () => void;
+}) {
   const statusLabel = semantics.status === 'healthy' ? 'RESIDENT'
     : semantics.status === 'visibility-filtered' ? 'HIDDEN PARTS'
     : semantics.status === 'mount-mismatch' ? 'MOUNT DROP'
@@ -350,7 +359,6 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
   const statusTone = semantics.status === 'healthy' || semantics.status === 'visibility-filtered' ? 'success'
     : semantics.status === 'load-mismatch' || semantics.status === 'mount-mismatch' ? 'warning'
       : 'textFaint';
-  const listHeight = Math.min(6, semantics.rows.length) * REGIONS.grid.rowHeight;
   return (
     <C.HW_Section>
       <C.HW_SectionHead>
@@ -364,18 +372,12 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
           <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>saved blob</C.HW_FormLabel>
-        <C.HW_ReadValue>{`${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} faces`}</C.HW_ReadValue>
-      </C.HW_ReadRow>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>{`mount ${semantics.mountSource ?? ''}`}</C.HW_FormLabel>
-        <C.HW_ReadValue>{`${semantics.mountRegions} regions · ${semantics.mountNamedFaces}/${semantics.mountFaces} faces`}</C.HW_ReadValue>
-      </C.HW_ReadRow>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>resident</C.HW_FormLabel>
-        <C.HW_ReadValue>{`${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} faces${semantics.residentHiddenFaces > 0 ? ` · ${semantics.residentHiddenNamedFaces}/${semantics.residentHiddenFaces} hidden` : ''}`}</C.HW_ReadValue>
-      </C.HW_ReadRow>
+      {semanticHorizonLines(semantics).map((line) => (
+        <C.HW_ReadRow key={line.label}>
+          <C.HW_FormLabel>{line.label}</C.HW_FormLabel>
+          <C.HW_ReadValue>{line.value}</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ))}
       {semantics.status === 'mount-mismatch' ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
@@ -393,14 +395,16 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
         </C.HW_ReadRow>
       ) : null}
       {semantics.rows.length > 0 ? (
-        <ScrollView style={{ width: '100%', height: listHeight }} showScrollbar>
-          {semantics.rows.map((row) => (
-            <C.HW_ReadRow key={`semantic-${row.id}`}>
-              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces} tris · ${row.instances}x` : row.presence === 'not-visible' ? 'not visible' : row.presence === 'mount-only' ? 'mount only' : 'saved only'}</C.HW_FormLabel>
-              <C.HW_ReadValue>{`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}</C.HW_ReadValue>
-            </C.HW_ReadRow>
-          ))}
-        </ScrollView>
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>names</C.HW_FormLabel>
+          <Pressable
+            onPress={onOpenNames}
+            tooltip="Open the NAMES pane — the full region list, each row selecting its faces"
+            style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <C.HW_ReadValue style={{ color: accentFor('primary') }}>{`${semantics.rows.length} in the NAMES pane →`}</C.HW_ReadValue>
+          </Pressable>
+        </C.HW_ReadRow>
       ) : null}
     </C.HW_Section>
   );
@@ -865,7 +869,11 @@ export default function Inspector(props: {
                   onSelectAudit={(kind) => focusBridge?.selectAuditFaces(kind)}
                 />
                 {focusBridge ? (
-                  <SemanticsSection semantics={focusBridge.semantics} onRefresh={focusBridge.refreshSemantics} />
+                  <SemanticsSection
+                    semantics={focusBridge.semantics}
+                    onRefresh={focusBridge.refreshSemantics}
+                    onOpenNames={() => props.onPane('names')}
+                  />
                 ) : null}
                 {/* The OUTLINER is geometry/selection focus, not rig or paint state. */}
                 {modelParts ? (
