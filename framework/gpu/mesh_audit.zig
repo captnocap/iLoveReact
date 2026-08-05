@@ -2,7 +2,11 @@
 //! neither arguable (req_3749):
 //!
 //!   • intersecting — triangles that PASS THROUGH another triangle. Not "close to",
-//!     not "sharing an edge": an edge of one crosses the interior of the other.
+//!     not "sharing an edge", not RESTING AGAINST: each must have corners strictly on
+//!     both sides of the other's plane and the crossing must have real length. A join
+//!     at a direction change — a T-junction vertex mid-edge of a neighbour, a wall
+//!     rising off the line of another face's edge — is contact, never a penetration
+//!     (req_3808).
 //!   • unreachable  — triangles no ray escapes from. Geometry sealed inside other
 //!     geometry, which no camera reaches from any angle and no UV island can earn.
 //!
@@ -116,40 +120,107 @@ fn rayTriangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3, min_t: f32, m
     return t;
 }
 
-/// Do two faces share a vertex position? Adjacent triangles meet along an edge by
-/// construction — correct topology, not penetration, and it must never count.
-fn sharesVertex(verts: []const f32, x: u32, y: u32) bool {
-    const eps: f32 = 1e-6;
-    for (0..3) |i| {
-        const p = corner(verts, x, @intCast(i));
-        for (0..3) |j| {
-            const q = corner(verts, y, @intCast(j));
-            if (@abs(p[0] - q[0]) <= eps and @abs(p[1] - q[1]) <= eps and @abs(p[2] - q[2]) <= eps) return true;
-        }
+/// Touch deadband, in metres. A vertex within this distance of the other triangle's
+/// plane is ON that plane — resting against it, not through it. Sized well above f32
+/// coordinate noise and weld-seam mismatch (~1e-5 on metre-scale models) and well
+/// below any penetration a modeller would call real.
+const touch_eps: f32 = 1e-4;
+
+/// Where a triangle's corners sit relative to a plane: signed distances plus whether
+/// any corner is strictly in front of / behind the touch deadband.
+const PlaneSide = struct {
+    d: [3]f32,
+    front: bool,
+    behind: bool,
+};
+
+fn planeSide(n: Vec3, origin: Vec3, a: Vec3, b: Vec3, c: Vec3) PlaneSide {
+    var side = PlaneSide{ .d = undefined, .front = false, .behind = false };
+    for ([_]Vec3{ a, b, c }, 0..) |p, i| {
+        const d = dot(n, sub(p, origin));
+        side.d[i] = d;
+        if (d > touch_eps) side.front = true;
+        if (d < -touch_eps) side.behind = true;
     }
-    return false;
+    return side;
 }
 
-/// True when an edge of one triangle crosses the interior of the other. Segment ends
-/// are excluded by the parameter window, so triangles that merely meet at a shared
-/// boundary do not register.
-fn penetrates(verts: []const f32, x: u32, y: u32) bool {
-    const eps: f32 = 1e-6;
-    for ([_][2]u32{ .{ x, y }, .{ y, x } }) |ordered| {
-        const ta = corner(verts, ordered[1], 0);
-        const tb = corner(verts, ordered[1], 1);
-        const tc = corner(verts, ordered[1], 2);
-        for (0..3) |i| {
-            const p0 = corner(verts, ordered[0], @intCast(i));
-            const p1 = corner(verts, ordered[0], @intCast((i + 1) % 3));
-            const seg = sub(p1, p0);
-            const len = @sqrt(dot(seg, seg));
-            if (len < eps) continue;
-            const dir = Vec3{ seg[0] / len, seg[1] / len, seg[2] / len };
-            if (rayTriangle(p0, dir, ta, tb, tc, eps, len - eps) != null) return true;
+/// Interval of a triangle's crossing along the two planes' intersection line: project
+/// every deadband-zero corner and every strict front/behind edge crossing onto the
+/// line direction. Returns null when the triangle only touches the line at nothing.
+fn crossingInterval(line_dir: Vec3, corners: [3]Vec3, side: PlaneSide) ?[2]f32 {
+    var lo: f32 = std.math.floatMax(f32);
+    var hi: f32 = -std.math.floatMax(f32);
+    var any = false;
+    for (0..3) |i| {
+        const di = side.d[i];
+        if (@abs(di) <= touch_eps) {
+            const t = dot(line_dir, corners[i]);
+            lo = @min(lo, t);
+            hi = @max(hi, t);
+            any = true;
+            continue;
+        }
+        const j = (i + 1) % 3;
+        const dj = side.d[j];
+        if ((di > touch_eps and dj < -touch_eps) or (di < -touch_eps and dj > touch_eps)) {
+            const f = di / (di - dj);
+            const p = Vec3{
+                corners[i][0] + (corners[j][0] - corners[i][0]) * f,
+                corners[i][1] + (corners[j][1] - corners[i][1]) * f,
+                corners[i][2] + (corners[j][2] - corners[i][2]) * f,
+            };
+            const t = dot(line_dir, p);
+            lo = @min(lo, t);
+            hi = @max(hi, t);
+            any = true;
         }
     }
-    return false;
+    if (!any) return null;
+    return .{ lo, hi };
+}
+
+/// True when two triangles genuinely pass through each other: EACH strictly straddles
+/// the other's plane (corners beyond the touch deadband on both sides), and their
+/// crossing intervals along the planes' intersection line overlap with real length.
+///
+/// Everything that merely TOUCHES fails the straddle test and never counts: shared
+/// edges, a T-junction vertex resting mid-edge of a neighbouring face, a wall rising
+/// off the line of another face's edge — a join at a direction change is a join, not
+/// a penetration (req_3808: the audit read a sedan's wheel-well seams as 16
+/// "intersecting" triangles; every contact point sat exactly on a triangle boundary).
+fn penetrates(verts: []const f32, x: u32, y: u32) bool {
+    const xa = corner(verts, x, 0);
+    const xb = corner(verts, x, 1);
+    const xc = corner(verts, x, 2);
+    const ya = corner(verts, y, 0);
+    const yb = corner(verts, y, 1);
+    const yc = corner(verts, y, 2);
+
+    var nx = cross(sub(xb, xa), sub(xc, xa));
+    var ny = cross(sub(yb, ya), sub(yc, ya));
+    const nx_len = @sqrt(dot(nx, nx));
+    const ny_len = @sqrt(dot(ny, ny));
+    if (nx_len < 1e-12 or ny_len < 1e-12) return false; // degenerate sliver
+    nx = .{ nx[0] / nx_len, nx[1] / nx_len, nx[2] / nx_len };
+    ny = .{ ny[0] / ny_len, ny[1] / ny_len, ny[2] / ny_len };
+
+    // Each triangle must have corners strictly on BOTH sides of the other's plane.
+    // Touching the plane (within the deadband) is contact, never a crossing.
+    const y_side = planeSide(nx, xa, ya, yb, yc);
+    if (!(y_side.front and y_side.behind)) return false;
+    const x_side = planeSide(ny, ya, xa, xb, xc);
+    if (!(x_side.front and x_side.behind)) return false;
+
+    // Both planes are crossed; near-parallel planes cannot both be straddled beyond
+    // the deadband unless the line is well defined, but guard the degenerate case.
+    const line = cross(nx, ny);
+    if (@sqrt(dot(line, line)) < 1e-6) return false;
+
+    const ix = crossingInterval(line, .{ xa, xb, xc }, x_side) orelse return false;
+    const iy = crossingInterval(line, .{ ya, yb, yc }, y_side) orelse return false;
+    const overlap = @min(ix[1], iy[1]) - @max(ix[0], iy[0]);
+    return overlap > touch_eps;
 }
 
 /// Fibonacci sphere — an even spread with no axis bias, so a face that only escapes
@@ -210,7 +281,6 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
             const yi: u32 = @intCast(y);
             if (hit_flags[xi] and hit_flags[yi]) continue;
             if (!boxesOverlap(boxes[xi], boxes[yi])) continue;
-            if (sharesVertex(verts, xi, yi)) continue;
             if (!penetrates(verts, xi, yi)) continue;
             hit_flags[xi] = true;
             hit_flags[yi] = true;

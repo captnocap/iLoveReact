@@ -118,6 +118,46 @@ test "faces that merely touch at a shared plane do not count as penetrating" {
     try testing.expectEqual(@as(u32, 0), facts.intersecting);
 }
 
+test "a T-junction join at a direction change is contact, not penetration" {
+    // The req_3808 failure shape, lifted from the police_sedan wheel wells: bounded
+    // cuts leave a vertex resting mid-edge of a neighbouring face, and the joined
+    // geometry changes direction there. No interior is crossed anywhere, but the old
+    // edge-ray test registered the boundary graze (barycentric u/v/w of exactly 0 or
+    // 1) and reported 16 phantom "intersecting" triangles on an honestly built car.
+    const allocator = testing.allocator;
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
+    defer verts.deinit(allocator);
+
+    // Big face in the z=0 plane, bottom edge from (0,0,0) to (2,0,0).
+    try tri(&verts, allocator, .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 1, 2, 0 });
+    // A tilted face whose corner rests exactly mid-edge at (0.6,0,0) — no shared
+    // vertex, angled off the big face's plane. The sedan's notch-cut far end on the
+    // nose face's bottom edge.
+    try tri(&verts, allocator, .{ 0.6, 0, 0 }, .{ 1.1, -1, 0.5 }, .{ 0.1, -1, 0.5 });
+    // A wall rising off the LINE of the big face's bottom edge, its feet mid-edge —
+    // the wheel-well wall standing on the underbody quad's boundary.
+    try tri(&verts, allocator, .{ 1.2, 0, 0 }, .{ 1.8, 0, 0.001 }, .{ 1.5, -1.2, 0.4 });
+
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    try testing.expect(facts.computed);
+    try testing.expectEqual(@as(u32, 0), facts.intersecting);
+}
+
+test "a genuine stab through a face interior still counts" {
+    // Control for the T-junction case: the same big face, but the second triangle
+    // actually passes THROUGH its interior — corners strictly on both sides.
+    const allocator = testing.allocator;
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
+    defer verts.deinit(allocator);
+
+    try tri(&verts, allocator, .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 1, 2, 0 });
+    try tri(&verts, allocator, .{ 1, 0.5, -0.5 }, .{ 1.4, 0.9, 0.5 }, .{ 0.6, 0.9, 0.5 });
+
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    try testing.expect(facts.computed);
+    try testing.expectEqual(@as(u32, 2), facts.intersecting);
+}
+
 test "an interior sealed behind GLASS is reachable — glass never blocks rays" {
     // The police_sedan failure shape (req_3763 P3-1): seats inside a glazed cabin
     // reported unreachable because the audit treated glass as opaque. With the
