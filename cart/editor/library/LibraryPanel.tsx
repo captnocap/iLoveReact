@@ -10,7 +10,7 @@
 // the measured space — no fixed page size leaving dead rows. Selecting a
 // single model shows its parent folder's gallery with that cell highlighted,
 // and the detail card resolves models as well as materials in both states.
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Box } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
@@ -34,6 +34,8 @@ import MaterialCatalogRow from './MaterialCatalogRow';
 import FolderSummary from './FolderSummary';
 import MaterialControls from './MaterialControls';
 import ContextToolControls from './ContextToolControls';
+import LibrarySearchResults from './LibrarySearchResults';
+import { searchLibrary } from '../data/librarySearch';
 
 // The grids' own inner padding (workspace.cls HW_Lib*Grid / HW_GalleryGrid).
 const GRID_PAD = 10;
@@ -78,6 +80,11 @@ export default function LibraryPanel(props: {
   const canBrowseAssets = showMaterialCatalog || Boolean(folderTab);
   const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder, props.models);
   const trail = contentFolderTrail(props.contentFolder, props.contentTree);
+  const searchActive = props.state.search.trim().length > 0;
+  const searchHits = useMemo(
+    () => searchLibrary(props.state.search, props.catalogAssets, props.models),
+    [props.state.search, props.catalogAssets, props.models],
+  );
 
   // ── Measured paging (req_3137): a page holds exactly what the grid area fits.
   // Cell footprints mirror the cls classes — HW_MaterialTile 68 + gap 4 (20px
@@ -99,10 +106,12 @@ export default function LibraryPanel(props: {
   // model's cell highlighted — one thumbnail in an empty grid is dead space.
   const selectedModel = props.models.find((model) => model.folderId === props.contentFolder) ?? null;
   const galleryFolder = selectedModel && trail && trail.length > 1 ? trail[trail.length - 2]!.id : props.contentFolder;
-  const galleryModels = showModelPackages ? modelPackagesForFolder(galleryFolder, props.state.search, props.models) : null;
+  const galleryModels = showModelPackages && !searchActive
+    ? modelPackagesForFolder(galleryFolder, '', props.models)
+    : null;
 
   // One pager for every paged branch (models page like materials/assets do).
-  const pagedCount = galleryModels ? galleryModels.length : canBrowseAssets ? props.assets.length : null;
+  const pagedCount = searchActive ? null : galleryModels ? galleryModels.length : canBrowseAssets ? props.assets.length : null;
   const activePageSize = galleryModels ? modelPageSize : pageSize;
   const maxPage = Math.max(0, Math.ceil((pagedCount ?? 0) / activePageSize) - 1);
   const page = Math.min(props.state.assetPage, maxPage);
@@ -160,9 +169,19 @@ export default function LibraryPanel(props: {
     />
   );
 
+  const searchResults = (
+    <LibrarySearchResults
+      hits={searchHits}
+      activeAssetId={props.state.activeAssetId}
+      activeDocumentId={props.state.activeWorkspaceDocumentId}
+      onAsset={props.onAsset}
+      onModel={props.onModel}
+    />
+  );
+
   const footer = (
     <C.HW_LibFoot>
-      <C.HW_StatusText>{selectedFolderCount} items</C.HW_StatusText>
+      <C.HW_StatusText>{searchActive ? `${searchHits.length} matches` : `${selectedFolderCount} items`}</C.HW_StatusText>
       <C.HW_Spacer />
       <C.HW_StatusText>M {props.models.length} · MAT {MATERIAL_ASSET_COUNT} · PKG {CATALOG_DIAGNOSTICS.modelPackages}</C.HW_StatusText>
     </C.HW_LibFoot>
@@ -170,7 +189,7 @@ export default function LibraryPanel(props: {
 
   // The expanded grid column's content: model gallery / material tiles /
   // asset cards / folder summary.
-  const gridContent = showModelPackages ? (
+  const gridContent = searchActive ? searchResults : showModelPackages ? (
     <ModelPackageBrowser
       folder={galleryFolder}
       search={props.state.search}
@@ -252,7 +271,9 @@ export default function LibraryPanel(props: {
           </C.HW_LibTreeCol>
           <C.HW_LibGridCol>
             <C.HW_LibCrumb>
-              {trail ? trail.flatMap((node, index) => {
+              {searchActive ? (
+                <C.HW_CrumbTextOn>SEARCH · {searchHits.length} MATCHES</C.HW_CrumbTextOn>
+              ) : trail ? trail.flatMap((node, index) => {
                 const last = index === trail.length - 1;
                 const Seg = last ? C.HW_CrumbTextOn : C.HW_CrumbText;
                 const crumb = (
@@ -287,8 +308,7 @@ export default function LibraryPanel(props: {
         </C.HW_LibBody>
       ) : (
         <>
-          {quickRows}
-          {tree}
+          {searchActive ? searchResults : <>{quickRows}{tree}</>}
           {footer}
         </>
       )}

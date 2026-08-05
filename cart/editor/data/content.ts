@@ -12,6 +12,7 @@ import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
 import type { BuildKind } from '../world/buildCatalog';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
+import { modelMatchesLibrarySearch } from './librarySearch';
 
 export const CONTENT_TREE: ContentNode[] = EDITOR_ASSET_CATALOG.contentTree;
 export const SNAP_MODES = ['surface + edge', 'grid', 'free', 'vertex'];
@@ -120,24 +121,7 @@ export function modelPackagesForFolder(
       if (folder === 'models-props-wip') return model.sourceKind === 'studio-model' || model.stage === 'wip';
       return model.folderId === folder;
     })
-    .filter((model) => {
-      if (!needle) return true;
-      const haystack = [
-        model.name,
-        model.path,
-        model.kind,
-        model.semanticKind ?? '',
-        model.source,
-        model.viewerPath ?? '',
-        model.viewerMeshRef ?? '',
-        model.rig,
-        model.data,
-        ...model.decompositions,
-        ...model.atlases.map((atlas) => `${atlas.label} ${atlas.scope}`),
-        ...model.paints.map((paint) => `${paint.name} ${paint.atlas} ${paint.shaderRefs.join(' ')} ${paint.imageRefs.join(' ')}`),
-      ].join(' ').toLowerCase();
-      return haystack.includes(needle);
-    });
+    .filter((model) => !needle || modelMatchesLibrarySearch(model, needle));
 }
 
 // A freshly-authored primitive is fully described by its id (`primitive:<kind>:<n>`), so

@@ -192,6 +192,7 @@ import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
 import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
+import { assetMatchesLibrarySearch } from '../data/librarySearch';
 import {
   leftPanelForFolder,
   leftPanelsFor,
@@ -1587,18 +1588,7 @@ export default function AppFrame() {
     const needle = state.search.trim().toLowerCase();
     return catalogAssets
       .filter((asset) => assetMatchesContentFolder(asset, effectiveContentFolder))
-      .filter((asset) => {
-        if (!needle) return true;
-        const haystack = [
-          asset.name,
-          asset.recipe ?? '',
-          asset.sourceKind ?? '',
-          asset.sourceId ?? '',
-          asset.semanticKind ?? '',
-          ...(asset.stats ?? []),
-        ].join(' ').toLowerCase();
-        return haystack.includes(needle);
-      })
+      .filter((asset) => !needle || assetMatchesLibrarySearch(asset, needle))
       .sort(rankAssets);
   }, [catalogAssets, effectiveContentFolder, state.search]);
 
