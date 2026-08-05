@@ -2273,14 +2273,18 @@ pub fn selectionSnapshotJson(allocator: std.mem.Allocator) ?[]u8 {
 
 /// Face-mode count in AUTHORED faces (a picked cube face reads as 1, not its 2 triangles):
 /// grouped triangles count once per group; ungrouped triangles count individually.
-fn countSelectedAuthoredFaces() u32 {
-    const s = g_sel_face orelse return 0;
+/// How many AUTHORED faces a per-triangle mask covers. A quad is ONE face even though
+/// it is two triangles, and a cube is six even though it is twelve (the req_2509
+/// vocabulary). Every number a surface prints as "faces" must come through here — a
+/// raw triangle count told the user "named 2 faces" when they had selected one quad
+/// (req_3888). Loose triangles carry no group and each count as their own face.
+pub fn authoredFacesInMask(mask: []const bool) u32 {
     var groups = std.AutoHashMapUnmanaged(u32, void).empty;
     defer groups.deinit(alloc);
     var n: u32 = 0;
-    for (s, 0..) |b, f| {
-        if (!b) continue;
-        const grp = model_source.faceGroupOf(@intCast(f));
+    for (mask, 0..) |selected, face| {
+        if (!selected) continue;
+        const grp = model_source.faceGroupOf(@intCast(face));
         if (grp == model_source.NO_FACE_GROUP) {
             n += 1;
         } else if (!groups.contains(grp)) {
@@ -2289,6 +2293,10 @@ fn countSelectedAuthoredFaces() u32 {
         }
     }
     return n;
+}
+
+fn countSelectedAuthoredFaces() u32 {
+    return authoredFacesInMask(g_sel_face orelse return 0);
 }
 
 /// Re-read unique-vert positions from the displayed soup — for host-side restores that

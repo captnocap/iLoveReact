@@ -26,8 +26,10 @@ function selectable(row: ModelFocusSemanticRow): boolean {
   return row.presence === 'resident' && row.faces > 0;
 }
 
+// The percept counts per TRIANGLE, so this number is triangles — say so. Calling a
+// quad's two triangles "2 faces" is the req_3888 lie in another spot.
 function presenceLabel(row: ModelFocusSemanticRow): string {
-  return row.presence === 'resident' ? `${row.faces}f · ${row.instances}x`
+  return row.presence === 'resident' ? `${row.faces} tris · ${row.instances}x`
     : row.presence === 'not-visible' ? 'not visible'
       : row.presence === 'mount-only' ? 'mount only'
         : 'saved only';
@@ -85,7 +87,7 @@ export default function NamesPanel({ semantics, bridge, onRefresh }: {
       <C.HW_ReadRow>
         <C.HW_FormLabel>coverage</C.HW_FormLabel>
         <C.HW_ReadValue style={{ color: accentFor(unnamed > 0 ? 'warning' : 'success') }}>
-          {totalFaces === 0 ? 'no live mesh' : `${rows.length} regions · ${namedFaces}/${totalFaces} faces${unnamed > 0 ? ` · ${unnamed} unnamed` : ''}`}
+          {totalFaces === 0 ? 'no live mesh' : `${rows.length} regions · ${namedFaces}/${totalFaces} tris${unnamed > 0 ? ` · ${unnamed} unnamed` : ''}`}
         </C.HW_ReadValue>
       </C.HW_ReadRow>
 
@@ -111,7 +113,7 @@ export default function NamesPanel({ semantics, bridge, onRefresh }: {
                 <Pressable
                   onPress={(event: any) => select(row, event?.shiftKey === true)}
                   tooltip={canSelect
-                    ? `Select ${row.name} on the model (${row.faces} faces) — shift-click to add to the selection`
+                    ? `Select ${row.name} on the model (${row.faces} triangles) — shift-click to add to the selection`
                     : `${row.name} has no faces in the live mesh (${presenceLabel(row)})`}
                   style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, opacity: canSelect ? 1 : 0.55 }}
                 >

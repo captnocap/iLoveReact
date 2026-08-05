@@ -396,7 +396,7 @@ function SemanticsSection({ semantics, onRefresh }: { semantics: ModelFocusSeman
         <ScrollView style={{ width: '100%', height: listHeight }} showScrollbar>
           {semantics.rows.map((row) => (
             <C.HW_ReadRow key={`semantic-${row.id}`}>
-              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces}f · ${row.instances}x` : row.presence === 'not-visible' ? 'not visible' : row.presence === 'mount-only' ? 'mount only' : 'saved only'}</C.HW_FormLabel>
+              <C.HW_FormLabel>{row.presence === 'resident' ? `${row.faces} tris · ${row.instances}x` : row.presence === 'not-visible' ? 'not visible' : row.presence === 'mount-only' ? 'mount only' : 'saved only'}</C.HW_FormLabel>
               <C.HW_ReadValue>{`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}</C.HW_ReadValue>
             </C.HW_ReadRow>
           ))}
