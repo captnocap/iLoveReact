@@ -186,12 +186,19 @@ single-triangle authored faces, it fuses that twin pair into the matching
 quad. Pairing is quantized-positional (the same `mirror_corners` identity the
 live twin extension uses), so a twin split on the OPPOSITE diagonal still
 matches and keeps its own resident diagonal. Each lone triangle can be claimed
-once; pairs the indexed mesh refuses (non-coplanar, cross-meaning, straddling
-glass classes) are honestly skipped and excluded from the returned count. The
+once. The fusion runs through `mergeSelectedTrusted` — Merge Faces WITHOUT the
+coplanarity gate (`MERGE_FACE_NORMAL_DOT_MIN` 0.9999 / ~0.1 mm plane
+tolerance): import-authored quads are routinely millimetres out of plane (the
+Van Seat specimen: 3.7 mm, normals 5.5° apart), which the interactive gate
+rightly refuses to CREATE but must not refuse to COPY — the source quad the
+model already contains licenses an equally-warped mirror twin. Remaining
+refusals (cross-meaning, unwelded, mixed glass class) still skip honestly. The
 whole sweep is ONE journal entry — byte-stable group-only when no fused
-boundary drops corners, the req_3771 dissolve install otherwise. Surfaces:
-the `quads` verb in the symmetry trust strip (per armed axis, beside
-keep+/keep−) and the Seat action `mirror-quads {"axis":0|1|2|"x"|"y"|"z"}`.
+boundary drops corners, the req_3771 dissolve install otherwise. The receipt
+carries `quads/symmetric/pairs/refused` counters even on ok:0 so a zero
+explains itself. Surfaces: the `quads` verb in the symmetry trust strip (per
+armed axis, beside keep+/keep−) and the Seat action
+`mirror-quads {"axis":0|1|2|"x"|"y"|"z"}`.
 
 ### T-junction seams merge in one shot (req_3800)
 

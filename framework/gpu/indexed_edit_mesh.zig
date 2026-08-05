@@ -1505,6 +1505,10 @@ pub const Mesh = struct {
     /// spans in one run what the other side splits mid-way) is the same geometry
     /// and must cancel just like an exactly-shared edge (req_3800).
     fn mergeFaceIds(mesh: *Mesh, selected: []const u32, preferred_diagonal: ?[2]u32) !?MergedFace {
+        return mesh.mergeFaceIdsGated(selected, preferred_diagonal, true);
+    }
+
+    fn mergeFaceIdsGated(mesh: *Mesh, selected: []const u32, preferred_diagonal: ?[2]u32, require_coplanar: bool) !?MergedFace {
         if (selected.len < 2) return null;
         if (selected[0] >= mesh.faces.items.len or !mesh.faces.items[selected[0]].alive) return null;
         const reference_part = mesh.faces.items[selected[0]].part;
@@ -1519,7 +1523,7 @@ pub const Mesh = struct {
             semantic_conflict = semantic_conflict or !mesh_semantics.eql(face.semantic, reference_semantic);
             source_tessellation_valid = source_tessellation_valid and face.source_tessellation_valid;
         }
-        if (!selectedFacesAreCoplanar(mesh, selected)) return null;
+        if (require_coplanar and !selectedFacesAreCoplanar(mesh, selected)) return null;
 
         // Every vertex the selection references: candidate T-points for edge splitting.
         var cluster = std.ArrayListUnmanaged(u32).empty;
@@ -1720,13 +1724,27 @@ pub const Mesh = struct {
     /// A two-triangle merge records their real resident diagonal so later geometric
     /// edits never have to guess how the authored quad was physically tessellated.
     pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
+        return mesh.mergeSelectedImpl(selected_triangles, true);
+    }
+
+    /// Mirror-twin fusion (req_3855): mergeSelected WITHOUT the coplanarity gate.
+    /// Licensed ONLY when the caller has proven the fused result is the positional
+    /// mirror image of an authored face the model already contains — the twin is
+    /// exactly as warped as its licensed source (import-authored quads are routinely
+    /// millimetres out of plane, which the interactive gate rightly refuses to
+    /// CREATE but must not refuse to COPY).
+    pub fn mergeSelectedTrusted(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
+        return mesh.mergeSelectedImpl(selected_triangles, false);
+    }
+
+    fn mergeSelectedImpl(mesh: *Mesh, selected_triangles: []const bool, require_coplanar: bool) !?MergedFace {
         var selected = std.ArrayListUnmanaged(u32).empty;
         defer selected.deinit(mesh.allocator);
         for (mesh.faces.items) |*face| {
             if (faceFullySelected(face, selected_triangles)) try selected.append(mesh.allocator, face.id);
         }
         const diagonal = mesh.sharedTriangleDiagonal(selected.items);
-        return mesh.mergeFaceIds(selected.items, diagonal);
+        return mesh.mergeFaceIdsGated(selected.items, diagonal, require_coplanar);
     }
 
     fn triangleTip(face: *const Face, diagonal: [2]u32) ?u32 {

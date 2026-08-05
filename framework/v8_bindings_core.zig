@@ -1899,17 +1899,43 @@ fn hostMeshTopoTrisToQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoChangedReturn(info, changed);
 }
 
-/// __mesh_topo_mirror_quads(axisMask) → JSON {"ok","key","count","changed"}. Fuse
-/// twin triangle pairs into quads wherever the reflected authored face across the
-/// given mirror axes (bit 0=X, 1=Y, 2=Z; model-origin planes) is already a quad —
-/// the retroactive repair for quads authored before mirror editing was armed
-/// (req_3855). Grouping only in the common case; changed is the fused pair count.
+/// __mesh_topo_mirror_quads(axisMask) → JSON {"ok","key","count","generation",
+/// "changed","quads","symmetric","pairs","refused"}. Fuse twin triangle pairs into
+/// quads wherever the reflected authored face across the given mirror axes (bit 0=X,
+/// 1=Y, 2=Z; model-origin planes) is already a quad — the retroactive repair for
+/// quads authored before mirror editing was armed (req_3855). Grouping only in the
+/// common case; the stats ride the reply even on ok:0 so a zero explains itself.
 fn hostMeshTopoMirrorQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const axis_mask: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
-    const changed = scene3d.meshMirrorMatchQuads(axis_mask);
-    if (changed > 0) state.markDirty();
-    setMeshTopoChangedReturn(info, changed);
+    const stats = scene3d.meshMirrorMatchQuads(axis_mask);
+    if (stats.fused > 0) state.markDirty();
+    var buf: [320]u8 = undefined;
+    if (stats.fused == 0) {
+        const json = std.fmt.bufPrint(
+            &buf,
+            "{{\"ok\":0,\"changed\":0,\"quads\":{d},\"symmetric\":{d},\"pairs\":{d},\"refused\":{d}}}",
+            .{ stats.quads, stats.symmetric, stats.pairs, stats.refused },
+        ) catch {
+            setReturnString(info, "{\"ok\":0,\"changed\":0}");
+            return;
+        };
+        setReturnString(info, json);
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"changed\":{d},\"quads\":{d},\"symmetric\":{d},\"pairs\":{d},\"refused\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), stats.fused, stats.quads, stats.symmetric, stats.pairs, stats.refused },
+    ) catch {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    setReturnString(info, json);
 }
 
 /// __mesh_quadify_begin() → JSON {"ok","residentTriangles"}. Capture the exact

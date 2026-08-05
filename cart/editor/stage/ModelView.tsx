@@ -729,8 +729,12 @@ const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
 const meshTrisToQuads = () => readTopoResult(host.__mesh_topo_tris_to_quads?.());
 // Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
 // reflected authored face across the axis plane is already a quad — the retroactive
-// repair for quads authored before mirror editing was armed.
-const meshMirrorQuads = (axis: number) => readTopoResult(host.__mesh_topo_mirror_quads?.(1 << axis));
+// repair for quads authored before mirror editing was armed. The receipt carries
+// quads/symmetric/pairs/refused counters even on ok:0 so a zero explains itself.
+const meshMirrorQuads = (axis: number) => {
+  const raw = host.__mesh_topo_mirror_quads?.(1 << axis);
+  return { result: readTopoResult(raw), doorPresent: typeof raw === 'string' && raw.length > 0 };
+};
 const meshQuadifyBegin = () => readTopoResult(host.__mesh_quadify_begin?.());
 const meshQuadifyPreview = (evaluation: number): QuadifyPlan | null =>
   readQuadifyPlan(host.__mesh_quadify_preview?.(evaluation));
@@ -2580,7 +2584,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!adoptMesh(meshSymmetrize(axis, keepPositive))) setError('symmetrize: no mesh half to keep');
   };
   const runMirrorQuads = (axis: number) => {
-    if (!adoptMesh(meshMirrorQuads(axis))) setError('match quads: no quad whose twin is two loose triangles');
+    const { result, doorPresent } = meshMirrorQuads(axis);
+    if (adoptMesh(result)) return;
+    if (!doorPresent) { setError('match quads: host door missing — rebuild the dev host'); return; }
+    const s = (result ?? {}) as { quads?: number; symmetric?: number; pairs?: number; refused?: number };
+    setError(`match quads: nothing fused — ${s.quads ?? 0} quads, ${s.symmetric ?? 0} already matched, ${s.pairs ?? 0} twin pairs, ${s.refused ?? 0} refused`);
   };
 
   // ── Editor bridge ──────────────────────────────────────────────────────────

@@ -6901,14 +6901,27 @@ pub fn meshMergeSelectedFaces() bool {
 /// still matches and keeps its own resident diagonal — so the common case commits as a
 /// byte-stable group-only change: no vertex moves, UVs, paint, and part ownership all
 /// untouched. One journal entry for the whole sweep. Returns the fused pair count.
-pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
-    if (!model_paint.hasTarget()) return 0;
-    const verts = g_edit_verts orelse return 0;
+/// The receipt half of meshMirrorMatchQuads: every counter a zero needs to explain
+/// itself. `refused` counts discovered twin pairs the indexed merge still rejected
+/// (cross-meaning, unwelded) — with the trusted merge the coplanarity gate is not
+/// among the reasons.
+pub const MirrorQuadStats = struct {
+    fused: u32 = 0, // twin pairs actually fused into quads (0 ⇒ mesh unchanged)
+    quads: u32 = 0, // source quads scanned (two tris, four corners, in scope)
+    symmetric: u32 = 0, // quads whose reflection is already one authored face
+    pairs: u32 = 0, // twin lone-triangle pairs discovered
+    refused: u32 = 0, // discovered pairs the indexed merge rejected
+};
+
+pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
+    var stats: MirrorQuadStats = .{};
+    if (!model_paint.hasTarget()) return stats;
+    const verts = g_edit_verts orelse return stats;
     const tri_count = g_edit_count / 3;
-    if (tri_count == 0) return 0;
+    if (tri_count == 0) return stats;
     const mirror_axes: u8 = @intCast(axis_mask_raw & 7);
-    if (mirror_axes == 0) return 0;
-    if (model_source.faceGroups() == null) return 0; // no authored quads to copy
+    if (mirror_axes == 0) return stats;
+    if (model_source.faceGroups() == null) return stats; // no authored quads to copy
     const alloc = std.heap.c_allocator;
     const PosKey = mirror_corners.Key;
     const helpers = struct {
@@ -6979,6 +6992,7 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
         if (source_tris.len != 2) continue;
         const source_keys = (keys_of.get(entry.key_ptr.*) orelse continue).items;
         if (source_keys.len != 4) continue; // wire/degenerate quads have no twin shape
+        stats.quads += 1;
         // Split the quad's corners into its diagonal (shared by both triangles) and
         // the two off-diagonal tips.
         var tri_keys: [2][3]PosKey = undefined;
@@ -7037,7 +7051,10 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
             // already symmetric across this subset (or is its own twin) — nothing owed.
             if (aid_by_hash.get(mirror_corners.keyHash(reflected.items))) |twin_aid| {
                 if (keys_of.get(twin_aid)) |twin_keys| {
-                    if (mirror_corners.sameKeys(twin_keys.items, reflected.items)) continue;
+                    if (mirror_corners.sameKeys(twin_keys.items, reflected.items)) {
+                        stats.symmetric += 1;
+                        continue;
+                    }
                 }
             }
             const rd0 = mirror_corners.reflect(diag[0], subset);
@@ -7077,25 +7094,26 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
                 const glass_a = model_paint.isGlassAlpha(colors[@as(usize, found[0]) * 4 + 3]);
                 const glass_b = model_paint.isGlassAlpha(colors[@as(usize, found[1]) * 4 + 3]);
                 if (glass_a != glass_b) continue;
-                pairs.append(alloc, .{ found[0], found[1] }) catch return 0;
-                claimed.put(alloc, found[0], {}) catch return 0;
-                claimed.put(alloc, found[1], {}) catch return 0;
+                pairs.append(alloc, .{ found[0], found[1] }) catch return stats;
+                claimed.put(alloc, found[0], {}) catch return stats;
+                claimed.put(alloc, found[1], {}) catch return stats;
+                stats.pairs += 1;
                 break :subsets;
             }
         }
     }
-    if (pairs.items.len == 0) return 0;
+    if (pairs.items.len == 0) return stats;
 
-    const groups = captureFaceGroups() orelse return 0;
+    const groups = captureFaceGroups() orelse return stats;
     defer std.heap.c_allocator.free(groups);
     const parts = capturePartOfFaces();
     defer if (parts) |rows| std.heap.c_allocator.free(rows);
-    const materials = captureFaceMaterials(tri_count) orelse return 0;
+    const materials = captureFaceMaterials(tri_count) orelse return stats;
     defer std.heap.c_allocator.free(materials);
 
-    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return 0;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return stats;
     defer indexed.deinit();
-    const pair_mask = alloc.alloc(bool, tri_count) catch return 0;
+    const pair_mask = alloc.alloc(bool, tri_count) catch return stats;
     defer alloc.free(pair_mask);
     var fused: u32 = 0;
     var any_retessellated = false;
@@ -7103,29 +7121,38 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
         @memset(pair_mask, false);
         pair_mask[pair[0]] = true;
         pair_mask[pair[1]] = true;
-        // A pair the indexed mesh refuses (non-coplanar, unwelded, cross-meaning) is
-        // honestly skipped — the count reports only real fusions.
-        const merged = (indexed.mergeSelected(pair_mask) catch null) orelse continue;
+        // TRUSTED merge — no coplanarity gate (req_3855): the source quad the model
+        // already contains licenses an equally-warped mirror twin. Import-authored
+        // quads are routinely millimetres out of plane, which the interactive gate
+        // rightly refuses to CREATE but must not refuse to COPY. Other refusals
+        // (cross-meaning, unwelded) still skip honestly and land in `refused`.
+        const merged = (indexed.mergeSelectedTrusted(pair_mask) catch null) orelse continue;
         if (merged.retessellated) any_retessellated = true;
         fused += 1;
     }
-    if (fused == 0) return 0;
+    stats.refused = @intCast(pairs.items.len - fused);
+    if (fused == 0) return stats;
+    stats.fused = fused;
 
     if (!any_retessellated) {
         // Every fused boundary kept all four corners — the byte-stable group-only
         // commit keeps geometry, UVs, and atlas pixels untouched.
-        if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "mirror match quads")) return 0;
-        return fused;
+        if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "mirror match quads")) {
+            stats.fused = 0;
+            return stats;
+        }
+        return stats;
     }
 
     // Dissolve commit (req_3771 shape): some fused boundary dropped seam corners, so
     // the resident rows are rebuilt from the clean loops in one journal entry.
-    var lowered = indexed.lower() catch return 0;
+    stats.fused = 0; // restored below only when the install commits
+    var lowered = indexed.lower() catch return stats;
     defer lowered.deinit();
-    if (lowered.tri_count == 0) return 0;
-    const dissolve_colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return 0;
+    if (lowered.tri_count == 0) return stats;
+    const dissolve_colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return stats;
     defer std.heap.c_allocator.free(dissolve_colors);
-    if (!mesh_edit.inheritFaceRgba(colors, lowered.source_triangles, dissolve_colors)) return 0;
+    if (!mesh_edit.inheritFaceRgba(colors, lowered.source_triangles, dissolve_colors)) return stats;
     const part_count = hostPartCount();
     var snap = journalSnapshotCurrent("mirror match quads");
     const installed = lcInstallLowered(
@@ -7140,12 +7167,13 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
     );
     if (!installed) {
         journalDiscard(&snap);
-        return 0;
+        return stats;
     }
     if (parts != null) renormalizePartRanges(lowered.parts, part_count);
     adoptIndexedEditMesh(&indexed, &lowered);
     journalCommit(&snap);
-    return fused;
+    stats.fused = fused;
+    return stats;
 }
 
 // ── Whole-topology triangle → quad dry-run session ────────────────────────────

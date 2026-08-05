@@ -73,6 +73,8 @@ export type SeatPercept = {
 };
 export type SelectorReceipt = { ok: boolean; faces?: number; actionableFaces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
+/** mirror-quads receipt counters — present even on ok:0 so a zero explains itself. */
+export type MirrorQuadStats = { ok?: number; changed?: number; quads?: number; symmetric?: number; pairs?: number; refused?: number };
 export type InsetReceipt =
   | { ok: true; topology: TopologyReceipt; transforms: number }
   | { ok: false; stage: 'validate' | 'extrude' | 'scale-0' | 'scale-1' | 'offset'; reason: string };
@@ -1296,9 +1298,15 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const trisToQuads = (): TopologyReceipt | null => topology(() => host.__mesh_topo_tris_to_quads?.());
   // Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
-  // reflected authored face across the model-origin axis plane is already a quad.
-  const mirrorMatchQuads = (axis: number): TopologyReceipt | null =>
-    topology(() => host.__mesh_topo_mirror_quads?.(1 << axis));
+  // reflected authored face across the model-origin axis plane is already a quad. The
+  // stats ride the reply even on ok:0 so a zero explains itself instead of hiding
+  // behind a generic refusal (the exact opacity that cost a debugging session).
+  const mirrorMatchQuads = (axis: number): { receipt: TopologyReceipt | null; stats: MirrorQuadStats | null } => {
+    const raw = automation(() => host.__mesh_topo_mirror_quads?.(1 << axis));
+    const receipt = readTopology(raw);
+    adapter.adoptTopology?.(receipt);
+    return { receipt, stats: parseJson<MirrorQuadStats>(raw) };
+  };
   const collectUvOrientation = (): number => {
     const changed = Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
     if (changed > 0) notifySelectionChanged();
@@ -1638,8 +1646,13 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const axisRaw = args.axis;
         const axis = typeof axisRaw === 'string' ? 'xyz'.indexOf(axisRaw.toLowerCase()) : Number(axisRaw ?? 0);
         if (axis < 0 || axis > 2 || !Number.isInteger(axis)) return seat.reply('mirror-quads', false, undefined, 'axis must be 0|1|2 or x|y|z');
-        const result = seat.mirrorMatchQuads(axis);
-        return seat.reply('mirror-quads', !!result, result ?? undefined, result ? undefined : 'no quad whose mirror twin is two loose triangles (both sides already match, or the twins are not lone coplanar faces)');
+        const { receipt, stats } = seat.mirrorMatchQuads(axis);
+        const reason = receipt
+          ? undefined
+          : stats
+            ? `nothing fused — scanned ${stats.quads ?? 0} quads: ${stats.symmetric ?? 0} already have a quad twin, ${stats.pairs ?? 0} twin lone-triangle pairs found, ${stats.refused ?? 0} refused by the indexed merge`
+            : 'mirror-quads door unavailable — the running host binary predates it; rebuild the dev host';
+        return seat.reply('mirror-quads', !!receipt, receipt ?? stats ?? undefined, reason);
       }
       case 'collect-uv-orientation': {
         const changed = seat.collectUvOrientation();
