@@ -1462,15 +1462,21 @@ fn appendFaceColor(list: *std.ArrayListUnmanaged(u8), c: [4]u8) bool {
 /// selected edges' explicit owner. Never re-infer old ownership from the replaced mesh:
 /// a detached seam is position-coincident with its source and that guess can hand every
 /// detached face back to the original outliner.
-fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_faces: u32, src_part: u32) bool {
+/// `tris_per_face` partitions the appended triangle range into authored faces:
+/// the source face first, then one segment per mirror twin. Each segment gets its
+/// OWN fresh group id — stamping the whole append with one id fused a twin and its
+/// source into a single authored face on opposite ends of the model (req_3804).
+/// 0 keeps the whole append as one face (no-mirror callers append exactly one).
+fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_faces: u32, src_part: u32, tris_per_face: u32) bool {
     const og = old_groups orelse return hostPartCount() == 0; // ungrouped import
     const fc = g_edit_count / 3;
     if (fc <= old_faces or og.len < old_faces) return false;
     const groups = std.heap.c_allocator.alloc(u32, fc) catch return false;
     defer std.heap.c_allocator.free(groups);
     @memcpy(groups[0..old_faces], og[0..old_faces]);
-    const new_id = nextFreeGroupId(og[0..old_faces]);
-    @memset(groups[old_faces..fc], new_id);
+    const new_id = nextFreeGroupId(og[0..old_faces]); // max+1, so consecutive ids stay free
+    const span = if (tris_per_face == 0) fc - old_faces else tris_per_face;
+    for (groups[old_faces..fc], 0..) |*slot, appended| slot.* = new_id + @as(u32, @intCast(appended)) / span;
     model_source.setFaceGroups(groups);
     const pc = hostPartCount();
     if (pc > 0) {
@@ -2128,11 +2134,73 @@ fn selectWeldedEdgeAt(p: [3]f32, q: [3]f32) bool {
     return mesh_edit.focusEdgeByEndpoints(p, q);
 }
 
+/// True when `p` would land in the same weld class as an existing resident vertex —
+/// the topology rebuild would then FUSE the new geometry onto it. Margin 2/WELD_Q
+/// covers both weld rules in play (mesh_edit's round-to-cell and the indexed
+/// import's eps-ball).
+fn pointWeldsIntoResidentSoup(p: [3]f32) bool {
+    const soup = g_edit_verts orelse return false;
+    const eps = 2.0 / 1024.0;
+    var vert: usize = 0;
+    while (vert < @as(usize, g_edit_count)) : (vert += 1) {
+        const base = vert * 8;
+        const dx = soup[base] - p[0];
+        const dy = soup[base + 1] - p[1];
+        const dz = soup[base + 2] - p[2];
+        if (dx * dx + dy * dy + dz * dz <= eps * eps) return true;
+    }
+    return false;
+}
+
+/// Reflect `p` across the model-origin mirror plane for one enabled-axes subset.
+fn mirrorReflectPoint(p: [3]f32, subset: u8) [3]f32 {
+    var r = p;
+    inline for (0..3) |axis| {
+        if (subset & (@as(u8, 1) << @intCast(axis)) != 0)
+            r[axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - r[axis];
+    }
+    return r;
+}
+
+/// An extrude may never FUSE (req_3802): the parameterless hotkey stamps the same
+/// auto distance every time, so a later stamp's outer corners land bit-equal on an
+/// earlier stamp's verts and the rebuild silently welds the "extruded" quad onto
+/// unrelated geometry — the user sees "create a face between two edges", and
+/// dragging the handed-off edge would tear the neighbour. Nudge the distance until
+/// every outer corner — and its enabled mirror reflections, where the twin quads
+/// land — sits clear of every resident vertex's weld class.
+fn extrudeDistanceClearOfResidentVerts(frame: mesh_edit.EdgeExtrusionFrame, requested: f32) f32 {
+    const step: f32 = if (requested < 0) -4.0 / 1024.0 else 4.0 / 1024.0;
+    const mirror_mask = mesh_edit.mirrorMask() & 7;
+    var dist = requested;
+    var attempts: u32 = 0;
+    attempt: while (attempts < 16) : (attempts += 1) {
+        const outer = frame.outer(dist);
+        for (outer) |corner| {
+            if (pointWeldsIntoResidentSoup(corner)) {
+                dist += step;
+                continue :attempt;
+            }
+            var subset: u8 = 1;
+            while (subset <= 7) : (subset += 1) {
+                if (subset & ~mirror_mask != 0) continue;
+                if (pointWeldsIntoResidentSoup(mirrorReflectPoint(corner, subset))) {
+                    dist += step;
+                    continue :attempt;
+                }
+            }
+        }
+        break;
+    }
+    return dist;
+}
+
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     if (!model_paint.hasTarget()) return false;
     const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
     const frame = mesh_edit.edgeExtrusionFramePub(edge_idx) orelse return false;
-    const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
+    const requested = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
+    const dist = extrudeDistanceClearOfResidentVerts(frame, requested);
     const outer = frame.outer(dist);
     const c = outer[0];
     const d = outer[1];
@@ -2164,16 +2232,6 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     var twin_quads: u32 = 0;
     if (mesh_edit.mirrorMask() != 0) {
         const endpoints = mesh_edit.edgeEndpointsPub(edge_idx);
-        const reflect = struct {
-            fn point(p: [3]f32, subset: u8) [3]f32 {
-                var r = p;
-                inline for (0..3) |axis| {
-                    if (subset & (@as(u8, 1) << @intCast(axis)) != 0)
-                        r[axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - r[axis];
-                }
-                return r;
-            }
-        };
         var subset: u8 = 1;
         while (subset <= 7) : (subset += 1) {
             const t0 = mesh_edit.mirrorTwinOfVertPub(endpoints[0], subset) orelse continue;
@@ -2182,10 +2240,10 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
             if (same_edge or !mesh_edit.hasEdgeBetweenPub(t0, t1)) continue;
             if ((mesh_edit.vertPartPub(t0) orelse continue) != src_part) continue;
             if ((mesh_edit.vertPartPub(t1) orelse continue) != src_part) continue;
-            const ra = reflect.point(frame.a, subset);
-            const rb = reflect.point(frame.b, subset);
-            const rc = reflect.point(c, subset);
-            const rd = reflect.point(d, subset);
+            const ra = mirrorReflectPoint(frame.a, subset);
+            const rb = mirrorReflectPoint(frame.b, subset);
+            const rc = mirrorReflectPoint(c, subset);
+            const rd = mirrorReflectPoint(d, subset);
             // A reflection flips handedness — swap the pairs relative to the source call.
             const twin_appended = if (forward)
                 appendQuadSplit(&verts, rb, ra, rc, rd)
@@ -2224,7 +2282,7 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
         journalDiscard(&snap);
         return false;
     }
-    if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
+    if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, 2)) {
         if (snap) |*before| _ = journalInstall(before);
         journalDiscard(&snap);
         return false;
@@ -2362,6 +2420,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
         verts.deinit(std.heap.c_allocator);
         return false;
     }
+    // Triangle count of the SOURCE face alone — the twin appends below repeat it, and
+    // grouping/focus must treat each copy as its own authored face (req_3804).
+    const source_tris: u32 = @intCast((verts.items.len - @as(usize, g_edit_count) * 8) / 24);
     // Mirror (req_3797): bridge the twin edges too — the appended face rows reflect
     // across the plane with reversed winding, one copy per enabled subset whose twin
     // vertices and edges all exist in the same part.
@@ -2433,7 +2494,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
-        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part)) {
+        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, source_tris)) {
             if (snap) |*before| _ = journalInstall(before);
             journalDiscard(&snap);
             return false;
@@ -2448,8 +2509,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
         g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
         g_retopo_pending_band_generation = 0;
         // Create Face hands the next edit to its result: Face mode + exactly the new
-        // authored face selected, so X can reverse an unlucky winding immediately.
-        _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
+        // SOURCE face selected (a mirror twin is its own authored face and follows
+        // bilaterally), so X can reverse an unlucky winding immediately.
+        _ = mesh_edit.focusCreatedFace(old_faces, source_tris);
         journalCommit(&snap);
         if (follow_before) |before| {
             if (mesh_edit.followPatchJson(std.heap.c_allocator, null, 2)) |after| {

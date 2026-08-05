@@ -129,7 +129,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat select-vertex <id> [+]` | `{"action":"select-vertex","args":{"index":2,"additive":true}}` | Select vertex ids returned by `elements`. |
 | `tools/seat name <name> [instance]` | `{"action":"name","args":{"name":"…","instance":0}}` | Names the current selection, role `authored`. |
 | `tools/seat extrude <dist> <name> [instance]` | `{"action":"extrude","args":{"distance":0.2,"name":"roof","instance":0}}` | Creates `<name>.cap` + `<name>.wall`. A MULTI-face selection region-extrudes as ONE shell: the patch translates along its average normal as the cap and walls rise only on the selection boundary — never between selected faces. One part per selection; wire faces, non-manifold selection edges, and closed selections are refused. |
-| `tools/seat extrude-edge <dist>` | `{"action":"extrude-edge","args":{"distance":0.1}}` | Extends exactly one selected edge; inherits source meaning. |
+| `tools/seat extrude-edge <dist>` | `{"action":"extrude-edge","args":{"distance":0.1}}` | Extends exactly one selected edge; inherits source meaning. Never fuses: if the outer corners would land in an existing vertex's weld class the distance auto-nudges clear (req_3802), so an extrude always creates a free boundary edge — bridge deliberately with `create-face`, never by extruding "onto" geometry. |
 | `tools/seat connect` | `{"action":"connect"}` | Connect exactly two selected non-adjacent vertices across one face. |
 | `tools/seat create-face <name>` | `{"action":"create-face","args":{"name":"bridge"}}` | Fill a closed 3/4-edge loop or bridge two disjoint edges; naming required. |
 | `tools/seat bevel <width>` | `{"action":"bevel","args":{"width":0.02}}` | Atomic native bevel session on one edge or vertex. Meters. |
@@ -171,7 +171,10 @@ transaction: transforms reflect onto twins, and extrude, delete, flip, glass, pa
 solidify, detach, merge-faces, weld, connect, create-face, bevel, and extrude-edge all
 extend to the selection's mirror twins automatically. A missing/out-of-scope twin honestly
 falls back to one-sided. After a mirrored extrude only the SOURCE cap is selected — move it
-and the twin cap follows by reflection. Exceptions: loop cut already propagates its ring
+and the twin cap follows by reflection. Every twin lands as its OWN authored face
+(req_3804): bilateral ops pair source and twin positionally, never by shared face
+identity — two disjoint pieces reporting as one selectable face is a bug, not mirror
+behavior. Exceptions: loop cut already propagates its ring
 around the whole body; basic-cut is NOT yet mirror-extended (cut both sides manually).
 
 ## Structured editor parity
