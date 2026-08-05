@@ -847,6 +847,20 @@ pub fn edgeSelectedPub(e: u32) bool {
     return e < s.len and s[e];
 }
 
+/// True when an editable edge runs between the two logical vertices — how a mirror-
+/// extended op proves a twin EDGE actually exists before building on it (req_3797).
+pub fn hasEdgeBetweenPub(a: u32, b: u32) bool {
+    if (!ensureTopology()) return false;
+    const ed = g_edges orelse return false;
+    const lo = @min(a, b);
+    const hi = @max(a, b);
+    var e: usize = 0;
+    while (e * 2 + 1 < ed.len) : (e += 1) {
+        if (ed[e * 2] == lo and ed[e * 2 + 1] == hi) return true;
+    }
+    return false;
+}
+
 pub fn setXray(on: bool) void {
     g_xray = on;
 }
@@ -3384,6 +3398,19 @@ fn ensureMirrorTwins() ?[]u32 {
     g_mirror_built_for = g_vert_count;
     g_mirror_built_mask = g_mirror_mask;
     return twins;
+}
+
+/// The mirror twin of one logical vertex for a plane subset (bit 0/1/2 = X/Y/Z),
+/// through the same twin table live mirrored transforms use. Null when mirror is
+/// off, the subset is not enabled, or the vertex has no reflection partner — the
+/// door topology ops use to extend an edit to the other side (req_3797).
+pub fn mirrorTwinOfVertPub(v: u32, subset: u8) ?u32 {
+    if (subset == 0 or subset > 7 or (subset & g_mirror_mask) != subset) return null;
+    const twins = ensureMirrorTwins() orelse return null;
+    if (v >= g_vert_count) return null;
+    const t = twins[@as(usize, subset - 1) * g_vert_count + v];
+    if (t == MIRROR_NONE or t == v or t >= g_vert_count) return null;
+    return t;
 }
 
 /// Live symmetry report against the exact same identity domains and

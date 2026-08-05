@@ -3791,6 +3791,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         }
         else if (name === 'extrudeface') { const r = meshExtrudeFace(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeface:${a[0]} → ${JSON.stringify(r)}`); }
         else if (name === 'extrudeedge') { const r = meshExtrudeEdge(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeedge:${a[0]} → ${JSON.stringify(r)}`); }
+        // weld — the Merge-at-Center verb through the real door (req_3797's mirror
+        // verification needed it headless; same replay language as del/flip).
+        else if (name === 'weld') { const r = meshWeld(); adoptMesh(r); console.error(`[meshops] weld → ${JSON.stringify(r)}`); }
+        // symreport:axis,path — dump the live symmetry report to a FILE (the shot
+        // pipeline filters console output; files are the only assertion surface).
+        // The one-line proof harness scenarios use for "the mesh is still symmetric".
+        else if (name === 'symreport') {
+          const axis = num(a[0]);
+          const rep = meshSymmetryReport(axis);
+          if (a[1]) host.__fs_write?.(String(a[1]), JSON.stringify({ axis, report: rep }));
+          console.error(`[meshops] symreport:${axis} → ${JSON.stringify(rep)}`);
+        }
         else if (name === 'detach') { const r = meshDetach(); adoptMesh(r); console.error(`[meshops] detach → ${JSON.stringify(r)}`); }
         else if (name === 'contract') {
           const prefix = a.join(',');

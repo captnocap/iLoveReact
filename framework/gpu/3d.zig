@@ -1493,16 +1493,17 @@ fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_fac
     return true;
 }
 
-/// Live mirror editing (req_3796): the selection extension that makes extrude land on
-/// BOTH sides. For every fully-selected authored face, find the authored face whose
-/// distinct corner positions are exactly the reflection of its own across
-/// mesh_edit.MIRROR_PLANE_CENTER (per enabled plane subset) and add its triangles to
-/// the mask. Matching is positional and quantized (mesh_edit's MIRROR_Q class), never
-/// by triangle tessellation — a twin quad split on the OTHER diagonal still pairs. A
-/// face with no complete twin, a twin outside the edit scope, a partially-selected
-/// source, or a self-twin (a face straddling the plane) simply doesn't extend — the
-/// same honesty as mirrored transforms.
-fn extendExtrudeMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: []bool) void {
+/// Live mirror editing (req_3796/req_3797): the selection extension that makes a
+/// face-mask topology op land on BOTH sides — extrude, delete, flip, glass, paint
+/// fill, solidify, detach all route through it. For every fully-selected authored
+/// face, find the authored face whose distinct corner positions are exactly the
+/// reflection of its own across mesh_edit.MIRROR_PLANE_CENTER (per enabled plane
+/// subset) and add its triangles to the mask. Matching is positional and quantized
+/// (mesh_edit's MIRROR_Q class), never by triangle tessellation — a twin quad split
+/// on the OTHER diagonal still pairs. A face with no complete twin, a twin outside
+/// the edit scope, a partially-selected source, or a self-twin (a face straddling
+/// the plane) simply doesn't extend — the same honesty as mirrored transforms.
+fn extendFaceMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: []bool) void {
     const mirror_mask = mesh_edit.mirrorMask() & 7;
     if (mirror_mask == 0 or tri_count == 0) return;
     const alloc = std.heap.c_allocator;
@@ -1652,8 +1653,19 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     // Live mirror editing (req_3796): a mirrored extrude is the SAME extrude landing on
     // two faces — each pushes along its own normal. Extend the selection with every
     // selected authored face's mirror twin BEFORE choosing the path, so both sides
-    // extrude in one journal transaction.
-    if (mesh_edit.mirrorMask() != 0) extendExtrudeMaskWithMirrorTwins(cur_verts, tri_count, mask);
+    // extrude in one journal transaction. The pre-extension mask survives as the reply
+    // mask: only the SOURCE side's cap re-selects, so the follow-up transform moves one
+    // side directly and the twin cap follows by reflection instead of moving rigidly.
+    var reply_mask: ?[]const bool = null;
+    var reply_copy: ?[]bool = null;
+    defer if (reply_copy) |copy| std.heap.c_allocator.free(copy);
+    if (mesh_edit.mirrorMask() != 0) {
+        reply_copy = std.heap.c_allocator.dupe(bool, mask) catch null;
+        extendFaceMaskWithMirrorTwins(cur_verts, tri_count, mask);
+        if (reply_copy) |copy| {
+            if (!std.mem.eql(bool, copy, mask)) reply_mask = copy;
+        }
+    }
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     var entity: ?FaceExtrudeEntity = null;
@@ -1686,7 +1698,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     // patches going opposite ways), and walls rise only along each patch boundary.
     // The single-face path below stays byte-identical (mesh-port-parity pins its
     // fixtures).
-    if (multi) return meshTopoExtrudeRegion(mask, tri_count, distance_raw);
+    if (multi) return meshTopoExtrudeRegion(mask, tri_count, distance_raw, reply_mask);
 
     const old_groups: ?[]u32 = if (has_groups) (captureFaceGroups() orelse return false) else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
@@ -1842,8 +1854,10 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
 /// nothing mutates): a wire/degenerate face in the selection, a patch spanning
 /// parts or a selection mixing grouped/ungrouped faces, a non-manifold selection
 /// edge (3+ selected uses), and a closed or folded patch (no boundary, or no net
-/// normal to extrude along).
-fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32) bool {
+/// normal to extrude along). `reply_mask` (mirror extension, req_3797) narrows the
+/// reply selection to the SOURCE side's caps — the twin caps stay unselected so the
+/// follow-up transform mirrors them by reflection instead of moving them rigidly.
+fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, reply_mask: ?[]const bool) bool {
     const alloc = std.heap.c_allocator;
     const cur_verts = g_edit_verts orelse return false;
     const mesh_grouped = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
@@ -1995,10 +2009,13 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32) 
     // rows copy verbatim so UVs, normals, group ids, paint, and per-face semantics
     // all survive the move.
     const cap_start_face: u32 = @intCast(out.items.len / 24);
+    var cap_is_source = std.ArrayListUnmanaged(bool).empty;
+    defer cap_is_source.deinit(alloc);
     f = 0;
     while (f < tri_count) : (f += 1) {
         if (!mask[f]) continue;
         const off = (patches.get(uf.find(parent, f)) orelse return false).off;
+        cap_is_source.append(alloc, if (reply_mask) |source| source[f] else true) catch return false;
         const base = @as(usize, f) * 24;
         var row: [24]f32 = undefined;
         @memcpy(&row, cur_verts[base .. base + 24]);
@@ -2090,11 +2107,15 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32) 
         if (nbytes > 0) @memcpy(src[0..nbytes], colors.items[0..nbytes]);
     }
     ensureGlassTrailing();
-    // The reply selection is the CAP — face indices are append-order stable, so the
-    // translated patch is exactly [cap_start_face, cap_start_face + cap_face_count).
+    // The reply selection is the SOURCE side's cap — face indices are append-order
+    // stable inside [cap_start_face, cap_start_face + cap_face_count). Twin caps stay
+    // unselected so the next transform reflects them instead of dragging them along.
     var cap: u32 = 0;
+    var reply_selected = false;
     while (cap < cap_face_count) : (cap += 1) {
-        _ = mesh_edit.selectFaceByIndex(cap_start_face + cap, cap != 0);
+        if (cap < cap_is_source.items.len and !cap_is_source.items[cap]) continue;
+        _ = mesh_edit.selectFaceByIndex(cap_start_face + cap, reply_selected);
+        reply_selected = true;
     }
     mesh_edit.setMode(.face);
     journalCommit(&snap);
@@ -2132,29 +2153,74 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
         verts.deinit(std.heap.c_allocator);
         return false;
     }
+    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    };
+    // Mirror (req_3797): every twin EDGE of the selected edge extrudes the reflected
+    // reverse-wound quad in the same commit — one per enabled plane subset. A twin
+    // extends only when both twin vertices exist, an editable edge actually runs
+    // between them, and it lives in the same part (the append stamps one owner).
+    var twin_quads: u32 = 0;
+    if (mesh_edit.mirrorMask() != 0) {
+        const endpoints = mesh_edit.edgeEndpointsPub(edge_idx);
+        const reflect = struct {
+            fn point(p: [3]f32, subset: u8) [3]f32 {
+                var r = p;
+                inline for (0..3) |axis| {
+                    if (subset & (@as(u8, 1) << @intCast(axis)) != 0)
+                        r[axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - r[axis];
+                }
+                return r;
+            }
+        };
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            const t0 = mesh_edit.mirrorTwinOfVertPub(endpoints[0], subset) orelse continue;
+            const t1 = mesh_edit.mirrorTwinOfVertPub(endpoints[1], subset) orelse continue;
+            const same_edge = (t0 == endpoints[0] and t1 == endpoints[1]) or (t0 == endpoints[1] and t1 == endpoints[0]);
+            if (same_edge or !mesh_edit.hasEdgeBetweenPub(t0, t1)) continue;
+            if ((mesh_edit.vertPartPub(t0) orelse continue) != src_part) continue;
+            if ((mesh_edit.vertPartPub(t1) orelse continue) != src_part) continue;
+            const ra = reflect.point(frame.a, subset);
+            const rb = reflect.point(frame.b, subset);
+            const rc = reflect.point(c, subset);
+            const rd = reflect.point(d, subset);
+            // A reflection flips handedness — swap the pairs relative to the source call.
+            const twin_appended = if (forward)
+                appendQuadSplit(&verts, rb, ra, rc, rd)
+            else
+                appendQuadSplit(&verts, ra, rb, rd, rc);
+            if (!twin_appended) {
+                verts.deinit(std.heap.c_allocator);
+                return false;
+            }
+            twin_quads += 1;
+        }
+    }
     const owned = verts.toOwnedSlice(std.heap.c_allocator) catch {
         verts.deinit(std.heap.c_allocator);
         return false;
     };
     defer std.heap.c_allocator.free(owned);
     // Grouping bookkeeping BEFORE the replace wipes it (req_2644).
+    const new_faces: u32 = 2 + twin_quads * 2;
     const old_faces = g_edit_count / 3;
     const old_groups: ?[]u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) captureFaceGroups() else null;
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
     const old_parts = capturePartOfFaces();
     defer if (old_parts) |parts| std.heap.c_allocator.free(parts);
-    const materials = captureFaceMaterials(g_edit_count / 3 + 2) orelse return false;
+    const materials = captureFaceMaterials(g_edit_count / 3 + new_faces) orelse return false;
     defer std.heap.c_allocator.free(materials);
     @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
-    var semantics = captureFaceSemantics(old_faces + 2) orelse return false;
+    var semantics = captureFaceSemantics(old_faces + new_faces) orelse return false;
     defer semantics.deinit();
     const source_semantic = model_source.faceSemanticOf(frame.source_face);
     @memset(semantics.regions[old_faces..], source_semantic.region);
     @memset(semantics.instances[old_faces..], source_semantic.instance);
-    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
     var snap = journalSnapshotCurrent("extrude edge");
-    if (!replaceActiveEditMesh(owned, g_edit_count + 6)) {
+    if (!replaceActiveEditMesh(owned, g_edit_count + new_faces * 3)) {
         journalDiscard(&snap);
         return false;
     }
@@ -2295,6 +2361,47 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     if (!ok) {
         verts.deinit(std.heap.c_allocator);
         return false;
+    }
+    // Mirror (req_3797): bridge the twin edges too — the appended face rows reflect
+    // across the plane with reversed winding, one copy per enabled subset whose twin
+    // vertices and edges all exist in the same part.
+    if (mesh_edit.mirrorMask() != 0) {
+        const src_part_check = mesh_edit.selectedEdgesCommonPartPub();
+        const appended_start = @as(usize, g_edit_count) * 8;
+        const appended_len = verts.items.len - appended_start;
+        var subset: u8 = 1;
+        twin_subsets: while (subset <= 7) : (subset += 1) {
+            var self_twin = true;
+            for (edges) |edge| {
+                const t0 = mesh_edit.mirrorTwinOfVertPub(edge[0], subset) orelse continue :twin_subsets;
+                const t1 = mesh_edit.mirrorTwinOfVertPub(edge[1], subset) orelse continue :twin_subsets;
+                if (!mesh_edit.hasEdgeBetweenPub(t0, t1)) continue :twin_subsets;
+                if (src_part_check) |part| {
+                    if ((mesh_edit.vertPartPub(t0) orelse continue :twin_subsets) != part) continue :twin_subsets;
+                    if ((mesh_edit.vertPartPub(t1) orelse continue :twin_subsets) != part) continue :twin_subsets;
+                }
+                const same_edge = (t0 == edge[0] and t1 == edge[1]) or (t0 == edge[1] and t1 == edge[0]);
+                if (!same_edge) self_twin = false;
+            }
+            if (self_twin) continue; // the loop straddles the plane — it is its own twin
+            var row: usize = 0;
+            while (row * 24 < appended_len) : (row += 1) {
+                var corners: [3][3]f32 = undefined;
+                var k: usize = 0;
+                while (k < 3) : (k += 1) {
+                    const base = appended_start + row * 24 + k * 8;
+                    corners[k] = .{ verts.items[base], verts.items[base + 1], verts.items[base + 2] };
+                    inline for (0..3) |axis| {
+                        if (subset & (@as(u8, 1) << @intCast(axis)) != 0)
+                            corners[k][axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - corners[k][axis];
+                    }
+                }
+                if (!appendTri(&verts, corners[0], corners[2], corners[1])) {
+                    verts.deinit(std.heap.c_allocator);
+                    return false;
+                }
+            }
+        }
     }
     const owned = verts.toOwnedSlice(std.heap.c_allocator) catch {
         verts.deinit(std.heap.c_allocator);
@@ -2588,6 +2695,29 @@ pub fn meshTopoConnectVertices() bool {
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     if (!(indexed.connectVertices(selected[0], selected[1]) catch return false)) return false;
+    // Mirror (req_3797): connect every twin pair too — one connect per enabled plane
+    // subset, all in the same commit. A twin pair that exists but cannot connect
+    // refuses the whole op (never commit a half-symmetric connect).
+    if (mesh_edit.mirrorMask() != 0) {
+        var done: [7][2]u32 = undefined;
+        var done_count: usize = 0;
+        done[0] = .{ @min(selected[0], selected[1]), @max(selected[0], selected[1]) };
+        done_count = 1;
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            const t0 = mesh_edit.mirrorTwinOfVertPub(selected[0], subset) orelse continue;
+            const t1 = mesh_edit.mirrorTwinOfVertPub(selected[1], subset) orelse continue;
+            const pair = [2]u32{ @min(t0, t1), @max(t0, t1) };
+            var seen = false;
+            for (done[0..done_count]) |have| {
+                if (have[0] == pair[0] and have[1] == pair[1]) seen = true;
+            }
+            if (seen) continue;
+            done[done_count] = pair;
+            done_count += 1;
+            if (!(indexed.connectVertices(t0, t1) catch return false)) return false;
+        }
+    }
     var lowered = indexed.lower() catch return false;
     defer lowered.deinit();
     const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
@@ -3130,6 +3260,9 @@ const BevelSession = struct {
     original_mode: mesh_edit.Mode,
     selection_index: u32,
     target: indexed_edit_mesh.BevelTarget,
+    // Mirror (req_3797): the target's resolved twins, one slot per plane subset —
+    // every preview/commit bevels them at the same width in the same journal entry.
+    twin_targets: [7]?indexed_edit_mesh.BevelTarget = [_]?indexed_edit_mesh.BevelTarget{null} ** 7,
     max_width: f32,
     base_mesh: indexed_edit_mesh.Mesh,
     last_mesh: ?indexed_edit_mesh.Mesh,
@@ -3232,10 +3365,42 @@ pub fn meshBevelBegin() ?BevelInfo {
         else => return null,
     };
     const kind: indexed_edit_mesh.BevelKind = std.meta.activeTag(resolved.target);
+    // Mirror (req_3797): resolve the target's twin per enabled plane subset against
+    // the same base. A twin that resolves joins every preview/commit; its max width
+    // tightens the shared clamp so one slider drives both sides.
+    var twin_targets = [_]?indexed_edit_mesh.BevelTarget{null} ** 7;
+    var shared_max_width = resolved.max_width;
+    if (mesh_edit.mirrorMask() != 0) {
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            const twin_resolved: ?indexed_edit_mesh.BevelSelection = switch (original_mode) {
+                .vertex => vertex_twin: {
+                    const twin = mesh_edit.mirrorTwinOfVertPub(selection_index, subset) orelse break :vertex_twin null;
+                    const twin_part = mesh_edit.vertPartPub(twin) orelse break :vertex_twin null;
+                    break :vertex_twin base_mesh.resolveBevelVertex(mesh_edit.vertPosPub(twin), twin_part);
+                },
+                .edge => edge_twin: {
+                    const endpoints = mesh_edit.edgeEndpointsPub(selection_index);
+                    const t0 = mesh_edit.mirrorTwinOfVertPub(endpoints[0], subset) orelse break :edge_twin null;
+                    const t1 = mesh_edit.mirrorTwinOfVertPub(endpoints[1], subset) orelse break :edge_twin null;
+                    const same_edge = (t0 == endpoints[0] and t1 == endpoints[1]) or (t0 == endpoints[1] and t1 == endpoints[0]);
+                    if (same_edge or !mesh_edit.hasEdgeBetweenPub(t0, t1)) break :edge_twin null;
+                    const twin_part = mesh_edit.vertPartPub(t0) orelse break :edge_twin null;
+                    if ((mesh_edit.vertPartPub(t1) orelse break :edge_twin null) != twin_part) break :edge_twin null;
+                    break :edge_twin base_mesh.resolveBevelEdge(mesh_edit.vertPosPub(t0), mesh_edit.vertPosPub(t1), twin_part);
+                },
+                else => null,
+            };
+            const twin_selection = twin_resolved orelse continue;
+            if (std.meta.activeTag(twin_selection.target) != kind) continue;
+            twin_targets[subset - 1] = twin_selection.target;
+            shared_max_width = @min(shared_max_width, twin_selection.max_width);
+        }
+    }
     const default_width = std.math.clamp(
         indexed_edit_mesh.BevelTuning.default_width_m,
         indexed_edit_mesh.BevelTuning.minimum_width_m,
-        resolved.max_width,
+        shared_max_width,
     );
     const label = if (kind == .edge) "bevel edge" else "bevel vertex";
     g_bevel = .{
@@ -3243,7 +3408,8 @@ pub fn meshBevelBegin() ?BevelInfo {
         .original_mode = original_mode,
         .selection_index = selection_index,
         .target = resolved.target,
-        .max_width = resolved.max_width,
+        .twin_targets = twin_targets,
+        .max_width = shared_max_width,
         .base_mesh = base_mesh,
         .last_mesh = null,
         .base_paint_layout_stale = g_paint_layout_stale,
@@ -3260,7 +3426,7 @@ pub fn meshBevelBegin() ?BevelInfo {
         .kind = kind,
         .default_width = default_width,
         .minimum_width = indexed_edit_mesh.BevelTuning.minimum_width_m,
-        .max_width = resolved.max_width,
+        .max_width = shared_max_width,
     };
 }
 
@@ -3282,6 +3448,12 @@ pub fn meshBevelPreview(width_raw: f32) bool {
     var preview = session.base_mesh.clone() catch return false;
     defer preview.deinit();
     if (!(preview.bevel(session.target, width) catch return false)) return false;
+    // Mirror (req_3797): every resolved twin bevels at the same width in this preview
+    // — a twin that stops beveling refuses the whole preview, never half a chamfer.
+    for (session.twin_targets) |twin_opt| {
+        const twin = twin_opt orelse continue;
+        if (!(preview.bevel(twin, width) catch return false)) return false;
+    }
 
     var lowered = preview.lower() catch return false;
     defer lowered.deinit();
@@ -3413,6 +3585,9 @@ pub fn meshDeleteSelection() bool {
     defer std.heap.c_allocator.free(mask);
     const del = mesh_edit.buildDeleteMask(mask);
     if (del == 0) return false;
+    // Mirror (req_3797): deleting a face deletes its twin — the mask extension is the
+    // same door extrude uses.
+    if (mesh_edit.mirrorMask() != 0) extendFaceMaskWithMirrorTwins(verts, tri_count, mask);
     const follow_before = if (mesh_edit.mode() == .face)
         mesh_edit.followPatchJson(std.heap.c_allocator, null, 2)
     else
@@ -3450,9 +3625,37 @@ pub fn meshTopoWeldSelection() bool {
     if (affected_count < 2) return false;
     const center = mesh_edit.selectionPivot() orelse return false;
 
-    // Final position per corner: the centroid for affected corners, the soup's
-    // own position otherwise. Faces with two coincident final corners are
-    // degenerate slivers — masked out of the rebuild.
+    // Final position per logical vertex: the centroid for affected vertices; with
+    // mirror armed (req_3797), each affected vertex's twin collapses to the
+    // REFLECTED centroid of its plane subset in the same rebuild. A twin that is
+    // itself affected collapses to the selection centroid directly — never both.
+    const collapse_to = std.heap.c_allocator.alloc(?[3]f32, vert_count) catch return false;
+    defer std.heap.c_allocator.free(collapse_to);
+    @memset(collapse_to, null);
+    var v: u32 = 0;
+    while (v < vert_count) : (v += 1) {
+        if (affected[v]) collapse_to[v] = center;
+    }
+    if (mesh_edit.mirrorMask() != 0) {
+        v = 0;
+        while (v < vert_count) : (v += 1) {
+            if (!affected[v]) continue;
+            var subset: u8 = 1;
+            while (subset <= 7) : (subset += 1) {
+                const twin = mesh_edit.mirrorTwinOfVertPub(v, subset) orelse continue;
+                if (twin >= vert_count or affected[twin] or collapse_to[twin] != null) continue;
+                var reflected = center;
+                inline for (0..3) |axis| {
+                    if (subset & (@as(u8, 1) << @intCast(axis)) != 0)
+                        reflected[axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - reflected[axis];
+                }
+                collapse_to[twin] = reflected;
+            }
+        }
+    }
+
+    // Faces with two coincident final corners are degenerate slivers — masked out
+    // of the rebuild.
     const corner_positions = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
     defer std.heap.c_allocator.free(corner_positions);
     const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
@@ -3469,14 +3672,15 @@ pub fn meshTopoWeldSelection() bool {
         var k: usize = 0;
         while (k < 3) : (k += 1) {
             const lv = mesh_edit.cornerVertPub(f, @intCast(k));
-            const collapse = lv < vert_count and affected[lv];
-            if (collapse) {
+            const final_opt: ?[3]f32 = if (lv < vert_count) collapse_to[lv] else null;
+            if (final_opt != null) {
                 moved_any = true;
                 touched_face = true;
             }
-            corner_positions[cp_base + k * 3 + 0] = if (collapse) center[0] else verts[soup_base + k * 8 + 0];
-            corner_positions[cp_base + k * 3 + 1] = if (collapse) center[1] else verts[soup_base + k * 8 + 1];
-            corner_positions[cp_base + k * 3 + 2] = if (collapse) center[2] else verts[soup_base + k * 8 + 2];
+            const final = final_opt orelse [3]f32{ verts[soup_base + k * 8 + 0], verts[soup_base + k * 8 + 1], verts[soup_base + k * 8 + 2] };
+            corner_positions[cp_base + k * 3 + 0] = final[0];
+            corner_positions[cp_base + k * 3 + 1] = final[1];
+            corner_positions[cp_base + k * 3 + 2] = final[2];
         }
         touched[f] = touched_face;
         mask[f] = weldTriangleDegenerate(corner_positions[cp_base .. cp_base + 9]);
@@ -6182,8 +6386,20 @@ pub fn meshDetachSelection() AppendResult {
     const tri_count = g_edit_count / 3;
     const mask = jalloc.alloc(bool, tri_count) catch return fail;
     defer jalloc.free(mask);
-    const del = mesh_edit.buildDeleteMask(mask);
-    if (del == 0 or del >= tri_count) return fail;
+    var del = mesh_edit.buildDeleteMask(mask);
+    if (del == 0) return fail;
+    // Mirror (req_3797): the twin faces detach into the SAME new part — a symmetric
+    // panel detaches as one piece.
+    if (mesh_edit.mirrorMask() != 0) {
+        if (g_edit_verts) |soup| {
+            extendFaceMaskWithMirrorTwins(soup, tri_count, mask);
+            del = 0;
+            for (mask) |selected| {
+                if (selected) del += 1;
+            }
+        }
+    }
+    if (del >= tri_count) return fail;
 
     const groups = captureFaceGroups() orelse return fail;
     defer jalloc.free(groups);
@@ -6327,6 +6543,8 @@ pub fn meshFlipSelectionWinding() bool {
     const mask = jalloc.alloc(bool, tri_count) catch return false;
     defer jalloc.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return false;
+    // Mirror (req_3797): flipping a face flips its twin — symmetry survives the wind.
+    if (mesh_edit.mirrorMask() != 0) extendFaceMaskWithMirrorTwins(cur_verts, tri_count, mask);
 
     const needed = @as(usize, g_edit_count) * 8;
     if (cur_verts.len < needed) return false;
@@ -6442,6 +6660,20 @@ pub fn meshMergeSelectedFaces() bool {
     const mask = jalloc.alloc(bool, tri_count) catch return false;
     defer jalloc.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return false;
+    // Mirror (req_3797): merge fuses ONE connected cluster, so the twin cluster gets
+    // its own second fusion in the same commit rather than a mask extension.
+    var twin_mask: ?[]bool = null;
+    defer if (twin_mask) |rows| jalloc.free(rows);
+    if (mesh_edit.mirrorMask() != 0) build_twin: {
+        const extended = jalloc.dupe(bool, mask) catch break :build_twin;
+        extendFaceMaskWithMirrorTwins(verts, tri_count, extended);
+        var twin_any = false;
+        for (extended, mask) |*slot, source| {
+            slot.* = slot.* and !source;
+            if (slot.*) twin_any = true;
+        }
+        if (twin_any) twin_mask = extended else jalloc.free(extended);
+    }
     const groups = captureFaceGroups() orelse return false;
     defer std.heap.c_allocator.free(groups);
     const parts = capturePartOfFaces();
@@ -6454,19 +6686,27 @@ pub fn meshMergeSelectedFaces() bool {
 
     // A single authored face cannot straddle opaque and glass draw passes. RGB may
     // vary per source triangle (painted detail is retained), but alpha class may not.
-    var selected_glass: ?bool = null;
-    var triangle: usize = 0;
-    while (triangle < tri_count) : (triangle += 1) {
-        if (!mask[triangle]) continue;
-        const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
-        if (selected_glass) |expected| {
-            if (expected != is_glass) return false;
-        } else selected_glass = is_glass;
+    // Each cluster (source, twin) is checked on its own — they merge separately.
+    for ([2]?[]const bool{ mask, twin_mask }) |cluster_opt| {
+        const cluster = cluster_opt orelse continue;
+        var selected_glass: ?bool = null;
+        var triangle: usize = 0;
+        while (triangle < tri_count) : (triangle += 1) {
+            if (!cluster[triangle]) continue;
+            const is_glass = model_paint.isGlassAlpha(base_colors[triangle * 4 + 3]);
+            if (selected_glass) |expected| {
+                if (expected != is_glass) return false;
+            } else selected_glass = is_glass;
+        }
     }
 
     var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
     const merged = (indexed.mergeSelected(mask) catch return false) orelse return false;
+    const twin_merged: ?indexed_edit_mesh.MergedFace = if (twin_mask) |rows|
+        (indexed.mergeSelected(rows) catch null)
+    else
+        null;
     var selected_count: usize = 0;
     for (mask) |selected| if (selected) {
         selected_count += 1;
@@ -6482,7 +6722,11 @@ pub fn meshMergeSelectedFaces() bool {
     const before = mesh_edit.followPatchJson(std.heap.c_allocator, selected_faces, 2) orelse return false;
     defer std.heap.c_allocator.free(before);
 
-    if (!merged.retessellated) {
+    // With mirror on, either BOTH clusters merge or the op refuses — committing only
+    // the source half would mint the exact silent asymmetry this mode exists to kill.
+    if (twin_mask != null and twin_merged == null) return false;
+    const any_retessellated = merged.retessellated or (twin_merged != null and twin_merged.?.retessellated);
+    if (!any_retessellated) {
         // Every source corner survives on the fused boundary (or the loop is
         // concave, where a re-fan would flip triangles) — the byte-stable
         // group-only commit keeps geometry, UVs, and atlas pixels untouched.
@@ -6534,7 +6778,8 @@ pub fn meshMergeSelectedFaces() bool {
     var after_faces = std.ArrayListUnmanaged(u32).empty;
     defer after_faces.deinit(std.heap.c_allocator);
     for (lowered.face_ids, 0..) |face_id, row| {
-        if (face_id == merged.face_id) after_faces.append(std.heap.c_allocator, @intCast(row)) catch break;
+        const is_twin_face = twin_merged != null and face_id == twin_merged.?.face_id;
+        if (face_id == merged.face_id or is_twin_face) after_faces.append(std.heap.c_allocator, @intCast(row)) catch break;
     }
     const after = mesh_edit.followPatchJson(std.heap.c_allocator, after_faces.items, 2) orelse return true;
     defer std.heap.c_allocator.free(after);
@@ -6814,6 +7059,10 @@ pub fn meshSetSelectionGlass() bool {
     defer jalloc.free(mask);
     const selected = mesh_edit.buildDeleteMask(mask);
     if (selected == 0) return false;
+    // Mirror (req_3797): glass toggles land on the twin faces too.
+    if (mesh_edit.mirrorMask() != 0) {
+        if (g_edit_verts) |soup| extendFaceMaskWithMirrorTwins(soup, tri_count, mask);
+    }
 
     var snap = journalSnapshotCurrent("glass faces");
     mesh_edit.clearSelection(); // restore the tinted patches before colours are read
@@ -6998,6 +7247,9 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     defer jalloc.free(mask);
     const selected = mesh_edit.buildDeleteMask(mask);
     if (selected == 0) return false;
+    // Mirror (req_3797): solidify thickens the twin faces too — each authored plane
+    // already offsets along its own normal, so disjoint twin clusters compose freely.
+    if (mesh_edit.mirrorMask() != 0) extendFaceMaskWithMirrorTwins(cur_verts, tri_count, mask);
     const t: f32 = if (thickness_raw > 1e-5) thickness_raw else mesh_edit.SolidifyTuning.default_thickness_m;
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
@@ -10078,6 +10330,11 @@ pub fn meshPaintSelection(io: std.Io, environ: *const std.process.Environ.Map, r
     const mask = jalloc.alloc(bool, face_count) catch return 0;
     defer jalloc.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
+    // Mirror (req_3797): the fill paints the twin faces too — the mirror-painting half
+    // of req_1538's original ask, for fills.
+    if (mesh_edit.mirrorMask() != 0) {
+        if (g_edit_verts) |soup| extendFaceMaskWithMirrorTwins(soup, face_count, mask);
+    }
     var snap = journalSnapshotForNewAction(mesh_journal_log.PAINT_FACES_LABEL);
     if (snap == null or snap.?.atlas == null or snap.?.paint_state == null) {
         journalDiscard(&snap);

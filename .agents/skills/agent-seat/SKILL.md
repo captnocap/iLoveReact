@@ -165,6 +165,15 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat action <name> '<json>'` | Any structured action below. | Parameterized parity lane; JSON must be one object. |
 | `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
 
+**Live mirror is bilateral (req_3796/req_3797).** With a mirror plane armed (Mirror Edit
+X/Y/Z — model-origin plane, always), the editing verbs land on BOTH sides in one journal
+transaction: transforms reflect onto twins, and extrude, delete, flip, glass, paint fill,
+solidify, detach, merge-faces, weld, connect, create-face, bevel, and extrude-edge all
+extend to the selection's mirror twins automatically. A missing/out-of-scope twin honestly
+falls back to one-sided. After a mirrored extrude only the SOURCE cap is selected — move it
+and the twin cap follows by reflection. Exceptions: loop cut already propagates its ring
+around the whole body; basic-cut is NOT yet mirror-extended (cut both sides manually).
+
 ## Structured editor parity
 
 Use the structured lane for cart-owned tools. These calls route into the same Outliner,
