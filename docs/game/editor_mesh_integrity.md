@@ -193,6 +193,19 @@ edges at one vertex) still return null. The TS twin
 Unit-pinned in `framework/testing/unit/mesh_edit.zig` and
 `cart/editor/model/editMesh.test.ts`.
 
+**Cracked seams only merge when they can re-tessellate (req_3805).** A
+cancelled T-split seam is a physical crack: the spanning side has no welded
+vertex along the overlap, so its byte-stable rows keep rendering an open edge
+INSIDE the fused face. A convex result re-tessellates (the dissolve commit),
+which rebuilds the rows from the clean loop and stitches the crack. A CONCAVE
+result never re-tessellates (a re-fan flips rows), so a concave fusion over
+cracked seams — the user's horseshoe-around-a-hole, two columns bridged only
+by a small quad — would commit an authored face that lies about its own
+topology: lingering interior edges, centre dot floating over the void. Both
+twins now refuse exactly that combination (`fragment_keys` ∩ cancelled seams +
+`loopIsConcavePositions`); concave fusions over EXACT seams (the supported
+req_3771 bookshelf class) and convex fusions over cracked seams stay legal.
+
 ## Outliner row ↔ range reconciler — req_3763 (P0-1/P0-2)
 
 The roll call proves the HOST partition; the outliner ROW table (cart state)

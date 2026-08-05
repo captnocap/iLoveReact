@@ -248,5 +248,30 @@ test('merge faces still refuses a genuinely holed selection', () => {
   assert(mergeFaces(ring, ring.faces.map((_, i) => i)) === null, 'holed ring must still refuse to merge');
 });
 
+test('merge faces refuses a concave horseshoe over cracked T-split seams (req_3805)', () => {
+  // Two tall columns bridged only by a small bottom quad, hole above the bridge.
+  // Both bridge seams are T-junctions (the columns have no vertex at the bridge's
+  // top corners), so the cancelled seams are physical cracks; the fused loop is a
+  // concave horseshoe that can never re-tessellate — must refuse.
+  const mesh: EditMesh = {
+    verts: [
+      [0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0],
+      [1, 1, 0], [2, 1, 0],
+      [0, 3, 0], [1, 3, 0], [2, 3, 0], [3, 3, 0],
+    ],
+    faces: [
+      { loop: [0, 1, 7, 6] },  // left column
+      { loop: [1, 2, 5, 4] },  // bottom bridge (hole above)
+      { loop: [2, 3, 9, 8] },  // right column
+    ],
+  };
+  assert(mergeFaces(mesh, [0, 1, 2]) === null, 'cracked concave horseshoe must refuse to merge');
+  // Control: fill the hole and the same seams merge into one convex rectangle.
+  const filled: EditMesh = { verts: mesh.verts, faces: [...mesh.faces, { loop: [4, 5, 8, 7] }] };
+  const merged = mergeFaces(filled, [0, 1, 2, 3]);
+  assert(merged !== null, 'hole-filled rectangle must merge');
+  assert(merged!.faces[0].loop.length === 4, `expected a clean quad, got a ${merged!.faces[0].loop.length}-gon`);
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} test(s) failed`);

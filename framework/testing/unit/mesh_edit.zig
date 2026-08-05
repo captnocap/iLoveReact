@@ -832,6 +832,61 @@ test "merge faces dissolves a T-junction seam the staged path could already merg
     try testing.expectEqual(@as(u32, 2), lowered.tri_count);
 }
 
+test "merge faces refuses a concave horseshoe over cracked T-split seams (req_3805)" {
+    // The user's live demo: two tall columns bridged only by a small bottom quad,
+    // with a HOLE above the bridge. Both bridge seams are T-junctions — the columns
+    // have no vertex at the bridge's top corners — so the cancelled seams are
+    // physical cracks in the render rows. The fused loop is a concave horseshoe,
+    // which never re-tessellates (a re-fan flips rows), so committing would produce
+    // one authored face whose interior still renders open edges and whose centre
+    // dot floats over the void. The merge must refuse.
+    const p = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 0 },
+        .{ 1, 1, 0 }, .{ 2, 1, 0 },
+        .{ 0, 3, 0 }, .{ 1, 3, 0 }, .{ 2, 3, 0 }, .{ 3, 3, 0 },
+    };
+    const triangles = [_][3]usize{
+        // left column (0,0)-(1,0)-(1,3)-(0,3)
+        .{ 0, 1, 7 }, .{ 0, 7, 6 },
+        // bottom bridge (1,0)-(2,0)-(2,1)-(1,1) — the hole sits above it
+        .{ 1, 2, 5 }, .{ 1, 5, 4 },
+        // right column (2,0)-(3,0)-(3,3)-(2,3)
+        .{ 2, 3, 9 }, .{ 2, 9, 8 },
+    };
+    var soup = [_]f32{0} ** (triangles.len * 3 * 8);
+    for (triangles, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = (triangle_index * 3 + corner) * 8;
+            @memcpy(soup[base .. base + 3], p[point][0..]);
+        }
+    }
+    const groups = [_]u32{ 40, 40, 41, 41, 42, 42 };
+    const selected = [_]bool{true} ** triangles.len;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], triangles.len, groups[0..], null);
+    defer indexed.deinit();
+    try testing.expect((try indexed.mergeSelected(selected[0..])) == null);
+
+    // Control: fill the hole and the same T-split seams become mergeable — the
+    // union is a convex rectangle, so the dissolve re-tessellates and STITCHES
+    // the cracks instead of hiding them.
+    const filler = [_][3]usize{ .{ 4, 5, 8 }, .{ 4, 8, 7 } };
+    var full_soup = [_]f32{0} ** ((triangles.len + filler.len) * 3 * 8);
+    @memcpy(full_soup[0..soup.len], soup[0..]);
+    for (filler, 0..) |triangle, triangle_index| {
+        for (triangle, 0..) |point, corner| {
+            const base = ((triangles.len + triangle_index) * 3 + corner) * 8;
+            @memcpy(full_soup[base .. base + 3], p[point][0..]);
+        }
+    }
+    const full_groups = [_]u32{ 40, 40, 41, 41, 42, 42, 43, 43 };
+    const full_selected = [_]bool{true} ** (triangles.len + filler.len);
+    var full = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, full_soup[0..], triangles.len + filler.len, full_groups[0..], null);
+    defer full.deinit();
+    const merged = (try full.mergeSelected(full_selected[0..])).?;
+    try testing.expect(merged.retessellated);
+    try testing.expectEqual(@as(usize, 4), full.faces.items[merged.face_id].vertices.items.len);
+}
+
 test "tris to quads recovers every selected cell instead of pairing across grid seams" {
     // Two adjacent squares arrive as four independent triangles. The middle vertical
     // edge is also a legal triangle adjacency, so an arbitrary first-match walk can

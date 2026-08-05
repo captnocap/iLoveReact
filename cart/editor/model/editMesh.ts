@@ -2814,6 +2814,10 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
   const MERGE_LINE_REL_EPS = 0.00001;            // matches MERGE_FACE_PLANE_REL_EPS
   const uses = new Map<string, number>();
   const subEdges: Array<[number, number]> = [];
+  // Keys whose contributions include a T-split fragment: the spanning side has no
+  // vertex along the overlap, so a cancelled fragment seam is a physical CRACK
+  // inside the fused region until a re-tessellation stitches it.
+  const fragmentKeys = new Set<string>();
   for (const f of selFaces) {
     const L = f.loop;
     for (let i = 0; i < L.length; i += 1) {
@@ -2839,16 +2843,19 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
         }
         splits.sort((x, y) => x.t - y.t);
       }
+      const edgeWasSplit = splits.length > 0;
       let run = from;
       for (const s of splits) {
         if (s.vertex === run) continue;
         const key = run < s.vertex ? `${run}:${s.vertex}` : `${s.vertex}:${run}`;
         uses.set(key, (uses.get(key) ?? 0) + 1);
+        fragmentKeys.add(key);
         subEdges.push([run, s.vertex]);
         run = s.vertex;
       }
       const key = run < to ? `${run}:${to}` : `${to}:${run}`;
       uses.set(key, (uses.get(key) ?? 0) + 1);
+      if (edgeWasSplit) fragmentKeys.add(key);
       subEdges.push([run, to]);
     }
   }
@@ -2877,6 +2884,13 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
 
   const clean = dropCollinearLoop(m.verts, loop);
   if (clean.length < 3) return null;
+
+  // A cancelled T-split seam is a physical crack in the render topology, and only
+  // a convex result re-tessellates to stitch it — a concave fusion over cracked
+  // seams (the horseshoe-around-a-hole) refuses instead of committing an authored
+  // face that lies about its own topology (req_3805). Matches the native twin.
+  const crackedSeams = [...fragmentKeys].some((key) => (uses.get(key) ?? 0) >= 2);
+  if (crackedSeams && isFaceConcave(m, { loop: clean })) return null;
 
   // orient the fused face to the shared normal (the boundary chain already matches,
   // but guard against a degenerate first face), and carry the common appearance.

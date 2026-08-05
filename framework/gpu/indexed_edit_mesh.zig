@@ -1516,6 +1516,11 @@ pub const Mesh = struct {
         defer uses.deinit(mesh.allocator);
         var directed = std.ArrayListUnmanaged(Directed).empty;
         defer directed.deinit(mesh.allocator);
+        // Keys whose contributions include a T-split fragment: the spanning side has
+        // no welded vertex along the overlap, so if such a seam cancels, the fused
+        // interior physically contains a CRACK until a re-tessellation stitches it.
+        var fragment_keys = std.AutoHashMapUnmanaged(u64, void).empty;
+        defer fragment_keys.deinit(mesh.allocator);
         const Split = struct { t: f32, vertex: u32 };
         var splits = std.ArrayListUnmanaged(Split).empty;
         defer splits.deinit(mesh.allocator);
@@ -1555,6 +1560,7 @@ pub const Mesh = struct {
                 }
                 const uv_from = face.uvs.items[corner];
                 const uv_to = face.uvs.items[(corner + 1) % corner_count];
+                const edge_was_split = splits.items.len > 0;
                 var run_from = from;
                 var run_uv = uv_from;
                 for (splits.items) |split| {
@@ -1563,6 +1569,7 @@ pub const Mesh = struct {
                     const entry = try uses.getOrPut(mesh.allocator, key);
                     if (!entry.found_existing) entry.value_ptr.* = 0;
                     entry.value_ptr.* += 1;
+                    try fragment_keys.put(mesh.allocator, key, {});
                     try directed.append(mesh.allocator, .{ .from = run_from, .to = split.vertex, .uv = run_uv, .key = key });
                     run_from = split.vertex;
                     run_uv = lerp2(uv_from, uv_to, split.t);
@@ -1571,6 +1578,7 @@ pub const Mesh = struct {
                 const entry = try uses.getOrPut(mesh.allocator, key);
                 if (!entry.found_existing) entry.value_ptr.* = 0;
                 entry.value_ptr.* += 1;
+                if (edge_was_split) try fragment_keys.put(mesh.allocator, key, {});
                 try directed.append(mesh.allocator, .{ .from = run_from, .to = to, .uv = run_uv, .key = key });
             }
         }
@@ -1604,6 +1612,23 @@ pub const Mesh = struct {
         if (current != start.? or loop.items.len != boundary_count) return null;
         dropCollinearFaceLoop(mesh, &loop, &uvs);
         if (loop.items.len < 3) return null;
+
+        // A cancelled T-split seam is a physical CRACK (req_3805): the spanning side
+        // has no welded vertex along the overlap, so its byte-stable rows keep
+        // rendering an open edge INSIDE the fused face. Only a re-tessellation
+        // stitches that, and concave loops never re-tessellate (a re-fan flips
+        // rows) — so a concave fusion over cracked seams refuses instead of
+        // committing an authored face that lies about its own topology (the
+        // horseshoe-around-a-hole whose centre dot floats over the void).
+        var cracked_seams = false;
+        var fragment_iter = fragment_keys.keyIterator();
+        while (fragment_iter.next()) |key| {
+            if ((uses.get(key.*) orelse 0) >= 2) {
+                cracked_seams = true;
+                break;
+            }
+        }
+        if (cracked_seams and loopIsConcavePositions(mesh, loop.items)) return null;
 
         // The dissolve test (req_3771): would the byte-stable resident rows still
         // reference a corner the fused boundary no longer owns? Interior grid verts
@@ -2017,12 +2042,27 @@ pub const Mesh = struct {
 
     fn faceIsConcave(mesh: *const Mesh, face: *const Face) bool {
         if (face.vertices.items.len < 4) return false;
-        const normal = faceNormal(mesh, face);
-        var sign: f32 = 0;
-        for (face.vertices.items, 0..) |vertex_id, corner| {
-            const previous = mesh.vertices.items[face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len]].position;
+        return loopIsConcavePositions(mesh, face.vertices.items);
+    }
+
+    /// The faceIsConcave turn-sign test over a bare vertex loop — usable BEFORE a
+    /// candidate boundary is committed onto a face (req_3805's refusal runs on the
+    /// clean loop, ahead of any mutation). Newell normal, same 1e-9 turn epsilon.
+    fn loopIsConcavePositions(mesh: *const Mesh, loop: []const u32) bool {
+        if (loop.len < 4) return false;
+        var normal: Vec3 = .{ 0, 0, 0 };
+        for (loop, 0..) |vertex_id, corner| {
             const current = mesh.vertices.items[vertex_id].position;
-            const next = mesh.vertices.items[face.vertices.items[(corner + 1) % face.vertices.items.len]].position;
+            const next = mesh.vertices.items[loop[(corner + 1) % loop.len]].position;
+            normal[0] += (current[1] - next[1]) * (current[2] + next[2]);
+            normal[1] += (current[2] - next[2]) * (current[0] + next[0]);
+            normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
+        }
+        var sign: f32 = 0;
+        for (loop, 0..) |vertex_id, corner| {
+            const previous = mesh.vertices.items[loop[(corner + loop.len - 1) % loop.len]].position;
+            const current = mesh.vertices.items[vertex_id].position;
+            const next = mesh.vertices.items[loop[(corner + 1) % loop.len]].position;
             const turn = dot3(cross3(sub3(current, previous), sub3(next, current)), normal);
             if (@abs(turn) < 1e-9) continue;
             const current_sign: f32 = if (turn > 0) 1 else -1;
