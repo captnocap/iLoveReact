@@ -76,6 +76,8 @@ export type SelectorReceipt = { ok: boolean; faces?: number; actionableFaces?: n
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
 /** mirror-quads receipt counters — present even on ok:0 so a zero explains itself. */
 export type MirrorQuadStats = { ok?: number; changed?: number; quads?: number; symmetric?: number; pairs?: number; refused?: number };
+/** mirror-replace receipt counters — present even on ok:0 so a zero explains itself. */
+export type MirrorReplaceStats = { ok?: number; changed?: number; copied?: number; replaced?: number; welded?: number; seam?: number };
 export type InsetReceipt =
   | { ok: true; topology: TopologyReceipt; transforms: number }
   | { ok: false; stage: 'validate' | 'extrude' | 'scale-0' | 'scale-1' | 'offset'; reason: string };
@@ -1308,6 +1310,16 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     adapter.adoptTopology?.(receipt);
     return { receipt, stats: parseJson<MirrorQuadStats>(raw) };
   };
+  // Selection-scoped mirror stamp (req_3864): reflect the selected faces across the
+  // model-origin axis plane, deleting every whole twin face buried in the stamped
+  // space and welding the seam + region border. Deliberate asymmetry survives by
+  // simply not being selected.
+  const mirrorReplace = (axis: number): { receipt: TopologyReceipt | null; stats: MirrorReplaceStats | null } => {
+    const raw = automation(() => host.__mesh_topo_mirror_replace?.(1 << axis));
+    const receipt = readTopology(raw);
+    adapter.adoptTopology?.(receipt);
+    return { receipt, stats: parseJson<MirrorReplaceStats>(raw) };
+  };
   const collectUvOrientation = (): number => {
     const changed = Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
     if (changed > 0) notifySelectionChanged();
@@ -1415,7 +1427,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     select, selectEdge, selectVertex, selectFace, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, collectUvOrientation, shellAction,
+    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
   };
 }
@@ -1713,6 +1725,18 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
             ? `nothing fused — scanned ${stats.quads ?? 0} quads: ${stats.symmetric ?? 0} already have a quad twin, ${stats.pairs ?? 0} twin lone-triangle pairs found, ${stats.refused ?? 0} refused by the indexed merge`
             : 'mirror-quads door unavailable — the running host binary predates it; rebuild the dev host';
         return seat.reply('mirror-quads', !!receipt, receipt ?? stats ?? undefined, reason);
+      }
+      case 'mirror-replace': {
+        const axisRaw = args.axis;
+        const axis = typeof axisRaw === 'string' ? 'xyz'.indexOf(axisRaw.toLowerCase()) : Number(axisRaw ?? 0);
+        if (axis < 0 || axis > 2 || !Number.isInteger(axis)) return seat.reply('mirror-replace', false, undefined, 'axis must be 0|1|2 or x|y|z');
+        const { receipt, stats } = seat.mirrorReplace(axis);
+        const reason = receipt
+          ? undefined
+          : stats
+            ? 'nothing stamped — select the faces to mirror first (face mode); the selection is reflected across the model-origin plane, the twin space is cleared, and the seam + borders weld'
+            : 'mirror-replace door unavailable — the running host binary predates it; rebuild the dev host';
+        return seat.reply('mirror-replace', !!receipt, receipt ?? stats ?? undefined, reason);
       }
       case 'collect-uv-orientation': {
         const changed = seat.collectUvOrientation();

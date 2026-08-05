@@ -735,6 +735,14 @@ const meshMirrorQuads = (axis: number) => {
   const raw = host.__mesh_topo_mirror_quads?.(1 << axis);
   return { result: readTopoResult(raw), doorPresent: typeof raw === 'string' && raw.length > 0 };
 };
+// Selection-scoped mirror stamp (req_3864): reflect the SELECTED faces across the axis
+// plane, clearing whatever whole twin faces occupy the stamped space and welding the
+// seam + region border. Unselected faces are never touched, so deliberate asymmetry
+// survives by simply not being selected.
+const meshMirrorReplace = (axis: number) => {
+  const raw = host.__mesh_topo_mirror_replace?.(1 << axis);
+  return { result: readTopoResult(raw), doorPresent: typeof raw === 'string' && raw.length > 0 };
+};
 const meshQuadifyBegin = () => readTopoResult(host.__mesh_quadify_begin?.());
 const meshQuadifyPreview = (evaluation: number): QuadifyPlan | null =>
   readQuadifyPlan(host.__mesh_quadify_preview?.(evaluation));
@@ -2589,6 +2597,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!doorPresent) { setError('match quads: host door missing — rebuild the dev host'); return; }
     const s = (result ?? {}) as { quads?: number; symmetric?: number; pairs?: number; refused?: number };
     setError(`match quads: nothing fused — ${s.quads ?? 0} quads, ${s.symmetric ?? 0} already matched, ${s.pairs ?? 0} twin pairs, ${s.refused ?? 0} refused`);
+  };
+  const runMirrorCopy = (axis: number) => {
+    const { result, doorPresent } = meshMirrorReplace(axis);
+    if (adoptMesh(result)) return;
+    if (!doorPresent) { setError('copy sel: host door missing — rebuild the dev host'); return; }
+    setError('copy sel: select the faces to stamp onto the other side first (face mode)');
   };
 
   // ── Editor bridge ──────────────────────────────────────────────────────────
@@ -5020,6 +5034,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 </Pressable>
                 <Pressable onPress={() => runMirrorQuads(axis)} tooltip={`match quads — where one side has a quad and its ${label} twin is two loose triangles, fuse the twins into the same quad`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
                   <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>quads</Text>
+                </Pressable>
+                <Pressable onPress={() => runMirrorCopy(axis)} tooltip={`copy selection across ${label} — clear whatever occupies the mirrored space, stamp the selected faces' mirror there, weld the seam and borders; unselected faces are never touched`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
+                  <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>copy sel</Text>
                 </Pressable>
               </Row>
             );

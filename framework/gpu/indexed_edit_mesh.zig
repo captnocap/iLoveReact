@@ -1336,6 +1336,279 @@ pub const Mesh = struct {
         return changed;
     }
 
+    /// Receipt for mirrorReplaceSelection — every counter a zero needs to explain itself.
+    pub const MirrorReplaceStats = struct {
+        copied: u32 = 0, // selected faces stamped onto the other side
+        replaced: u32 = 0, // twin faces deleted to make room
+        welded: u32 = 0, // stamped corners welded onto surviving twin verts
+        seam: u32 = 0, // near-plane corners shared with the source (the welded seam)
+    };
+
+    /// Mirror-stamp the SELECTED faces across the model-origin plane (req_3864, the
+    /// user's own retopo unit generalized: "delete the triangles, then create the face
+    /// in the space"). For the selection S:
+    ///   1. every twin-side face ALL of whose corners lie on the reflected surface of
+    ///      S is deleted — whole authored faces only, neighbours that cross the region
+    ///      border survive untouched;
+    ///   2. every face of S is re-created reflected (reverse-wound, quads stay quads,
+    ///      diagonal choice preserved — the symmetrize clone machinery);
+    ///   3. stamped corners weld: near-plane corners (≤ SEAM_EPS) SHARE the source
+    ///      vertex outright, and every other corner snaps onto a surviving twin vertex
+    ///      in the same quantized position class before minting a new one — the seam
+    ///      and the region border come out welded, never coincident-but-separate.
+    /// Faces the user did not select are never deleted and never reflected, so
+    /// deliberate asymmetry survives by simply not being selected.
+    pub fn mirrorReplaceSelection(mesh: *Mesh, selected_triangles: []const bool, axis: u8, center: f32) !?MirrorReplaceStats {
+        if (axis > 2) return null;
+        const SEAM_EPS: f32 = 0.001; // 1mm: centreline verts this close to the plane weld to the source
+        var stats = MirrorReplaceStats{};
+
+        var selected = std.ArrayListUnmanaged(u32).empty;
+        defer selected.deinit(mesh.allocator);
+        var selected_lookup = std.AutoHashMapUnmanaged(u32, void).empty;
+        defer selected_lookup.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!faceFullySelected(face, selected_triangles)) continue;
+            try selected.append(mesh.allocator, face.id);
+            try selected_lookup.put(mesh.allocator, face.id, {});
+        }
+        if (selected.items.len == 0) return null;
+
+        // The reflected surface of S as fan triangles with a per-triangle weld
+        // tolerance: 35% of the triangle's shortest edge. A twin corner within that
+        // leash of the surface is "inside the stamped space".
+        const SurfaceTri = struct { a: Vec3, b: Vec3, c: Vec3, tol_sq: f32 };
+        var surface = std.ArrayListUnmanaged(SurfaceTri).empty;
+        defer surface.deinit(mesh.allocator);
+        var region_lo = Vec3{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+        var region_hi = Vec3{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+        var max_tol: f32 = 0;
+        for (selected.items) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            const loop = face.vertices.items;
+            if (loop.len < 3) continue;
+            var corner: usize = 1;
+            while (corner + 1 < loop.len) : (corner += 1) {
+                var a = mesh.vertices.items[loop[0]].position;
+                var b = mesh.vertices.items[loop[corner]].position;
+                var c = mesh.vertices.items[loop[corner + 1]].position;
+                a[axis] = center * 2 - a[axis];
+                b[axis] = center * 2 - b[axis];
+                c[axis] = center * 2 - c[axis];
+                const shortest = @min(length3(sub3(b, a)), @min(length3(sub3(c, b)), length3(sub3(a, c))));
+                const tol = @max(SEAM_EPS, shortest * 0.35);
+                max_tol = @max(max_tol, tol);
+                try surface.append(mesh.allocator, .{ .a = a, .b = b, .c = c, .tol_sq = tol * tol });
+                inline for (0..3) |at| {
+                    region_lo[at] = @min(region_lo[at], @min(a[at], @min(b[at], c[at])));
+                    region_hi[at] = @max(region_hi[at], @max(a[at], @max(b[at], c[at])));
+                }
+            }
+        }
+        if (surface.items.len == 0) return null;
+        inline for (0..3) |at| {
+            region_lo[at] -= max_tol;
+            region_hi[at] += max_tol;
+        }
+
+        const on_surface = struct {
+            fn dist_sq(p: Vec3, a: Vec3, b: Vec3, c: Vec3) f32 {
+                // Ericson closest-point-on-triangle.
+                const ab = sub3(b, a);
+                const ac = sub3(c, a);
+                const ap = sub3(p, a);
+                const d1 = dot3(ab, ap);
+                const d2 = dot3(ac, ap);
+                if (d1 <= 0 and d2 <= 0) return dot3(ap, ap);
+                const bp = sub3(p, b);
+                const d3 = dot3(ab, bp);
+                const d4 = dot3(ac, bp);
+                if (d3 >= 0 and d4 <= d3) return dot3(bp, bp);
+                const vc = d1 * d4 - d3 * d2;
+                if (vc <= 0 and d1 >= 0 and d3 <= 0) {
+                    const t = d1 / (d1 - d3);
+                    const q = Vec3{ a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t };
+                    const pq = sub3(p, q);
+                    return dot3(pq, pq);
+                }
+                const cp = sub3(p, c);
+                const d5 = dot3(ab, cp);
+                const d6 = dot3(ac, cp);
+                if (d6 >= 0 and d5 <= d6) return dot3(cp, cp);
+                const vb = d5 * d2 - d1 * d6;
+                if (vb <= 0 and d2 >= 0 and d6 <= 0) {
+                    const t = d2 / (d2 - d6);
+                    const q = Vec3{ a[0] + ac[0] * t, a[1] + ac[1] * t, a[2] + ac[2] * t };
+                    const pq = sub3(p, q);
+                    return dot3(pq, pq);
+                }
+                const va = d3 * d6 - d5 * d4;
+                if (va <= 0 and (d4 - d3) >= 0 and (d5 - d6) >= 0) {
+                    const t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+                    const bc = sub3(c, b);
+                    const q = Vec3{ b[0] + bc[0] * t, b[1] + bc[1] * t, b[2] + bc[2] * t };
+                    const pq = sub3(p, q);
+                    return dot3(pq, pq);
+                }
+                const denom = 1.0 / (va + vb + vc);
+                const v = vb * denom;
+                const w = vc * denom;
+                const q = Vec3{
+                    a[0] + ab[0] * v + ac[0] * w,
+                    a[1] + ab[1] * v + ac[1] * w,
+                    a[2] + ab[2] * v + ac[2] * w,
+                };
+                const pq = sub3(p, q);
+                return dot3(pq, pq);
+            }
+        };
+        const vert_on_surface = struct {
+            fn check(tris: []const SurfaceTri, lo: Vec3, hi: Vec3, p: Vec3) bool {
+                inline for (0..3) |at| {
+                    if (p[at] < lo[at] or p[at] > hi[at]) return false;
+                }
+                for (tris) |tri| {
+                    if (on_surface.dist_sq(p, tri.a, tri.b, tri.c) <= tri.tol_sq) return true;
+                }
+                return false;
+            }
+        };
+
+        // Which side the selection lives on: deletion may only ever eat the OTHER side.
+        var source_side: f32 = 0;
+        for (selected.items) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            for (face.vertices.items) |vertex_id| {
+                source_side += mesh.vertices.items[vertex_id].position[axis] - center;
+            }
+        }
+        const source_sign: f32 = if (source_side >= 0) 1 else -1;
+
+        // 1. Delete every whole twin-side face buried inside the stamped space. The
+        //    selection itself is never deleted, and neither is anything on the
+        //    selection's own side of the plane (a source-side sliver hugging the
+        //    plane can sit within tolerance of the reflected surface).
+        for (mesh.faces.items) |*face| {
+            if (!face.alive or face.vertices.items.len < 3) continue;
+            if (selected_lookup.contains(face.id)) continue;
+            var centroid: f32 = 0;
+            for (face.vertices.items) |vertex_id| {
+                centroid += mesh.vertices.items[vertex_id].position[axis];
+            }
+            centroid = centroid / @as(f32, @floatFromInt(face.vertices.items.len)) - center;
+            if (centroid * source_sign > SEAM_EPS) continue; // source side — untouchable
+            var covered = true;
+            for (face.vertices.items) |vertex_id| {
+                if (!vert_on_surface.check(surface.items, region_lo, region_hi, mesh.vertices.items[vertex_id].position)) {
+                    covered = false;
+                    break;
+                }
+            }
+            if (!covered) continue;
+            face.alive = false;
+            stats.replaced += 1;
+        }
+
+        // Survivor position index for border welding: every vertex still referenced by
+        // a live face, keyed by the shared quantized position class.
+        var survivors = std.AutoHashMapUnmanaged(MirrorPositionKey, u32).empty;
+        defer survivors.deinit(mesh.allocator);
+        for (mesh.faces.items) |*face| {
+            if (!face.alive) continue;
+            for (face.vertices.items) |vertex_id| {
+                const key = mirrorPositionKey(0, mesh.vertices.items[vertex_id].position);
+                const entry = try survivors.getOrPut(mesh.allocator, key);
+                if (!entry.found_existing) entry.value_ptr.* = vertex_id;
+            }
+        }
+
+        // 2. Stamp the reflected copies — the symmetrize clone loop plus border welding.
+        var reflected_vertices = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer reflected_vertices.deinit(mesh.allocator);
+        var twin_groups = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer twin_groups.deinit(mesh.allocator);
+        for (selected.items) |face_id| {
+            const face = &mesh.faces.items[face_id];
+            if (face.vertices.items.len < 3) continue;
+            var on_seam = true;
+            for (face.vertices.items) |vertex_id| {
+                if (@abs(mesh.vertices.items[vertex_id].position[axis] - center) > SEAM_EPS) on_seam = false;
+            }
+            if (on_seam) continue; // lives on the plane — it IS its own twin
+            var twin = try face.clone(mesh.allocator);
+            errdefer twin.deinit(mesh.allocator);
+            const source_diagonal = if (face.vertices.items.len == 4)
+                (face.diagonal orelse chosenQuadDiagonal(mesh, face))
+            else
+                null;
+            var twin_vertices = std.ArrayListUnmanaged(u32).empty;
+            defer twin_vertices.deinit(mesh.allocator);
+            var output_corner: usize = 0;
+            while (output_corner < face.vertices.items.len) : (output_corner += 1) {
+                const source_corner = if (output_corner == 0) 0 else face.vertices.items.len - output_corner;
+                const source_id = face.vertices.items[source_corner];
+                const source_position = mesh.vertices.items[source_id].position;
+                var twin_id = source_id;
+                if (@abs(source_position[axis] - center) > SEAM_EPS) {
+                    const entry = try reflected_vertices.getOrPut(mesh.allocator, source_id);
+                    if (!entry.found_existing) {
+                        var reflected = source_position;
+                        reflected[axis] = center * 2 - reflected[axis];
+                        // Border weld: an existing survivor in the same position class
+                        // IS this corner — share its identity instead of minting a
+                        // coincident-but-separate twin.
+                        if (survivors.get(mirrorPositionKey(0, reflected))) |existing| {
+                            entry.value_ptr.* = existing;
+                            stats.welded += 1;
+                        } else {
+                            entry.value_ptr.* = @intCast(mesh.vertices.items.len);
+                            try mesh.vertices.append(mesh.allocator, .{ .position = reflected });
+                        }
+                    }
+                    twin_id = entry.value_ptr.*;
+                } else {
+                    stats.seam += 1;
+                }
+                try twin_vertices.append(mesh.allocator, twin_id);
+            }
+            const group_entry = try twin_groups.getOrPut(mesh.allocator, face.group);
+            if (!group_entry.found_existing) {
+                group_entry.value_ptr.* = mesh.next_group;
+                mesh.next_group += 1;
+            }
+            twin.id = @intCast(mesh.faces.items.len);
+            twin.group = group_entry.value_ptr.*;
+            twin.source_tessellation_valid = false;
+            twin.vertices.clearRetainingCapacity();
+            twin.uvs.clearRetainingCapacity();
+            try twin.vertices.appendSlice(mesh.allocator, twin_vertices.items);
+            output_corner = 0;
+            while (output_corner < face.uvs.items.len) : (output_corner += 1) {
+                const source_corner = if (output_corner == 0) 0 else face.uvs.items.len - output_corner;
+                try twin.uvs.append(mesh.allocator, face.uvs.items[source_corner]);
+            }
+            if (source_diagonal) |diagonal| {
+                const a_position = mesh.vertices.items[diagonal[0]].position;
+                const b_position = mesh.vertices.items[diagonal[1]].position;
+                const twin_a = if (@abs(a_position[axis] - center) <= SEAM_EPS)
+                    diagonal[0]
+                else
+                    reflected_vertices.get(diagonal[0]) orelse return error.InvalidMirrorDiagonal;
+                const twin_b = if (@abs(b_position[axis] - center) <= SEAM_EPS)
+                    diagonal[1]
+                else
+                    reflected_vertices.get(diagonal[1]) orelse return error.InvalidMirrorDiagonal;
+                twin.diagonal = .{ twin_a, twin_b };
+            } else {
+                twin.diagonal = null;
+            }
+            try mesh.faces.append(mesh.allocator, twin);
+            stats.copied += 1;
+        }
+        if (stats.copied == 0 and stats.replaced == 0) return null;
+        return stats;
+    }
+
     fn mirrorPositionKey(part: u32, position: Vec3) MirrorPositionKey {
         return .{
             .part = part,

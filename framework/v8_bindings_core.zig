@@ -1938,6 +1938,36 @@ fn hostMeshTopoMirrorQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnString(info, json);
 }
 
+/// __mesh_topo_mirror_replace(axisMask) → JSON {"ok","key","count","generation",
+/// "changed","copied","replaced","welded","seam"}. Selection-scoped mirror stamp
+/// (req_3864): reflect the SELECTED faces across the model-origin plane, delete every
+/// whole twin face buried in the stamped space, weld the seam + region border. Stats
+/// ride the reply even on ok:0 so a zero explains itself.
+fn hostMeshTopoMirrorReplace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis_mask: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const stats = scene3d.meshMirrorReplaceSelection(axis_mask);
+    if (stats.copied > 0 or stats.replaced > 0) state.markDirty();
+    var buf: [320]u8 = undefined;
+    if (stats.copied == 0 and stats.replaced == 0) {
+        setReturnString(info, "{\"ok\":0,\"changed\":0,\"copied\":0,\"replaced\":0,\"welded\":0,\"seam\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"changed\":{d},\"copied\":{d},\"replaced\":{d},\"welded\":{d},\"seam\":{d}}}",
+        .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), stats.copied, stats.copied, stats.replaced, stats.welded, stats.seam },
+    ) catch {
+        setReturnString(info, "{\"ok\":0,\"changed\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 /// __mesh_quadify_begin() → JSON {"ok","residentTriangles"}. Capture the exact
 /// whole-model base for a non-journaled triangle→quad dry run.
 fn hostMeshQuadifyBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4705,6 +4735,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
     v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
     v8_runtime.registerHostFn("__mesh_topo_mirror_quads", hostMeshTopoMirrorQuads);
+    v8_runtime.registerHostFn("__mesh_topo_mirror_replace", hostMeshTopoMirrorReplace);
     v8_runtime.registerHostFn("__mesh_quadify_begin", hostMeshQuadifyBegin);
     v8_runtime.registerHostFn("__mesh_quadify_preview", hostMeshQuadifyPreview);
     v8_runtime.registerHostFn("__mesh_quadify_end", hostMeshQuadifyEnd);

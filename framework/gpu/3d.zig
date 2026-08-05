@@ -7176,6 +7176,61 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
     return stats;
 }
 
+/// Selection-scoped mirror stamp (req_3864): reflect the SELECTED faces across the
+/// model-origin plane of the lowest armed axis, deleting every whole twin face buried
+/// in the stamped space and welding the seam + region border — the user's own retopo
+/// unit ("delete the triangles, create the face in the space") applied to the twin
+/// side in one journal entry. Unselected faces are never deleted and never reflected,
+/// so deliberate asymmetry survives by simply not being selected.
+pub fn meshMirrorReplaceSelection(axis_mask_raw: u32) indexed_edit_mesh.Mesh.MirrorReplaceStats {
+    const empty: indexed_edit_mesh.Mesh.MirrorReplaceStats = .{};
+    if (!model_paint.hasTarget()) return empty;
+    if (mesh_edit.mode() != .face) return empty;
+    const verts = g_edit_verts orelse return empty;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return empty;
+    const axis: u8 = blk: {
+        const m: u8 = @intCast(axis_mask_raw & 7);
+        if (m & 1 != 0) break :blk 0;
+        if (m & 2 != 0) break :blk 1;
+        if (m & 4 != 0) break :blk 2;
+        return empty;
+    };
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return empty;
+    defer std.heap.c_allocator.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return empty;
+
+    const base_colors = collectCurrentFaceColors() orelse return empty;
+    defer std.heap.c_allocator.free(base_colors);
+    const groups = captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const part_count = hostPartCount();
+    const groups_arg: ?[]const u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) groups else null;
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts, model_source.faceMaterials()) orelse return empty;
+    defer indexed.deinit();
+    const stats = (indexed.mirrorReplaceSelection(mask, axis, mesh_edit.MIRROR_PLANE_CENTER[axis]) catch return empty) orelse return empty;
+    var lowered = indexed.lower() catch return empty;
+    defer lowered.deinit();
+    if (lowered.tri_count == 0) return empty;
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return empty;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return empty;
+    var snap = journalSnapshotCurrent("mirror copy selection");
+    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
+    if (!ok) {
+        journalDiscard(&snap);
+        return empty;
+    }
+    if (parts != null) renormalizePartRanges(lowered.parts, part_count);
+    adoptIndexedEditMesh(&indexed, &lowered);
+    mesh_edit.clearSelection();
+    journalCommit(&snap);
+    return stats;
+}
+
 // ── Whole-topology triangle → quad dry-run session ────────────────────────────
 // The popup owns only phase/evaluation controls. The captured base, exact maximum
 // matching, live authored-edge preview, cancel restore, and one-entry commit stay

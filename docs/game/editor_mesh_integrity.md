@@ -200,6 +200,34 @@ explains itself. Surfaces: the `quads` verb in the symmetry trust strip (per
 armed axis, beside keep+/keep−) and the Seat action
 `mirror-quads {"axis":0|1|2|"x"|"y"|"z"}`.
 
+## Mirror Copy Selection — the selection-scoped stamp (req_3864)
+
+Per-quad matching cannot help when the twin side's tessellation is OFFSET from
+the retopo (the twin space is covered by halves of other authored faces), and
+whole-part `keep±` symmetrize is too blunt — it cuts the model in half, mirrors
+everything including deliberate asymmetry, and shares seam identity only within
+1e-5 m so off-plane centreline verts stay unwelded. The user's own retopo unit
+("delete the triangles, then create the face in the space"), generalized to a
+face selection, is `meshMirrorReplaceSelection` / `__mesh_topo_mirror_replace`:
+
+1. every whole twin-side face ALL of whose corners lie on the reflected surface
+   of the selection (per-triangle leash: 35% of the shortest edge) is deleted —
+   border-crossing neighbours survive untouched, and nothing on the selection's
+   own side of the plane is ever deleted;
+2. every selected face is re-created reflected through the symmetrize clone
+   machinery (reverse-wound, quads stay quads, diagonal choice preserved,
+   mirrored paint via source-row inheritance);
+3. corners weld instead of stacking: within 1 mm of the plane the stamp SHARES
+   the source vertex (the welded seam), and elsewhere it snaps onto any
+   surviving twin vertex in the same quantized position class before minting a
+   new one (the welded region border).
+
+Unselected faces are never deleted and never reflected, so deliberate
+asymmetry survives by simply not being selected. One journal entry ("mirror
+copy selection"); receipt carries `copied/replaced/welded/seam` even on ok:0.
+Surfaces: the `copy sel` verb in the symmetry trust strip and the Seat action
+`mirror-replace {"axis":0|1|2|"x"|"y"|"z"}`.
+
 ### T-junction seams merge in one shot (req_3800)
 
 Seam cancellation is geometric, not id-exact. A T-junction seam — one face

@@ -62,6 +62,17 @@ export const editor_mesh_integrity: DocIndex = {
       status: 'live',
     },
     {
+      name: 'meshMirrorReplaceSelection / __mesh_topo_mirror_replace',
+      purpose: ['geometry', 'host_bridge'],
+      kind: 'host_fn',
+      sourceFile: 'framework/gpu/3d.zig',
+      description:
+        'req_3864 selection-scoped mirror stamp — the user’s own retopo unit ("delete the triangles, then create the face in the space") generalized to a face selection and applied to the twin side in one journal entry ("mirror copy selection"). Deletes every whole twin-side face all of whose corners lie on the reflected surface of the selection (per-triangle leash 35% of shortest edge; nothing on the selection’s own side is ever deleted), re-creates the selected faces reflected through the symmetrize clone machinery (reverse-wound, quads stay quads, diagonals preserved, mirrored paint via source-row inheritance), and welds: corners within 1mm of the model-origin plane SHARE the source vertex (welded seam), others snap onto surviving twin verts in the same quantized position class (welded border). Unselected faces are never deleted and never reflected — deliberate asymmetry survives by not being selected. Built because per-quad matching (meshMirrorMatchQuads) cannot help offset twin tessellation and keep± symmetrize is too blunt (cuts the whole part, ignores asymmetric content, 1e-5 seam sharing leaves off-plane centreline verts unwelded). Receipt carries copied/replaced/welded/seam even on ok:0. Surfaces: the copy sel verb in ModelView’s symmetry trust strip and Seat action mirror-replace.',
+      dependsOn: ['meshIntegrityRollCall'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/agent/seatApi.ts'],
+      status: 'live',
+    },
+    {
       name: 'meshQuadifyBegin / meshQuadifyPreview / meshQuadifyEnd',
       purpose: ['geometry', 'host_bridge', 'ui'],
       kind: 'host_fn',
