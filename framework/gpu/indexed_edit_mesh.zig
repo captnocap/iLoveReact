@@ -298,6 +298,23 @@ pub const BevelTuning = struct {
     pub const coplanar_normal_dot: f32 = 0.999;
 };
 
+/// One selected open boundary loop is chamfered as a unit: every old corner
+/// receives one new boundary edge and every old boundary edge keeps a positive
+/// middle span. That changes any N-sided opening into a clean 2N-sided opening;
+/// these limits are shared by the popup preview and headless callers.
+pub const BoundaryChamferTuning = struct {
+    pub const minimum_sides: usize = 3;
+    pub const default_width_m: f32 = BevelTuning.default_width_m;
+    pub const minimum_width_m: f32 = BevelTuning.minimum_width_m;
+    pub const edge_fraction: f32 = 0.45;
+};
+
+pub const BoundaryChamferSelection = struct {
+    sides_before: u32,
+    sides_after: u32,
+    max_width: f32,
+};
+
 pub const BevelKind = enum { vertex, edge };
 pub const BevelTarget = union(BevelKind) {
     vertex: u32,
@@ -2960,6 +2977,102 @@ pub const Mesh = struct {
         return count == 2;
     }
 
+    fn edgeIncidentFaceCount(mesh: *const Mesh, edge: [2]u32) u32 {
+        var count: u32 = 0;
+        for (mesh.faces.items) |*face| {
+            if (face.alive and faceHasUndirectedEdge(face, edge[0], edge[1])) count += 1;
+        }
+        return count;
+    }
+
+    fn boundaryChamferLimit(mesh: *const Mesh, loop: []const u32) ?f32 {
+        if (loop.len < BoundaryChamferTuning.minimum_sides) return null;
+        var shortest = std.math.inf(f32);
+        for (loop, 0..) |vertex, index| {
+            const next = loop[(index + 1) % loop.len];
+            if (vertex == next or vertex >= mesh.vertices.items.len or next >= mesh.vertices.items.len or
+                !mesh.vertices.items[vertex].alive or !mesh.vertices.items[next].alive or
+                mesh.edgeIncidentFaceCount(.{ vertex, next }) != 1)
+            {
+                return null;
+            }
+            for (loop[0..index]) |prior| if (prior == vertex) return null;
+            shortest = @min(shortest, length3(sub3(
+                mesh.vertices.items[next].position,
+                mesh.vertices.items[vertex].position,
+            )));
+        }
+        const limit = shortest * BoundaryChamferTuning.edge_fraction;
+        return if (std.math.isFinite(limit) and limit >= BoundaryChamferTuning.minimum_width_m) limit else null;
+    }
+
+    /// Resolve an unordered selected edge set into one strict closed loop. Every
+    /// edge must be an actual open mesh boundary (one incident authored face),
+    /// every vertex must have degree two in the selection, and all identity is
+    /// resolved inside the selected outliner part before topology is changed.
+    pub fn resolveBoundaryChamfer(
+        mesh: *const Mesh,
+        selected_edges: []const [2]Vec3,
+        part: u32,
+        out_loop: []u32,
+    ) ?BoundaryChamferSelection {
+        if (selected_edges.len < BoundaryChamferTuning.minimum_sides or out_loop.len != selected_edges.len) return null;
+        const BoundaryNode = struct {
+            neighbors: [2]u32 = undefined,
+            count: u8 = 0,
+        };
+        var nodes = std.AutoHashMapUnmanaged(u32, BoundaryNode).empty;
+        defer nodes.deinit(mesh.allocator);
+        nodes.ensureTotalCapacity(mesh.allocator, @intCast(selected_edges.len)) catch return null;
+
+        for (selected_edges) |edge_positions| {
+            const edge = [2]u32{
+                mesh.vertexAt(edge_positions[0], part) orelse return null,
+                mesh.vertexAt(edge_positions[1], part) orelse return null,
+            };
+            if (edge[0] == edge[1] or mesh.edgeIncidentFaceCount(edge) != 1) return null;
+            for ([2][2]u32{ .{ edge[0], edge[1] }, .{ edge[1], edge[0] } }) |directed| {
+                const entry = nodes.getOrPut(mesh.allocator, directed[0]) catch return null;
+                if (!entry.found_existing) entry.value_ptr.* = .{};
+                var neighbor_index: usize = 0;
+                while (neighbor_index < entry.value_ptr.count) : (neighbor_index += 1) {
+                    if (entry.value_ptr.neighbors[neighbor_index] == directed[1]) return null;
+                }
+                if (entry.value_ptr.count >= entry.value_ptr.neighbors.len) return null;
+                entry.value_ptr.neighbors[entry.value_ptr.count] = directed[1];
+                entry.value_ptr.count += 1;
+            }
+        }
+        if (nodes.count() != selected_edges.len) return null;
+        var start: u32 = std.math.maxInt(u32);
+        var node_it = nodes.iterator();
+        while (node_it.next()) |entry| {
+            if (entry.value_ptr.count != 2) return null;
+            start = @min(start, entry.key_ptr.*);
+        }
+
+        var previous: ?u32 = null;
+        var current = start;
+        for (out_loop, 0..) |*slot, index| {
+            for (out_loop[0..index]) |visited| if (visited == current) return null;
+            slot.* = current;
+            const node = nodes.get(current) orelse return null;
+            const next = if (previous) |prior|
+                if (node.neighbors[0] == prior) node.neighbors[1] else if (node.neighbors[1] == prior) node.neighbors[0] else return null
+            else
+                @min(node.neighbors[0], node.neighbors[1]);
+            previous = current;
+            current = next;
+        }
+        if (current != start) return null;
+        const max_width = mesh.boundaryChamferLimit(out_loop) orelse return null;
+        return .{
+            .sides_before = @intCast(out_loop.len),
+            .sides_after = @intCast(out_loop.len * 2),
+            .max_width = max_width,
+        };
+    }
+
     fn faceCentroid(mesh: *const Mesh, face: *const Face) Vec3 {
         var center = Vec3{ 0, 0, 0 };
         for (face.vertices.items) |vertex_id| center = add3(center, mesh.vertices.items[vertex_id].position);
@@ -3348,6 +3461,112 @@ pub const Mesh = struct {
             .edge => |edge| mesh.bevelEdge(edge, width),
             .vertex => |vertex| mesh.bevelVertex(vertex, width),
         };
+    }
+
+    fn directedEdgeKey(a: u32, b: u32) u64 {
+        return (@as(u64, a) << 32) | b;
+    }
+
+    /// Chamfer one complete open boundary loop from the captured indexed base.
+    /// Each old boundary edge receives a point near each endpoint; a new corner
+    /// face makes the segment between those points the opening boundary while the
+    /// old corner becomes an interior vertex. The operation is simultaneous, so
+    /// adjacent corners cannot shorten or clamp one another in iteration order.
+    pub fn chamferBoundary(mesh: *Mesh, loop: []const u32, width_raw: f32) !bool {
+        const limit = mesh.boundaryChamferLimit(loop) orelse return false;
+        const width = @min(width_raw, limit);
+        if (!std.math.isFinite(width) or width < BoundaryChamferTuning.minimum_width_m) return false;
+
+        var point_by_direction = std.AutoHashMapUnmanaged(u64, u32).empty;
+        defer point_by_direction.deinit(mesh.allocator);
+        try point_by_direction.ensureTotalCapacity(mesh.allocator, @intCast(loop.len * 2));
+        for (loop, 0..) |vertex, index| {
+            const next = loop[(index + 1) % loop.len];
+            const a = mesh.vertices.items[vertex].position;
+            const b = mesh.vertices.items[next].position;
+            const edge_length = length3(sub3(b, a));
+            if (edge_length <= width * 2) return false;
+            const direction = mul3(sub3(b, a), 1.0 / edge_length);
+            const near_a: u32 = @intCast(mesh.vertices.items.len);
+            const near_b: u32 = near_a + 1;
+            try mesh.vertices.appendSlice(mesh.allocator, &.{
+                Vertex{ .position = add3(a, mul3(direction, width)) },
+                Vertex{ .position = add3(b, mul3(direction, -width)) },
+            });
+            try point_by_direction.put(mesh.allocator, directedEdgeKey(vertex, next), near_a);
+            try point_by_direction.put(mesh.allocator, directedEdgeKey(next, vertex), near_b);
+        }
+
+        const original_face_count = mesh.faces.items.len;
+        var face_index: usize = 0;
+        while (face_index < original_face_count) : (face_index += 1) {
+            const face = &mesh.faces.items[face_index];
+            if (!face.alive or face.vertices.items.len < 3) continue;
+            var split_edges: usize = 0;
+            for (face.vertices.items, 0..) |vertex, corner| {
+                const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                if (point_by_direction.contains(directedEdgeKey(vertex, next))) split_edges += 1;
+            }
+            if (split_edges == 0) continue;
+
+            var vertices = std.ArrayListUnmanaged(u32).empty;
+            errdefer vertices.deinit(mesh.allocator);
+            var uvs = std.ArrayListUnmanaged(Vec2).empty;
+            errdefer uvs.deinit(mesh.allocator);
+            try vertices.ensureTotalCapacity(mesh.allocator, face.vertices.items.len + split_edges * 2);
+            try uvs.ensureTotalCapacity(mesh.allocator, face.vertices.items.len + split_edges * 2);
+            for (face.vertices.items, 0..) |vertex, corner| {
+                const next_corner = (corner + 1) % face.vertices.items.len;
+                const next = face.vertices.items[next_corner];
+                const uv = if (corner < face.uvs.items.len) face.uvs.items[corner] else Vec2{ 0.5, 0.5 };
+                const next_uv = if (next_corner < face.uvs.items.len) face.uvs.items[next_corner] else Vec2{ 0.5, 0.5 };
+                vertices.appendAssumeCapacity(vertex);
+                uvs.appendAssumeCapacity(uv);
+                const near_vertex = point_by_direction.get(directedEdgeKey(vertex, next)) orelse continue;
+                const near_next = point_by_direction.get(directedEdgeKey(next, vertex)) orelse return false;
+                const a = mesh.vertices.items[vertex].position;
+                const b = mesh.vertices.items[next].position;
+                const edge_length = length3(sub3(b, a));
+                const fraction = width / edge_length;
+                vertices.appendAssumeCapacity(near_vertex);
+                vertices.appendAssumeCapacity(near_next);
+                uvs.appendAssumeCapacity(.{
+                    uv[0] + (next_uv[0] - uv[0]) * fraction,
+                    uv[1] + (next_uv[1] - uv[1]) * fraction,
+                });
+                uvs.appendAssumeCapacity(.{
+                    next_uv[0] + (uv[0] - next_uv[0]) * fraction,
+                    next_uv[1] + (uv[1] - next_uv[1]) * fraction,
+                });
+            }
+            face.vertices.deinit(mesh.allocator);
+            face.uvs.deinit(mesh.allocator);
+            face.vertices = vertices;
+            face.uvs = uvs;
+            face.diagonal = null;
+            face.source_tessellation_valid = false;
+        }
+
+        for (loop, 0..) |vertex, index| {
+            const previous = loop[(index + loop.len - 1) % loop.len];
+            const next = loop[(index + 1) % loop.len];
+            var cap = [3]u32{
+                point_by_direction.get(directedEdgeKey(vertex, previous)) orelse return false,
+                vertex,
+                point_by_direction.get(directedEdgeKey(vertex, next)) orelse return false,
+            };
+            var source_face: ?u32 = null;
+            var reference_normal = Vec3{ 0, 0, 0 };
+            for (mesh.faces.items[0..original_face_count]) |*face| {
+                if (!face.alive or !containsVertex(face, vertex)) continue;
+                if (source_face == null) source_face = face.id;
+                reference_normal = add3(reference_normal, faceNormal(mesh, face));
+            }
+            const source = source_face orelse return false;
+            if (dot3(mesh.loopNormal(cap[0..]), reference_normal) < 0) std.mem.reverse(u32, cap[0..]);
+            _ = try mesh.appendBevelFace(source, cap[0..]);
+        }
+        return true;
     }
 
     pub fn lower(mesh: *const Mesh) !Lowered {

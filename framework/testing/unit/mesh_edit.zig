@@ -988,8 +988,8 @@ test "merge faces dissolves a T-junction seam the staged path could already merg
     // overlapping seam runs are the same geometry.
     const p = [_][3]f32{
         .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 },
-        .{ 1, 1, 0 }, .{ 2, 1, 0 },
-        .{ 0, 2, 0 }, .{ 1, 2, 0 }, .{ 2, 2, 0 },
+        .{ 1, 1, 0 }, .{ 2, 1, 0 }, .{ 0, 2, 0 },
+        .{ 1, 2, 0 }, .{ 2, 2, 0 },
     };
     const triangles = [_][3]usize{
         // left tall quad (0,0)-(1,0)-(1,2)-(0,2)
@@ -1030,8 +1030,8 @@ test "merge faces refuses a concave horseshoe over cracked T-split seams (req_38
     // dot floats over the void. The merge must refuse.
     const p = [_][3]f32{
         .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 }, .{ 3, 0, 0 },
-        .{ 1, 1, 0 }, .{ 2, 1, 0 },
-        .{ 0, 3, 0 }, .{ 1, 3, 0 }, .{ 2, 3, 0 }, .{ 3, 3, 0 },
+        .{ 1, 1, 0 }, .{ 2, 1, 0 }, .{ 0, 3, 0 }, .{ 1, 3, 0 },
+        .{ 2, 3, 0 }, .{ 3, 3, 0 },
     };
     const triangles = [_][3]usize{
         // left column (0,0)-(1,0)-(1,3)-(0,3)
@@ -2333,6 +2333,115 @@ test "indexed bevel rejects boundary edges and flat triangulation seams" {
 
     try testing.expect(indexed.resolveBevelEdge(corners[0], corners[1], 7) == null);
     try testing.expect(indexed.resolveBevelEdge(corners[0], corners[2], 7) == null);
+}
+
+const boundary_chamfer_outer = [4][3]f32{
+    .{ -2, 2, 0 }, .{ 2, 2, 0 }, .{ 2, -2, 0 }, .{ -2, -2, 0 },
+};
+const boundary_chamfer_inner = [4][3]f32{
+    .{ -1, 1, 0 }, .{ 1, 1, 0 }, .{ 1, -1, 0 }, .{ -1, -1, 0 },
+};
+
+fn boundaryChamferRingSoup(out: []f32) void {
+    const quads = [4][4][3]f32{
+        .{ boundary_chamfer_outer[0], boundary_chamfer_outer[1], boundary_chamfer_inner[1], boundary_chamfer_inner[0] },
+        .{ boundary_chamfer_outer[1], boundary_chamfer_outer[2], boundary_chamfer_inner[2], boundary_chamfer_inner[1] },
+        .{ boundary_chamfer_outer[2], boundary_chamfer_outer[3], boundary_chamfer_inner[3], boundary_chamfer_inner[2] },
+        .{ boundary_chamfer_outer[3], boundary_chamfer_outer[0], boundary_chamfer_inner[0], boundary_chamfer_inner[3] },
+    };
+    var triangle: usize = 0;
+    for (quads) |quad| {
+        for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }) |split| {
+            for (split, 0..) |quad_corner, output_corner| {
+                const base = (triangle * 3 + output_corner) * 8;
+                @memcpy(out[base .. base + 3], quad[quad_corner][0..]);
+            }
+            triangle += 1;
+        }
+    }
+}
+
+test "selected open boundary loop chamfers every N-sided corner into one 2N-sided opening" {
+    var soup = [_]f32{0} ** (8 * 3 * 8);
+    boundaryChamferRingSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3 };
+    const parts = [_]u32{7} ** 8;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 8, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    const selected_edges = [4][2][3]f32{
+        .{ boundary_chamfer_inner[0], boundary_chamfer_inner[1] },
+        .{ boundary_chamfer_inner[1], boundary_chamfer_inner[2] },
+        .{ boundary_chamfer_inner[2], boundary_chamfer_inner[3] },
+        .{ boundary_chamfer_inner[3], boundary_chamfer_inner[0] },
+    };
+    var loop: [selected_edges.len]u32 = undefined;
+    const selection = indexed.resolveBoundaryChamfer(selected_edges[0..], 7, loop[0..]) orelse
+        return error.ExpectedOpenBoundaryLoop;
+    try testing.expectEqual(@as(u32, 4), selection.sides_before);
+    try testing.expectEqual(@as(u32, 8), selection.sides_after);
+    try testing.expectApproxEqAbs(@as(f32, 0.9), selection.max_width, 0.00001);
+    try testing.expect(try indexed.chamferBoundary(loop[0..], 0.25));
+
+    var open_edges = std.AutoHashMap(u64, u32).init(testing.allocator);
+    defer open_edges.deinit();
+    for (indexed.faces.items) |face| {
+        if (!face.alive) continue;
+        for (face.vertices.items, 0..) |vertex, corner| {
+            const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            const lo = @min(vertex, next);
+            const hi = @max(vertex, next);
+            const key = (@as(u64, lo) << 32) | hi;
+            const entry = try open_edges.getOrPut(key);
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        }
+    }
+    var boundary_edges: u32 = 0;
+    var edge_it = open_edges.valueIterator();
+    while (edge_it.next()) |incidence| if (incidence.* == 1) {
+        boundary_edges += 1;
+    };
+    try testing.expectEqual(@as(u32, 12), boundary_edges); // 4 outer + 8 inner.
+    // The old corners become interior support vertices for the four new corner
+    // faces; only the OPEN boundary changes from four edges to eight.
+    for (loop) |vertex| try testing.expect(indexed.vertices.items[vertex].alive);
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 20), lowered.tri_count);
+    for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+}
+
+test "boundary chamfer rejects an open chain and a closed manifold loop" {
+    var ring_soup = [_]f32{0} ** (8 * 3 * 8);
+    boundaryChamferRingSoup(ring_soup[0..]);
+    const ring_groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3 };
+    const ring_parts = [_]u32{7} ** 8;
+    var ring = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, ring_soup[0..], 8, ring_groups[0..], ring_parts[0..]);
+    defer ring.deinit();
+    const chain = [3][2][3]f32{
+        .{ boundary_chamfer_inner[0], boundary_chamfer_inner[1] },
+        .{ boundary_chamfer_inner[1], boundary_chamfer_inner[2] },
+        .{ boundary_chamfer_inner[2], boundary_chamfer_inner[3] },
+    };
+    var chain_loop: [chain.len]u32 = undefined;
+    try testing.expect(ring.resolveBoundaryChamfer(chain[0..], 7, chain_loop[0..]) == null);
+
+    var cube_soup = [_]f32{0} ** (12 * 3 * 8);
+    bevelCubeSoup(cube_soup[0..]);
+    const cube_groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const cube_parts = [_]u32{7} ** 12;
+    var cube = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, cube_soup[0..], 12, cube_groups[0..], cube_parts[0..]);
+    defer cube.deinit();
+    const manifold = [4][2][3]f32{
+        .{ bevel_cube_corners[4], bevel_cube_corners[5] },
+        .{ bevel_cube_corners[5], bevel_cube_corners[6] },
+        .{ bevel_cube_corners[6], bevel_cube_corners[7] },
+        .{ bevel_cube_corners[7], bevel_cube_corners[4] },
+    };
+    var manifold_loop: [manifold.len]u32 = undefined;
+    try testing.expect(cube.resolveBoundaryChamfer(manifold[0..], 7, manifold_loop[0..]) == null);
 }
 
 test "opposite-corner weld removes the authored quad whose boundary cancels" {

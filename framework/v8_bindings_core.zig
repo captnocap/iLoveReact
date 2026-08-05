@@ -1325,8 +1325,9 @@ fn hostMeshTopoConnectVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callco
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth"}. Capture
-/// exactly one selected sharp manifold edge or 3+-edge corner as a host-owned live
+/// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth",
+/// "sidesBefore"?,"sidesAfter"?}. Capture one selected sharp manifold edge, one
+/// 3+-edge corner, or one complete selected open-boundary loop as a host-owned live
 /// preview session. Widths are metres; the Studio popup converts them to modeling u.
 fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -1334,17 +1335,29 @@ fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    const kind = if (bevel.kind == .edge) "edge" else "vertex";
+    const kind = switch (bevel.kind) {
+        .edge => "edge",
+        .vertex => "vertex",
+        .boundary => "boundary",
+    };
     var buf: [320]u8 = undefined;
-    const json = std.fmt.bufPrint(
-        &buf,
-        "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d}}}",
-        .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width },
-    ) catch {
+    const json = if (bevel.kind == .boundary)
+        std.fmt.bufPrint(
+            &buf,
+            "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d},\"sidesBefore\":{d},\"sidesAfter\":{d}}}",
+            .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width, bevel.sides_before, bevel.sides_after },
+        )
+    else
+        std.fmt.bufPrint(
+            &buf,
+            "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d}}}",
+            .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width },
+        );
+    const written = json catch {
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    setReturnString(info, json);
+    setReturnString(info, written);
 }
 
 /// __mesh_bevel_preview(width) → JSON {"ok","key","count","fallbackReason"?}.

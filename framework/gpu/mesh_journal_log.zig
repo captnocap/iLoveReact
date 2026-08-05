@@ -170,6 +170,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "connect vertices", .connect_vertices },
         .{ "bevel edge", .bevel },
         .{ "bevel vertex", .bevel },
+        .{ "chamfer boundary", .bevel },
         .{ PAINT_FACES_LABEL, .paint_faces },
         .{ RETOPO_GUIDE_TINT_LABEL, .retopo_guide },
         .{ RETOPO_GUIDE_CLEAR_LABEL, .retopo_guide },

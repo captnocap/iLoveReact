@@ -3390,15 +3390,18 @@ pub fn meshLcFallbackReason() ?[]const u8 {
     return sp.last_reason;
 }
 
-// ── Bevel: one selected indexed edge or vertex, host-owned live session ────────
+// ── Bevel: one indexed target or one open boundary loop, host-owned session ───
 // The cart owns only popup values. Stable topology identity, preview installation,
 // part/material/UV provenance, exact cancel, and the one-entry journal transaction
 // stay behind this boundary.
+const BevelSessionKind = enum { vertex, edge, boundary };
 const BevelSession = struct {
-    kind: indexed_edit_mesh.BevelKind,
+    kind: BevelSessionKind,
     original_mode: mesh_edit.Mode,
     selection_index: u32,
-    target: indexed_edit_mesh.BevelTarget,
+    target: ?indexed_edit_mesh.BevelTarget,
+    boundary_loop: ?[]u32,
+    boundary_selection: ?[]mesh_edit.Edge,
     // Mirror (req_3797): the target's resolved twins, one slot per plane subset —
     // every preview/commit bevels them at the same width in the same journal entry.
     twin_targets: [7]?indexed_edit_mesh.BevelTarget = [_]?indexed_edit_mesh.BevelTarget{null} ** 7,
@@ -3425,20 +3428,24 @@ fn bevelFree() void {
     std.heap.c_allocator.free(session.base_colors);
     if (session.base_face_part) |parts| std.heap.c_allocator.free(parts);
     if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
+    if (session.boundary_loop) |loop| std.heap.c_allocator.free(loop);
+    if (session.boundary_selection) |edges| std.heap.c_allocator.free(edges);
     journalDiscard(&session.snap);
     g_bevel = null;
 }
 
 pub const BevelInfo = struct {
-    kind: indexed_edit_mesh.BevelKind,
+    kind: BevelSessionKind,
     default_width: f32,
     minimum_width: f32,
     max_width: f32,
+    sides_before: u32 = 0,
+    sides_after: u32 = 0,
 };
 
-/// Capture the current single vertex/edge selection and resolve it into stable indexed
-/// identity. Returns the popup's complete sizing contract, or null when the selected
-/// element is not a bevelable manifold target.
+/// Capture either one vertex/sharp edge or one complete selected open-boundary edge
+/// loop and resolve it into stable indexed identity. Boundary loops chamfer every
+/// corner simultaneously, changing any N-sided opening into a 2N-sided opening.
 pub fn meshBevelBegin() ?BevelInfo {
     if (g_lc != null) return null;
     if (g_bevel != null) _ = meshBevelEnd(false);
@@ -3481,35 +3488,68 @@ pub fn meshBevelBegin() ?BevelInfo {
     var mesh_adopted = false;
     defer if (!mesh_adopted) base_mesh.deinit();
 
-    var selection_index: u32 = undefined;
-    const resolved: indexed_edit_mesh.BevelSelection = switch (original_mode) {
+    var selection_index: u32 = 0;
+    var target: ?indexed_edit_mesh.BevelTarget = null;
+    var boundary_loop: ?[]u32 = null;
+    var boundary_selection: ?[]mesh_edit.Edge = null;
+    defer if (!ownership_adopted) {
+        if (boundary_loop) |loop| std.heap.c_allocator.free(loop);
+        if (boundary_selection) |edges| std.heap.c_allocator.free(edges);
+    };
+    var kind: BevelSessionKind = undefined;
+    var shared_max_width: f32 = undefined;
+    switch (original_mode) {
         .vertex => vertex_target: {
             const vertex = mesh_edit.selectedVertexIndexPub() orelse return null;
             const part = mesh_edit.selectedVertexPartPub() orelse return null;
             selection_index = vertex;
-            break :vertex_target base_mesh.resolveBevelVertex(mesh_edit.vertPosPub(vertex), part) orelse return null;
+            const resolved = base_mesh.resolveBevelVertex(mesh_edit.vertPosPub(vertex), part) orelse return null;
+            target = resolved.target;
+            kind = .vertex;
+            shared_max_width = resolved.max_width;
+            break :vertex_target;
         },
         .edge => edge_target: {
-            const edge_index = mesh_edit.selectedEdgeIndexPub() orelse return null;
-            if (!mesh_edit.edgeInScopePub(edge_index)) return null;
-            const part = mesh_edit.selectedEdgePartPub() orelse return null;
-            const endpoints = mesh_edit.edgeEndpointsPub(edge_index);
-            selection_index = edge_index;
-            break :edge_target base_mesh.resolveBevelEdge(
-                mesh_edit.vertPosPub(endpoints[0]),
-                mesh_edit.vertPosPub(endpoints[1]),
-                part,
-            ) orelse return null;
+            const selected_count = mesh_edit.selectedEdgeCountPub();
+            if (selected_count == 1) {
+                const edge_index = mesh_edit.selectedEdgeIndexPub() orelse return null;
+                if (!mesh_edit.edgeInScopePub(edge_index)) return null;
+                const part = mesh_edit.selectedEdgePartPub() orelse return null;
+                const endpoints = mesh_edit.edgeEndpointsPub(edge_index);
+                selection_index = edge_index;
+                const resolved = base_mesh.resolveBevelEdge(
+                    mesh_edit.vertPosPub(endpoints[0]),
+                    mesh_edit.vertPosPub(endpoints[1]),
+                    part,
+                ) orelse return null;
+                target = resolved.target;
+                kind = .edge;
+                shared_max_width = resolved.max_width;
+                break :edge_target;
+            }
+            if (selected_count < indexed_edit_mesh.BoundaryChamferTuning.minimum_sides) return null;
+            const selected = std.heap.c_allocator.alloc(mesh_edit.Edge, selected_count) catch return null;
+            boundary_selection = selected;
+            if (mesh_edit.selectedEdgesPub(selected) != selected_count) return null;
+            const part = mesh_edit.selectedEdgesCommonPartPub() orelse return null;
+            const edge_positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, selected_count) catch return null;
+            defer std.heap.c_allocator.free(edge_positions);
+            for (selected, 0..) |edge, index| edge_positions[index] = .{
+                mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
+            };
+            const loop = std.heap.c_allocator.alloc(u32, selected_count) catch return null;
+            boundary_loop = loop;
+            const resolved = base_mesh.resolveBoundaryChamfer(edge_positions, part, loop) orelse return null;
+            kind = .boundary;
+            shared_max_width = resolved.max_width;
         },
         else => return null,
-    };
-    const kind: indexed_edit_mesh.BevelKind = std.meta.activeTag(resolved.target);
+    }
     // Mirror (req_3797): resolve the target's twin per enabled plane subset against
     // the same base. A twin that resolves joins every preview/commit; its max width
     // tightens the shared clamp so one slider drives both sides.
     var twin_targets = [_]?indexed_edit_mesh.BevelTarget{null} ** 7;
-    var shared_max_width = resolved.max_width;
-    if (mesh_edit.mirrorMask() != 0) {
+    if (kind != .boundary and mesh_edit.mirrorMask() != 0) {
         var subset: u8 = 1;
         while (subset <= 7) : (subset += 1) {
             const twin_resolved: ?indexed_edit_mesh.BevelSelection = switch (original_mode) {
@@ -3531,22 +3571,36 @@ pub fn meshBevelBegin() ?BevelInfo {
                 else => null,
             };
             const twin_selection = twin_resolved orelse continue;
-            if (std.meta.activeTag(twin_selection.target) != kind) continue;
+            const target_kind: BevelSessionKind = switch (std.meta.activeTag(twin_selection.target)) {
+                .vertex => .vertex,
+                .edge => .edge,
+            };
+            if (target_kind != kind) continue;
             twin_targets[subset - 1] = twin_selection.target;
             shared_max_width = @min(shared_max_width, twin_selection.max_width);
         }
     }
+    const minimum_width = if (kind == .boundary)
+        indexed_edit_mesh.BoundaryChamferTuning.minimum_width_m
+    else
+        indexed_edit_mesh.BevelTuning.minimum_width_m;
     const default_width = std.math.clamp(
-        indexed_edit_mesh.BevelTuning.default_width_m,
-        indexed_edit_mesh.BevelTuning.minimum_width_m,
+        if (kind == .boundary) indexed_edit_mesh.BoundaryChamferTuning.default_width_m else indexed_edit_mesh.BevelTuning.default_width_m,
+        minimum_width,
         shared_max_width,
     );
-    const label = if (kind == .edge) "bevel edge" else "bevel vertex";
+    const label = switch (kind) {
+        .edge => "bevel edge",
+        .vertex => "bevel vertex",
+        .boundary => "chamfer boundary",
+    };
     g_bevel = .{
         .kind = kind,
         .original_mode = original_mode,
         .selection_index = selection_index,
-        .target = resolved.target,
+        .target = target,
+        .boundary_loop = boundary_loop,
+        .boundary_selection = boundary_selection,
         .twin_targets = twin_targets,
         .max_width = shared_max_width,
         .base_mesh = base_mesh,
@@ -3564,8 +3618,10 @@ pub fn meshBevelBegin() ?BevelInfo {
     return .{
         .kind = kind,
         .default_width = default_width,
-        .minimum_width = indexed_edit_mesh.BevelTuning.minimum_width_m,
+        .minimum_width = minimum_width,
         .max_width = shared_max_width,
+        .sides_before = if (boundary_loop) |loop| @intCast(loop.len) else 0,
+        .sides_after = if (boundary_loop) |loop| @intCast(loop.len * 2) else 0,
     };
 }
 
@@ -3575,10 +3631,11 @@ pub fn meshBevelBegin() ?BevelInfo {
 pub fn meshBevelPreview(width_raw: f32) bool {
     const session: *BevelSession = if (g_bevel) |*active| active else return false;
     session.last_preview_ok = false;
-    session.last_reason = if (session.kind == .edge)
-        "This edge cannot produce a durable bevel at that width"
-    else
-        "This corner cannot produce a durable bevel at that width";
+    session.last_reason = switch (session.kind) {
+        .edge => "This edge cannot produce a durable bevel at that width",
+        .vertex => "This corner cannot produce a durable bevel at that width",
+        .boundary => "This opening cannot produce a durable boundary chamfer at that width",
+    };
     const width = std.math.clamp(
         width_raw,
         indexed_edit_mesh.BevelTuning.minimum_width_m,
@@ -3586,7 +3643,11 @@ pub fn meshBevelPreview(width_raw: f32) bool {
     );
     var preview = session.base_mesh.clone() catch return false;
     defer preview.deinit();
-    if (!(preview.bevel(session.target, width) catch return false)) return false;
+    const changed = switch (session.kind) {
+        .edge, .vertex => preview.bevel(session.target orelse return false, width) catch return false,
+        .boundary => preview.chamferBoundary(session.boundary_loop orelse return false, width) catch return false,
+    };
+    if (!changed) return false;
     // Mirror (req_3797): every resolved twin bevels at the same width in this preview
     // — a twin that stops beveling refuses the whole preview, never half a chamfer.
     for (session.twin_targets) |twin_opt| {
@@ -3684,10 +3745,24 @@ pub fn meshBevelEnd(commit: bool) bool {
             } else |_| {}
             g_paint_layout_stale = session.base_paint_layout_stale;
             mesh_edit.setMode(session.original_mode);
-            _ = if (session.original_mode == .vertex)
-                mesh_edit.selectVertexByIndex(session.selection_index, false)
-            else
-                mesh_edit.selectEdgeByIndex(session.selection_index, false);
+            if (session.original_mode == .vertex) {
+                _ = mesh_edit.selectVertexByIndex(session.selection_index, false);
+            } else if (session.boundary_selection) |selected_edges| {
+                var first = true;
+                for (selected_edges) |selected_edge| {
+                    var edge_index: u32 = 0;
+                    while (edge_index < mesh_edit.edgeCount()) : (edge_index += 1) {
+                        const endpoints = mesh_edit.edgeEndpointsPub(edge_index);
+                        const same = (endpoints[0] == selected_edge[0] and endpoints[1] == selected_edge[1]) or
+                            (endpoints[0] == selected_edge[1] and endpoints[1] == selected_edge[0]);
+                        if (!same) continue;
+                        if (mesh_edit.selectEdgeByIndex(edge_index, !first)) first = false;
+                        break;
+                    }
+                }
+            } else {
+                _ = mesh_edit.selectEdgeByIndex(session.selection_index, false);
+            }
         }
         journalDiscard(&session.snap);
     }
@@ -3697,6 +3772,8 @@ pub fn meshBevelEnd(commit: bool) bool {
     std.heap.c_allocator.free(session.base_colors);
     if (session.base_face_part) |parts| std.heap.c_allocator.free(parts);
     if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
+    if (session.boundary_loop) |loop| std.heap.c_allocator.free(loop);
+    if (session.boundary_selection) |edges| std.heap.c_allocator.free(edges);
     journalDiscard(&session.snap);
     g_bevel = null;
     return ok;
@@ -10306,12 +10383,19 @@ pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []con
     if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
     var rows = captureFaceSemantics(face_count) orelse return 0;
     defer rows.deinit();
+    // Track which TRIANGLES changed, but report AUTHORED FACES: the caller prints this
+    // number to the user next to the word "faces", and a quad is one face, not two
+    // (req_3888 — naming one quad announced "named 2 faces").
+    const changed_mask = jalloc.alloc(bool, face_count) catch return 0;
+    defer jalloc.free(changed_mask);
+    @memset(changed_mask, false);
     var changed: u32 = 0;
     for (mask, 0..) |selected, face| {
         if (!selected) continue;
         if (rows.regions[face] == region and rows.instances[face] == instance) continue;
         rows.regions[face] = region;
         rows.instances[face] = instance;
+        changed_mask[face] = true;
         changed += 1;
     }
     if (changed == 0) return 0;
@@ -10322,7 +10406,7 @@ pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []con
     }
     clearIndexedEditMesh();
     journalCommit(&snap);
-    return changed;
+    return mesh_edit.authoredFacesInMask(changed_mask);
 }
 
 /// Name an untouched axis-aligned cube in one transaction. This is deliberately
