@@ -158,6 +158,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut: PROPAGATES the edge ring around the whole body — one hood cut also cuts windshield/roof/underbody (measured: +66 tris where basic-cut adds +6). Reach for it only when you want the full ring. |
 | `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Subdivides ONLY the selected faces — the bounded local cut. This is the one you want for a local detail line; it never walks the ring. The receipt's `worldDirection` is the seed vector applied geometrically across every selected face. |
 | `tools/seat tris-to-quads` | `{"action":"tris-to-quads"}` | Convert the compatible maximum triangle set. |
+| `tools/seat action mirror-quads '{"axis":0}'` | `{"action":"mirror-quads","args":{"axis":0}}` | Retroactive mirror quad repair (req_3855): wherever an authored quad's reflection across the model-origin axis plane (`axis` 0/1/2 or `"x"|"y"|"z"`) is covered by two SEPARATE lone triangles, fuse that twin pair into the matching quad. Grouping only — no vertex moves; a twin split on the opposite diagonal still matches. Use it after modeling one side without mirror armed. |
 | `tools/seat collect-uv-orientation` | `{"action":"collect-uv-orientation"}` | Expand one selected face to the same signed UV orientation. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize across the MODEL-ORIGIN plane (fixed — never a bounds midpoint); `-` keeps the −side. Center the model first if it sits off-origin. |
 | `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | The app captures its OWN frame. |
@@ -179,6 +180,9 @@ and the twin cap follows by reflection. Every twin lands as its OWN authored fac
 identity — two disjoint pieces reporting as one selectable face is a bug, not mirror
 behavior. Exceptions: loop cut already propagates its ring
 around the whole body; basic-cut is NOT yet mirror-extended (cut both sides manually).
+Forgot to arm mirror before quadifying one side? `mirror-quads` (table above) retroactively
+copies quad grouping onto twin triangle pairs — same repair as the `quads` verb in the
+editor's symmetry trust strip.
 
 ## Structured editor parity
 

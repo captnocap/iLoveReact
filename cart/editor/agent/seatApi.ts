@@ -1295,6 +1295,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return result;
   };
   const trisToQuads = (): TopologyReceipt | null => topology(() => host.__mesh_topo_tris_to_quads?.());
+  // Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
+  // reflected authored face across the model-origin axis plane is already a quad.
+  const mirrorMatchQuads = (axis: number): TopologyReceipt | null =>
+    topology(() => host.__mesh_topo_mirror_quads?.(1 << axis));
   const collectUvOrientation = (): number => {
     const changed = Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
     if (changed > 0) notifySelectionChanged();
@@ -1402,7 +1406,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     select, selectEdge, selectVertex, selectFace, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, trisToQuads, collectUvOrientation, shellAction,
+    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
   };
 }
@@ -1629,6 +1633,13 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'tris-to-quads': {
         const result = seat.trisToQuads();
         return seat.reply('tris-to-quads', !!result, result ?? undefined, result ? undefined : 'no compatible triangle pairs were available');
+      }
+      case 'mirror-quads': {
+        const axisRaw = args.axis;
+        const axis = typeof axisRaw === 'string' ? 'xyz'.indexOf(axisRaw.toLowerCase()) : Number(axisRaw ?? 0);
+        if (axis < 0 || axis > 2 || !Number.isInteger(axis)) return seat.reply('mirror-quads', false, undefined, 'axis must be 0|1|2 or x|y|z');
+        const result = seat.mirrorMatchQuads(axis);
+        return seat.reply('mirror-quads', !!result, result ?? undefined, result ? undefined : 'no quad whose mirror twin is two loose triangles (both sides already match, or the twins are not lone coplanar faces)');
       }
       case 'collect-uv-orientation': {
         const changed = seat.collectUvOrientation();

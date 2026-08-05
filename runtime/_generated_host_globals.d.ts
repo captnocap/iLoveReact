@@ -94,6 +94,7 @@ declare global {
   function __mesh_merge_parts(...args: unknown[]): unknown;
   function __mesh_topo_merge_faces(...args: unknown[]): unknown;
   function __mesh_topo_tris_to_quads(...args: unknown[]): unknown;
+  function __mesh_topo_mirror_quads(...args: unknown[]): unknown;
   function __mesh_quadify_begin(...args: unknown[]): unknown;
   function __mesh_quadify_preview(...args: unknown[]): unknown;
   function __mesh_quadify_end(...args: unknown[]): unknown;

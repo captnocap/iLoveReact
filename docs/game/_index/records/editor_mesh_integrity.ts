@@ -51,6 +51,17 @@ export const editor_mesh_integrity: DocIndex = {
       status: 'live',
     },
     {
+      name: 'meshMirrorMatchQuads / __mesh_topo_mirror_quads',
+      purpose: ['geometry', 'host_bridge'],
+      kind: 'host_fn',
+      sourceFile: 'framework/gpu/3d.zig',
+      description:
+        'req_3855 retroactive mirror quad repair — the fix for quads authored BEFORE mirror editing was armed. For every authored quad (two triangles, four distinct corners) in the active scope whose reflection across the model-origin plane subset (axisMask bit 0=X/1=Y/2=Z) is covered by two SEPARATE single-triangle authored faces, fuses that twin pair into the matching quad via indexed_edit_mesh.mergeSelected. Pairing is quantized-positional (the shared mirror_corners identity the live req_3796/3797 twin extension uses), so a twin split on the OPPOSITE diagonal still matches and keeps its own resident diagonal. Each lone triangle claims once; refused pairs (non-coplanar, cross-meaning, mixed glass class) are skipped and excluded from the returned count. Whole sweep is ONE journal entry ("mirror match quads"): byte-stable group-only when no fused boundary drops corners, req_3771 dissolve install otherwise. Surfaces: the quads verb in ModelView’s symmetry trust strip (per armed axis) and Seat action mirror-quads.',
+      dependsOn: ['meshIntegrityRollCall'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'cart/editor/agent/seatApi.ts'],
+      status: 'live',
+    },
+    {
       name: 'meshQuadifyBegin / meshQuadifyPreview / meshQuadifyEnd',
       purpose: ['geometry', 'host_bridge', 'ui'],
       kind: 'host_fn',

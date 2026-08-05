@@ -373,6 +373,10 @@
           "zig": "hostMeshTopoTrisToQuads"
         },
         {
+          "js": "__mesh_topo_mirror_quads",
+          "zig": "hostMeshTopoMirrorQuads"
+        },
+        {
           "js": "__mesh_quadify_begin",
           "zig": "hostMeshQuadifyBegin"
         },

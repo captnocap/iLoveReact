@@ -173,6 +173,26 @@ detection covers every source corner missing from the fused boundary, so the
 old debris drops with it. For an isolated face, loop cut it once and merge the
 halves back.
 
+## Mirror Match Quads — retroactive quad symmetry (req_3855)
+
+Live mirror extends Merge Faces to the twin side, but only helps from the
+moment mirror is armed — quads authored one-sided BEFORE that leave the model
+with an authored quad on one side and two loose triangles occupying the exact
+reflected space. `meshMirrorMatchQuads(axisMask)` /
+`__mesh_topo_mirror_quads(axisMask)` is the one-button repair: for every
+authored quad (two triangles, four distinct corners) in the active scope whose
+reflection across the model-origin plane subset is covered by two SEPARATE
+single-triangle authored faces, it fuses that twin pair into the matching
+quad. Pairing is quantized-positional (the same `mirror_corners` identity the
+live twin extension uses), so a twin split on the OPPOSITE diagonal still
+matches and keeps its own resident diagonal. Each lone triangle can be claimed
+once; pairs the indexed mesh refuses (non-coplanar, cross-meaning, straddling
+glass classes) are honestly skipped and excluded from the returned count. The
+whole sweep is ONE journal entry — byte-stable group-only when no fused
+boundary drops corners, the req_3771 dissolve install otherwise. Surfaces:
+the `quads` verb in the symmetry trust strip (per armed axis, beside
+keep+/keep−) and the Seat action `mirror-quads {"axis":0|1|2|"x"|"y"|"z"}`.
+
 ### T-junction seams merge in one shot (req_3800)
 
 Seam cancellation is geometric, not id-exact. A T-junction seam — one face

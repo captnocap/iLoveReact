@@ -1899,6 +1899,19 @@ fn hostMeshTopoTrisToQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoChangedReturn(info, changed);
 }
 
+/// __mesh_topo_mirror_quads(axisMask) → JSON {"ok","key","count","changed"}. Fuse
+/// twin triangle pairs into quads wherever the reflected authored face across the
+/// given mirror axes (bit 0=X, 1=Y, 2=Z; model-origin planes) is already a quad —
+/// the retroactive repair for quads authored before mirror editing was armed
+/// (req_3855). Grouping only in the common case; changed is the fused pair count.
+fn hostMeshTopoMirrorQuads(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis_mask: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const changed = scene3d.meshMirrorMatchQuads(axis_mask);
+    if (changed > 0) state.markDirty();
+    setMeshTopoChangedReturn(info, changed);
+}
+
 /// __mesh_quadify_begin() → JSON {"ok","residentTriangles"}. Capture the exact
 /// whole-model base for a non-journaled triangle→quad dry run.
 fn hostMeshQuadifyBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4665,6 +4678,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
     v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
+    v8_runtime.registerHostFn("__mesh_topo_mirror_quads", hostMeshTopoMirrorQuads);
     v8_runtime.registerHostFn("__mesh_quadify_begin", hostMeshQuadifyBegin);
     v8_runtime.registerHostFn("__mesh_quadify_preview", hostMeshQuadifyPreview);
     v8_runtime.registerHostFn("__mesh_quadify_end", hostMeshQuadifyEnd);

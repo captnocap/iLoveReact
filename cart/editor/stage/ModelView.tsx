@@ -727,6 +727,10 @@ const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) 
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
 const meshTrisToQuads = () => readTopoResult(host.__mesh_topo_tris_to_quads?.());
+// Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
+// reflected authored face across the axis plane is already a quad — the retroactive
+// repair for quads authored before mirror editing was armed.
+const meshMirrorQuads = (axis: number) => readTopoResult(host.__mesh_topo_mirror_quads?.(1 << axis));
 const meshQuadifyBegin = () => readTopoResult(host.__mesh_quadify_begin?.());
 const meshQuadifyPreview = (evaluation: number): QuadifyPlan | null =>
   readQuadifyPlan(host.__mesh_quadify_preview?.(evaluation));
@@ -2574,6 +2578,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   const runSymmetrize = (axis: number, keepPositive: boolean) => {
     if (!adoptMesh(meshSymmetrize(axis, keepPositive))) setError('symmetrize: no mesh half to keep');
+  };
+  const runMirrorQuads = (axis: number) => {
+    if (!adoptMesh(meshMirrorQuads(axis))) setError('match quads: no quad whose twin is two loose triangles');
   };
 
   // ── Editor bridge ──────────────────────────────────────────────────────────
@@ -5002,6 +5009,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 </Pressable>
                 <Pressable onPress={() => runSymmetrize(axis, false)} tooltip={`symmetrize — keep the −${label} half, rebuild +${label} as its mirror`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
                   <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>{`keep −${label}`}</Text>
+                </Pressable>
+                <Pressable onPress={() => runMirrorQuads(axis)} tooltip={`match quads — where one side has a quad and its ${label} twin is two loose triangles, fuse the twins into the same quad`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
+                  <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>quads</Text>
                 </Pressable>
               </Row>
             );
