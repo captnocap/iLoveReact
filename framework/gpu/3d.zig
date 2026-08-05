@@ -1509,65 +1509,81 @@ fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_fac
 /// on the OTHER diagonal still pairs. A face with no complete twin, a twin outside
 /// the edit scope, a partially-selected source, or a self-twin (a face straddling
 /// the plane) simply doesn't extend — the same honesty as mirrored transforms.
+/// Quantized corner-position identity shared by the live mirror twin extension and the
+/// retroactive mirror repairs — the same tolerance class as mesh_edit's MIRROR_Q.
+const mirror_corners = struct {
+    const Q: f32 = 1000.0;
+    const Key = [3]i32;
+    fn quant(p: [3]f32) Key {
+        return .{
+            @intFromFloat(@round(p[0] * Q)),
+            @intFromFloat(@round(p[1] * Q)),
+            @intFromFloat(@round(p[2] * Q)),
+        };
+    }
+    fn corner(verts: []const f32, face: u32, slot: usize) [3]f32 {
+        const base = (@as(usize, face) * 3 + slot) * 8;
+        return .{ verts[base], verts[base + 1], verts[base + 2] };
+    }
+    fn posLess(a: Key, b: Key) bool {
+        inline for (0..3) |axis| {
+            if (a[axis] != b[axis]) return a[axis] < b[axis];
+        }
+        return false;
+    }
+    fn keyHash(sorted: []const Key) u64 {
+        var h = std.hash.Wyhash.init(0x726a_3796);
+        for (sorted) |k| h.update(std.mem.asBytes(&k));
+        return h.final();
+    }
+    /// Dedupe-insert keeping the list sorted — corner sets are tiny.
+    fn addKey(list: *std.ArrayListUnmanaged(Key), a: std.mem.Allocator, k: Key) bool {
+        for (list.items) |have| {
+            if (have[0] == k[0] and have[1] == k[1] and have[2] == k[2]) return true;
+        }
+        list.append(a, k) catch return false;
+        var i = list.items.len - 1;
+        while (i > 0 and posLess(list.items[i], list.items[i - 1])) : (i -= 1) {
+            std.mem.swap(Key, &list.items[i], &list.items[i - 1]);
+        }
+        return true;
+    }
+    fn sameKeys(a: []const Key, b: []const Key) bool {
+        if (a.len != b.len) return false;
+        for (a, b) |ka, kb| {
+            if (ka[0] != kb[0] or ka[1] != kb[1] or ka[2] != kb[2]) return false;
+        }
+        return true;
+    }
+    /// Reflect a quantized key across MIRROR_PLANE_CENTER on the axes in `subset`.
+    fn reflect(k: Key, subset: u8) Key {
+        var r = k;
+        inline for (0..3) |axis| {
+            if (subset & (@as(u8, 1) << @intCast(axis)) != 0) {
+                const qc2: i32 = @intFromFloat(@round(mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 * Q));
+                r[axis] = qc2 - r[axis];
+            }
+        }
+        return r;
+    }
+};
+
+/// The authored-face identity of a triangle: its group, or itself (high-bit tagged
+/// so it can't collide with a real group id) when ungrouped.
+fn authoredFaceIdOf(grouped: bool, f: u32) u32 {
+    if (!grouped) return 0x8000_0000 | f;
+    const g = model_source.faceGroupOf(f);
+    return if (g == model_source.NO_FACE_GROUP) 0x8000_0000 | f else g;
+}
+
 fn extendFaceMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: []bool) void {
     const mirror_mask = mesh_edit.mirrorMask() & 7;
     if (mirror_mask == 0 or tri_count == 0) return;
     const alloc = std.heap.c_allocator;
-    const Q: f32 = 1000.0; // same tolerance class as mesh_edit's MIRROR_Q
-    const PosKey = [3]i32;
+    const PosKey = mirror_corners.Key;
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
-    const helpers = struct {
-        fn quant(p: [3]f32) PosKey {
-            return .{
-                @intFromFloat(@round(p[0] * Q)),
-                @intFromFloat(@round(p[1] * Q)),
-                @intFromFloat(@round(p[2] * Q)),
-            };
-        }
-        fn corner(verts: []const f32, face: u32, slot: usize) [3]f32 {
-            const base = (@as(usize, face) * 3 + slot) * 8;
-            return .{ verts[base], verts[base + 1], verts[base + 2] };
-        }
-        fn posLess(a: PosKey, b: PosKey) bool {
-            inline for (0..3) |axis| {
-                if (a[axis] != b[axis]) return a[axis] < b[axis];
-            }
-            return false;
-        }
-        fn keyHash(sorted: []const PosKey) u64 {
-            var h = std.hash.Wyhash.init(0x726a_3796);
-            for (sorted) |k| h.update(std.mem.asBytes(&k));
-            return h.final();
-        }
-        /// Dedupe-insert keeping the list sorted — corner sets are tiny.
-        fn addKey(list: *std.ArrayListUnmanaged(PosKey), a: std.mem.Allocator, k: PosKey) bool {
-            for (list.items) |have| {
-                if (have[0] == k[0] and have[1] == k[1] and have[2] == k[2]) return true;
-            }
-            list.append(a, k) catch return false;
-            var i = list.items.len - 1;
-            while (i > 0 and posLess(list.items[i], list.items[i - 1])) : (i -= 1) {
-                std.mem.swap(PosKey, &list.items[i], &list.items[i - 1]);
-            }
-            return true;
-        }
-        fn sameKeys(a: []const PosKey, b: []const PosKey) bool {
-            if (a.len != b.len) return false;
-            for (a, b) |ka, kb| {
-                if (ka[0] != kb[0] or ka[1] != kb[1] or ka[2] != kb[2]) return false;
-            }
-            return true;
-        }
-    };
-    // The authored-face identity of a triangle: its group, or itself (high-bit tagged
-    // so it can't collide with a real group id) when ungrouped.
-    const aid_of = struct {
-        fn at(grouped: bool, f: u32) u32 {
-            if (!grouped) return 0x8000_0000 | f;
-            const g = model_source.faceGroupOf(f);
-            return if (g == model_source.NO_FACE_GROUP) 0x8000_0000 | f else g;
-        }
-    }.at;
+    const helpers = mirror_corners;
+    const aid_of = authoredFaceIdOf;
 
     var tris_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
     var keys_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(PosKey)).empty;
@@ -1599,10 +1615,6 @@ fn extendFaceMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: [
     while (hash_it.next()) |entry| {
         aid_by_hash.put(alloc, helpers.keyHash(entry.value_ptr.items), entry.key_ptr.*) catch return;
     }
-    // Twice the quantized plane coordinate per axis: reflected key = qc2 − key.
-    var qc2: PosKey = undefined;
-    inline for (0..3) |axis| qc2[axis] = @intFromFloat(@round(mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 * Q));
-
     var source_it = tris_of.iterator();
     while (source_it.next()) |entry| {
         var all_masked = true;
@@ -1620,11 +1632,7 @@ fn extendFaceMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: [
             var reflected = std.ArrayListUnmanaged(PosKey).empty;
             defer reflected.deinit(alloc);
             for (source_keys) |k| {
-                var r = k;
-                inline for (0..3) |axis| {
-                    if (subset & (@as(u8, 1) << @intCast(axis)) != 0) r[axis] = qc2[axis] - r[axis];
-                }
-                if (!helpers.addKey(&reflected, alloc, r)) return;
+                if (!helpers.addKey(&reflected, alloc, helpers.reflect(k, subset))) return;
             }
             const twin_aid = aid_by_hash.get(helpers.keyHash(reflected.items)) orelse continue;
             if (twin_aid == entry.key_ptr.*) continue; // straddles the plane — its own twin
@@ -6885,6 +6893,261 @@ pub fn meshMergeSelectedFaces() bool {
     return true;
 }
 
+/// Mirror quad symmetrize (req_3855): the retroactive half of live-mirror Merge Faces.
+/// For every authored QUAD (two triangles, four distinct corners) in the active scope
+/// whose reflection across the `axis_mask` plane subset is covered by two SEPARATE
+/// single-triangle authored faces, fuse that twin pair into the matching quad. Pairing
+/// is positional and quantized (mirror_corners) — a twin split on the opposite diagonal
+/// still matches and keeps its own resident diagonal — so the common case commits as a
+/// byte-stable group-only change: no vertex moves, UVs, paint, and part ownership all
+/// untouched. One journal entry for the whole sweep. Returns the fused pair count.
+pub fn meshMirrorMatchQuads(axis_mask_raw: u32) u32 {
+    if (!model_paint.hasTarget()) return 0;
+    const verts = g_edit_verts orelse return 0;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return 0;
+    const mirror_axes: u8 = @intCast(axis_mask_raw & 7);
+    if (mirror_axes == 0) return 0;
+    if (model_source.faceGroups() == null) return 0; // no authored quads to copy
+    const alloc = std.heap.c_allocator;
+    const PosKey = mirror_corners.Key;
+    const helpers = struct {
+        fn sortTriple(keys: *[3]PosKey) void {
+            var i: usize = 1;
+            while (i < 3) : (i += 1) {
+                var j = i;
+                while (j > 0 and mirror_corners.posLess(keys[j], keys[j - 1])) : (j -= 1) {
+                    std.mem.swap(PosKey, &keys[j], &keys[j - 1]);
+                }
+            }
+        }
+    };
+
+    // Authored-face identity → triangles + deduped sorted corner keys, in-scope only.
+    var tris_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
+    var keys_of = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(PosKey)).empty;
+    defer {
+        var t_it = tris_of.valueIterator();
+        while (t_it.next()) |list| list.deinit(alloc);
+        tris_of.deinit(alloc);
+        var k_it = keys_of.valueIterator();
+        while (k_it.next()) |list| list.deinit(alloc);
+        keys_of.deinit(alloc);
+    }
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (@as(usize, f) * 24 + 24 > verts.len) return 0;
+        if (!mesh_edit.faceInScopePub(f)) continue;
+        const aid = authoredFaceIdOf(true, f);
+        const t_gop = tris_of.getOrPut(alloc, aid) catch return 0;
+        if (!t_gop.found_existing) t_gop.value_ptr.* = .empty;
+        t_gop.value_ptr.append(alloc, f) catch return 0;
+        const k_gop = keys_of.getOrPut(alloc, aid) catch return 0;
+        if (!k_gop.found_existing) k_gop.value_ptr.* = .empty;
+        var slot: usize = 0;
+        while (slot < 3) : (slot += 1) {
+            if (!mirror_corners.addKey(k_gop.value_ptr, alloc, mirror_corners.quant(mirror_corners.corner(verts, f, slot)))) return 0;
+        }
+    }
+
+    // Whole-face identity (already-symmetric probe) + lone-triangle identity (twin probe).
+    var aid_by_hash = std.AutoHashMapUnmanaged(u64, u32).empty;
+    defer aid_by_hash.deinit(alloc);
+    var lone_by_hash = std.AutoHashMapUnmanaged(u64, u32).empty; // 3-corner hash → face index
+    defer lone_by_hash.deinit(alloc);
+    var hash_it = keys_of.iterator();
+    while (hash_it.next()) |entry| {
+        aid_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), entry.key_ptr.*) catch return 0;
+        const tris = tris_of.get(entry.key_ptr.*) orelse continue;
+        if (tris.items.len == 1 and entry.value_ptr.items.len == 3) {
+            lone_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), tris.items[0]) catch return 0;
+        }
+    }
+
+    const colors = collectCurrentFaceColors() orelse return 0;
+    defer std.heap.c_allocator.free(colors);
+    if (colors.len != @as(usize, tri_count) * 4) return 0;
+
+    // Discover the twin pairs to fuse. Each lone triangle may be claimed once.
+    var pairs = std.ArrayListUnmanaged([2]u32).empty;
+    defer pairs.deinit(alloc);
+    var claimed = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer claimed.deinit(alloc);
+    var source_it = tris_of.iterator();
+    while (source_it.next()) |entry| {
+        const source_tris = entry.value_ptr.items;
+        if (source_tris.len != 2) continue;
+        const source_keys = (keys_of.get(entry.key_ptr.*) orelse continue).items;
+        if (source_keys.len != 4) continue; // wire/degenerate quads have no twin shape
+        // Split the quad's corners into its diagonal (shared by both triangles) and
+        // the two off-diagonal tips.
+        var tri_keys: [2][3]PosKey = undefined;
+        for (source_tris, 0..) |tri, at| {
+            var slot: usize = 0;
+            while (slot < 3) : (slot += 1) {
+                tri_keys[at][slot] = mirror_corners.quant(mirror_corners.corner(verts, tri, slot));
+            }
+        }
+        var diag: [2]PosKey = undefined;
+        var off: [2]PosKey = undefined;
+        var diag_n: usize = 0;
+        var off_n: usize = 0;
+        var degenerate = false;
+        for (source_keys) |k| {
+            var in_first = false;
+            var in_second = false;
+            for (tri_keys[0]) |t| {
+                if (t[0] == k[0] and t[1] == k[1] and t[2] == k[2]) in_first = true;
+            }
+            for (tri_keys[1]) |t| {
+                if (t[0] == k[0] and t[1] == k[1] and t[2] == k[2]) in_second = true;
+            }
+            if (in_first and in_second) {
+                if (diag_n >= 2) {
+                    degenerate = true;
+                    break;
+                }
+                diag[diag_n] = k;
+                diag_n += 1;
+            } else {
+                if (off_n >= 2) {
+                    degenerate = true;
+                    break;
+                }
+                off[off_n] = k;
+                off_n += 1;
+            }
+        }
+        if (degenerate or diag_n != 2 or off_n != 2) continue;
+
+        var subset: u8 = 1;
+        subsets: while (subset <= 7) : (subset += 1) {
+            if ((subset & mirror_axes) != subset) continue;
+            var reflected = std.ArrayListUnmanaged(PosKey).empty;
+            defer reflected.deinit(alloc);
+            var bad = false;
+            for (source_keys) |k| {
+                if (!mirror_corners.addKey(&reflected, alloc, mirror_corners.reflect(k, subset))) {
+                    bad = true;
+                    break;
+                }
+            }
+            if (bad or reflected.items.len != 4) continue; // straddles/collapses on the plane
+            // An authored face already covering the reflected corners means this quad is
+            // already symmetric across this subset (or is its own twin) — nothing owed.
+            if (aid_by_hash.get(mirror_corners.keyHash(reflected.items))) |twin_aid| {
+                if (keys_of.get(twin_aid)) |twin_keys| {
+                    if (mirror_corners.sameKeys(twin_keys.items, reflected.items)) continue;
+                }
+            }
+            const rd0 = mirror_corners.reflect(diag[0], subset);
+            const rd1 = mirror_corners.reflect(diag[1], subset);
+            const ro0 = mirror_corners.reflect(off[0], subset);
+            const ro1 = mirror_corners.reflect(off[1], subset);
+            // The twin pair may be split on either diagonal of the reflected quad.
+            const splits = [2][2][3]PosKey{
+                .{ .{ rd0, rd1, ro0 }, .{ rd0, rd1, ro1 } },
+                .{ .{ ro0, ro1, rd0 }, .{ ro0, ro1, rd1 } },
+            };
+            for (splits) |split| {
+                var found: [2]u32 = undefined;
+                var found_ok = true;
+                for (split, 0..) |triple_raw, at| {
+                    var triple = triple_raw;
+                    helpers.sortTriple(&triple);
+                    const cand = lone_by_hash.get(mirror_corners.keyHash(triple[0..])) orelse {
+                        found_ok = false;
+                        break;
+                    };
+                    const cand_keys = keys_of.get(authoredFaceIdOf(true, cand)) orelse {
+                        found_ok = false;
+                        break;
+                    };
+                    if (!mirror_corners.sameKeys(cand_keys.items, triple[0..])) { // hash collision
+                        found_ok = false;
+                        break;
+                    }
+                    found[at] = cand;
+                }
+                if (!found_ok or found[0] == found[1]) continue;
+                if (claimed.contains(found[0]) or claimed.contains(found[1])) continue;
+                if (found[0] == source_tris[0] or found[0] == source_tris[1]) continue;
+                if (found[1] == source_tris[0] or found[1] == source_tris[1]) continue;
+                // A single authored face cannot straddle opaque and glass draw passes.
+                const glass_a = model_paint.isGlassAlpha(colors[@as(usize, found[0]) * 4 + 3]);
+                const glass_b = model_paint.isGlassAlpha(colors[@as(usize, found[1]) * 4 + 3]);
+                if (glass_a != glass_b) continue;
+                pairs.append(alloc, .{ found[0], found[1] }) catch return 0;
+                claimed.put(alloc, found[0], {}) catch return 0;
+                claimed.put(alloc, found[1], {}) catch return 0;
+                break :subsets;
+            }
+        }
+    }
+    if (pairs.items.len == 0) return 0;
+
+    const groups = captureFaceGroups() orelse return 0;
+    defer std.heap.c_allocator.free(groups);
+    const parts = capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const materials = captureFaceMaterials(tri_count) orelse return 0;
+    defer std.heap.c_allocator.free(materials);
+
+    var indexed = cloneIndexedEditMeshOrImport(verts, tri_count, groups, parts, model_source.faceMaterials()) orelse return 0;
+    defer indexed.deinit();
+    const pair_mask = alloc.alloc(bool, tri_count) catch return 0;
+    defer alloc.free(pair_mask);
+    var fused: u32 = 0;
+    var any_retessellated = false;
+    for (pairs.items) |pair| {
+        @memset(pair_mask, false);
+        pair_mask[pair[0]] = true;
+        pair_mask[pair[1]] = true;
+        // A pair the indexed mesh refuses (non-coplanar, unwelded, cross-meaning) is
+        // honestly skipped — the count reports only real fusions.
+        const merged = (indexed.mergeSelected(pair_mask) catch null) orelse continue;
+        if (merged.retessellated) any_retessellated = true;
+        fused += 1;
+    }
+    if (fused == 0) return 0;
+
+    if (!any_retessellated) {
+        // Every fused boundary kept all four corners — the byte-stable group-only
+        // commit keeps geometry, UVs, and atlas pixels untouched.
+        if (!commitIndexedFaceGrouping(&indexed, verts, tri_count, parts, materials, "mirror match quads")) return 0;
+        return fused;
+    }
+
+    // Dissolve commit (req_3771 shape): some fused boundary dropped seam corners, so
+    // the resident rows are rebuilt from the clean loops in one journal entry.
+    var lowered = indexed.lower() catch return 0;
+    defer lowered.deinit();
+    if (lowered.tri_count == 0) return 0;
+    const dissolve_colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return 0;
+    defer std.heap.c_allocator.free(dissolve_colors);
+    if (!mesh_edit.inheritFaceRgba(colors, lowered.source_triangles, dissolve_colors)) return 0;
+    const part_count = hostPartCount();
+    var snap = journalSnapshotCurrent("mirror match quads");
+    const installed = lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        lowered.groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        dissolve_colors,
+    );
+    if (!installed) {
+        journalDiscard(&snap);
+        return 0;
+    }
+    if (parts != null) renormalizePartRanges(lowered.parts, part_count);
+    adoptIndexedEditMesh(&indexed, &lowered);
+    journalCommit(&snap);
+    return fused;
+}
+
 // ── Whole-topology triangle → quad dry-run session ────────────────────────────
 // The popup owns only phase/evaluation controls. The captured base, exact maximum
 // matching, live authored-edge preview, cancel restore, and one-entry commit stay
@@ -9225,7 +9488,10 @@ fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
         const n = vcross(vsub(p1, p0), vsub(p2, p0));
         const cen = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
-        if (!mesh_edit.xray() and vdot(n, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
+        if (!mesh_edit.xray()) {
+            if (vdot(n, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
+            if (mesh_edit.overlayPointOccludedPub(cen)) continue; // behind a nearer surface (req_3856)
+        }
         const a = ovProject(cam, p0, ox, oy) orelse continue;
         const bb = ovProject(cam, p1, ox, oy) orelse continue;
         const cc = ovProject(cam, p2, ox, oy) orelse continue;
@@ -9320,8 +9586,11 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const glass = model_paint.faceIsGlass(f);
         const grp = model_source.faceGroupOf(f);
         if (grp == model_source.NO_FACE_GROUP) {
-            // Ungrouped soup: a dot per front-facing triangle.
-            if (!mesh_edit.xray() and vdot(n, vsub(cam.eye, cen)) <= 0) continue;
+            // Ungrouped soup: a dot per front-facing, unoccluded triangle.
+            if (!mesh_edit.xray()) {
+                if (vdot(n, vsub(cam.eye, cen)) <= 0) continue;
+                if (mesh_edit.overlayPointOccludedPub(cen)) continue; // req_3856
+            }
             const sp = ovProject(cam, cen, ox, oy) orelse continue;
             drawFaceSemanticDot(sp[0], sp[1], selected, glass);
             continue;
@@ -9341,7 +9610,10 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         const acc = entry.value_ptr.*;
         if (acc.w <= 1e-12) continue;
         const cen = vmul(acc.cen, 1.0 / acc.w);
-        if (!mesh_edit.xray() and vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
+        if (!mesh_edit.xray()) {
+            if (vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing in Surface mode
+            if (mesh_edit.overlayPointOccludedPub(cen)) continue; // behind a nearer surface (req_3856)
+        }
         const sp = ovProject(cam, cen, ox, oy) orelse continue;
         drawFaceSemanticDot(sp[0], sp[1], acc.sel, acc.glass);
     }
@@ -9723,6 +9995,11 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // compass and marquee are view furniture and stay; wash/dots/edges/gizmo are
     // EDIT affordances and must never render over a paint surface.
     const mode: u8 = if (g_paint_session) 0 else meshEditModeRaw();
+    // One visibility refresh feeds every edit-mode overlay below: the vertex/edge
+    // camera masks AND the Surface-mode occlusion grid the face wash and face dots
+    // consult — so it must run before the face-tint layer, not just the edge layer
+    // (req_3856).
+    const vis_ready = (mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam);
     // Clip everything to the pane, and use segment breaks to layer polys under capsules.
     core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
     // Layer 1 (polys): the tile-panel fills. Always drawn in the model doc view — the
@@ -9746,7 +10023,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     }
     overlayLayerBreak(ox, oy);
     // Layer 4 (capsules): edges, dots, loop-cut accents, gizmo, marquee.
-    if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.refreshCameraVisibility(cam)) {
+    if (vis_ready) {
         drawEdgeOverlay(cam, mode, ox, oy);
     } else if (mode == 0 and !g_paint_session and mesh_edit.ensureTopologyPub()) {
         // Plain view: only the naked Pen Edges wires — they have no faces to rasterize,

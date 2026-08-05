@@ -817,6 +817,160 @@ var g_xray: bool = false;
 var g_camera_visible_vert: ?[]bool = null;
 var g_camera_visible_edge: ?[]bool = null;
 
+// ── Overlay occlusion grid (Surface mode, req_3856) ────────────────────────────
+// Screen-space depth grid rebuilt by refreshCameraVisibility: every front-facing
+// triangle of the resident mesh (scope-independent — anything rendered occludes,
+// the same rule picking's model_paint.occluded applies) is binned by its projected
+// bounds, and a world point is hidden when a binned triangle covers its pixel at
+// nearer depth. O(point × cell load) instead of one whole-mesh raycast per marker,
+// so the drawn overlay can afford the same honesty as the click path.
+const OCC_VP_PX: f32 = 1024; // virtual square viewport — coordinates only feed this grid
+const OCC_GRID_DIM: u32 = 64;
+const OCC_CELL_PX: f32 = OCC_VP_PX / @as(f32, @floatFromInt(OCC_GRID_DIM));
+const OCC_DEPTH_SLACK: f32 = 0.003; // relative depth tolerance — model_paint.occluded's ray eps
+const OCC_BARY_SLACK: f32 = 1e-4; // a vertex ON a shared triangle edge is that triangle's own rim
+
+const OccCorner = struct { x: f32, y: f32, z: f32 };
+const OccTri = struct { a: OccCorner, b: OccCorner, c: OccCorner };
+
+var g_occ_tris: []OccTri = &.{};
+var g_occ_items: []u32 = &.{};
+var g_occ_tri_count: u32 = 0;
+var g_occ_cell_start: [OCC_GRID_DIM * OCC_GRID_DIM + 1]u32 = undefined;
+var g_occ_cell_cursor: [OCC_GRID_DIM * OCC_GRID_DIM]u32 = undefined;
+var g_occ_ready: bool = false;
+
+fn occCellIndex(px: f32) u32 {
+    // Off-virtual-viewport coordinates clamp into the rim cells: the exact
+    // point-in-triangle math below still runs on unclamped floats, so clamping
+    // only widens rim-cell candidate lists, never invents or misses occluders.
+    const cell = @floor(px / OCC_CELL_PX);
+    if (cell < 0) return 0;
+    if (cell >= @as(f32, @floatFromInt(OCC_GRID_DIM))) return OCC_GRID_DIM - 1;
+    return @intFromFloat(cell);
+}
+
+fn occTriCellBounds(t: OccTri) [4]u32 {
+    const min_x = occCellIndex(@min(t.a.x, @min(t.b.x, t.c.x)));
+    const max_x = occCellIndex(@max(t.a.x, @max(t.b.x, t.c.x)));
+    const min_y = occCellIndex(@min(t.a.y, @min(t.b.y, t.c.y)));
+    const max_y = occCellIndex(@max(t.a.y, @max(t.b.y, t.c.y)));
+    return .{ min_x, max_x, min_y, max_y };
+}
+
+/// Rebuild the occlusion grid for `cam`. False (grid unusable) on no mesh or OOM —
+/// callers then skip occlusion pruning and Surface mode degrades to back-face culls.
+fn occBuildGrid(cam: model_paint.Camera) bool {
+    g_occ_ready = false;
+    const pos = model_paint.positions() orelse return false;
+    const fc = model_paint.faceCount();
+    if (fc == 0) return false;
+    if (g_occ_tris.len < fc) {
+        if (g_occ_tris.len > 0) alloc.free(g_occ_tris);
+        g_occ_tris = alloc.alloc(OccTri, fc) catch {
+            g_occ_tris = &.{};
+            return false;
+        };
+    }
+    // Pass 1: project every front-facing triangle whose corners all sit in front of
+    // the near plane. A triangle straddling the camera cannot bin coherently — it is
+    // dropped, degrading (conservatively) to visible markers when you are inside it.
+    g_occ_tri_count = 0;
+    var face: u32 = 0;
+    while (face < fc) : (face += 1) {
+        const base = @as(usize, face) * 9;
+        if (base + 8 >= pos.len) break;
+        if (!faceCameraFacing(cam, face)) continue; // only front faces visibly occlude
+        const a = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 0], pos[base + 1], pos[base + 2] }) orelse continue;
+        const b = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 3], pos[base + 4], pos[base + 5] }) orelse continue;
+        const c = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 6], pos[base + 7], pos[base + 8] }) orelse continue;
+        g_occ_tris[g_occ_tri_count] = .{
+            .a = .{ .x = a[0], .y = a[1], .z = a[2] },
+            .b = .{ .x = b[0], .y = b[1], .z = b[2] },
+            .c = .{ .x = c[0], .y = c[1], .z = c[2] },
+        };
+        g_occ_tri_count += 1;
+    }
+    if (g_occ_tri_count == 0) return false;
+    // Pass 2: count (triangle, cell) spans → CSR prefix sum.
+    @memset(g_occ_cell_start[0..], 0);
+    var spans: u32 = 0;
+    var t: u32 = 0;
+    while (t < g_occ_tri_count) : (t += 1) {
+        const bounds = occTriCellBounds(g_occ_tris[t]);
+        var cy = bounds[2];
+        while (cy <= bounds[3]) : (cy += 1) {
+            var cx = bounds[0];
+            while (cx <= bounds[1]) : (cx += 1) {
+                g_occ_cell_start[cy * OCC_GRID_DIM + cx + 1] += 1;
+                spans += 1;
+            }
+        }
+    }
+    var cell: u32 = 1;
+    while (cell <= OCC_GRID_DIM * OCC_GRID_DIM) : (cell += 1) {
+        g_occ_cell_start[cell] += g_occ_cell_start[cell - 1];
+    }
+    if (g_occ_items.len < spans) {
+        if (g_occ_items.len > 0) alloc.free(g_occ_items);
+        g_occ_items = alloc.alloc(u32, spans) catch {
+            g_occ_items = &.{};
+            return false;
+        };
+    }
+    // Pass 3: scatter triangle ids into their cells.
+    @memcpy(g_occ_cell_cursor[0..], g_occ_cell_start[0 .. OCC_GRID_DIM * OCC_GRID_DIM]);
+    t = 0;
+    while (t < g_occ_tri_count) : (t += 1) {
+        const bounds = occTriCellBounds(g_occ_tris[t]);
+        var cy = bounds[2];
+        while (cy <= bounds[3]) : (cy += 1) {
+            var cx = bounds[0];
+            while (cx <= bounds[1]) : (cx += 1) {
+                const idx = cy * OCC_GRID_DIM + cx;
+                g_occ_items[g_occ_cell_cursor[idx]] = t;
+                g_occ_cell_cursor[idx] += 1;
+            }
+        }
+    }
+    g_occ_cam = cam;
+    g_occ_ready = true;
+    return true;
+}
+
+var g_occ_cam: model_paint.Camera = .{ .eye = .{ 0, 0, 0 }, .target = .{ 0, 0, 1 }, .fov_deg = 50 };
+
+/// Is world point `p` hidden behind a nearer front-facing triangle, per the grid the
+/// last refreshCameraVisibility built? False when no grid is live (X-Ray, no mesh).
+/// The relative depth slack tolerates a point lying ON its own incident faces.
+fn occPointHidden(p: [3]f32) bool {
+    if (!g_occ_ready) return false;
+    const sp = model_paint.projectDepth(g_occ_cam, OCC_VP_PX, OCC_VP_PX, p) orelse return false;
+    const eps = sp[2] * OCC_DEPTH_SLACK + 1e-4;
+    const cell = occCellIndex(sp[1]) * OCC_GRID_DIM + occCellIndex(sp[0]);
+    var i = g_occ_cell_start[cell];
+    while (i < g_occ_cell_start[cell + 1]) : (i += 1) {
+        const t = g_occ_tris[g_occ_items[i]];
+        const denom = (t.b.y - t.c.y) * (t.a.x - t.c.x) + (t.c.x - t.b.x) * (t.a.y - t.c.y);
+        if (@abs(denom) < 1e-9) continue; // edge-on sliver — no visible area to occlude with
+        const w0 = ((t.b.y - t.c.y) * (sp[0] - t.c.x) + (t.c.x - t.b.x) * (sp[1] - t.c.y)) / denom;
+        const w1 = ((t.c.y - t.a.y) * (sp[0] - t.c.x) + (t.a.x - t.c.x) * (sp[1] - t.c.y)) / denom;
+        const w2 = 1.0 - w0 - w1;
+        if (w0 < -OCC_BARY_SLACK or w1 < -OCC_BARY_SLACK or w2 < -OCC_BARY_SLACK) continue;
+        // 1/depth interpolates linearly in screen space (perspective-correct).
+        const inv_z = w0 / t.a.z + w1 / t.b.z + w2 / t.c.z;
+        if (inv_z <= 0) continue;
+        if (1.0 / inv_z < sp[2] - eps) return true;
+    }
+    return false;
+}
+
+/// Overlay-grade occlusion for arbitrary world points (face-mode dots and tint
+/// centroids in 3d.zig) against the grid refreshCameraVisibility built this frame.
+pub fn overlayPointOccludedPub(p: [3]f32) bool {
+    return occPointHidden(p);
+}
+
 // ── Read accessors for the overlay renderer (3d.zig owns the GPU/capsule emit; this module
 // stays GPU-free so its topology/selection logic is unit-testable without wgpu). ──────────
 /// Build the welded topology if needed (so entering vertex/edge mode shows dots immediately).
@@ -924,6 +1078,7 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
     if (g_xray) {
         @memset(visible_vertices, true);
         @memset(visible_edges, true);
+        g_occ_ready = false; // X-Ray: nothing is hidden — face dots consult this too
         return true;
     }
 
@@ -936,6 +1091,17 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera) bool {
         while (corner < 3) : (corner += 1) {
             const vertex = corners[face * 3 + corner];
             if (vertex < visible_vertices.len) visible_vertices[vertex] = true;
+        }
+    }
+    // Surface mode hides what the surface hides (req_3856): a camera-facing vertex
+    // sitting BEHIND a nearer front face (greebles under a hull, the model's far
+    // side) must not draw or catch marquees — the same rule picking already
+    // enforces per-click via model_paint.occluded. Grid build failure degrades to
+    // the historical back-face-only mask rather than blanking the overlay.
+    if (occBuildGrid(cam)) {
+        var vertex: u32 = 0;
+        while (vertex < g_vert_count) : (vertex += 1) {
+            if (visible_vertices[vertex] and occPointHidden(vertPos(vertex))) visible_vertices[vertex] = false;
         }
     }
     const edges = g_edges orelse return false;
@@ -2074,6 +2240,12 @@ pub fn reset() void {
     if (g_scope_edge) |s| alloc.free(s);
     if (g_camera_visible_vert) |s| alloc.free(s);
     if (g_camera_visible_edge) |s| alloc.free(s);
+    if (g_occ_tris.len > 0) alloc.free(g_occ_tris);
+    if (g_occ_items.len > 0) alloc.free(g_occ_items);
+    g_occ_tris = &.{};
+    g_occ_items = &.{};
+    g_occ_tri_count = 0;
+    g_occ_ready = false;
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
@@ -4311,9 +4483,13 @@ test "surface mode rejects occluded element handles and xray deliberately restor
     setXray(false);
     try testing.expectEqual(@as(i32, 0), pick(cam, 800, 600, sp[0], sp[1], false));
     try testing.expect(refreshCameraVisibility(cam));
-    try testing.expect(vertexCameraVisiblePub(0)); // camera-facing, but exactly occluded by the other part
+    // Camera-facing but behind the front part: the drawn-overlay mask now agrees
+    // with the pick gate — Surface mode hides it entirely (req_3856).
+    try testing.expect(!vertexCameraVisiblePub(0));
+    try testing.expect(overlayPointOccludedPub(hidden_vert));
 
     setXray(true);
+    try testing.expect(vertexCameraVisiblePub(0)); // X-Ray restores through-model handles
     try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, sp[0], sp[1], false));
     const pivot = selectionPivot().?;
     try testing.expectApproxEqAbs(@as(f32, -1), pivot[2], 1e-4);
