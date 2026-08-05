@@ -674,6 +674,44 @@ test "create-face reference normal follows the neighboring authored surface" {
     try testing.expect(normal[2] > 0.999);
 }
 
+test "create-face mirror mapping keeps endpoints on the symmetry seam" {
+    // Two triangles meet on x=0. A Create Face bridge built from the +X boundary
+    // needs the off-plane endpoint reflected to -X while the seam endpoint remains
+    // the same welded vertex. Rejecting that self-image drops the complete twin face.
+    var soup = [_]f32{
+        0,  0, 0, 0, 0, 1, 0, 0,
+        1,  0, 0, 0, 0, 1, 0, 0,
+        0,  1, 0, 0, 0, 1, 0, 0,
+        0,  0, 0, 0, 0, 1, 0, 0,
+        0,  1, 0, 0, 0, 1, 0, 0,
+        -1, 0, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3838, soup[0..], 6, &.{ 0, 1 });
+    defer {
+        mesh_edit.test_support.clear();
+        mesh_edit.setMirrorMask(0);
+    }
+    mesh_edit.setMirrorMask(1);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var positive: ?u32 = null;
+    var negative: ?u32 = null;
+    var seam: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[0] == 1 and at[1] == 0 and at[2] == 0) positive = vertex;
+        if (at[0] == -1 and at[1] == 0 and at[2] == 0) negative = vertex;
+        if (at[0] == 0 and at[1] == 0 and at[2] == 0) seam = vertex;
+    }
+
+    const mirrored_outer = mesh_edit.mirrorImageOfVertPub(positive.?, 1).?;
+    const mirrored_seam = mesh_edit.mirrorImageOfVertPub(seam.?, 1).?;
+    try testing.expectEqual(negative.?, mirrored_outer);
+    try testing.expectEqual(seam.?, mirrored_seam);
+    try testing.expect(mesh_edit.hasEdgeBetweenPub(mirrored_outer, mirrored_seam));
+}
+
 test "exact uniform scale multiplies the selection frame around a stable pivot" {
     var soup = [_]f32{
         0, 0, 0, 0, 0, 1, 0, 0,

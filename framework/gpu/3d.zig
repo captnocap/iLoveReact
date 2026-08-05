@@ -2434,8 +2434,11 @@ pub fn meshTopoCreateFaceFromEdges() bool {
         twin_subsets: while (subset <= 7) : (subset += 1) {
             var self_twin = true;
             for (edges) |edge| {
-                const t0 = mesh_edit.mirrorTwinOfVertPub(edge[0], subset) orelse continue :twin_subsets;
-                const t1 = mesh_edit.mirrorTwinOfVertPub(edge[1], subset) orelse continue :twin_subsets;
+                // A bridge can terminate on the mirror plane. Its seam endpoint is
+                // its own valid reflected image while the other endpoint crosses to
+                // the twin boundary edge (req_3838).
+                const t0 = mesh_edit.mirrorImageOfVertPub(edge[0], subset) orelse continue :twin_subsets;
+                const t1 = mesh_edit.mirrorImageOfVertPub(edge[1], subset) orelse continue :twin_subsets;
                 if (!mesh_edit.hasEdgeBetweenPub(t0, t1)) continue :twin_subsets;
                 if (src_part_check) |part| {
                     if ((mesh_edit.vertPartPub(t0) orelse continue :twin_subsets) != part) continue :twin_subsets;

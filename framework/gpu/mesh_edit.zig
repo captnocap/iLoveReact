@@ -3550,17 +3550,24 @@ fn ensureMirrorTwins() ?[]u32 {
     return twins;
 }
 
-/// The mirror twin of one logical vertex for a plane subset (bit 0/1/2 = X/Y/Z),
-/// through the same twin table live mirrored transforms use. Null when mirror is
-/// off, the subset is not enabled, or the vertex has no reflection partner — the
-/// door topology ops use to extend an edit to the other side (req_3797).
-pub fn mirrorTwinOfVertPub(v: u32, subset: u8) ?u32 {
+/// The reflected image of one logical vertex for a plane subset (bit 0/1/2 = X/Y/Z).
+/// Unlike the distinct-twin door below, a vertex on the mirror plane legally maps to
+/// itself. Create Face needs that identity when a bridge edge terminates on the seam:
+/// its off-plane endpoint crosses to the other side while its seam endpoint stays put.
+pub fn mirrorImageOfVertPub(v: u32, subset: u8) ?u32 {
     if (subset == 0 or subset > 7 or (subset & g_mirror_mask) != subset) return null;
     const twins = ensureMirrorTwins() orelse return null;
     if (v >= g_vert_count) return null;
     const t = twins[@as(usize, subset - 1) * g_vert_count + v];
-    if (t == MIRROR_NONE or t == v or t >= g_vert_count) return null;
+    if (t == MIRROR_NONE or t >= g_vert_count) return null;
     return t;
+}
+
+/// The distinct mirror twin used by transforms and topology verbs that must not
+/// process a plane vertex twice. Null also means the reflected image is `v` itself.
+pub fn mirrorTwinOfVertPub(v: u32, subset: u8) ?u32 {
+    const t = mirrorImageOfVertPub(v, subset) orelse return null;
+    return if (t == v) null else t;
 }
 
 /// Live symmetry report against the exact same identity domains and
