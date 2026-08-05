@@ -190,9 +190,10 @@ import { subscribe } from '@reactjit/runtime/ffi';
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
-import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
+import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { assetMatchesLibrarySearch } from '../data/librarySearch';
+import { navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
 import {
   leftPanelForFolder,
   leftPanelsFor,
@@ -855,6 +856,10 @@ export default function AppFrame() {
                 transaction.materialAssetId,
                 ...previous.recentMaterialIds.filter((assetId) => assetId !== transaction.materialAssetId),
               ].slice(0, 10),
+              recentLibraryKeys: rememberRecentLibraryItem(
+                previous.recentLibraryKeys ?? [],
+                `asset:${transaction.materialAssetId}`,
+              ),
             } : {}),
           };
           const next = recordWorldEdit(
@@ -2598,13 +2603,21 @@ export default function AppFrame() {
   };
 
   const selectAsset = (asset: Asset) => {
-    setState((prev) => ({
-      ...prev,
-      activeAssetId: asset.id,
-      activeTab: asset.tab,
-      contentFolder: folderForAsset(asset),
-      status: `selected ${asset.name} - context preserved`,
-    }));
+    setState((prev) => {
+      // Picking from a quick collection keeps the collection open; ordinary
+      // tree/gallery selection navigates to and remembers the real folder.
+      const inCollection = prev.contentFolder === 'materials-favorites' || prev.contentFolder === 'materials-recent';
+      const destination = inCollection ? prev.contentFolder : folderForAsset(asset);
+      return {
+        ...prev,
+        activeAssetId: asset.id,
+        activeTab: asset.tab,
+        contentFolder: destination,
+        libraryCollectionReturnFolder: inCollection ? prev.libraryCollectionReturnFolder : destination,
+        recentLibraryKeys: rememberRecentLibraryItem(prev.recentLibraryKeys ?? [], `asset:${asset.id}`),
+        status: `selected ${asset.name} - context preserved`,
+      };
+    });
   };
 
   const selectObject = (id: string) => {
@@ -2616,6 +2629,8 @@ export default function AppFrame() {
         activeAssetId: object.assetId,
         activeTab: assetById(object.assetId, prev.assetOverrides).tab,
         contentFolder: folderForAsset(assetById(object.assetId, prev.assetOverrides)),
+        libraryCollectionReturnFolder: folderForAsset(assetById(object.assetId, prev.assetOverrides)),
+        recentLibraryKeys: rememberRecentLibraryItem(prev.recentLibraryKeys ?? [], `asset:${object.assetId}`),
         cursor: { x: object.left, y: 0, z: object.top },
         status: `selected ${object.name}`,
       };
@@ -3025,6 +3040,9 @@ export default function AppFrame() {
         activeDomain: result.active,
         leftPanelCollapsed: result.collapsed,
         contentFolder,
+        libraryCollectionReturnFolder: changedPane && selectedPane?.renderer === 'library'
+          ? contentFolder
+          : prev.libraryCollectionReturnFolder,
         activeTab: tab ?? prev.activeTab,
         assetPage: changedPane && selectedPane?.renderer === 'library' ? 0 : prev.assetPage,
         expandedFolders: selectedPane?.renderer === 'library'
@@ -3043,6 +3061,7 @@ export default function AppFrame() {
     activeDomain: 'materials',
     leftPanelCollapsed: false,
     contentFolder: 'materials',
+    libraryCollectionReturnFolder: 'materials',
     activeTab: tabForContentFolder('materials') ?? prev.activeTab,
     assetPage: 0,
     expandedFolders: { ...prev.expandedFolders, materials: true },
@@ -3072,16 +3091,27 @@ export default function AppFrame() {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
       const fallback = resolvedPanelId(leftPanelsFor(documentKind), prev.activeDomain);
-      const tab = tabForContentFolder(contentFolder);
+      const navigation = navigateLibraryCollection(
+        prev.contentFolder,
+        prev.libraryCollectionReturnFolder ?? DEFAULT_CONTENT_FOLDER,
+        contentFolder,
+      );
+      const tab = tabForContentFolder(navigation.folder);
+      const selectedModel = visibleModelPackages(prev.modelOverrides, prev.modelDupes)
+        .find((model) => model.folderId === navigation.folder);
       return {
         ...prev,
-        activeDomain: leftPanelForFolder(documentKind, contentFolder, fallback),
+        activeDomain: leftPanelForFolder(documentKind, navigation.folder, fallback),
         leftPanelCollapsed: false,
-        contentFolder,
+        contentFolder: navigation.folder,
+        libraryCollectionReturnFolder: navigation.returnFolder,
         activeTab: tab ?? prev.activeTab,
         assetPage: 0,
-        expandedFolders: { ...prev.expandedFolders, [contentFolder]: true },
-        status: `content browser: ${contentFolderLabel(contentFolder)}`,
+        expandedFolders: { ...prev.expandedFolders, [navigation.folder]: true },
+        recentLibraryKeys: selectedModel
+          ? rememberRecentLibraryItem(prev.recentLibraryKeys ?? [], `model:${selectedModel.id}`)
+          : prev.recentLibraryKeys,
+        status: `content browser: ${contentFolderLabel(navigation.folder)}`,
       };
     });
   };
@@ -5969,6 +5999,7 @@ export default function AppFrame() {
       ...prev,
       workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
       activeWorkspaceDocumentId: doc.id,
+      recentLibraryKeys: rememberRecentLibraryItem(prev.recentLibraryKeys ?? [], `model:${model.id}`),
       materialFocused: false,
       contextOpen: false,
       status: `opened model document: ${model.name}`,

@@ -576,6 +576,8 @@ export type EditorState = {
   fileExplorerDirectoryHistory: ExplorerDirectoryHistoryEntry[];
   selectedObjectId: string;
   contentFolder: ContentFolderId;
+  /** Normal tree folder restored when a selected Favorites/Recent row toggles off. */
+  libraryCollectionReturnFolder: ContentFolderId;
   expandedFolders: Partial<Record<ContentFolderId, boolean>>;
   // Content browser dock state (req_3135): tucked micro dock (false) or the
   // expanded tree + thumbnail-grid dock (true). Both widths are region constants.
@@ -630,6 +632,8 @@ export type EditorState = {
   // assign pushes here, and the quick menu surfaces them as its RECENT row.
   // Live usage, distinct from the catalog's static `recent` flag.
   recentMaterialIds: string[];
+  /** Newest-first mixed Asset Explorer history (`model:<id>` / `asset:<id>`). */
+  recentLibraryKeys: string[];
   // Authored placeables (req_2578 build pieces + req_2712 props): meshes exported
   // "as a wall piece" / "as a prop", placeable alongside the catalog. DISK is the
   // source of truth (manifest.placeable, req_2718) — this list is seeded from the

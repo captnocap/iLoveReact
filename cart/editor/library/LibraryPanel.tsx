@@ -35,7 +35,8 @@ import FolderSummary from './FolderSummary';
 import MaterialControls from './MaterialControls';
 import ContextToolControls from './ContextToolControls';
 import LibrarySearchResults from './LibrarySearchResults';
-import { searchLibrary } from '../data/librarySearch';
+import { librarySearchHitKey, searchLibrary } from '../data/librarySearch';
+import { favoriteLibraryHits, recentLibraryHits } from '../data/libraryCollections';
 
 // The grids' own inner padding (workspace.cls HW_Lib*Grid / HW_GalleryGrid).
 const GRID_PAD = 10;
@@ -85,6 +86,27 @@ export default function LibraryPanel(props: {
     () => searchLibrary(props.state.search, props.catalogAssets, props.models),
     [props.state.search, props.catalogAssets, props.models],
   );
+  const favoriteHits = useMemo(
+    () => favoriteLibraryHits(props.catalogAssets, props.models),
+    [props.catalogAssets, props.models],
+  );
+  const recentHits = useMemo(
+    () => recentLibraryHits(props.state.recentLibraryKeys ?? [], props.catalogAssets, props.models),
+    [props.state.recentLibraryKeys, props.catalogAssets, props.models],
+  );
+  const favoriteCollection = props.contentFolder === 'materials-favorites';
+  const recentCollection = props.contentFolder === 'materials-recent';
+  const collectionHits = favoriteCollection ? favoriteHits : recentCollection ? recentHits : null;
+  const filteredCollectionHits = useMemo(() => {
+    if (!collectionHits || !searchActive) return collectionHits;
+    const matchingKeys = new Set(searchHits.map(librarySearchHitKey));
+    return collectionHits.filter((hit) => matchingKeys.has(librarySearchHitKey(hit)));
+  }, [collectionHits, searchActive, searchHits]);
+  // A query filters Favorites/Recent when one is selected; elsewhere it is the
+  // global search surface. Quick-tab navigation must never be hidden by stale
+  // search text left in the box.
+  const resultHits = filteredCollectionHits ?? (searchActive ? searchHits : null);
+  const resultSurfaceActive = resultHits !== null;
 
   // ── Measured paging (req_3137): a page holds exactly what the grid area fits.
   // Cell footprints mirror the cls classes — HW_MaterialTile 68 + gap 4 (20px
@@ -111,7 +133,7 @@ export default function LibraryPanel(props: {
     : null;
 
   // One pager for every paged branch (models page like materials/assets do).
-  const pagedCount = searchActive ? null : galleryModels ? galleryModels.length : canBrowseAssets ? props.assets.length : null;
+  const pagedCount = resultSurfaceActive ? null : galleryModels ? galleryModels.length : canBrowseAssets ? props.assets.length : null;
   const activePageSize = galleryModels ? modelPageSize : pageSize;
   const maxPage = Math.max(0, Math.ceil((pagedCount ?? 0) / activePageSize) - 1);
   const page = Math.min(props.state.assetPage, maxPage);
@@ -134,10 +156,10 @@ export default function LibraryPanel(props: {
     props.onModelContext(model, event);
   };
 
-  const favSelected = props.contentFolder === 'materials-favorites';
-  const recentSelected = props.contentFolder === 'materials-recent';
-  const favCount = countAssetsForFolder(props.catalogAssets, 'materials-favorites', props.models);
-  const recentCount = countAssetsForFolder(props.catalogAssets, 'materials-recent', props.models);
+  const favSelected = favoriteCollection;
+  const recentSelected = recentCollection;
+  const favCount = favoriteHits.length;
+  const recentCount = recentHits.length;
   const FavRow = favSelected ? C.HW_QuickRowOn : C.HW_QuickRow;
   const RecentRow = recentSelected ? C.HW_QuickRowOn : C.HW_QuickRow;
   const quickRows = (
@@ -169,9 +191,9 @@ export default function LibraryPanel(props: {
     />
   );
 
-  const searchResults = (
+  const resultSurface = (
     <LibrarySearchResults
-      hits={searchHits}
+      hits={resultHits ?? []}
       activeAssetId={props.state.activeAssetId}
       activeDocumentId={props.state.activeWorkspaceDocumentId}
       onAsset={props.onAsset}
@@ -181,7 +203,7 @@ export default function LibraryPanel(props: {
 
   const footer = (
     <C.HW_LibFoot>
-      <C.HW_StatusText>{searchActive ? `${searchHits.length} matches` : `${selectedFolderCount} items`}</C.HW_StatusText>
+      <C.HW_StatusText>{resultSurfaceActive ? `${resultHits.length} ${searchActive ? 'matches' : 'items'}` : `${selectedFolderCount} items`}</C.HW_StatusText>
       <C.HW_Spacer />
       <C.HW_StatusText>M {props.models.length} · MAT {MATERIAL_ASSET_COUNT} · PKG {CATALOG_DIAGNOSTICS.modelPackages}</C.HW_StatusText>
     </C.HW_LibFoot>
@@ -189,7 +211,7 @@ export default function LibraryPanel(props: {
 
   // The expanded grid column's content: model gallery / material tiles /
   // asset cards / folder summary.
-  const gridContent = searchActive ? searchResults : showModelPackages ? (
+  const gridContent = resultSurfaceActive ? resultSurface : showModelPackages ? (
     <ModelPackageBrowser
       folder={galleryFolder}
       search={props.state.search}
@@ -271,7 +293,9 @@ export default function LibraryPanel(props: {
           </C.HW_LibTreeCol>
           <C.HW_LibGridCol>
             <C.HW_LibCrumb>
-              {searchActive ? (
+              {collectionHits ? (
+                <C.HW_CrumbTextOn>{favoriteCollection ? 'FAVORITES' : 'RECENT'} · {resultHits?.length ?? 0} ITEMS</C.HW_CrumbTextOn>
+              ) : searchActive ? (
                 <C.HW_CrumbTextOn>SEARCH · {searchHits.length} MATCHES</C.HW_CrumbTextOn>
               ) : trail ? trail.flatMap((node, index) => {
                 const last = index === trail.length - 1;
@@ -308,7 +332,7 @@ export default function LibraryPanel(props: {
         </C.HW_LibBody>
       ) : (
         <>
-          {searchActive ? searchResults : <>{quickRows}{tree}</>}
+          {collectionHits ? <>{quickRows}{resultSurface}</> : searchActive ? resultSurface : <>{quickRows}{tree}</>}
           {footer}
         </>
       )}

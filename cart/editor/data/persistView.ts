@@ -162,6 +162,7 @@ export function loadPersistedState(): EditorState {
   merged.activeDomain = normalizeLeftPanelId(merged.activeDomain);
   merged.rightPane = normalizeRightPanelId(merged.rightPane);
   merged.contentFolder = normalizeContentFolderId(merged.contentFolder);
+  merged.libraryCollectionReturnFolder = normalizeContentFolderId(merged.libraryCollectionReturnFolder);
   // The id seq only ever grows: a stale hotstate seq must not re-mint ids the
   // disk save already handed out.
   merged.seq = Math.max(merged.seq, base.seq);
