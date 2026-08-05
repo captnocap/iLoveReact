@@ -5,6 +5,7 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
+import { readModelPackageFacts } from '../data/modelPackageFacts';
 import ModelThumbnail from './ModelThumbnail';
 
 export default function ModelDetailCard({
@@ -16,6 +17,8 @@ export default function ModelDetailCard({
   onOpen: (model: ModelPackage) => void;
   onFavorite: (id: string) => void;
 }) {
+  const facts = readModelPackageFacts(model);
+  const triangles = facts.triangles === null ? '?' : facts.triangles.toLocaleString();
   return (
     <C.HW_DetailCard>
       <C.HW_DetailTop>
@@ -30,7 +33,7 @@ export default function ModelDetailCard({
             </C.HW_IconMiniButton>
           </C.HW_DetailNameRow>
           <C.HW_DetailMeta>{model.kind} · {model.path}</C.HW_DetailMeta>
-          <C.HW_DetailMeta>{model.triangles} tris · {model.paints.length} paint{model.paints.length === 1 ? '' : 's'} · {model.atlases.length} atlas{model.atlases.length === 1 ? '' : 'es'} · {model.stage}</C.HW_DetailMeta>
+          <C.HW_DetailMeta>{triangles} tris · {facts.paints} paint{facts.paints === 1 ? '' : 's'} · {facts.atlases} atlas{facts.atlases === 1 ? '' : 'es'} · {model.stage}</C.HW_DetailMeta>
         </C.HW_DetailText>
       </C.HW_DetailTop>
       <C.HW_VerbRow>
