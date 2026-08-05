@@ -817,171 +817,143 @@ var g_xray: bool = false;
 var g_camera_visible_vert: ?[]bool = null;
 var g_camera_visible_edge: ?[]bool = null;
 
-// ── Overlay occlusion grid (Surface mode, req_3856) ────────────────────────────
-// Screen-space depth grid rebuilt by refreshCameraVisibility: every front-facing
+// ── Overlay occlusion depth buffer (Surface mode, req_3856/3859/3867) ──────────
+// A small CPU depth buffer rebuilt by refreshCameraVisibility: every front-facing
 // triangle of the resident mesh (scope-independent — anything rendered occludes,
-// the same rule picking's model_paint.occluded applies) is binned by its projected
-// bounds, and a world point is hidden when a binned triangle covers its pixel at
-// nearer depth. O(point × cell load) instead of one whole-mesh raycast per marker,
-// so the drawn overlay can afford the same honesty as the click path.
-const OCC_VP_PX: f32 = 1024; // virtual square viewport — coordinates only feed this grid
-const OCC_GRID_DIM: u32 = 64;
-const OCC_CELL_PX: f32 = OCC_VP_PX / @as(f32, @floatFromInt(OCC_GRID_DIM));
-const OCC_DEPTH_SLACK: f32 = 0.003; // relative depth tolerance — model_paint.occluded's ray eps
-const OCC_BARY_SLACK: f32 = 1e-4; // a vertex ON a shared triangle edge is that triangle's own rim
-// Slope-scaled depth bias (req_3861), the wireframe-over-surface classic: a GRAZING
-// panel changes depth enormously within one pixel, so a fixed relative tolerance
-// hides markers sitting a hair past a shallow hull fold even though the user is
-// looking straight at them. Each covering triangle therefore also forgives the
-// depth it sweeps across this many pixels of its own screen gradient — huge on
-// near-edge-on panels (silhouette markers survive), ~zero on frontal surfaces
-// (greebles behind the hull stay hidden).
-const OCC_SLOPE_BIAS_PX: f32 = 2.0;
+// the same rule picking's model_paint.occluded applies) is RASTERIZED at ~1/3
+// screen resolution, storing the nearest 1/depth per texel. A world point is
+// hidden only when EVERY texel in its one-texel neighborhood holds a strictly
+// nearer surface. This is what the user's eye actually tests: the buffer holds
+// the same surface the render shows at that pixel, so far-side geometry can
+// never leak through a grazing panel (an interpolated-plane test with scalar
+// slack could — req_3861's slope bias overshot exactly there, req_3867), while
+// markers within a texel of a silhouette survive via the neighborhood's
+// background/far texels.
+const OCC_BUF_SCALE: f32 = 3.0; // buffer texels are this many real screen pixels
+const OCC_BUF_MAX_DIM: u32 = 1024;
+const OCC_DEPTH_SLACK: f32 = 0.005; // relative — a texel must be nearer by more than this to hide
+const OCC_RASTER_EDGE_SLACK: f32 = 1e-6; // texel-center inside test; shared edges may double-write
 
-const OccCorner = struct { x: f32, y: f32, iz: f32 }; // iz = 1/view-depth (screen-linear)
-const OccTri = struct { a: OccCorner, b: OccCorner, c: OccCorner };
-
-var g_occ_tris: []OccTri = &.{};
-var g_occ_items: []u32 = &.{};
-var g_occ_tri_count: u32 = 0;
-var g_occ_cell_start: [OCC_GRID_DIM * OCC_GRID_DIM + 1]u32 = undefined;
-var g_occ_cell_cursor: [OCC_GRID_DIM * OCC_GRID_DIM]u32 = undefined;
+var g_occ_depth: []f32 = &.{}; // 1/view-depth per texel, 0 = empty/background
+var g_occ_bw: u32 = 0;
+var g_occ_bh: u32 = 0;
 var g_occ_ready: bool = false;
+var g_occ_cam: model_paint.Camera = .{ .eye = .{ 0, 0, 0 }, .target = .{ 0, 0, 1 }, .fov_deg = 50 };
 
-fn occCellIndex(px: f32) u32 {
-    // Off-virtual-viewport coordinates clamp into the rim cells: the exact
-    // point-in-triangle math below still runs on unclamped floats, so clamping
-    // only widens rim-cell candidate lists, never invents or misses occluders.
-    const cell = @floor(px / OCC_CELL_PX);
-    if (cell < 0) return 0;
-    if (cell >= @as(f32, @floatFromInt(OCC_GRID_DIM))) return OCC_GRID_DIM - 1;
-    return @intFromFloat(cell);
+fn occBufferDim(vp_px: f32) u32 {
+    const dim = @floor(vp_px / OCC_BUF_SCALE);
+    if (dim < 1) return 1;
+    if (dim >= @as(f32, @floatFromInt(OCC_BUF_MAX_DIM))) return OCC_BUF_MAX_DIM;
+    return @intFromFloat(dim);
 }
 
-fn occTriCellBounds(t: OccTri) [4]u32 {
-    const min_x = occCellIndex(@min(t.a.x, @min(t.b.x, t.c.x)));
-    const max_x = occCellIndex(@max(t.a.x, @max(t.b.x, t.c.x)));
-    const min_y = occCellIndex(@min(t.a.y, @min(t.b.y, t.c.y)));
-    const max_y = occCellIndex(@max(t.a.y, @max(t.b.y, t.c.y)));
-    return .{ min_x, max_x, min_y, max_y };
-}
-
-/// Rebuild the occlusion grid for `cam`. False (grid unusable) on no mesh or OOM —
+/// Rasterize the mesh's front-facing triangles into the overlay depth buffer for
+/// `cam`. False (buffer unusable) on no mesh, degenerate viewport, or OOM —
 /// callers then skip occlusion pruning and Surface mode degrades to back-face culls.
-fn occBuildGrid(cam: model_paint.Camera) bool {
+fn occBuildDepth(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bool {
     g_occ_ready = false;
     const pos = model_paint.positions() orelse return false;
     const fc = model_paint.faceCount();
-    if (fc == 0) return false;
-    if (g_occ_tris.len < fc) {
-        if (g_occ_tris.len > 0) alloc.free(g_occ_tris);
-        g_occ_tris = alloc.alloc(OccTri, fc) catch {
-            g_occ_tris = &.{};
+    if (fc == 0 or vp_w <= 0 or vp_h <= 0) return false;
+    const bw = occBufferDim(vp_w);
+    const bh = occBufferDim(vp_h);
+    const texels = @as(usize, bw) * @as(usize, bh);
+    if (g_occ_depth.len < texels) {
+        if (g_occ_depth.len > 0) alloc.free(g_occ_depth);
+        g_occ_depth = alloc.alloc(f32, texels) catch {
+            g_occ_depth = &.{};
             return false;
         };
     }
-    // Pass 1: project every front-facing triangle whose corners all sit in front of
-    // the near plane. A triangle straddling the camera cannot bin coherently — it is
-    // dropped, degrading (conservatively) to visible markers when you are inside it.
-    g_occ_tri_count = 0;
+    const depth = g_occ_depth[0..texels];
+    @memset(depth, 0);
+    const bw_f = @as(f32, @floatFromInt(bw));
+    const bh_f = @as(f32, @floatFromInt(bh));
     var face: u32 = 0;
     while (face < fc) : (face += 1) {
         const base = @as(usize, face) * 9;
         if (base + 8 >= pos.len) break;
         if (!faceCameraFacing(cam, face)) continue; // only front faces visibly occlude
-        const a = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 0], pos[base + 1], pos[base + 2] }) orelse continue;
-        const b = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 3], pos[base + 4], pos[base + 5] }) orelse continue;
-        const c = model_paint.projectDepth(cam, OCC_VP_PX, OCC_VP_PX, .{ pos[base + 6], pos[base + 7], pos[base + 8] }) orelse continue;
-        g_occ_tris[g_occ_tri_count] = .{
-            .a = .{ .x = a[0], .y = a[1], .iz = 1.0 / a[2] },
-            .b = .{ .x = b[0], .y = b[1], .iz = 1.0 / b[2] },
-            .c = .{ .x = c[0], .y = c[1], .iz = 1.0 / c[2] },
-        };
-        g_occ_tri_count += 1;
-    }
-    if (g_occ_tri_count == 0) return false;
-    // Pass 2: count (triangle, cell) spans → CSR prefix sum.
-    @memset(g_occ_cell_start[0..], 0);
-    var spans: u32 = 0;
-    var t: u32 = 0;
-    while (t < g_occ_tri_count) : (t += 1) {
-        const bounds = occTriCellBounds(g_occ_tris[t]);
-        var cy = bounds[2];
-        while (cy <= bounds[3]) : (cy += 1) {
-            var cx = bounds[0];
-            while (cx <= bounds[1]) : (cx += 1) {
-                g_occ_cell_start[cy * OCC_GRID_DIM + cx + 1] += 1;
-                spans += 1;
+        // A triangle with a corner behind the near plane cannot project coherently —
+        // it is dropped, degrading (conservatively) to visible markers when the
+        // camera is inside the geometry.
+        const a = model_paint.projectDepth(cam, bw_f, bh_f, .{ pos[base + 0], pos[base + 1], pos[base + 2] }) orelse continue;
+        const b = model_paint.projectDepth(cam, bw_f, bh_f, .{ pos[base + 3], pos[base + 4], pos[base + 5] }) orelse continue;
+        const c = model_paint.projectDepth(cam, bw_f, bh_f, .{ pos[base + 6], pos[base + 7], pos[base + 8] }) orelse continue;
+        const denom = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+        if (@abs(denom) < 1e-9) continue; // zero-area sliver covers nothing
+        const ia = 1.0 / a[2];
+        const ib = 1.0 / b[2];
+        const ic = 1.0 / c[2];
+        const min_x = @min(a[0], @min(b[0], c[0]));
+        const max_x = @max(a[0], @max(b[0], c[0]));
+        const min_y = @min(a[1], @min(b[1], c[1]));
+        const max_y = @max(a[1], @max(b[1], c[1]));
+        if (max_x < 0 or max_y < 0 or min_x >= bw_f or min_y >= bh_f) continue;
+        const tx0: u32 = @intFromFloat(@max(0, @floor(min_x)));
+        const tx1: u32 = @min(bw - 1, @as(u32, @intFromFloat(@max(0, @ceil(max_x)))));
+        const ty0: u32 = @intFromFloat(@max(0, @floor(min_y)));
+        const ty1: u32 = @min(bh - 1, @as(u32, @intFromFloat(@max(0, @ceil(max_y)))));
+        var ty = ty0;
+        while (ty <= ty1) : (ty += 1) {
+            const py = @as(f32, @floatFromInt(ty)) + 0.5;
+            var tx = tx0;
+            while (tx <= tx1) : (tx += 1) {
+                const px = @as(f32, @floatFromInt(tx)) + 0.5;
+                const w0 = ((b[1] - c[1]) * (px - c[0]) + (c[0] - b[0]) * (py - c[1])) / denom;
+                const w1 = ((c[1] - a[1]) * (px - c[0]) + (a[0] - c[0]) * (py - c[1])) / denom;
+                const w2 = 1.0 - w0 - w1;
+                if (w0 < -OCC_RASTER_EDGE_SLACK or w1 < -OCC_RASTER_EDGE_SLACK or w2 < -OCC_RASTER_EDGE_SLACK) continue;
+                // 1/depth interpolates linearly in screen space (perspective-correct).
+                const inv_z = w0 * ia + w1 * ib + w2 * ic;
+                const slot = &depth[@as(usize, ty) * bw + tx];
+                if (inv_z > slot.*) slot.* = inv_z;
             }
         }
     }
-    var cell: u32 = 1;
-    while (cell <= OCC_GRID_DIM * OCC_GRID_DIM) : (cell += 1) {
-        g_occ_cell_start[cell] += g_occ_cell_start[cell - 1];
-    }
-    if (g_occ_items.len < spans) {
-        if (g_occ_items.len > 0) alloc.free(g_occ_items);
-        g_occ_items = alloc.alloc(u32, spans) catch {
-            g_occ_items = &.{};
-            return false;
-        };
-    }
-    // Pass 3: scatter triangle ids into their cells.
-    @memcpy(g_occ_cell_cursor[0..], g_occ_cell_start[0 .. OCC_GRID_DIM * OCC_GRID_DIM]);
-    t = 0;
-    while (t < g_occ_tri_count) : (t += 1) {
-        const bounds = occTriCellBounds(g_occ_tris[t]);
-        var cy = bounds[2];
-        while (cy <= bounds[3]) : (cy += 1) {
-            var cx = bounds[0];
-            while (cx <= bounds[1]) : (cx += 1) {
-                const idx = cy * OCC_GRID_DIM + cx;
-                g_occ_items[g_occ_cell_cursor[idx]] = t;
-                g_occ_cell_cursor[idx] += 1;
-            }
-        }
-    }
+    g_occ_bw = bw;
+    g_occ_bh = bh;
     g_occ_cam = cam;
     g_occ_ready = true;
     return true;
 }
 
-var g_occ_cam: model_paint.Camera = .{ .eye = .{ 0, 0, 0 }, .target = .{ 0, 0, 1 }, .fov_deg = 50 };
-
-/// Is world point `p` hidden behind a nearer front-facing triangle, per the grid the
-/// last refreshCameraVisibility built? False when no grid is live (X-Ray, no mesh).
-/// The relative depth slack tolerates a point lying ON its own incident faces; the
-/// slope-scaled slack additionally forgives what a GRAZING coverer sweeps across
-/// OCC_SLOPE_BIAS_PX of its own screen depth gradient (req_3861).
+/// Is world point `p` hidden behind the rasterized surface, per the depth buffer
+/// the last refreshCameraVisibility built? False when no buffer is live (X-Ray,
+/// no mesh). Hidden requires EVERY texel of the 3×3 neighborhood to hold a
+/// strictly nearer surface: a point on its own visible surface always finds its
+/// own (equal-depth) texel, a point within a texel of a silhouette finds the
+/// background/far texel beyond the rim, and a point on the model's other side
+/// finds nothing but nearer hull — exactly the split the eye expects.
 fn occPointHidden(p: [3]f32) bool {
-    if (!g_occ_ready) return false;
-    const sp = model_paint.projectDepth(g_occ_cam, OCC_VP_PX, OCC_VP_PX, p) orelse return false;
-    const eps = sp[2] * OCC_DEPTH_SLACK + 1e-4;
-    const cell = occCellIndex(sp[1]) * OCC_GRID_DIM + occCellIndex(sp[0]);
-    var i = g_occ_cell_start[cell];
-    while (i < g_occ_cell_start[cell + 1]) : (i += 1) {
-        const t = g_occ_tris[g_occ_items[i]];
-        const denom = (t.b.y - t.c.y) * (t.a.x - t.c.x) + (t.c.x - t.b.x) * (t.a.y - t.c.y);
-        if (@abs(denom) < 1e-9) continue; // edge-on sliver — no visible area to occlude with
-        const w0 = ((t.b.y - t.c.y) * (sp[0] - t.c.x) + (t.c.x - t.b.x) * (sp[1] - t.c.y)) / denom;
-        const w1 = ((t.c.y - t.a.y) * (sp[0] - t.c.x) + (t.a.x - t.c.x) * (sp[1] - t.c.y)) / denom;
-        const w2 = 1.0 - w0 - w1;
-        if (w0 < -OCC_BARY_SLACK or w1 < -OCC_BARY_SLACK or w2 < -OCC_BARY_SLACK) continue;
-        // 1/depth interpolates linearly in screen space (perspective-correct).
-        const inv_z = w0 * t.a.iz + w1 * t.b.iz + w2 * t.c.iz;
-        if (inv_z <= 0) continue;
-        const tri_z = 1.0 / inv_z;
-        // The triangle's screen-space depth gradient (1/z is a plane; dz = z² · d(1/z)).
-        const gx = ((t.b.y - t.c.y) * t.a.iz + (t.c.y - t.a.y) * t.b.iz + (t.a.y - t.b.y) * t.c.iz) / denom;
-        const gy = ((t.c.x - t.b.x) * t.a.iz + (t.a.x - t.c.x) * t.b.iz + (t.b.x - t.a.x) * t.c.iz) / denom;
-        const slope_slack = tri_z * tri_z * @sqrt(gx * gx + gy * gy) * OCC_SLOPE_BIAS_PX;
-        if (tri_z < sp[2] - eps - slope_slack) return true;
+    if (!g_occ_ready or g_occ_bw == 0 or g_occ_bh == 0) return false;
+    const bw_f = @as(f32, @floatFromInt(g_occ_bw));
+    const bh_f = @as(f32, @floatFromInt(g_occ_bh));
+    const sp = model_paint.projectDepth(g_occ_cam, bw_f, bh_f, p) orelse return false;
+    // Off-buffer projections are off-viewport too: the scissor, marquee rect, and
+    // click point are all inside the pane, so "visible" is free and harmless.
+    if (sp[0] < 0 or sp[0] >= bw_f or sp[1] < 0 or sp[1] >= bh_f) return false;
+    const piz = 1.0 / sp[2];
+    const tol = piz * OCC_DEPTH_SLACK + 1e-7;
+    const cx: i64 = @intFromFloat(@floor(sp[0]));
+    const cy: i64 = @intFromFloat(@floor(sp[1]));
+    var dy: i64 = -1;
+    while (dy <= 1) : (dy += 1) {
+        const ty = cy + dy;
+        if (ty < 0 or ty >= g_occ_bh) return false; // rim of the pane counts as open
+        var dx: i64 = -1;
+        while (dx <= 1) : (dx += 1) {
+            const tx = cx + dx;
+            if (tx < 0 or tx >= g_occ_bw) return false;
+            const d = g_occ_depth[@as(usize, @intCast(ty)) * g_occ_bw + @as(usize, @intCast(tx))];
+            if (d <= piz + tol) return false; // farther/equal surface or background → seen
+        }
     }
-    return false;
+    return true;
 }
 
 /// Overlay-grade occlusion for arbitrary world points (face-mode dots and tint
-/// centroids in 3d.zig) against the grid refreshCameraVisibility built this frame.
+/// centroids in 3d.zig) against the buffer refreshCameraVisibility built this frame.
 pub fn overlayPointOccludedPub(p: [3]f32) bool {
     return occPointHidden(p);
 }
@@ -1120,37 +1092,13 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bo
     // Pass 2 (req_3856): Surface mode hides what the surface hides — a camera-facing
     // vertex sitting BEHIND a nearer front face (greebles under a hull, the model's
     // far side) must not draw or catch marquees, the same rule picking already
-    // enforces per-click via model_paint.occluded. A silhouette corner can be
-    // covered by a sliver of its own hull at grazing angles, so a corner also
-    // counts as visible when a point nudged onto an incident front face is clear
-    // (req_3859). Grid build failure degrades to the back-face-only mask.
-    if (occBuildGrid(cam)) {
-        const tan_h = @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
-        face = 0;
-        while (face < face_count) : (face += 1) {
-            if (!faceInScope(face) or !faceCameraFacing(cam, face)) continue;
-            const centroid = faceCentroid(face) orelse continue;
-            var corner: u32 = 0;
-            while (corner < 3) : (corner += 1) {
-                const vertex = corners[face * 3 + corner];
-                if (vertex >= visible_vertices.len or visible_vertices[vertex]) continue;
-                const p = vertPos(vertex);
-                if (!occPointHidden(p)) {
-                    visible_vertices[vertex] = true;
-                    continue;
-                }
-                // The rescue probe is a few SCREEN pixels onto the incident face —
-                // grazing-angle cover is a sub-pixel sliver, while a corner
-                // genuinely behind a wall stays hidden beyond a few pixels.
-                const depth = occViewDepth(cam, p);
-                if (depth <= OCC_EDGE_NEAR_Z or vp_h <= 0) continue;
-                const world_per_px = depth * 2.0 * tan_h / vp_h;
-                const toward = occSub(centroid, p);
-                const reach = @sqrt(toward[0] * toward[0] + toward[1] * toward[1] + toward[2] * toward[2]);
-                if (reach < 1e-9) continue;
-                const step = @min(1.0, OCC_CORNER_RESCUE_PX * world_per_px / reach);
-                if (!occPointHidden(occLerp(p, centroid, step))) visible_vertices[vertex] = true;
-            }
+    // enforces per-click via model_paint.occluded. The depth buffer's one-texel
+    // neighborhood keeps silhouette corners honest without any nudge heuristics
+    // (req_3867). Buffer build failure degrades to the back-face-only mask.
+    if (occBuildDepth(cam, vp_w, vp_h)) {
+        var vertex: u32 = 0;
+        while (vertex < g_vert_count) : (vertex += 1) {
+            if (touched[vertex] and !occPointHidden(vertPos(vertex))) visible_vertices[vertex] = true;
         }
     } else {
         @memcpy(visible_vertices, touched);
@@ -1176,29 +1124,12 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bo
     return true;
 }
 
-const OCC_CORNER_RESCUE_PX: f32 = 3; // silhouette-corner rescue probe distance, in screen pixels
 const OCC_EDGE_NEAR_Z: f32 = 1e-3; // view-depth near clip for edge span sampling
 const OCC_EDGE_SAMPLE_PX: f32 = 48; // one occlusion probe per this many on-screen pixels
 const OCC_EDGE_MAX_SAMPLES: u32 = 16;
 
 fn occLerp(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
     return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
-}
-
-fn occSub(a: [3]f32, b: [3]f32) [3]f32 {
-    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
-}
-
-/// The authored centroid of one displayed triangle, from the live position stream.
-fn faceCentroid(face: u32) ?[3]f32 {
-    const pos = model_paint.positions() orelse return null;
-    const base = @as(usize, face) * 9;
-    if (base + 8 >= pos.len) return null;
-    return .{
-        (pos[base + 0] + pos[base + 3] + pos[base + 6]) / 3.0,
-        (pos[base + 1] + pos[base + 4] + pos[base + 7]) / 3.0,
-        (pos[base + 2] + pos[base + 5] + pos[base + 8]) / 3.0,
-    };
 }
 
 fn occViewDepth(cam: model_paint.Camera, p: [3]f32) f32 {
@@ -2396,11 +2327,10 @@ pub fn reset() void {
     if (g_scope_edge) |s| alloc.free(s);
     if (g_camera_visible_vert) |s| alloc.free(s);
     if (g_camera_visible_edge) |s| alloc.free(s);
-    if (g_occ_tris.len > 0) alloc.free(g_occ_tris);
-    if (g_occ_items.len > 0) alloc.free(g_occ_items);
-    g_occ_tris = &.{};
-    g_occ_items = &.{};
-    g_occ_tri_count = 0;
+    if (g_occ_depth.len > 0) alloc.free(g_occ_depth);
+    g_occ_depth = &.{};
+    g_occ_bw = 0;
+    g_occ_bh = 0;
     g_occ_ready = false;
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
@@ -4665,22 +4595,22 @@ test "surface mode rejects occluded element handles and xray deliberately restor
 }
 
 test "an edge with both endpoints occluded still draws where its middle crosses the view" {
-    // The zoomed-in regression (req_3859): a long hull edge runs across the whole
-    // viewport while both of its endpoints sit off-screen BEHIND other parts. The
-    // endpoint-derived rule alone would hide an edge you are looking straight at;
-    // span sampling must keep it, while the hidden endpoint markers stay hidden.
+    // The zoomed-in regression (req_3859): a long hull edge crosses the view while
+    // both of its endpoints sit BEHIND other parts. The endpoint-derived rule alone
+    // would hide an edge you are looking straight at; span sampling must keep it,
+    // while the hidden endpoint markers stay hidden.
     var verts = [_]f32{
-        // scoped part, group 0: one wide triangle, bottom edge x ∈ [-6, 6] at z=0
-        -6.0, 0.0,  0.0, 0, 0, 1, 0, 0,
-        6.0,  0.0,  0.0, 0, 0, 1, 0, 0,
+        // scoped part, group 0: one wide triangle, bottom edge x ∈ [-2.8, 2.8] at z=0
+        -2.8, 0.0,  0.0, 0, 0, 1, 0, 0,
+        2.8,  0.0,  0.0, 0, 0, 1, 0, 0,
         0.0,  1.0,  0.0, 0, 0, 1, 0, 0,
         // occluder part, group 1+2: two panels at z=2 covering only the endpoint rays
-        2.5,  -3.0, 2.0, 0, 0, 1, 0, 0,
-        8.0,  -3.0, 2.0, 0, 0, 1, 0, 0,
-        5.0,  6.0,  2.0, 0, 0, 1, 0, 0,
-        -8.0, -3.0, 2.0, 0, 0, 1, 0, 0,
-        -2.5, -3.0, 2.0, 0, 0, 1, 0, 0,
-        -5.0, 6.0,  2.0, 0, 0, 1, 0, 0,
+        1.2,  -3.0, 2.0, 0, 0, 1, 0, 0,
+        2.4,  -3.0, 2.0, 0, 0, 1, 0, 0,
+        1.8,  6.0,  2.0, 0, 0, 1, 0, 0,
+        -2.4, -3.0, 2.0, 0, 0, 1, 0, 0,
+        -1.2, -3.0, 2.0, 0, 0, 1, 0, 0,
+        -1.8, 6.0,  2.0, 0, 0, 1, 0, 0,
     };
     model_paint.setTarget(795, verts[0..], 9);
     model_source.setFaceGroups(&[_]u32{ 0, 1, 2 });
@@ -4695,8 +4625,8 @@ test "an edge with both endpoints occluded still draws where its middle crosses 
     }
 
     const cam = model_paint.Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
-    try testing.expect(model_paint.occluded(cam, .{ -6, 0, 0 }));
-    try testing.expect(model_paint.occluded(cam, .{ 6, 0, 0 }));
+    try testing.expect(model_paint.occluded(cam, .{ -2.8, 0, 0 }));
+    try testing.expect(model_paint.occluded(cam, .{ 2.8, 0, 0 }));
     try testing.expect(!model_paint.occluded(cam, .{ 0, 0, 0 })); // the middle is in plain view
 
     try testing.expect(ensureTopology());
@@ -4717,13 +4647,14 @@ test "an edge with both endpoints occluded still draws where its middle crosses 
     try testing.expect(edgeCameraVisiblePub(span_edge.?));
 }
 
-test "grazing coverage gets slope-scaled slack; frontal coverage stays strict" {
-    // The hull-at-a-shallow-angle regression (req_3861): a panel seen nearly
-    // edge-on sweeps a huge depth range across a handful of pixels, so a point a
-    // hair past its silhouette is "behind" it by far more than the flat relative
-    // eps — and visible markers died wholesale at grazing view angles. The grid's
-    // slope-scaled bias must forgive what the coverer sweeps across ~2px of its
-    // own gradient, while a genuinely buried point stays hidden.
+test "a point at a grazing silhouette stays visible; a buried point stays hidden" {
+    // The hull-at-a-shallow-angle regression (req_3861/3867): a panel seen nearly
+    // edge-on sweeps a huge depth range across a handful of pixels, so any
+    // depth-compare with scalar slack either hides markers a hair past the
+    // silhouette or lets the far side bleed through. The depth buffer's
+    // neighborhood answers it structurally: a near-silhouette point sees the
+    // background texel just past the rim, a buried point sees nothing but
+    // nearer panel in every direction.
     var verts = [_]f32{
         // one flat panel, y=0, x ∈ [-2,2], z ∈ [-6,0], normal +y
         -2.0, 0.0, 0.0,  0, 1, 0, 0, 0,
@@ -4750,15 +4681,16 @@ test "grazing coverage gets slope-scaled slack; frontal coverage stays strict" {
     setXray(false);
     try testing.expect(refreshCameraVisibility(cam, 800, 600));
 
-    // Just past the far silhouette: the raw ray test calls it occluded (cover
-    // ≈ 0.54 units vs eps ≈ 0.034), but the coverer is grazing (slope slack
-    // ≈ 1.04) — the overlay must keep it.
+    // Just past the far silhouette: the raw ray test calls it occluded, but its
+    // buffer neighborhood reaches the open background past the panel's rim — the
+    // overlay must keep it.
     const near_silhouette = [3]f32{ 0, -0.01, -6.2 };
     try testing.expect(model_paint.occluded(cam, near_silhouette));
     try testing.expect(!overlayPointOccludedPub(near_silhouette));
 
-    // Well underneath the panel (cover ≈ 4.8 units, far beyond eps + slack):
-    // slope bias is a silhouette courtesy, not X-Ray through the floor.
+    // Well underneath the panel, screenwise inside its footprint: every nearby
+    // texel shows nearer panel — the neighborhood is a silhouette courtesy, not
+    // X-Ray through the floor.
     const buried = [3]f32{ 0, -0.15, -6.2 };
     try testing.expect(model_paint.occluded(cam, buried));
     try testing.expect(overlayPointOccludedPub(buried));
