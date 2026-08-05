@@ -625,6 +625,9 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const shell = adapter.partPercept?.();
     return shell ? { ...percept, ...shell } : percept;
   };
+  // Viewport input already emits this one committed-selection notification. Seat
+  // automation changes the same resident sets, so it must wake the human's inspector too.
+  const notifySelectionChanged = () => host.__meshEditSelChanged?.();
   const look = (): SeatPercept | null => {
     const initial = withParts(readSeatPercept());
     if (!initial || primitiveBootstrapAttempted || initial.table.regions.length > 0 || initial.unnamed !== initial.faces || initial.faces < 6 || initial.faces > 12) return initial;
@@ -667,11 +670,13 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const actionable = receipt.actionableFaces ?? receipt.faces;
     if (receipt.ok && receipt.faces !== undefined && actionable !== undefined && actionable < receipt.faces) {
       host.__mesh_edit_clear?.();
+      notifySelectionChanged();
       return {
         ok: false, faces: receipt.faces, actionableFaces: actionable, bbox: receipt.bbox,
         reason: `selector matched ${receipt.faces} faces but active part scope permits ${actionable}; select every intended part first`,
       };
     }
+    if (receipt.ok) notifySelectionChanged();
     return receipt;
   };
   const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
@@ -768,6 +773,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       const id = args.id === 'all' ? -1 : Number(args.id);
       if (!Number.isInteger(id) || id < -1) return { ok: false, reason: 'select needs a non-negative band id or id:"all"' };
       const selected = Number(host.__mesh_retopo_band_select?.(id) ?? -1);
+      if (selected > 0) notifySelectionChanged();
       return selected > 0 ? { ok: true, result: { id: id < 0 ? 'all' : id, selected } }
         : { ok: false, reason: 'band id is absent, stale, or selected no resident faces' };
     }
@@ -938,12 +944,21 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     }
     return { ok: false, reason: `unknown Follow operation "${operation}"` };
   };
-  const selectEdge = (index: number, additive = false): boolean =>
-    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
-  const selectVertex = (index: number, additive = false): boolean =>
-    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_vertex?.(index, additive ? 1 : 0) === 1;
-  const selectFace = (index: number, additive = false): boolean =>
-    Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_face?.(index, additive ? 1 : 0) === 1;
+  const selectEdge = (index: number, additive = false): boolean => {
+    const changed = Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_edge?.(index, additive ? 1 : 0) === 1;
+    if (changed) notifySelectionChanged();
+    return changed;
+  };
+  const selectVertex = (index: number, additive = false): boolean => {
+    const changed = Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_vertex?.(index, additive ? 1 : 0) === 1;
+    if (changed) notifySelectionChanged();
+    return changed;
+  };
+  const selectFace = (index: number, additive = false): boolean => {
+    const changed = Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_face?.(index, additive ? 1 : 0) === 1;
+    if (changed) notifySelectionChanged();
+    return changed;
+  };
   const selectElements = (kind: 'face' | 'edge' | 'vertex', values: unknown): number => {
     const indices = Array.isArray(values)
       ? [...new Set(values.map(Number).filter((index) => Number.isInteger(index) && index >= 0))]
@@ -956,6 +971,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (typeof door !== 'function') return 0;
     let changed = 0;
     for (let at = 0; at < indices.length; at += 1) changed += door(indices[at], at === 0 ? 0 : 1) === 1 ? 1 : 0;
+    if (changed > 0) notifySelectionChanged();
     return changed;
   };
   const selectBoundaryEdgePairs = (values: unknown): { changed: number; edges: number[] } | null => {
@@ -1279,7 +1295,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return result;
   };
   const trisToQuads = (): TopologyReceipt | null => topology(() => host.__mesh_topo_tris_to_quads?.());
-  const collectUvOrientation = (): number => Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
+  const collectUvOrientation = (): number => {
+    const changed = Number(automation(() => host.__mesh_edit_select_uv_orientation?.()) ?? 0);
+    if (changed > 0) notifySelectionChanged();
+    return changed;
+  };
   const shellAction = (action: string, args: Record<string, unknown>): SeatShellReceipt =>
     adapter.shellAction?.(action, args) ?? { ok: false, reason: 'editor shell action bridge unavailable' };
   /** Append a resident primitive as a new named part, then leave it selected so the

@@ -262,6 +262,51 @@ test "follow patch records exact selected triangles and their next adjacency rin
     try testing.expect(std.mem.indexOf(u8, after, "\"vertices\":[0,1,2]") != null);
 }
 
+test "selection snapshot exposes the native face edge and vertex facts the inspector shows" {
+    var soup = [_]f32{0} ** (6 * 8);
+    const positions = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
+    };
+    for (positions, 0..) |position, row| {
+        soup[row * 8] = position[0];
+        soup[row * 8 + 1] = position[1];
+        soup[row * 8 + 2] = position[2];
+        soup[row * 8 + 5] = 1;
+    }
+    mesh_edit.test_support.loadGroupedSoup(3828, soup[0..], 6, &.{ 10, 10 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.test_support.setPartRanges(&.{ 10, 11 });
+
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    const face_json = mesh_edit.selectionSnapshotJson(testing.allocator) orelse return error.MissingFaceSelectionSnapshot;
+    defer testing.allocator.free(face_json);
+    try testing.expect(std.mem.indexOf(u8, face_json, "\"mode\":3,\"count\":1,\"affectedVertices\":4,\"selectedTriangles\":2") != null);
+    try testing.expect(std.mem.indexOf(u8, face_json, "\"group\":10,\"part\":0,\"material\":null,\"region\":null,\"instance\":null") != null);
+    try testing.expect(std.mem.indexOf(u8, face_json, "\"normal\":[0,0,1],\"area\":0.5") != null);
+
+    try testing.expect(mesh_edit.selectVertexByIndex(0, false));
+    const vertex_json = mesh_edit.selectionSnapshotJson(testing.allocator) orelse return error.MissingVertexSelectionSnapshot;
+    defer testing.allocator.free(vertex_json);
+    try testing.expect(std.mem.indexOf(u8, vertex_json, "\"mode\":1,\"count\":1,\"affectedVertices\":1,\"selectedTriangles\":0") != null);
+    try testing.expect(std.mem.indexOf(u8, vertex_json, "\"vertices\":[{\"id\":0,\"at\":[0,0,0],\"part\":0}]") != null);
+
+    var boundary: ?u32 = null;
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        if (mesh_edit.edgeIsBoundaryPub(edge)) {
+            boundary = edge;
+            break;
+        }
+    }
+    try testing.expect(boundary != null);
+    try testing.expect(mesh_edit.selectEdgeByIndex(boundary.?, false));
+    const edge_json = mesh_edit.selectionSnapshotJson(testing.allocator) orelse return error.MissingEdgeSelectionSnapshot;
+    defer testing.allocator.free(edge_json);
+    try testing.expect(std.mem.indexOf(u8, edge_json, "\"mode\":2,\"count\":1,\"affectedVertices\":2,\"selectedTriangles\":0") != null);
+    try testing.expect(std.mem.indexOf(u8, edge_json, "\"length\":1,\"faces\":1,\"open\":true,\"part\":0") != null);
+}
+
 test "follow action queue retains rapid native lessons and drains them exactly once" {
     var queue: mesh_edit.FollowActionQueue = .{};
     defer queue.deinit(testing.allocator);

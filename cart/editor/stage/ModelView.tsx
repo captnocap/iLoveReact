@@ -31,6 +31,7 @@ import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost } from '@reactjit/runtime/ffi';
 import { createAgentSeat, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt } from '../agent/seatApi';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
 import { captureFrame } from '@reactjit/capture';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
@@ -234,6 +235,7 @@ export type ModelFocusShape = {
 export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   semantics: ModelFocusSemantics;
+  readSelection: () => ModelSelectionSnapshot | null;
   refreshSemantics: () => void;
   refreshGeometry: () => void;
   paintLive: boolean;
@@ -597,6 +599,8 @@ const readSelInfo = (): SelInfo | null => {
     return null;
   }
 };
+const readModelSelection = (): ModelSelectionSnapshot | null =>
+  parseModelSelectionSnapshot(host.__mesh_edit_selection?.());
 const readTopoResult = (json: any): TopoResult | null => {
   try {
     return typeof json === 'string' && json ? (JSON.parse(json) as TopoResult) : null;
@@ -1048,6 +1052,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     return () => clearInterval(t);
   }, [bdActive?.id]);
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
+  // Counts can remain identical while the user replaces one selected element with
+  // another. This revision carries that identity change to Model Focus without putting
+  // JS back into the native pointer loop.
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [guard, setGuard] = useState<GuardInfo | null>(null);
   // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
   // return code, so a failed bake silently painted flat white (req_2482).
@@ -1461,6 +1469,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const mode = Math.max(0, Math.min(3, info.mode | 0));
     const next = mode === info.mode ? info : { ...info, mode };
     setSelInfo(next);
+    setSelectionRevision((value) => value + 1);
     setSelMode(mode);
     if (mode !== 0) {
       setPaintMode(false);
@@ -3162,6 +3171,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       semantics,
+      readSelection: readModelSelection,
       refreshSemantics: () => setSemanticRevision((value) => value + 1),
       refreshGeometry: () => setSemanticRevision((value) => value + 1),
       paintLive: paintMode,
@@ -3216,7 +3226,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     g.__modelFocusBridge = bridge;
     g.__modelSemanticDiagnostics = semantics;
     g.__modelFocusBridgeChanged?.();
-  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision]);
+  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision, selectionRevision]);
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them

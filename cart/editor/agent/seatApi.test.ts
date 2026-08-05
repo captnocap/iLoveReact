@@ -419,6 +419,8 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   let vertexArgs: unknown[] = [];
   let edgeArgs: unknown[] = [];
   let faceArgs: unknown[] = [];
+  let selectionNotices = 0;
+  (globalThis as any).__meshEditSelChanged = () => { selectionNotices += 1; };
   (globalThis as any).__mesh_edit_select_vertex = (...args: unknown[]) => { vertexArgs = args; return 1; };
   (globalThis as any).__mesh_edit_select_edge = (...args: unknown[]) => { edgeArgs = args; return 1; };
   (globalThis as any).__mesh_edit_select_face = (...args: unknown[]) => { faceArgs = args; return 1; };
@@ -437,6 +439,7 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   const pointed = executeSeatRequest(seat, { action: 'select-edge-points', args: { pairs: [[[-0.0000001, 1, 0], [1, 1, 0]]] } });
   assert(pointed.ok && edgeArgs[0] === 4, 'boundary edge coordinates did not survive topology rekeying');
   assert(!executeSeatRequest(seat, { action: 'select-edge-pairs', args: { pairs: [[2, 99]] } }).ok, 'missing boundary edge pair was partially accepted');
+  assert(selectionNotices >= 6, 'Seat selections did not wake the visible Model Focus readout');
 });
 
 test('boundary continuation exposes and accepts only one edge anchored at each open endpoint', () => {

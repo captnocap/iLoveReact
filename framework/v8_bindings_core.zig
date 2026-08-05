@@ -2423,6 +2423,14 @@ fn hostMeshEditElements(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, json);
 }
 
+/// __mesh_edit_selection() → compact current-selection topology + semantic facts.
+fn hostMeshEditSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const json = scene3d.meshEditSelectionJson(std.heap.c_allocator) orelse return setReturnString(info, "");
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
+}
+
 /// __mesh_retopo_bands_plan(axis, widthMeters, origin?) → complete preview plan JSON.
 /// View-only: it changes neither geometry nor saved paint/material data.
 fn hostMeshRetopoBandsPlan(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4688,6 +4696,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_selection", hostModelPaintSelection);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
+    v8_runtime.registerHostFn("__mesh_edit_selection", hostMeshEditSelection);
     v8_runtime.registerHostFn("__mesh_retopo_bands_plan", hostMeshRetopoBandsPlan);
     v8_runtime.registerHostFn("__mesh_retopo_bands_plan_rails", hostMeshRetopoBandsPlanRails);
     v8_runtime.registerHostFn("__mesh_retopo_bands_read", hostMeshRetopoBandsRead);

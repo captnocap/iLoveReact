@@ -61,6 +61,34 @@
           "zig": "hostMeshSetFaceMaterials"
         },
         {
+          "js": "__mesh_set_face_semantics",
+          "zig": "hostMeshSetFaceSemantics"
+        },
+        {
+          "js": "__mesh_semantic_assign",
+          "zig": "hostMeshSemanticAssign"
+        },
+        {
+          "js": "__mesh_semantic_extrude_intent",
+          "zig": "hostMeshSemanticExtrudeIntent"
+        },
+        {
+          "js": "__mesh_semantic_bootstrap_axes",
+          "zig": "hostMeshSemanticBootstrapAxes"
+        },
+        {
+          "js": "__mesh_semantic_name_primitive",
+          "zig": "hostMeshSemanticNamePrimitive"
+        },
+        {
+          "js": "__mesh_semantic_state",
+          "zig": "hostMeshSemanticState"
+        },
+        {
+          "js": "__mesh_select_query",
+          "zig": "hostMeshSelectQuery"
+        },
+        {
           "js": "__mesh_texture_slot_assign",
           "zig": "hostMeshTextureSlotAssign"
         },
@@ -99,6 +127,14 @@
         {
           "js": "__model_cam_set_pose",
           "zig": "hostModelCamSetPose"
+        },
+        {
+          "js": "__model_orbit_frame",
+          "zig": "hostModelOrbitFrame"
+        },
+        {
+          "js": "__mesh_live_frame",
+          "zig": "hostMeshLiveFrame"
         },
         {
           "js": "__model_bd_gizmo_set",
@@ -165,6 +201,18 @@
           "zig": "hostMeshGizmoScaleBy"
         },
         {
+          "js": "__mesh_transform_translate",
+          "zig": "hostMeshTransformTranslate"
+        },
+        {
+          "js": "__mesh_transform_scale_axis",
+          "zig": "hostMeshTransformScaleAxis"
+        },
+        {
+          "js": "__mesh_transform_rotate_axis",
+          "zig": "hostMeshTransformRotateAxis"
+        },
+        {
           "js": "__mesh_topo_extrude_edge",
           "zig": "hostMeshTopoExtrudeEdge"
         },
@@ -185,8 +233,20 @@
           "zig": "hostMeshTopoWeld"
         },
         {
+          "js": "__mesh_retopo_weld_pairs",
+          "zig": "hostMeshRetopoWeldPairs"
+        },
+        {
+          "js": "__mesh_retopo_normalize_widths",
+          "zig": "hostMeshRetopoNormalizeWidths"
+        },
+        {
           "js": "__mesh_topo_loop_cut",
           "zig": "hostMeshTopoLoopCut"
+        },
+        {
+          "js": "__mesh_topo_connect_vertices",
+          "zig": "hostMeshTopoConnectVertices"
         },
         {
           "js": "__mesh_bevel_begin",
@@ -357,6 +417,10 @@
           "zig": "hostMeshEditSelectFace"
         },
         {
+          "js": "__mesh_edit_select_vertex",
+          "zig": "hostMeshEditSelectVertex"
+        },
+        {
           "js": "__mesh_edit_select_uv_orientation",
           "zig": "hostMeshEditSelectUvOrientation"
         },
@@ -421,8 +485,68 @@
           "zig": "hostModelPaintGroupRange"
         },
         {
+          "js": "__model_paint_selection",
+          "zig": "hostModelPaintSelection"
+        },
+        {
           "js": "__mesh_edit_select_edge",
           "zig": "hostMeshEditSelectEdge"
+        },
+        {
+          "js": "__mesh_edit_elements",
+          "zig": "hostMeshEditElements"
+        },
+        {
+          "js": "__mesh_edit_selection",
+          "zig": "hostMeshEditSelection"
+        },
+        {
+          "js": "__mesh_retopo_bands_plan",
+          "zig": "hostMeshRetopoBandsPlan"
+        },
+        {
+          "js": "__mesh_retopo_bands_plan_rails",
+          "zig": "hostMeshRetopoBandsPlanRails"
+        },
+        {
+          "js": "__mesh_retopo_bands_read",
+          "zig": "hostMeshRetopoBandsRead"
+        },
+        {
+          "js": "__mesh_retopo_bands_clear",
+          "zig": "hostMeshRetopoBandsClear"
+        },
+        {
+          "js": "__mesh_retopo_band_tint_selection",
+          "zig": "hostMeshRetopoBandTintSelection"
+        },
+        {
+          "js": "__mesh_retopo_band_select",
+          "zig": "hostMeshRetopoBandSelect"
+        },
+        {
+          "js": "__mesh_retopo_source_ghost",
+          "zig": "hostMeshRetopoSourceGhost"
+        },
+        {
+          "js": "__mesh_retopo_source_ghost_read",
+          "zig": "hostMeshRetopoSourceGhostRead"
+        },
+        {
+          "js": "__mesh_retopo_guide_write",
+          "zig": "hostMeshRetopoGuideWrite"
+        },
+        {
+          "js": "__mesh_retopo_guide_load",
+          "zig": "hostMeshRetopoGuideLoad"
+        },
+        {
+          "js": "__mesh_follow_patch",
+          "zig": "hostMeshFollowPatch"
+        },
+        {
+          "js": "__mesh_follow_action_drain",
+          "zig": "hostMeshFollowActionDrain"
         },
         {
           "js": "__mesh_edit_guard",

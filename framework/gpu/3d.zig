@@ -10475,6 +10475,14 @@ pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
     return out.toOwnedSlice() catch null;
 }
 
+/// Compact, selection-only topology facts for the visible Model Focus inspector and
+/// coordinate-free Agent Seat reads. The mesh-edit module owns the schema so every
+/// consumer sees the same selected ids, geometry, topology, material, and semantics.
+pub fn meshEditSelectionJson(allocator: std.mem.Allocator) ?[]u8 {
+    if (!model_paint.hasTarget()) return null;
+    return mesh_edit.selectionSnapshotJson(allocator);
+}
+
 fn retopoBandPlanJson(allocator: std.mem.Allocator) ?[]u8 {
     const plan = if (g_retopo_band_plan) |*value| value else return null;
     if (plan.faces.len != model_paint.faceCount()) return null;

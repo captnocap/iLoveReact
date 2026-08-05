@@ -1822,6 +1822,156 @@ fn countTrue(maybe: ?[]bool) u32 {
     return n;
 }
 
+/// The inspector and Agent Seat consume one compact native selection snapshot instead
+/// of reconstructing selection meaning from mesh-wide element tables. Exact totals are
+/// always reported; detail rows are bounded so Ctrl+A on a dense import cannot allocate
+/// an unbounded JSON reply on the interaction path.
+pub const SelectionSnapshotTuning = struct {
+    pub const max_detail_rows: u32 = 256;
+};
+
+/// JSON schema v1:
+/// { mode, count, affectedVertices, selectedTriangles, truncated, pivot, bounds,
+///   vertices:[{id,at,part}], edges:[{id,vertices,length,faces,open,part}],
+///   triangles:[{id,group,part,material,region,instance,vertices,normal,area}] }
+///
+/// `count` uses the same authored-face contract as the visible selection HUD. Face
+/// details remain triangle rows because group id is the exact authored-face join key;
+/// consumers can group them without losing the resident triangle ids automation uses.
+pub fn selectionSnapshotJson(allocator: std.mem.Allocator) ?[]u8 {
+    if (g_mode != .none and !ensureTopology()) return null;
+
+    const selected_count = selCount();
+    const selected_triangles = if (g_mode == .face) countTrue(g_sel_face) else 0;
+    const affected = fillAffectedVerts();
+    var affected_count: u32 = 0;
+    var pivot: [3]f32 = .{ 0, 0, 0 };
+    var bounds_min: [3]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) };
+    var bounds_max: [3]f32 = .{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    if (affected) |mask| {
+        var vertex: u32 = 0;
+        while (vertex < g_vert_count and vertex < mask.len) : (vertex += 1) {
+            if (!mask[vertex]) continue;
+            const point = vertPosPub(vertex);
+            for (0..3) |axis| {
+                pivot[axis] += point[axis];
+                bounds_min[axis] = @min(bounds_min[axis], point[axis]);
+                bounds_max[axis] = @max(bounds_max[axis], point[axis]);
+            }
+            affected_count += 1;
+        }
+    }
+    if (affected_count > 0) {
+        const inverse = 1.0 / @as(f32, @floatFromInt(affected_count));
+        for (0..3) |axis| pivot[axis] *= inverse;
+    }
+
+    const selected_edges = if (g_mode == .edge) countTrue(g_sel_edge) else 0;
+    const truncated = affected_count > SelectionSnapshotTuning.max_detail_rows or
+        selected_edges > SelectionSnapshotTuning.max_detail_rows or
+        selected_triangles > SelectionSnapshotTuning.max_detail_rows;
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.print(
+        "{{\"version\":1,\"mode\":{d},\"count\":{d},\"affectedVertices\":{d},\"selectedTriangles\":{d},\"truncated\":{s},\"pivot\":",
+        .{ @intFromEnum(g_mode), selected_count, affected_count, selected_triangles, if (truncated) "true" else "false" },
+    ) catch return null;
+    if (affected_count == 0) {
+        writer.writeAll("null,\"bounds\":null") catch return null;
+    } else {
+        writer.print(
+            "[{d},{d},{d}],\"bounds\":[{d},{d},{d},{d},{d},{d}]",
+            .{ pivot[0], pivot[1], pivot[2], bounds_min[0], bounds_min[1], bounds_min[2], bounds_max[0], bounds_max[1], bounds_max[2] },
+        ) catch return null;
+    }
+
+    writer.writeAll(",\"vertices\":[") catch return null;
+    var emitted: u32 = 0;
+    if (affected) |mask| {
+        var vertex: u32 = 0;
+        while (vertex < g_vert_count and vertex < mask.len and emitted < SelectionSnapshotTuning.max_detail_rows) : (vertex += 1) {
+            if (!mask[vertex]) continue;
+            const point = vertPosPub(vertex);
+            writer.print("{s}{{\"id\":{d},\"at\":[{d},{d},{d}],\"part\":", .{
+                if (emitted == 0) "" else ",", vertex, point[0], point[1], point[2],
+            }) catch return null;
+            const part = vertPartPub(vertex) orelse model_source.NO_PART;
+            if (part == model_source.NO_PART) writer.writeAll("null") catch return null else writer.print("{d}", .{part}) catch return null;
+            writer.writeAll("}") catch return null;
+            emitted += 1;
+        }
+    }
+
+    writer.writeAll("],\"edges\":[") catch return null;
+    emitted = 0;
+    if (g_mode == .edge) {
+        const selected = g_sel_edge orelse return null;
+        var edge: u32 = 0;
+        while (edge < selected.len and edge < g_edge_count and emitted < SelectionSnapshotTuning.max_detail_rows) : (edge += 1) {
+            if (!selected[edge]) continue;
+            const endpoints = edgeEndpointsPub(edge);
+            const a = vertPosPub(endpoints[0]);
+            const b = vertPosPub(endpoints[1]);
+            const delta = vecSub(b, a);
+            const length = @sqrt(vecDot(delta, delta));
+            const incidence = edgeFaceIncidencePub(edge);
+            const open = incidence == 1 and !edgeIsWirePub(edge);
+            writer.print(
+                "{s}{{\"id\":{d},\"vertices\":[{d},{d}],\"length\":{d},\"faces\":{d},\"open\":{s},\"part\":",
+                .{ if (emitted == 0) "" else ",", edge, endpoints[0], endpoints[1], length, incidence, if (open) "true" else "false" },
+            ) catch return null;
+            const part_a = vertPartPub(endpoints[0]) orelse model_source.NO_PART;
+            const part_b = vertPartPub(endpoints[1]) orelse model_source.NO_PART;
+            if (part_a == model_source.NO_PART or part_a != part_b) writer.writeAll("null") catch return null else writer.print("{d}", .{part_a}) catch return null;
+            writer.writeAll("}") catch return null;
+            emitted += 1;
+        }
+    }
+
+    writer.writeAll("],\"triangles\":[") catch return null;
+    emitted = 0;
+    if (g_mode == .face) {
+        const selected = g_sel_face orelse return null;
+        const corners = g_corner_vert orelse return null;
+        var face: u32 = 0;
+        while (face < selected.len and emitted < SelectionSnapshotTuning.max_detail_rows) : (face += 1) {
+            if (!selected[face]) continue;
+            const base = @as(usize, face) * 3;
+            const vertices = [3]u32{ corners[base], corners[base + 1], corners[base + 2] };
+            const a = vertPosPub(vertices[0]);
+            const b = vertPosPub(vertices[1]);
+            const c = vertPosPub(vertices[2]);
+            const cross = vecCross(vecSub(b, a), vecSub(c, a));
+            const cross_length = @sqrt(vecDot(cross, cross));
+            const normal = if (cross_length > 0.00000001) vecMul(cross, 1.0 / cross_length) else [3]f32{ 0, 0, 0 };
+            const area = cross_length * 0.5;
+            const group = model_source.faceGroupOf(face);
+            const part = model_source.partIndexOf(group);
+            const material = model_source.faceMaterialOf(face);
+            const semantic = model_source.faceSemanticOf(face);
+            writer.print("{s}{{\"id\":{d},\"group\":", .{ if (emitted == 0) "" else ",", face }) catch return null;
+            if (group == model_source.NO_FACE_GROUP) writer.writeAll("null") catch return null else writer.print("{d}", .{group}) catch return null;
+            writer.writeAll(",\"part\":") catch return null;
+            if (part == model_source.NO_PART) writer.writeAll("null") catch return null else writer.print("{d}", .{part}) catch return null;
+            writer.writeAll(",\"material\":") catch return null;
+            if (material == model_source.NO_FACE_MATERIAL) writer.writeAll("null") catch return null else writer.print("{d}", .{material}) catch return null;
+            writer.writeAll(",\"region\":") catch return null;
+            if (semantic.region == model_source.NO_SEMANTIC_ID) writer.writeAll("null") catch return null else writer.print("{d}", .{semantic.region}) catch return null;
+            writer.writeAll(",\"instance\":") catch return null;
+            if (semantic.instance == model_source.NO_SEMANTIC_ID) writer.writeAll("null") catch return null else writer.print("{d}", .{semantic.instance}) catch return null;
+            writer.print(
+                ",\"vertices\":[{d},{d},{d}],\"normal\":[{d},{d},{d}],\"area\":{d}}}",
+                .{ vertices[0], vertices[1], vertices[2], normal[0], normal[1], normal[2], area },
+            ) catch return null;
+            emitted += 1;
+        }
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
+}
+
 /// Face-mode count in AUTHORED faces (a picked cube face reads as 1, not its 2 triangles):
 /// grouped triangles count once per group; ungrouped triangles count individually.
 fn countSelectedAuthoredFaces() u32 {

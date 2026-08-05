@@ -32,6 +32,13 @@ import UvEditor from './UvEditor';
 import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
 import type { ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import {
+  modelSelectionModeName,
+  summarizeSelectedFaces,
+  type ModelSelectionFaceFact,
+  type ModelSelectionSnapshot,
+  type ModelSelectionVec3,
+} from '../model/modelSelectionFocus';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -50,6 +57,182 @@ function fmtCount(value: number): string {
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
   if (value >= 10000) return `${(value / 1000).toFixed(1)}k`;
   return String(value);
+}
+
+const SELECTION_READOUT_TUNING = {
+  decimalPlaces: 4,
+  maxVisibleDetailRows: 8,
+  idsPerRow: 6,
+} as const;
+
+function fmtSelectionNumber(value: number): string {
+  const nearZero = Math.abs(value) < 0.5 * 10 ** -SELECTION_READOUT_TUNING.decimalPlaces ? 0 : value;
+  return nearZero.toFixed(SELECTION_READOUT_TUNING.decimalPlaces).replace(/\.?0+$/, '');
+}
+
+const fmtSelectionVector = (value: ModelSelectionVec3): string =>
+  `(${value.map(fmtSelectionNumber).join(', ')})`;
+
+function fmtSelectionFact(value: ModelSelectionFaceFact, prefix: string): string {
+  return value === 'mixed' ? `mixed ${prefix}s` : value === null ? 'none' : `${prefix} ${value}`;
+}
+
+function SelectionSection({ selection, semantics }: {
+  selection: ModelSelectionSnapshot | null;
+  semantics: ModelFocusSemantics | null;
+}) {
+  const mode = selection ? modelSelectionModeName(selection.mode) : 'view';
+  const semanticNames = new Map((semantics?.rows ?? []).map((row) => [row.id, row.name]));
+  const faces = selection ? summarizeSelectedFaces(selection) : [];
+  const vertexById = new Map((selection?.vertices ?? []).map((vertex) => [vertex.id, vertex]));
+  const detailRows: { key: string; label: string; value: string }[] = [];
+  const pushIdRows = (key: string, label: string, ids: number[]) => {
+    for (let at = 0; at < ids.length; at += SELECTION_READOUT_TUNING.idsPerRow) {
+      detailRows.push({
+        key: `${key}-${at}`,
+        label: at === 0 ? label : `${label} +`,
+        value: ids.slice(at, at + SELECTION_READOUT_TUNING.idsPerRow).join(', '),
+      });
+    }
+  };
+
+  if (selection?.mode === 1) {
+    for (const vertex of selection.vertices) {
+      detailRows.push({
+        key: `vertex-${vertex.id}`,
+        label: `vertex v${vertex.id}`,
+        value: `${fmtSelectionVector(vertex.at)} m${vertex.part === null ? '' : ` · part ${vertex.part}`}`,
+      });
+    }
+  } else if (selection?.mode === 2) {
+    for (const edge of selection.edges) {
+      detailRows.push({
+        key: `edge-${edge.id}`,
+        label: `edge e${edge.id}`,
+        value: `v${edge.vertices[0]}—v${edge.vertices[1]} · ${fmtSelectionNumber(edge.length)} m`,
+      });
+      detailRows.push({
+        key: `edge-${edge.id}-topology`,
+        label: 'topology',
+        value: `${edge.faces} incident · ${edge.open ? 'open' : 'closed'} · ${edge.part === null ? 'no part' : `part ${edge.part}`}`,
+      });
+      for (const vertexId of edge.vertices) {
+        const vertex = vertexById.get(vertexId);
+        if (vertex) detailRows.push({
+          key: `edge-${edge.id}-vertex-${vertexId}`,
+          label: `vertex v${vertexId}`,
+          value: `${fmtSelectionVector(vertex.at)} m`,
+        });
+      }
+    }
+  } else if (selection?.mode === 3) {
+    for (const face of faces) {
+      const faceId = face.group === null ? `tri ${face.triangleIds[0]}` : `group ${face.group}`;
+      detailRows.push({
+        key: `${face.key}-face`,
+        label: `face ${faceId}`,
+        value: `${face.triangleIds.length} tris · ${face.vertices.length} verts`,
+      });
+      pushIdRows(`${face.key}-triangles`, 'tri ids', face.triangleIds);
+      pushIdRows(`${face.key}-vertices`, 'vert ids', face.vertices);
+      const semantic = typeof face.region === 'number'
+        ? `${semanticNames.get(face.region) ?? 'unnamed'} · region ${face.region}`
+        : fmtSelectionFact(face.region, 'region');
+      detailRows.push({
+        key: `${face.key}-semantic`,
+        label: 'semantic',
+        value: `${semantic} · ${fmtSelectionFact(face.instance, 'instance')}`,
+      });
+      detailRows.push({
+        key: `${face.key}-normal`,
+        label: 'normal',
+        value: fmtSelectionVector(face.normal),
+      });
+      detailRows.push({
+        key: `${face.key}-area`,
+        label: 'area',
+        value: `${fmtSelectionNumber(face.area)} m²`,
+      });
+      detailRows.push({
+        key: `${face.key}-surface`,
+        label: 'surface',
+        value: `${fmtSelectionFact(face.part, 'part')} · ${fmtSelectionFact(face.material, 'material')}`,
+      });
+    }
+    for (const vertex of selection.vertices) {
+      detailRows.push({
+        key: `face-vertex-${vertex.id}`,
+        label: `vertex v${vertex.id}`,
+        value: `${fmtSelectionVector(vertex.at)} m${vertex.part === null ? '' : ` · part ${vertex.part}`}`,
+      });
+    }
+  }
+
+  const countLabel = !selection ? 'native read unavailable'
+    : selection.count === 0 ? 'none'
+      : selection.mode === 3
+        ? `${selection.count} authored face${selection.count === 1 ? '' : 's'} · ${selection.selectedTriangles} tris`
+        : `${selection.count} ${mode}${selection.count === 1 ? '' : 's'}`;
+  const detailHeight = Math.min(SELECTION_READOUT_TUNING.maxVisibleDetailRows, detailRows.length) * REGIONS.grid.rowHeight;
+  const detailCoverage = selection?.mode === 3
+    ? `${selection.triangles.length}/${selection.selectedTriangles} tris · ${selection.vertices.length}/${selection.affectedVertices} verts`
+    : selection?.mode === 2
+      ? `${selection.edges.length}/${selection.count} edges · ${selection.vertices.length}/${selection.affectedVertices} verts`
+      : `${selection?.vertices.length ?? 0}/${selection?.affectedVertices ?? 0} verts`;
+  const tagTone = selection?.count ? 'primary' : 'textFaint';
+
+  return (
+    <C.HW_Section>
+      <C.HW_SectionHead>
+        <C.HW_AccentBar style={{ backgroundColor: accentFor(tagTone) }} />
+        <C.HW_SectionTitle style={{ color: accentFor(tagTone) }}>SELECTION</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_Tag style={{ backgroundColor: accentFor(tagTone) }}>
+          <C.HW_TagText>{`${mode.toUpperCase()} · ${selection?.count ?? 0}`}</C.HW_TagText>
+        </C.HW_Tag>
+      </C.HW_SectionHead>
+      <C.HW_ReadRow>
+        <C.HW_FormLabel>selected</C.HW_FormLabel>
+        <C.HW_ReadValue>{countLabel}</C.HW_ReadValue>
+      </C.HW_ReadRow>
+      {selection && selection.count > 0 ? (
+        <>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>affected</C.HW_FormLabel>
+            <C.HW_ReadValue>{`${selection.affectedVertices} welded verts`}</C.HW_ReadValue>
+          </C.HW_ReadRow>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>pivot</C.HW_FormLabel>
+            <C.HW_ReadValue>{selection.pivot ? `${fmtSelectionVector(selection.pivot)} m` : '—'}</C.HW_ReadValue>
+          </C.HW_ReadRow>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>bounds min</C.HW_FormLabel>
+            <C.HW_ReadValue>{selection.bounds ? `${fmtSelectionVector(selection.bounds.slice(0, 3) as ModelSelectionVec3)} m` : '—'}</C.HW_ReadValue>
+          </C.HW_ReadRow>
+          <C.HW_ReadRow>
+            <C.HW_FormLabel>bounds max</C.HW_FormLabel>
+            <C.HW_ReadValue>{selection.bounds ? `${fmtSelectionVector(selection.bounds.slice(3, 6) as ModelSelectionVec3)} m` : '—'}</C.HW_ReadValue>
+          </C.HW_ReadRow>
+          {selection.truncated ? (
+            <C.HW_ReadRow>
+              <C.HW_FormLabel>detail</C.HW_FormLabel>
+              <C.HW_ReadValue style={{ color: accentFor('warning') }}>{`showing ${detailCoverage}`}</C.HW_ReadValue>
+            </C.HW_ReadRow>
+          ) : null}
+          {detailRows.length > 0 ? (
+            <ScrollView style={{ width: '100%', height: detailHeight }} showScrollbar>
+              {detailRows.map((row) => (
+                <C.HW_ReadRow key={row.key}>
+                  <C.HW_FormLabel>{row.label}</C.HW_FormLabel>
+                  <C.HW_ReadValue>{row.value}</C.HW_ReadValue>
+                </C.HW_ReadRow>
+              ))}
+            </ScrollView>
+          ) : null}
+        </>
+      ) : null}
+    </C.HW_Section>
+  );
 }
 
 // SHAPE — the old studio's count strip (req_2618 G): verts/faces/edges/uv'd/mounts as
@@ -644,6 +827,10 @@ export default function Inspector(props: {
             {activePane === 'inspector' ? (
               <>
                 <ModelDetailBody model={activeModel} />
+                <SelectionSection
+                  selection={focusBridge?.readSelection() ?? null}
+                  semantics={focusBridge?.semantics ?? null}
+                />
                 <ShapeSection shape={focusBridge?.shape ?? null} />
                 {focusBridge ? (
                   <SemanticsSection semantics={focusBridge.semantics} onRefresh={focusBridge.refreshSemantics} />
