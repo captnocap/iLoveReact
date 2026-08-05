@@ -1154,19 +1154,51 @@ fn buildImpl(
         };
     }
     const corner_uv = alloc.alloc(f32, @as(usize, fc) * 6) catch return null;
+    // Grid-true corners out of the gate (req_3881): every generated UV corner
+    // snaps to a whole texel — the Blockbench feel, so hand edits start aligned
+    // instead of on fractional coordinates. Paint fills already flood the pad
+    // gutter and clamp at the island rect, so border-exact corners sample
+    // safely. An island whose snap would collapse any triangle (sub-texel
+    // slivers) keeps the half-texel-inset corners instead — never degenerate,
+    // and the fallback is island-wide so shared corners always stay coincident.
+    const island_snaps = alloc.alloc(bool, n_islands) catch return null;
+    defer alloc.free(island_snaps);
+    @memset(island_snaps, true);
     f = 0;
     while (f < fc) : (f += 1) {
         const isl = islands[tri_island[f]];
+        const tw: f32 = @floatFromInt(isl.w);
+        const th: f32 = @floatFromInt(isl.h);
+        var sx: [3]f32 = undefined;
+        var sy: [3]f32 = undefined;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const source = (@as(usize, f) * 3 + k) * 2;
+            sx[k] = std.math.clamp(@round((unfold.corner_chart[source + 0] - isl.min_u) * density), 0, tw);
+            sy[k] = std.math.clamp(@round((unfold.corner_chart[source + 1] - isl.min_v) * density), 0, th);
+        }
+        // Integer-corner triangle areas are multiples of one half; only a true
+        // collapse reads as zero.
+        const doubled_area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sy[1] - sy[0]) * (sx[2] - sx[0]);
+        if (@abs(doubled_area) < 0.25) island_snaps[tri_island[f]] = false;
+    }
+    f = 0;
+    while (f < fc) : (f += 1) {
+        const isl = islands[tri_island[f]];
+        const snap = island_snaps[tri_island[f]];
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const source = (@as(usize, f) * 3 + k) * 2;
             const uv = [2]f32{ unfold.corner_chart[source + 0], unfold.corner_chart[source + 1] };
-            // Meters → island texel, inset half a texel so edge samples stay inside
-            // the island under linear filtering (the pad gutter handles the rest).
             const tw: f32 = @floatFromInt(isl.w);
             const th: f32 = @floatFromInt(isl.h);
-            const lx = std.math.clamp((uv[0] - isl.min_u) * density, 0.5, @max(0.5, tw - 0.5));
-            const ly = std.math.clamp((uv[1] - isl.min_v) * density, 0.5, @max(0.5, th - 0.5));
+            const raw_x = (uv[0] - isl.min_u) * density;
+            const raw_y = (uv[1] - isl.min_v) * density;
+            // Meters → island texel: whole-texel snap, or the half-texel inset
+            // fallback that keeps sliver islands' edge samples inside under
+            // linear filtering (the pad gutter handles the rest).
+            const lx = if (snap) std.math.clamp(@round(raw_x), 0, tw) else std.math.clamp(raw_x, 0.5, @max(0.5, tw - 0.5));
+            const ly = if (snap) std.math.clamp(@round(raw_y), 0, th) else std.math.clamp(raw_y, 0.5, @max(0.5, th - 0.5));
             corner_uv[source + 0] = @as(f32, @floatFromInt(isl.x)) + lx;
             corner_uv[source + 1] = @as(f32, @floatFromInt(isl.y)) + ly;
         }
@@ -1218,7 +1250,8 @@ test "cube at 16 texels/m unfolds into ONE cross island with no self-overlap" {
     try testing.expectEqual(@as(f32, 16), l.density); // nothing clamped
     const isl = l.islands[0];
     try testing.expect((isl.w == 64 and isl.h == 48) or (isl.w == 48 and isl.h == 64));
-    // Every corner's texel lands inside the island rect (with the half-texel inset).
+    // Every corner's texel lands inside the island rect, ON the texel grid —
+    // generated UVs arrive grid-snapped (req_3881), the Blockbench feel.
     var f: u32 = 0;
     while (f < 12) : (f += 1) {
         try testing.expectEqual(@as(u32, 0), l.tri_island[f]);
@@ -1228,6 +1261,8 @@ test "cube at 16 texels/m unfolds into ONE cross island with no self-overlap" {
             const y = l.corner_uv[(@as(usize, f) * 3 + k) * 2 + 1];
             try testing.expect(x >= @as(f32, @floatFromInt(isl.x)) and x <= @as(f32, @floatFromInt(isl.x + isl.w)));
             try testing.expect(y >= @as(f32, @floatFromInt(isl.y)) and y <= @as(f32, @floatFromInt(isl.y + isl.h)));
+            try testing.expectEqual(@round(x), x);
+            try testing.expectEqual(@round(y), y);
         }
     }
     // Unfolded faces tile the cross without overlapping: pairwise shrunk-triangle
