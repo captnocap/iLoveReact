@@ -498,7 +498,10 @@ After the user says the demonstration is done:
    '{"open":[a,b],"edges":[[a,c],[b,d]]}'`; then
    `tools/seat create-face <name>` and inspect the replacement face's new frontier. Create
    Face derives the new winding from the authored surface normals beside both selected
-   boundary edges; do not append an unconditional `flip` after it. This
+   boundary edges; when those neighbors disagree (bridging across a recess or ≥90°
+   corner selects its two opposing flank walls), the quad's other two edges carry the
+   winding instead if they already exist and agree (req_3840) — either opposite pair
+   of a 4-edge hole fills it. Do not append an unconditional `flip` after it. This
    continuation resolver runs inside the editor, so large imports never depend on the full
    `elements` reply fitting across the socket. When deletion rekeys the endpoints, use
    `select-edge-points` with the two pre-delete coordinate pairs; it uniquely resolves the

@@ -1662,6 +1662,39 @@ pub fn selectedEdgesReferenceNormalPub() ?[3]f32 {
     return if (vecDot(normal, normal) >= 0.5) normal else null;
 }
 
+/// The edge index running between two logical vertices, if one exists. Edges are
+/// stored lo,hi like hasEdgeBetweenPub reads them.
+fn edgeIndexBetween(a: u32, b: u32) ?u32 {
+    const ed = g_edges orelse return null;
+    const lo = @min(a, b);
+    const hi = @max(a, b);
+    var e: u32 = 0;
+    while (@as(usize, e) * 2 + 1 < ed.len) : (e += 1) {
+        if (ed[e * 2] == lo and ed[e * 2 + 1] == hi) return e;
+    }
+    return null;
+}
+
+/// Winding reference for a two-edge bridge whose OWN neighbors disagree (req_3840).
+/// A bridge across a recess or ≥90° corner selects the two flank walls, whose
+/// normals oppose — but the quad it closes has two OTHER edges, and when those both
+/// already exist as legal boundary edges whose adjacent faces agree, that agreement
+/// carries the winding: the same quad built from the passing opposite pair. Both
+/// SELECTED edges must still be legal boundary edges on their own — this rescues
+/// only the disagreement rejection, never an interior or out-of-scope selection.
+pub fn bridgeCrossReferenceNormalPub(sel0: Edge, sel1: Edge, cross0: Edge, cross1: Edge) ?[3]f32 {
+    if (!ensureTopology()) return null;
+    inline for (.{ sel0, sel1 }) |sel| {
+        const sel_edge = edgeIndexBetween(sel[0], sel[1]) orelse return null;
+        _ = edgeExtrusionFramePub(sel_edge) orelse return null;
+    }
+    const f0 = edgeExtrusionFramePub(edgeIndexBetween(cross0[0], cross0[1]) orelse return null) orelse return null;
+    const f1 = edgeExtrusionFramePub(edgeIndexBetween(cross1[0], cross1[1]) orelse return null) orelse return null;
+    if (vecDot(f0.face_normal, f1.face_normal) <= 0) return null;
+    const normal = vecNorm(vecAdd(f0.face_normal, f1.face_normal));
+    return if (vecDot(normal, normal) >= 0.5) normal else null;
+}
+
 /// Geometry needed to extend one selected edge without inventing a perpendicular
 /// flap. The outer edge stays in the adjacent authored face's plane; the caller
 /// chooses only the distance and owns the topology transaction.

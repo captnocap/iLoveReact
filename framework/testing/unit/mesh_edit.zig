@@ -674,6 +674,67 @@ test "create-face reference normal follows the neighboring authored surface" {
     try testing.expect(normal[2] > 0.999);
 }
 
+test "bridge winding falls back to the quad's other two edges across a recess" {
+    // Four authored faces around a missing quad: the faces beside the hole's left
+    // and right edges are opposing flank walls (normals -x / +x), while the faces
+    // above and below both face +z. Selecting the flank pair used to reject with
+    // no derivable winding even though the identical quad bridges cleanly from the
+    // top/bottom pair (req_3840).
+    var soup = [_]f32{
+        0,   1,   0,  0,  0, 1, 0, 0,
+        1,   1,   0,  0,  0, 1, 0, 0,
+        0.5, 2,   0,  0,  0, 1, 0, 0,
+        1,   0,   0,  0,  0, 1, 0, 0,
+        0,   0,   0,  0,  0, 1, 0, 0,
+        0.5, -1,  0,  0,  0, 1, 0, 0,
+        0,   1,   0,  -1, 0, 0, 0, 0,
+        0,   0.5, -1, -1, 0, 0, 0, 0,
+        0,   0,   0,  -1, 0, 0, 0, 0,
+        1,   1,   0,  1,  0, 0, 0, 0,
+        1,   0,   0,  1,  0, 0, 0, 0,
+        1,   0.5, -1, 1,  0, 0, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3840, soup[0..], 12, &.{ 0, 1, 2, 3 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var tl: ?u32 = null;
+    var tr: ?u32 = null;
+    var bl: ?u32 = null;
+    var br: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[2] != 0) continue;
+        if (at[0] == 0 and at[1] == 1) tl = vertex;
+        if (at[0] == 1 and at[1] == 1) tr = vertex;
+        if (at[0] == 0 and at[1] == 0) bl = vertex;
+        if (at[0] == 1 and at[1] == 0) br = vertex;
+    }
+    const left: mesh_edit.Edge = .{ tl.?, bl.? };
+    const right: mesh_edit.Edge = .{ tr.?, br.? };
+
+    // The flank pair's own neighbors oppose: no agreed reference normal.
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        const ends = mesh_edit.edgeEndpointsPub(edge);
+        const is_left = (ends[0] == left[0] and ends[1] == left[1]) or (ends[0] == left[1] and ends[1] == left[0]);
+        const is_right = (ends[0] == right[0] and ends[1] == right[1]) or (ends[0] == right[1] and ends[1] == right[0]);
+        if (is_left or is_right) try testing.expect(mesh_edit.selectEdgeByIndex(edge, true));
+    }
+    try testing.expect(mesh_edit.selectedEdgesReferenceNormalPub() == null);
+
+    // The quad's other two edges (top and bottom) agree and carry the winding.
+    const fallback = mesh_edit.bridgeCrossReferenceNormalPub(left, right, .{ tl.?, tr.? }, .{ bl.?, br.? }).?;
+    try testing.expectApproxEqAbs(@as(f32, 0), fallback[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), fallback[1], 0.0001);
+    try testing.expect(fallback[2] > 0.999);
+
+    // Cross edges that do not exist (the diagonals) still reject the bridge.
+    try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(left, right, .{ tl.?, br.? }, .{ bl.?, tr.? }) == null);
+}
+
 test "create-face mirror mapping keeps endpoints on the symmetry seam" {
     // Two triangles meet on x=0. A Create Face bridge built from the +X boundary
     // needs the off-plane endpoint reflected to -X while the seam endpoint remains

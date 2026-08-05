@@ -2371,7 +2371,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
     if (selected_count < 2 or selected_count > selected.len) return false;
     const edges = selected[0..@as(usize, @intCast(selected_count))];
-    const reference_normal = mesh_edit.selectedEdgesReferenceNormalPub() orelse return false;
+    const agreed_normal = mesh_edit.selectedEdgesReferenceNormalPub();
 
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
@@ -2386,13 +2386,27 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             const b = mesh_edit.vertPosPub(edges[0][1]);
             var c = mesh_edit.vertPosPub(edges[1][0]);
             var d = mesh_edit.vertPosPub(edges[1][1]);
+            var c_id = edges[1][0];
+            var d_id = edges[1][1];
             if (dist2(a, d) + dist2(b, c) < dist2(a, c) + dist2(b, d)) {
                 const tmp = c;
                 c = d;
                 d = tmp;
+                const tmp_id = c_id;
+                c_id = d_id;
+                d_id = tmp_id;
             }
-            ok = appendQuadSplitFacing(&verts, a, b, d, c, reference_normal);
-        } else {
+            // The quad's other two edges carry the winding when the selected pair's
+            // own neighbors disagree — a recess fill works from either opposite pair
+            // of its loop (req_3840).
+            const winding = agreed_normal orelse mesh_edit.bridgeCrossReferenceNormalPub(
+                edges[0],
+                edges[1],
+                .{ edges[0][0], c_id },
+                .{ edges[0][1], d_id },
+            );
+            if (winding) |reference| ok = appendQuadSplitFacing(&verts, a, b, d, c, reference);
+        } else if (agreed_normal) |reference_normal| {
             var order: [3]u32 = undefined;
             if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
                 ok = appendTriFacing(
@@ -2404,7 +2418,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 );
             }
         }
-    } else {
+    } else if (agreed_normal) |reference_normal| {
         var order: [4]u32 = undefined;
         if (closedEdgeLoopOrder(edges, &order)) |n| {
             const p0 = mesh_edit.vertPosPub(order[0]);
