@@ -1,8 +1,8 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { EDITOR_ASSET_CATALOG, fileModelPackage, modelCategoryNodes } from './assetCatalog';
-import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
-import { MODEL_PACKAGE_SUBDIRS, modelFolderIdFor } from './modelPackage';
+import { isMaterialized } from './modelPackageStore';
+import { modelFolderIdFor } from './modelPackage';
 import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
@@ -74,33 +74,6 @@ export function isModelFolder(folder: ContentFolderId): boolean {
     folder === 'models-vehicles' ||
     folder === 'models-props-wip' ||
     String(folder).startsWith('model-');
-}
-
-// A model's subdir node (mesh/atlases/paints/shaders), whose id is the model's
-// home folderId with a "/<sub>" suffix (see modelSubdirNodes). These list FILES,
-// not model thumbnails, so the browser renders them differently.
-export function isModelSubfolder(folder: ContentFolderId): boolean {
-  const s = String(folder);
-  if (!s.startsWith('model-') || !s.includes('/')) return false;
-  const sub = s.slice(s.indexOf('/') + 1);
-  return (MODEL_PACKAGE_SUBDIRS as readonly string[]).includes(sub);
-}
-
-// Resolve a subfolder id to its model + the real files inside that subdir. Returns
-// null when the id isn't a model subdir or the model isn't found; an empty files
-// array is the honest "Save the model to populate this" state.
-export function subfolderFilesForFolder(
-  folder: ContentFolderId,
-  models: ModelPackage[] = MODEL_PACKAGES,
-): { model: ModelPackage; sub: string; files: PackageFile[] } | null {
-  if (!isModelSubfolder(folder)) return null;
-  const s = String(folder);
-  const cut = s.indexOf('/');
-  const homeId = s.slice(0, cut);
-  const sub = s.slice(cut + 1) as (typeof MODEL_PACKAGE_SUBDIRS)[number];
-  const model = models.find((m) => m.folderId === homeId);
-  if (!model) return null;
-  return { model, sub, files: listPackageFiles(model, sub) };
 }
 
 // Fallback gallery page size for the expanded dock's first render, before its
@@ -362,7 +335,6 @@ export function countAssetsForFolder(
   models: ModelPackage[] = MODEL_PACKAGES,
 ): number {
   if (folder === 'game') return assets.length + models.length;
-  if (isModelSubfolder(folder)) return subfolderFilesForFolder(folder, models)?.files.length ?? 0;
   if (isModelFolder(folder)) return modelPackagesForFolder(folder, '', models).length;
   return assets.filter((asset) => assetMatchesContentFolder(asset, folder)).length;
 }

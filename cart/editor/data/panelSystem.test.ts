@@ -8,6 +8,7 @@
 import {
   leftPanelForFolder,
   leftPanelsFor,
+  normalizeContentFolderId,
   normalizeLeftPanelId,
   normalizeRightPanelId,
   pressPanelButton,
@@ -69,10 +70,16 @@ test('invalid pane state resolves to the context default without inventing a ren
 });
 
 test('tree navigation updates the matching contextual rail family', () => {
-  assert(leftPanelForFolder('world', 'model-prop-chair/paints', 'assets') === 'models', 'model subfolder did not select Models');
+  assert(leftPanelForFolder('world', 'model-prop-chair', 'assets') === 'models', 'model asset did not select Models');
   assert(leftPanelForFolder('world', 'materials-generated', 'assets') === 'materials', 'material subfolder did not select Materials');
   assert(leftPanelForFolder('world', 'build-pieces', 'assets') === 'build', 'build folder did not select Build');
   assert(leftPanelForFolder('model', 'missions', 'materials') === 'materials', 'unavailable model pane discarded the valid fallback');
+});
+
+test('retired model storage folders migrate back to the model asset', () => {
+  assert(normalizeContentFolderId('model-prop-chair/paints') === 'model-prop-chair', 'retired child folder survived');
+  assert(normalizeContentFolderId('models-props') === 'models-props', 'live category was rewritten');
+  assert(normalizeContentFolderId('materials-core') === 'materials-core', 'non-model folder was rewritten');
 });
 
 test('mock-era hot state migrates into the live pane vocabulary', () => {

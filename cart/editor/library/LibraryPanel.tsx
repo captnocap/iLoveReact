@@ -11,7 +11,7 @@
 // single model shows its parent folder's gallery with that cell highlighted,
 // and the detail card resolves models as well as materials in both states.
 import type { ReactNode } from 'react';
-import { Box, Image } from '../../../runtime/primitives';
+import { Box } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useMeasure } from '../../../runtime/hooks/useMeasure';
@@ -23,10 +23,8 @@ import {
   countAssetsForFolder,
   isMaterialFolder,
   isModelFolder,
-  isModelSubfolder,
   modelPackagesForFolder,
   MODEL_GALLERY_PAGE_SIZE,
-  subfolderFilesForFolder,
   tabForContentFolder,
 } from '../data/content';
 import ContentTree from './ContentTree';
@@ -75,11 +73,7 @@ export default function LibraryPanel(props: {
     ? props.models.find((model) => model.id === props.modelRenamingId) ?? null
     : null;
   const folderTab = tabForContentFolder(props.contentFolder);
-  // A model subdir (…/mesh|atlases|paints|shaders) lists FILES, not model
-  // thumbnails, so it gets its own branch and is excluded from the gallery.
-  const showModelSubfolder = isModelSubfolder(props.contentFolder);
-  const subfolderView = showModelSubfolder ? subfolderFilesForFolder(props.contentFolder, props.models) : null;
-  const showModelPackages = isModelFolder(props.contentFolder) && !showModelSubfolder;
+  const showModelPackages = isModelFolder(props.contentFolder);
   const showMaterialCatalog = isMaterialFolder(props.contentFolder);
   const canBrowseAssets = showMaterialCatalog || Boolean(folderTab);
   const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder, props.models);
@@ -122,7 +116,7 @@ export default function LibraryPanel(props: {
   const docModel = typeof docId === 'string' && docId.startsWith('model:')
     ? props.models.find((model) => `model:${model.id}` === docId) ?? null
     : null;
-  const detailModel = selectedModel ?? subfolderView?.model ?? docModel;
+  const detailModel = selectedModel ?? docModel;
 
   const onNodeContext = (id: ContentFolderId, event: { x: number; y: number }) => {
     // Only model-home rows (whose id is a model's folderId) open the menu.
@@ -174,31 +168,9 @@ export default function LibraryPanel(props: {
     </C.HW_LibFoot>
   );
 
-  // The expanded grid column's content: files / model gallery / material tiles /
+  // The expanded grid column's content: model gallery / material tiles /
   // asset cards / folder summary.
-  const gridContent = showModelSubfolder ? (
-    <C.HW_LibAssetGrid>
-      {(subfolderView?.files.length ?? 0) === 0 ? (
-        <C.HW_EmptyState>
-          <Icon name="Inbox" size={16} color={accentFor('textFaint')} />
-          <C.HW_StatusText>{`empty — Save the model to populate ${subfolderView?.sub ?? 'this'}`}</C.HW_StatusText>
-        </C.HW_EmptyState>
-      ) : subfolderView!.files.map((file) => {
-        // Image files (painted atlases, atlas exports) preview as their actual
-        // picture; everything else (stroke json, mesh blobs, wgsl) shows a chip.
-        const isImage = /\.(png|jpg|jpeg|webp|bmp)$/i.test(file.name);
-        return (
-          <C.HW_AssetCard key={file.path}>
-            {isImage
-              ? <Image src={file.path} style={{ height: 42, width: '100%' }} />
-              : <C.HW_AssetSwatch style={{ backgroundColor: '#1b2130' }} />}
-            <C.HW_AssetLabel numberOfLines={1} noWrap>{file.name}</C.HW_AssetLabel>
-            <C.HW_AssetMeta numberOfLines={1} noWrap>{file.sub}</C.HW_AssetMeta>
-          </C.HW_AssetCard>
-        );
-      })}
-    </C.HW_LibAssetGrid>
-  ) : showModelPackages ? (
+  const gridContent = showModelPackages ? (
     <ModelPackageBrowser
       folder={galleryFolder}
       search={props.state.search}

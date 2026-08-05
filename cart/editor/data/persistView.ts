@@ -20,7 +20,7 @@ import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './
 import { loadGlobalsSave } from './globalsStore';
 import { loadColorLibrary } from './colorLibraryStore';
 import { commandExists, MENUS } from './commands';
-import { normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
+import { normalizeContentFolderId, normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
 import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v2';
@@ -161,6 +161,7 @@ export function loadPersistedState(): EditorState {
   if (!MENUS.includes(merged.actionMenu)) merged.actionMenu = 'Build';
   merged.activeDomain = normalizeLeftPanelId(merged.activeDomain);
   merged.rightPane = normalizeRightPanelId(merged.rightPane);
+  merged.contentFolder = normalizeContentFolderId(merged.contentFolder);
   // The id seq only ever grows: a stale hotstate seq must not re-mint ids the
   // disk save already handed out.
   merged.seq = Math.max(merged.seq, base.seq);

@@ -7,7 +7,7 @@ import {
 } from '../textures/shaders';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelPackage, ModelPart, PrimitiveKind } from './types';
-import { MODEL_PACKAGE_SUBDIRS, modelFolderIdFor, modelSlug } from './modelPackage';
+import { modelFolderIdFor, modelSlug } from './modelPackage';
 import { loadMaterializedPackages, materializePackageArtifacts, resolvePackageDir } from './modelPackageStore';
 import { readMeshDoc, readMeshDocParts, type MeshDocPartMeta, type PackageMeshDoc } from './meshDoc';
 
@@ -379,23 +379,8 @@ function shaderPresetAssets(): Asset[] {
   });
 }
 
-// The Models subtree IS the on-disk Model Package layout, dug into like a file
-// explorer (models/<category>/<model>/<subdir>/, see modelPackage.ts): category
-// dirs -> per-model homes -> the mesh/atlases/paints/shaders subdirs. Every
-// level is a real, expandable tree node so the browser mirrors the packages
-// end to end instead of stopping at source-kind buckets.
-
-// A model's package subdirectories as leaf nodes. Ids extend the model's folder
-// id (model-<id>/<sub>), which still satisfies the `model-${string}` union.
-function modelSubdirNodes(model: ModelPackage): ContentNode[] {
-  return MODEL_PACKAGE_SUBDIRS.map((sub) => ({
-    id: `${model.folderId}/${sub}` as ContentFolderId,
-    label: sub,
-    icon: 'Folder',
-  }));
-}
-
-// One home per model under its category, each expandable into its subdirs.
+// The content browser stops at the model asset. Its mesh/atlas/paint/shader
+// directories are package-storage internals, not destinations in this tree.
 function modelHomeNodes(models: ModelPackage[]): ContentNode[] {
   return [...models]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -403,7 +388,6 @@ function modelHomeNodes(models: ModelPackage[]): ContentNode[] {
       id: model.folderId,
       label: model.name,
       icon: 'Box',
-      children: modelSubdirNodes(model),
     }));
 }
 

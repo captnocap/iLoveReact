@@ -107,6 +107,16 @@ export function leftPanelForFolder(
   return buttons[0]!.id;
 }
 
+/** Retired model-package child rows used `model-…/<storage-dir>` ids. A hot
+ * reload can still carry one; return it to the real model asset node. */
+export function normalizeContentFolderId(folder: ContentFolderId): ContentFolderId {
+  const value = String(folder);
+  const slash = value.indexOf('/');
+  return value.startsWith('model-') && slash > 0
+    ? value.slice(0, slash) as ContentFolderId
+    : folder;
+}
+
 /** Hot-state migrations from the inert mock-era rail vocabulary. */
 export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'grid') return 'materials';
