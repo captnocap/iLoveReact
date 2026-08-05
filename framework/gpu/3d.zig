@@ -6949,17 +6949,17 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
     }
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
-        if (@as(usize, f) * 24 + 24 > verts.len) return 0;
+        if (@as(usize, f) * 24 + 24 > verts.len) return stats;
         if (!mesh_edit.faceInScopePub(f)) continue;
         const aid = authoredFaceIdOf(true, f);
-        const t_gop = tris_of.getOrPut(alloc, aid) catch return 0;
+        const t_gop = tris_of.getOrPut(alloc, aid) catch return stats;
         if (!t_gop.found_existing) t_gop.value_ptr.* = .empty;
-        t_gop.value_ptr.append(alloc, f) catch return 0;
-        const k_gop = keys_of.getOrPut(alloc, aid) catch return 0;
+        t_gop.value_ptr.append(alloc, f) catch return stats;
+        const k_gop = keys_of.getOrPut(alloc, aid) catch return stats;
         if (!k_gop.found_existing) k_gop.value_ptr.* = .empty;
         var slot: usize = 0;
         while (slot < 3) : (slot += 1) {
-            if (!mirror_corners.addKey(k_gop.value_ptr, alloc, mirror_corners.quant(mirror_corners.corner(verts, f, slot)))) return 0;
+            if (!mirror_corners.addKey(k_gop.value_ptr, alloc, mirror_corners.quant(mirror_corners.corner(verts, f, slot)))) return stats;
         }
     }
 
@@ -6970,16 +6970,16 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
     defer lone_by_hash.deinit(alloc);
     var hash_it = keys_of.iterator();
     while (hash_it.next()) |entry| {
-        aid_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), entry.key_ptr.*) catch return 0;
+        aid_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), entry.key_ptr.*) catch return stats;
         const tris = tris_of.get(entry.key_ptr.*) orelse continue;
         if (tris.items.len == 1 and entry.value_ptr.items.len == 3) {
-            lone_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), tris.items[0]) catch return 0;
+            lone_by_hash.put(alloc, mirror_corners.keyHash(entry.value_ptr.items), tris.items[0]) catch return stats;
         }
     }
 
-    const colors = collectCurrentFaceColors() orelse return 0;
+    const colors = collectCurrentFaceColors() orelse return stats;
     defer std.heap.c_allocator.free(colors);
-    if (colors.len != @as(usize, tri_count) * 4) return 0;
+    if (colors.len != @as(usize, tri_count) * 4) return stats;
 
     // Discover the twin pairs to fuse. Each lone triangle may be claimed once.
     var pairs = std.ArrayListUnmanaged([2]u32).empty;
