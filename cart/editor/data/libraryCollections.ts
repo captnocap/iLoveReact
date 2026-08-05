@@ -30,8 +30,29 @@ export function navigateLibraryCollection(
   };
 }
 
+export function isRecentLibraryKey(value: unknown): value is string {
+  return typeof value === 'string'
+    && ((value.startsWith('asset:') && value.length > 'asset:'.length)
+      || (value.startsWith('model:') && value.length > 'model:'.length));
+}
+
+/** Validate, deduplicate, and bound persisted history without changing its
+ *  newest-first order. Unknown key families belong to a different collection. */
+export function normalizeRecentLibraryKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of raw) {
+    if (!isRecentLibraryKey(value) || seen.has(value)) continue;
+    seen.add(value);
+    keys.push(value);
+    if (keys.length === LIBRARY_COLLECTION_TUNING.recentLimit) break;
+  }
+  return keys;
+}
+
 export function rememberRecentLibraryItem(keys: readonly string[], key: string): string[] {
-  return [key, ...keys.filter((item) => item !== key)].slice(0, LIBRARY_COLLECTION_TUNING.recentLimit);
+  return normalizeRecentLibraryKeys([key, ...keys]);
 }
 
 export function favoriteLibraryHits(

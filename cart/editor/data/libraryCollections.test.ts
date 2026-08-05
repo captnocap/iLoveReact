@@ -6,7 +6,7 @@
 //     --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-library-collections.test.js
-import { favoriteLibraryHits, navigateLibraryCollection, recentLibraryHits, rememberRecentLibraryItem } from './libraryCollections';
+import { favoriteLibraryHits, LIBRARY_COLLECTION_TUNING, navigateLibraryCollection, normalizeRecentLibraryKeys, recentLibraryHits, rememberRecentLibraryItem } from './libraryCollections';
 import { librarySearchHitKey } from './librarySearch';
 import type { Asset, ModelPackage } from './types';
 
@@ -45,6 +45,22 @@ test('recents preserve newest-first mixed item order and skip missing ids', () =
 test('remembering an item moves it to the front without duplicates', () => {
   const keys = rememberRecentLibraryItem(['asset:water', 'model:speaker'], 'model:speaker');
   assert(keys.join(',') === 'model:speaker,asset:water', 'recent selection did not move to the front');
+});
+
+test('persisted recents accept only mixed library keys and remain bounded', () => {
+  const raw = [
+    'asset:water',
+    'asset:water',
+    'model:speaker',
+    'folder:models',
+    '',
+    42,
+    ...Array.from({ length: 30 }, (_, index) => `asset:item-${index}`),
+  ];
+  const keys = normalizeRecentLibraryKeys(raw);
+  assert(keys.slice(0, 2).join(',') === 'asset:water,model:speaker', 'normalization lost newest-first order or deduplication');
+  assert(keys.length === LIBRARY_COLLECTION_TUNING.recentLimit, 'persisted history escaped its cap');
+  assert(!keys.includes('folder:models'), 'unknown key family entered Recent');
 });
 
 test('quick collections toggle back to the exact prior folder', () => {

@@ -224,6 +224,7 @@ import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageD
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
 import { oklchName, pushRecentColor, SPINE_LIBRARY } from '../data/colorSpine';
 import { scheduleColorLibrarySave } from '../data/colorLibraryStore';
+import { scheduleLibraryHistorySave } from '../data/libraryHistoryStore';
 import { hexToOklch, oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
@@ -1301,6 +1302,12 @@ export default function AppFrame() {
   useEffect(() => {
     scheduleColorLibrarySave(state.colorSpinePalette, state.colorSpineRecents);
   }, [state.colorSpinePalette, state.colorSpineRecents]);
+
+  // Asset Explorer Recent is durable user history, not session-only view
+  // state. Every mixed asset/model history change micro-saves independently.
+  useEffect(() => {
+    scheduleLibraryHistorySave(state.recentLibraryKeys);
+  }, [state.recentLibraryKeys]);
 
   // Micro-save the world's authored edits to disk (SESSIONSAVE req_2765): every
   // worldPieces / semantic-object / zone-def change — placements, verbs,

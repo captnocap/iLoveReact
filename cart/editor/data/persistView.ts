@@ -19,6 +19,7 @@ import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
 import { loadColorLibrary } from './colorLibraryStore';
+import { loadLibraryHistory } from './libraryHistoryStore';
 import { commandExists, MENUS } from './commands';
 import { normalizeContentFolderId, normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
 import type { EditorState } from './types';
@@ -107,6 +108,10 @@ export function loadPersistedState(): EditorState {
     base.colorSpinePalette = colorLibrary.saved;
     base.colorSpineRecents = colorLibrary.recents;
   }
+  // Asset/model use history is editor-wide user state. Unlike ordinary view
+  // chrome it survives a cold process restart through its per-concern save.
+  const libraryHistory = loadLibraryHistory();
+  if (libraryHistory) base.recentLibraryKeys = libraryHistory;
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   const modelWork = getHotState<Partial<ModelWorkHot> | null>(MODEL_WORK_HOT_KEY, null);
   if (!saved) {
