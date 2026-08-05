@@ -1336,6 +1336,23 @@ pub const Mesh = struct {
         return changed;
     }
 
+    /// Part-scoped symmetrize about PER-PART planes (req_3886): `centers[part]`
+    /// carries each targeted part's own plane, so a focused off-origin part (a
+    /// detached head rest) repairs about its OWN centerline instead of reflecting
+    /// across the whole model. The single-plane variant above remains the
+    /// whole-model authority (req_3795); the caller decides which contract the
+    /// user invoked.
+    pub fn symmetrizePartsAt(mesh: *Mesh, axis: u8, centers: []const f32, keep_positive: bool, target_parts: []const bool) !bool {
+        if (axis > 2) return false;
+        var changed = false;
+        for (target_parts, 0..) |target, part_index| {
+            if (!target or part_index >= centers.len) continue;
+            const part: u32 = @intCast(part_index);
+            changed = (try mesh.symmetrizeForPart(axis, centers[part_index], keep_positive, part)) or changed;
+        }
+        return changed;
+    }
+
     /// Receipt for mirrorReplaceSelection — every counter a zero needs to explain itself.
     pub const MirrorReplaceStats = struct {
         copied: u32 = 0, // selected faces stamped onto the other side
@@ -4574,6 +4591,40 @@ test "part symmetrize cannot cut or reflect an unfocused outliner part" {
         if (face.alive and face.part == 1) untouched_faces += 1;
     }
     try std.testing.expectEqual(@as(u32, 1), untouched_faces);
+}
+
+test "per-part symmetrize repairs an off-origin part about its own centerline" {
+    // The detached-head-rest case (req_3886): the part lives at x ∈ [10, 12],
+    // nowhere near the model origin. Symmetrized about ITS plane (x = 11) it must
+    // stay in place and come out symmetric — never reflect across the whole model.
+    const allocator = std.testing.allocator;
+    var soup = std.ArrayListUnmanaged(f32).empty;
+    defer soup.deinit(allocator);
+    const quad = [4]Vec3{
+        .{ 10, 0, 0 }, .{ 12.5, 0, 0 }, .{ 12.5, 1, 0 }, .{ 10, 1, 0 },
+    };
+    try appendSoupTri(&soup, allocator, quad[0], quad[1], quad[2]);
+    try appendSoupTri(&soup, allocator, quad[0], quad[2], quad[3]);
+    const groups = [_]u32{ 0, 0 };
+    const parts = [_]u32{ 0, 0 };
+    var mesh = try Mesh.fromSoup(allocator, soup.items, 2, groups[0..], parts[0..]);
+    defer mesh.deinit();
+
+    try std.testing.expect(try mesh.symmetrizePartsAt(0, &.{11}, true, &.{true}));
+    var min_x: f32 = std.math.floatMax(f32);
+    var max_x: f32 = -std.math.floatMax(f32);
+    for (mesh.faces.items) |face| {
+        if (!face.alive) continue;
+        for (face.vertices.items) |vertex_id| {
+            const x = mesh.vertices.items[vertex_id].position[0];
+            min_x = @min(min_x, x);
+            max_x = @max(max_x, x);
+        }
+    }
+    // keep_positive keeps x ≥ 11 ([11, 12.5]) and reflects it to [9.5, 11]: the
+    // part stays put, symmetric about its own plane.
+    try std.testing.expectApproxEqAbs(@as(f32, 9.5), min_x, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), max_x, 0.0001);
 }
 
 test "equal-length non-planar mirror quads carry the same physical diagonal" {

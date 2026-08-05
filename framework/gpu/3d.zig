@@ -2848,11 +2848,19 @@ pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
     return mesh_edit.symmetryReportPub(axis);
 }
 
+/// One-shot part symmetrize derives its plane from the focused part's bounds at
+/// invocation; quantizing the midpoint keeps repeated repairs on the same plane
+/// even as micro-asymmetries move the raw bounds by float dust.
+const SYMMETRIZE_PART_PLANE_QUANTUM_M: f32 = 0.0001;
+
 /// Port of Studio symmetrize (req_1190): repair the active outliner part(s), not the
-/// composed model. Each focused part cuts at the shared model-origin plane, drops the
-/// far half, and emits reflected reverse-wound twins — the same plane Mirror Part
-/// duplicates across, so "center, then mirror" is the whole workflow (req_1538).
-/// Selection clears, as in the original UI.
+/// composed model. WHOLE-MODEL scope cuts at the shared model-origin plane — the
+/// same plane Mirror Part duplicates across, so "center, then mirror" is the whole
+/// workflow (req_1538). A FOCUSED part instead symmetrizes about its OWN centerline
+/// (req_3886): a detached head rest repairs in place rather than reflecting across
+/// the entire model. The one-shot verb may derive that plane at invocation; armed
+/// mirror-edit twinning keeps the fixed origin authority, because planes re-derived
+/// across EDITS are what drifted (req_3795). Selection clears, as in the original UI.
 pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
     if (axis > 2 or !model_paint.hasTarget()) return false;
     const original_mode = mesh_edit.mode();
@@ -2874,14 +2882,45 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
         const target_parts = std.heap.c_allocator.alloc(bool, @intCast(part_count)) catch return false;
         defer std.heap.c_allocator.free(target_parts);
         @memset(target_parts, false);
+        var in_scope: u32 = 0;
         var face: u32 = 0;
         while (face < tri_count) : (face += 1) {
             if (!mesh_edit.faceInScopePub(face)) continue;
+            in_scope += 1;
             const part = face_parts[@intCast(face)];
             const part_index: usize = @intCast(part);
             if (part_index < target_parts.len) target_parts[part_index] = true;
         }
-        if (!(indexed.symmetrizeParts(axis, mesh_edit.MIRROR_PLANE_CENTER[axis], keep_positive, target_parts) catch return false)) return false;
+        const centers = std.heap.c_allocator.alloc(f32, @intCast(part_count)) catch return false;
+        defer std.heap.c_allocator.free(centers);
+        for (centers) |*center| center.* = mesh_edit.MIRROR_PLANE_CENTER[axis];
+        if (in_scope < tri_count) {
+            // Focused scope (req_3886): each targeted part repairs about its own
+            // quantized bounds midpoint on the chosen axis, measured right now.
+            const lo = std.heap.c_allocator.alloc(f32, @intCast(part_count)) catch return false;
+            defer std.heap.c_allocator.free(lo);
+            const hi = std.heap.c_allocator.alloc(f32, @intCast(part_count)) catch return false;
+            defer std.heap.c_allocator.free(hi);
+            @memset(lo, std.math.floatMax(f32));
+            @memset(hi, -std.math.floatMax(f32));
+            face = 0;
+            while (face < tri_count) : (face += 1) {
+                const part_index: usize = @intCast(face_parts[@intCast(face)]);
+                if (part_index >= target_parts.len or !target_parts[part_index]) continue;
+                var corner: u32 = 0;
+                while (corner < 3) : (corner += 1) {
+                    const value = verts[(@as(usize, face) * 3 + corner) * 8 + axis];
+                    lo[part_index] = @min(lo[part_index], value);
+                    hi[part_index] = @max(hi[part_index], value);
+                }
+            }
+            for (centers, 0..) |*center, part_index| {
+                if (!target_parts[part_index] or lo[part_index] > hi[part_index]) continue;
+                const midpoint = (lo[part_index] + hi[part_index]) * 0.5;
+                center.* = @round(midpoint / SYMMETRIZE_PART_PLANE_QUANTUM_M) * SYMMETRIZE_PART_PLANE_QUANTUM_M;
+            }
+        }
+        if (!(indexed.symmetrizePartsAt(axis, centers, keep_positive, target_parts) catch return false)) return false;
     } else {
         if (!(indexed.symmetrize(axis, mesh_edit.MIRROR_PLANE_CENTER[axis], keep_positive) catch return false)) return false;
     }
