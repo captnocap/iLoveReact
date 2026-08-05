@@ -86,6 +86,7 @@ import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { compactSeatReply, executeSeatRequestAtShell, seatBatchGenerationReason, type AgentSeat, type SeatPartPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
   countUvTextureFootprints,
   flattenUvFaceCorners,
@@ -1229,11 +1230,17 @@ export default function AppFrame() {
       commandId,
       args,
       source: commandSource(source),
+      // The raw source rides as origin so the authority's capability hook can
+      // tell the password-verified seat lane from user-lane edits (req_3850).
+      origin: source,
       ...correlation,
     });
     if (outcome.status === 'rejected') {
+      // 'unauthorized' on a claimed model deserves the claim's own words, not
+      // the generic missing-capability line.
+      const claim = outcome.code === 'unauthorized' ? claimHolder(activeModelId) : null;
       const previous = stateRef.current;
-      const next = { ...previous, openMenu: null, status: outcome.reason };
+      const next = { ...previous, openMenu: null, status: claim ? `locked — ${claim.agent} has this model claimed` : outcome.reason };
       stateRef.current = next;
       setState(next);
     }
@@ -1448,7 +1455,12 @@ export default function AppFrame() {
   }
   useEffect(() => {
     (globalThis as any).__mesh_action_document?.(activeModelId ? modelDocumentToken(activeModelId) : 0);
+    setClaimActiveModel(activeModelId);
   }, [activeModelId]);
+  // Agent claims (req_3850): re-render on claim/dismiss so the tab badges
+  // track the table; the table itself lives in agent/claims.ts.
+  const [, setClaimsPulse] = useState(0);
+  useEffect(() => subscribeClaims(() => setClaimsPulse((n) => n + 1)), []);
   const activeModelPkg = activeModelId ? effectiveModelPackage(activeModelId, state.modelOverrides, state.modelDupes) : null;
   const activeModelOnDisk = activeModelPkg ? isMaterialized(activeModelPkg.kind, activeModelPkg.id) : false;
   // Mesh-journal baseline per model: the depth recorded at the last save (reset to
@@ -3694,7 +3706,14 @@ export default function AppFrame() {
         payload.replyPath,
         JSON.stringify(payload.brief === true ? compactSeatReply(reply) : reply),
       );
-      const run = (row: SeatRequest): SeatReply => executeSeatRequestAtShell(currentSeat(), row, bootstrap);
+      // One payload-level claim token/model target stamps every row, so a batch
+      // authenticates once (req_3850). Row-level values win when present.
+      const stampClaim = (row: SeatRequest): SeatRequest => ({
+        ...row,
+        token: row.token ?? (typeof payload.token === 'string' ? payload.token : undefined),
+        model: row.model ?? (typeof payload.model === 'string' ? payload.model : undefined),
+      });
+      const run = (row: SeatRequest): SeatReply => executeSeatRequestAtShell(currentSeat(), stampClaim(row), bootstrap);
       const expected = Number(payload.generation);
       const current = currentSeat()?.look() ?? null;
       if (Number.isFinite(expected) && (!current || expected !== current.generation)) {

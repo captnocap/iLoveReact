@@ -81,6 +81,15 @@ else if (action === 'recipe') {
   try { request = { action: 'recipe', args: { recipe: name, params: args.length ? JSON.parse(args.join(' ')) : {} } }; }
   catch { console.error('seat recipe expects a JSON object after the recipe name'); process.exit(2); }
 }
+// claim <password> [agent] / dismiss <password> / claims — the model lock
+// (req_3850). Password falls back to RJIT_SEAT_TOKEN so an agent exports it
+// once and every later request authenticates automatically via the payload.
+else if (action === 'claim') request = { action, args: {
+  password: args[0] || process.env.RJIT_SEAT_TOKEN,
+  agent: args[1] || process.env.RJIT_SEAT_AGENT || 'agent',
+} };
+else if (action === 'dismiss') request = { action, args: { password: args[0] || process.env.RJIT_SEAT_TOKEN } };
+else if (action === 'claims') request = { action };
 else if (action === 'command') request = { action, args: { id: args[0] } };
 // Escape hatch for the structured parity surface. This is deliberately one
 // action + one JSON object, not a second SDK: every row still resolves inside
@@ -95,7 +104,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
   process.exit(2);
 }
 
@@ -104,6 +113,10 @@ const replyPath = `/tmp/reactjit-seat-${id}.json`;
 const payload = JSON.stringify({
   kind: 'agent-seat', id, replyPath, request, brief,
   ...(process.env.RJIT_SEAT_GENERATION ? { generation: Number(process.env.RJIT_SEAT_GENERATION) } : {}),
+  // Claim credentials (req_3850): stamped payload-level so batches carry them
+  // once; the shell copies them onto every row.
+  ...(process.env.RJIT_SEAT_TOKEN ? { token: process.env.RJIT_SEAT_TOKEN } : {}),
+  ...(process.env.RJIT_SEAT_MODEL ? { model: process.env.RJIT_SEAT_MODEL } : {}),
 });
 const socketPath = process.env.RJIT_SOCKET || '/tmp/reactjit.sock';
 const socket = net.createConnection(socketPath);

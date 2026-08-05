@@ -4,6 +4,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import type { WorkspaceDocument } from '../data/types';
 import { WORLD_DOCUMENT_ID } from '../data/documents';
+import { claimHolder } from '../agent/claims';
 
 export default function StageTabs(props: {
   documents: WorkspaceDocument[];
@@ -26,11 +27,17 @@ export default function StageTabs(props: {
         const Tab = props.activeId === doc.id ? C.HW_StageTabOn : C.HW_StageTab;
         const Label = props.activeId === doc.id ? C.HW_StageTabTextOn : C.HW_StageTabText;
         const Meta = props.activeId === doc.id ? C.HW_StageTabMetaOn : C.HW_StageTabMeta;
+        // Agent claim badge (req_3850): a claimed model wears its lock + holder
+        // in place of the static subtitle — the live state outranks provenance.
+        const claim = doc.kind === 'model' ? claimHolder(doc.sourceId ?? null) : null;
         return (
           <Tab key={doc.id} onPress={() => props.onDocument(doc.id)}>
+            {claim ? <Icon name="Lock" size={11} color={accentFor('warning')} /> : null}
             <C.HW_StageTabTextStack>
               <Label numberOfLines={1} noWrap>{doc.title}</Label>
-              {doc.subtitle ? <Meta numberOfLines={1} noWrap>{doc.subtitle}</Meta> : null}
+              {claim
+                ? <Meta numberOfLines={1} noWrap>{claim.agent}</Meta>
+                : doc.subtitle ? <Meta numberOfLines={1} noWrap>{doc.subtitle}</Meta> : null}
             </C.HW_StageTabTextStack>
             {doc.id !== WORLD_DOCUMENT_ID ? (
               <C.HW_StageTabClose onPress={() => props.onCloseDocument(doc.id)}>

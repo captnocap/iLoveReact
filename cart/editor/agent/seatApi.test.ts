@@ -2,6 +2,7 @@
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
 import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { resetClaimsForTest, setClaimActiveModel } from './claims';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -808,6 +809,52 @@ test('geometry facts ride every reply and never invent a clean zero', () => {
 
   // And it must actually appear in the readout an agent sees on every operation.
   assert(formatSeatPercept(measured).includes('402 triangles pass through'), 'facts absent from the per-operation readout');
+});
+
+test('a claimed model admits only the password lane and stays readable (req_3850)', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('m-radio');
+  const bootstrap = { newPrimitive: () => true };
+
+  const claimed = executeSeatRequestAtShell(null, { action: 'claim', args: { password: 'hush', agent: 'lane-a' } }, bootstrap);
+  assert(claimed.ok && (claimed.result as any).model === 'm-radio', 'claim on the active model failed');
+
+  const rival = executeSeatRequestAtShell(null, { action: 'claim', args: { password: 'other', agent: 'lane-b' } }, bootstrap);
+  assert(!rival.ok && rival.reason?.includes('lane-a') === true, 'a second agent stole the claim');
+
+  const blocked = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 } }, bootstrap);
+  assert(!blocked.ok && blocked.reason?.includes('lane-a') === true, 'tokenless mutation was not refused with the holder named');
+
+  const wrongToken = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 }, token: 'other' }, bootstrap);
+  assert(!wrongToken.ok, 'a wrong token mutated a claimed model');
+
+  // The right token clears admission; the refusal that remains is the ordinary
+  // no-live-model shell boundary, proving the gate itself opened.
+  const allowed = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 }, token: 'hush' }, bootstrap);
+  assert(!allowed.ok && allowed.reason?.includes('no live model') === true, 'the holder token did not pass the gate');
+
+  const read = executeSeatRequestAtShell(null, { action: 'look' }, bootstrap);
+  assert(read.ok, 'a claimed model stopped answering reads');
+
+  const wrongDismiss = executeSeatRequestAtShell(null, { action: 'dismiss', args: { password: 'nope' } }, bootstrap);
+  assert(!wrongDismiss.ok, 'a wrong password released the claim');
+  const listed = executeSeatRequestAtShell(null, { action: 'claims' }, bootstrap);
+  assert((listed.result as any).claims.length === 1 && (listed.result as any).claims[0].agent === 'lane-a', 'claims listing lost the holder');
+  const released = executeSeatRequestAtShell(null, { action: 'dismiss', args: { password: 'hush' } }, bootstrap);
+  assert(released.ok, 'the holder could not dismiss its own claim');
+  const after = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 } }, bootstrap);
+  assert(!after.ok && after.reason?.includes('no live model') === true, 'dismiss did not reopen the model');
+  resetClaimsForTest();
+});
+
+test('claim admission targets the request model honestly before session routing exists', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('m-active');
+  const bootstrap = { newPrimitive: () => true };
+  const misrouted = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 }, model: 'm-other' }, bootstrap);
+  assert(!misrouted.ok && misrouted.reason?.includes('m-active') === true,
+    'a request for a background model was not refused with the active model named');
+  resetClaimsForTest();
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);

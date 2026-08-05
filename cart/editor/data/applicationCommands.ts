@@ -12,6 +12,7 @@ import {
   type CommandSource,
   type CommandMode,
 } from '../../../runtime/commands';
+import { claimActiveModel, claimAdmits } from '../agent/claims';
 import {
   PiecePlacementRejected,
   WORLD_PIECES_PLACE_COMMAND_ID,
@@ -853,6 +854,7 @@ export function createEditorApplicationCommands(
     icon,
     effect: 'action',
     undoScope: { kind: 'native', key: 'model' },
+    requiredCapabilities: ['model.edit'],
     projections: { contextMenu: ['model-outliner'] },
     validateArgs,
     isEnabled: modelSurfaceEnabled,
@@ -1131,7 +1133,19 @@ export function createEditorApplicationCommands(
     },
   }, () => adapter.colorStudio.history.commitRedo());
 
-  const authority = new CommandAuthority(registry, { outcomeSink });
+  const authority = new CommandAuthority(registry, {
+    outcomeSink,
+    // Claim admission (req_3850): commands declaring 'model.edit' mutate the
+    // active model document. The seat lane's password was already verified at
+    // the transport door, so its origin passes; every other origin is a
+    // user-lane edit and answers to the claim table. Refusals reject as
+    // 'unauthorized' and flow through the outcome sink like any command.
+    hasCapability: (capability, context) => {
+      if (capability !== 'model.edit') return false;
+      if (context.origin === 'seat') return true;
+      return claimAdmits(claimActiveModel(), undefined).ok;
+    },
+  });
   return Object.freeze({
     invoke<Result = unknown>(request: EditorCommandRequest): CommandOutcome<Result> {
       return authority.invoke<Result>({

@@ -4,6 +4,7 @@
 // loss. Transports (CLI/dev socket) are adapters around this module.
 
 import { countUvTextureFootprints, parseUvIslandRects } from '../model/uvLayout';
+import { claimActiveModel, claimAdmits, claimModel, dismissClaim, listClaims } from './claims';
 
 export const NO_SEMANTIC_ID = 0xffffffff;
 export const DEFAULT_NAMING_DEBT_BUDGET = 8;
@@ -1420,8 +1421,60 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
 }
 
 export type AgentSeat = ReturnType<typeof createAgentSeat>;
-export type SeatRequest = { action: string; args?: Record<string, unknown> };
+export type SeatRequest = {
+  action: string;
+  args?: Record<string, unknown>;
+  /** Claim password (req_3850). The transport stamps one payload-level token
+   * onto every row so a batch carries it once. Absent on an unclaimed model. */
+  token?: string;
+  /** Target model id. Until per-document session routing lands, a target other
+   * than the active model is refused honestly instead of silently landing on
+   * the wrong mesh. */
+  model?: string;
+};
 export type SeatBootstrapAdapter = { newPrimitive: (spec: SeatPrimitiveSpec) => boolean };
+
+// ---- Claim admission (req_3850) --------------------------------------------
+// Reads are never gated; every other action on a claimed model needs its
+// password. `operation:"read"` covers the read lane of operation-carrying
+// actions (viewport, retopo-bands, follow, uv-prestack diagnostics, ...).
+
+const SEAT_READ_ACTIONS = new Set([
+  'look', 'semantic-status', 'elements', 'boundary-continuation', 'uv-state',
+  'recipe-list', 'shot', 'claims',
+]);
+
+const seatRequestReads = (request: SeatRequest): boolean => {
+  if (SEAT_READ_ACTIONS.has(request.action)) return true;
+  const operation = String((request.args ?? {}).operation ?? '');
+  if (operation === 'read') return true;
+  if (request.action === 'follow' && operation === 'inspect') return true;
+  return false;
+};
+
+const seatAdmission = (request: SeatRequest): { ok: boolean; reason?: string } => {
+  if (seatRequestReads(request)) return { ok: true };
+  const active = claimActiveModel();
+  if (request.model && active && request.model !== active) {
+    return { ok: false, reason: `model ${request.model} is not the active document — per-model routing lands with session instancing; the active model is ${active}` };
+  }
+  return claimAdmits(active, request.token);
+};
+
+function executeClaimRequest(request: SeatRequest): SeatReply {
+  const args = request.args ?? {};
+  if (request.action === 'claims') {
+    return { ok: true, op: 'claims', result: { claims: listClaims(), activeModel: claimActiveModel() }, percept: null };
+  }
+  const model = String(args.model ?? claimActiveModel() ?? '');
+  const password = String(args.password ?? request.token ?? '');
+  if (request.action === 'claim') {
+    const outcome = claimModel(model, password, String(args.agent ?? 'agent'));
+    return { ok: outcome.ok, op: 'claim', ...(outcome.ok ? { result: { model } } : { reason: outcome.reason }), percept: null };
+  }
+  const outcome = dismissClaim(model, password);
+  return { ok: outcome.ok, op: 'dismiss', ...(outcome.ok ? { result: { model } } : { reason: outcome.reason }), percept: null };
+}
 
 const primitiveSpecFromRequest = (
   args: Record<string, unknown>,
@@ -1441,6 +1494,13 @@ export function executeSeatRequestAtShell(
   request: SeatRequest,
   bootstrap: SeatBootstrapAdapter,
 ): SeatReply {
+  if (request.action === 'claim' || request.action === 'dismiss' || request.action === 'claims') {
+    return executeClaimRequest(request);
+  }
+  const admission = seatAdmission(request);
+  if (!admission.ok) {
+    return { ok: false, op: request.action, percept: seat?.look() ?? null, reason: admission.reason };
+  }
   if (seat) return executeSeatRequest(seat, request);
   if (request.action === 'look') {
     return { ok: true, op: 'look', result: { state: 'no-live-model' }, percept: null };
