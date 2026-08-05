@@ -1151,11 +1151,15 @@ fn setMeshLcPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
         setReturnString(info, "{\"ok\":0}");
         return;
     };
+    const state_lc = scene3d.meshLcState() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
     var buf: [512]u8 = undefined;
     const json = if (scene3d.meshLcFallbackReason()) |reason|
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"fallbackReason\":\"{s}\"}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), reason })
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"worldDirection\":[{d},{d},{d}],\"fallbackReason\":\"{s}\"}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), state_lc.world_direction[0], state_lc.world_direction[1], state_lc.world_direction[2], reason })
     else
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d}}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration() });
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"generation\":{d},\"worldDirection\":[{d},{d},{d}]}}", .{ key, scene3d.meshEditActiveCount(), scene3d.meshEditGeneration(), state_lc.world_direction[0], state_lc.world_direction[1], state_lc.world_direction[2] });
     setReturnString(info, json catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1362,7 +1366,8 @@ fn hostMeshLcBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setReturnString(info, json);
 }
 
-/// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON {"ok","key","count","fallbackReason"?}.
+/// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON
+/// {"ok","key","count","worldDirection","fallbackReason"?}.
 /// Install the cut at these popup params as the live mesh (the live preview — not
 /// journaled). offsetFrac is 0..1 of the face's span on the chosen axis; 0.5 is the
 /// even comb. fallbackReason explains a refused topological preview; no plane fallback
@@ -1388,7 +1393,8 @@ fn hostMeshLcEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_lc_state() → JSON {"ok","dir","cuts","offsetFrac","key","count","fallbackReason"?}.
+/// __mesh_lc_state() → JSON
+/// {"ok","dir","worldDirection","cuts","offsetFrac","key","count","fallbackReason"?}.
 /// Read back the LIVE session's last-previewed params (req_2625 gap DD): a host-side
 /// handle drag re-previews internally, so the popup polls this to keep its value tracking
 /// the drag — key/count because every re-preview installs a NEW mesh key the cart must
@@ -1405,9 +1411,9 @@ fn hostMeshLcState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     };
     var buf: [512]u8 = undefined;
     const json = if (st.fallback_reason) |reason|
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d},\"fallbackReason\":\"{s}\"}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount(), reason })
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"worldDirection\":[{d},{d},{d}],\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d},\"fallbackReason\":\"{s}\"}}", .{ st.dir, st.world_direction[0], st.world_direction[1], st.world_direction[2], st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount(), reason })
     else
-        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d}}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount() });
+        std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"worldDirection\":[{d},{d},{d}],\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d}}}", .{ st.dir, st.world_direction[0], st.world_direction[1], st.world_direction[2], st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount() });
     setReturnString(info, json catch {
         setReturnString(info, "{\"ok\":0}");
         return;

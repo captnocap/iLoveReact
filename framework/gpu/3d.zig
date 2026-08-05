@@ -2897,9 +2897,9 @@ const LcSession = struct {
     base_face_part: ?[]u32,
     last_face_part: ?[]u32, // per LAST-preview face; aliases nothing (owned)
     part_count: u32,
-    // The seed face's first two ordered edge directions. Popup direction 0/1 chooses
-    // the same edge index that the reference walk receives; these vectors only drive
-    // the overlay handle and never determine topological adjacency.
+    // The seed face's first two ordered edge directions. Propagated loop cut still
+    // receives the clicked face's edge index; bounded Basic Cut passes the chosen
+    // world vector through so every selected face resolves the same orientation.
     dirs: [2][3]f32,
     lo: [2]f32, // selected-face extent along each cut direction (dot-space)
     hi: [2]f32,
@@ -3160,10 +3160,10 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.base_mesh.clone() catch return false;
     defer preview.deinit();
     const changed = if (reuse_topology) blk: {
-        preview.repositionCutVertices(cut_count, fraction);
+        preview.repositionCutVertices(cut_count, fraction, if (s.basic) s.dirs[d] else null);
         break :blk true;
     } else if (s.basic)
-        preview.cutSelected(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false
+        preview.cutSelected(s.base_cut_mask, s.dirs[d], cut_count, fraction) catch return false
     else
         preview.loopCut(s.base_cut_mask, @intCast(d), cut_count, fraction) catch return false;
     if (!changed) {
@@ -3294,7 +3294,13 @@ pub fn meshLcActive() bool {
     return g_lc != null or g_bevel != null or g_quadify != null;
 }
 
-pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32, fallback_reason: ?[]const u8 };
+pub const LcState = struct {
+    dir: u32,
+    world_direction: [3]f32,
+    cuts: u32,
+    offset_frac: f32,
+    fallback_reason: ?[]const u8,
+};
 /// The live session's last-previewed params — the __mesh_lc_state read-back. A host-side
 /// handle drag re-previews internally, so the popup polls this to keep its steppers and
 /// offset cell tracking the drag.
@@ -3302,6 +3308,7 @@ pub fn meshLcState() ?LcState {
     const sp: *const LcSession = if (g_lc) |*p| p else return null;
     return .{
         .dir = sp.last_dir,
+        .world_direction = sp.dirs[@min(sp.last_dir, 1)],
         .cuts = sp.last_cuts,
         .offset_frac = sp.last_offset_frac,
         .fallback_reason = sp.last_reason,

@@ -1036,6 +1036,11 @@ pub const Mesh = struct {
         processed: std.AutoHashMapUnmanaged(u32, void) = .empty,
         center_vertices: std.AutoHashMapUnmanaged(u64, u32) = .empty,
         direction: u32,
+        /// Basic Cut resolves one world-space orientation across every selected
+        /// face. splitFace still orders an edge against each face's winding, so
+        /// this vector also keeps the offset phase anchored to the seed face's
+        /// world end when mirrored/rotated rings order that edge oppositely.
+        basic_cut_direction: ?Vec3 = null,
         cuts: u32,
         offset_fraction: f32,
         propagate: bool,
@@ -1058,9 +1063,22 @@ pub const Mesh = struct {
             try context.center_vertices.put(context.mesh.allocator, key, id);
             return id;
         }
+
+        fn ratioForSide(context: *const CutContext, side: [2]u32, cut_no: u32) f32 {
+            const ratio = cutRatio(context.cuts, context.offset_fraction, cut_no);
+            const direction = context.basic_cut_direction orelse return ratio;
+            const a = context.mesh.vertices.items[side[0]].position;
+            const b = context.mesh.vertices.items[side[1]].position;
+            // The seed edge follows its stored ring, and splitFace canonicalizes
+            // it to point opposite the seed direction. Preserve that established
+            // UI offset convention on every other face: a reversed/mirrored ring
+            // whose canonical side points WITH the seed direction gets the
+            // complementary ratio.
+            return if (dot3(sub3(b, a), direction) > 0) 1.0 - ratio else ratio;
+        }
     };
 
-    pub fn repositionCutVertices(mesh: *Mesh, cuts_raw: u32, offset_fraction_raw: f32) void {
+    pub fn repositionCutVertices(mesh: *Mesh, cuts_raw: u32, offset_fraction_raw: f32, basic_cut_direction: ?Vec3) void {
         const cuts = @max(1, cuts_raw);
         const offset_fraction = std.math.clamp(offset_fraction_raw, 0.0, 1.0);
         var cut_no: u32 = 0;
@@ -1070,7 +1088,11 @@ pub const Mesh = struct {
                 if (origin.cut_no != cut_no) continue;
                 const a = mesh.vertices.items[origin.edge[0]].position;
                 const b = mesh.vertices.items[origin.edge[1]].position;
-                vertex.position = lerp3(a, b, cutRatio(cuts, offset_fraction, origin.cut_no));
+                var ratio = cutRatio(cuts, offset_fraction, origin.cut_no);
+                if (basic_cut_direction) |direction| {
+                    if (dot3(sub3(b, a), direction) > 0) ratio = 1.0 - ratio;
+                }
+                vertex.position = lerp3(a, b, ratio);
             }
             // UVs are per FACE corner, so updating the shared vertex position is only
             // half the preview. Each split piece retains the source-triangle provenance
@@ -2142,9 +2164,40 @@ pub const Mesh = struct {
         return try splitFace(&context, face_id, start_edge, face.vertices.items.len == 4, 0);
     }
 
+    fn cutSideAlignedToWorld(mesh: *const Mesh, face: *const Face, world_direction_raw: Vec3) ?[2]u32 {
+        const direction_length = length3(world_direction_raw);
+        if (direction_length <= IMPORT_WELD_EPS) return null;
+        const world_direction = mul3(world_direction_raw, 1.0 / direction_length);
+        var best_side: ?[2]u32 = null;
+        var best_alignment: f32 = -1.0;
+        for (face.vertices.items, 0..) |vertex_id, edge_index| {
+            const next_vertex_id = face.vertices.items[(edge_index + 1) % face.vertices.items.len];
+            const a = mesh.vertices.items[vertex_id].position;
+            const b = mesh.vertices.items[next_vertex_id].position;
+            const edge = sub3(b, a);
+            const edge_length = length3(edge);
+            // An edge shorter than the soup-import weld boundary cannot remain a
+            // distinct edge after save/load and is not a usable cut orientation.
+            if (edge_length <= IMPORT_WELD_EPS) continue;
+            const alignment = @abs(dot3(mul3(edge, 1.0 / edge_length), world_direction));
+            if (alignment <= best_alignment) continue;
+            best_alignment = alignment;
+            best_side = if (dot3(edge, world_direction) >= 0)
+                .{ vertex_id, next_vertex_id }
+            else
+                .{ next_vertex_id, vertex_id };
+        }
+        return best_side;
+    }
+
     /// Basic Cut uses the same face splitter but deliberately disables neighbor
-    /// traversal. It can therefore never turn into a loop cut or exceed selection.
-    pub fn cutSelected(mesh: *Mesh, selected_triangles: []const bool, direction: u32, cuts: u32, offset_fraction: f32) !bool {
+    /// traversal. One call resolves one seed world direction against every selected
+    /// face, so stored ring rotation/winding can never change the requested axis or
+    /// offset phase. It can therefore never turn into a loop cut or exceed selection.
+    pub fn cutSelected(mesh: *Mesh, selected_triangles: []const bool, world_direction_raw: Vec3, cuts: u32, offset_fraction: f32) !bool {
+        const direction_length = length3(world_direction_raw);
+        if (direction_length <= IMPORT_WELD_EPS) return false;
+        const world_direction = mul3(world_direction_raw, 1.0 / direction_length);
         var selected = std.ArrayListUnmanaged(u32).empty;
         defer selected.deinit(mesh.allocator);
         for (mesh.faces.items) |*face| {
@@ -2152,7 +2205,8 @@ pub const Mesh = struct {
         }
         var context = CutContext{
             .mesh = mesh,
-            .direction = direction,
+            .direction = 0,
+            .basic_cut_direction = world_direction,
             .cuts = @max(1, cuts),
             .offset_fraction = std.math.clamp(offset_fraction, 0.0, 1.0),
             .propagate = false,
@@ -2162,10 +2216,7 @@ pub const Mesh = struct {
         for (selected.items) |face_id| {
             const face = &mesh.faces.items[face_id];
             if (!face.alive or face.vertices.items.len < 2) continue;
-            const side = [2]u32{
-                face.vertices.items[direction % face.vertices.items.len],
-                face.vertices.items[(direction + 1) % face.vertices.items.len],
-            };
+            const side = cutSideAlignedToWorld(mesh, face, world_direction) orelse continue;
             changed = (try splitFace(&context, face_id, side, false, 0)) or changed;
         }
         return changed;
@@ -2197,7 +2248,7 @@ pub const Mesh = struct {
             const opposite_diff: isize = @as(isize, @intCast(opposite0_index)) - @as(isize, @intCast(opposite1_index));
             if (opposite_diff == 1 or opposite_diff < -2) std.mem.swap(u32, &opposite[0], &opposite[1]);
 
-            const ratio = cutRatio(context.cuts, context.offset_fraction, cut_no);
+            const ratio = context.ratioForSide(side, cut_no);
             const center_side = try context.centerVertex(side, ratio, cut_no);
             const center_opposite = try context.centerVertex(opposite, ratio, cut_no);
 
@@ -2205,6 +2256,7 @@ pub const Mesh = struct {
             const side_uv = lerp2(uvFor(old, side[0]), uvFor(old, side[1]), ratio);
             const opposite_uv = lerp2(uvFor(old, opposite[0]), uvFor(old, opposite[1]), ratio);
             const new_face = try context.mesh.makeSplitFace(old, &.{ side[1], center_side, center_opposite, opposite[1] }, &.{ uvFor(old, side[1]), side_uv, opposite_uv, uvFor(old, opposite[1]) });
+            const new_face_id = new_face.id;
             // Blockbench stores this array as an unordered vertex set and its
             // MeshFace.getSortedVertices() restores polygon order. Our face loops are
             // ordered data, so emit that sorted order directly; the literal reference
@@ -2213,7 +2265,24 @@ pub const Mesh = struct {
             try context.mesh.faces.append(context.mesh.allocator, new_face);
 
             if (cut_no + 1 < context.cuts) {
-                _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1);
+                // The remaining comb planes belong on the FAR side of this plane along
+                // the seed world direction. replaceFaceLoop kept side[0]'s child at
+                // face_id and the appended face holds side[1]'s — which of those is the
+                // far child is a ring-order artifact, so on a world-anchored basic cut
+                // pick by projection instead (req_3825: the mirrored half recursed into
+                // the near child and its comb collapsed inward — stations {1/3, 1/6}
+                // where the unmirrored twin correctly spread {1/3, 2/3}).
+                if (context.basic_cut_direction) |world_direction| {
+                    const p_side0 = context.mesh.vertices.items[side[0]].position;
+                    const p_side1 = context.mesh.vertices.items[side[1]].position;
+                    if (dot3(p_side0, world_direction) >= dot3(p_side1, world_direction)) {
+                        _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1);
+                    } else {
+                        _ = try splitFace(context, new_face_id, .{ center_side, side[1] }, double_side, cut_no + 1);
+                    }
+                } else {
+                    _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1);
+                }
             }
             if (cut_no != 0 or !context.propagate) return true;
 
@@ -2250,7 +2319,7 @@ pub const Mesh = struct {
                 if (vertex_id != side[0] and vertex_id != side[1]) opposed = vertex_id;
             }
             const opposed_vertex = opposed orelse return false;
-            const ratio = cutRatio(context.cuts, context.offset_fraction, cut_no);
+            const ratio = context.ratioForSide(side, cut_no);
 
             if (context.direction > 2) {
                 var opposite = [2]u32{ side[context.direction % side.len], opposed_vertex };
@@ -3545,7 +3614,7 @@ test "semantic membership survives indexed face splitting" {
         instances[0..],
     );
     defer mesh.deinit();
-    try std.testing.expect(try mesh.cutSelected(&.{ true, true }, 0, 1, 0.5));
+    try std.testing.expect(try mesh.cutSelected(&.{ true, true }, .{ 1, 0, 0 }, 1, 0.5));
     var lowered = try mesh.lower();
     defer lowered.deinit();
     try std.testing.expect(lowered.tri_count > 2);
@@ -3764,10 +3833,142 @@ test "basic indexed cut never traverses into an unselected neighbor" {
     var mesh = try Mesh.fromSoup(allocator, fixture.verts, 4, fixture.groups, null);
     defer mesh.deinit();
     const selected = [_]bool{ true, true, false, false };
-    try std.testing.expect(try mesh.cutSelected(selected[0..], 1, 1, 0.5));
+    try std.testing.expect(try mesh.cutSelected(selected[0..], .{ 0, 1, 0 }, 1, 0.5));
     var lowered = try mesh.lower();
     defer lowered.deinit();
     try std.testing.expectEqual(@as(u32, 6), lowered.tri_count); // selected 2→4, neighbor stays 2
+}
+
+test "basic cut applies one world axis and offset phase to mirrored face rings" {
+    const allocator = std.testing.allocator;
+    // The right quad is the X reflection of the left with its loop reversed back
+    // to the same surface normal — the ring shape produced by symmetrize.
+    const quads = [_][4]Vec3{
+        .{ .{ -2, 0, -1 }, .{ 0, 0, -1 }, .{ 0, 0, 1 }, .{ -2, 0, 1 } },
+        .{ .{ 2, 0, 1 }, .{ 0, 0, 1 }, .{ 0, 0, -1 }, .{ 2, 0, -1 } },
+    };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 4, fixture.groups, null);
+    defer mesh.deinit();
+
+    const original_vertex_count = mesh.vertices.items.len;
+    const selected = [_]bool{ true, true, true, true };
+    try std.testing.expect(try mesh.cutSelected(selected[0..], .{ 0, 0, 1 }, 1, 0.25));
+
+    var cut_vertex_count: usize = 0;
+    for (mesh.vertices.items[original_vertex_count..]) |vertex| {
+        const origin = vertex.cut_origin orelse continue;
+        cut_vertex_count += 1;
+        const edge = sub3(
+            mesh.vertices.items[origin.edge[1]].position,
+            mesh.vertices.items[origin.edge[0]].position,
+        );
+        try std.testing.expect(@abs(dot3(norm3(edge), .{ 0, 0, 1 })) > 0.9999);
+        // Offset 0.25 retains the seed face's established positive-end phase:
+        // both opposite-winding halves land on the same z station.
+        try std.testing.expectApproxEqAbs(@as(f32, 0.5), vertex.position[2], 0.00001);
+    }
+    try std.testing.expectEqual(@as(usize, 3), cut_vertex_count);
+
+    mesh.repositionCutVertices(1, 0.4, .{ 0, 0, 1 });
+    for (mesh.vertices.items[original_vertex_count..]) |vertex| {
+        if (vertex.cut_origin == null) continue;
+        try std.testing.expectApproxEqAbs(@as(f32, 0.2), vertex.position[2], 0.00001);
+    }
+}
+
+test "basic cut multi-cut comb spreads the same world stations on mirrored rings" {
+    const allocator = std.testing.allocator;
+    // Same symmetrize-shaped fixture as the single-cut phase test above. With
+    // cuts=2 the comb recursion must descend into the world-far child on BOTH
+    // rings: before req_3825 the mirrored ring recursed into the near child and
+    // its comb collapsed inward (stations {1/3, 1/6} of the span) while the
+    // unmirrored twin spread evenly ({1/3, 2/3}).
+    const quads = [_][4]Vec3{
+        .{ .{ -2, 0, -1 }, .{ 0, 0, -1 }, .{ 0, 0, 1 }, .{ -2, 0, 1 } },
+        .{ .{ 2, 0, 1 }, .{ 0, 0, 1 }, .{ 0, 0, -1 }, .{ 2, 0, -1 } },
+    };
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 4, fixture.groups, null);
+    defer mesh.deinit();
+
+    const original_vertex_count = mesh.vertices.items.len;
+    const selected = [_]bool{ true, true, true, true };
+    try std.testing.expect(try mesh.cutSelected(selected[0..], .{ 0, 0, 1 }, 2, 0.5));
+
+    // Even thirds of z∈[-1,1] are ±1/3. Both stations must appear, nothing else:
+    // a ring-relative recursion leaves one side with a plane at z = 2/3 instead.
+    var near_station: usize = 0;
+    var far_station: usize = 0;
+    for (mesh.vertices.items[original_vertex_count..]) |vertex| {
+        if (vertex.cut_origin == null) continue;
+        const z = vertex.position[2];
+        try std.testing.expect(@abs(@abs(z) - 1.0 / 3.0) < 0.0001);
+        if (z < 0) near_station += 1 else far_station += 1;
+    }
+    // Three welded verts per station line (x = -2, 0, 2).
+    try std.testing.expectEqual(@as(usize, 3), near_station);
+    try std.testing.expectEqual(@as(usize, 3), far_station);
+}
+
+test "basic cut world axis searches beyond collinear T-vertex ring edges" {
+    const allocator = std.testing.allocator;
+    var mesh = Mesh{ .allocator = allocator };
+    defer mesh.deinit();
+    try mesh.vertices.appendSlice(allocator, &.{
+        .{ .position = .{ 0, 0, 0 } },
+        .{ .position = .{ 1, 0, 0 } },
+        .{ .position = .{ 2, 0, 0 } },
+        .{ .position = .{ 2, 1, 0 } },
+        .{ .position = .{ 0, 1, 0 } },
+    });
+    var face = Face{ .id = 0, .group = 0, .part = NO_PART };
+    errdefer face.deinit(allocator);
+    try face.vertices.appendSlice(allocator, &.{ 0, 1, 2, 3, 4 });
+    try face.uvs.appendSlice(allocator, &.{ .{ 0, 0 }, .{ 0.5, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } });
+    try mesh.faces.append(allocator, face);
+
+    const side = mesh.cutSideAlignedToWorld(&mesh.faces.items[0], .{ 0, 1, 0 }).?;
+    try std.testing.expectEqual(@as(u32, 2), side[0]);
+    try std.testing.expectEqual(@as(u32, 3), side[1]);
+}
+
+test "basic cut keeps one station across side by side cut children" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 2, 0, 1 }, .{ 0, 0, 1 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer mesh.deinit();
+    const selected = [_]bool{ true, true };
+
+    try std.testing.expect(try mesh.cutSelected(selected[0..], .{ 1, 0, 0 }, 1, 0.5));
+    const seed = mesh.seedInfo(selected[0..]).?;
+    const z_direction = if (@abs(dot3(seed.directions[0], .{ 0, 0, 1 })) >=
+        @abs(dot3(seed.directions[1], .{ 0, 0, 1 })))
+        seed.directions[0]
+    else
+        seed.directions[1];
+    const before_cross_cut = mesh.vertices.items.len;
+    try std.testing.expect(try mesh.cutSelected(selected[0..], z_direction, 1, 0.25));
+
+    var station: ?f32 = null;
+    var station_vertex_count: usize = 0;
+    for (mesh.vertices.items[before_cross_cut..]) |vertex| {
+        if (vertex.cut_origin == null) continue;
+        station_vertex_count += 1;
+        if (station) |expected| {
+            try std.testing.expectApproxEqAbs(expected, vertex.position[2], 0.00001);
+        } else {
+            station = vertex.position[2];
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), station_vertex_count);
 }
 
 test "reference direction above two splits a triangle edge to edge" {
@@ -3800,7 +4001,7 @@ test "basic cut on an adjacent face succeeds after the first cut" {
     defer mesh.deinit();
 
     const first = [_]bool{ true, true, false, false };
-    try std.testing.expect(try mesh.cutSelected(first[0..], 1, 1, 0.5));
+    try std.testing.expect(try mesh.cutSelected(first[0..], .{ 0, 1, 0 }, 1, 0.5));
     var first_lowered = try mesh.lower();
     defer first_lowered.deinit();
     mesh.adoptLoweredMetadata(&first_lowered, first_lowered.groups, null);
@@ -3812,7 +4013,7 @@ test "basic cut on an adjacent face succeeds after the first cut" {
         if (face.group != 1) continue;
         for (face.source_triangles.items) |triangle| second[triangle] = true;
     }
-    try std.testing.expect(try mesh.cutSelected(second, 1, 1, 0.5));
+    try std.testing.expect(try mesh.cutSelected(second, .{ 0, 1, 0 }, 1, 0.5));
 }
 
 test "reference multi-cut recursively spaces cuts from the amended offset" {
@@ -3930,7 +4131,7 @@ test "offset preview reuses topology and only recomputes cut vertices" {
     var reused = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
     defer reused.deinit();
     try std.testing.expect(try reused.loopCut(selected[0..], 0, 2, 0.25));
-    reused.repositionCutVertices(2, 0.75);
+    reused.repositionCutVertices(2, 0.75, null);
 
     var fresh = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
     defer fresh.deinit();

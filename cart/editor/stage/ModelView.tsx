@@ -656,7 +656,7 @@ const meshLcPreview = (dir: number, cuts: number, offsetFrac: number) =>
 const meshLcEnd = (commit: boolean) => readTopoResult(host.__mesh_lc_end?.(commit ? 1 : 0));
 // Read back the LIVE session's last-previewed params: a host-side handle drag re-previews
 // internally (engine.zig → meshLcHandleDrag), so the popup polls this while open.
-type LcState = { ok: number; dir?: number; cuts?: number; offsetFrac?: number; key?: string; count?: number; fallbackReason?: string };
+type LcState = { ok: number; dir?: number; worldDirection?: [number, number, number]; cuts?: number; offsetFrac?: number; key?: string; count?: number; fallbackReason?: string };
 const meshLcState = (): LcState | null => {
   try {
     const j = host.__mesh_lc_state?.();

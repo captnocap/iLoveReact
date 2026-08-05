@@ -1269,9 +1269,12 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const loopCut = (direction: number, cuts: number, offsetFraction: number, basic = false): TopologyReceipt | null => {
     if (![0, 1].includes(direction) || !Number.isInteger(cuts) || cuts < 1 || !Number.isFinite(offsetFraction) || offsetFraction < 0 || offsetFraction > 1) return null;
     if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(basic ? 1 : 0))?.ok !== 1) return null;
-    const preview = parseJson<{ ok?: number; fallbackReason?: string }>(host.__mesh_lc_preview?.(direction, cuts, offsetFraction));
+    const preview = parseJson<{ ok?: number; worldDirection?: [number, number, number]; fallbackReason?: string }>(host.__mesh_lc_preview?.(direction, cuts, offsetFraction));
     if (preview?.ok !== 1) { host.__mesh_lc_end?.(0); return null; } // cancel restores the pre-cut mesh exactly
-    const result = readTopology(automation(() => host.__mesh_lc_end?.(1)));
+    const committed = readTopology(automation(() => host.__mesh_lc_end?.(1)));
+    const result = committed && preview.worldDirection
+      ? { ...committed, worldDirection: preview.worldDirection }
+      : committed;
     adapter.adoptTopology?.(result);
     return result;
   };

@@ -575,11 +575,13 @@ test('basic cut and triangle conversion use their native topology sessions', () 
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   let basic = -1;
   (globalThis as any).__mesh_lc_begin = (kind: number) => { basic = kind; return JSON.stringify({ ok: 1 }); };
-  (globalThis as any).__mesh_lc_preview = () => JSON.stringify({ ok: 1 });
+  (globalThis as any).__mesh_lc_preview = () => JSON.stringify({ ok: 1, worldDirection: [0, 0, -1] });
   (globalThis as any).__mesh_lc_end = () => JSON.stringify({ ok: 1, key: 'doc', count: 64, generation: 5 });
   (globalThis as any).__mesh_topo_tris_to_quads = () => JSON.stringify({ ok: 1, key: 'doc', count: 58, generation: 6 });
   const seat = createAgentSeat();
-  assert(executeSeatRequest(seat, { action: 'basic-cut', args: { direction: 1, cuts: 2, offset: 0.4 } }).ok && basic === 1, 'basic cut did not select the basic-cut session');
+  const cut = executeSeatRequest(seat, { action: 'basic-cut', args: { direction: 1, cuts: 2, offset: 0.4 } });
+  assert(cut.ok && basic === 1, 'basic cut did not select the basic-cut session');
+  assert(JSON.stringify((cut.result as any).worldDirection) === '[0,0,-1]', 'basic cut receipt dropped the applied seed world direction');
   assert(executeSeatRequest(seat, { action: 'tris-to-quads' }).ok, 'triangle conversion stayed unreachable');
 });
 
