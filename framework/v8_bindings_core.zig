@@ -926,6 +926,26 @@ fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, reply);
 }
 
+/// __mesh_select_audit(kind) → {ok,faces,actionableFaces,bbox}. kind 0 = intersecting,
+/// 1 = unreachable, 2 = both. Selects the triangles behind the SHAPE panel's counts so
+/// the user can SEE where they are (req_3883), never just how many there are.
+fn hostMeshSelectAudit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw = argToI32(info, 0) orelse 0;
+    if (raw < 0 or raw > 2) return setReturnString(info, "{\"ok\":false,\"reason\":\"kind must be 0, 1, or 2\"}");
+    const kind: scene3d.AuditSelectKind = @enumFromInt(@as(u8, @intCast(raw)));
+    const result = scene3d.meshSelectAuditFaces(kind) orelse
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh\"}");
+    state.markDirty();
+    var buf: [320]u8 = undefined;
+    const reply = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+        .{ result.faces, result.actionable_faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
+    ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
+    setReturnString(info, reply);
+}
+
 /// __mesh_texture_slot_assign(index) / _clear() mutate metadata on the selected
 /// authored faces. Return the number of authored faces whose role changed.
 fn hostMeshTextureSlotAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4663,6 +4683,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
     v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
     v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
+    v8_runtime.registerHostFn("__mesh_select_audit", hostMeshSelectAudit);
     v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
     v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
     v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);

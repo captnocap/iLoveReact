@@ -193,6 +193,9 @@ export type ModelToolApi = {
   // GUI semantic naming (req_3872): name the current face selection as a durable
   // region (same table+door as the Seat's `name` verb). null = host door absent.
   nameSelection: (name: string) => { changed: number } | null;
+  // Select the triangles behind SHAPE's geometry counts (req_3883). null = host
+  // door absent (old binary) or no live mesh.
+  selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".

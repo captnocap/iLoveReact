@@ -10432,7 +10432,7 @@ fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: 
         }
         if (any_glass) transparent = rows;
     }
-    g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{}, transparent);
+    g_audit_facts = mesh_audit.audit(allocator, verts, face_count, .{}, transparent, .{});
     g_audit_key = key;
     return g_audit_facts;
 }
@@ -10634,6 +10634,77 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         if (!selected) continue;
         _ = mesh_edit.selectFaceByIndex(@intCast(face), !first);
         first = false;
+    }
+    if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
+    return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox };
+}
+
+/// Which audited fact to select. `both` is the union — one press to see every
+/// triangle the SHAPE panel is complaining about.
+pub const AuditSelectKind = enum(u8) { intersecting = 0, unreachable_faces = 1, both = 2 };
+
+/// Select the triangles behind the SHAPE panel's geometry counts (req_3883). A count
+/// the user cannot locate is not actionable: this re-runs the audit asking it to mark
+/// the faces it counts, switches to face mode, and selects exactly that set — so the
+/// number and the selection can never describe different triangles.
+///
+/// Returns null when there is no live mesh; a zero-face result when the audit was
+/// over budget or the mesh is genuinely clean (the caller distinguishes those by
+/// reading `auditComputed` from the percept it already has).
+pub fn meshSelectAuditFaces(kind: AuditSelectKind) ?MeshSelectorResult {
+    const verts = g_edit_verts orelse return null;
+    const face_count_usize: usize = @intCast(g_edit_count / 3);
+    if (face_count_usize == 0 or verts.len < face_count_usize * 24) return null;
+    const face_count: u32 = @intCast(face_count_usize);
+
+    const allocator = std.heap.c_allocator;
+    const intersecting = allocator.alloc(bool, face_count_usize) catch return null;
+    defer allocator.free(intersecting);
+    const unreachable_faces = allocator.alloc(bool, face_count_usize) catch return null;
+    defer allocator.free(unreachable_faces);
+
+    // Glass is transparent to reachability exactly as the counting path treats it
+    // (req_3763 P3-1), or the selection would offer up a glazed cabin's interior.
+    const glass_rows: ?[]bool = allocator.alloc(bool, face_count_usize) catch null;
+    defer if (glass_rows) |rows| allocator.free(rows);
+    var transparent: ?[]const bool = null;
+    if (glass_rows) |rows| {
+        var any_glass = false;
+        for (rows, 0..) |*row, face| {
+            const color = model_source.colorOf(@intCast(face));
+            row.* = if (color) |c| model_paint.isGlassAlpha(c[3]) else false;
+            if (row.*) any_glass = true;
+        }
+        if (any_glass) transparent = rows;
+    }
+
+    const facts = mesh_audit.audit(allocator, verts, face_count, .{}, transparent, .{
+        .intersecting = intersecting,
+        .unreachable_faces = unreachable_faces,
+    });
+    if (!facts.computed) return MeshSelectorResult{ .faces = 0, .actionable_faces = 0, .bbox = .{ 0, 0, 0, 0, 0, 0 } };
+
+    mesh_edit.setMode(.face);
+    mesh_edit.clearSelection();
+    var matched: u32 = 0;
+    var actionable: u32 = 0;
+    var bbox: [6]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    for (0..face_count_usize) |face| {
+        const wanted = switch (kind) {
+            .intersecting => intersecting[face],
+            .unreachable_faces => unreachable_faces[face],
+            .both => intersecting[face] or unreachable_faces[face],
+        };
+        if (!wanted) continue;
+        _ = mesh_edit.selectFaceByIndex(@intCast(face), matched != 0);
+        matched += 1;
+        if (mesh_edit.faceInScopePub(@intCast(face))) actionable += 1;
+        const base = face * 24;
+        for (0..3) |corner_index| for (0..3) |component| {
+            const value = verts[base + corner_index * 8 + component];
+            bbox[component] = @min(bbox[component], value);
+            bbox[component + 3] = @max(bbox[component + 3], value);
+        };
     }
     if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
     return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox };

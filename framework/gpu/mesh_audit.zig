@@ -36,6 +36,16 @@ pub const Facts = struct {
     directions: u32 = 0,
 };
 
+/// Optional per-face output. A count alone cannot be acted on — "34 unreachable"
+/// says nothing about WHERE (req_3883) — so the same pass that counts can also
+/// record which triangles it counted, and the editor selects exactly those.
+/// Each slice must be `face_count` long or it is ignored; both are set to false
+/// for every face first, so a skipped (over-budget) audit leaves no stale marks.
+pub const Marks = struct {
+    intersecting: ?[]bool = null,
+    unreachable_faces: ?[]bool = null,
+};
+
 pub const Budget = struct {
     /// Above this the pass is skipped. Both passes are quadratic in the worst case and
     /// this runs once per topology generation on the interactive path, so the cap is
@@ -245,7 +255,27 @@ fn sampleDirection(index: u32, count: u32) Vec3 {
 /// windows). Transparent faces are still audited as candidates themselves, and
 /// intersection counting ignores the flag entirely — glass through a fender is
 /// still a penetration.
-pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, budget: Budget, transparent: ?[]const bool) Facts {
+///
+/// `marks` (optional): per-face output for the two facts — see Marks. Counting and
+/// marking are the SAME pass, so a marked audit can never disagree with the count
+/// the panel is showing.
+pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, budget: Budget, transparent: ?[]const bool, marks: Marks) Facts {
+    // Clear before any early return: an over-budget or malformed audit must leave the
+    // caller's buffers empty rather than whatever a previous mesh left in them.
+    const mark_intersecting: ?[]bool = if (marks.intersecting) |rows|
+        (if (rows.len == face_count) blk: {
+            @memset(rows, false);
+            break :blk rows;
+        } else null)
+    else
+        null;
+    const mark_unreachable: ?[]bool = if (marks.unreachable_faces) |rows|
+        (if (rows.len == face_count) blk: {
+            @memset(rows, false);
+            break :blk rows;
+        } else null)
+    else
+        null;
     if (face_count == 0) return .{ .computed = true, .directions = budget.directions };
     if (budget.directions == 0 or face_count > budget.max_faces) return .{};
     if (verts.len < @as(usize, face_count) * 24) return .{};
@@ -290,6 +320,7 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
     for (hit_flags) |flag| {
         if (flag) intersecting += 1;
     }
+    if (mark_intersecting) |rows| @memcpy(rows, hit_flags);
 
     // ── Fact 2: reachability ───────────────────────────────────────────────────
     // A face is reachable when some sampled direction off its front side leaves the
@@ -339,7 +370,10 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
             }
             if (!blocked) escaped = true;
         }
-        if (!escaped) unreachable_count += 1;
+        if (!escaped) {
+            unreachable_count += 1;
+            if (mark_unreachable) |rows| rows[self_index] = true;
+        }
     }
 
     return .{

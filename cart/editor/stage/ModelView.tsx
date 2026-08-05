@@ -268,6 +268,9 @@ export type ModelFocusBridge = {
   // texture + UV layout + strokes for full looks, program/atlas replay for legacy ones.
   loadPaintVariant: (variant: PaintVariant) => boolean;
   shape: ModelFocusShape | null;
+  /** Select the triangles behind SHAPE's geometry counts, so the panel's number
+   *  can be looked at instead of only read (req_3883). */
+  selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -317,6 +320,9 @@ export type ModelToolApi = {
   // region — the same table+door the Agent Seat's `name` verb uses, but recorded
   // as a toolbar action, not automation. null = the host door is absent.
   nameSelection: (name: string) => { changed: number } | null;
+  // Select the triangles behind the SHAPE panel's geometry counts (req_3883).
+  // null = the host door is absent (an old binary) or there is no live mesh.
+  selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -2682,6 +2688,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (changed > 0) setSemanticRevision((value) => value + 1);
       return { changed };
     },
+    selectAuditFaces: (kind) => {
+      const ordinal = kind === 'intersecting' ? 0 : kind === 'unreachable' ? 1 : 2;
+      let reply: { ok?: boolean; faces?: number } | null = null;
+      try {
+        const raw = host.__mesh_select_audit?.(ordinal);
+        reply = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+      if (reply?.ok !== true) return null;
+      // The host owns the selection; mirror it back so the viewport overlay, the
+      // selection counters, and the shell's gates all see the same set.
+      adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: Number(reply.faces) || 0 });
+      return { faces: Number(reply.faces) || 0 };
+    },
     retopoGhost: (visible) => {
       const raw = host.__mesh_retopo_source_ghost?.(visible ? 1 : 0);
       try {
@@ -3265,6 +3284,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           unreachable: percept?.unreachableFaces ?? 0,
         }
         : null,
+      selectAuditFaces: (kind) => toolApiRef.current?.selectAuditFaces(kind) ?? null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.

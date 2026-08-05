@@ -241,7 +241,10 @@ function SelectionSection({ selection, semantics }: {
 // counts door and read '—' until it builds topology (vertex/edge mode) — never 0-faked;
 // uv'd is faces-with-atlas (whole-model atlas covers all once it exists); mounts is an
 // honest 0 until the rig slice lands.
-function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
+function ShapeSection({ shape, onSelectAudit }: {
+  shape: ModelFocusShape | null;
+  onSelectAudit: (kind: 'intersecting' | 'unreachable' | 'both') => void;
+}) {
   const cells: [string, string][] = [
     ['verts', shape && shape.verts > 0 ? fmtCount(shape.verts) : '—'],
     ['faces', shape ? fmtCount(shape.faces) : '—'],
@@ -258,6 +261,15 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
       <C.HW_SectionHead>
         <C.HW_AccentBar />
         <C.HW_SectionTitle>SHAPE</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        {shape?.audited && (shape.intersecting > 0 || shape.unreachable > 0) ? (
+          <C.HW_MiniVerb
+            onPress={() => onSelectAudit('both')}
+            tooltip="Select every intersecting AND unreachable triangle at once"
+          >
+            <Icon name="Target" size={10} color={accentFor('warning')} />
+          </C.HW_MiniVerb>
+        ) : null}
       </C.HW_SectionHead>
       <C.HW_StatGrid>
         {cells.map(([label, value]) => (
@@ -280,12 +292,14 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
         shape={shape}
         count={shape?.intersecting ?? 0}
         detail="tris through other tris"
+        onSelect={() => onSelectAudit('intersecting')}
       />
       <GeometryFactRow
         label="unreachable"
         shape={shape}
         count={shape?.unreachable ?? 0}
         detail="tris no camera can see"
+        onSelect={() => onSelectAudit('unreachable')}
       />
     </C.HW_Section>
   );
@@ -295,7 +309,12 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 // look for it (req_3750). Tinted only when the count is real: an over-budget mesh reads
 // "not measured", never a clean zero it did not earn.
 function GeometryFactRow(
-  { label, shape, count, detail }: { label: string; shape: ModelFocusShape | null; count: number; detail: string },
+  { label, shape, count, detail, onSelect }: {
+    label: string; shape: ModelFocusShape | null; count: number; detail: string;
+    /** Select these exact triangles — a count you cannot locate is not actionable
+     *  (req_3883). Offered only when the audit is real and found something. */
+    onSelect: () => void;
+  },
 ) {
   // A count larger than the mesh cannot describe this mesh — it belongs to another one
   // (req_3752). Show that, rather than a number the panel knows is impossible.
@@ -306,10 +325,16 @@ function GeometryFactRow(
         : count === 0 ? `0 · ${detail}`
           : `${fmtCount(count)} · ${detail}`;
   const tone = inconsistent ? 'error' : shape?.audited && count > 0 ? 'warning' : 'textDim';
+  const locatable = !!shape && shape.audited && !inconsistent && count > 0;
   return (
     <C.HW_ReadRow>
       <C.HW_FormLabel>{label}</C.HW_FormLabel>
       <C.HW_ReadValue style={{ color: accentFor(tone) }}>{value}</C.HW_ReadValue>
+      {locatable ? (
+        <C.HW_MiniVerb onPress={onSelect} tooltip={`Select all ${fmtCount(count)} ${label} triangles — face mode, then press F to frame them`}>
+          <Icon name="Target" size={10} color={accentFor(tone)} />
+        </C.HW_MiniVerb>
+      ) : null}
     </C.HW_ReadRow>
   );
 }
@@ -831,7 +856,10 @@ export default function Inspector(props: {
                   selection={focusBridge?.readSelection() ?? null}
                   semantics={focusBridge?.semantics ?? null}
                 />
-                <ShapeSection shape={focusBridge?.shape ?? null} />
+                <ShapeSection
+                  shape={focusBridge?.shape ?? null}
+                  onSelectAudit={(kind) => focusBridge?.selectAuditFaces(kind)}
+                />
                 {focusBridge ? (
                   <SemanticsSection semantics={focusBridge.semantics} onRefresh={focusBridge.refreshSemantics} />
                 ) : null}

@@ -54,7 +54,7 @@ test "a lone triangle is reachable and intersects nothing" {
     defer verts.deinit(allocator);
     try tri(&verts, allocator, .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 });
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expectEqual(@as(u32, 0), facts.intersecting);
     try testing.expectEqual(@as(u32, 0), facts.unreachable_faces);
@@ -66,7 +66,7 @@ test "a closed box is fully reachable from outside and never self-intersects" {
     defer verts.deinit(allocator);
     try box(&verts, allocator, .{ 0, 0, 0 }, .{ 1, 1, 1 });
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expectEqual(@as(u32, 12), faces(verts));
     // Adjacent faces share edges everywhere; sharing an edge is correct topology.
@@ -81,7 +81,7 @@ test "a box sealed inside another box is buried WITHOUT any penetration" {
     try box(&verts, allocator, .{ 0, 0, 0 }, .{ 4, 4, 4 }); // shell
     try box(&verts, allocator, .{ 1, 1, 1 }, .{ 2, 2, 2 }); // fully contained
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expectEqual(@as(u32, 24), faces(verts));
     // Nothing touches anything: the surfaces never cross.
@@ -97,7 +97,7 @@ test "two boxes driven through each other are counted as penetrating" {
     try box(&verts, allocator, .{ 0, 0, 0 }, .{ 2, 2, 2 });
     try box(&verts, allocator, .{ 1, 1, 1 }, .{ 3, 3, 3 }); // corner-overlaps the first
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expect(facts.intersecting > 0);
     // Overlapping corners leave interior slivers no ray can leave.
@@ -111,7 +111,7 @@ test "faces that merely touch at a shared plane do not count as penetrating" {
     try box(&verts, allocator, .{ 0, 0, 0 }, .{ 1, 1, 1 });
     try box(&verts, allocator, .{ 1, 0, 0 }, .{ 2, 1, 1 }); // shares the x=1 plane exactly
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     // Perfect contact is not penetration. This is the case a naive overlap test gets
     // wrong, and the case a user would legitimately author before welding a seam.
@@ -138,7 +138,7 @@ test "a T-junction join at a direction change is contact, not penetration" {
     // the wheel-well wall standing on the underbody quad's boundary.
     try tri(&verts, allocator, .{ 1.2, 0, 0 }, .{ 1.8, 0, 0.001 }, .{ 1.5, -1.2, 0.4 });
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expectEqual(@as(u32, 0), facts.intersecting);
 }
@@ -153,7 +153,7 @@ test "a genuine stab through a face interior still counts" {
     try tri(&verts, allocator, .{ 0, 0, 0 }, .{ 2, 0, 0 }, .{ 1, 2, 0 });
     try tri(&verts, allocator, .{ 1, 0.5, -0.5 }, .{ 1.4, 0.9, 0.5 }, .{ 0.6, 0.9, 0.5 });
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{}, null, .{});
     try testing.expect(facts.computed);
     try testing.expectEqual(@as(u32, 2), facts.intersecting);
 }
@@ -175,13 +175,13 @@ test "an interior sealed behind GLASS is reachable — glass never blocks rays" 
     @memset(transparent[0..12], true); // shell faces are glass
     @memset(transparent[12..], false);
 
-    const through_glass = mesh_audit.audit(allocator, verts.items, face_count, .{}, transparent);
+    const through_glass = mesh_audit.audit(allocator, verts.items, face_count, .{}, transparent, .{});
     try testing.expect(through_glass.computed);
     try testing.expectEqual(@as(u32, 0), through_glass.unreachable_faces);
     // Glass changes reachability ONLY — the intersection fact is untouched.
     try testing.expectEqual(@as(u32, 0), through_glass.intersecting);
 
-    const opaque_shell = mesh_audit.audit(allocator, verts.items, face_count, .{}, null);
+    const opaque_shell = mesh_audit.audit(allocator, verts.items, face_count, .{}, null, .{});
     try testing.expectEqual(@as(u32, 12), opaque_shell.unreachable_faces);
 }
 
@@ -191,8 +191,67 @@ test "over budget reports NOT MEASURED instead of an unearned zero" {
     defer verts.deinit(allocator);
     try box(&verts, allocator, .{ 0, 0, 0 }, .{ 1, 1, 1 });
 
-    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{ .max_faces = 4 }, null);
+    const facts = mesh_audit.audit(allocator, verts.items, faces(verts), .{ .max_faces = 4 }, null, .{});
     try testing.expect(!facts.computed);
     try testing.expectEqual(@as(u32, 0), facts.intersecting);
     try testing.expectEqual(@as(u32, 0), facts.unreachable_faces);
+}
+
+test "marks name exactly the faces the counts counted" {
+    // req_3883: the panel's number is only actionable if the editor can select the
+    // same triangles. Marking rides the SAME pass as counting, so the two can never
+    // disagree — this fixture buries a box inside a box (12 unreachable, the inner
+    // shell) and stabs one face pair, then checks the marks against the counts AND
+    // against which specific faces they are.
+    const allocator = testing.allocator;
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
+    defer verts.deinit(allocator);
+    try box(&verts, allocator, .{ -2, -2, -2 }, .{ 2, 2, 2 }); // faces 0..11 outer
+    try box(&verts, allocator, .{ -1, -1, -1 }, .{ 1, 1, 1 }); // faces 12..23 buried
+
+    const face_count = faces(verts);
+    const intersecting = try allocator.alloc(bool, face_count);
+    defer allocator.free(intersecting);
+    const unreachable_faces = try allocator.alloc(bool, face_count);
+    defer allocator.free(unreachable_faces);
+
+    const facts = mesh_audit.audit(allocator, verts.items, face_count, .{}, null, .{
+        .intersecting = intersecting,
+        .unreachable_faces = unreachable_faces,
+    });
+    try testing.expect(facts.computed);
+
+    var marked_unreachable: u32 = 0;
+    for (unreachable_faces, 0..) |flag, face| {
+        if (!flag) continue;
+        marked_unreachable += 1;
+        try testing.expect(face >= 12); // only the inner shell is buried
+    }
+    try testing.expectEqual(facts.unreachable_faces, marked_unreachable);
+
+    var marked_intersecting: u32 = 0;
+    for (intersecting) |flag| {
+        if (flag) marked_intersecting += 1;
+    }
+    try testing.expectEqual(facts.intersecting, marked_intersecting);
+}
+
+test "an over-budget audit leaves no stale marks" {
+    // The counts are zero AND not computed; the caller's buffers must come back
+    // empty rather than holding whatever the last mesh wrote into them.
+    const allocator = testing.allocator;
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
+    defer verts.deinit(allocator);
+    try box(&verts, allocator, .{ 0, 0, 0 }, .{ 1, 1, 1 });
+
+    const face_count = faces(verts);
+    const unreachable_faces = try allocator.alloc(bool, face_count);
+    defer allocator.free(unreachable_faces);
+    @memset(unreachable_faces, true); // stale marks from an earlier mesh
+
+    const facts = mesh_audit.audit(allocator, verts.items, face_count, .{ .max_faces = 4 }, null, .{
+        .unreachable_faces = unreachable_faces,
+    });
+    try testing.expect(!facts.computed);
+    for (unreachable_faces) |flag| try testing.expect(!flag);
 }

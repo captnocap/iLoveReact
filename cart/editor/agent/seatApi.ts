@@ -959,6 +959,19 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (changed) notifySelectionChanged();
     return changed;
   };
+  /** Select the triangles behind the percept's geometry counts (req_3883). The host
+   *  marks them in the SAME pass that counts them, so the selection can never
+   *  disagree with the number the reply already reported. */
+  const selectAudit = (kind: string): { faces: number; actionableFaces: number; bbox: number[] } | null => {
+    const ordinal = kind === 'intersecting' ? 0 : kind === 'unreachable' ? 1 : kind === 'both' ? 2 : -1;
+    if (ordinal < 0) return null;
+    try {
+      const reply = JSON.parse(String(automation(() => host.__mesh_select_audit?.(ordinal)) ?? 'null'));
+      if (reply?.ok !== true) return null;
+      notifySelectionChanged();
+      return { faces: Number(reply.faces) || 0, actionableFaces: Number(reply.actionableFaces) || 0, bbox: reply.bbox ?? [] };
+    } catch { return null; }
+  };
   const selectFace = (index: number, additive = false): boolean => {
     const changed = Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_face?.(index, additive ? 1 : 0) === 1;
     if (changed) notifySelectionChanged();
@@ -1424,7 +1437,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
     look, elements, retopoBands, boundaryContinuation, follow, followPatch,
-    select, selectEdge, selectVertex, selectFace, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
+    select, selectEdge, selectVertex, selectFace, selectAudit, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
@@ -1582,6 +1595,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'select-face': {
         const ok = seat.selectFace(Number(args.index), args.additive === true);
         return seat.reply('select-face', ok, undefined, ok ? undefined : 'face index is invalid, stale, or outside the active scope');
+      }
+      case 'select-audit': {
+        const result = seat.selectAudit(String(args.kind ?? 'both'));
+        return seat.reply('select-audit', !!result, result ?? undefined, result ? undefined : 'kind must be "intersecting", "unreachable", or "both", and a model must be open');
       }
       case 'select-elements': {
         const kind = String(args.kind ?? 'face');
