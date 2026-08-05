@@ -14,6 +14,12 @@ import { REGIONS } from '../shell/regions';
 import type { ModelFocusBridge } from '../stage/ModelView';
 import type { ModelFocusSemanticRow, ModelFocusSemantics } from '../model/modelSemanticsFocus';
 
+/** Rows the list shows before it scrolls. The pane is this list, so it takes the
+ *  column — the Model pane's six-row sliver is what this tab exists to replace.
+ *  A ScrollView is excluded from proportional fallback and must carry an explicit
+ *  height (flexGrow collapses it to nothing), so the height is this × rowHeight. */
+const NAMES_LIST_MAX_ROWS = 22;
+
 // Only resident regions have faces in the live mesh to select. The others are real
 // rows worth showing (they diagnose a drop), but pressing them cannot select anything.
 function selectable(row: ModelFocusSemanticRow): boolean {
@@ -96,7 +102,7 @@ export default function NamesPanel({ semantics, bridge, onRefresh }: {
           <C.HW_ReadValue>{rows.length === 0 ? 'none yet — select faces and press N to name them' : 'no match'}</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : (
-        <ScrollView style={{ width: '100%', flexGrow: 1 }} showScrollbar>
+        <ScrollView style={{ width: '100%', height: Math.min(shown.length, NAMES_LIST_MAX_ROWS) * REGIONS.grid.rowHeight }} showScrollbar>
           {shown.map((row) => {
             const active = selectedId === row.id;
             const canSelect = selectable(row);
