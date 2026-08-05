@@ -1,7 +1,6 @@
 // SECTION B — Left Rail (see shell/regions.ts SECTIONS): contextual input panes.
-// Paint joins the relevant source libraries while the stage is painting, so
-// either surface can reopen in the same slot. Selecting the active button again
-// folds Section C away.
+// The one Asset Explorer owns all source folders. Paint joins it while the stage
+// is painting; selecting the active button again folds Section C away.
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { leftPanelsFor, resolvedPanelId, type LeftPanelId } from '../data/panelSystem';

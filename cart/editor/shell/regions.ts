@@ -30,7 +30,7 @@
 // that to land in the right file.
 export const SECTIONS = {
   A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · menu bar · active map · Editor/Play toggle · window controls' },
-  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'contextual input buttons: Paint and relevant source libraries coexist while painting; active-button repeat collapses/reopens C' },
+  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'contextual input buttons: one Asset Explorer plus Paint while painting; active-button repeat collapses/reopens C' },
   C: { region: 'contentBrowser', name: 'Left Panel', file: 'library/LibraryPanel.tsx + shell/PaintSidePanel.tsx', contains: 'one replaceable slot: asset browser (0/350/680) or unified Paint tools + layers + brush + ink (0/350)' },
   D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE compact mesh/world toolbar; paint sub-tools, safety, and resolution live persistently in C' },
   E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },

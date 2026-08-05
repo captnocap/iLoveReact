@@ -25,17 +25,24 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-test('model browse context exposes source libraries and focus tools', () => {
-  assert(leftPanelsFor('model').map((button) => button.id).join(',') === 'models,materials', 'model left rail drifted');
+test('model browse context exposes one Asset Explorer and focus tools', () => {
+  assert(leftPanelsFor('model').map((button) => button.id).join(',') === 'assets', 'model left rail duplicated the Asset Explorer');
   assert(rightPanelsFor('model').map((button) => button.id).join(',') === 'inspector,paint,rig', 'model right rail drifted');
 });
 
-test('paint is one peer pane and source libraries remain reachable', () => {
+test('category shortcuts never reappear as duplicate library rail panes', () => {
+  for (const kind of ['world', 'model', 'material', 'playtest', 'animation', 'facade'] as const) {
+    const libraries = leftPanelsFor(kind).filter((button) => button.renderer === 'library');
+    assert(libraries.length === 1 && libraries[0]!.id === 'assets', `${kind} exposes more than the one Asset Explorer`);
+  }
+});
+
+test('paint is one peer pane and the Asset Explorer remains reachable', () => {
   const modelPaint = leftPanelsFor('model', true);
   const facadePaint = leftPanelsFor('facade', true);
-  assert(modelPaint.map((button) => button.id).join(',') === 'paint,models,materials', 'model paint panes drifted');
-  assert(facadePaint.map((button) => button.id).join(',') === 'paint,materials,models', 'facade paint panes drifted');
-  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint,library,library', 'paint pane renderers are not explicit');
+  assert(modelPaint.map((button) => button.id).join(',') === 'paint,assets', 'model paint panes drifted');
+  assert(facadePaint.map((button) => button.id).join(',') === 'paint,assets', 'facade paint panes drifted');
+  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint,library', 'paint pane renderers are not explicit');
   assert(leftPanelsFor('world', true)[0]!.id === 'assets', 'unsupported world paint context replaced its library');
 });
 
@@ -52,28 +59,28 @@ test('World Bible owns one explicit index pane and no generic world inspector', 
 });
 
 test('pressing the active rail button toggles collapse', () => {
-  const closed = pressPanelButton('models', 'models', false);
-  assert(closed.active === 'models' && closed.collapsed, 'active press did not collapse');
-  const opened = pressPanelButton(closed.active, 'models', closed.collapsed);
-  assert(opened.active === 'models' && !opened.collapsed, 'second active press did not reopen');
+  const closed = pressPanelButton('assets', 'assets', false);
+  assert(closed.active === 'assets' && closed.collapsed, 'active press did not collapse');
+  const opened = pressPanelButton(closed.active, 'assets', closed.collapsed);
+  assert(opened.active === 'assets' && !opened.collapsed, 'second active press did not reopen');
 });
 
 test('pressing a different button selects it and opens its panel', () => {
-  const result = pressPanelButton('models', 'materials', true);
-  assert(result.active === 'materials' && !result.collapsed, 'different pane stayed collapsed or unselected');
+  const result = pressPanelButton('paint', 'assets', true);
+  assert(result.active === 'assets' && !result.collapsed, 'different pane stayed collapsed or unselected');
 });
 
 test('invalid pane state resolves to the context default without inventing a renderer', () => {
-  assert(resolvedPanelId(leftPanelsFor('model'), 'missions') === 'models', 'model left default was not contextual');
+  assert(resolvedPanelId(leftPanelsFor('model'), 'missions') === 'assets', 'model left default was not the Asset Explorer');
   assert(resolvedPanelId(rightPanelsFor('world'), 'rig') === 'inspector', 'world right default was not contextual');
   assert(resolvedPanelIdOrNull(rightPanelsFor('knowledge'), 'inspector') === null, 'empty World Bible focus rail did not resolve safely');
 });
 
-test('tree navigation updates the matching contextual rail family', () => {
-  assert(leftPanelForFolder('world', 'model-prop-chair', 'assets') === 'models', 'model asset did not select Models');
-  assert(leftPanelForFolder('world', 'materials-generated', 'assets') === 'materials', 'material subfolder did not select Materials');
-  assert(leftPanelForFolder('world', 'build-pieces', 'assets') === 'build', 'build folder did not select Build');
-  assert(leftPanelForFolder('model', 'missions', 'materials') === 'materials', 'unavailable model pane discarded the valid fallback');
+test('tree navigation never changes rail icon inside the Asset Explorer', () => {
+  assert(leftPanelForFolder('world', 'model-prop-chair', 'assets') === 'assets', 'model folder changed the rail destination');
+  assert(leftPanelForFolder('world', 'materials-generated', 'assets') === 'assets', 'material folder changed the rail destination');
+  assert(leftPanelForFolder('world', 'build-pieces', 'assets') === 'assets', 'build folder changed the rail destination');
+  assert(leftPanelForFolder('model', 'missions', 'assets') === 'assets', 'model context invented a category rail destination');
 });
 
 test('retired model storage folders migrate back to the model asset', () => {
@@ -83,8 +90,9 @@ test('retired model storage folders migrate back to the model asset', () => {
 });
 
 test('mock-era hot state migrates into the live pane vocabulary', () => {
-  assert(normalizeLeftPanelId('grid') === 'materials', 'legacy grid did not migrate');
-  assert(normalizeLeftPanelId('actors') === 'characters', 'legacy actors did not migrate');
+  assert(normalizeLeftPanelId('grid') === 'assets', 'legacy grid did not migrate into Assets');
+  assert(normalizeLeftPanelId('actors') === 'assets', 'legacy actors did not migrate into Assets');
+  assert(normalizeLeftPanelId('materials') === 'assets', 'retired Materials alias survived hot reload');
   assert(normalizeLeftPanelId('tool-options') === 'paint', 'split tool-options state did not migrate to Paint');
   assert(normalizeLeftPanelId('ink') === 'paint', 'split Ink state did not migrate to Paint');
   assert(normalizeLeftPanelId('paint') === 'paint', 'live Paint pane did not survive hot reload');

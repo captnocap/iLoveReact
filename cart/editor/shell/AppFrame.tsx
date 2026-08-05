@@ -193,7 +193,7 @@ import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from
 import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { assetMatchesLibrarySearch } from '../data/librarySearch';
-import { navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
+import { isLibraryCollectionFolder, navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
 import {
   leftPanelForFolder,
   leftPanelsFor,
@@ -1578,12 +1578,9 @@ export default function AppFrame() {
   const contextualLeftPanels = leftPanelsFor(activeDocumentKind, paintUiActive);
   const activeLeftPanel = resolvedPanelId(contextualLeftPanels, state.activeDomain);
   const activeLeftPanelDefinition = contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!;
-  // A context switch can make the prior pane unavailable. Library renderers
-  // project their own root without overwriting remembered state; paint renderers
-  // do not touch asset navigation at all.
-  const effectiveContentFolder = activeLeftPanelDefinition.renderer === 'library'
-    ? (state.activeDomain === activeLeftPanel ? state.contentFolder : activeLeftPanelDefinition.folder)
-    : state.contentFolder;
+  // The Asset Explorer is one pane, so document/tool context changes never
+  // project category-specific roots over its remembered tree navigation.
+  const effectiveContentFolder = state.contentFolder;
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
   const activeAsset = assetById(state.activeAssetId, state.assetOverrides);
   const contextPanelMode = panelModeFor(state, activeObject);
@@ -3032,15 +3029,16 @@ export default function AppFrame() {
       const result = pressPanelButton(active, pressed, prev.leftPanelCollapsed);
       const changedPane = prev.activeDomain !== pressed;
       const selectedPane = panes.find((pane) => pane.id === pressed);
-      const rootFolder = selectedPane?.renderer === 'library' ? selectedPane.folder : prev.contentFolder;
-      const contentFolder = changedPane && selectedPane?.renderer === 'library' ? rootFolder : prev.contentFolder;
+      // The rail has one library destination. Returning from Paint reopens the
+      // exact explorer folder instead of treating Assets as a jump to /Game.
+      const contentFolder = prev.contentFolder;
       const tab = tabForContentFolder(contentFolder);
       return {
         ...prev,
         activeDomain: result.active,
         leftPanelCollapsed: result.collapsed,
         contentFolder,
-        libraryCollectionReturnFolder: changedPane && selectedPane?.renderer === 'library'
+        libraryCollectionReturnFolder: changedPane && selectedPane?.renderer === 'library' && !isLibraryCollectionFolder(contentFolder)
           ? contentFolder
           : prev.libraryCollectionReturnFolder,
         activeTab: tab ?? prev.activeTab,
@@ -3058,7 +3056,7 @@ export default function AppFrame() {
   // the Materials library open — the row's promise is "show me the picker".
   const browseMaterials = () => setState((prev) => ({
     ...prev,
-    activeDomain: 'materials',
+    activeDomain: 'assets',
     leftPanelCollapsed: false,
     contentFolder: 'materials',
     libraryCollectionReturnFolder: 'materials',
