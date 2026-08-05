@@ -735,6 +735,50 @@ test "bridge winding falls back to the quad's other two edges across a recess" {
     try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(left, right, .{ tl.?, br.? }, .{ bl.?, tr.? }) == null);
 }
 
+test "twin-edge probe requires matching face incidence between source and twin" {
+    // A mirrored op must mean the same thing on both sides: a bridge built from an
+    // open source edge must not land on a twin edge that already carries two faces
+    // (req_3843 — twin create-face was stacking duplicates over filled sides), while
+    // matching incidence keeps deliberate authored-seam ops bilateral.
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3843, soup[0..], 6, &.{ 0, 1 });
+    defer mesh_edit.test_support.clear();
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var origin: ?u32 = null;
+    var right: ?u32 = null;
+    var far: ?u32 = null;
+    var up: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[0] == 0 and at[1] == 0) origin = vertex;
+        if (at[0] == 1 and at[1] == 0) right = vertex;
+        if (at[0] == 1 and at[1] == 1) far = vertex;
+        if (at[0] == 0 and at[1] == 1) up = vertex;
+    }
+    const open_source: mesh_edit.Edge = .{ origin.?, right.? };
+    const seam: mesh_edit.Edge = .{ origin.?, far.? };
+
+    // Open source (1 incident face) onto an open twin — legal.
+    try testing.expect(mesh_edit.twinEdgeMatchesSourcePub(open_source, right.?, far.?));
+    // Open source onto the filled interior diagonal (2 faces) — refused, even though
+    // the edge itself exists.
+    try testing.expect(mesh_edit.hasEdgeBetweenPub(origin.?, far.?));
+    try testing.expect(!mesh_edit.twinEdgeMatchesSourcePub(open_source, origin.?, far.?));
+    // Seam source onto a matching seam — stays bilateral.
+    try testing.expect(mesh_edit.twinEdgeMatchesSourcePub(seam, origin.?, far.?));
+    // A twin pair with no edge at all stays refused.
+    try testing.expect(!mesh_edit.twinEdgeMatchesSourcePub(open_source, right.?, up.?));
+}
+
 test "create-face mirror mapping keeps endpoints on the symmetry seam" {
     // Two triangles meet on x=0. A Create Face bridge built from the +X boundary
     // needs the off-plane endpoint reflected to -X while the seam endpoint remains

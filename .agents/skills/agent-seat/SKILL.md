@@ -170,7 +170,10 @@ X/Y/Z — model-origin plane, always), the editing verbs land on BOTH sides in o
 transaction: transforms reflect onto twins, and extrude, delete, flip, glass, paint fill,
 solidify, detach, merge-faces, weld, connect, create-face, bevel, and extrude-edge all
 extend to the selection's mirror twins automatically. A missing/out-of-scope twin honestly
-falls back to one-sided. After a mirrored extrude only the SOURCE cap is selected — move it
+falls back to one-sided, and so does a twin edge whose side is already FILLED: a mirrored
+create-face/extrude-edge requires the twin edge to match the source edge's face incidence
+(req_3843), so bridging an open edge never stacks a duplicate coincident face over a
+surfaced twin side. After a mirrored extrude only the SOURCE cap is selected — move it
 and the twin cap follows by reflection. Every twin lands as its OWN authored face
 (req_3804): bilateral ops pair source and twin positionally, never by shared face
 identity — two disjoint pieces reporting as one selectable face is a bug, not mirror

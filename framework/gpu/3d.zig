@@ -2237,7 +2237,10 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
             const t0 = mesh_edit.mirrorTwinOfVertPub(endpoints[0], subset) orelse continue;
             const t1 = mesh_edit.mirrorTwinOfVertPub(endpoints[1], subset) orelse continue;
             const same_edge = (t0 == endpoints[0] and t1 == endpoints[1]) or (t0 == endpoints[1] and t1 == endpoints[0]);
-            if (same_edge or !mesh_edit.hasEdgeBetweenPub(t0, t1)) continue;
+            // Twin openness must match the source (req_3843): extruding an open edge's
+            // twin on a filled side would raise a fin over existing surface, while a
+            // deliberate authored-seam extrusion stays bilateral on a matching seam.
+            if (same_edge or !mesh_edit.twinEdgeMatchesSourcePub(endpoints, t0, t1)) continue;
             if ((mesh_edit.vertPartPub(t0) orelse continue) != src_part) continue;
             if ((mesh_edit.vertPartPub(t1) orelse continue) != src_part) continue;
             const ra = mirrorReflectPoint(frame.a, subset);
@@ -2453,7 +2456,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 // the twin boundary edge (req_3838).
                 const t0 = mesh_edit.mirrorImageOfVertPub(edge[0], subset) orelse continue :twin_subsets;
                 const t1 = mesh_edit.mirrorImageOfVertPub(edge[1], subset) orelse continue :twin_subsets;
-                if (!mesh_edit.hasEdgeBetweenPub(t0, t1)) continue :twin_subsets;
+                // The twin edge must match the source edge's openness: bridging from an
+                // open edge onto a filled twin side stacks a duplicate coincident face
+                // over the existing surface (req_3843).
+                if (!mesh_edit.twinEdgeMatchesSourcePub(edge, t0, t1)) continue :twin_subsets;
                 if (src_part_check) |part| {
                     if ((mesh_edit.vertPartPub(t0) orelse continue :twin_subsets) != part) continue :twin_subsets;
                     if ((mesh_edit.vertPartPub(t1) orelse continue :twin_subsets) != part) continue :twin_subsets;

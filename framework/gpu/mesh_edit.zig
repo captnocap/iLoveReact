@@ -861,6 +861,19 @@ pub fn hasEdgeBetweenPub(a: u32, b: u32) bool {
     return false;
 }
 
+/// True when the twin edge exists with the SAME face incidence as its source edge.
+/// A mirrored op must mean the same thing on both sides: a bridge or extrusion built
+/// from an OPEN source edge (one incident face) must not land on a filled side (two),
+/// where the identical construction would stack duplicate coincident geometry no
+/// click or camera can untangle (req_3843). Matching incidence instead of demanding
+/// openness keeps deliberate authored-seam ops bilateral.
+pub fn twinEdgeMatchesSourcePub(source: Edge, t0: u32, t1: u32) bool {
+    if (!ensureTopology()) return false;
+    const src = edgeIndexBetween(source[0], source[1]) orelse return false;
+    const twin = edgeIndexBetween(t0, t1) orelse return false;
+    return edgeFaceIncidencePub(twin) == edgeFaceIncidencePub(src);
+}
+
 pub fn setXray(on: bool) void {
     g_xray = on;
 }
