@@ -24,6 +24,7 @@ import GcStressSection from './GcStressSection';
 import PresetSection from './PresetSection';
 import ModelDetailBody from '../library/ModelDetailBody';
 import ModelPaintVariants from '../library/ModelPaintVariants';
+import NamesPanel from './NamesPanel';
 import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
@@ -793,7 +794,10 @@ export default function Inspector(props: {
     // (REGIONS.grid.labelWidth label + REGIONS.grid.verbColWidth verb).
     const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
-    const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle : activePane === 'rig' ? 'MODEL · RIG' : 'MODEL FOCUS';
+    const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle
+      : activePane === 'rig' ? 'MODEL · RIG'
+        : activePane === 'names' ? 'MODEL · NAMES'
+          : 'MODEL FOCUS';
     return (
       <C.HW_RightPanel style={{ width: activePane === 'paint'
         ? uvWorkspace.panelWidth
@@ -905,6 +909,12 @@ export default function Inspector(props: {
                 />
                 <ModelPaintVariants key={activeModel.id} model={activeModel} bridge={focusBridge} hidden={!uvWorkspace.showPaintVariants} />
               </>
+            ) : activePane === 'names' ? (
+              <NamesPanel
+                semantics={focusBridge?.semantics ?? null}
+                bridge={focusBridge}
+                onRefresh={() => focusBridge?.refreshSemantics()}
+              />
             ) : (
               <RigSection
                 rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}

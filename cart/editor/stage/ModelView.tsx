@@ -271,6 +271,8 @@ export type ModelFocusBridge = {
   /** Select the triangles behind SHAPE's geometry counts, so the panel's number
    *  can be looked at instead of only read (req_3883). */
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
+  /** Show WHERE a name lives: select that region's faces on the model (req_3884). */
+  selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -323,6 +325,8 @@ export type ModelToolApi = {
   // Select the triangles behind the SHAPE panel's geometry counts (req_3883).
   // null = the host door is absent (an old binary) or there is no live mesh.
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
+  // Select one named semantic region's faces by id (req_3884).
+  selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -2688,6 +2692,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (changed > 0) setSemanticRevision((value) => value + 1);
       return { changed };
     },
+    // Select one semantic region by id (req_3884): the names list is only useful
+    // if clicking a name shows you WHERE it is. Same native selector query the
+    // Seat's `region:<name>` compiles to — one selection authority, not a second.
+    selectRegion: (id, additive = false) => {
+      let reply: { ok?: boolean; faces?: number } | null = null;
+      try {
+        const raw = host.__mesh_select_query?.(JSON.stringify({ kind: 'region', region: id, regions: [id], additive }));
+        reply = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+      if (reply?.ok !== true) return null;
+      adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: Number(reply.faces) || 0 });
+      return { faces: Number(reply.faces) || 0 };
+    },
     selectAuditFaces: (kind) => {
       const ordinal = kind === 'intersecting' ? 0 : kind === 'unreachable' ? 1 : 2;
       let reply: { ok?: boolean; faces?: number } | null = null;
@@ -3285,6 +3302,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         }
         : null,
       selectAuditFaces: (kind) => toolApiRef.current?.selectAuditFaces(kind) ?? null,
+      selectRegion: (id, additive) => toolApiRef.current?.selectRegion(id, additive) ?? null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.

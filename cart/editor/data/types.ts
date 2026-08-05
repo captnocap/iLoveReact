@@ -196,6 +196,8 @@ export type ModelToolApi = {
   // Select the triangles behind SHAPE's geometry counts (req_3883). null = host
   // door absent (old binary) or no live mesh.
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
+  // Select a named semantic region's faces by id (req_3884).
+  selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".

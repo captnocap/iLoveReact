@@ -10,7 +10,7 @@
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
 export type LeftPanelId = 'assets' | 'paint' | 'world-bible';
-export type RightPanelId = 'inspector' | 'paint' | 'rig';
+export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names';
 
 export type PanelButton<Id extends string> = {
   id: Id;
@@ -36,6 +36,9 @@ const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' }
 const MODEL_RIGHT = [
   { id: 'inspector', label: 'Model', icon: 'SlidersHorizontal' },
   { id: 'paint', label: 'Atlas', icon: 'Image' },
+  // The semantic region table earns its own pane beside the atlas (req_3884):
+  // the whole list at once, each row selecting its faces on the model.
+  { id: 'names', label: 'Names', icon: 'Tag' },
   { id: 'rig', label: 'Rig', icon: 'Bone' },
 ] as const;
 const FOCUS_RIGHT = [INSPECTOR] as const;
@@ -104,5 +107,5 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
 }
 
 export function normalizeRightPanelId(value: string): RightPanelId {
-  return value === 'paint' || value === 'rig' ? value : 'inspector';
+  return value === 'paint' || value === 'rig' || value === 'names' ? value : 'inspector';
 }
