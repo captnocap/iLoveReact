@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 import { resetClaimsForTest, setClaimActiveModel } from './claims';
 
 let passed = 0, failed = 0;
@@ -13,7 +13,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 const percept: SeatPercept = {
-  version: 1, generation: 4, faces: 60, authoredFaces: 30, islands: 0, footprints: 0, unnamed: 0,
+  version: 1, model: null, generation: 4, faces: 60, authoredFaces: 30, islands: 0, footprints: 0, unnamed: 0,
   activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
@@ -371,7 +371,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 // layer up. The table the seat writes back must be grown from the PRE-append capture.
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
-    version: 1, generation: 9, faces: 132, authoredFaces: 66, islands: 0, footprints: 0, unnamed: 0,
+    version: 1, model: null, generation: 9, faces: 132, authoredFaces: 66, islands: 0, footprints: 0, unnamed: 0,
     activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
@@ -425,7 +425,7 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   (globalThis as any).__mesh_edit_select_vertex = (...args: unknown[]) => { vertexArgs = args; return 1; };
   (globalThis as any).__mesh_edit_select_edge = (...args: unknown[]) => { edgeArgs = args; return 1; };
   (globalThis as any).__mesh_edit_select_face = (...args: unknown[]) => { faceArgs = args; return 1; };
-  const seat = createAgentSeat();
+  const seat = createAgentSeat({ selectionChanged: () => (globalThis as any).__meshEditSelChanged?.() });
   assert(executeSeatRequest(seat, { action: 'elements' }).ok, 'element vocabulary was unavailable');
   assert(executeSeatRequest(seat, { action: 'select-vertex', args: { index: 2, additive: true } }).ok, 'vertex selection failed');
   assert(executeSeatRequest(seat, { action: 'select-edge', args: { index: 4 } }).ok, 'edge selection failed');
@@ -859,14 +859,101 @@ test('a claimed model admits only the password lane and stays readable (req_3850
   resetClaimsForTest();
 });
 
-test('claim admission targets the request model honestly before session routing exists', () => {
+test('seat request target prefers the request model and otherwise uses the active model', () => {
+  assert(seatRequestTarget({ action: 'look', model: 'm-b' }, 'm-a') === 'm-b', 'explicit request model lost to the active model');
+  assert(seatRequestTarget({ action: 'look' }, 'm-a') === 'm-a', 'active model was not used as the request target');
+  assert(seatRequestTarget({ action: 'look' }, null) === null, 'a missing model target was invented');
+});
+
+test('background seat policy names every refused limitation family', () => {
+  const refused = [
+    ['viewport', 'viewport'],
+    ['uv-state', 'UV/paint'],
+    ['shot', 'capture'],
+    ['add', 'part geometry'],
+    ['atlas', 'atlas'],
+    ['follow', 'Follow'],
+    ['new', 'new'],
+    ['recipe', 'recipes'],
+    ['command', 'editor commands'],
+  ] as const;
+  for (const [action, family] of refused) {
+    const reason = backgroundSeatRefusal(action, {});
+    assert(reason?.includes(family) === true, `${action} refusal did not name the ${family} limitation: ${reason}`);
+  }
+  for (const action of ['extrude', 'select', 'save', 'part-rename', 'part-select', 'texture-slot', 'rig', 'recipe-list']) {
+    assert(backgroundSeatRefusal(action, {}) === null, `${action} was incorrectly refused for a background model`);
+  }
+  assert(backgroundSeatRefusal('retopo-bands', { operation: 'read' }) === null, 'retopology guide read was refused');
+  assert(backgroundSeatRefusal('retopo-bands', { operation: 'plan' })?.includes('retopology guides') === true,
+    'retopology guide mutation did not name its persistence limitation');
+});
+
+test('claim admission targets the request model', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('m-a');
+  const bootstrap = { newPrimitive: () => true };
+  const claimed = executeSeatRequestAtShell(null, {
+    action: 'claim', args: { model: 'm-b', password: 'hush', agent: 'lane-b' },
+  }, bootstrap);
+  assert(claimed.ok, 'the background target could not be claimed');
+  const blocked = executeSeatRequestAtShell(null, { action: 'extrude', model: 'm-b' }, bootstrap);
+  assert(!blocked.ok && blocked.reason?.includes('lane-b') === true, 'the request target claim did not block a tokenless mutation');
+  const admitted = executeSeatRequestAtShell(null, { action: 'extrude', model: 'm-b', token: 'hush' }, bootstrap);
+  assert(!admitted.ok && admitted.reason?.includes('no live model') === true, 'the target claim password did not pass admission');
+
+  resetClaimsForTest();
+  setClaimActiveModel('m-a');
+  executeSeatRequestAtShell(null, { action: 'claim', args: { password: 'active-only', agent: 'lane-a' } }, bootstrap);
+  const independent = executeSeatRequestAtShell(null, { action: 'extrude', model: 'm-b' }, bootstrap);
+  assert(!independent.ok && independent.reason?.includes('no live model') === true,
+    'a claim on the active model incorrectly blocked a different request target');
+  resetClaimsForTest();
+});
+
+test('a background-model request reaches the ordinary no-live-model shell boundary', () => {
   resetClaimsForTest();
   setClaimActiveModel('m-active');
   const bootstrap = { newPrimitive: () => true };
   const misrouted = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 }, model: 'm-other' }, bootstrap);
-  assert(!misrouted.ok && misrouted.reason?.includes('m-active') === true,
-    'a request for a background model was not refused with the active model named');
+  assert(!misrouted.ok && misrouted.reason?.includes('no live model') === true,
+    'a request for a background model was still refused by the removed routing policy');
   resetClaimsForTest();
+});
+
+test('percept model identity comes from the shell part percept', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  const modeled = executeSeatRequest(createAgentSeat({
+    partPercept: () => ({ model: 'm-b', activePartId: null, parts: [] }),
+  }), { action: 'look' }).percept;
+  assert(modeled?.model === 'm-b', 'shell model identity was dropped while joining the part percept');
+  assert(modeled != null && formatSeatPercept(modeled).includes('· model m-b ·'), 'formatted percept omitted the target model');
+
+  const unknown = executeSeatRequest(createAgentSeat(), { action: 'look' }).percept;
+  const formatted = unknown ? formatSeatPercept(unknown) : '';
+  assert(unknown?.model === null && formatted.includes('· model unknown ·'), 'a native-only percept guessed a model identity');
+  assert((formatted.match(/· model /g) ?? []).length === 1, 'the model identity appeared more than once in the percept header');
+});
+
+test('selection changes notify only through the seat adapter', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 60, actionableFaces: 60 });
+  let rawSelectionChanged = false;
+  (globalThis as any).__meshEditSelChanged = () => { rawSelectionChanged = true; };
+
+  const unwired = createAgentSeat();
+  assert(unwired.select('all').ok, 'unwired seat selection failed');
+  assert(!rawSelectionChanged, 'an unwired seat called the visible selection door directly');
+
+  const wired = createAgentSeat({ selectionChanged: () => (globalThis as any).__meshEditSelChanged?.() });
+  assert(wired.select('all').ok, 'wired seat selection failed');
+  assert(rawSelectionChanged, 'the adapter did not receive the selection notification');
+});
+
+test('batch generation refusal names an optional target model without changing legacy text', () => {
+  assert(seatBatchGenerationReason(4, 5, 1, 'm-b')?.includes('m-b') === true, 'target model was omitted from the batch refusal');
+  assert(seatBatchGenerationReason(4, 5, 1) === 'batch closed before row 2 — editor generation changed from 4 to 5',
+    'the three-argument generation refusal changed');
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);

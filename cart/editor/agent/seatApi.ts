@@ -34,9 +34,10 @@ export type SeatPart = {
   hi: number | null;
   groupPath: { id: string; name: string }[];
 };
-export type SeatPartPercept = { activePartId: string | null; parts: SeatPart[] };
+export type SeatPartPercept = { model?: string | null; activePartId: string | null; parts: SeatPart[] };
 export type SeatPercept = {
   version: 1;
+  model: string | null;
   generation: number;
   /** RENDER TRIANGLES, not authored faces. Two triangles of one authored quad count
    * twice here, so this number alone cannot tell a quad mesh from triangle soup —
@@ -357,6 +358,7 @@ export type SeatPrimitiveSpec = {
 export type SeatAdapter = {
   /** ModelView uses this to adopt the new host key/count after topology changes. */
   adoptTopology?: (result: TopologyReceipt | null) => void;
+  selectionChanged?: () => void;
   take?: () => number | undefined;
   namingDebtBudget?: number;
   /** Append a primitive as a new outliner part; returns its authored group range.
@@ -440,6 +442,7 @@ export function readSeatPercept(): SeatPercept | null {
   ));
   return {
     ...value,
+    model: null,
     islands,
     footprints,
     authoredFaces: countAuthoredFaces(atlas?.triangles),
@@ -572,7 +575,7 @@ export function formatSeatPercept(percept: SeatPercept): string {
   const authored = percept.authoredFaces == null
     ? `${percept.faces} triangles · authored faces unknown (no readable atlas)`
     : `${percept.authoredFaces} authored faces · ${percept.faces} triangles`;
-  const lines = [`mesh · ${authored} · ${percept.footprints} paint footprints · ${percept.islands} logical UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
+  const lines = [`mesh · model ${percept.model ?? 'unknown'} · ${authored} · ${percept.footprints} paint footprints · ${percept.islands} logical UV islands · generation ${percept.generation} · unnamed ${percept.unnamed}`];
   if (percept.authoredFaces != null && percept.authoredFaces === percept.faces && percept.faces > 0) {
     lines.push(`  ⚠ TRIANGLE SOUP — every triangle is its own authored face; this mesh has no quads left`);
   }
@@ -607,10 +610,12 @@ export function compactSeatReply(reply: SeatReply): SeatBriefReply {
   };
 }
 
-export function seatBatchGenerationReason(expected: number, live: number, rowIndex: number): string | null {
+export function seatBatchGenerationReason(expected: number, live: number, rowIndex: number, model?: string): string | null {
   return live === expected
     ? null
-    : `batch closed before row ${rowIndex + 1} — editor generation changed from ${expected} to ${live}`;
+    : model === undefined
+      ? `batch closed before row ${rowIndex + 1} — editor generation changed from ${expected} to ${live}`
+      : `batch closed before row ${rowIndex + 1} on model ${model} — editor generation changed from ${expected} to ${live}`;
 }
 
 export function createAgentSeat(adapter: SeatAdapter = {}) {
@@ -629,11 +634,11 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const withParts = (percept: SeatPercept | null): SeatPercept | null => {
     if (!percept) return null;
     const shell = adapter.partPercept?.();
-    return shell ? { ...percept, ...shell } : percept;
+    return shell ? { ...percept, ...shell, model: shell.model ?? null } : { ...percept, model: null };
   };
   // Viewport input already emits this one committed-selection notification. Seat
   // automation changes the same resident sets, so it must wake the human's inspector too.
-  const notifySelectionChanged = () => host.__meshEditSelChanged?.();
+  const notifySelectionChanged = () => adapter.selectionChanged?.();
   const look = (): SeatPercept | null => {
     const initial = withParts(readSeatPercept());
     if (!initial || primitiveBootstrapAttempted || initial.table.regions.length > 0 || initial.unnamed !== initial.faces || initial.faces < 6 || initial.faces > 12) return initial;
@@ -1490,12 +1495,45 @@ export type SeatRequest = {
   /** Claim password (req_3850). The transport stamps one payload-level token
    * onto every row so a batch carries it once. Absent on an unclaimed model. */
   token?: string;
-  /** Target model id. Until per-document session routing lands, a target other
-   * than the active model is refused honestly instead of silently landing on
-   * the wrong mesh. */
+  /** Target model id. Claim admission keys on this target; the shell receiver
+   * owns per-document session routing. */
   model?: string;
 };
 export type SeatBootstrapAdapter = { newPrimitive: (spec: SeatPrimitiveSpec) => boolean };
+
+export const seatRequestTarget = (request: SeatRequest, activeModel: string | null): string | null =>
+  request.model ?? activeModel ?? null;
+
+const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path']);
+const BACKGROUND_FOCUS_BRIDGE_ACTIONS = new Set([
+  'uv-state', 'uv-select', 'uv-layout', 'uv-prestack', 'uv-stitch', 'uv-two-sheet',
+  'uv-geometry', 'uv-history', 'uv-atlas', 'uv-layer', 'paint-variant', 'semantic-status',
+]);
+const BACKGROUND_EDITOR_COMMAND_ACTIONS = new Set(['command', 'model-export', 'model-starter', 'model-import']);
+const BACKGROUND_PART_GEOMETRY_ACTIONS = new Set([
+  'add', 'detach', 'part-visibility', 'part-delete', 'part-duplicate', 'part-merge',
+  'part-path-array', 'part-import',
+]);
+
+export function backgroundSeatRefusal(action: string, args: Record<string, unknown>): string | null {
+  if (BACKGROUND_VISIBLE_VIEWPORT_ACTIONS.has(action)) {
+    return `${action} drives the visible model viewport; a background model is not the document on screen`;
+  }
+  if (BACKGROUND_FOCUS_BRIDGE_ACTIONS.has(action)) {
+    return `the UV/paint focus bridge belongs to the visible ModelView; ${action} cannot target a background model`;
+  }
+  if (action === 'shot') return 'a capture renders the frame the editor is composing; a background model has no framed scene';
+  if (BACKGROUND_EDITOR_COMMAND_ACTIONS.has(action)) return 'editor commands run against the visible editor';
+  if (BACKGROUND_PART_GEOMETRY_ACTIONS.has(action)) return "part geometry ops mirror through the visible viewer's part-range table; they cannot target a background model yet";
+  if (action === 'atlas') return 'the paint atlas transaction is owned by the visible painter';
+  if (action === 'follow') return "Follow records the human's demonstrations in the visible editor";
+  if (action === 'new') return 'new creates a document and has no target model';
+  if (action === 'recipe') return 'recipes compose part-geometry verbs';
+  if (action === 'retopo-bands' && String(args.operation ?? 'read') !== 'read') {
+    return 'retopology guides persist into the visible model package';
+  }
+  return null;
+}
 
 // ---- Claim admission (req_3850) --------------------------------------------
 // Reads are never gated; every other action on a claimed model needs its
@@ -1517,11 +1555,8 @@ const seatRequestReads = (request: SeatRequest): boolean => {
 
 const seatAdmission = (request: SeatRequest): { ok: boolean; reason?: string } => {
   if (seatRequestReads(request)) return { ok: true };
-  const active = claimActiveModel();
-  if (request.model && active && request.model !== active) {
-    return { ok: false, reason: `model ${request.model} is not the active document — per-model routing lands with session instancing; the active model is ${active}` };
-  }
-  return claimAdmits(active, request.token);
+  const target = request.model ?? claimActiveModel();
+  return claimAdmits(target, request.token);
 };
 
 function executeClaimRequest(request: SeatRequest): SeatReply {

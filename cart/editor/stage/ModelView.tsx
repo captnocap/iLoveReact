@@ -3438,6 +3438,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   useEffect(() => {
     const seat = createAgentSeat({
       adoptTopology: (result) => adoptMesh(result as TopoResult | null),
+      selectionChanged: () => host.__meshEditSelChanged?.(),
       // `add` has to reach the SHELL: this viewer owns the host mesh, but the outliner
       // part table lives in AppFrame, and req_3465 is what their divergence costs. Same
       // global-door pattern as __modelFocusBridge, deliberately outside the prop path.
