@@ -7,6 +7,7 @@ import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/as
 import { meshDocHiddenRanges } from '../data/meshDoc';
 import type { ModelOutlinerDragItem, ModelOutlinerDropTarget } from '../data/modelOutliner';
 import type { LightRig } from '../model/editMesh';
+import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 import {
   EMPTY_MODEL_VIEW_RESIDENCY,
   advanceModelViewResidency,
@@ -81,7 +82,7 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
   modelDirty: boolean;
   reloadRevision: number;
   onDiscardLive: () => void;
-  onKeepLive: () => boolean;
+  onKeepLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   onRequireFirstSave: () => boolean;
   onDocumentMutated: () => void;
 }) {

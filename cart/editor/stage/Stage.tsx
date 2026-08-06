@@ -23,6 +23,7 @@ import { worldToolFor } from '../world/worldTool';
 import WorldBibleSurface from '../worldBible/WorldBibleSurface';
 import type { PieceSelectionIntent } from '../world/selection';
 import type { FloraPaintSample, WorldFloraBrush } from '../world/surfaceFlora';
+import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 
 export default function Stage(props: {
   state: EditorState;
@@ -38,7 +39,7 @@ export default function Stage(props: {
   modelOnDisk: boolean;
   modelReloadRevision: number;
   onDiscardActiveModel: () => void;
-  onSavePaintConflictLive: () => boolean;
+  onSavePaintConflictLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
   onStage: () => void;

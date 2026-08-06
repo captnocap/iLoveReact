@@ -100,6 +100,7 @@ import {
   type UvIslandRect,
   type UvTwoSheetZone,
 } from '../model/uvLayout';
+import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -462,8 +463,9 @@ export default function AppFrame() {
     allowPartShrink: authorizedPartShrinkTargetRef.current.get(modelId) === liveCount,
     allowSemanticClear: authorizedSemanticClearRef.current.has(modelId),
   });
-  const consumePartShrinkAuthorization = (modelId: string) => {
+  const consumeModelSaveAuthorizations = (modelId: string) => {
     authorizedPartShrinkTargetRef.current.delete(modelId);
+    authorizedSemanticClearRef.current.delete(modelId);
   };
   const worldDurableRefs = useRef<{
     pieces: EditorState['worldPieces'];
@@ -1500,7 +1502,11 @@ export default function AppFrame() {
 
   /** The single model commit path used by File → Save, first-atlas gating,
    * close/switch boundaries, and background autosave after first save. */
-  const saveActiveModelNow = (reason = 'Save', allowStalePaintLayout = false): boolean => {
+  const saveActiveModelNow = (
+    reason = 'Save',
+    allowStalePaintLayout = false,
+    keepLiveOptions: PaintLayoutKeepLiveOptions = {},
+  ): boolean => {
     const current = stateRef.current;
     const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
     const pkg = doc?.kind === 'model'
@@ -1516,7 +1522,7 @@ export default function AppFrame() {
       const opened = modelToolApiRef.current?.openPaintLayoutConflict({
         origin: 'save',
         unsaved: Boolean(current.modelDirty[pkg.id]),
-        keepLive: () => saveActiveModelNow(reason, true),
+        keepLive: (options) => saveActiveModelNow(reason, true, options),
         keepDisk: () => discardModelWorkingCopy(pkg.id, `Kept DISK for "${pkg.name}" — live edits and Ctrl+Z history were discarded`),
       }) === true;
       if (opened) {
@@ -1543,16 +1549,21 @@ export default function AppFrame() {
     };
     const result = materializeModelPackage(pkgToSave);
     const liveRows = current.modelParts[pkg.id] ?? [];
+    const structuralSaveOptions = partShrinkSaveOptions(pkg.id, liveRows.length);
     const artifactsOk = result.ok && writeModelArtifacts(
       pkg,
       partsMetaFromRows(liveRows),
       meshDocPartRangesFromRows(liveRows) ?? undefined,
-      partShrinkSaveOptions(pkg.id, liveRows.length),
+      {
+        ...structuralSaveOptions,
+        allowSemanticClear: keepLiveOptions.allowSemanticClear === true
+          || structuralSaveOptions.allowSemanticClear,
+      },
     );
     const ok = result.ok && artifactsOk;
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
     if (ok) {
-      consumePartShrinkAuthorization(pkg.id);
+      consumeModelSaveAuthorizations(pkg.id);
       // Existing package rows must be replaced too: world/livePush resolves
       // emitted lights and face rigs through MODEL_PACKAGES, so a successful
       // Save has to become live truth immediately, not only after a restart.
@@ -2335,7 +2346,7 @@ export default function AppFrame() {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the model document could not be saved without losing part ranges.' }));
         return;
       }
-      consumePartShrinkAuthorization(pkg.id);
+      consumeModelSaveAuthorizations(pkg.id);
       // Resolve the geometry through the ONE resolver the viewer uses — the package
       // meshdoc just written (host truth), else live seed parts, else the package
       // resolver. Cache it so the resident builder draws exactly what you see.
@@ -4043,7 +4054,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Character export stopped: the model document could not be saved without losing part ranges.' }));
       return;
     }
-    consumePartShrinkAuthorization(pkg.id);
+    consumeModelSaveAuthorizations(pkg.id);
     // Measured part centers off the meshdoc just written (host truth). Ranges
     // pair with rows by RANK (both ascend by lo — the parts.json contract); a
     // failed write degrades to name-only rows (binding holds, transforms identity).
@@ -6241,7 +6252,7 @@ export default function AppFrame() {
       partShrinkSaveOptions(pkg.id, liveRows.length),
     )) return null;
     upsertSavedPackage(pkgToSave);
-    consumePartShrinkAuthorization(pkg.id);
+    consumeModelSaveAuthorizations(pkg.id);
     savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
   };
@@ -6937,7 +6948,7 @@ export default function AppFrame() {
             onDiscardActiveModel={() => {
               if (activeModelId) discardModelWorkingCopy(activeModelId, 'Kept DISK — live edits and Ctrl+Z history were discarded');
             }}
-            onSavePaintConflictLive={() => saveActiveModelNow('Saved after choosing Keep LIVE', true)}
+            onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', true, options)}
             onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
             onModelDocumentMutated={markActiveModelDirty}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}

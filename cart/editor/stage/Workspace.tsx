@@ -7,6 +7,7 @@ import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 import type { PieceSelectionIntent } from '../world/selection';
+import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 
 export default function Workspace(props: {
   state: EditorState;
@@ -19,7 +20,7 @@ export default function Workspace(props: {
   modelOnDisk: boolean;
   modelReloadRevision: number;
   onDiscardActiveModel: () => void;
-  onSavePaintConflictLive: () => boolean;
+  onSavePaintConflictLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;

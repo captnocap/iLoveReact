@@ -9,6 +9,7 @@
 
 import {
   paintEraTriangleCount,
+  paintLayoutKeepLiveClearsSemantics,
   paintLayoutMismatchSentence,
   type PaintLayoutDiskFacts,
 } from './paintLayoutConflict';
@@ -21,6 +22,7 @@ function assert(condition: boolean, message: string) { if (!condition) throw new
 const disk = (variants: PaintLayoutDiskFacts['variants']): PaintLayoutDiskFacts => ({
   packageDir: '/models/example',
   doc: { bytes: 81099, modifiedMs: 1, stamp: '81099:1', triangles: 961, authoredFaces: 600 },
+  semantics: { namedFaces: 8, regions: [{ name: 'headrest_mount_left', faces: 8 }] },
   basePaint: { id: null, name: 'Base painting', triangles: 1019 },
   variants,
   marker: { reason: 'topology-changed', docStamp: '81099:1' },
@@ -47,6 +49,18 @@ test('same cardinality still explains face-layout staleness honestly', () => {
   assert(
     paintLayoutMismatchSentence(961, facts, '2').includes('paint mapping differs'),
     'same-count topology drift was presented as compatible',
+  );
+});
+
+test('Keep LIVE recognizes the disclosed removal of disk-only names', () => {
+  const facts = disk([]);
+  assert(
+    paintLayoutKeepLiveClearsSemantics({ namedFaces: 0 }, facts),
+    'an empty live table did not recognize the named disk state it will replace',
+  );
+  assert(
+    !paintLayoutKeepLiveClearsSemantics({ namedFaces: 1 }, facts),
+    'a resident named state was mistaken for a semantic clear',
   );
 });
 

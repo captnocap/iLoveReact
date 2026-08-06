@@ -36,6 +36,10 @@ export type PaintLayoutDiskFacts = {
     triangles: number | null;
     authoredFaces: number | null;
   } | null;
+  semantics: {
+    namedFaces: number;
+    regions: { name: string; faces: number }[];
+  };
   basePaint: PaintEraFact | null;
   variants: PaintEraFact[];
   marker: PaintLayoutStaleMarker | null;
@@ -46,6 +50,15 @@ export type PaintLayoutLiveFacts = {
   authoredFaces: number | null;
   generation: number | null;
   unsaved: boolean;
+  namedFaces: number;
+  semanticNames: string[];
+};
+
+export type PaintLayoutKeepLiveOptions = {
+  /** Keep LIVE is an explicit state choice. When the picker disclosed that the
+   * resident semantic table is empty while disk still has names, this capability
+   * lets that exact choice pass the semantic-erasure save guard (req_3900). */
+  allowSemanticClear?: boolean;
 };
 
 export function paintEraTriangleCount(cornerUv: unknown): number | null {
@@ -95,6 +108,13 @@ export function readPaintLayoutDiskFacts(pkg: PaintTarget): PaintLayoutDiskFacts
   const authoredFaceCount = mesh
     ? (mesh.faceGroups ? new Set(mesh.faceGroups).size : triangleCount)
     : null;
+  const semanticFaceCounts = new Map<number, number>();
+  for (const id of mesh?.semanticRegions ?? []) {
+    if (id !== 0xffffffff) semanticFaceCounts.set(id, (semanticFaceCounts.get(id) ?? 0) + 1);
+  }
+  const semanticRegions = (mesh?.semanticTable?.regions ?? [])
+    .map((region) => ({ name: region.name, faces: semanticFaceCounts.get(region.id) ?? 0 }))
+    .filter((region) => region.faces > 0);
   return {
     packageDir,
     doc: blob
@@ -106,12 +126,26 @@ export function readPaintLayoutDiskFacts(pkg: PaintTarget): PaintLayoutDiskFacts
         authoredFaces: authoredFaceCount,
       }
       : null,
+    semantics: {
+      namedFaces: semanticRegions.reduce((total, region) => total + region.faces, 0),
+      regions: semanticRegions,
+    },
     // These are intentionally direct reads. readModelBasePaint is gated while the
     // stale marker exists, but the picker exists to show that preserved evidence.
     basePaint: parsePaintEra(readFile(`${packageDir}/atlases/base.paint.json`), null, 'Base painting'),
     variants: listPaintVariants(pkg).map(variantFact),
     marker: readStaleMarker(readFile(`${packageDir}/${PAINT_LAYOUT_STALE_FILE}`)),
   };
+}
+
+/** True only for the protected destructive edge: live has no named faces while
+ * disk still does. The picker can disclose this fact before its Keep LIVE verb
+ * mints the one-shot save authorization; ordinary saves remain guarded. */
+export function paintLayoutKeepLiveClearsSemantics(
+  live: Pick<PaintLayoutLiveFacts, 'namedFaces'>,
+  disk: PaintLayoutDiskFacts | null,
+): boolean {
+  return live.namedFaces === 0 && (disk?.semantics?.namedFaces ?? 0) > 0;
 }
 
 export function paintLayoutMismatchSentence(
