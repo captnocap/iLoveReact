@@ -162,6 +162,12 @@ import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource }
 import {
   choosePartAppendRoute,
 } from '../model/partResidency';
+import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
+import {
+  planSelectionOwnerSurgery,
+  selectionOwnerElementLabel,
+  type SelectionOwnerPlan,
+} from '../model/selectionOwnerSurgery';
 import {
   groupPathById,
   nextDuplicateGroupName,
@@ -4186,6 +4192,7 @@ export default function AppFrame() {
   const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
   const selectedPartIdsRef = useRef<string[]>([]);
   selectedPartIdsRef.current = selectedPartIds;
+  const selectionSurgeryRef = useRef<{ plan: SelectionOwnerPlan; cursor: number } | null>(null);
   // Focus is deliberately locked by default: stage clicks are often part of a
   // risky edit gesture, while selecting from the outliner remains explicit.
   const [stagePartFocusEnabled, setStagePartFocusEnabled] = useState(false);
@@ -4253,11 +4260,102 @@ export default function AppFrame() {
     // callback will not fire on its own. Ping the viewer to mirror host mode/counts.
     host.__meshEditSelChanged?.();
   };
+  const selectionElementIds = (selection: ModelSelectionSnapshot): number[] => (
+    selection.mode === 1
+      ? selection.vertices.map((vertex) => vertex.id)
+      : selection.mode === 2
+        ? selection.edges.map((edge) => edge.id)
+        : selection.mode === 3
+          ? selection.triangles.map((triangle) => triangle.id)
+          : []
+  );
+  const sameElementIds = (a: readonly number[], b: readonly number[]): boolean =>
+    a.length === b.length && a.every((id, index) => id === b[index]);
+  const focusSelectionOwner = () => {
+    const current = stateRef.current;
+    const modelId = activePartsModelId(current);
+    const parts = modelId ? (current.modelParts[modelId] ?? []) : [];
+    if (!modelId || parts.length === 0) {
+      setState((prev) => ({ ...prev, status: 'selection surgery needs an open model with Outliner parts' }));
+      return;
+    }
+
+    const selection = parseModelSelectionSnapshot((globalThis as any).__mesh_edit_selection?.());
+    let session = selectionSurgeryRef.current;
+    let cursor = 0;
+    if (session && selection && selection.mode === session.plan.mode) {
+      const activeGroup = session.plan.groups[session.cursor];
+      if (activeGroup && sameElementIds(selectionElementIds(selection), activeGroup.elementIds)) {
+        cursor = (session.cursor + 1) % session.plan.groups.length;
+      } else {
+        session = null;
+      }
+    } else {
+      session = null;
+    }
+
+    if (!session) {
+      const result = planSelectionOwnerSurgery(selection, parts);
+      if (!result.ok) {
+        selectionSurgeryRef.current = null;
+        setState((prev) => ({ ...prev, status: `selection surgery: ${result.reason}` }));
+        return;
+      }
+      const activeIndex = result.plan.groups.findIndex((group) => group.partId === current.modelActivePartId);
+      cursor = activeIndex >= 0 ? activeIndex : 0;
+      session = { plan: result.plan, cursor };
+    }
+
+    const target = session.plan.groups[cursor]!;
+    if (!target.visible) {
+      selectionSurgeryRef.current = session;
+      setState((prev) => ({ ...prev, status: `selection surgery: ${target.partName} owns this selection but is hidden — show it, then locate again` }));
+      return;
+    }
+
+    setSelectedPartIds([target.partId]);
+    selectedPartIdsRef.current = [target.partId];
+    pushPartSetToHost(current, parts, [target.partId], target.partId);
+
+    const host = globalThis as any;
+    const selectElement = session.plan.mode === 1
+      ? host.__mesh_edit_select_vertex
+      : session.plan.mode === 2
+        ? host.__mesh_edit_select_edge
+        : host.__mesh_edit_select_face;
+    let restored = 0;
+    if (typeof selectElement === 'function') {
+      for (const id of target.elementIds) {
+        if (selectElement(id, restored > 0 ? 1 : 0) !== 1) break;
+        restored += 1;
+      }
+    }
+    if (restored !== target.elementIds.length) {
+      host.__mesh_edit_clear?.();
+      host.__meshEditSelChanged?.();
+      selectionSurgeryRef.current = null;
+      setState((prev) => ({ ...prev, modelActivePartId: target.partId, status: 'selection surgery stopped — topology changed while the selection was being restored; select it again' }));
+      return;
+    }
+
+    session.cursor = cursor;
+    selectionSurgeryRef.current = session.plan.groups.length > 1 ? session : null;
+    host.__meshEditSelChanged?.();
+    const label = selectionOwnerElementLabel(session.plan.mode, target.elementIds.length);
+    const cycle = session.plan.groups.length > 1 ? ` · owner ${cursor + 1}/${session.plan.groups.length}; press again to cycle` : '';
+    const ownershipVerb = target.elementIds.length === 1 ? 'belongs' : 'belong';
+    setState((prev) => ({
+      ...prev,
+      modelActivePartId: target.partId,
+      status: `selection surgery: ${label} ${ownershipVerb} to ${target.partName}${cycle}`,
+    }));
+  };
   const selectPart = (id: string) => {
     // Focus = SCOPE editing to the selected set. EXACTLY ONE primary is always focused
     // (req_2644): a plain click replaces the set with [id] (clicking the focused row
     // RE-ASSERTS it — never a toggle-off into scope(0,0)); shift-click toggles set
     // membership (req_2659) but the set never empties.
+    selectionSurgeryRef.current = null;
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
     const cur = effectiveSelectedIds(state, parts, selectedPartIds);
@@ -6672,6 +6770,7 @@ export default function AppFrame() {
     // A live role-naming session turns the row click into the assignment.
     // Read through the ref: the row's registered handler may predate the session.
     onSelectPart: guarded((id: string) => (roleNamerRef.current ? assignRoleToPart(id) : selectPart(id))),
+    onFocusSelectionOwner: guarded(focusSelectionOwner),
     onRenamePart: guarded(renamePart),
     onToggleVisiblePart: guarded(toggleVisiblePart),
     onDeletePart: guarded(deletePart),

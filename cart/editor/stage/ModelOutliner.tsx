@@ -39,7 +39,7 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, stageFocusEnabled, onToggleStageFocus, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel, roleNamer, onStartRoleNamer, onSkipRole, onCancelRoleNamer }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, stageFocusEnabled, onToggleStageFocus, onSelect, onFocusSelectionOwner, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onMoveItem, onAdd, onImportModel, roleNamer, onStartRoleNamer, onSkipRole, onCancelRoleNamer }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
@@ -55,6 +55,8 @@ export default function ModelOutliner({ parts, activeId, selectedIds, stageFocus
   onSkipRole?: () => void;
   onCancelRoleNamer?: () => void;
   onSelect: (id: string) => void;
+  /** Locate selected mesh topology in the Outliner without dropping the selection. */
+  onFocusSelectionOwner: () => void;
   onRename: (id: string, name: string) => void;
   onToggleVisible: (id: string) => void;
   onDuplicate: (id: string) => void;
@@ -290,6 +292,13 @@ export default function ModelOutliner({ parts, activeId, selectedIds, stageFocus
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: '#536174', fontSize: 9, fontFamily: 'monospace' }}>Ctrl C/V/D</Text>
         <Text style={{ color: '#5d6878', fontSize: 11, fontFamily: 'monospace' }}>{`${parts.length}`}</Text>
+        <Pressable
+          style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }}
+          onPress={onFocusSelectionOwner}
+          tooltip="Selection surgery — focus the Outliner part that owns the selected vertices, edges, or faces; mixed owners cycle one at a time"
+        >
+          <Icon name="LocateFixed" size={12} color="#d5aa69" />
+        </Pressable>
         <Pressable
           style={{ width: 21, height: 21, alignItems: 'center', justifyContent: 'center' }}
           onPress={onToggleStageFocus}

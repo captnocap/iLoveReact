@@ -19,6 +19,8 @@ import { modelDocumentSeed, type ModelDocumentSeed } from '../model/modelDocumen
 // the per-model parts from state.
 export type OutlinerHandlers = {
   onSelectPart: (id: string) => void;
+  /** Focus the Outliner owner of the live topology selection and preserve that selection. */
+  onFocusSelectionOwner: () => void;
   onRenamePart: (id: string, name: string) => void;
   onToggleVisiblePart: (id: string) => void;
   onDeletePart: (id: string) => void;

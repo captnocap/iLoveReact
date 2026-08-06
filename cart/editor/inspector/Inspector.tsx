@@ -889,6 +889,7 @@ export default function Inspector(props: {
                     stageFocusEnabled={props.stagePartFocusEnabled}
                     onToggleStageFocus={props.onToggleStagePartFocus}
                     onSelect={props.outlinerHandlers.onSelectPart}
+                    onFocusSelectionOwner={props.outlinerHandlers.onFocusSelectionOwner}
                     onRename={props.outlinerHandlers.onRenamePart}
                     onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
                     onDuplicate={props.outlinerHandlers.onDuplicatePart}
