@@ -31,6 +31,7 @@ const meshdoc_format = @import("gpu/meshdoc_format.zig");
 const material_tex = @import("gpu/material_tex.zig");
 const paint_program = @import("gpu/paint_program.zig");
 const capture = @import("gpu/capture.zig");
+const host_tree = @import("host_tree.zig");
 const root = @import("root");
 
 // Retained source mesh + its path, so the live quality slider can re-decimate from the
@@ -697,6 +698,66 @@ fn hostModelCamSetPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const tz: f32 = @floatCast(argToF64(info, 5) orelse 0);
     const ok = scene3d.orbitSetPose(yaw, pitch, dist, .{ tx, ty, tz });
     if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn liveOrbitSceneFrom(node_id: u32) ?*host_tree.Node {
+    const node = host_tree.getNode(node_id) orelse return null;
+    if (node.style.display == .none) return null;
+    if (node.scene3d) {
+        for (host_tree.getChildren(node_id)) |child_id| {
+            const child = host_tree.getNode(child_id) orelse continue;
+            if (child.scene3d_camera and child.scene3d_camera_orbit) return node;
+        }
+    }
+    for (host_tree.getChildren(node_id)) |child_id| {
+        if (liveOrbitSceneFrom(child_id)) |scene| return scene;
+    }
+    return null;
+}
+
+fn liveOrbitScene() ?*host_tree.Node {
+    for (host_tree.getRootChildren()) |node_id| {
+        if (liveOrbitSceneFrom(node_id)) |scene| return scene;
+    }
+    return null;
+}
+
+/// __model_shot_offscreen(path, w, h[, yaw, pitch, dist, tx, ty, tz]) -> 1|0.
+/// Re-materialize the orbit Scene3D subtree through the same host-tree path the
+/// live frame uses before engine.paintNode hands it to scene3d.render.
+fn hostModelShotOffscreen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer std.heap.c_allocator.free(path);
+    const width_raw = argToI32(info, 1) orelse return setReturnNumber(info, 0);
+    const height_raw = argToI32(info, 2) orelse return setReturnNumber(info, 0);
+    if (path.len == 0 or width_raw <= 0 or height_raw <= 0) return setReturnNumber(info, 0);
+
+    const pose: ?[6]f32 = if (info.length() >= 9) .{
+        @floatCast(argToF64(info, 3) orelse return setReturnNumber(info, 0)),
+        @floatCast(argToF64(info, 4) orelse return setReturnNumber(info, 0)),
+        @floatCast(argToF64(info, 5) orelse return setReturnNumber(info, 0)),
+        @floatCast(argToF64(info, 6) orelse return setReturnNumber(info, 0)),
+        @floatCast(argToF64(info, 7) orelse return setReturnNumber(info, 0)),
+        @floatCast(argToF64(info, 8) orelse return setReturnNumber(info, 0)),
+    } else null;
+
+    const source_scene = liveOrbitScene() orelse return setReturnNumber(info, 0);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var scene = source_scene.*;
+    scene.children = host_tree.materializeChildren(arena.allocator(), source_scene.id);
+    const ok = scene3d.modelShotOffscreen(
+        host.io,
+        host.environ,
+        &scene,
+        path,
+        @intCast(width_raw),
+        @intCast(height_raw),
+        pose,
+    );
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
@@ -4742,6 +4803,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
     v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
     v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
+    v8_runtime.registerHostFn("__model_shot_offscreen", hostModelShotOffscreen);
     v8_runtime.registerHostFn("__model_orbit_frame", hostModelOrbitFrame);
     v8_runtime.registerHostFn("__mesh_live_frame", hostMeshLiveFrame);
     v8_runtime.registerHostFn("__model_bd_gizmo_set", hostModelBdGizmoSet);

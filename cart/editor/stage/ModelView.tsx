@@ -3457,6 +3457,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       },
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
       captureFrame: (path) => captureFrame(path),
+      shotOffscreen: (path, width, height, pose) => Boolean(
+        (globalThis as any).__model_shot_offscreen?.(path, width, height, ...(pose ?? [])),
+      ),
     });
     (globalThis as any).__agentSeat = seat;
     const refresh = () => setSemanticRevision((value) => value + 1);

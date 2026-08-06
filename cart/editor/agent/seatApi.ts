@@ -372,6 +372,7 @@ export type SeatAdapter = {
    *  runtime/capture.ts AND the binary carries -Dhas-capture. Never touches the
    *  desktop: it reads back the frame the app itself composed. */
   captureFrame?: (path: string) => boolean;
+  shotOffscreen?: (path: string, width: number, height: number, pose: number[] | null) => boolean;
   /** Full package save through AppFrame: meshdoc v4, semantic table, parts,
    *  atlas, and package metadata cross the cold-restart boundary together. */
   persist?: () => boolean;
@@ -1414,6 +1415,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const newPrimitive = (spec: SeatPrimitiveSpec): boolean => adapter.newPrimitive?.(spec) === true;
   const shot = (path: string): boolean => adapter.captureFrame?.(path) === true;
+  const shotOffscreen = (path: string, width: number, height: number, pose: number[] | null): boolean => adapter.shotOffscreen?.(path, width, height, pose) === true;
   const recipeList = () => [{
     name: 'dial', status: 'candidate' as const,
     description: 'Place a resident cylinder normal to one selected target face.',
@@ -1477,7 +1479,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
-    addPrimitive, newPrimitive, shot, recipeList, runRecipe, reply,
+    addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
   };
 }
 
@@ -1821,6 +1823,14 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'shot': {
         const path = String(args.path ?? '');
+        if (args.offscreen === true) {
+          const width = Number(args.width ?? 1024);
+          const height = Number(args.height ?? 1024);
+          const pose = Array.isArray(args.pose) ? args.pose.map(Number) : null;
+          const ok = seat.shotOffscreen(path, width, height, pose);
+          return seat.reply('shot', ok, ok ? { path } : undefined, ok ? undefined
+            : 'capture door unavailable — the cart must import runtime/capture.ts and the binary must be built with -Dhas-capture');
+        }
         const ok = seat.shot(path);
         return seat.reply('shot', ok, ok ? { path } : undefined, ok ? undefined
           : 'capture door unavailable — the cart must import runtime/capture.ts and the binary must be built with -Dhas-capture');

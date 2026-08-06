@@ -11,6 +11,7 @@ const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
 const terrain_grid = @import("terrain_grid.zig");
 const core = @import("gpu.zig");
+const capture = @import("capture.zig");
 const images = @import("images.zig");
 const build_options = @import("build_options");
 const math = @import("../math/root.zig");
@@ -13932,7 +13933,7 @@ fn ensureRt(slot: *Rt, w: u32, h: u32) ?*Rt {
         .sample_count = 1,
         .dimension = .@"2d",
         .format = .rgba8_unorm,
-        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding,
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_src,
     }) orelse return null;
     slot.color_view = slot.color_texture.?.createView(&.{
         .format = .rgba8_unorm,
@@ -14941,6 +14942,35 @@ pub fn renderDetached(io: std.Io, environ: *const std.process.Environ.Map, targe
     // Detached targets are their own window/surface — the scene fills it, origin (0,0).
     drawScene(io, environ, node, slot, 0, 0, w, h);
     return slot.color_view;
+}
+
+/// Offscreen model shot (req_3850 slice 5): render `node`'s scene into a private
+/// detached target at an optional explicit orbit pose, read it back, write a PNG.
+/// The live orbit is saved and restored — the visible viewport never moves. The
+/// pose bypasses the camera lock deliberately: a programmatic render is not a
+/// user camera gesture. Returns false on any failure; never touches the swapchain.
+pub fn modelShotOffscreen(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, path: []const u8, w: u32, h: u32, pose: ?[6]f32) bool {
+    const saved_orbit = g_orbit;
+    defer g_orbit = saved_orbit;
+
+    if (pose) |p| {
+        g_orbit.yaw = p[0];
+        g_orbit.pitch = std.math.clamp(p[1], -ORBIT_PITCH_LIM, ORBIT_PITCH_LIM);
+        g_orbit.dist = @max(0.01, p[2]);
+        g_orbit.target = .{ p[3], p[4], p[5] };
+    }
+
+    var target: DetachedTarget = .{};
+    defer target.deinit();
+    if (renderDetached(io, environ, &target, node, @floatFromInt(w), @floatFromInt(h)) == null) return false;
+
+    const tex = target.slot.color_texture orelse return false;
+    // Rt targets are rgba8_unorm, so unlike a BGRA static/swapchain surface they
+    // need no red/blue swizzle during readback.
+    const raw = core.readbackTexture(tex, w, h, false) orelse return false;
+    defer std.heap.page_allocator.free(raw);
+    if (raw.len < 8) return false;
+    return capture.writeRgbaPng(io, path, raw[8..], w, h);
 }
 
 // Draw the analytic skybox as one fullscreen triangle. Reconstructs each
