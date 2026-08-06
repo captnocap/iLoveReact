@@ -1326,7 +1326,8 @@ fn hostMeshTopoConnectVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callco
 }
 
 /// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth",
-/// "sidesBefore"?,"sidesAfter"?}. Capture one selected sharp manifold edge, one
+/// "sidesBefore"?,"defaultTargetSides"?,"minimumTargetSides"?,"maximumTargetSides"?}.
+/// Capture one selected sharp manifold edge, one
 /// 3+-edge corner, or one complete selected open-boundary loop as a host-owned live
 /// preview session. Widths are metres; the Studio popup converts them to modeling u.
 fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1344,8 +1345,8 @@ fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const json = if (bevel.kind == .boundary)
         std.fmt.bufPrint(
             &buf,
-            "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d},\"sidesBefore\":{d},\"sidesAfter\":{d}}}",
-            .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width, bevel.sides_before, bevel.sides_after },
+            "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d},\"sidesBefore\":{d},\"defaultTargetSides\":{d},\"minimumTargetSides\":{d},\"maximumTargetSides\":{d}}}",
+            .{ kind, bevel.default_width, bevel.minimum_width, bevel.max_width, bevel.sides_before, bevel.default_target_sides, bevel.minimum_target_sides, bevel.maximum_target_sides },
         )
     else
         std.fmt.bufPrint(
@@ -1360,12 +1361,13 @@ fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnString(info, written);
 }
 
-/// __mesh_bevel_preview(width) → JSON {"ok","key","count","fallbackReason"?}.
+/// __mesh_bevel_preview(width,targetSides) → JSON {"ok","key","count","fallbackReason"?}.
 /// Rebuild from the captured indexed base and install a non-journaled live preview.
 fn hostMeshBevelPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const width: f32 = @floatCast(argToF64(info, 0) orelse 0);
-    const ok = scene3d.meshBevelPreview(width);
+    const target_sides: u32 = @intCast(@max(argToI32(info, 1) orelse 0, 0));
+    const ok = scene3d.meshBevelPreview(width, target_sides);
     if (ok) state.markDirty();
     setMeshBevelPreviewReturn(info, ok);
 }

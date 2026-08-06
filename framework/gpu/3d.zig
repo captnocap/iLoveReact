@@ -3440,12 +3440,14 @@ pub const BevelInfo = struct {
     minimum_width: f32,
     max_width: f32,
     sides_before: u32 = 0,
-    sides_after: u32 = 0,
+    default_target_sides: u32 = 0,
+    minimum_target_sides: u32 = 0,
+    maximum_target_sides: u32 = 0,
 };
 
 /// Capture either one vertex/sharp edge or one complete selected open-boundary edge
-/// loop and resolve it into stable indexed identity. Boundary loops chamfer every
-/// corner simultaneously, changing any N-sided opening into a 2N-sided opening.
+/// loop and resolve it into stable indexed identity. Boundary loops expose a strict
+/// larger target-side range; each preview rebuilds that N-to-M chamfer atomically.
 pub fn meshBevelBegin() ?BevelInfo {
     if (g_lc != null) return null;
     if (g_bevel != null) _ = meshBevelEnd(false);
@@ -3492,6 +3494,7 @@ pub fn meshBevelBegin() ?BevelInfo {
     var target: ?indexed_edit_mesh.BevelTarget = null;
     var boundary_loop: ?[]u32 = null;
     var boundary_selection: ?[]mesh_edit.Edge = null;
+    var boundary_info: ?indexed_edit_mesh.BoundaryChamferSelection = null;
     defer if (!ownership_adopted) {
         if (boundary_loop) |loop| std.heap.c_allocator.free(loop);
         if (boundary_selection) |edges| std.heap.c_allocator.free(edges);
@@ -3540,6 +3543,7 @@ pub fn meshBevelBegin() ?BevelInfo {
             const loop = std.heap.c_allocator.alloc(u32, selected_count) catch return null;
             boundary_loop = loop;
             const resolved = base_mesh.resolveBoundaryChamfer(edge_positions, part, loop) orelse return null;
+            boundary_info = resolved;
             kind = .boundary;
             shared_max_width = resolved.max_width;
         },
@@ -3620,21 +3624,23 @@ pub fn meshBevelBegin() ?BevelInfo {
         .default_width = default_width,
         .minimum_width = minimum_width,
         .max_width = shared_max_width,
-        .sides_before = if (boundary_loop) |loop| @intCast(loop.len) else 0,
-        .sides_after = if (boundary_loop) |loop| @intCast(loop.len * 2) else 0,
+        .sides_before = if (boundary_info) |resolved| resolved.sides_before else 0,
+        .default_target_sides = if (boundary_info) |resolved| resolved.default_target_sides else 0,
+        .minimum_target_sides = if (boundary_info) |resolved| resolved.minimum_target_sides else 0,
+        .maximum_target_sides = if (boundary_info) |resolved| resolved.maximum_target_sides else 0,
     };
 }
 
 /// Rebuild a bevel preview from the captured indexed base. Preview never touches the
 /// undo stack; all new render triangles inherit paint/material/part provenance through
 /// the indexed lowering map.
-pub fn meshBevelPreview(width_raw: f32) bool {
+pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
     const session: *BevelSession = if (g_bevel) |*active| active else return false;
     session.last_preview_ok = false;
     session.last_reason = switch (session.kind) {
         .edge => "This edge cannot produce a durable bevel at that width",
         .vertex => "This corner cannot produce a durable bevel at that width",
-        .boundary => "This opening cannot produce a durable boundary chamfer at that width",
+        .boundary => "This opening cannot produce that target side count at this width",
     };
     const width = std.math.clamp(
         width_raw,
@@ -3645,7 +3651,7 @@ pub fn meshBevelPreview(width_raw: f32) bool {
     defer preview.deinit();
     const changed = switch (session.kind) {
         .edge, .vertex => preview.bevel(session.target orelse return false, width) catch return false,
-        .boundary => preview.chamferBoundary(session.boundary_loop orelse return false, width) catch return false,
+        .boundary => preview.chamferBoundary(session.boundary_loop orelse return false, width, target_sides) catch return false,
     };
     if (!changed) return false;
     // Mirror (req_3797): every resolved twin bevels at the same width in this preview

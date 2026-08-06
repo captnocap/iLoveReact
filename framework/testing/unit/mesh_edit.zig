@@ -2361,7 +2361,30 @@ fn boundaryChamferRingSoup(out: []f32) void {
     }
 }
 
-test "selected open boundary loop chamfers every N-sided corner into one 2N-sided opening" {
+fn countOpenEdges(mesh: *const indexed_edit_mesh.Mesh) !u32 {
+    var incidences = std.AutoHashMap(u64, u32).init(testing.allocator);
+    defer incidences.deinit();
+    for (mesh.faces.items) |face| {
+        if (!face.alive) continue;
+        for (face.vertices.items, 0..) |vertex, corner| {
+            const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            const lo = @min(vertex, next);
+            const hi = @max(vertex, next);
+            const key = (@as(u64, lo) << 32) | hi;
+            const entry = try incidences.getOrPut(key);
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        }
+    }
+    var boundary_edges: u32 = 0;
+    var edge_it = incidences.valueIterator();
+    while (edge_it.next()) |incidence| if (incidence.* == 1) {
+        boundary_edges += 1;
+    };
+    return boundary_edges;
+}
+
+test "selected open boundary loop chamfers to its chosen target side count" {
     var soup = [_]f32{0} ** (8 * 3 * 8);
     boundaryChamferRingSoup(soup[0..]);
     const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3 };
@@ -2379,30 +2402,12 @@ test "selected open boundary loop chamfers every N-sided corner into one 2N-side
     const selection = indexed.resolveBoundaryChamfer(selected_edges[0..], 7, loop[0..]) orelse
         return error.ExpectedOpenBoundaryLoop;
     try testing.expectEqual(@as(u32, 4), selection.sides_before);
-    try testing.expectEqual(@as(u32, 8), selection.sides_after);
+    try testing.expectEqual(@as(u32, 8), selection.default_target_sides);
+    try testing.expectEqual(@as(u32, 5), selection.minimum_target_sides);
+    try testing.expectEqual(@as(u32, 256), selection.maximum_target_sides);
     try testing.expectApproxEqAbs(@as(f32, 0.9), selection.max_width, 0.00001);
-    try testing.expect(try indexed.chamferBoundary(loop[0..], 0.25));
-
-    var open_edges = std.AutoHashMap(u64, u32).init(testing.allocator);
-    defer open_edges.deinit();
-    for (indexed.faces.items) |face| {
-        if (!face.alive) continue;
-        for (face.vertices.items, 0..) |vertex, corner| {
-            const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
-            const lo = @min(vertex, next);
-            const hi = @max(vertex, next);
-            const key = (@as(u64, lo) << 32) | hi;
-            const entry = try open_edges.getOrPut(key);
-            if (!entry.found_existing) entry.value_ptr.* = 0;
-            entry.value_ptr.* += 1;
-        }
-    }
-    var boundary_edges: u32 = 0;
-    var edge_it = open_edges.valueIterator();
-    while (edge_it.next()) |incidence| if (incidence.* == 1) {
-        boundary_edges += 1;
-    };
-    try testing.expectEqual(@as(u32, 12), boundary_edges); // 4 outer + 8 inner.
+    try testing.expect(try indexed.chamferBoundary(loop[0..], 0.25, 8));
+    try testing.expectEqual(@as(u32, 12), try countOpenEdges(&indexed)); // 4 outer + 8 inner.
     // The old corners become interior support vertices for the four new corner
     // faces; only the OPEN boundary changes from four edges to eight.
     for (loop) |vertex| try testing.expect(indexed.vertices.items[vertex].alive);
@@ -2411,6 +2416,51 @@ test "selected open boundary loop chamfers every N-sided corner into one 2N-side
     defer lowered.deinit();
     try testing.expectEqual(@as(u32, 20), lowered.tri_count);
     for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+}
+
+test "boundary chamfer supports non-doubling and multi-segment targets" {
+    const selected_edges = [4][2][3]f32{
+        .{ boundary_chamfer_inner[0], boundary_chamfer_inner[1] },
+        .{ boundary_chamfer_inner[1], boundary_chamfer_inner[2] },
+        .{ boundary_chamfer_inner[2], boundary_chamfer_inner[3] },
+        .{ boundary_chamfer_inner[3], boundary_chamfer_inner[0] },
+    };
+    for ([_]u32{ 6, 12 }) |target_sides| {
+        var soup = [_]f32{0} ** (8 * 3 * 8);
+        boundaryChamferRingSoup(soup[0..]);
+        const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3 };
+        const parts = [_]u32{7} ** 8;
+        var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 8, groups[0..], parts[0..]);
+        defer indexed.deinit();
+        var loop: [selected_edges.len]u32 = undefined;
+        _ = indexed.resolveBoundaryChamfer(selected_edges[0..], 7, loop[0..]) orelse
+            return error.ExpectedOpenBoundaryLoop;
+        try testing.expect(try indexed.chamferBoundary(loop[0..], 0.25, target_sides));
+        try testing.expectEqual(@as(u32, 4) + target_sides, try countOpenEdges(&indexed));
+        var lowered = try indexed.lower();
+        defer lowered.deinit();
+        for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+    }
+}
+
+test "boundary chamfer rejects target counts that do not refine the opening" {
+    var soup = [_]f32{0} ** (8 * 3 * 8);
+    boundaryChamferRingSoup(soup[0..]);
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3 };
+    const parts = [_]u32{7} ** 8;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 8, groups[0..], parts[0..]);
+    defer indexed.deinit();
+    const selected_edges = [4][2][3]f32{
+        .{ boundary_chamfer_inner[0], boundary_chamfer_inner[1] },
+        .{ boundary_chamfer_inner[1], boundary_chamfer_inner[2] },
+        .{ boundary_chamfer_inner[2], boundary_chamfer_inner[3] },
+        .{ boundary_chamfer_inner[3], boundary_chamfer_inner[0] },
+    };
+    var loop: [selected_edges.len]u32 = undefined;
+    _ = indexed.resolveBoundaryChamfer(selected_edges[0..], 7, loop[0..]) orelse
+        return error.ExpectedOpenBoundaryLoop;
+    try testing.expect(!(try indexed.chamferBoundary(loop[0..], 0.25, 4)));
+    try testing.expect(!(try indexed.chamferBoundary(loop[0..], 0.25, 257)));
 }
 
 test "boundary chamfer rejects an open chain and a closed manifold loop" {
