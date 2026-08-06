@@ -142,6 +142,13 @@ export function meshDocPartRangesComplete(partCount: number, hostRangeCount: num
   return partCount > 0 && hostRangeCount === partCount;
 }
 
+/** The part-count authority used by the destructive-save guard. A real range
+ * table belongs to doc.blob and wins over its fallible metadata sidecar;
+ * rangeless legacy documents have only the sidecar to describe their parts. */
+export function meshDocDurablePartCount(storedRangeCount: number | undefined, savedPartCount: number): number {
+  return (storedRangeCount ?? 0) >= 1 ? storedRangeCount! : savedPartCount;
+}
+
 export function meshDocPartMetadataCanShrink(
   storedRangeCount: number | undefined,
   savedPartCount: number,
@@ -161,7 +168,7 @@ export function meshDocPartMetadataCanShrink(
   // boundary — the save REPAIRS the sidecar. A rangeless legacy doc still
   // falls back to the sidecar's count as its only durable authority, so a
   // collapsed parts.json can never overwrite 15 saved names (the reverse tear).
-  const durablePartCount = (storedRangeCount ?? 0) >= 1 ? storedRangeCount! : savedPartCount;
+  const durablePartCount = meshDocDurablePartCount(storedRangeCount, savedPartCount);
   return livePartCount >= durablePartCount || explicitlyAuthorized;
 }
 

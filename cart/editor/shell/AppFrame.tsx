@@ -104,6 +104,7 @@ import {
   paintLayoutConflictAckHotKey,
   paintLayoutConflictRevision,
   paintLayoutConflictRevisionIsAcknowledged,
+  modelRevisionPartConflict,
   readPaintLayoutDiskFacts,
   type PaintLayoutKeepLiveOptions,
 } from '../model/paintLayoutConflict';
@@ -1533,15 +1534,28 @@ export default function AppFrame() {
     const hasRecoverablePaint = alreadyOnDisk
       && (hasStoredModelPaint(pkg) || modelPaintLayoutIsStale(pkg));
     const paintConflictDisk = alreadyOnDisk ? readPaintLayoutDiskFacts(pkg) : null;
+    const liveRows = current.modelParts[pkg.id] ?? [];
+    const structuralSaveOptions = partShrinkSaveOptions(pkg.id, liveRows.length);
+    const diskPartCount = paintConflictDisk?.doc?.parts ?? null;
+    const partCountConflict = modelRevisionPartConflict(
+      liveRows.length,
+      diskPartCount,
+      structuralSaveOptions.allowPartShrink,
+    );
     const paintConflictAckKey = paintLayoutConflictAckHotKey(modelDocSessionId(pkg.kind, pkg.id));
     const paintConflictAcknowledged = paintLayoutConflictRevisionIsAcknowledged(
       getHotState<string | null>(paintConflictAckKey, null),
       paintConflictDisk,
     );
-    if (!allowStalePaintLayout && stalePaintLayout && hasRecoverablePaint && !paintConflictAcknowledged) {
+    const paintLayoutConflict = stalePaintLayout && hasRecoverablePaint && !paintConflictAcknowledged;
+    if (!allowStalePaintLayout && (partCountConflict !== null || paintLayoutConflict)) {
       const opened = modelToolApiRef.current?.openPaintLayoutConflict({
         origin: 'save',
         unsaved: Boolean(current.modelDirty[pkg.id]),
+        reason: partCountConflict
+          ? partCountConflict
+          : { kind: 'paint-layout' },
+        remakePaintAfterKeepLive: stalePaintLayout && hasRecoverablePaint,
         keepLive: (options) => saveActiveModelNow(reason, true, options),
         keepDisk: () => discardModelWorkingCopy(pkg.id, `Kept DISK for "${pkg.name}" — live edits and Ctrl+Z history were discarded`),
       }) === true;
@@ -1550,7 +1564,9 @@ export default function AppFrame() {
           ...prev,
           openMenu: null,
           actionMenu: 'File',
-          status: `${reason} paused: live geometry and saved paint disagree — choose Keep LIVE or Keep DISK`,
+          status: partCountConflict
+            ? `${reason} paused: LIVE has ${liveRows.length} parts and DISK has ${diskPartCount} — choose Keep LIVE or Keep DISK`
+            : `${reason} paused: live geometry and saved paint disagree — choose Keep LIVE or Keep DISK`,
         }));
         return false;
       }
@@ -1568,14 +1584,14 @@ export default function AppFrame() {
       lights,
     };
     const result = materializeModelPackage(pkgToSave);
-    const liveRows = current.modelParts[pkg.id] ?? [];
-    const structuralSaveOptions = partShrinkSaveOptions(pkg.id, liveRows.length);
     const artifactsOk = result.ok && writeModelArtifacts(
       pkg,
       partsMetaFromRows(liveRows),
       meshDocPartRangesFromRows(liveRows) ?? undefined,
       {
         ...structuralSaveOptions,
+        allowPartShrink: keepLiveOptions.allowPartShrink === true
+          || structuralSaveOptions.allowPartShrink,
         allowSemanticClear: keepLiveOptions.allowSemanticClear === true
           || structuralSaveOptions.allowSemanticClear,
       },

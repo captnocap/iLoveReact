@@ -108,8 +108,10 @@ import {
   paintLayoutConflictRevision,
   paintLayoutConflictRevisionIsAcknowledged,
   paintLayoutKeepLiveClearsSemantics,
-  paintLayoutMismatchSentence,
+  modelRevisionKeepLiveOptions,
+  modelRevisionMismatchSentence,
   readPaintLayoutDiskFacts,
+  type ModelRevisionConflictReason,
   type PaintLayoutDiskFacts,
   type PaintLayoutKeepLiveOptions,
   type PaintLayoutLiveFacts,
@@ -391,6 +393,8 @@ export type ModelToolApi = {
 export type PaintLayoutSaveConflictRequest = {
   origin: 'save';
   unsaved: boolean;
+  reason?: ModelRevisionConflictReason;
+  remakePaintAfterKeepLive?: boolean;
   keepLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   keepDisk: () => void;
 };
@@ -462,6 +466,8 @@ type PaintLayoutConflictSession = {
   requestedVariantName: string | null;
   live: PaintLayoutLiveFacts;
   disk: PaintLayoutDiskFacts | null;
+  reason: ModelRevisionConflictReason;
+  remakePaintAfterKeepLive: boolean;
   keepLive?: (options?: PaintLayoutKeepLiveOptions) => boolean;
   keepDisk?: () => void;
   confirmDisk: boolean;
@@ -1692,6 +1698,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       authoredFaces: percept?.authoredFaces ?? authoredFaces,
       generation: percept?.generation ?? session?.generation ?? null,
       unsaved: saveRequest?.unsaved ?? documentDirty ?? ((session?.undo ?? 0) > 0),
+      parts: percept?.parts.length ?? null,
       namedFaces: percept ? Math.max(0, percept.faces - percept.unnamed) : 0,
       semanticNames: percept?.table.regions.map((region) => region.name) ?? [],
     };
@@ -1702,6 +1709,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       requestedVariantName: requestedVariant?.name ?? null,
       live,
       disk,
+      reason: saveRequest?.reason ?? { kind: 'paint-layout' },
+      remakePaintAfterKeepLive: saveRequest?.remakePaintAfterKeepLive ?? true,
       keepLive: saveRequest?.keepLive ?? onKeepLive,
       keepDisk: saveRequest?.keepDisk ?? onDiscardLive,
       confirmDisk: false,
@@ -1725,9 +1734,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // repro). Standalone viewers still use the callback captured by the session.
     const keepLive = onKeepLive ?? paintConflict.keepLive;
     const saved = keepLive
-      ? keepLive({
-        allowSemanticClear: paintLayoutKeepLiveClearsSemantics({ namedFaces: liveNamedFaces }, diskAtChoice),
-      })
+      ? keepLive(modelRevisionKeepLiveOptions(
+        { namedFaces: liveNamedFaces },
+        diskAtChoice,
+        paintConflict.reason,
+      ))
       : true;
     if (!saved) {
       setPaintConflict((current) => current ? { ...current, actionError: 'The live model could not be saved. Nothing was discarded; choose again or Cancel.' } : current);
@@ -1738,8 +1749,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintConflict(null);
     // Keeping the resident geometry preserves the older paintings as recovery
     // assets, then leads directly to the explicit atlas-remake door.
-    atlasInvalidatedRef.current = true;
-    setAtlasPrompt(true);
+    if (paintConflict.remakePaintAfterKeepLive) {
+      atlasInvalidatedRef.current = true;
+      setAtlasPrompt(true);
+    }
   };
   const keepDiskPaintLayout = () => {
     if (!paintConflict) return;
@@ -5542,8 +5555,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       {paintConflict && model && (() => {
         const { live, disk } = paintConflict;
         const diskDoc = disk?.doc ?? null;
-        const mismatch = paintLayoutMismatchSentence(live.triangles, disk, paintConflict.requestedVariantId);
-        const originNote = paintConflict.origin === 'save'
+        const partConflict = paintConflict.reason.kind === 'part-count';
+        const mismatch = modelRevisionMismatchSentence(live.triangles, disk, paintConflict.requestedVariantId, paintConflict.reason);
+        const originNote = partConflict
+          ? 'Save paused because the durable document still owns more Outliner parts. Pick the model revision that should survive.'
+          : paintConflict.origin === 'save'
           ? 'Save paused before writing a topology-changed marker. Pick the model revision that should survive.'
           : paintConflict.origin === 'variant-load'
             ? `${paintConflict.requestedVariantName ?? 'This painting'} was not loaded. Its UV map cannot be applied to the resident shape safely.`
@@ -5564,7 +5580,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Col style={{ width: PAINT_CONFLICT_LAYOUT.panelWidth, paddingLeft: 16, paddingRight: 16, paddingTop: 14, paddingBottom: 14, backgroundColor: 'rgba(17,20,29,0.97)', borderWidth: 1, borderColor: '#3c5a80', borderRadius: 8 }}>
               <Row style={{ alignItems: 'center', gap: 8 }}>
                 <Icon name="TriangleAlert" size={16} color="#ffb454" />
-                <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>Live model and saved paint disagree</Text>
+                <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>{partConflict ? 'Live model and saved model disagree' : 'Live model and saved paint disagree'}</Text>
               </Row>
               <Text style={{ color: '#ffe0b3', fontSize: 13, fontWeight: 700, marginTop: 8 }}>{mismatch}</Text>
               <Text style={{ color: '#b9c4d4', fontSize: 11, marginTop: 5 }}>{originNote}</Text>
@@ -5581,6 +5597,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       : `${live.triangles} triangles`}
                   </Text>
                   <Text style={{ color: '#9fb4cf', fontSize: 11, marginTop: 7 }}>Generation {live.generation ?? 'unknown'}</Text>
+                  {live.parts != null ? <Text style={{ color: '#9fb4cf', fontSize: 10, marginTop: 5 }}>{`${live.parts} Outliner part${live.parts === 1 ? '' : 's'}`}</Text> : null}
                   <Text style={{ color: live.unsaved ? '#ffb454' : '#8fc9bb', fontSize: 11, fontWeight: 700, marginTop: 5 }}>
                     {live.unsaved ? 'Unsaved edits are present' : 'No unsaved edits reported'}
                   </Text>
@@ -5590,7 +5607,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       : '0 named triangles · no named regions'}
                   </Text>
                   <Text style={{ color: '#8b97ab', fontSize: 10, marginTop: 8 }}>
-                    Keep LIVE writes this resident mesh, preserves the older paintings as recovery files, and opens Remake Paint Atlas.
+                    {paintConflict.remakePaintAfterKeepLive
+                      ? 'Keep LIVE writes this resident mesh, preserves the older paintings as recovery files, and opens Remake Paint Atlas.'
+                      : 'Keep LIVE writes this resident mesh and replaces the saved document shown here.'}
                   </Text>
                 </Col>
 
@@ -5607,9 +5626,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   <Text style={{ color: '#9fb4cf', fontSize: 10, marginTop: 5 }}>
                     {diskDoc ? `Saved ${formatConflictTime(diskDoc.modifiedMs)} · stamp ${diskDoc.stamp}` : 'No readable document stamp'}
                   </Text>
-                  <Text style={{ color: '#ffb454', fontSize: 10, marginTop: 5 }}>
+                  {diskDoc?.parts != null ? <Text style={{ color: '#9fb4cf', fontSize: 10, marginTop: 5 }}>{`${diskDoc.parts} saved Outliner part${diskDoc.parts === 1 ? '' : 's'}`}</Text> : null}
+                  {!partConflict || disk?.marker ? <Text style={{ color: '#ffb454', fontSize: 10, marginTop: 5 }}>
                     {disk?.marker ? `Marker: ${disk.marker.reason} · doc ${disk.marker.docStamp}` : 'Stale marker is unreadable'}
-                  </Text>
+                  </Text> : null}
                   <Text style={{ color: '#9fb4cf', fontSize: 10, marginTop: 5 }}>
                     {(disk?.semantics?.namedFaces ?? 0) > 0
                       ? `${disk!.semantics.namedFaces} named triangles · ${savedNameSummary}`
@@ -5655,7 +5675,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Pressable tooltip="Reload mesh/doc.blob and discard the resident journal" onPress={keepDiskPaintLayout} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: paintConflict.confirmDisk ? '#4a3127' : '#303747', borderWidth: 1, borderColor: paintConflict.confirmDisk ? '#a46f44' : '#566176' }}>
                   <Row style={{ alignItems: 'center', gap: 6 }}><Icon name="DatabaseBackup" size={13} color={paintConflict.confirmDisk ? '#ffb454' : '#e1e7f1'} /><Text style={{ color: paintConflict.confirmDisk ? '#ffe0b3' : '#e1e7f1', fontSize: 11, fontWeight: 700 }}>{paintConflict.confirmDisk ? 'Discard live edits · Keep DISK' : 'Keep DISK'}</Text></Row>
                 </Pressable>
-                <Pressable tooltip="Save the resident mesh and move to Remake Paint Atlas" onPress={keepLivePaintLayout} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
+                <Pressable tooltip={paintConflict.remakePaintAfterKeepLive ? 'Save the resident mesh and move to Remake Paint Atlas' : 'Replace the saved document with the resident mesh'} onPress={keepLivePaintLayout} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
                   <Row style={{ alignItems: 'center', gap: 6 }}><Icon name="Save" size={13} color="#e6f1ff" /><Text style={{ color: '#e6f1ff', fontSize: 11, fontWeight: 700 }}>Keep LIVE</Text></Row>
                 </Pressable>
               </Row>

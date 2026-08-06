@@ -5,7 +5,7 @@
 // era, every named paint variant, and the marker that explains the refusal. The
 // UI receives compact facts rather than learning package paths or JSON shapes.
 import { readFile, stat } from '../../../runtime/hooks/fs';
-import { readMeshDoc } from '../data/meshDoc';
+import { meshDocDurablePartCount, readMeshDoc, readMeshDocParts } from '../data/meshDoc';
 import {
   PAINT_LAYOUT_STALE_FILE,
   resolvePackageDir,
@@ -35,6 +35,7 @@ export type PaintLayoutDiskFacts = {
     stamp: string;
     triangles: number | null;
     authoredFaces: number | null;
+    parts: number | null;
   } | null;
   semantics: {
     namedFaces: number;
@@ -50,6 +51,7 @@ export type PaintLayoutLiveFacts = {
   authoredFaces: number | null;
   generation: number | null;
   unsaved: boolean;
+  parts: number | null;
   namedFaces: number;
   semanticNames: string[];
 };
@@ -59,7 +61,25 @@ export type PaintLayoutKeepLiveOptions = {
    * resident semantic table is empty while disk still has names, this capability
    * lets that exact choice pass the semantic-erasure save guard (req_3900). */
   allowSemanticClear?: boolean;
+  /** The picker disclosed that Keep LIVE replaces a document with more durable
+   * parts than the resident Outliner. This is that one-shot permission. */
+  allowPartShrink?: boolean;
 };
+
+export type ModelRevisionConflictReason =
+  | { kind: 'paint-layout' }
+  | { kind: 'part-count'; liveParts: number; diskParts: number };
+
+/** Preflight the exact destructive part-count edge guarded by writeMeshDoc. */
+export function modelRevisionPartConflict(
+  liveParts: number,
+  diskParts: number | null,
+  alreadyAuthorized: boolean,
+): ModelRevisionConflictReason | null {
+  return diskParts !== null && liveParts > 0 && liveParts < diskParts && !alreadyAuthorized
+    ? { kind: 'part-count', liveParts, diskParts }
+    : null;
+}
 
 /** Hot-session acknowledgement scope. The value is a concrete disk revision,
  * not a boolean: an external/cold disk change therefore demands a new choice,
@@ -120,6 +140,7 @@ export function readPaintLayoutDiskFacts(pkg: PaintTarget): PaintLayoutDiskFacts
   if (!packageDir) return null;
   const blob = stat(`${packageDir}/mesh/doc.blob`);
   const mesh = readMeshDoc(packageDir);
+  const savedPartCount = readMeshDocParts(packageDir)?.length ?? 0;
   const triangleCount = mesh && mesh.vertices.length % (MESH_VERTEX_FLOATS * TRIANGLE_VERTICES) === 0
     ? mesh.vertices.length / (MESH_VERTEX_FLOATS * TRIANGLE_VERTICES)
     : null;
@@ -142,6 +163,7 @@ export function readPaintLayoutDiskFacts(pkg: PaintTarget): PaintLayoutDiskFacts
         stamp: `${blob.size}:${blob.mtimeMs}`,
         triangles: triangleCount,
         authoredFaces: authoredFaceCount,
+        parts: mesh ? meshDocDurablePartCount(mesh.storedRangeCount, savedPartCount) : null,
       }
       : null,
     semantics: {
@@ -185,6 +207,32 @@ export function paintLayoutMismatchSentence(
     return `${era.name} belongs to an older face layout; both shapes report ${liveTriangles} triangles, but their paint mapping differs.`;
   }
   return 'Saved paint belongs to an older face layout than the live mesh.';
+}
+
+/** One plain sentence for the exact guarded difference the picker resolves. */
+export function modelRevisionMismatchSentence(
+  liveTriangles: number,
+  disk: PaintLayoutDiskFacts | null,
+  requestedVariantId: string | null,
+  reason: ModelRevisionConflictReason,
+): string {
+  if (reason.kind === 'part-count') {
+    const removed = reason.diskParts - reason.liveParts;
+    return `The live model has ${reason.liveParts} part${reason.liveParts === 1 ? '' : 's'}; the saved model has ${reason.diskParts}. Keep LIVE removes ${removed} saved part${removed === 1 ? '' : 's'}.`;
+  }
+  return paintLayoutMismatchSentence(liveTriangles, disk, requestedVariantId);
+}
+
+/** Convert only the differences disclosed by the modal into write capabilities. */
+export function modelRevisionKeepLiveOptions(
+  live: Pick<PaintLayoutLiveFacts, 'namedFaces'>,
+  disk: PaintLayoutDiskFacts | null,
+  reason: ModelRevisionConflictReason,
+): PaintLayoutKeepLiveOptions {
+  return {
+    allowSemanticClear: paintLayoutKeepLiveClearsSemantics(live, disk),
+    allowPartShrink: reason.kind === 'part-count',
+  };
 }
 
 export function formatConflictBytes(bytes: number): string {

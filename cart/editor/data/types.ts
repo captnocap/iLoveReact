@@ -244,7 +244,9 @@ export type ModelToolApi = {
   openPaintLayoutConflict: (request: {
     origin: 'save';
     unsaved: boolean;
-    keepLive: () => boolean;
+    reason?: { kind: 'paint-layout' } | { kind: 'part-count'; liveParts: number; diskParts: number };
+    remakePaintAfterKeepLive?: boolean;
+    keepLive: (options?: { allowSemanticClear?: boolean; allowPartShrink?: boolean }) => boolean;
     keepDisk: () => void;
   }) => boolean;
   toggleLight: (which: LightId) => void;

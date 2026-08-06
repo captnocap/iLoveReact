@@ -13,6 +13,9 @@ import {
   paintLayoutConflictRevisionIsAcknowledged,
   paintLayoutKeepLiveClearsSemantics,
   paintLayoutMismatchSentence,
+  modelRevisionKeepLiveOptions,
+  modelRevisionMismatchSentence,
+  modelRevisionPartConflict,
   type PaintLayoutDiskFacts,
 } from './paintLayoutConflict';
 
@@ -23,7 +26,7 @@ function assert(condition: boolean, message: string) { if (!condition) throw new
 
 const disk = (variants: PaintLayoutDiskFacts['variants']): PaintLayoutDiskFacts => ({
   packageDir: '/models/example',
-  doc: { bytes: 81099, modifiedMs: 1, stamp: '81099:1', triangles: 961, authoredFaces: 600 },
+  doc: { bytes: 81099, modifiedMs: 1, stamp: '81099:1', triangles: 961, authoredFaces: 600, parts: 4 },
   semantics: { namedFaces: 8, regions: [{ name: 'headrest_mount_left', faces: 8 }] },
   basePaint: { id: null, name: 'Base painting', triangles: 1019 },
   variants,
@@ -64,6 +67,21 @@ test('Keep LIVE recognizes the disclosed removal of disk-only names', () => {
     !paintLayoutKeepLiveClearsSemantics({ namedFaces: 1 }, facts),
     'a resident named state was mistaken for a semantic clear',
   );
+});
+
+test('part-count conflict names the deletion and mints only its disclosed capability', () => {
+  const facts = disk([]);
+  const reason = { kind: 'part-count' as const, liveParts: 3, diskParts: 4 };
+  assert(
+    modelRevisionMismatchSentence(1167, facts, null, reason) === 'The live model has 3 parts; the saved model has 4. Keep LIVE removes 1 saved part.',
+    'the guarded part deletion was not explained plainly',
+  );
+  const options = modelRevisionKeepLiveOptions({ namedFaces: 1 }, facts, reason);
+  assert(options.allowPartShrink === true, 'Keep LIVE did not authorize the disclosed part shrink');
+  assert(options.allowSemanticClear === false, 'an unrelated semantic clear was authorized');
+  assert(modelRevisionPartConflict(3, 4, false)?.kind === 'part-count', 'the guarded shrink did not open a conflict');
+  assert(modelRevisionPartConflict(3, 4, true) === null, 'a real Delete/Merge capability was prompted again');
+  assert(modelRevisionPartConflict(4, 4, false) === null, 'equal part counts were treated as destructive');
 });
 
 test('an acknowledged disk checkpoint remains resolved until disk actually changes', () => {
