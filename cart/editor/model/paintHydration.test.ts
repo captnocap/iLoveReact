@@ -143,7 +143,7 @@ test('a stale topology refuses every persisted paint source', () => {
     readLatestVariant: () => { variantRead = true; return null; },
   });
   const result = hydratePersistedModelPaint(h.sources, h.port);
-  assert(result.status === 'stale', 'stale topology was not reported');
+  assert(result.status === 'stale' && result.reason === 'layout-stale', 'stale topology was not reported with its refusal reason');
   assert(h.calls.join('|') === 'invalidate', 'stale topology attempted a restore');
   assert(!variantRead, 'stale topology read a legacy paint program');
 });

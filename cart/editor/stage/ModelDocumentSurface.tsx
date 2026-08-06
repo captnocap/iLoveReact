@@ -62,7 +62,7 @@ type ViewerSource =
   | { kind: 'missing'; title: string; label: string }
   | null;
 
-export default function ModelDocumentSurface({ model, lights, textureSlots = [], triggerProps, onToolApi, onToolState, outliner, modelOnDisk, onRequireFirstSave, onDocumentMutated }: {
+export default function ModelDocumentSurface({ model, lights, textureSlots = [], triggerProps, onToolApi, onToolState, outliner, modelOnDisk, modelDirty, reloadRevision, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated }: {
   model: ModelPackage | null;
   lights: readonly LightRig[];
   /** Texture-slot table (Rig draft ?? manifest) — slots wearing a liveMaterial
@@ -78,6 +78,10 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
   // composed host mesh. Absent for imported single meshes (their outliner is a follow-up).
   outliner: OutlinerApi | null;
   modelOnDisk: boolean;
+  modelDirty: boolean;
+  reloadRevision: number;
+  onDiscardLive: () => void;
+  onKeepLive: () => boolean;
   onRequireFirstSave: () => boolean;
   onDocumentMutated: () => void;
 }) {
@@ -123,10 +127,10 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
     return (
       <C.HW_ModelDocument {...triggerProps}>
         <ModelView
-          key={`${model.id}:parts`}
+          key={`${model.id}:parts:${reloadRevision}`}
           initialTitle={model.name}
           initialFileParts={{ path: fileBase.sourcePath, basePartId: fileBase.id, baseColor: fileBase.color, baseHidden: !fileBase.visible, appends }}
-          allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
+          allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} documentDirty={modelDirty} onDiscardLive={onDiscardLive} onKeepLive={onKeepLive} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
           authoredLights={lights} textureSlots={textureSlots}
           onPartRanges={(ranges) => outliner.onStampRanges(model.id, ranges)}
           onPathPlaneCreated={outliner.onPathPlaneCreated}
@@ -183,10 +187,10 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
     );
     const modelView = residencyRef.current.established ? (
       <ModelView
-        key={model.id}
+        key={`${model.id}:${reloadRevision}`}
         initialTitle={model.name}
         initialMesh={seed ?? undefined}
-        allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
+        allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} documentDirty={modelDirty} onDiscardLive={onDiscardLive} onKeepLive={onKeepLive} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
         authoredLights={lights} textureSlots={textureSlots}
         onPathPlaneCreated={outliner!.onPathPlaneCreated}
       />
@@ -207,8 +211,8 @@ export default function ModelDocumentSurface({ model, lights, textureSlots = [],
 
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
-      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={viewer} importedTextureSourcePath={model.viewerPath} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
+      ? <ModelView key={`${model.id}:${reloadRevision}`} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} documentDirty={modelDirty} onDiscardLive={onDiscardLive} onKeepLive={onKeepLive} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />
+      : <ModelView key={`${model.id}:${reloadRevision}`} initialTitle={model.name} initialMesh={viewer} importedTextureSourcePath={model.viewerPath} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} documentDirty={modelDirty} onDiscardLive={onDiscardLive} onKeepLive={onKeepLive} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} authoredLights={lights} textureSlots={textureSlots} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}

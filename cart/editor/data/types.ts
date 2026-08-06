@@ -144,10 +144,10 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // A BLOCKING session the model viewer owns (req_2626 gap HH — modal discipline).
 // While one is live, every other input surface must be inert until it resolves:
 // 'bevel' / 'loop-cut' = host-side captured-base topology popup sessions,
-// 'tris-to-quads' = the whole-topology dry run, 'paint-atlas' = the Create Paint
-// Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
+// 'tris-to-quads' = the whole-topology dry run, 'paint-conflict' = the live/disk
+// save picker, 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
 // through ModelToolSnapshot so the shell's central gate can see the session.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
@@ -240,6 +240,13 @@ export type ModelToolApi = {
   cycleDetail: () => void;
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
+  /** Open the viewer-owned live-vs-disk picker before a stale full save. */
+  openPaintLayoutConflict: (request: {
+    origin: 'save';
+    unsaved: boolean;
+    keepLive: () => boolean;
+    keepDisk: () => void;
+  }) => boolean;
   toggleLight: (which: LightId) => void;
 };
 

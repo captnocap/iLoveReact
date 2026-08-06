@@ -306,6 +306,7 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   const mv = state.modelTool.blocking;
   if (mv === 'bevel') return { id: 'bevel', label: 'Bevel' };
   if (mv === 'loop-cut') return { id: 'loop-cut', label: 'Loop Cut' };
+  if (mv === 'paint-conflict') return { id: 'paint-conflict', label: 'Live / Disk Paint Conflict' };
   if (mv === 'paint-atlas') return { id: 'paint-atlas', label: 'Create Paint Atlas' };
   if (mv === 'face-guard') return { id: 'face-guard', label: 'Unsafe Face Edit' };
   if (state.newMeshPrompt) return { id: 'new-mesh', label: state.newMeshPrompt.mode === 'add' ? 'Add Mesh' : 'New Mesh' };

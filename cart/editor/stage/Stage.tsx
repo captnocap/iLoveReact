@@ -36,6 +36,9 @@ export default function Stage(props: {
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
   modelOnDisk: boolean;
+  modelReloadRevision: number;
+  onDiscardActiveModel: () => void;
+  onSavePaintConflictLive: () => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
   onStage: () => void;
@@ -158,6 +161,10 @@ export default function Stage(props: {
             onToolState={props.onModelToolState}
             outliner={outliner}
             modelOnDisk={props.modelOnDisk}
+            modelDirty={activeModel ? Boolean(props.state.modelDirty[activeModel.id]) : false}
+            reloadRevision={props.modelReloadRevision}
+            onDiscardLive={props.onDiscardActiveModel}
+            onKeepLive={props.onSavePaintConflictLive}
             onRequireFirstSave={props.onRequireFirstModelSave}
             onDocumentMutated={props.onModelDocumentMutated}
           />

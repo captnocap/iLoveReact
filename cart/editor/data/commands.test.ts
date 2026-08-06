@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  COMMANDS, MENUS, commandById, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  COMMANDS, MENUS, blockingOverlay, commandById, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   menuDropdownLeft, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -34,6 +34,12 @@ test('Save and Preferences are application commands on every document surface', 
   const preferences = commandById('open-preferences');
   assert(save.menu === 'File' && save.scope === 'global' && save.key === 'Ctrl+S', 'Save is not the global document command');
   assert(preferences.menu === 'Edit' && preferences.scope === 'global' && preferences.key === 'Ctrl+,', 'Preferences is not globally discoverable');
+});
+
+test('the live/disk paint picker blocks every competing editor command', () => {
+  const state = { modelTool: { blocking: 'paint-conflict' } } as unknown as EditorState;
+  const block = blockingOverlay(state);
+  assert(block?.id === 'paint-conflict' && block.label.includes('Live / Disk'), 'paint conflict escaped modal discipline');
 });
 
 test('wide menu panels center on their chrome trigger before edge clamping', () => {

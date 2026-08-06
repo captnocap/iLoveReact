@@ -18,7 +18,8 @@
 // model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
 // modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
-import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable, ScrollView, Slider, Scene3D } from '@reactjit/runtime/primitives';
+import { Icon } from '../../../runtime/icons/Icon';
 import type { LightRig } from '../model/editMesh';
 import type { ModelTextureSlot } from '../data/types';
 import { buildRegionData } from '../render3d/regionFormula';
@@ -98,7 +99,16 @@ import {
 } from '../data/uvTextureWorkspaceStore';
 import { rasterizeUvWireframe } from '../model/uvWireframe';
 import { claimModelDocSession, modelDocSessionId, readModelDocSession } from '../model/docSession';
-import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort } from '../model/paintHydration';
+import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort, type PaintHydrationResult } from '../model/paintHydration';
+import { shouldRestoreSavedGlass } from '../model/glassHydration';
+import {
+  formatConflictBytes,
+  formatConflictTime,
+  paintLayoutMismatchSentence,
+  readPaintLayoutDiskFacts,
+  type PaintLayoutDiskFacts,
+  type PaintLayoutLiveFacts,
+} from '../model/paintLayoutConflict';
 import { meshEditXrayActive, triangleWireframeVisible } from '../model/viewportPresentation';
 import {
   JOURNAL_UV_ATLAS_MUTATION,
@@ -175,7 +185,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // modal discipline): host-captured bevel/loop-cut/quadify popup sessions, the Create
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
@@ -368,6 +378,16 @@ export type ModelToolApi = {
   setPalette: (p: Palette) => void;
   // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
   toggleLight: (which: LightId) => void;
+  /** Pause a shell-owned save at the same visible conflict picker used by cold
+   * paint hydration and variant loading. Returns false when no model can host it. */
+  openPaintLayoutConflict: (request: PaintLayoutSaveConflictRequest) => boolean;
+};
+
+export type PaintLayoutSaveConflictRequest = {
+  origin: 'save';
+  unsaved: boolean;
+  keepLive: () => boolean;
+  keepDisk: () => void;
 };
 // A FILE-BACKED multi-part model: the base part is an imported .glb/.obj the HOST parses
 // (geometry never crosses the bridge), and `appends` replay the doc's other parts
@@ -411,6 +431,14 @@ export type ModelViewProps = {
   /** A paint atlas is durable model content. A never-saved model must acquire
    * its manifest first; the shell supplies the one canonical Save entrance. */
   paintTargetOnDisk?: boolean;
+  /** Shell-authoritative dirty state. The conflict picker must distinguish a
+   * clean resident mount from edits that Keep DISK will actually destroy. */
+  documentDirty?: boolean;
+  /** Reload the package through the shell's ordinary discard/remount path. */
+  onDiscardLive?: () => void;
+  /** Save the resident geometry while explicitly preserving the stale paint
+   * marker. Used when cold-open/variant conflicts did not originate at Save. */
+  onKeepLive?: () => boolean;
   onRequireFirstSave?: () => boolean;
   onDocumentMutated?: () => void;
   /** Model-local emitted lights from the Rig draft. They illuminate the same
@@ -421,6 +449,18 @@ export type ModelViewProps = {
    * their faces per-frame over object-space position; membership binds BY SLOT
    * so face re-assignment/cuts/undo never need a JS re-push. */
   textureSlots?: readonly ModelTextureSlot[];
+};
+
+type PaintLayoutConflictSession = {
+  origin: 'cold-open' | 'variant-load' | 'save';
+  requestedVariantId: string | null;
+  requestedVariantName: string | null;
+  live: PaintLayoutLiveFacts;
+  disk: PaintLayoutDiskFacts | null;
+  keepLive?: () => boolean;
+  keepDisk?: () => void;
+  confirmDisk: boolean;
+  actionError: string | null;
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -981,8 +1021,12 @@ const roundBevelUnits = (value: number) => {
 const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
+const PAINT_CONFLICT_LAYOUT = {
+  panelWidth: 720,
+  savedLooksHeight: 92,
+} as const;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, documentDirty, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -1609,6 +1653,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     fit?: number;
   }) => AtlasReceipt | null>(() => null);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
+  const [paintConflict, setPaintConflict] = useState<PaintLayoutConflictSession | null>(null);
+  const coldPaintConflictShownRef = useRef<string | null>(null);
   // The atlas base TYPE (Blockbench's Create Texture "Type"), picked in the SAME gate as the
   // size since both gate painting (req_2546): Texture Template = per-island colours, Solid =
   // one flat colour (the current ink), Blank = bare sheet.
@@ -1617,6 +1663,71 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // groups when it carries authored grouping; null for plain/per-triangle imports. The
   // prompt reads faces to the user and triangles to the byte math, never conflating them.
   const [authoredFaces, setAuthoredFaces] = useState<number | null>(null);
+  const paintConflictAckKey = hotDocId ? `editor:paint-layout-conflict-ack:v1:${hotDocId}` : null;
+  const paintConflictMarkerKey = (disk: PaintLayoutDiskFacts | null): string =>
+    disk?.marker?.docStamp ?? disk?.doc?.stamp ?? 'stale-without-readable-stamp';
+  const acknowledgePaintConflict = (disk: PaintLayoutDiskFacts | null) => {
+    if (paintConflictAckKey) setHotState(paintConflictAckKey, paintConflictMarkerKey(disk));
+  };
+  const paintConflictWasAcknowledged = (disk: PaintLayoutDiskFacts | null): boolean =>
+    !!paintConflictAckKey
+    && getHotState<string | null>(paintConflictAckKey, null) === paintConflictMarkerKey(disk);
+  const openPaintLayoutConflict = (
+    origin: PaintLayoutConflictSession['origin'],
+    requestedVariant: PaintVariant | null = null,
+    saveRequest?: PaintLayoutSaveConflictRequest,
+  ): boolean => {
+    if (!model || !paintTarget || !paintTargetOnDisk) return false;
+    const disk = readPaintLayoutDiskFacts(paintTarget);
+    const percept = readSeatPercept();
+    const session = readModelSession();
+    const live: PaintLayoutLiveFacts = {
+      triangles: percept?.faces ?? Math.floor(model.count / 3),
+      authoredFaces: percept?.authoredFaces ?? authoredFaces,
+      generation: percept?.generation ?? session?.generation ?? null,
+      unsaved: saveRequest?.unsaved ?? documentDirty ?? ((session?.undo ?? 0) > 0),
+    };
+    setPaintMode(false);
+    setPaintConflict({
+      origin,
+      requestedVariantId: requestedVariant?.id ?? null,
+      requestedVariantName: requestedVariant?.name ?? null,
+      live,
+      disk,
+      keepLive: saveRequest?.keepLive ?? onKeepLive,
+      keepDisk: saveRequest?.keepDisk ?? onDiscardLive,
+      confirmDisk: false,
+      actionError: null,
+    });
+    return true;
+  };
+  const cancelPaintLayoutConflict = () => setPaintConflict(null);
+  const keepLivePaintLayout = () => {
+    if (!paintConflict) return;
+    const saved = paintConflict.keepLive ? paintConflict.keepLive() : true;
+    if (!saved) {
+      setPaintConflict((current) => current ? { ...current, actionError: 'The live model could not be saved. Nothing was discarded; choose again or Cancel.' } : current);
+      return;
+    }
+    const freshDisk = paintTarget ? readPaintLayoutDiskFacts(paintTarget) : paintConflict.disk;
+    acknowledgePaintConflict(freshDisk);
+    setPaintConflict(null);
+    // Keeping the resident geometry preserves the older paintings as recovery
+    // assets, then leads directly to the explicit atlas-remake door.
+    atlasInvalidatedRef.current = true;
+    setAtlasPrompt(true);
+  };
+  const keepDiskPaintLayout = () => {
+    if (!paintConflict) return;
+    if (!paintConflict.confirmDisk) {
+      setPaintConflict({ ...paintConflict, confirmDisk: true, actionError: null });
+      return;
+    }
+    acknowledgePaintConflict(paintConflict.disk);
+    const discard = paintConflict.keepDisk;
+    setPaintConflict(null);
+    discard?.();
+  };
   // Model-space bounds CENTER, computed one-shot from the composed vertices at load
   // (req_2618 G). File imports have no vertices cart-side → null (honest-empty).
   const [boundsCenter, setBoundsCenter] = useState<[number, number, number] | null>(null);
@@ -2348,8 +2459,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Hydrate authored paint as DOCUMENT state. This is deliberately independent of
   // Paint mode: opening a model must publish its existing UV atlas immediately, while
   // the Paint button only decides which tool owns viewport input (req_3349).
-  const hydratePersistedAtlas = (): boolean => {
-    if (!paintTarget || !paintTargetOnDisk || !resolvePackageDir(paintTarget.kind, paintTarget.id)) return false;
+  const hydratePersistedAtlas = (): PaintHydrationResult['status'] => {
+    if (!paintTarget || !paintTargetOnDisk || !resolvePackageDir(paintTarget.kind, paintTarget.id)) return 'missing';
     const result = hydratePersistedModelPaint({
       stale: modelPaintLayoutIsStale(paintTarget),
       basePaint: readModelBasePaint(paintTarget),
@@ -2367,16 +2478,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (result.status === 'ready') {
       atlasReadyRef.current = true;
       atlasInvalidatedRef.current = false;
-      return true;
+      return 'ready';
     }
     atlasReadyRef.current = false;
     if (result.status === 'stale') {
       atlasInvalidatedRef.current = true;
       setPaintMode(false);
+      openPaintLayoutConflict('cold-open');
     } else if (result.status === 'failed') {
-      console.error(`[paint] persisted atlas for ${paintTarget.id} exists but could not be hydrated`);
+      const message = `Saved paint for ${paintTarget.name} exists, but the host rejected its raster or UV data. The model was left unpainted.`;
+      setError(message);
+      console.error(`[paint] ${result.reason}: ${message}`);
     }
-    return false;
+    return result.status;
   };
   // Restore one SAVED LOOK onto the resident model (req_3439): the PAINT VARIANTS
   // panel's Load. Same hydration engine as cold load, pointed at the chosen variant —
@@ -2391,7 +2505,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       readLatestVariant: () => variant,
       readVariantRasterBase,
     }, paintHydrationPort);
-    if (result.status !== 'ready') return false;
+    if (result.status !== 'ready') {
+      if (result.status === 'stale') {
+        atlasInvalidatedRef.current = true;
+        setPaintMode(false);
+        openPaintLayoutConflict('variant-load', variant);
+      } else {
+        const reason = result.status === 'failed'
+          ? `${variant.name} could not be loaded because its raster or UV data was rejected. The live model was left unchanged.`
+          : `${variant.name} has no readable paint data to load.`;
+        setError(reason);
+        console.error(`[paint] variant ${variant.id}: ${reason}`);
+      }
+      return false;
+    }
     atlasReadyRef.current = true;
     atlasInvalidatedRef.current = false;
     buildUvPanel();
@@ -2405,22 +2532,45 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const sessionDroppedNamesRef = useRef<Set<string>>(new Set());
   // Model adoption happens in the mount effect below. Once its host-resident key lands,
   // hydrate any saved atlas and publish it to the UV bridge without arming the brush.
-  // Glass restore (req_3402) runs AFTER hydration in the same pass: hydration
-  // rebuilds the atlas from the RGB-only baseline + program (req_2928), so the
-  // saved trailing-glass run (doc.blob glassFirstVertex) must be re-applied on
-  // top — before this, every restart silently un-glassed the model.
+  // COLD-LOAD glass restore (req_3402) runs AFTER hydration in the same pass:
+  // hydration rebuilds the atlas from the RGB-only baseline + program (req_2928),
+  // so the saved trailing-glass run must be re-applied once. A hot-resumed host
+  // session already owns newer per-face alpha and ordering; replaying the stale
+  // disk boundary over it turns recently appended/touched tail faces into glass.
   const glassRestoredRef = useRef(false);
+  const hostSessionResumedRef = useRef(false);
   useEffect(() => { sessionDroppedNamesRef.current.clear(); }, [model?.key]);
   useEffect(() => {
     if (!model) return;
     if (!atlasReadyRef.current && !atlasInvalidatedRef.current) {
-      if (hydratePersistedAtlas()) buildUvPanel();
+      if (hydratePersistedAtlas() === 'ready') buildUvPanel();
     }
     const gv = initialMesh?.glassFirstVertex;
-    if (!glassRestoredRef.current && typeof gv === 'number' && gv >= 0) {
+    if (shouldRestoreSavedGlass({
+      resumedHostSession: hostSessionResumedRef.current,
+      alreadyRestored: glassRestoredRef.current,
+      glassFirstVertex: gv,
+    })) {
       glassRestoredRef.current = true;
       host.__model_glass_restore?.(gv);
     }
+  }, [model?.key, paintTarget?.kind, paintTarget?.id, paintTargetOnDisk]);
+
+  // A stale package used to land as only an internal flag. Open the same picker
+  // on cold adoption, once per marker revision. A Keep DISK remount records a
+  // session acknowledgement so the exact marker does not immediately reopen;
+  // a cold process has no hot acknowledgement and surfaces it again.
+  useEffect(() => {
+    if (!model || !paintTarget || !paintTargetOnDisk || !modelPaintLayoutIsStale(paintTarget)) return;
+    const disk = readPaintLayoutDiskFacts(paintTarget);
+    const marker = paintConflictMarkerKey(disk);
+    host.__model_paint_layout_invalidate?.();
+    atlasReadyRef.current = false;
+    atlasInvalidatedRef.current = true;
+    setPaintMode(false);
+    if (coldPaintConflictShownRef.current === marker || paintConflictWasAcknowledged(disk)) return;
+    coldPaintConflictShownRef.current = marker;
+    openPaintLayoutConflict('cold-open');
   }, [model?.key, paintTarget?.kind, paintTarget?.id, paintTargetOnDisk]);
 
   const togglePaint = () => {
@@ -2430,10 +2580,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     if (!model) return;
     if (!atlasReadyRef.current) {
-      if (hydratePersistedAtlas()) {
+      // The cold-open conflict already made the mismatch visible. Once the user
+      // has chosen a geometry side, Paint leads to the explicit Remake door
+      // instead of re-running the same refusal.
+      if (atlasInvalidatedRef.current) {
+        setAtlasPrompt(true);
+        return;
+      }
+      const hydration = hydratePersistedAtlas();
+      if (hydration === 'ready') {
         enterPaint();
         return;
       }
+      if (hydration === 'stale') return;
       setAtlasPrompt(true);
       return;
     }
@@ -2963,6 +3122,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     changeDetail,
     setBrush,
     setPalette,
+    openPaintLayoutConflict: (request) => openPaintLayoutConflict('save', null, request),
     toggleLight: (which) => {
       if (which === 'flat') setLitFlat((v) => !v);
       else if (which === 'key') setLitKey((v) => !v);
@@ -3308,7 +3468,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The viewer's unresolved BLOCKING session, mirrored up with the tool state so the
   // shell can enforce modal discipline (req_2626 HH): while one is live, the shell
   // holds every other input surface inert until the user resolves it HERE.
-  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
+  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
   }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
@@ -3447,6 +3607,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (bv) { closeBevel(false); return; } // restore the captured pre-bevel mesh + selection
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
       if (quadify) { closeQuadify(false); return; } // discard the dry run and restore grouping
+      if (paintConflict) { cancelPaintLayoutConflict(); return; }
       if (atlasPrompt) { setAtlasPrompt(false); return; } // the atlas gate cancels next
       if (selMode !== 0) { meshClearSel(); adoptHostSelection(selInfo); }
     },
@@ -3459,6 +3620,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const freshModelPaintReset = () => {
     setPaintMode(false);
     setAtlasPrompt(false);
+    setPaintConflict(null);
     setUvPanel(null);
     atlasReadyRef.current = false;
     atlasInvalidatedRef.current = false;
@@ -3688,6 +3850,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (!twig || twig.docId !== hotDocId) return false;
       const session = readModelSession();
       if (!session || session.key !== twig.key) return false;
+      hostSessionResumedRef.current = true;
       setModel({ key: session.key, count: session.count, radius: session.radius, name: initialTitle ?? initialMesh?.name ?? 'model' });
       setError(null);
       atlasInvalidatedRef.current = session.paintStale === true;
@@ -5339,6 +5502,109 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           })}
         </Col>
       ) : null}
+
+      {/* Paint-layout conflict (req_3897): every stale save/load refusal becomes a
+          visible comparison and a choice. This is deliberately separate from the
+          Remake Atlas prompt: first choose which GEOMETRY survives; then choose how
+          the surviving geometry receives a new paint sheet. */}
+      {paintConflict && model && (() => {
+        const { live, disk } = paintConflict;
+        const diskDoc = disk?.doc ?? null;
+        const mismatch = paintLayoutMismatchSentence(live.triangles, disk, paintConflict.requestedVariantId);
+        const originNote = paintConflict.origin === 'save'
+          ? 'Save paused before writing a topology-changed marker. Pick the model revision that should survive.'
+          : paintConflict.origin === 'variant-load'
+            ? `${paintConflict.requestedVariantName ?? 'This painting'} was not loaded. Its UV map cannot be applied to the resident shape safely.`
+            : 'This package opened with paint preserved from an older shape. Nothing was applied silently.';
+        const savedLooks = [
+          ...(disk?.basePaint ? [disk.basePaint] : []),
+          ...(disk?.variants ?? []),
+        ];
+        return (
+          <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <Col style={{ width: PAINT_CONFLICT_LAYOUT.panelWidth, paddingLeft: 16, paddingRight: 16, paddingTop: 14, paddingBottom: 14, backgroundColor: 'rgba(17,20,29,0.97)', borderWidth: 1, borderColor: '#3c5a80', borderRadius: 8 }}>
+              <Row style={{ alignItems: 'center', gap: 8 }}>
+                <Icon name="TriangleAlert" size={16} color="#ffb454" />
+                <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>Live model and saved paint disagree</Text>
+              </Row>
+              <Text style={{ color: '#ffe0b3', fontSize: 13, fontWeight: 700, marginTop: 8 }}>{mismatch}</Text>
+              <Text style={{ color: '#b9c4d4', fontSize: 11, marginTop: 5 }}>{originNote}</Text>
+
+              <Row style={{ marginTop: 12, gap: 10, alignItems: 'stretch' }}>
+                <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: 7, backgroundColor: '#202735', borderWidth: 1, borderColor: '#3a4356' }}>
+                  <Row style={{ alignItems: 'center', gap: 7 }}>
+                    <Icon name="Monitor" size={14} color="#9fc8ff" />
+                    <Text style={{ color: '#dbe7ff', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>LIVE</Text>
+                  </Row>
+                  <Text style={{ color: '#e6f1ff', fontSize: 13, fontWeight: 700, marginTop: 9 }}>
+                    {live.authoredFaces != null && live.authoredFaces !== live.triangles
+                      ? `${live.authoredFaces} authored faces · ${live.triangles} triangles`
+                      : `${live.triangles} triangles`}
+                  </Text>
+                  <Text style={{ color: '#9fb4cf', fontSize: 11, marginTop: 7 }}>Generation {live.generation ?? 'unknown'}</Text>
+                  <Text style={{ color: live.unsaved ? '#ffb454' : '#8fc9bb', fontSize: 11, fontWeight: 700, marginTop: 5 }}>
+                    {live.unsaved ? 'Unsaved edits are present' : 'No unsaved edits reported'}
+                  </Text>
+                  <Text style={{ color: '#8b97ab', fontSize: 10, marginTop: 8 }}>
+                    Keep LIVE writes this resident mesh, preserves the older paintings as recovery files, and opens Remake Paint Atlas.
+                  </Text>
+                </Col>
+
+                <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: 7, backgroundColor: '#202735', borderWidth: 1, borderColor: '#3a4356' }}>
+                  <Row style={{ alignItems: 'center', gap: 7 }}>
+                    <Icon name="Database" size={14} color="#9fc8ff" />
+                    <Text style={{ color: '#dbe7ff', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>DISK</Text>
+                  </Row>
+                  <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700, marginTop: 9 }}>
+                    {diskDoc
+                      ? `${diskDoc.triangles ?? 'unknown'} triangles · ${formatConflictBytes(diskDoc.bytes)}`
+                      : 'mesh/doc.blob is missing'}
+                  </Text>
+                  <Text style={{ color: '#9fb4cf', fontSize: 10, marginTop: 5 }}>
+                    {diskDoc ? `Saved ${formatConflictTime(diskDoc.modifiedMs)} · stamp ${diskDoc.stamp}` : 'No readable document stamp'}
+                  </Text>
+                  <Text style={{ color: '#ffb454', fontSize: 10, marginTop: 5 }}>
+                    {disk?.marker ? `Marker: ${disk.marker.reason} · doc ${disk.marker.docStamp}` : 'Stale marker is unreadable'}
+                  </Text>
+                  <Text style={{ color: '#8b97ab', fontSize: 9, fontWeight: 700, letterSpacing: 1, marginTop: 8 }}>SAVED PAINT ERAS</Text>
+                  <ScrollView style={{ height: PAINT_CONFLICT_LAYOUT.savedLooksHeight, marginTop: 4 }} showScrollbar>
+                    <Col style={{ gap: 3 }}>
+                      {savedLooks.length > 0 ? savedLooks.map((look, index) => (
+                        <Row key={`${look.id ?? 'base'}:${index}`} style={{ alignItems: 'center', gap: 6 }}>
+                          <Text numberOfLines={1} noWrap style={{ flexGrow: 1, minWidth: 0, color: paintConflict.requestedVariantId === look.id ? '#ffe0b3' : '#c8d3e3', fontSize: 10, fontWeight: paintConflict.requestedVariantId === look.id ? 700 : 500 }}>{look.name}</Text>
+                          <Text style={{ color: '#9fb4cf', fontSize: 10 }}>{look.triangles == null ? 'mapping unknown' : `${look.triangles} triangles`}</Text>
+                        </Row>
+                      )) : (
+                        <Text style={{ color: '#8b97ab', fontSize: 10 }}>No readable base paint or variants</Text>
+                      )}
+                    </Col>
+                  </ScrollView>
+                </Col>
+              </Row>
+
+              {paintConflict.confirmDisk ? (
+                <Row style={{ marginTop: 10, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: '#3a2b27', borderWidth: 1, borderColor: '#805f3c', alignItems: 'center', gap: 7 }}>
+                  <Icon name="History" size={13} color="#ffb454" />
+                  <Text style={{ flexGrow: 1, minWidth: 0, color: '#ffe0b3', fontSize: 11, fontWeight: 700 }}>Confirm Keep DISK: live edits will be discarded and Ctrl+Z history will not survive the reload.</Text>
+                </Row>
+              ) : null}
+              {paintConflict.actionError ? <Text style={{ color: '#ff9da1', fontSize: 11, fontWeight: 700, marginTop: 8 }}>{paintConflict.actionError}</Text> : null}
+
+              <Row style={{ marginTop: 12, gap: 8, justifyContent: 'flex-end' }}>
+                <Pressable tooltip="Leave both states untouched and decide later" onPress={cancelPaintLayoutConflict} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}>
+                  <Row style={{ alignItems: 'center', gap: 6 }}><Icon name="X" size={13} color="#e1e7f1" /><Text style={{ color: '#e1e7f1', fontSize: 11, fontWeight: 700 }}>Cancel</Text></Row>
+                </Pressable>
+                <Pressable tooltip="Reload mesh/doc.blob and discard the resident journal" onPress={keepDiskPaintLayout} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: paintConflict.confirmDisk ? '#4a3127' : '#303747', borderWidth: 1, borderColor: paintConflict.confirmDisk ? '#a46f44' : '#566176' }}>
+                  <Row style={{ alignItems: 'center', gap: 6 }}><Icon name="DatabaseBackup" size={13} color={paintConflict.confirmDisk ? '#ffb454' : '#e1e7f1'} /><Text style={{ color: paintConflict.confirmDisk ? '#ffe0b3' : '#e1e7f1', fontSize: 11, fontWeight: 700 }}>{paintConflict.confirmDisk ? 'Discard live edits · Keep DISK' : 'Keep DISK'}</Text></Row>
+                </Pressable>
+                <Pressable tooltip="Save the resident mesh and move to Remake Paint Atlas" onPress={keepLivePaintLayout} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
+                  <Row style={{ alignItems: 'center', gap: 6 }}><Icon name="Save" size={13} color="#e6f1ff" /><Text style={{ color: '#e6f1ff', fontSize: 11, fontWeight: 700 }}>Keep LIVE</Text></Row>
+                </Pressable>
+              </Row>
+            </Col>
+          </Col>
+        );
+      })()}
 
       {/* Create Paint Atlas — the explicit step between modeling and painting (every paint
           tool has it). Entering paint the first time on a loaded model picks the atlas

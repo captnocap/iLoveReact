@@ -17,6 +17,9 @@ export default function Workspace(props: {
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
   modelOnDisk: boolean;
+  modelReloadRevision: number;
+  onDiscardActiveModel: () => void;
+  onSavePaintConflictLive: () => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;

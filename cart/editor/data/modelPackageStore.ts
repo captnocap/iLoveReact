@@ -284,7 +284,7 @@ export type ModelBasePaint = {
   rasterBase?: true;
 };
 
-const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
+export const PAINT_LAYOUT_STALE_FILE = 'atlases/layout.stale.json';
 const PAINT_RASTER_BASE_FILE = 'atlases/raster-base.png';
 export const MODEL_UV_RESET_FILE = 'atlases/uv-reset.json';
 const MAX_SIGNED_UV_TEXELS = 16_777_216;

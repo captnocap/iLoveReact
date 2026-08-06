@@ -212,7 +212,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage } from '../data/modelPackageStore';
+import { hasStoredModelPaint, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -438,6 +438,7 @@ export default function AppFrame() {
   const persistenceSettings = useMemo(editorPersistenceSettings, [settingsRevision]);
   const [manualWorldDirty, setManualWorldDirty] = useState(false);
   const [modelMutationRevision, setModelMutationRevision] = useState(0);
+  const [modelReloadRevision, setModelReloadRevision] = useState(0);
   const retopoGhostVisibleRef = useRef(state.modelTool.retopoGhostVisible);
   retopoGhostVisibleRef.current = state.modelTool.retopoGhostVisible;
   // Destructive part-count changes require a one-shot capability tied to the exact
@@ -1499,13 +1500,35 @@ export default function AppFrame() {
 
   /** The single model commit path used by File → Save, first-atlas gating,
    * close/switch boundaries, and background autosave after first save. */
-  const saveActiveModelNow = (reason = 'Save'): boolean => {
+  const saveActiveModelNow = (reason = 'Save', allowStalePaintLayout = false): boolean => {
     const current = stateRef.current;
     const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
     const pkg = doc?.kind === 'model'
       ? effectiveModelPackage(doc.sourceId, current.modelOverrides, current.modelDupes)
       : null;
     if (!pkg) return false;
+
+    const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
+    const stalePaintLayout = (globalThis as any).__model_paint_layout_stale?.() === 1;
+    const hasRecoverablePaint = alreadyOnDisk
+      && (hasStoredModelPaint(pkg) || modelPaintLayoutIsStale(pkg));
+    if (!allowStalePaintLayout && stalePaintLayout && hasRecoverablePaint) {
+      const opened = modelToolApiRef.current?.openPaintLayoutConflict({
+        origin: 'save',
+        unsaved: Boolean(current.modelDirty[pkg.id]),
+        keepLive: () => saveActiveModelNow(reason, true),
+        keepDisk: () => discardModelWorkingCopy(pkg.id, `Kept DISK for "${pkg.name}" — live edits and Ctrl+Z history were discarded`),
+      }) === true;
+      if (opened) {
+        setState((prev) => ({
+          ...prev,
+          openMenu: null,
+          actionMenu: 'File',
+          status: `${reason} paused: live geometry and saved paint disagree — choose Keep LIVE or Keep DISK`,
+        }));
+        return false;
+      }
+    }
 
     const rigDraft = current.modelRigs[pkg.id];
     const textureSlots = current.modelTextureSlots[pkg.id] ?? pkg.textureSlots ?? [];
@@ -1518,7 +1541,6 @@ export default function AppFrame() {
       textureSlots,
       lights,
     };
-    const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
     const result = materializeModelPackage(pkgToSave);
     const liveRows = current.modelParts[pkg.id] ?? [];
     const artifactsOk = result.ok && writeModelArtifacts(
@@ -6228,15 +6250,20 @@ export default function AppFrame() {
    * claim and the React working copy so reopening hydrates the saved package.
    * A never-materialized model has no durable identity, so its pending override
    * and session catalog row leave with the working copy too. */
-  const discardModelWorkingCopy = (modelId: string) => {
+  const discardModelWorkingCopy = (modelId: string, status?: string) => {
     releaseModelDocSession();
     const current = stateRef.current;
     const pkg = effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes);
     const materialized = Boolean(pkg && isMaterialized(pkg.kind, pkg.id));
-    const next = discardModelWorkingCopyState(current, modelId, materialized);
+    const discarded = discardModelWorkingCopyState(current, modelId, materialized);
+    const next = status ? { ...discarded, status } : discarded;
     stateRef.current = next;
     persistState(next);
     setState(next);
+    // Force the viewer through its ordinary cold package mount. Releasing the
+    // host lease alone is insufficient while the same keyed ModelView remains
+    // mounted; the revision makes Keep DISK a real reload, including journal loss.
+    setModelReloadRevision((revision) => revision + 1);
   };
 
   const refreshWorldBibleForOpen = () => {
@@ -6906,6 +6933,11 @@ export default function AppFrame() {
             modelContextTrigger={modelMenu.triggerProps}
             outlinerHandlers={outlinerHandlers}
             modelOnDisk={activeModelOnDisk}
+            modelReloadRevision={modelReloadRevision}
+            onDiscardActiveModel={() => {
+              if (activeModelId) discardModelWorkingCopy(activeModelId, 'Kept DISK — live edits and Ctrl+Z history were discarded');
+            }}
+            onSavePaintConflictLive={() => saveActiveModelNow('Saved after choosing Keep LIVE', true)}
             onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
             onModelDocumentMutated={markActiveModelDirty}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}

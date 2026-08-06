@@ -31,7 +31,9 @@ export type PaintHydrationPort = {
 
 export type PaintHydrationResult =
   | { status: 'ready'; source: 'base' | 'variant' }
-  | { status: 'missing' | 'stale' | 'failed' };
+  | { status: 'missing' }
+  | { status: 'stale'; reason: 'layout-stale' }
+  | { status: 'failed'; reason: 'restore-rejected' };
 
 export type ResidentPaintResumeAction = 'none' | 'preview' | 'paint';
 
@@ -62,7 +64,7 @@ export function hydratePersistedModelPaint(
 ): PaintHydrationResult {
   if (sources.stale) {
     port.invalidateLayout();
-    return { status: 'stale' };
+    return { status: 'stale', reason: 'layout-stale' };
   }
 
   let foundPersistedPaint = false;
@@ -120,5 +122,7 @@ export function hydratePersistedModelPaint(
     if (restored) return { status: 'ready', source: 'variant' };
   }
 
-  return { status: foundPersistedPaint ? 'failed' : 'missing' };
+  return foundPersistedPaint
+    ? { status: 'failed', reason: 'restore-rejected' }
+    : { status: 'missing' };
 }
