@@ -653,7 +653,9 @@ type BevelInfo = {
   minimumWidth?: number;
   maxWidth?: number;
   sidesBefore?: number;
-  sidesAfter?: number;
+  defaultTargetSides?: number;
+  minimumTargetSides?: number;
+  maximumTargetSides?: number;
 };
 const meshBevelBegin = (): BevelInfo | null => {
   try {
@@ -663,7 +665,7 @@ const meshBevelBegin = (): BevelInfo | null => {
     return null;
   }
 };
-const meshBevelPreview = (width: number) => readTopoResult(host.__mesh_bevel_preview?.(width));
+const meshBevelPreview = (width: number, targetSides = 0) => readTopoResult(host.__mesh_bevel_preview?.(width, targetSides));
 const meshBevelEnd = (commit: boolean) => readTopoResult(host.__mesh_bevel_end?.(commit ? 1 : 0));
 // ── Face loop cut (the studio's Blockbench treatment): a host-owned popup session ──
 // begin captures the base mesh + the clicked face's two in-plane axes; preview installs
@@ -940,7 +942,18 @@ const LC_CARD_W = LC_PAD * 2 + LC_LABEL_W + LC_GAP + LC_STEP_W; // content colum
 const lcSpanLabel = (s: number) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}u`;
 const BEVEL_POPUP_TUNING = {
   stepUnits: 0.5,
+  sliderStepUnits: 0.1,
   widthDecimals: 1,
+} as const;
+const BEVEL_POPUP_LAYOUT = {
+  panelWidth: 420,
+  viewportInset: 16,
+  viewportBottom: 72,
+  panelPadding: 16,
+  panelGap: 12,
+  controlHeight: 42,
+  actionHeight: 44,
+  cornerRadius: 9,
 } as const;
 const QUADIFY_PREVIEW_TUNING = {
   scanStartDelayMs: 32,
@@ -1243,7 +1256,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     min: number;
     max: number;
     sidesBefore: number;
-    sidesAfter: number;
+    targetSides: number;
+    minTargetSides: number;
+    maxTargetSides: number;
     fallbackReason: string | null;
   }>(null);
   const openBevel = () => {
@@ -1256,23 +1271,40 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const min = roundBevelUnits(info.minimumWidth * U_PER_TILE);
     const max = Math.max(min, roundBevelUnits(info.maxWidth * U_PER_TILE));
     const width = Math.max(min, Math.min(max, roundBevelUnits(info.defaultWidth * U_PER_TILE)));
-    const preview = meshBevelPreview(width / U_PER_TILE);
+    const sidesBefore = info.kind === 'boundary' ? Math.trunc(info.sidesBefore ?? 0) : 0;
+    const minTargetSides = info.kind === 'boundary' ? Math.trunc(info.minimumTargetSides ?? 0) : 0;
+    const maxTargetSides = info.kind === 'boundary' ? Math.trunc(info.maximumTargetSides ?? 0) : 0;
+    const targetSides = info.kind === 'boundary' ? Math.trunc(info.defaultTargetSides ?? 0) : 0;
+    if (info.kind === 'boundary' && (
+      sidesBefore < 3 || minTargetSides <= sidesBefore || maxTargetSides < minTargetSides ||
+      targetSides < minTargetSides || targetSides > maxTargetSides
+    )) {
+      meshBevelEnd(false);
+      setError('The selected boundary did not provide a valid target side-count range');
+      return;
+    }
+    const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
     setBv({
       kind: info.kind,
       width,
       min,
       max,
-      sidesBefore: info.kind === 'boundary' ? Math.max(0, Math.trunc(info.sidesBefore ?? 0)) : 0,
-      sidesAfter: info.kind === 'boundary' ? Math.max(0, Math.trunc(info.sidesAfter ?? 0)) : 0,
+      sidesBefore,
+      targetSides,
+      minTargetSides,
+      maxTargetSides,
       fallbackReason: preview?.fallbackReason ?? null,
     });
     adoptMesh(preview);
   };
-  const changeBevel = (widthRaw: number) => {
+  const changeBevel = (widthRaw: number, targetSidesRaw = bv?.targetSides ?? 0) => {
     if (!bv) return;
     const width = Math.max(bv.min, Math.min(bv.max, roundBevelUnits(widthRaw)));
-    const preview = meshBevelPreview(width / U_PER_TILE);
-    setBv({ ...bv, width, fallbackReason: preview?.fallbackReason ?? null });
+    const targetSides = bv.kind === 'boundary'
+      ? Math.max(bv.minTargetSides, Math.min(bv.maxTargetSides, Math.trunc(targetSidesRaw)))
+      : 0;
+    const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
+    setBv({ ...bv, width, targetSides, fallbackReason: preview?.fallbackReason ?? null });
     adoptMesh(preview);
   };
   const closeBevel = (commit: boolean) => {
@@ -4614,7 +4646,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       onPress={openBevel}
                       tooltip={selInfo.sel === 1
                         ? 'Bevel selected sharp manifold edge — opens a live width preview'
-                        : 'Chamfer the complete selected open boundary loop — N sides become 2N'}
+                        : 'Chamfer the complete selected open boundary loop to a chosen larger side count'}
                       style={{
                         paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
                         backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
@@ -4850,63 +4882,192 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Box>
       ) : null}
 
-      {/* Bevel sizing: one corner/sharp edge or one complete open boundary loop on
-          the host-native indexed mesh. Width is modeling u; every step is a fresh
-          preview from the captured base. Apply journals once, while ✕ / Esc restores
-          the base and the exact original selection. */}
+      {/* Bevel / Chamfer Boundary uses a dedicated readable panel. It deliberately
+          does NOT reuse the 20px inspector grid: this is a modal modeling decision,
+          so the width control and both exit actions must be legible at a glance. */}
       {bv ? (
-        <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
+        <Box style={{
+          position: 'absolute',
+          left: BEVEL_POPUP_LAYOUT.viewportInset,
+          right: BEVEL_POPUP_LAYOUT.viewportInset,
+          bottom: BEVEL_POPUP_LAYOUT.viewportBottom,
+          alignItems: 'center',
+          overflow: 'hidden',
+        }}>
           <Col
             style={{
-              width: LC_CARD_W, maxWidth: '100%', paddingLeft: LC_PAD, paddingRight: LC_PAD, paddingTop: 10, paddingBottom: 10,
-              backgroundColor: 'rgba(11,19,32,0.96)', borderWidth: 1, borderColor: '#2c4a6a',
-              borderRadius: 8, gap: 8,
+              width: BEVEL_POPUP_LAYOUT.panelWidth,
+              maxWidth: '100%',
+              padding: BEVEL_POPUP_LAYOUT.panelPadding,
+              backgroundColor: 'rgba(7,13,21,0.98)',
+              borderWidth: 2,
+              borderColor: bv.kind === 'boundary' ? '#42d9e8' : '#4e75a4',
+              borderRadius: BEVEL_POPUP_LAYOUT.cornerRadius,
+              gap: BEVEL_POPUP_LAYOUT.panelGap,
             }}
           >
-            <Row style={{ alignItems: 'center' }}>
-              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
-                {bv.kind === 'boundary'
-                  ? `Chamfer Boundary${bv.sidesBefore > 0 ? ` · ${bv.sidesBefore} → ${bv.sidesAfter} sides` : ''}`
-                  : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
+            <Col style={{ gap: 4 }}>
+              <Text style={{ color: '#edf5f7', fontSize: 17, fontWeight: 800 }}>
+                {bv.kind === 'boundary' ? 'Chamfer Boundary' : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
               </Text>
+              <Text style={{ color: '#b8c6d0', fontSize: 12 }}>
+                {bv.kind === 'boundary' && bv.sidesBefore > 0
+                  ? `${bv.sidesBefore}-sided opening → ${bv.targetSides}-sided opening`
+                  : 'Adjust how far the selected corner is cut back.'}
+              </Text>
+            </Col>
+            {bv.fallbackReason ? (
+              <Box style={{ padding: 10, backgroundColor: '#302315', borderWidth: 1, borderColor: '#9b6b2e', borderRadius: 6 }}>
+                <Text style={{ color: '#ffd792', fontSize: 12, fontWeight: 700 }}>{bv.fallbackReason}</Text>
+              </Box>
+            ) : null}
+            {bv.kind === 'boundary' ? (
+              <Col style={{ gap: 10, padding: 12, backgroundColor: '#10212a', borderWidth: 1, borderColor: '#2d6971', borderRadius: 7 }}>
+                <Row style={{ alignItems: 'center' }}>
+                  <Text style={{ color: '#d9f1f3', fontSize: 13, fontWeight: 800, flexGrow: 1 }}>Target opening sides</Text>
+                  <Text style={{ color: '#83a7aa', fontSize: 11, fontFamily: 'monospace' }}>
+                    {`${bv.minTargetSides}–${bv.maxTargetSides}`}
+                  </Text>
+                </Row>
+                <Row style={{ alignItems: 'center', gap: 10 }}>
+                  <Pressable
+                    onPress={() => changeBevel(bv.width, bv.targetSides - 1)}
+                    tooltip="Use one fewer side in the opening"
+                    style={{
+                      width: 112,
+                      height: BEVEL_POPUP_LAYOUT.controlHeight,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 6,
+                      backgroundColor: bv.targetSides <= bv.minTargetSides ? '#172127' : '#153038',
+                      borderWidth: 1,
+                      borderColor: bv.targetSides <= bv.minTargetSides ? '#344047' : '#397982',
+                      opacity: bv.targetSides <= bv.minTargetSides ? 0.55 : 1,
+                    }}
+                  >
+                    <Text style={{ color: '#d8f4f7', fontSize: 13, fontWeight: 800 }}>− Fewer</Text>
+                  </Pressable>
+                  <Col style={{ flexGrow: 1, minWidth: 0, alignItems: 'center', gap: 1 }}>
+                    <Text style={{ color: '#91f1f4', fontSize: 24, fontFamily: 'monospace', fontWeight: 900 }}>{bv.targetSides}</Text>
+                    <Text style={{ color: '#83a7aa', fontSize: 10 }}>sides</Text>
+                  </Col>
+                  <Pressable
+                    onPress={() => changeBevel(bv.width, bv.targetSides + 1)}
+                    tooltip="Use one more side in the opening"
+                    style={{
+                      width: 112,
+                      height: BEVEL_POPUP_LAYOUT.controlHeight,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 6,
+                      backgroundColor: bv.targetSides >= bv.maxTargetSides ? '#172127' : '#153038',
+                      borderWidth: 1,
+                      borderColor: bv.targetSides >= bv.maxTargetSides ? '#344047' : '#397982',
+                      opacity: bv.targetSides >= bv.maxTargetSides ? 0.55 : 1,
+                    }}
+                  >
+                    <Text style={{ color: '#d8f4f7', fontSize: 13, fontWeight: 800 }}>More +</Text>
+                  </Pressable>
+                </Row>
+                <Text style={{ color: '#83a7aa', fontSize: 10, textAlign: 'center' }}>
+                  New sides are distributed as evenly as possible around the selected loop.
+                </Text>
+              </Col>
+            ) : null}
+            <Col style={{ gap: 10, padding: 12, backgroundColor: '#0d1823', borderWidth: 1, borderColor: '#263b4d', borderRadius: 7 }}>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={{ color: '#d5e0e7', fontSize: 13, fontWeight: 700, flexGrow: 1 }}>Corner cut width</Text>
+                <Text style={{ color: '#788692', fontSize: 11, fontFamily: 'monospace' }}>
+                  {`${bv.min.toFixed(1)}–${bv.max.toFixed(1)} units`}
+                </Text>
+              </Row>
+              <Row style={{ alignItems: 'center', gap: 10 }}>
+                <Pressable
+                  onPress={() => changeBevel(bv.width - BEVEL_POPUP_TUNING.stepUnits)}
+                  tooltip={`Make the cut ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units narrower`}
+                  style={{
+                    width: 112,
+                    height: BEVEL_POPUP_LAYOUT.controlHeight,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    backgroundColor: '#132231',
+                    borderWidth: 1,
+                    borderColor: '#3b556c',
+                  }}
+                >
+                  <Text style={{ color: '#d8e9f6', fontSize: 13, fontWeight: 800 }}>− Narrower</Text>
+                </Pressable>
+                <Col style={{ flexGrow: 1, minWidth: 0, alignItems: 'center', gap: 1 }}>
+                  <Text style={{ color: '#f0e1bf', fontSize: 22, fontFamily: 'monospace', fontWeight: 800 }}>
+                    {bv.width.toFixed(BEVEL_POPUP_TUNING.widthDecimals)}
+                  </Text>
+                  <Text style={{ color: '#788692', fontSize: 10 }}>model units</Text>
+                </Col>
+                <Pressable
+                  onPress={() => changeBevel(bv.width + BEVEL_POPUP_TUNING.stepUnits)}
+                  tooltip={`Make the cut ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units wider`}
+                  style={{
+                    width: 112,
+                    height: BEVEL_POPUP_LAYOUT.controlHeight,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    backgroundColor: '#132231',
+                    borderWidth: 1,
+                    borderColor: '#3b556c',
+                  }}
+                >
+                  <Text style={{ color: '#d8e9f6', fontSize: 13, fontWeight: 800 }}>Wider +</Text>
+                </Pressable>
+              </Row>
+              <Slider
+                value={bv.width}
+                min={bv.min}
+                max={bv.max}
+                step={BEVEL_POPUP_TUNING.sliderStepUnits}
+                onCommit={(value: number) => changeBevel(value)}
+                style={{ height: 30, backgroundColor: '#172635', color: '#42d9e8' }}
+              />
+            </Col>
+            <Row style={{ gap: 10 }}>
               <Pressable
                 onPress={() => closeBevel(false)}
-                tooltip="Cancel (Esc) — restore the unbeveled mesh and selection"
-                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+                tooltip="Cancel (Esc) — restore the original mesh and selection"
+                style={{
+                  flexGrow: 1,
+                  height: BEVEL_POPUP_LAYOUT.actionHeight,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 7,
+                  backgroundColor: '#202a35',
+                  borderWidth: 1,
+                  borderColor: '#566474',
+                }}
               >
-                <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
+                <Text style={{ color: '#e1e8ef', fontSize: 13, fontWeight: 800 }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { if (!bv.fallbackReason) closeBevel(true); }}
+                tooltip={bv.fallbackReason ? 'Adjust the width until the preview is valid' : 'Commit this result as one undo step'}
+                style={{
+                  flexGrow: 1,
+                  height: BEVEL_POPUP_LAYOUT.actionHeight,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 7,
+                  backgroundColor: bv.fallbackReason ? '#332627' : '#16472e',
+                  borderWidth: 1,
+                  borderColor: bv.fallbackReason ? '#704447' : '#3c9a68',
+                  opacity: bv.fallbackReason ? 0.7 : 1,
+                }}
+              >
+                <Text style={{ color: bv.fallbackReason ? '#d7a9a9' : '#b9f6cf', fontSize: 13, fontWeight: 800 }}>
+                  {bv.fallbackReason ? 'Cannot Apply' : bv.kind === 'boundary' ? 'Apply Chamfer' : 'Apply Bevel'}
+                </Text>
               </Pressable>
             </Row>
-            {bv.fallbackReason ? (
-              <Text style={{ color: '#e7b96b', fontSize: 11 }}>{bv.fallbackReason}</Text>
-            ) : null}
-            <Row style={{ alignItems: 'center' }}>
-              <Text numberOfLines={1} noWrap style={{ color: '#8fa1b8', fontSize: 12, width: LC_LABEL_W }}>width u</Text>
-              <Box style={{ flexGrow: 1 }} />
-              <Pressable
-                onPress={() => changeBevel(bv.width - BEVEL_POPUP_TUNING.stepUnits)}
-                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-              >
-                <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
-              </Pressable>
-              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', width: LC_VAL_W, marginLeft: LC_GAP, marginRight: LC_GAP, textAlign: 'center' }}>
-                {bv.width.toFixed(BEVEL_POPUP_TUNING.widthDecimals)}
-              </Text>
-              <Pressable
-                onPress={() => changeBevel(bv.width + BEVEL_POPUP_TUNING.stepUnits)}
-                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-              >
-                <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>+</Text>
-              </Pressable>
-            </Row>
-            <Text style={{ color: '#7d899c', fontSize: 10, fontFamily: 'monospace' }}>{`max ${bv.max.toFixed(BEVEL_POPUP_TUNING.widthDecimals)}u`}</Text>
-            <Pressable
-              onPress={() => closeBevel(!bv.fallbackReason)}
-              tooltip={bv.fallbackReason ? 'Close without changing the mesh' : 'Commit the bevel as one undo step'}
-              style={{ marginTop: 2, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: bv.fallbackReason ? '#303747' : '#1c3a2a', borderWidth: 1, borderColor: bv.fallbackReason ? '#566176' : '#2f7a4f' }}
-            >
-              <Text style={{ color: bv.fallbackReason ? '#c8d1df' : '#7fd6a0', fontSize: 12, fontWeight: 700 }}>{bv.fallbackReason ? 'Close' : 'Apply'}</Text>
-            </Pressable>
+            <Text style={{ color: '#627282', fontSize: 10, textAlign: 'center' }}>Esc cancels · Apply creates one undo step</Text>
           </Col>
         </Box>
       ) : null}

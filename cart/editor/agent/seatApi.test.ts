@@ -626,8 +626,18 @@ test('bevel is one captured native session and cancels a rejected preview', () =
   (globalThis as any).__mesh_bevel_preview = () => JSON.stringify({ ok: 1, key: 'preview', count: 36 });
   (globalThis as any).__mesh_bevel_end = (commit: number) => { ended = commit; return JSON.stringify({ ok: 1, key: 'doc', count: 36 }); };
   assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02 } }).ok && ended === 1, 'valid bevel did not commit atomically');
-  (globalThis as any).__mesh_bevel_begin = () => JSON.stringify({ ok: 1, kind: 'boundary', sidesBefore: 4, sidesAfter: 8 });
-  assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02 } }).ok && ended === 1, 'generalized boundary chamfer stayed unreachable through Bevel');
+  let previewTarget = 0;
+  (globalThis as any).__mesh_bevel_begin = () => JSON.stringify({
+    ok: 1, kind: 'boundary', sidesBefore: 4,
+    defaultTargetSides: 8, minimumTargetSides: 5, maximumTargetSides: 256,
+  });
+  (globalThis as any).__mesh_bevel_preview = (_width: number, targetSides: number) => {
+    previewTarget = targetSides;
+    return JSON.stringify({ ok: 1, key: 'preview', count: 36 });
+  };
+  assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02, targetSides: 6 } }).ok && ended === 1,
+    'generalized boundary chamfer stayed unreachable through Bevel');
+  assert(previewTarget === 6, 'Seat collapsed an explicit non-doubling target back to the default');
 });
 
 test('resident destructive and constructive topology doors are reachable', () => {

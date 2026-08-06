@@ -1108,11 +1108,27 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     topology(() => host.__mesh_undo?.());
     return null;
   };
-  const bevel = (width: number): TopologyReceipt | null => {
+  const bevel = (width: number, requestedTargetSides?: number): TopologyReceipt | null => {
     if (!Number.isFinite(width) || width <= 0) return null;
-    const begin = parseJson<{ ok?: number }>(host.__mesh_bevel_begin?.());
+    const begin = parseJson<{
+      ok?: number;
+      kind?: 'edge' | 'vertex' | 'boundary';
+      defaultTargetSides?: number;
+      minimumTargetSides?: number;
+      maximumTargetSides?: number;
+    }>(host.__mesh_bevel_begin?.());
     if (begin?.ok !== 1) return null;
-    const preview = readTopology(host.__mesh_bevel_preview?.(width));
+    let targetSides = 0;
+    if (begin.kind === 'boundary') {
+      targetSides = requestedTargetSides ?? begin.defaultTargetSides ?? 0;
+      if (!Number.isSafeInteger(targetSides) ||
+          targetSides < (begin.minimumTargetSides ?? Number.POSITIVE_INFINITY) ||
+          targetSides > (begin.maximumTargetSides ?? Number.NEGATIVE_INFINITY)) {
+        host.__mesh_bevel_end?.(0);
+        return null;
+      }
+    }
+    const preview = readTopology(host.__mesh_bevel_preview?.(width, targetSides));
     if (!preview) { host.__mesh_bevel_end?.(0); return null; }
     const result = readTopology(automation(() => host.__mesh_bevel_end?.(1)));
     adapter.adoptTopology?.(result);
@@ -1654,8 +1670,9 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('create-face', !!result, result ?? undefined, result ? undefined : 'select two bridge edges or a closed 3/4-edge loop and provide a name');
       }
       case 'bevel': {
-        const result = seat.bevel(Number(args.width ?? 0));
-        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge/vertex or one complete 3+ edge open boundary loop, then use a valid width');
+        const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);
+        const result = seat.bevel(Number(args.width ?? 0), targetSides);
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge/vertex or one complete 3+ edge open boundary loop, then use a valid width and targetSides');
       }
       case 'inset': {
         const result = seat.inset(
