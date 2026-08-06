@@ -3663,6 +3663,17 @@ pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
 
     var lowered = preview.lower() catch return false;
     defer lowered.deinit();
+    // Fresh bevel/chamfer faces do not own UV space in the existing paint
+    // contract. Their generated 0..1 square used to sample the entire authored
+    // atlas during preview, presenting random image fragments as the new corner
+    // surfaces. Keep every pre-existing triangle's interpolated UVs exact, while
+    // the newly appended face ids share one neutral gutter texel until Remake
+    // Paint Atlas gives the changed topology a real layout.
+    if (model_paint.hasAuthoredAtlas()) {
+        const neutral_uv = model_paint.reserveNeutralPlaceholderUv() orelse return false;
+        const first_generated_face: u32 = @intCast(session.base_mesh.faces.items.len);
+        if (!lowered.pointFreshFacesAtUv(first_generated_face, neutral_uv)) return false;
+    }
     const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
     defer std.heap.c_allocator.free(colors);
     if (!mesh_edit.inheritFaceRgba(session.base_colors, lowered.source_triangles, colors)) return false;

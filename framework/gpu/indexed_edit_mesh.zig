@@ -423,6 +423,22 @@ pub const Lowered = struct {
     semantic_instances: []u32,
     tri_count: u32,
 
+    /// Point every render triangle minted after the captured topology boundary
+    /// at one caller-owned atlas texel. Existing triangles retain exact UVs.
+    pub fn pointFreshFacesAtUv(lowered: *Lowered, first_face_id: u32, uv: Vec2) bool {
+        if (lowered.uvs.len != lowered.face_ids.len * 6 or
+            !std.math.isFinite(uv[0]) or !std.math.isFinite(uv[1])) return false;
+        for (lowered.face_ids, 0..) |face_id, triangle| {
+            if (face_id < first_face_id) continue;
+            const at = triangle * 6;
+            for (0..3) |corner| {
+                lowered.uvs[at + corner * 2] = uv[0];
+                lowered.uvs[at + corner * 2 + 1] = uv[1];
+            }
+        }
+        return true;
+    }
+
     pub fn deinit(lowered: *Lowered) void {
         lowered.allocator.free(lowered.positions);
         lowered.allocator.free(lowered.uvs);

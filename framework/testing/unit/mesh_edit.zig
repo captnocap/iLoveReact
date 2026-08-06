@@ -2444,6 +2444,7 @@ test "selected open boundary loop chamfers to its chosen target side count" {
     try testing.expectEqual(@as(u32, 5), selection.minimum_target_sides);
     try testing.expectEqual(@as(u32, 256), selection.maximum_target_sides);
     try testing.expectApproxEqAbs(@as(f32, 0.9), selection.max_width, 0.00001);
+    const first_chamfer_face: u32 = @intCast(indexed.faces.items.len);
     try testing.expect(try indexed.chamferBoundary(loop[0..], 0.25, 8));
     try testing.expectEqual(@as(u32, 12), try countOpenEdges(&indexed)); // 4 outer + 8 inner.
     // The old corners become interior support vertices for the four new corner
@@ -2454,6 +2455,19 @@ test "selected open boundary loop chamfers to its chosen target side count" {
     defer lowered.deinit();
     try testing.expectEqual(@as(u32, 20), lowered.tri_count);
     for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+    const neutral_uv = [2]f32{ 0.8125, 0.9375 };
+    try testing.expect(lowered.pointFreshFacesAtUv(first_chamfer_face, neutral_uv));
+    var neutral_triangles: u32 = 0;
+    for (lowered.face_ids, 0..) |face_id, triangle| {
+        if (face_id < first_chamfer_face) continue;
+        neutral_triangles += 1;
+        const at = triangle * 6;
+        for (0..3) |corner| {
+            try testing.expectApproxEqAbs(neutral_uv[0], lowered.uvs[at + corner * 2], 0.000001);
+            try testing.expectApproxEqAbs(neutral_uv[1], lowered.uvs[at + corner * 2 + 1], 0.000001);
+        }
+    }
+    try testing.expect(neutral_triangles > 0);
 }
 
 test "boundary chamfer supports non-doubling and multi-segment targets" {
