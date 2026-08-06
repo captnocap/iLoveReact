@@ -178,6 +178,17 @@ export function readPaintLayoutDiskFacts(pkg: PaintTarget): PaintLayoutDiskFacts
   };
 }
 
+/** A paint-layout mismatch is VACUOUS when the package holds no paint at all —
+ * no base era, no variants. There is nothing for the live mesh to disagree WITH,
+ * so asking the person to arbitrate is a false alarm: a never-painted model must
+ * open and save silently (req_3940/req_3956, found when every agent-built model
+ * raised the picker over paint that never existed). Deliberately narrow: this
+ * says nothing about `part-count`, which is a real destructive edge and keeps
+ * raising the picker even on an unpainted package. */
+export function paintLayoutConflictIsVacuous(disk: PaintLayoutDiskFacts | null): boolean {
+  return !disk?.basePaint && (disk?.variants?.length ?? 0) === 0;
+}
+
 /** True only for the protected destructive edge: live has no named faces while
  * disk still does. The picker can disclose this fact before its Keep LIVE verb
  * mints the one-shot save authorization; ordinary saves remain guarded. */

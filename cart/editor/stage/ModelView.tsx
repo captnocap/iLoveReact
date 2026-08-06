@@ -107,6 +107,7 @@ import {
   paintLayoutConflictAckHotKey,
   paintLayoutConflictRevision,
   paintLayoutConflictRevisionIsAcknowledged,
+  paintLayoutConflictIsVacuous,
   paintLayoutKeepLiveClearsSemantics,
   modelRevisionKeepLiveOptions,
   modelRevisionMismatchSentence,
@@ -1691,6 +1692,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   ): boolean => {
     if (!model || !paintTarget || !paintTargetOnDisk) return false;
     const disk = readPaintLayoutDiskFacts(paintTarget);
+    const conflictReason = saveRequest?.reason ?? { kind: 'paint-layout' as const };
+    // Never raise the picker over paint that does not exist (req_3956). A
+    // structural edit marks the layout stale whether or not the package was ever
+    // painted, so an unpainted model used to open/save straight into a modal
+    // whose own DISK panel read "No readable base paint or variants".
+    if (conflictReason.kind === 'paint-layout' && paintLayoutConflictIsVacuous(disk)) return false;
     const percept = readSeatPercept();
     const session = readModelSession();
     const live: PaintLayoutLiveFacts = {

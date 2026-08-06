@@ -9,6 +9,7 @@
 
 import {
   paintEraTriangleCount,
+  paintLayoutConflictIsVacuous,
   paintLayoutConflictRevision,
   paintLayoutConflictRevisionIsAcknowledged,
   paintLayoutKeepLiveClearsSemantics,
@@ -103,6 +104,23 @@ test('an acknowledged disk checkpoint remains resolved until disk actually chang
     }),
     'an actual disk revision change reused the old acknowledgement',
   );
+});
+
+test('a never-painted package raises no paint-layout conflict (req_3956)', () => {
+  const painted = disk([{ id: '1', name: 'Painting 1', triangles: 1019 }]);
+  assert(!paintLayoutConflictIsVacuous(painted), 'a package with real paint was called vacuous');
+  assert(
+    !paintLayoutConflictIsVacuous({ ...painted, basePaint: null }),
+    'a package whose variants survive was called vacuous',
+  );
+  // The exact state every agent-built model lands in: structural edits set the
+  // stale marker, but no era was ever painted — the picker's own DISK panel says
+  // "No readable base paint or variants". There is nothing to arbitrate.
+  assert(
+    paintLayoutConflictIsVacuous({ ...painted, basePaint: null, variants: [] }),
+    'an unpainted package still claimed a paint conflict',
+  );
+  assert(paintLayoutConflictIsVacuous(null), 'a package with no readable disk facts claimed a paint conflict');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
