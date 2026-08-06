@@ -84,6 +84,37 @@ export function modelOutlinerNote(modelId: string, parts: readonly ModelPartReco
   return JSON.stringify({ modelId, parts });
 }
 
+const APPENDED_PART_HISTORY_LABELS = new Set(['duplicate part', 'mirror part']);
+
+/** Last-resort inverse for append-only part history when an older/native caller
+ * restored geometry without a usable metadata note. Duplicate and Mirror Part
+ * append one highest-ranked native range; undo removes exactly that row. Keep
+ * every surviving row's authored identity and only re-stamp its host range. */
+export function recoverAppendedPartUndoRows<T extends { lo?: number; hi?: number }>(
+  rows: readonly T[],
+  ranges: readonly { lo: number; hi: number }[],
+  historyLabel: string,
+): T[] | null {
+  if (!APPENDED_PART_HISTORY_LABELS.has(historyLabel) || rows.length !== ranges.length + 1) return null;
+  if (ranges.some((range) => !Number.isInteger(range.lo) || !Number.isInteger(range.hi) || range.hi <= range.lo)) return null;
+  const ranked = rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => ((a.row.lo ?? Number.MAX_SAFE_INTEGER) - (b.row.lo ?? Number.MAX_SAFE_INTEGER)) || (a.index - b.index));
+  const appended = ranked[ranked.length - 1];
+  if (!appended || !Number.isInteger(appended.row.lo) || !Number.isInteger(appended.row.hi)) return null;
+  const kept = rows.filter((_row, index) => index !== appended.index);
+  const keptByRange = kept
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => ((a.row.lo ?? Number.MAX_SAFE_INTEGER) - (b.row.lo ?? Number.MAX_SAFE_INTEGER)) || (a.index - b.index));
+  const restoredRanges = ranges.slice().sort((a, b) => a.lo - b.lo);
+  const restored = kept.slice();
+  keptByRange.forEach((entry, rank) => {
+    const range = restoredRanges[rank]!;
+    restored[entry.index] = { ...entry.row, lo: range.lo, hi: range.hi };
+  });
+  return restored;
+}
+
 function assertSnapshot(snapshot: ModelOutlinerSnapshot, modelId: string): ModelPartRecord[] {
   if (!modelId || snapshot.modelId !== modelId) {
     throw new ModelOutlinerRejected('WRONG_MODEL', 'the requested model is not the active model document');

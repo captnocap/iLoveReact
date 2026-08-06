@@ -3,6 +3,7 @@ import {
   ModelOutlinerRejected,
   modelPartRecords,
   modelOutlinerNote,
+  recoverAppendedPartUndoRows,
   planGroupDissolve,
   planGroupRename,
   planOutlinerMove,
@@ -89,6 +90,26 @@ test('journal notes exclude mesh blobs while retaining exact durable metadata', 
   const note = modelOutlinerNote('model-a', modelPartRecords([withMesh]));
   assert(!note.includes('"mesh"'), 'mesh geometry leaked into the journal note');
   assert(note.includes('"modelId":"model-a"') && note.includes('"name":"Deck"'), 'journal note lost identity metadata');
+});
+
+test('mirror undo preserves authored row identities when its journal note is unusable', () => {
+  const before = [
+    { ...part('hood', 'Hood'), lo: 20, hi: 25 },
+    { ...part('door', 'Driver Door'), lo: 40, hi: 44 },
+    { ...part('glass', 'Windshield'), lo: 70, hi: 73 },
+  ];
+  // Display order is deliberately not range order; the mirrored append is the
+  // highest native range, not necessarily the last visible outliner row.
+  const mirrored = { ...part('mirror', 'Driver Door mirror X'), lo: 90, hi: 94 };
+  const current = [before[0]!, mirrored, before[1]!, before[2]!];
+  const restored = recoverAppendedPartUndoRows(current, [
+    { lo: 0, hi: 6 }, { lo: 6, hi: 12 }, { lo: 12, hi: 18 },
+  ], 'mirror part');
+  assert(restored?.map((row) => row.id).join(',') === 'hood,door,glass', 'mirror row was not removed by native range rank');
+  assert(restored?.map((row) => row.name).join('|') === 'Hood|Driver Door|Windshield', 'authored names were replaced by anonymous rows');
+  assert(restored?.map((row) => `${row.lo}:${row.hi}`).join(',') === '0:6,6:12,12:18', 'surviving rows did not follow restored host ranges');
+  assert(recoverAppendedPartUndoRows(current, [{ lo: 0, hi: 6 }], 'mirror part') === null, 'ambiguous cardinality guessed at row ownership');
+  assert(recoverAppendedPartUndoRows(current, [{ lo: 0, hi: 6 }, { lo: 6, hi: 12 }, { lo: 12, hi: 18 }], 'merge parts') === null, 'non-append history used the append-only inverse');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

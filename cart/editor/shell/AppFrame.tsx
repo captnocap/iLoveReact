@@ -186,6 +186,7 @@ import {
   MODEL_PARTS_UNGROUP_COMMAND_ID,
   modelOutlinerNote,
   modelPartRecords,
+  recoverAppendedPartUndoRows,
 } from '../model/outlinerCommand';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
@@ -3638,6 +3639,9 @@ export default function AppFrame() {
   // is authoritative — these ids are stable across deletes and appends within a session.
   const partRange = (part: ModelPart): { lo: number; hi: number } | null =>
     part.lo != null && part.hi != null ? { lo: part.lo, hi: part.hi } : null;
+  const writeHostPartJournalNote = (modelId: string, parts: readonly ModelPart[]): void => {
+    (globalThis as any).__mesh_journal_note?.(modelOutlinerNote(modelId, modelPartRecords(parts)));
+  };
 
   // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
   // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
@@ -4644,6 +4648,10 @@ export default function AppFrame() {
     const placedRows: ModelPart[] = [];
     const lines: string[] = [];
     const usedNames = parts.map((part) => part.name);
+    let journalParts = parts.slice();
+    // Do not depend on a React effect having run since load/rename. The native
+    // snapshot taken by the first duplicate must carry the exact pre-op names.
+    writeHostPartJournalNote(mid, journalParts);
     let seq = state.seq;
     for (const part of rows) {
       const range = partRange(part);
@@ -4666,7 +4674,7 @@ export default function AppFrame() {
       const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
       const copiedPath = groupCopy?.pathByPartId.get(part.id) ?? partGroupPath(part);
       const copiedLeaf = copiedPath[copiedPath.length - 1];
-      placedRows.push({
+      const placed: ModelPart = {
         id: `part:dup:${seq++}`,
         name: duplicateName,
         kind: part.kind,
@@ -4680,14 +4688,20 @@ export default function AppFrame() {
         outlinerOrder: parts.length + placedRows.length,
         lo: r.lo,
         hi: r.hi,
-      });
+      };
+      placedRows.push(placed);
+      // A selected-set mirror is N native journal entries. Stamp the metadata
+      // after EACH append so the next snapshot describes the same N-part mesh;
+      // waiting until the batch ends is what let undo fall into Part 1/2/3….
+      journalParts = [...journalParts, placed];
+      writeHostPartJournalNote(mid, journalParts);
       lines.push(`${mirrorAxis >= 0 ? 'mirrored' : 'duplicated'} ${part.name} → [${r.lo},${r.hi})`);
     }
     if (placedRows.length === 0) {
       setState((prev) => ({ ...prev, status: lines.join(' · ') || 'duplicate needs a focused part with a stamped range' }));
       return;
     }
-    const nextParts = [...parts, ...placedRows];
+    const nextParts = journalParts;
     const focusedIds = placedRows.map((part) => part.id);
     const primaryId = placedRows[placedRows.length - 1]!.id;
 
@@ -5135,6 +5149,16 @@ export default function AppFrame() {
       return null;
     }
   };
+  const readHostRedoLabel = (): string => {
+    try {
+      const j = (globalThis as any).__mesh_history?.();
+      if (typeof j !== 'string' || !j) return '';
+      const label = JSON.parse(j)?.redoLabel;
+      return typeof label === 'string' ? label : '';
+    } catch {
+      return '';
+    }
+  };
   const stampRowsByRank = (rows: ModelPart[], ranges: { lo: number; hi: number }[]): ModelPart[] => {
     const byLo = rows.map((p, i) => ({ p, i })).sort((x, y) => ((x.p.lo ?? Number.MAX_SAFE_INTEGER) - (y.p.lo ?? Number.MAX_SAFE_INTEGER)) || (x.i - y.i));
     const sorted = ranges.slice().sort((x, y) => x.lo - y.lo);
@@ -5269,8 +5293,14 @@ export default function AppFrame() {
     }
     const noteParts = readHostJournalNoteParts(mid);
     const fromNote = noteParts && noteParts.length === ranges.length;
-    const next = stampRowsByRank(fromNote ? noteParts : partRowsFromGeometry(ranges, rows), ranges);
-    console.error(`[partsync] reconciled rows=${rows.length} → parts=${ranges.length} via ${fromNote ? 'journal note' : 'geometry'} (${reason})`);
+    // A native-door undo can bypass meshUndoRedo entirely. When it undid the
+    // append-only Mirror/Duplicate Part operation, the redo label still names
+    // that exact inverse; preserve the surviving rows instead of anonymizing
+    // them merely because an old snapshot carried no usable note.
+    const fromAppendInverse = fromNote ? null : recoverAppendedPartUndoRows(rows, ranges, readHostRedoLabel());
+    const recovery = fromNote ? 'journal note' : fromAppendInverse ? 'append inverse' : 'geometry';
+    const next = stampRowsByRank(fromNote ? noteParts : fromAppendInverse ?? partRowsFromGeometry(ranges, rows), ranges);
+    console.error(`[partsync] reconciled rows=${rows.length} → parts=${ranges.length} via ${recovery} (${reason})`);
     if (next.length < rows.length) authorizedPartShrinkTargetRef.current.set(mid, next.length);
     else authorizedPartShrinkTargetRef.current.delete(mid);
     const activeId = next.some((p) => p.id === s.modelActivePartId) ? s.modelActivePartId : (next[0]?.id ?? null);
@@ -5283,7 +5313,7 @@ export default function AppFrame() {
         ...prev,
         modelParts: { ...prev.modelParts, [mid]: next },
         modelActivePartId: activeId,
-        status: `outliner reconciled to the mesh — ${next.length} part(s), was ${rows.length} row(s) (${fromNote ? 'restored from the undo journal' : 'rebuilt from geometry'})`,
+        status: `outliner reconciled to the mesh — ${next.length} part(s), was ${rows.length} row(s) (${fromNote ? 'restored from the undo journal' : fromAppendInverse ? 'preserved from the append-only undo' : 'rebuilt from geometry'})`,
       };
     });
     markActiveModelDirty();
@@ -5335,7 +5365,8 @@ export default function AppFrame() {
   const partMeshSeedsRef = useRef<Record<string, EditMesh>>({});
   const meshUndoRedo = (redo: boolean, source = 'native') => {
     const api = modelToolApiRef.current;
-    const mid = activePartsModelId(state);
+    const current = stateRef.current;
+    const mid = activePartsModelId(current);
     const r = withNativeMeshActionSource(source, () => (redo ? api?.redoMesh() : api?.undoMesh()));
     const verb = redo ? 'redo' : 'undo';
     if (!r?.ok) {
@@ -5354,13 +5385,20 @@ export default function AppFrame() {
         }
       } catch { /* stale/foreign note — the geometry restored; part rows stay as-is */ }
     }
+    const hostRanges = mid ? readHostPartRanges() : null;
+    if (!redo && mid && hostRanges && (!restored || restored.length !== hostRanges.length)) {
+      const inverse = recoverAppendedPartUndoRows(current.modelParts[mid] ?? [], hostRanges, r.label);
+      if (inverse) {
+        console.error(`[partsync] ${verb} ${r.label} preserved ${inverse.length} authored row(s) through the append-only inverse`);
+        restored = inverse;
+      }
+    }
     if (restored && mid) {
       // UNDO SAFETY (req_2644): the journal restored the HOST's part ranges along with
       // the geometry — re-stamp the restored rows' lo/hi from that read-back instead of
       // trusting only the note (a stale note must never outvote the mesh). A note whose
       // COUNT disagrees with the host is stale outright: applying its rows anyway is
       // how a desync used to install itself (req_3763) — reconcile instead.
-      const hostRanges = readHostPartRanges();
       if (hostRanges && hostRanges.length !== restored.length) {
         console.error(`[partsync] ${verb} note carries ${restored.length} row(s) but the host restored ${hostRanges.length} part(s) — reconciling instead of applying the stale note`);
         setState((prev) => ({ ...prev, status: `${verb} ${r.label}` }));
@@ -5372,7 +5410,7 @@ export default function AppFrame() {
         restored = stampRowsByRank(restored, hostRanges);
       }
       api!.setPartRangesMirror((hostRanges ?? restored.filter((p) => p.lo != null && p.hi != null).map((p) => ({ lo: p.lo!, hi: p.hi! }))));
-      const currentPartCount = state.modelParts[mid]?.length ?? 0;
+      const currentPartCount = current.modelParts[mid]?.length ?? 0;
       if (restored.length < currentPartCount) authorizedPartShrinkTargetRef.current.set(mid, restored.length);
       else authorizedPartShrinkTargetRef.current.delete(mid);
       setState((prev) => {
@@ -5995,8 +6033,10 @@ export default function AppFrame() {
   // Drives the REAL outliner handlers by row index — the shell-side twin of
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
   //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
-  //   modifier record for the call) · add:kind · import:model-id · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
-  //   report (rows + selected set + primary) · audit (adds face counts + host selection).
+  //   modifier record for the call) · add:kind · import:model-id · eye:i · dup:i · mirror:i,axis ·
+  //   del:i · merge · undo · redo · wait:frames · report (rows + selected set + primary) ·
+  //   audit (adds face counts + host selection) · dump:/abs/path (machine-readable audit) ·
+  //   undodump:/abs/path (synchronous restored-note probe, before deferred reconciliation).
   // Handlers are per-render closures — the ref keeps the once-installed timer calling
   // the CURRENT ones (the same mount-frozen-closure trap as the meshops harness).
   const partOpsRef = useRef({ selectPart, addPrimitivePart, importModelAsParts, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
@@ -6013,7 +6053,8 @@ export default function AppFrame() {
       const s = stateRef.current;
       const mid = activePartsModelId(s);
       const parts = mid ? (s.modelParts[mid] ?? []) : [];
-      const idx = Number(arg ?? -1);
+      const argFields = (arg ?? '').split(',').map((field) => field.trim());
+      const idx = Number(argFields[0] ?? -1);
       const id = parts[idx]?.id ?? null;
       const h = partOpsRef.current;
       if (name === 'sel' && id) h.selectPart(id);
@@ -6029,6 +6070,10 @@ export default function AppFrame() {
         else console.error(`[partops] import package not found: ${arg}`);
       } else if (name === 'eye' && id) h.toggleVisiblePart(id);
       else if (name === 'dup' && id) h.duplicatePartById(id, -1);
+      else if (name === 'mirror' && id) {
+        const axis = argFields[1] === 'y' ? 1 : argFields[1] === 'z' ? 2 : 0;
+        h.duplicatePartById(id, axis);
+      }
       else if (name === 'del' && id) h.deletePart(id);
       else if (name === 'merge') h.mergeSelectedParts();
       else if (name === 'undo') h.meshUndoRedo(false);
@@ -6049,6 +6094,18 @@ export default function AppFrame() {
         let hostRanges = null;
         try { hostRanges = JSON.parse(host.__mesh_part_ranges?.() ?? 'null'); } catch { /* malformed host read stays null */ }
         console.error(`[partops] audit → ${JSON.stringify({ rows, selection, hostRanges, status: s.status })}`);
+      } else if (name === 'dump' && arg) {
+        const host = globalThis as any;
+        let hostRanges = null;
+        let journalNote = null;
+        try { hostRanges = JSON.parse(host.__mesh_part_ranges?.() ?? 'null'); } catch { /* malformed host read stays null */ }
+        try { journalNote = JSON.parse(host.__mesh_journal_note?.() ?? 'null'); } catch { /* malformed host read stays null */ }
+        const rows = parts.map(({ mesh: _mesh, ...part }) => part);
+        host.__fs_write?.(arg, JSON.stringify({ rows, hostRanges, journalNote, status: s.status }));
+      } else if (name === 'undodump' && arg) {
+        h.meshUndoRedo(false);
+        const host = globalThis as any;
+        host.__fs_write?.(arg, host.__mesh_journal_note?.() ?? '');
       } else if (name !== 'wait') console.error(`[partops] unknown/invalid op: ${op}`);
     };
     const runNext = () => {

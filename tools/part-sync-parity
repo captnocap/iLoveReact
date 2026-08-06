@@ -15,6 +15,9 @@
 #       journal note unable to vouch for the rows (count mismatch); the
 #       reconciler rebuilds the row table from geometry + semantic
 #       regions rather than freezing                                    → SYNCED, part:rebuild ids
+#   E   a two-row Mirror Part batch writes one matching metadata note per
+#       native step; undoing its last step keeps every surviving authored
+#       id/name instead of rebuilding them as Part 1/2/3                  → exact named 3-row restore
 # Assertions read the partsdump file the harness writes — the shot pipeline
 # filters app console output, so files are the only assertion surface (the
 # same reason mesh-port-parity asserts via contract: dumps).
@@ -34,6 +37,17 @@ run_scenario() {
       echo "part-sync-parity: $tag shot FAILED"; sed -n '1,40p' "$OUT/$tag.log"; return 1; }
   test -s "$OUT/$tag.parts" || {
     echo "part-sync-parity: $tag wrote no partsdump (script did not finish — raise --frames)"; return 1; }
+}
+
+run_mirror_undo_scenario() {
+  local ops
+  ops="add:cube;wait:8;sel:0;shiftsel:1;dump:$OUT/E.before"
+  ops="$ops;mirror:0,x;undodump:$OUT/E.note;wait:40;dump:$OUT/E.after"
+  RJIT_MODELDOC=cube RJIT_PARTOPS="$ops" \
+    ./tools/rjit shot editor --frames 1800 --timeout 100 --out "$OUT/E.png" >"$OUT/E.log" 2>&1 || {
+      echo "part-sync-parity: E shot FAILED"; sed -n '1,40p' "$OUT/E.log"; return 1; }
+  test -s "$OUT/E.before" -a -s "$OUT/E.note" -a -s "$OUT/E.after" || {
+    echo 'part-sync-parity: E did not write every mirror/undo probe'; return 1; }
 }
 
 # Scenario A — cut/undo re-stamp + detach/native-undo mismatch recovery. Adding a
@@ -76,6 +90,7 @@ run_scenario A "$A_OPS" || status=1
 run_scenario B "$B_OPS" || status=1
 run_scenario C "$C_OPS" || status=1
 run_scenario D "$D_OPS" || status=1
+run_mirror_undo_scenario || status=1
 
 check() { # check <tag> <expected "rows/native/verdict" per shellparts line, in order>
   local tag="$1"; shift
@@ -128,5 +143,23 @@ if ! sed -n '4p' "$OUT/D.parts" 2>/dev/null | grep -E 'verdict=SYNCED' | grep -q
   sed 's/^/  /' "$OUT/D.parts" 2>/dev/null || true; status=1
 fi
 
-if [ "$status" = 0 ]; then echo 'part-sync-parity: PASS (A1–A6 + B + C + D)'; fi
+# E's restored native note must describe the three-part geometry immediately,
+# before the deferred reconciler gets a chance to hide a stale-note bug. The
+# settled rows retain their authored ids/names; anonymous recovery is forbidden.
+if ! grep -q '"name":"Cube 1"' "$OUT/E.note" ||
+   ! grep -q '"name":"Cube 2"' "$OUT/E.note" ||
+   ! grep -q '"name":"Cube 1 mirror X"' "$OUT/E.note"; then
+  echo 'part-sync-parity: E undo did not restore the exact named three-row journal note'
+  sed 's/^/  /' "$OUT/E.note" 2>/dev/null || true; status=1
+fi
+if grep -Eq '"name":"Part [0-9]|part:rebuild:' "$OUT/E.after"; then
+  echo 'part-sync-parity: E mirror undo anonymized or rebuilt surviving outliner rows'
+  sed 's/^/  /' "$OUT/E.after" 2>/dev/null || true; status=1
+fi
+if ! grep -q '"ranges":\[\[0,6\],\[6,12\],\[12,18\]\]' "$OUT/E.after"; then
+  echo 'part-sync-parity: E mirror undo did not settle to the expected three native ranges'
+  sed 's/^/  /' "$OUT/E.after" 2>/dev/null || true; status=1
+fi
+
+if [ "$status" = 0 ]; then echo 'part-sync-parity: PASS (A1–A6 + B + C + D + E)'; fi
 exit "$status"
