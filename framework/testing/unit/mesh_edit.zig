@@ -227,6 +227,44 @@ test "changing outliner scope drops stale vertex selection before transform" {
     try testing.expectEqual(@as(u32, 1), moved.last_face);
 }
 
+test "stale edge bits outside the Outliner scope cannot enter topology tools" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+        3, 0, 0, 0, 0, 1, 0, 0,
+        4, 0, 0, 0, 0, 1, 0, 0,
+        3, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3904, soup[0..], 6, &.{ 0, 1 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.test_support.setPartRanges(&.{ 0, 1, 1, 2 });
+    mesh_edit.setEditScope(0, 1);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var part_zero_edge: ?u32 = null;
+    var part_one_edge: ?u32 = null;
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        if (!mesh_edit.edgeIsBoundaryPub(edge)) continue;
+        const endpoints = mesh_edit.edgeEndpointsPub(edge);
+        const part = mesh_edit.vertPartPub(endpoints[0]) orelse continue;
+        if (part == 0 and part_zero_edge == null) part_zero_edge = edge;
+        if (part == 1 and part_one_edge == null) part_one_edge = edge;
+    }
+    try testing.expect(part_zero_edge != null and part_one_edge != null);
+    try testing.expect(mesh_edit.test_support.forceEdgeSelection(&.{ part_zero_edge.?, part_one_edge.? }));
+
+    // The compact inspector can still report both raw bits for surgery, but every
+    // topology boundary sees only the edge owned by the focused part.
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectedEdgeCountPub());
+    try testing.expectEqual(part_zero_edge.?, mesh_edit.selectedEdgeIndexPub().?);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.selectedEdgesCommonPartPub().?);
+    var selected: [2]mesh_edit.Edge = undefined;
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selectedEdgesPub(selected[0..]));
+    try testing.expectEqual(mesh_edit.edgeEndpointsPub(part_zero_edge.?), selected[0]);
+}
+
 test "follow patch records exact selected triangles and their next adjacency ring" {
     var soup = [_]f32{0} ** (9 * 8);
     const positions = [_][3]f32{

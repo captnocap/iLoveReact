@@ -1817,8 +1817,18 @@ pub fn selectedVertexPartPub() ?u32 {
     return if (vertex < parts.len) parts[vertex] else null;
 }
 
+/// Count selected edges inside the active Outliner scope. Raw selection bits remain
+/// readable through selectionSnapshotJson so the surgery UI can diagnose stale owners,
+/// but topology tools may never consume an edge from a sibling part.
 pub fn selectedEdgeCountPub() u32 {
-    return countTrue(g_sel_edge);
+    if (!ensureTopology()) return 0;
+    const selected = g_sel_edge orelse return 0;
+    var count: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < selected.len and edge < g_edge_count) : (edge += 1) {
+        if (selected[edge] and edgeInScopePub(edge)) count += 1;
+    }
+    return count;
 }
 
 /// The three boundary vertices implied by two adjacent selected edges.  Create
@@ -1844,6 +1854,7 @@ pub fn triangleFromAdjacentEdges(e0: Edge, e1: Edge, out: *[3]u32) bool {
     return true;
 }
 
+/// Copy the active scope's selected edges into `out`.
 pub fn selectedEdgesPub(out: []Edge) u32 {
     if (!ensureTopology()) return 0;
     const sel = g_sel_edge orelse return 0;
@@ -1851,7 +1862,7 @@ pub fn selectedEdgesPub(out: []Edge) u32 {
     var n: u32 = 0;
     var e: u32 = 0;
     while (e < sel.len and e < g_edge_count) : (e += 1) {
-        if (!sel[e]) continue;
+        if (!sel[e] or !edgeInScopePub(e)) continue;
         if (n < out.len) out[n] = .{ edges[e * 2], edges[e * 2 + 1] };
         n += 1;
     }
@@ -1863,7 +1874,7 @@ pub fn selectedEdgeIndexPub() ?u32 {
     var found: ?u32 = null;
     var e: u32 = 0;
     while (e < sel.len) : (e += 1) {
-        if (!sel[e]) continue;
+        if (!sel[e] or !edgeInScopePub(e)) continue;
         if (found != null) return null;
         found = e;
     }
@@ -1880,7 +1891,7 @@ pub fn selectedEdgePartPub() ?u32 {
     return parts[a];
 }
 
-/// One authoritative outliner-part owner for the complete selected-edge set.
+/// One authoritative outliner-part owner for the in-scope selected-edge set.
 /// Welded vertex ids are already keyed by part, so this preserves the identity the
 /// user actually selected instead of asking a later triangle scan to infer it again
 /// from coincident seam geometry. Null means no edge is selected or the selection
@@ -1893,7 +1904,7 @@ pub fn selectedEdgesCommonPartPub() ?u32 {
     var owner: ?u32 = null;
     var edge: u32 = 0;
     while (edge < selected.len and edge < g_edge_count) : (edge += 1) {
-        if (!selected[edge]) continue;
+        if (!selected[edge] or !edgeInScopePub(edge)) continue;
         const a = edges[edge * 2];
         const b = edges[edge * 2 + 1];
         if (a >= parts.len or b >= parts.len or parts[a] != parts[b]) return null;
@@ -1917,7 +1928,7 @@ pub fn selectedEdgesReferenceNormalPub() ?[3]f32 {
     var count: u32 = 0;
     var edge: u32 = 0;
     while (edge < selected.len and edge < g_edge_count) : (edge += 1) {
-        if (!selected[edge]) continue;
+        if (!selected[edge] or !edgeInScopePub(edge)) continue;
         const frame = edgeExtrusionFramePub(edge) orelse return null;
         if (count > 0 and vecDot(sum, frame.face_normal) <= 0) return null;
         sum = vecAdd(sum, frame.face_normal);
@@ -2410,6 +2421,20 @@ pub const test_support = if (builtin.is_test) struct {
     pub fn setPartRanges(ranges: []const u32) void {
         model_source.setPartRanges(ranges);
         reset();
+    }
+
+    /// Simulate a stale/corrupted selection crossing the active Outliner scope.
+    /// Production picking cannot create this state; undo/adoption regressions have.
+    pub fn forceEdgeSelection(indices: []const u32) bool {
+        if (!ensureTopology()) return false;
+        const selected = g_sel_edge orelse return false;
+        @memset(selected, false);
+        for (indices) |index| {
+            if (index >= selected.len) return false;
+            selected[index] = true;
+        }
+        g_mode = .edge;
+        return true;
     }
 
     pub fn replaceGroupedSoupSameFaceCount(key: u64, verts: []const f32, count: u32, groups: []const u32) bool {
