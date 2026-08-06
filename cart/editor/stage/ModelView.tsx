@@ -3884,17 +3884,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       syncUvSelection();
     };
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
-    // Hot-reload resume (req_2898): if the host is STILL holding this document's live
-    // mesh from before the reload (doc twig matches AND the host session key matches),
-    // adopt it — edits, undo journal, selection, paint atlas, and camera all survive.
-    // Any mismatch (other doc, cold boot, saved-and-rekeyed) falls through to a normal
-    // load, exactly as before.
+    // Hot-reload/session resume (req_2898/req_3850): adopt the host's live document
+    // when the doc twig matches, or when the shell just restored a resident session.
+    // A fresh non-resident session still falls through to the normal cold load.
     const resumeHostSession = (): boolean => {
       if (!hotDocId) return false;
       const twig = readModelDocSession();
-      if (!twig || twig.docId !== hotDocId) return false;
       const session = readModelSession();
-      if (!session || session.key !== twig.key) return false;
+      const twigMatches = !!(twig && twig.docId === hotDocId && session && session.key === twig.key);
+      if (!twigMatches && (globalThis as any).__mesh_session_resident?.() !== 1) return false;
+      if (!session) return false;
+      claimModelDocSession(hotDocId, session.key);
       hostSessionResumedRef.current = true;
       setModel({ key: session.key, count: session.count, radius: session.radius, name: initialTitle ?? initialMesh?.name ?? 'model' });
       setError(null);

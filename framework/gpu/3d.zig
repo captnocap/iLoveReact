@@ -16814,6 +16814,12 @@ pub fn modelSessionActiveToken() u32 {
     return g_model_session_token;
 }
 
+/// True when the ACTIVE session already holds a resident edit mesh — the cart's
+/// "was this document parked here before?" probe (req_3850 slice 2).
+pub fn modelSessionResident() bool {
+    return g_edit_count > 0;
+}
+
 fn findModelSession(token: u32) ?*ModelSession {
     for (g_model_sessions.items) |session| {
         if (session.token == token) return session;

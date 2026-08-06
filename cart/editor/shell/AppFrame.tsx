@@ -45,7 +45,7 @@ import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/us
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -1470,6 +1470,15 @@ export default function AppFrame() {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     return doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
   })();
+  // Park the outgoing model's native session and restore the incoming one
+  // (req_3850 slice 2). MUST run synchronously in the state-changing handler,
+  // BEFORE setState: the incoming ModelView's mount effect fires before any
+  // parent effect, so an effect-based select would arrive too late. Non-model
+  // documents select token 0 (the primordial no-document session).
+  const selectNativeModelSession = (doc: WorkspaceDocument | null) => {
+    const modelId = doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
+    (globalThis as any).__mesh_session_select?.(modelId ? modelDocumentToken(modelId) : 0);
+  };
   // Native journal outcomes are drained asynchronously. Stamp the resident mesh
   // with this document's compact identity so a tab switch cannot attribute an
   // already-queued transform to the newly active model. Keep prior mappings for
@@ -2578,6 +2587,7 @@ export default function AppFrame() {
     // editor world with the embodied player — and the focus panel becomes the
     // physics-globals editor (Inspector's playtest branch). Tune, jump, lock in.
     if (command.id === 'globals-physics') {
+      selectNativeModelSession(PLAYTEST_DOCUMENT);
       setState((prev) => ({
         ...prev,
         openMenu: null,
@@ -2591,6 +2601,7 @@ export default function AppFrame() {
     // Globals → Animation (req_2786): the CAPTURE tab — webcam feed beside the
     // exported player model with live pose sync; record grows from here.
     if (command.id === 'globals-animation') {
+      selectNativeModelSession(ANIMATION_DOCUMENT);
       setState((prev) => ({
         ...prev,
         openMenu: null,
@@ -2620,6 +2631,10 @@ export default function AppFrame() {
       return;
     }
 
+    if (command.id === 'open-color-studio') {
+      const current = stateRef.current;
+      selectNativeModelSession(materialDocument(assetById(current.activeAssetId, current.assetOverrides)));
+    }
     setState((prev0) => {
       const t0 = Date.now();
       // One mode at a time (req_2666 WW): arming ANY tool here EXITS Map Paint
@@ -2985,6 +3000,25 @@ export default function AppFrame() {
   // Paint Facade (req_3062): the explicit selection is authoritative scope,
   // including a one-piece selection.
   const openFacadePainter = (pieceId: string, side: 'front' | 'back' = 'front') => {
+    const current = stateRef.current;
+    if (current.worldPieces.some((piece) => piece.id === pieceId)) {
+      const selectedIds = current.selectedPieceIds.includes(pieceId) ? current.selectedPieceIds : [pieceId];
+      const selected = selectedIds
+        .map((id) => current.worldPieces.find((piece) => piece.id === id))
+        .filter((piece): piece is NonNullable<typeof piece> => !!piece);
+      const created = facadeFromSelection(selected, `facade-${current.seq}`, side);
+      const existing = created ? current.worldFacades.find((candidate) => candidate.pieceIds.length === created.pieceIds.length
+        && candidate.pieceIds.every((id) => created.pieceIds.includes(id))
+        && candidate.normal.x === created.normal.x && candidate.normal.z === created.normal.z) : undefined;
+      const facade = existing ?? created;
+      if (facade) selectNativeModelSession({
+        id: `doc-facade-${facade.id}`,
+        kind: 'facade',
+        title: 'Facade',
+        subtitle: `${facade.widthMeters.toFixed(1)}×${facade.heightMeters.toFixed(1)}m`,
+        sourceId: facade.id,
+      });
+    }
     setState((prev) => {
       if (!prev.worldPieces.some((piece) => piece.id === pieceId)) return prev;
       const selectedIds = prev.selectedPieceIds.includes(pieceId) ? prev.selectedPieceIds : [pieceId];
@@ -3347,6 +3381,7 @@ export default function AppFrame() {
     const pkg = imported ?? fileModelPackage(path);
     const doc = modelDocument(pkg);
     const partPath = pkg.viewerPath ?? path;
+    selectNativeModelSession(doc);
     setState((prev) => {
       const seeded = prev.modelParts[pkg.id] ?? [filePartSeed(partPath, pkg.name)];
       return {
@@ -3571,6 +3606,7 @@ export default function AppFrame() {
     const asset = assetById(previous.activeAssetId, previous.assetOverrides);
     const doc = materialDocument(asset);
     const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
+    selectNativeModelSession(doc);
     const next: EditorState = {
       ...previous,
       materialFocused: true,
@@ -3596,6 +3632,7 @@ export default function AppFrame() {
     const match = catalogAssets.find((a) => a.recipe === specId);
     const asset = match ?? assetById(previous.activeAssetId, previous.assetOverrides);
     const doc = materialDocument(asset);
+    selectNativeModelSession(doc);
     const next: EditorState = {
       ...previous,
       materialFocused: true,
@@ -3978,8 +4015,9 @@ export default function AppFrame() {
     // ledger is the only thing that stops the id coming back (req_3773).
     const mid = nextPrimitiveDocId(kind, stateRef.current.workspaceDocuments);
     rememberMintedModelId(mid);
+    const doc = modelDocument(primitiveModelPackage(mid));
+    selectNativeModelSession(doc);
     setState((prev) => {
-      const doc = modelDocument(primitiveModelPackage(mid));
       const base = makePart(kind, [], prev.seq, params);
       const range = composeModelParts([base]).ranges[0];
       const part: ModelPart = { ...base, lo: range?.lo ?? 0, hi: range?.hi ?? 0 };
@@ -4018,8 +4056,9 @@ export default function AppFrame() {
     // Minted + retired before the document exists — see createNewMeshDocument.
     const mid = nextBuildStarterDocId(starterId, stateRef.current.workspaceDocuments);
     rememberMintedModelId(mid);
+    const doc = modelDocument(buildStarterModelPackage(mid));
+    selectNativeModelSession(doc);
     setState((prev) => {
-      const doc = modelDocument(buildStarterModelPackage(mid));
       const rangeById = new Map(composeModelParts(seeded).ranges.map((range) => [range.id, range]));
       const parts = seeded.map((part) => {
         const range = rangeById.get(part.id);
@@ -4049,8 +4088,9 @@ export default function AppFrame() {
     // Minted + retired before the document exists — see createNewMeshDocument.
     const mid = nextPlayerModelDocId(stateRef.current.workspaceDocuments);
     rememberMintedModelId(mid);
+    const doc = modelDocument(playerModelPackage(mid));
+    selectNativeModelSession(doc);
     setState((prev) => {
-      const doc = modelDocument(playerModelPackage(mid));
       const seeded = playerStarterParts();
       const rangeById = new Map(composeModelParts(seeded).ranges.map((r) => [r.id, r]));
       const parts = seeded.map((p) => {
@@ -4177,6 +4217,7 @@ export default function AppFrame() {
     } else if (kind === 'playtest') {
       // Headless repro of the playtest tab (req_2780): the embodied world with
       // the exported player model (or the stand-in when none is declared).
+      selectNativeModelSession(PLAYTEST_DOCUMENT);
       setState((prev) => ({
         ...prev,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, PLAYTEST_DOCUMENT),
@@ -4185,6 +4226,7 @@ export default function AppFrame() {
     } else if (kind === 'animation') {
       // Headless repro of the capture tab (req_2786) — no cam in headless, so
       // the tracker chip reports honestly while the layout verifies.
+      selectNativeModelSession(ANIMATION_DOCUMENT);
       setState((prev) => ({
         ...prev,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, ANIMATION_DOCUMENT),
@@ -6291,6 +6333,7 @@ export default function AppFrame() {
     // content browser stays on its list so you can pick the next model without
     // re-navigating back into the folder. (Do NOT touch contentFolder here.)
     // Parts are seeded by the effect below (covers both click-open and reload-of-open).
+    selectNativeModelSession(doc);
     setState((prev) => ({
       ...prev,
       workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
@@ -6484,6 +6527,7 @@ export default function AppFrame() {
     refreshWorldBibleForOpen();
     if (playing) navigate.push('/editor');
     const autosaved = autosaveActiveModelDoc(stateRef.current);
+    selectNativeModelSession(WORLD_BIBLE_DOCUMENT);
     setState((prev) => ({
       ...prev,
       workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
@@ -6528,8 +6572,11 @@ export default function AppFrame() {
         return;
       }
     }
+    const nextDoc = state.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
+    if (!nextDoc) return;
     if (activeWorkspaceDocumentId === WORLD_BIBLE_DOCUMENT_ID) refreshWorldBibleForOpen();
     const autosaved = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
+    if (state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) selectNativeModelSession(nextDoc);
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
       if (!doc) return prev;
@@ -6577,6 +6624,7 @@ export default function AppFrame() {
     if (documentId === WORLD_DOCUMENT_ID) return;
     if (!bypassUnsavedPrompt && documentId === WORLD_BIBLE_DOCUMENT_ID && worldBibleHasDrafts()) {
       requestWorldBibleReview();
+      selectNativeModelSession(WORLD_BIBLE_DOCUMENT);
       setState((prev) => ({
         ...prev,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
@@ -6638,6 +6686,9 @@ export default function AppFrame() {
       ? effectiveModelPackage(closingDoc.sourceId, state.modelOverrides, state.modelDupes)
       : null;
     if (closingPkg) releaseModelDocSession(modelDocSessionId(closingPkg.kind, closingPkg.id));
+    if (state.activeWorkspaceDocumentId === documentId) {
+      selectNativeModelSession(state.workspaceDocuments.find((doc) => doc.id === WORLD_DOCUMENT_ID) ?? null);
+    }
     setState((prev) => {
       const remaining = prev.workspaceDocuments.filter((doc) => doc.id !== documentId);
       const nextActive = prev.activeWorkspaceDocumentId === documentId
@@ -7019,15 +7070,18 @@ export default function AppFrame() {
       if (playing) navigate.push('/editor');
       requestUnsavedDecision(
         'World Bible draft',
-        () => setState((prev) => ({
-          ...prev,
-          workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
-          activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
-          activeDomain: 'world-bible',
-          leftPanelCollapsed: false,
-          materialFocused: false,
-          status: 'Review open',
-        })),
+        () => {
+          selectNativeModelSession(WORLD_BIBLE_DOCUMENT);
+          setState((prev) => ({
+            ...prev,
+            workspaceDocuments: upsertDocument(prev.workspaceDocuments, WORLD_BIBLE_DOCUMENT),
+            activeWorkspaceDocumentId: WORLD_BIBLE_DOCUMENT_ID,
+            activeDomain: 'world-bible',
+            leftPanelCollapsed: false,
+            materialFocused: false,
+            status: 'Review open',
+          }));
+        },
         () => {
           if (!worldBibleController.flushRecovery()) {
             setState((prev) => ({ ...prev, status: 'Draft recovery failed; exit canceled' }));
@@ -7198,7 +7252,10 @@ export default function AppFrame() {
             onFacadeClear={clearFacadePaint}
             onFacadeSave={saveFacadePainting}
             onArmPiece={armPiece}
-            onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onExitMaterialFocus={() => {
+              selectNativeModelSession(state.workspaceDocuments.find((doc) => doc.id === WORLD_DOCUMENT_ID) ?? null);
+              setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }));
+            }}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
             onColorStudioVariant={setColorStudioVariant}
             onColorStudioSeed={rollColorStudioSeed}

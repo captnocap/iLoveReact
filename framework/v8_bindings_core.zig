@@ -1723,6 +1723,13 @@ fn hostMeshSessionSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, if (scene3d.modelSessionSelect(token)) @as(i32, 1) else @as(i32, 0));
 }
 
+/// __mesh_session_resident() → 1|0 — whether the active document session
+/// already owns a live edit mesh that the cart must resume instead of reloading.
+fn hostMeshSessionResident(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, if (scene3d.modelSessionResident()) @as(i32, 1) else @as(i32, 0));
+}
+
 /// __mesh_action_drain() → Uint32 ArrayBuffer. One fixed row per accepted
 /// journal commit/control: id, document, kind, phase, source, before/after
 /// vertex counts, before/after part counts, and prior queue overflow.
@@ -4786,6 +4793,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_action_source", hostMeshActionSource);
     v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
     v8_runtime.registerHostFn("__mesh_session_select", hostMeshSessionSelect);
+    v8_runtime.registerHostFn("__mesh_session_resident", hostMeshSessionResident);
     v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
