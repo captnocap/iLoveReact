@@ -2398,6 +2398,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     return true;
   };
 
+  // Region names the user deliberately removed (or renamed away) this session.
+  // They persist in the saved/mount horizons until the next Save, and the NAMES
+  // list must not present those ghosts as failed deletes (req_3896). Per model:
+  // a fresh document starts with no deliberate drops.
+  const sessionDroppedNamesRef = useRef<Set<string>>(new Set());
   // Model adoption happens in the mount effect below. Once its host-resident key lands,
   // hydrate any saved atlas and publish it to the UV bridge without arming the brush.
   // Glass restore (req_3402) runs AFTER hydration in the same pass: hydration
@@ -2405,6 +2410,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // saved trailing-glass run (doc.blob glassFirstVertex) must be re-applied on
   // top — before this, every restart silently un-glassed the model.
   const glassRestoredRef = useRef(false);
+  useEffect(() => { sessionDroppedNamesRef.current.clear(); }, [model?.key]);
   useEffect(() => {
     if (!model) return;
     if (!atlasReadyRef.current && !atlasInvalidatedRef.current) {
@@ -2762,7 +2768,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const remove = 'remove' in edit;
       const name = remove ? '' : edit.name.trim();
       if (!remove && (!name || name === '_')) return null;
-      if (!table.regions.some((region) => region.id === id)) return null;
+      const previous = table.regions.find((region) => region.id === id);
+      if (!previous) return null;
       // Renaming ONTO an existing name would leave two rows claiming it; the caller
       // should merge deliberately instead of the table silently growing a duplicate.
       if (!remove && table.regions.some((region) => region.id !== id && region.name === name)) return null;
@@ -2776,6 +2783,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       };
       const changed = Number(host.__mesh_semantic_region_edit(id, remove ? 1 : 0, JSON.stringify(next)) ?? -1);
       if (changed < 0) return null;
+      // The old name now exists only in the saved/mount horizons; mark it as a
+      // DELIBERATE drop so the NAMES list doesn't keep a ghost "saved only" row
+      // that reads as a failed delete until the next Save (req_3896). Ctrl+Z
+      // makes it resident again, which clears the mark on the next refresh.
+      sessionDroppedNamesRef.current.add(previous.name);
       setSemanticRevision((value) => value + 1);
       return { changed };
     },
@@ -3327,6 +3339,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       packageDir,
       mountSource: initialFileParts ? 'file' : initialMesh?.source ?? (initialPath ? 'path' : 'none'),
     });
+    // Names the user deliberately removed/renamed away THIS SESSION still live in
+    // the saved/mount horizons until the next Save — an honest drop diagnostic in
+    // general, but for a deliberate edit it reads as a failed delete (req_3896).
+    // Suppress those ghosts; a name that returns resident (Ctrl+Z) clears its mark.
+    for (const row of semantics.rows) {
+      if (row.presence === 'resident') sessionDroppedNamesRef.current.delete(row.name);
+    }
+    semantics.rows = semantics.rows.filter((row) => row.presence === 'resident' || !sessionDroppedNamesRef.current.has(row.name));
     let liveFrame: { center: [number, number, number]; radius: number } | null = null;
     try {
       const value = JSON.parse(host.__mesh_live_frame?.() ?? 'null');
