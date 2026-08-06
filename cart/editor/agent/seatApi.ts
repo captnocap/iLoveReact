@@ -1564,7 +1564,10 @@ function executeClaimRequest(request: SeatRequest): SeatReply {
   if (request.action === 'claims') {
     return { ok: true, op: 'claims', result: { claims: listClaims(), activeModel: claimActiveModel() }, percept: null };
   }
-  const model = String(args.model ?? claimActiveModel() ?? '');
+  // Target resolution mirrors seatAdmission: the payload-level model target
+  // (RJIT_SEAT_MODEL rides there) binds a claim to the agent's OWN model, not
+  // whichever tab happens to be active mid-bootstrap (live bug, req_3923).
+  const model = String(args.model ?? request.model ?? claimActiveModel() ?? '');
   const password = String(args.password ?? request.token ?? '');
   if (request.action === 'claim') {
     const outcome = claimModel(model, password, String(args.agent ?? 'agent'));
