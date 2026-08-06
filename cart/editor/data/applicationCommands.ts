@@ -298,7 +298,7 @@ export interface EditorColorStudioAdapter {
 }
 
 export interface EditorModelOutlinerAdapter {
-  read(): ModelOutlinerSnapshot;
+  read(modelId?: string): ModelOutlinerSnapshot;
   now(): number;
   /** Commit both the host-journal checkpoint and its matching React metadata
    * projection. Failure must occur before either becomes visible. */
@@ -862,7 +862,7 @@ export function createEditorApplicationCommands(
 
   outlinerRegistration(MODEL_PART_RENAME_COMMAND_ID, 'Rename Model Part', 'PencilLine', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planPartRename(adapter.modelOutliner.read(), {
+    return planPartRename(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       partId: value.partId as string,
       name: value.name as string,
@@ -870,21 +870,21 @@ export function createEditorApplicationCommands(
   }));
   outlinerRegistration(MODEL_PARTS_GROUP_COMMAND_ID, 'Group Model Parts', 'FolderPlus', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planPartsGroup(adapter.modelOutliner.read(), {
+    return planPartsGroup(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       partIds: value.partIds as string[],
     });
   }));
   outlinerRegistration(MODEL_PARTS_UNGROUP_COMMAND_ID, 'Ungroup Model Parts', 'FolderMinus', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planPartsUngroup(adapter.modelOutliner.read(), {
+    return planPartsUngroup(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       partIds: value.partIds as string[],
     });
   }));
   outlinerRegistration(MODEL_GROUP_RENAME_COMMAND_ID, 'Rename Model Part Group', 'PencilLine', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planGroupRename(adapter.modelOutliner.read(), {
+    return planGroupRename(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       groupId: value.groupId as string,
       name: value.name as string,
@@ -892,14 +892,14 @@ export function createEditorApplicationCommands(
   }));
   outlinerRegistration(MODEL_GROUP_DISSOLVE_COMMAND_ID, 'Dissolve Model Part Group', 'FolderX', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planGroupDissolve(adapter.modelOutliner.read(), {
+    return planGroupDissolve(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       groupId: value.groupId as string,
     });
   }));
   outlinerRegistration(MODEL_OUTLINER_MOVE_COMMAND_ID, 'Move Model Outliner Item', 'GripVertical', (args) => modelOutlinerPlan(() => {
     const value = modelOutlinerRecord(args);
-    return planOutlinerMove(adapter.modelOutliner.read(), {
+    return planOutlinerMove(adapter.modelOutliner.read(value.modelId as string), {
       modelId: value.modelId as string,
       item: value.item as any,
       target: value.target as any,

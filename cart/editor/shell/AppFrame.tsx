@@ -86,7 +86,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { compactSeatReply, executeSeatRequestAtShell, seatBatchGenerationReason, type AgentSeat, type SeatPartPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
   countUvTextureFootprints,
@@ -265,6 +265,7 @@ const FACADE_PREVIEW_DETAILS = [128, FACADE_TEXELS_PER_METER, 512] as const;
 const MODEL_PAINT_TOOLS = ['fill', 'brush', 'pen', 'eyedropper'] as const;
 const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'pen', 'eyedropper', 'marquee', 'lasso'] as const;
 const COLOR_STUDIO_UNDO_CAP = 32;
+const SEAT_SESSION_WEDGED_REASON = "the editor's native session could not be restored — switch tabs to recover; the Agent Seat is refusing every request until then";
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
 // (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
@@ -373,9 +374,13 @@ export default function AppFrame() {
   // commit; menu/toolbar/hotkey callers never receive setState.
   const stateRef = useRef(state);
   stateRef.current = state;
-  const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>) => SeatShellReceipt>(
+  const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>, targetModelId?: string) => SeatShellReceipt>(
     () => ({ ok: false, reason: 'Agent Seat shell actions are not ready' }),
   );
+  const activeSessionTokenRef = useRef(0);
+  const activeSessionModelIdRef = useRef<string | null>(null);
+  const seatSessionWedgedRef = useRef(false);
+  const backgroundSeatByModelRef = useRef(new Map<string, AgentSeat>());
   // Agent UV plans are bounded, mutation-free proposals. Only the latest plan is
   // retained, and apply requires the same live UV revision so a human edit cannot
   // be overwritten by a stale agent review.
@@ -942,9 +947,13 @@ export default function AppFrame() {
         },
       },
       modelOutliner: {
-        read: () => {
+        read: (requestedModelId?: string) => {
           const current = stateRef.current;
-          const doc = current.workspaceDocuments.find((candidate) => candidate.id === current.activeWorkspaceDocumentId);
+          const activeDoc = current.workspaceDocuments.find((candidate) => candidate.id === current.activeWorkspaceDocumentId);
+          const requestedDoc = requestedModelId
+            ? current.workspaceDocuments.find((candidate) => candidate.kind === 'model' && candidate.sourceId === requestedModelId)
+            : null;
+          const doc = requestedDoc ?? activeDoc;
           const modelId = doc?.kind === 'model' ? (doc.sourceId ?? '') : '';
           return {
             modelId,
@@ -1477,7 +1486,12 @@ export default function AppFrame() {
   // documents select token 0 (the primordial no-document session).
   const selectNativeModelSession = (doc: WorkspaceDocument | null) => {
     const modelId = doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
-    (globalThis as any).__mesh_session_select?.(modelId ? modelDocumentToken(modelId) : 0);
+    const token = modelId ? modelDocumentToken(modelId) : 0;
+    if ((globalThis as any).__mesh_session_select?.(token) === 1) {
+      activeSessionTokenRef.current = token;
+      activeSessionModelIdRef.current = modelId;
+      seatSessionWedgedRef.current = false;
+    }
   };
   // Native journal outcomes are drained asynchronously. Stamp the resident mesh
   // with this document's compact identity so a tab switch cannot attribute an
@@ -1490,6 +1504,39 @@ export default function AppFrame() {
     const known = modelIdByMeshTokenRef.current.get(token);
     modelIdByMeshTokenRef.current.set(token, known && known !== activeModelId ? null : activeModelId);
   }
+  const withBackgroundModelSession = <T,>(
+    modelId: string,
+    run: () => T,
+    refuse: (reason: string) => T,
+  ): T => {
+    const host = globalThis as any;
+    const restoreToken = activeSessionTokenRef.current;
+    const token = modelDocumentToken(modelId);
+    if (token === restoreToken) return run();
+    if (host.__mesh_session_select?.(token) !== 1) {
+      return refuse(`the native session table refused target model ${modelId}`);
+    }
+    host.__mesh_action_document?.(token);
+    const known = modelIdByMeshTokenRef.current.get(token);
+    modelIdByMeshTokenRef.current.set(token, known && known !== modelId ? null : modelId);
+    const restore = () => {
+      const restored = host.__mesh_session_select?.(restoreToken) === 1
+        || host.__mesh_session_select?.(restoreToken) === 1;
+      host.__mesh_action_document?.(restoreToken);
+      if (restored) return;
+      seatSessionWedgedRef.current = true;
+      setState((prev) => ({ ...prev, status: `⚠ ${SEAT_SESSION_WEDGED_REASON}` }));
+    };
+    if (host.__mesh_session_resident?.() !== 1) {
+      restore();
+      return refuse(`model ${modelId} has no resident native session — open its tab once so the editor loads it, then retry`);
+    }
+    try {
+      return run();
+    } finally {
+      restore();
+    }
+  };
   useEffect(() => {
     (globalThis as any).__mesh_action_document?.(activeModelId ? modelDocumentToken(activeModelId) : 0);
     setClaimActiveModel(activeModelId);
@@ -1526,15 +1573,15 @@ export default function AppFrame() {
 
   /** The single model commit path used by File → Save, first-atlas gating,
    * close/switch boundaries, and background autosave after first save. */
-  const saveActiveModelNow = (
+  const saveModelDocumentNow = (
+    modelId: string | null,
     reason = 'Save',
     allowStalePaintLayout = false,
     keepLiveOptions: PaintLayoutKeepLiveOptions = {},
   ): boolean => {
     const current = stateRef.current;
-    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
-    const pkg = doc?.kind === 'model'
-      ? effectiveModelPackage(doc.sourceId, current.modelOverrides, current.modelDupes)
+    const pkg = modelId
+      ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes)
       : null;
     if (!pkg) return false;
 
@@ -1558,6 +1605,13 @@ export default function AppFrame() {
     );
     const paintLayoutConflict = stalePaintLayout && hasRecoverablePaint && !paintConflictAcknowledged;
     if (!allowStalePaintLayout && (partCountConflict !== null || paintLayoutConflict)) {
+      if (modelId !== activeSessionModelIdRef.current) {
+        setState((prev) => ({
+          ...prev,
+          status: `Save refused for background model "${pkg.name}" — LIVE/DISK disagree and the choice dialog belongs to the visible document; open its tab to resolve`,
+        }));
+        return false;
+      }
       const opened = modelToolApiRef.current?.openPaintLayoutConflict({
         origin: 'save',
         unsaved: Boolean(current.modelDirty[pkg.id]),
@@ -1641,13 +1695,22 @@ export default function AppFrame() {
     return ok;
   };
 
-  const markActiveModelDirty = () => {
+  const saveActiveModelNow = (
+    reason?: string,
+    allowStalePaintLayout?: boolean,
+    keepLiveOptions?: PaintLayoutKeepLiveOptions,
+  ): boolean => saveModelDocumentNow(activeSessionModelIdRef.current, reason, allowStalePaintLayout, keepLiveOptions);
+
+  const markModelDirty = (modelId: string) => {
     setModelMutationRevision((revision) => revision + 1);
     const current = stateRef.current;
-    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
-    const id = doc?.kind === 'model' ? doc.sourceId : null;
-    if (!id || current.modelDirty[id]) return;
-    setState((prev) => ({ ...prev, modelDirty: { ...prev.modelDirty, [id]: true } }));
+    if (current.modelDirty[modelId]) return;
+    const next = { ...current, modelDirty: { ...current.modelDirty, [modelId]: true } };
+    stateRef.current = next;
+    setState(next);
+  };
+  const markActiveModelDirty = () => {
+    if (activeSessionModelIdRef.current) markModelDirty(activeSessionModelIdRef.current);
   };
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
@@ -3758,7 +3821,7 @@ export default function AppFrame() {
     // the native gizmo/topology scope must receive the appended range synchronously.
     selectedPartIdsRef.current = [placed.id];
     setSelectedPartIds([placed.id]);
-    pushPartSetToHost(live, nextParts, [placed.id], placed.id);
+    pushPartSetToHost({ visible: true, paint: live.modelTool.paint, selMode: live.modelTool.selMode }, nextParts, [placed.id], placed.id);
     setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
     const bridge = (globalThis as any).__modelFocusBridge;
     if (bridge?.paintLive) bridge.refreshUv?.();
@@ -3802,7 +3865,7 @@ export default function AppFrame() {
     const nextParts = [...parts, placed];
     selectedPartIdsRef.current = [placed.id];
     setSelectedPartIds([placed.id]);
-    pushPartSetToHost(current, nextParts, [placed.id], placed.id);
+    pushPartSetToHost({ visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode }, nextParts, [placed.id], placed.id);
     (globalThis as any).__mesh_journal_note?.(JSON.stringify({
       modelId,
       parts: nextParts.map(({ mesh: _mesh, ...rest }) => rest),
@@ -3817,15 +3880,16 @@ export default function AppFrame() {
     }));
     return range;
   };
-  const seatPartPercept = (): SeatPartPercept => {
+  const seatPartPercept = (modelId?: string): SeatPartPercept => {
     const current = stateRef.current;
-    const modelId = activePartsModelId(current);
-    if (!modelId) return { activePartId: null, parts: [] };
-    const rows = current.modelParts[modelId] ?? [];
-    const activePartId = rows.some((row) => row.id === current.modelActivePartId)
+    const id = modelId ?? activePartsModelId(current);
+    if (!id) return { model: null, activePartId: null, parts: [] };
+    const rows = current.modelParts[id] ?? [];
+    const activePartId = id === activePartsModelId(current) && rows.some((row) => row.id === current.modelActivePartId)
       ? current.modelActivePartId
       : null;
     return {
+      model: id,
       activePartId,
       parts: rows.map((row) => ({
         id: row.id,
@@ -3846,12 +3910,29 @@ export default function AppFrame() {
       addPrimitive: seatAddPrimitive,
       detachSelection: seatDetachSelection,
       persist: () => saveActiveModelNow('Saved by Agent Seat'),
-      partPercept: seatPartPercept,
+      partPercept: (modelId?: string) => seatPartPercept(modelId),
       registerPathPart: (range: { lo: number; hi: number }, kind: 'plane' | 'edges') => registerPathPlanePart(range, kind),
-      shellAction: (action: string, args: Record<string, unknown>) => seatShellActionRef.current(action, args),
+      shellAction: (action: string, args: Record<string, unknown>, targetModelId?: string) => seatShellActionRef.current(action, args, targetModelId),
     };
     return () => { (globalThis as any).__seatShellBridge = null; };
   }, []);
+
+  const seatPerceptFor = (modelId: string | null): SeatPercept | null => {
+    if (seatSessionWedgedRef.current) return null;
+    if (!modelId || modelId === activeSessionModelIdRef.current) return (globalThis as any).__agentSeat?.look() ?? null;
+    return withBackgroundModelSession(modelId, () => backgroundSeatFor(modelId).look(), () => null);
+  };
+  const backgroundSeatFor = (modelId: string): AgentSeat => {
+    const existing = backgroundSeatByModelRef.current.get(modelId);
+    if (existing) return existing;
+    const seat = createAgentSeat({
+      partPercept: () => seatPartPercept(modelId),
+      shellAction: (action, args) => seatShellActionRef.current(action, args, modelId),
+      persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat (background)'),
+    });
+    backgroundSeatByModelRef.current.set(modelId, seat);
+    return seat;
+  };
 
   // The Seat controls model creation, so its transport must outlive ModelView.
   // A model-less editor still answers `look`, and `new` creates the first real
@@ -3876,17 +3957,97 @@ export default function AppFrame() {
         token: row.token ?? (typeof payload.token === 'string' ? payload.token : undefined),
         model: row.model ?? (typeof payload.model === 'string' ? payload.model : undefined),
       });
-      const run = (row: SeatRequest): SeatReply => executeSeatRequestAtShell(currentSeat(), stampClaim(row), bootstrap);
+      type SeatRowRun = {
+        reply: SeatReply;
+        before: SeatPercept | null;
+        after: SeatPercept | null;
+        target: string | null;
+        background: boolean;
+      };
+      const runSeatRow = (
+        row: SeatRequest,
+        guard?: { expectedByModel: Map<string, number>; index: number },
+      ): SeatRowRun => {
+        const stamped = stampClaim(row);
+        const active = activeSessionModelIdRef.current;
+        const target = seatRequestTarget(stamped, active);
+        const background = !!target && target !== active;
+        const refuse = (reason: string, percept: SeatPercept | null = null): SeatRowRun => ({
+          reply: { ok: false, op: row.action, percept, reason },
+          before: percept,
+          after: percept,
+          target,
+          background,
+        });
+        if (seatSessionWedgedRef.current) {
+          return refuse(`${SEAT_SESSION_WEDGED_REASON} (target model ${target ?? 'none'})`);
+        }
+        const runWithSeat = (seat: AgentSeat | null): SeatRowRun => {
+          const before = seat?.look() ?? null;
+          if (guard) {
+            const key = target ?? '';
+            const expectedGeneration = guard.expectedByModel.get(key);
+            if (expectedGeneration === undefined && before) {
+              guard.expectedByModel.set(key, before.generation);
+            } else if (expectedGeneration !== undefined) {
+              const generationReason = before
+                ? seatBatchGenerationReason(expectedGeneration, before.generation, guard.index, target ?? 'none')
+                : `batch closed before row ${guard.index + 1} on model ${target ?? 'none'} — the target has no live percept`;
+              if (generationReason) return refuse(generationReason, before);
+            }
+          }
+          let reply = executeSeatRequestAtShell(seat, stamped, bootstrap);
+          const after = seat?.look() ?? reply.percept;
+          if (background && !reply.ok) {
+            const reason = row.action === 'save'
+              ? `background save could not persist target model ${target}; the package write or visible-document conflict gate refused it`
+              : reply.reason?.includes(target!)
+                ? reply.reason
+                : `${reply.reason ?? `${row.action} was refused on the background lane`} (target model ${target})`;
+            reply = { ...reply, percept: after, reason };
+          }
+          if (background && reply.ok && row.action !== 'save'
+              && before && after && before.generation !== after.generation) {
+            markModelDirty(target!);
+          }
+          return { reply, before, after, target, background };
+        };
+        if (!background) return runWithSeat(currentSeat());
+        const open = stateRef.current.workspaceDocuments.some((doc) => doc.kind === 'model' && doc.sourceId === target);
+        if (!open) return refuse(`model ${target} is not an open document tab — open it first`);
+        const refusal = backgroundSeatRefusal(row.action, row.args ?? {})
+          ?? (row.action === 'batch' ? 'nested batches cannot hold a background session across the row cadence' : null)
+          ?? (row.action === 'group-visibility' || row.action === 'group-duplicate'
+            ? "part geometry ops mirror through the visible viewer's part-range table; they cannot target a background model yet"
+            : null);
+        if (refusal) return refuse(`${refusal} (target model ${target}, active ${active ?? 'none'})`);
+        return withBackgroundModelSession(
+          target!,
+          () => runWithSeat(backgroundSeatFor(target!)),
+          (reason) => refuse(reason),
+        );
+      };
+      const stampedRequest = stampClaim(request);
+      const payloadTarget = seatRequestTarget(stampedRequest, activeSessionModelIdRef.current);
+      if (seatSessionWedgedRef.current) {
+        writeReply({
+          ok: false,
+          op: request.action,
+          percept: null,
+          reason: `${SEAT_SESSION_WEDGED_REASON} (target model ${payloadTarget ?? 'none'})`,
+        });
+        return;
+      }
       const expected = Number(payload.generation);
-      const current = currentSeat()?.look() ?? null;
+      const current = seatPerceptFor(payloadTarget);
       if (Number.isFinite(expected) && (!current || expected !== current.generation)) {
         writeReply({
           ok: false,
           op: request.action,
           percept: current,
           reason: current
-            ? `stale generation ${expected}; live generation is ${current.generation}`
-            : `stale generation ${expected}; no live model is mounted`,
+            ? `stale generation ${expected} for model ${payloadTarget ?? 'none'}; live generation is ${current.generation}`
+            : `stale generation ${expected} for model ${payloadTarget ?? 'none'}; the target has no live percept`,
         });
         return;
       }
@@ -3895,8 +4056,9 @@ export default function AppFrame() {
         : null;
       if (!batch) {
         const hadSeat = currentSeat() !== null;
-        const reply = run(request);
-        refreshSeatUi();
+        const routed = runSeatRow(request);
+        const reply = routed.reply;
+        if (!routed.background) refreshSeatUi();
         // Creating the first document schedules ModelView's mount. Do not tell the
         // caller `new` is complete until the mesh-capable Seat is actually ready.
         if (!hadSeat && request.action === 'new' && reply.ok) {
@@ -3915,7 +4077,7 @@ export default function AppFrame() {
       }
       const replies: SeatReply[] = [];
       let index = 0;
-      let expectedGeneration: number | null = current?.generation ?? null;
+      const expectedByModel = new Map<string, number>();
       let bootstrapStartedAt: number | null = null;
       const finishBatch = () => {
         const ok = replies.every((reply) => reply.ok);
@@ -3923,8 +4085,8 @@ export default function AppFrame() {
           ok,
           op: 'batch',
           result: replies,
-          percept: currentSeat()?.look() ?? null,
-          ...(ok ? {} : { reason: 'batch stopped at first rejection' }),
+          percept: seatPerceptFor(payloadTarget),
+          ...(ok ? {} : { reason: `batch stopped at first rejection for target model ${payloadTarget ?? 'none'}` }),
         });
       };
       const runNext = () => {
@@ -3935,29 +4097,19 @@ export default function AppFrame() {
           return;
         }
         bootstrapStartedAt = null;
-        if (expectedGeneration === null && live) expectedGeneration = live.generation;
         if (index >= batch.length) {
           finishBatch();
           return;
         }
-        if (expectedGeneration !== null) {
-          const generationReason = live
-            ? seatBatchGenerationReason(expectedGeneration, live.generation, index)
-            : `batch closed before row ${index + 1} — live model was unmounted`;
-          if (generationReason) {
-            replies.push({ ok: false, op: batch[index]!.action, percept: live, reason: generationReason });
-            index = batch.length;
-            setTimeout(runNext, 0);
-            return;
-          }
-        }
         const rowRequest = batch[index++]!;
         const hadSeat = seat !== null;
-        const row = run(rowRequest);
+        const routed = runSeatRow(rowRequest, { expectedByModel, index: index - 1 });
+        const row = routed.reply;
         replies.push(row);
-        refreshSeatUi();
-        const after = currentSeat()?.look() ?? row.percept;
-        expectedGeneration = after?.generation ?? (rowRequest.action === 'new' ? null : expectedGeneration);
+        if (!routed.background) refreshSeatUi();
+        const key = routed.target ?? '';
+        if (row.percept) expectedByModel.set(key, row.percept.generation);
+        else if (rowRequest.action === 'new') expectedByModel.delete(key);
         if (!hadSeat && rowRequest.action === 'new' && row.ok) bootstrapStartedAt = Date.now();
         if (!row.ok) index = batch.length;
         setTimeout(runNext, 100); // visible modeling cadence is a seat feature
@@ -3991,7 +4143,7 @@ export default function AppFrame() {
     const nextParts = [...parts, placed];
     selectedPartIdsRef.current = [placed.id];
     setSelectedPartIds([placed.id]);
-    pushPartSetToHost(current, nextParts, [placed.id], placed.id);
+    pushPartSetToHost({ visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode }, nextParts, [placed.id], placed.id);
     setState((prev) => ({
       ...prev,
       seq: prev.seq + 1,
@@ -4291,18 +4443,23 @@ export default function AppFrame() {
    *  pivot is the union centroid because the pivot averages selected elements). Face
    *  selection follows in object/face mode — and NEVER during paint (req_2662: the
    *  mode row is exclusive; an outliner click mid-paint scopes without selecting). */
-  const pushPartSetToHost = (s: EditorState, parts: ModelPart[], ids: string[], primaryId: string) => {
+  const pushPartSetToHost = (
+    view: { visible: boolean; paint: boolean; selMode: number },
+    parts: ModelPart[],
+    ids: string[],
+    primaryId: string,
+  ) => {
     const host = globalThis as any;
     const selectedRanges = ids
       .map((sid) => { const p = parts.find((pp) => pp.id === sid); return p ? partRange(p) : null; })
       .filter((r): r is { lo: number; hi: number } => r !== null);
     const prim = parts.find((p) => p.id === primaryId);
-    host.__modelActivePartRange = prim ? partRange(prim) : null; // the UV filter's truth (req_2619 P)
+    if (view.visible) host.__modelActivePartRange = prim ? partRange(prim) : null; // the UV filter's truth (req_2619 P)
     // Paint is intentionally single-outliner even when a modeling multi-set is
     // highlighted. A union scope would make one stroke legally cross part
     // boundaries; the focused primary is the complete paint target contract.
     const primaryRange = prim ? partRange(prim) : null;
-    const ranges = s.modelTool.paint && primaryRange ? [primaryRange] : selectedRanges;
+    const ranges = view.paint && primaryRange ? [primaryRange] : selectedRanges;
     if (ranges.length === 0) return;
     if (ranges.length === 1) {
       host.__mesh_edit_scope?.(ranges[0]!.lo, ranges[0]!.hi);
@@ -4311,16 +4468,16 @@ export default function AppFrame() {
       ranges.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
       host.__mesh_edit_scope_ranges?.(pairs);
     }
-    if (s.modelTool.paint) return; // paint owns the surface — primary scope only
+    if (view.paint) return; // paint owns the surface — primary scope only
     // Selecting the parts' faces is a FACE-mode gesture — the host door flips its pick
     // mode to face. In vertex/edge mode focus only scopes (dots/edges restrict to the
     // set), so the toolbar's mode and the host's pick mode never diverge (req_2645 SS).
-    const m = s.modelTool.selMode;
+    const m = view.selMode;
     if (m === 0 || m === 3) ranges.forEach((r, i) => host.__mesh_edit_select_group_range?.(r.lo, r.hi, i === 0 ? 0 : 1));
     else host.__mesh_edit_clear?.();
     // This selection is shell-driven, not an engine pointer event, so the native
     // callback will not fire on its own. Ping the viewer to mirror host mode/counts.
-    host.__meshEditSelChanged?.();
+    if (view.visible) host.__meshEditSelChanged?.();
   };
   const selectionElementIds = (selection: ModelSelectionSnapshot): number[] => (
     selection.mode === 1
@@ -4377,7 +4534,7 @@ export default function AppFrame() {
 
     setSelectedPartIds([target.partId]);
     selectedPartIdsRef.current = [target.partId];
-    pushPartSetToHost(current, parts, [target.partId], target.partId);
+    pushPartSetToHost({ visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode }, parts, [target.partId], target.partId);
 
     const host = globalThis as any;
     const selectElement = session.plan.mode === 1
@@ -4433,7 +4590,7 @@ export default function AppFrame() {
       } else nextIds = [...cur, id];
     }
     setSelectedPartIds(nextIds);
-    pushPartSetToHost(state, parts, nextIds, primary);
+    pushPartSetToHost({ visible: true, paint: state.modelTool.paint, selMode: state.modelTool.selMode }, parts, nextIds, primary);
     setState((prev) => ({
       ...prev,
       modelActivePartId: primary,
@@ -4510,7 +4667,7 @@ export default function AppFrame() {
     }
     const primary = visibleIds.includes(state.modelActivePartId ?? '') ? state.modelActivePartId! : visibleIds[visibleIds.length - 1]!;
     setSelectedPartIds(visibleIds);
-    pushPartSetToHost(state, parts, visibleIds, primary);
+    pushPartSetToHost({ visible: true, paint: state.modelTool.paint, selMode: state.modelTool.selMode }, parts, visibleIds, primary);
     setState((prev) => ({
       ...prev,
       modelActivePartId: primary,
@@ -4770,7 +4927,7 @@ export default function AppFrame() {
     // click: active range, edit scope, face selection, and viewer counts.
     selectedPartIdsRef.current = focusedIds;
     setSelectedPartIds(focusedIds);
-    pushPartSetToHost(state, nextParts, focusedIds, primaryId);
+    pushPartSetToHost({ visible: true, paint: state.modelTool.paint, selMode: state.modelTool.selMode }, nextParts, focusedIds, primaryId);
     const partialGroupReport = groupCopy && placedRows.length < rows.length ? ` · ${lines.join(' · ')}` : '';
     const status = groupCopy
       ? `duplicated group "${groupCopy.sourceName}" → "${groupCopy.name}" — ${placedRows.length}/${rows.length} parts focused${partialGroupReport}`
@@ -4926,7 +5083,7 @@ export default function AppFrame() {
       : `${params.turnDegrees >= 0 ? '+' : ''}${params.turnDegrees}° turn, ${params.riseU >= 0 ? '+' : ''}${params.riseU} u rise`;
     selectedPartIdsRef.current = focusedIds;
     setSelectedPartIds(focusedIds);
-    pushPartSetToHost(state, materialized.parts, focusedIds, primaryId);
+    pushPartSetToHost({ visible: true, paint: state.modelTool.paint, selMode: state.modelTool.selMode }, materialized.parts, focusedIds, primaryId);
     setPathArrayPrompt(null);
     setState((prev) => ({
       ...prev,
@@ -4966,7 +5123,7 @@ export default function AppFrame() {
     const primaryId = focusedIds[focusedIds.length - 1]!;
     selectedPartIdsRef.current = focusedIds;
     setSelectedPartIds(focusedIds);
-    pushPartSetToHost(live, materialized.parts, focusedIds, primaryId);
+    pushPartSetToHost({ visible: true, paint: live.modelTool.paint, selMode: live.modelTool.selMode }, materialized.parts, focusedIds, primaryId);
     const next = {
       ...live,
       seq: materialized.nextSeq,
@@ -5079,7 +5236,7 @@ export default function AppFrame() {
     setSelectedPartIds([survivor.id]);
     // The structural host op clears its old face selection. Re-scope AND re-select the
     // fused row immediately so no highlighted-but-empty outliner residue survives.
-    pushPartSetToHost(state, workingParts, [survivor.id], survivor.id);
+    pushPartSetToHost({ visible: true, paint: state.modelTool.paint, selMode: state.modelTool.selMode }, workingParts, [survivor.id], survivor.id);
     const status = failedName
       ? `merged ${mergedNames.join(', ')} into ${survivor.name}; stopped before ${failedName} (host op failed)`
       : `merged ${selected.length} selected parts into ${survivor.name} — authored faces preserved`;
@@ -5535,15 +5692,20 @@ export default function AppFrame() {
   // first, so typing in a field never triggers a command.)
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
-  seatShellActionRef.current = (action, args) => {
+  seatShellActionRef.current = (action, args, targetModelId) => {
     const live = stateRef.current;
-    const modelId = activePartsModelId(live);
+    const modelId = targetModelId ?? activePartsModelId(live);
+    const background = !!targetModelId && targetModelId !== activeSessionModelIdRef.current;
     const parts = modelId ? (live.modelParts[modelId] ?? []) : [];
     const stringArray = (value: unknown): string[] => Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
       : [];
     const fail = (reason: string): SeatShellReceipt => ({ ok: false, reason });
     const ok = (result?: unknown): SeatShellReceipt => ({ ok: true, ...(result === undefined ? {} : { result }) });
+    const invokeOutliner = (commandId: string, commandArgs: unknown): string | null => {
+      const outcome = invokeApplicationCommand(commandId, commandArgs, 'seat');
+      return outcome.status === 'rejected' ? outcome.reason : null;
+    };
     try {
       if (action === 'editor-status') {
         const block = blockingNowRef.current(live);
@@ -5571,9 +5733,13 @@ export default function AppFrame() {
         if (selected.length !== ids.length || selected.length === 0) return fail('every selected part must exist and be visible');
         const requestedPrimary = typeof args.primary === 'string' ? args.primary : selected[selected.length - 1]!;
         const primary = selected.includes(requestedPrimary) ? requestedPrimary : selected[selected.length - 1]!;
+        if (background) {
+          pushPartSetToHost({ visible: false, paint: false, selMode: 3 }, parts, selected, primary);
+          return ok({ ids: selected, primary, focus: 'native-scope-only' });
+        }
         selectedPartIdsRef.current = selected;
         setSelectedPartIds(selected);
-        pushPartSetToHost(live, parts, selected, primary);
+        pushPartSetToHost({ visible: true, paint: live.modelTool.paint, selMode: live.modelTool.selMode }, parts, selected, primary);
         const next = { ...live, modelActivePartId: primary, status: `Agent Seat selected ${selected.length} part(s)` };
         stateRef.current = next;
         setState(next);
@@ -5583,7 +5749,8 @@ export default function AppFrame() {
         const id = String(args.id ?? '');
         const name = String(args.name ?? '').trim();
         if (!modelId || !parts.some((part) => part.id === id) || !name) return fail('part id and non-empty name are required');
-        invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId: id, name }, 'seat');
+        const reason = invokeOutliner(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId: id, name });
+        if (reason) return fail(reason);
         return ok({ id, name });
       }
       if (action === 'part-visibility') {
@@ -5637,7 +5804,8 @@ export default function AppFrame() {
         if (!modelId) return fail('open a multipart model first');
         const ids = stringArray(args.ids);
         if (ids.length === 0) return fail('part ids required');
-        invokeApplicationCommand(action === 'parts-group' ? MODEL_PARTS_GROUP_COMMAND_ID : MODEL_PARTS_UNGROUP_COMMAND_ID, { modelId, partIds: ids }, 'seat');
+        const reason = invokeOutliner(action === 'parts-group' ? MODEL_PARTS_GROUP_COMMAND_ID : MODEL_PARTS_UNGROUP_COMMAND_ID, { modelId, partIds: ids });
+        if (reason) return fail(reason);
         return ok({ ids });
       }
       if (action === 'group-rename' || action === 'group-dissolve') {
@@ -5647,8 +5815,12 @@ export default function AppFrame() {
         if (action === 'group-rename') {
           const name = String(args.name ?? '').trim();
           if (!name) return fail('group name required');
-          invokeApplicationCommand(MODEL_GROUP_RENAME_COMMAND_ID, { modelId, groupId, name }, 'seat');
-        } else invokeApplicationCommand(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId, groupId }, 'seat');
+          const reason = invokeOutliner(MODEL_GROUP_RENAME_COMMAND_ID, { modelId, groupId, name });
+          if (reason) return fail(reason);
+        } else {
+          const reason = invokeOutliner(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId, groupId });
+          if (reason) return fail(reason);
+        }
         return ok({ groupId });
       }
       if (action === 'group-visibility') {
@@ -5665,14 +5837,16 @@ export default function AppFrame() {
       }
       if (action === 'outliner-move') {
         if (!modelId || !args.item || !args.target) return fail('item and target descriptors are required');
-        invokeApplicationCommand(MODEL_OUTLINER_MOVE_COMMAND_ID, { modelId, item: args.item, target: args.target }, 'seat');
+        const reason = invokeOutliner(MODEL_OUTLINER_MOVE_COMMAND_ID, { modelId, item: args.item, target: args.target });
+        if (reason) return fail(reason);
         return ok();
       }
       if (action === 'role-name') {
         const partId = String(args.partId ?? '');
         const role = String(args.role ?? '').trim();
         if (!modelId || !partId || !role || !parts.some((part) => part.id === partId)) return fail('valid partId and role are required');
-        invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId, name: role }, 'seat');
+        const reason = invokeOutliner(MODEL_PART_RENAME_COMMAND_ID, { modelId, partId, name: role });
+        if (reason) return fail(reason);
         return ok({ partId, role });
       }
       if (action === 'model-rename') {
@@ -6685,6 +6859,7 @@ export default function AppFrame() {
     const closingPkg = closingDoc?.kind === 'model' && closingDoc.sourceId
       ? effectiveModelPackage(closingDoc.sourceId, state.modelOverrides, state.modelDupes)
       : null;
+    if (closingDoc?.kind === 'model' && closingDoc.sourceId) backgroundSeatByModelRef.current.delete(closingDoc.sourceId);
     if (closingPkg) releaseModelDocSession(modelDocSessionId(closingPkg.kind, closingPkg.id));
     if (state.activeWorkspaceDocumentId === documentId) {
       selectNativeModelSession(state.workspaceDocuments.find((doc) => doc.id === WORLD_DOCUMENT_ID) ?? null);
