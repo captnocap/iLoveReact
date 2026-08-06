@@ -3320,3 +3320,66 @@ test "bary point round trip crosses the diagonal consistently" {
     try std.testing.expectApproxEqAbs(p[1], p2[1], 1e-5);
     try std.testing.expectApproxEqAbs(p[2], p2[2], 1e-5);
 }
+
+// ── Per-document session (req_3850) ─────────────────────────────────────────
+// The module's resident-model globals, parked by value. Pointer fields move by
+// pointer — no deep copies, no frees. INVARIANT: a parked Session's contents are
+// only meaningful while its document is NOT active; the coordinator in 3d.zig
+// overwrites the record at every park. Adding a resident-model `var g_*` to this
+// module requires adding the same name here, or that state silently leaks
+// between documents.
+pub const Session = struct {
+    g_key_hash: @TypeOf(g_key_hash) = 0,
+    g_positions: @TypeOf(g_positions) = null,
+    g_facecount: @TypeOf(g_facecount) = 0,
+    g_face_alpha: @TypeOf(g_face_alpha) = null,
+    g_atlas_w: @TypeOf(g_atlas_w) = 0,
+    g_atlas_h: @TypeOf(g_atlas_h) = 0,
+    g_layout: @TypeOf(g_layout) = null,
+    g_layout_revision: @TypeOf(g_layout_revision) = 0,
+    g_neutral_placeholder: @TypeOf(g_neutral_placeholder) = null,
+    g_isl_start: @TypeOf(g_isl_start) = null,
+    g_isl_tris: @TypeOf(g_isl_tris) = null,
+    g_density_req: @TypeOf(g_density_req) = 1.0,
+    g_fit_req: @TypeOf(g_fit_req) = null,
+    g_rgba: @TypeOf(g_rgba) = null,
+    g_dirty_lo: @TypeOf(g_dirty_lo) = 0,
+    g_dirty_hi: @TypeOf(g_dirty_hi) = 0,
+    g_has_dirty: @TypeOf(g_has_dirty) = false,
+    g_carry_isles: @TypeOf(g_carry_isles) = null,
+    g_carry_rgba: @TypeOf(g_carry_rgba) = null,
+    g_carry_w: @TypeOf(g_carry_w) = 0,
+    g_carry_base_active: @TypeOf(g_carry_base_active) = null,
+    g_base_mode: @TypeOf(g_base_mode) = .template,
+    g_base_color: @TypeOf(g_base_color) = .{ 220, 220, 225, 255 },
+    g_base_active: @TypeOf(g_base_active) = false,
+    g_mat_rgba: @TypeOf(g_mat_rgba) = null,
+    g_mat_w: @TypeOf(g_mat_w) = 0,
+    g_mat_h: @TypeOf(g_mat_h) = 0,
+    g_mat_scale: @TypeOf(g_mat_scale) = 1.0,
+};
+
+pub fn sessionSave(s: *Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(s, f.name) = @field(@This(), f.name);
+}
+
+pub fn sessionLoad(s: *const Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(s, f.name);
+    if (g_rgba != null and g_atlas_h > 0) {
+        // The GPU atlas texture still holds the previously active document —
+        // mark every row dirty so the next frame re-uploads this session's paint.
+        g_dirty_lo = 0;
+        g_dirty_hi = g_atlas_h - 1;
+        g_has_dirty = true;
+    }
+}
+
+pub fn sessionReset() void {
+    const fresh = Session{};
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(fresh, f.name);
+    // Deliberately frees NOTHING: ownership of the previous state lives in the
+    // record the coordinator just parked.
+}

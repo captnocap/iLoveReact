@@ -1713,6 +1713,16 @@ fn hostMeshActionDocument(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     scene3d.meshActionDocumentSet(token);
 }
 
+/// __mesh_session_select(token) → 1|0 — park the active document's native mesh
+/// session (topology, journal, selection, paint, semantics) and restore the
+/// session keyed by this cart-supplied document token, creating a fresh one for
+/// an unseen token (req_3850). 0 only when session bookkeeping cannot allocate.
+fn hostMeshSessionSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const token: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    setReturnNumber(info, if (scene3d.modelSessionSelect(token)) @as(i32, 1) else @as(i32, 0));
+}
+
 /// __mesh_action_drain() → Uint32 ArrayBuffer. One fixed row per accepted
 /// journal commit/control: id, document, kind, phase, source, before/after
 /// vertex counts, before/after part counts, and prior queue overflow.
@@ -4775,6 +4785,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_history_log", hostMeshHistoryLog);
     v8_runtime.registerHostFn("__mesh_action_source", hostMeshActionSource);
     v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
+    v8_runtime.registerHostFn("__mesh_session_select", hostMeshSessionSelect);
     v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);

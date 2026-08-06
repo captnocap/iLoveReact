@@ -16727,3 +16727,136 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     queue.submit(&.{command});
     command.release();
 }
+
+// ── Per-document session (req_3850) ─────────────────────────────────────────
+// The module's resident-model globals, parked by value. Pointer fields move by
+// pointer — no deep copies, no frees. INVARIANT: a parked DocState's contents are
+// only meaningful while its document is NOT active; the coordinator below
+// overwrites the record at every park. Adding a resident-model `var g_*` to this
+// capture requires adding the same name here, or that state silently leaks
+// between documents.
+const DocState = struct {
+    g_edit_key_hash: @TypeOf(g_edit_key_hash) = 0,
+    g_edit_key: @TypeOf(g_edit_key) = null,
+    g_edit_verts: @TypeOf(g_edit_verts) = null,
+    g_edit_count: @TypeOf(g_edit_count) = 0,
+    g_edit_generation: @TypeOf(g_edit_generation) = 0,
+    g_save_displayed_projection: @TypeOf(g_save_displayed_projection) = false,
+    g_indexed_edit_mesh: @TypeOf(g_indexed_edit_mesh) = null,
+    g_guard_before: @TypeOf(g_guard_before) = null,
+    g_guard_indexed_before: @TypeOf(g_guard_indexed_before) = null,
+    g_guard_pending: @TypeOf(g_guard_pending) = false,
+    g_guard_bad_faces: @TypeOf(g_guard_bad_faces) = 0,
+    g_guard_face_count: @TypeOf(g_guard_face_count) = 0,
+    g_guard_bad_list: @TypeOf(g_guard_bad_list) = null,
+    g_guard_can_split: @TypeOf(g_guard_can_split) = false,
+    g_semantic_mint_intent: @TypeOf(g_semantic_mint_intent) = null,
+    g_lc: @TypeOf(g_lc) = null,
+    g_bevel: @TypeOf(g_bevel) = null,
+    g_quadify: @TypeOf(g_quadify) = null,
+    g_hidden_groups: @TypeOf(g_hidden_groups) = .empty,
+    g_journal_undo: @TypeOf(g_journal_undo) = .empty,
+    g_journal_redo: @TypeOf(g_journal_redo) = .empty,
+    g_journal_note: @TypeOf(g_journal_note) = null,
+    g_gizmo_snap: @TypeOf(g_gizmo_snap) = null,
+    g_mesh_action_events: @TypeOf(g_mesh_action_events) = undefined,
+    g_mesh_action_len: @TypeOf(g_mesh_action_len) = 0,
+    g_mesh_action_seq: @TypeOf(g_mesh_action_seq) = 0,
+    g_mesh_action_dropped: @TypeOf(g_mesh_action_dropped) = 0,
+    g_mesh_action_document_token: @TypeOf(g_mesh_action_document_token) = 0,
+    g_mesh_action_source: @TypeOf(g_mesh_action_source) = .native,
+    g_follow_action_queue: @TypeOf(g_follow_action_queue) = .{},
+    g_integrity_pending: @TypeOf(g_integrity_pending) = false,
+    g_integrity_strikes: @TypeOf(g_integrity_strikes) = 0,
+    g_integrity_label_buf: @TypeOf(g_integrity_label_buf) = undefined,
+    g_integrity_label_len: @TypeOf(g_integrity_label_len) = 0,
+    g_retopo_band_plan: @TypeOf(g_retopo_band_plan) = null,
+    g_retopo_manual_bands: @TypeOf(g_retopo_manual_bands) = null,
+    g_retopo_source_ghost: @TypeOf(g_retopo_source_ghost) = null,
+    g_retopo_pending_band: @TypeOf(g_retopo_pending_band) = mesh_edit.RETOPO_BAND_UNASSIGNED,
+    g_retopo_pending_band_generation: @TypeOf(g_retopo_pending_band_generation) = 0,
+    g_paint_session: @TypeOf(g_paint_session) = false,
+    g_paint_layout_stale: @TypeOf(g_paint_layout_stale) = false,
+    g_audit_facts: @TypeOf(g_audit_facts) = .{},
+    g_audit_key: @TypeOf(g_audit_key) = null,
+};
+
+fn docStateSave(s: *DocState) void {
+    inline for (@typeInfo(DocState).@"struct".fields) |f|
+        @field(s, f.name) = @field(@This(), f.name);
+}
+
+fn docStateLoad(s: *const DocState) void {
+    inline for (@typeInfo(DocState).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(s, f.name);
+}
+
+fn docStateReset() void {
+    const fresh = DocState{};
+    inline for (@typeInfo(DocState).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(fresh, f.name);
+    // Deliberately frees NOTHING: ownership of the previous state lives in the
+    // record the coordinator just parked.
+}
+
+pub const ModelSession = struct {
+    token: u32,
+    edit: mesh_edit.Session = .{},
+    source: model_source.Session = .{},
+    paint: model_paint.Session = .{},
+    local: DocState = .{},
+};
+
+var g_model_sessions: std.ArrayListUnmanaged(*ModelSession) = .empty;
+var g_model_session_token: u32 = 0; // 0 = the primordial pre-select session
+
+pub fn modelSessionActiveToken() u32 {
+    return g_model_session_token;
+}
+
+fn findModelSession(token: u32) ?*ModelSession {
+    for (g_model_sessions.items) |session| {
+        if (session.token == token) return session;
+    }
+    return null;
+}
+
+fn modelSessionRecord(token: u32) ?*ModelSession {
+    if (findModelSession(token)) |session| return session;
+    const session = jalloc.create(ModelSession) catch return null;
+    session.* = .{ .token = token };
+    g_model_sessions.append(jalloc, session) catch {
+        jalloc.destroy(session);
+        return null;
+    };
+    return session;
+}
+
+/// Park the active document's native session and restore (or freshly create)
+/// the session keyed by `token`. Pointer-copy swaps — no deep copies, no frees.
+/// A token seen before restores its parked mesh, journal, selection, paint and
+/// semantics exactly as parked (reopening a closed document reclaims its
+/// session). An unseen token starts from the modules' boot state; the caller
+/// then loads the document into it through the normal load path.
+pub fn modelSessionSelect(token: u32) bool {
+    if (token == g_model_session_token) return true;
+    const current = modelSessionRecord(g_model_session_token) orelse return false;
+    mesh_edit.sessionSave(&current.edit);
+    model_source.sessionSave(&current.source);
+    model_paint.sessionSave(&current.paint);
+    docStateSave(&current.local);
+    if (findModelSession(token)) |target| {
+        mesh_edit.sessionLoad(&target.edit);
+        model_source.sessionLoad(&target.source);
+        model_paint.sessionLoad(&target.paint);
+        docStateLoad(&target.local);
+    } else {
+        if (modelSessionRecord(token) == null) return false; // allocation failed
+        mesh_edit.sessionReset();
+        model_source.sessionReset();
+        model_paint.sessionReset();
+        docStateReset();
+    }
+    g_model_session_token = token;
+    return true;
+}

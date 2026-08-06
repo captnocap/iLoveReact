@@ -431,3 +431,44 @@ pub fn replaceGeometrySameTriangleCount(interleaved: []const f32, vertex_count: 
     @memcpy(source[0..need], interleaved[0..need]);
     return true;
 }
+
+// ── Per-document session (req_3850) ─────────────────────────────────────────
+// The module's resident-model globals, parked by value. Pointer fields move by
+// pointer — no deep copies, no frees. INVARIANT: a parked Session's contents are
+// only meaningful while its document is NOT active; the coordinator in 3d.zig
+// overwrites the record at every park. Adding a resident-model `var g_*` to this
+// module requires adding the same name here, or that state silently leaks
+// between documents.
+pub const Session = struct {
+    g_source_verts: @TypeOf(g_source_verts) = null,
+    g_source_count: @TypeOf(g_source_count) = 0,
+    g_source_path: @TypeOf(g_source_path) = null,
+    g_source_colors: @TypeOf(g_source_colors) = null,
+    g_face_to_source: @TypeOf(g_face_to_source) = null,
+    g_source_face_group: @TypeOf(g_source_face_group) = null,
+    g_source_face_material: @TypeOf(g_source_face_material) = null,
+    g_source_face_region: @TypeOf(g_source_face_region) = null,
+    g_source_face_instance: @TypeOf(g_source_face_instance) = null,
+    g_semantic_table_json: @TypeOf(g_semantic_table_json) = null,
+    g_part_ranges: @TypeOf(g_part_ranges) = null,
+    face_materials_gen: @TypeOf(face_materials_gen) = 1,
+    face_semantics_gen: @TypeOf(face_semantics_gen) = 1,
+};
+
+pub fn sessionSave(s: *Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(s, f.name) = @field(@This(), f.name);
+}
+
+pub fn sessionLoad(s: *const Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(s, f.name);
+}
+
+pub fn sessionReset() void {
+    const fresh = Session{};
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(fresh, f.name);
+    // Deliberately frees NOTHING: ownership of the previous state lives in the
+    // record the coordinator just parked.
+}

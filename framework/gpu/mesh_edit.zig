@@ -5161,3 +5161,68 @@ test "mirror X: a selection containing BOTH twins transforms each directly (no d
     try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(vi)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0.75), vertPos(ti)[0], 0.0001);
 }
+
+// ── Per-document session (req_3850) ─────────────────────────────────────────
+// The module's resident-model globals, parked by value. Pointer fields move by
+// pointer — no deep copies, no frees. INVARIANT: a parked Session's contents are
+// only meaningful while its document is NOT active; the coordinator in 3d.zig
+// overwrites the record at every park. Adding a resident-model `var g_*` to this
+// module requires adding the same name here, or that state silently leaks
+// between documents.
+pub const Session = struct {
+    g_mode: @TypeOf(g_mode) = .none,
+    g_built_for: @TypeOf(g_built_for) = 0,
+    g_verts: @TypeOf(g_verts) = null,
+    g_vert_count: @TypeOf(g_vert_count) = 0,
+    g_vert_part: @TypeOf(g_vert_part) = null,
+    g_corner_vert: @TypeOf(g_corner_vert) = null,
+    g_edges: @TypeOf(g_edges) = null,
+    g_edge_count: @TypeOf(g_edge_count) = 0,
+    g_edge_boundary: @TypeOf(g_edge_boundary) = null,
+    g_edge_incidence: @TypeOf(g_edge_incidence) = null,
+    g_edge_wire: @TypeOf(g_edge_wire) = null,
+    g_scope_active: @TypeOf(g_scope_active) = false,
+    g_scope_ranges: @TypeOf(g_scope_ranges) = undefined,
+    g_scope_count: @TypeOf(g_scope_count) = 0,
+    g_scope_vert: @TypeOf(g_scope_vert) = null,
+    g_scope_edge: @TypeOf(g_scope_edge) = null,
+    g_scope_built: @TypeOf(g_scope_built) = 0,
+    g_affect_vert: @TypeOf(g_affect_vert) = null,
+    g_mirror_twin: @TypeOf(g_mirror_twin) = null,
+    g_mirror_built_for: @TypeOf(g_mirror_built_for) = 0,
+    g_mirror_built_mask: @TypeOf(g_mirror_built_mask) = 0,
+    g_mirror_affect: @TypeOf(g_mirror_affect) = null,
+    g_sel_vert: @TypeOf(g_sel_vert) = null,
+    g_sel_edge: @TypeOf(g_sel_edge) = null,
+    g_sel_face: @TypeOf(g_sel_face) = null,
+    g_face_base: @TypeOf(g_face_base) = .empty,
+    g_tint_suspend: @TypeOf(g_tint_suspend) = 0,
+    g_snap: @TypeOf(g_snap) = null,
+    g_snap_mode: @TypeOf(g_snap_mode) = .none,
+    g_camera_visible_vert: @TypeOf(g_camera_visible_vert) = null,
+    g_camera_visible_edge: @TypeOf(g_camera_visible_edge) = null,
+    g_occ_depth: @TypeOf(g_occ_depth) = &.{},
+    g_occ_bw: @TypeOf(g_occ_bw) = 0,
+    g_occ_bh: @TypeOf(g_occ_bh) = 0,
+    g_occ_ready: @TypeOf(g_occ_ready) = false,
+    g_occ_cam: @TypeOf(g_occ_cam) = .{ .eye = .{ 0, 0, 0 }, .target = .{ 0, 0, 1 }, .fov_deg = 50 },
+};
+
+pub fn sessionSave(s: *Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(s, f.name) = @field(@This(), f.name);
+}
+
+pub fn sessionLoad(s: *const Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(s, f.name);
+    g_occ_ready = false; // occlusion grid is camera-derived; rebuild for the restored mesh
+}
+
+pub fn sessionReset() void {
+    const fresh = Session{};
+    inline for (@typeInfo(Session).@"struct".fields) |f|
+        @field(@This(), f.name) = @field(fresh, f.name);
+    // Deliberately frees NOTHING: ownership of the previous state lives in the
+    // record the coordinator just parked.
+}
