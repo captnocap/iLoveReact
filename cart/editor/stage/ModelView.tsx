@@ -273,6 +273,8 @@ export type ModelFocusBridge = {
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   /** Show WHERE a name lives: select that region's faces on the model (req_3884). */
   selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
+  /** Rename a region, or remove it entirely (req_3894). */
+  editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -327,6 +329,9 @@ export type ModelToolApi = {
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   // Select one named semantic region's faces by id (req_3884).
   selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
+  // Rename a region, or remove it (its faces go back to unnamed) — naming was a
+  // one-way door before this (req_3894). null = refused or no host door.
+  editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -2746,6 +2751,34 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // Select one semantic region by id (req_3884): the names list is only useful
     // if clicking a name shows you WHERE it is. Same native selector query the
     // Seat's `region:<name>` compiles to — one selection authority, not a second.
+    editRegion: (id, edit) => {
+      if (!host.__mesh_semantic_region_edit || !host.__mesh_semantic_state) return null;
+      let table: SemanticTable | null = null;
+      try {
+        const parsed = JSON.parse(String(host.__mesh_semantic_state() ?? 'null'));
+        if (parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) table = parsed.table;
+      } catch { return null; }
+      if (!table) return null;
+      const remove = 'remove' in edit;
+      const name = remove ? '' : edit.name.trim();
+      if (!remove && (!name || name === '_')) return null;
+      if (!table.regions.some((region) => region.id === id)) return null;
+      // Renaming ONTO an existing name would leave two rows claiming it; the caller
+      // should merge deliberately instead of the table silently growing a duplicate.
+      if (!remove && table.regions.some((region) => region.id !== id && region.name === name)) return null;
+      const next: SemanticTable = {
+        ...table,
+        regions: remove
+          // A child pointing at a removed parent would dangle, so orphan them to root.
+          ? table.regions.filter((region) => region.id !== id)
+            .map((region) => (region.parent === id ? { ...region, parent: null } : region))
+          : table.regions.map((region) => (region.id === id ? { ...region, name } : region)),
+      };
+      const changed = Number(host.__mesh_semantic_region_edit(id, remove ? 1 : 0, JSON.stringify(next)) ?? -1);
+      if (changed < 0) return null;
+      setSemanticRevision((value) => value + 1);
+      return { changed };
+    },
     selectRegion: (id, additive = false) => {
       let reply: { ok?: boolean; faces?: number } | null = null;
       try {
@@ -3354,6 +3387,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         : null,
       selectAuditFaces: (kind) => toolApiRef.current?.selectAuditFaces(kind) ?? null,
       selectRegion: (id, additive) => toolApiRef.current?.selectRegion(id, additive) ?? null,
+      editRegion: (id, edit) => toolApiRef.current?.editRegion(id, edit) ?? null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.

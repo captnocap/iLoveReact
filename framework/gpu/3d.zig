@@ -10415,6 +10415,43 @@ pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []con
     return mesh_edit.authoredFacesInMask(changed_mask);
 }
 
+/// Edit ONE existing semantic region: RENAME it (membership untouched — only the
+/// caller's rewritten table lands) or REMOVE it (every face wearing it becomes
+/// unnamed and the row leaves the table).
+///
+/// Naming was a one-way door until now: a name could be created but never taken back
+/// or corrected, so a mistyped or repurposed region was permanent (req_3894). Removal
+/// clears BOTH the region and the instance to NO_SEMANTIC_ID, because a row carrying
+/// an instance without a region is exactly what model_source rejects as invalid.
+///
+/// Returns the number of faces whose membership changed, or -1 when the edit was
+/// refused. A rename legitimately changes zero faces, so the caller must test for
+/// the negative rather than for zero.
+pub fn meshSemanticRegionEdit(region: u32, remove: bool, table_json: []const u8) i32 {
+    if (region == model_source.NO_SEMANTIC_ID or !model_paint.hasTarget()) return -1;
+    const face_count = g_edit_count / 3;
+    if (face_count == 0) return -1;
+    var rows = captureFaceSemantics(face_count) orelse return -1;
+    defer rows.deinit();
+    var changed: u32 = 0;
+    if (remove) {
+        for (rows.regions, rows.instances) |*face_region, *face_instance| {
+            if (face_region.* != region) continue;
+            face_region.* = model_source.NO_SEMANTIC_ID;
+            face_instance.* = model_source.NO_SEMANTIC_ID;
+            changed += 1;
+        }
+    }
+    var snap = journalSnapshotCurrent(if (remove) "remove region" else "rename region");
+    if (!model_source.setSemanticState(rows.regions, rows.instances, table_json)) {
+        journalDiscard(&snap);
+        return -1;
+    }
+    clearIndexedEditMesh();
+    journalCommit(&snap);
+    return @intCast(changed);
+}
+
 /// Name an untouched axis-aligned cube in one transaction. This is deliberately
 /// strict (six authored faces, every normal axis-aligned, every side present), so
 /// opening a legacy cube gives the seat known top/bottom/front/back/left/right

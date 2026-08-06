@@ -6975,6 +6975,7 @@ export default function AppFrame() {
             activeObject={activeObject}
             activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
             onPane={pressRightPanel}
+            onStatus={(status: string) => setState((prev) => ({ ...prev, status }))}
             onCollapse={() => setState((prev) => ({ ...prev, rightPanelCollapsed: true, status: 'focus panel collapsed' }))}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}

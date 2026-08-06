@@ -41,13 +41,18 @@ function presenceTone(row: ModelFocusSemanticRow): string {
       : 'warning';
 }
 
-export default function NamesPanel({ semantics, bridge, onRefresh }: {
+export default function NamesPanel({ semantics, bridge, onRefresh, onStatus }: {
   semantics: ModelFocusSemantics | null;
   bridge: ModelFocusBridge | null;
   onRefresh: () => void;
+  /** Refusals must be visible: a rename that silently does nothing is the same
+   *  dead end as having no rename at all (req_3894). */
+  onStatus: (message: string) => void;
 }) {
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const rows = semantics?.rows ?? [];
   const needle = filter.trim().toLowerCase();
   const shown = needle ? rows.filter((row) => row.name.toLowerCase().includes(needle) || row.role.toLowerCase().includes(needle)) : rows;
@@ -60,6 +65,29 @@ export default function NamesPanel({ semantics, bridge, onRefresh }: {
     if (!selectable(row)) return;
     bridge?.selectRegion(row.id, additive);
     setSelectedId(row.id);
+  };
+
+  const beginRename = (row: ModelFocusSemanticRow) => {
+    setRenamingId(row.id);
+    setRenameDraft(row.name);
+  };
+  const commitRename = (row: ModelFocusSemanticRow) => {
+    const name = renameDraft.trim();
+    setRenamingId(null);
+    if (!name || name === row.name) return;
+    const result = bridge?.editRegion(row.id, { name });
+    onStatus(result
+      ? `renamed "${row.name}" to "${name}" — save to make it durable`
+      : `rename refused — "${name}" is empty, reserved, or already another region's name`);
+    onRefresh();
+  };
+  const removeRegion = (row: ModelFocusSemanticRow) => {
+    const result = bridge?.editRegion(row.id, { remove: true });
+    if (selectedId === row.id) setSelectedId(null);
+    onStatus(result
+      ? `removed "${row.name}" — ${result.changed} faces are unnamed again (Ctrl+Z restores it)`
+      : `could not remove "${row.name}" — the resident mesh refused the edit`);
+    onRefresh();
   };
 
   return (
@@ -109,21 +137,42 @@ export default function NamesPanel({ semantics, bridge, onRefresh }: {
             const active = selectedId === row.id;
             const canSelect = selectable(row);
             return (
-              <Row key={`name-${row.id}`} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
-                <Pressable
-                  onPress={(event: any) => select(row, event?.shiftKey === true)}
-                  tooltip={canSelect
-                    ? `Select ${row.name} on the model (${row.faces} triangles) — shift-click to add to the selection`
-                    : `${row.name} has no faces in the live mesh (${presenceLabel(row)})`}
-                  style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, opacity: canSelect ? 1 : 0.55 }}
-                >
-                  <Icon name="Tag" size={10} color={accentFor(active ? 'primary' : canSelect ? 'textDim' : 'textFaint')} />
-                  <C.HW_ReadValue style={{ color: accentFor(active ? 'primary' : 'text') }}>
-                    {`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}
-                  </C.HW_ReadValue>
-                  <C.HW_Spacer />
-                  <C.HW_FormLabel style={{ color: accentFor(presenceTone(row)) }}>{presenceLabel(row)}</C.HW_FormLabel>
-                </Pressable>
+              <Row key={`name-${row.id}`} style={{ alignItems: 'center', gap: 4, height: REGIONS.grid.rowHeight, width: '100%' }}>
+                {renamingId === row.id ? (
+                  <TextInput
+                    autoFocus
+                    value={renameDraft}
+                    onChange={setRenameDraft}
+                    onSubmit={() => commitRename(row)}
+                    onKeyDown={(event: any) => {
+                      const key = String(event?.key).toLowerCase();
+                      if (key === 'enter') commitRename(row);
+                      if (key === 'escape') setRenamingId(null);
+                    }}
+                    style={{ flexGrow: 1, minWidth: 0, height: 21, paddingLeft: 6, paddingRight: 6, borderRadius: 4, borderWidth: 1, borderColor: accentFor('primary'), backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11 }}
+                  />
+                ) : (
+                  <Pressable
+                    onPress={(event: any) => select(row, event?.shiftKey === true)}
+                    tooltip={canSelect
+                      ? `Select ${row.name} on the model (${row.faces} triangles) — shift-click to add to the selection`
+                      : `${row.name} has no faces in the live mesh (${presenceLabel(row)})`}
+                    style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, opacity: canSelect ? 1 : 0.55 }}
+                  >
+                    <Icon name="Tag" size={10} color={accentFor(active ? 'primary' : canSelect ? 'textDim' : 'textFaint')} />
+                    <C.HW_ReadValue style={{ color: accentFor(active ? 'primary' : 'text') }}>
+                      {`${row.parent === null ? '' : '↳ '}${row.name}${row.role ? ` · ${row.role}` : ''}`}
+                    </C.HW_ReadValue>
+                    <C.HW_Spacer />
+                    <C.HW_FormLabel style={{ color: accentFor(presenceTone(row)) }}>{presenceLabel(row)}</C.HW_FormLabel>
+                  </Pressable>
+                )}
+                <C.HW_MiniVerb onPress={() => beginRename(row)} tooltip={`Rename ${row.name}`}>
+                  <Icon name="Pencil" size={10} color={accentFor('textDim')} />
+                </C.HW_MiniVerb>
+                <C.HW_MiniVerb onPress={() => removeRegion(row)} tooltip={`Remove ${row.name} — its faces go back to unnamed (Ctrl+Z restores it)`}>
+                  <Icon name="Trash2" size={10} color={accentFor('textDim')} />
+                </C.HW_MiniVerb>
               </Row>
             );
           })}

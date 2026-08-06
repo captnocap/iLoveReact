@@ -972,6 +972,26 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       return { faces: Number(reply.faces) || 0, actionableFaces: Number(reply.actionableFaces) || 0, bbox: reply.bbox ?? [] };
     } catch { return null; }
   };
+  /** Rename a region, or remove it so its faces go back to unnamed (req_3894).
+   *  Naming used to be a one-way door — a mistyped or repurposed region was
+   *  permanent, for the Seat exactly as for the GUI. */
+  const editRegion = (name: string, rename: string | null, remove: boolean): { changed: number; name: string } | null => {
+    const percept = look();
+    if (!percept || !host.__mesh_semantic_region_edit) return null;
+    const region = percept.table.regions.find((row) => row.name === name);
+    if (!region) return null;
+    const target = (rename ?? '').trim();
+    if (!remove && (!target || target === '_' || percept.table.regions.some((row) => row.id !== region.id && row.name === target))) return null;
+    const next: SemanticTable = {
+      ...percept.table,
+      regions: remove
+        ? percept.table.regions.filter((row) => row.id !== region.id)
+          .map((row) => (row.parent === region.id ? { ...row, parent: null } : row))
+        : percept.table.regions.map((row) => (row.id === region.id ? { ...row, name: target } : row)),
+    };
+    const changed = Number(automation(() => host.__mesh_semantic_region_edit(region.id, remove ? 1 : 0, JSON.stringify(next))) ?? -1);
+    return changed < 0 ? null : { changed, name: remove ? name : target };
+  };
   const selectFace = (index: number, additive = false): boolean => {
     const changed = Number.isInteger(index) && index >= 0 && host.__mesh_edit_select_face?.(index, additive ? 1 : 0) === 1;
     if (changed) notifySelectionChanged();
@@ -1453,7 +1473,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
     look, elements, retopoBands, boundaryContinuation, follow, followPatch,
-    select, selectEdge, selectVertex, selectFace, selectAudit, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
+    select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
@@ -1611,6 +1631,11 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'select-face': {
         const ok = seat.selectFace(Number(args.index), args.additive === true);
         return seat.reply('select-face', ok, undefined, ok ? undefined : 'face index is invalid, stale, or outside the active scope');
+      }
+      case 'region-edit': {
+        const remove = args.remove === true;
+        const result = seat.editRegion(String(args.name ?? ''), remove ? null : String(args.rename ?? ''), remove);
+        return seat.reply('region-edit', !!result, result ?? undefined, result ? undefined : 'needs an existing region name plus either rename:"<new>" (unique, non-empty) or remove:true');
       }
       case 'select-audit': {
         const result = seat.selectAudit(String(args.kind ?? 'both'));

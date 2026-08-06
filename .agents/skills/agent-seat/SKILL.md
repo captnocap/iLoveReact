@@ -124,6 +124,8 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat action retopo-bands '{"operation":"deleted-patch"}'` | Same | Recover the exact unread Delete Faces perimeter after a reconnect. Normal Seat `delete` replies include it directly as `deletedBoundary`. |
 | `tools/seat follow <start\|read\|stop\|clear\|inspect>` | `{"action":"follow","args":{"operation":"start","label":"torso strips"}}` | Records the append-only native edit firehose; also derives Delete Faces → Create Face examples when possible. See Follow. |
 | `tools/seat select <selector>` | `{"action":"select","args":{"selector":"…"}}` | Sets the live face selection. |
+| `tools/seat action region-edit '{"name":"cushion","rename":"seatBase"}'` | `{"action":"region-edit","args":{…}}` | Rename an existing region, or `{"name":"cushion","remove":true}` to remove it — its faces go back to unnamed and the row leaves the table. Naming is no longer one-way (req_3894). Refuses an unknown name, an empty/reserved rename, or a rename onto another region's name (merge deliberately instead). Children of a removed region are orphaned to root, and the whole edit is ONE undo step. |
+| `tools/seat action select-audit '{"kind":"unreachable"}'` | `{"action":"select-audit","args":{…}}` | Select the triangles behind the percept's geometry counts — `intersecting`, `unreachable`, or `both` (req_3883). The host marks them in the same pass that counts them, so the selection can never disagree with the number the reply reported. |
 | `tools/seat select-face <id> [+]` | `{"action":"select-face","args":{"index":7,"additive":true}}` | Exact triangle selection; ephemeral, never semantic memory. |
 | `tools/seat select-edge <id> [+]` | `{"action":"select-edge","args":{"index":4,"additive":true}}` | Select edge ids returned by `elements`. |
 | `tools/seat select-vertex <id> [+]` | `{"action":"select-vertex","args":{"index":2,"additive":true}}` | Select vertex ids returned by `elements`. |
@@ -926,11 +928,15 @@ differs from the inherited source region.
   own, since that is what a cold agent will see.
 - Reusing an existing name returns the **existing region** rather than making a duplicate,
   and sets it as the new pair's `parent`.
-- The user has the same verb in the GUI (req_3872/req_3880): **N** in face mode (or Edit →
-  Mesh → Name Faces…) opens a naming popover that lands on the same table and host door as
-  `name`. Regions you did not create may therefore appear between your calls — re-read the
-  percept's table instead of assuming you are the only author, and never rename a
-  human-authored region without being asked.
+- The user has the same verbs in the GUI (req_3872/req_3880/req_3894): **N** in face mode (or
+  Edit → Mesh → Name Faces…) opens a naming popover, and the **NAMES** pane lists every
+  region with per-row rename and remove. All of it lands on the same table and host doors
+  you use. Regions you did not create may therefore appear — and names you did create may be
+  renamed or removed — between your calls; re-read the percept's table instead of assuming
+  you are the only author, and never rename or remove a human-authored region unasked.
+- A wrong name is fixable now: `region-edit` renames or removes. That is a correction tool,
+  not a licence to leave naming until later — a name still belongs to the operation that
+  creates the geometry.
 - Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
   (`DEFAULT_NAMING_DEBT_BUDGET`). This is only a construction backstop: `save` refuses
   whenever `unnamed > 0`, so every durable model crosses the boundary at zero debt.

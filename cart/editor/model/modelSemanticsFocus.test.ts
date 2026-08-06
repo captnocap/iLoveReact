@@ -51,18 +51,25 @@ test('documents with no saved or resident names remain honestly empty', () => {
 });
 
 
-test('agreeing horizons collapse to one line, divergence keeps all three', () => {
+test('horizons share a row when they agree and split only where they differ', () => {
   const agreeing = modelFocusSemantics({ regions: [3, 3, 4], instances: [0, 0, 0], table }, {
     faces: 3, unnamed: 0, regions: [{ id: 3, faces: 2, instances: 1 }, { id: 4, faces: 1, instances: 1 }], table,
   });
   const collapsed = semanticHorizonLines(agreeing);
   assert(collapsed.length === 1, `agreeing horizons printed ${collapsed.length} lines instead of one`);
-  assert(collapsed[0]!.label === 'saved · mount · live', 'the collapsed line does not name all three horizons');
+  assert(collapsed[0]!.label === 'in sync', 'three agreeing horizons should read as one in-sync row');
   assert(collapsed[0]!.value.includes('tris'), 'per-triangle counts must be labelled as triangles');
 
-  const dropped = modelFocusSemantics({ regions: [3, 3, 4], instances: [0, 0, 0], table }, {
-    faces: 3, unnamed: 3, regions: [], table: { version: 1, regions: [] },
+  // The common case while naming: disk and mount still match, only the live mesh
+  // has moved on. Two rows — never saved and mount repeating each other (req_3892).
+  const liveDrift = modelFocusSemantics({ regions: [3, 3, 4], instances: [0, 0, 0], table }, {
+    faces: 5, unnamed: 0, regions: [{ id: 3, faces: 4, instances: 1 }, { id: 4, faces: 1, instances: 1 }], table,
   });
-  assert(semanticHorizonLines(dropped).length === 3, 'a real semantic drop must still show every horizon');
+  const split = semanticHorizonLines(liveDrift);
+  assert(split.length === 2, `a live-only drift printed ${split.length} rows instead of two`);
+  assert(split[0]!.label === 'saved+mount', `agreeing horizons did not share a row (got "${split[0]!.label}")`);
+  assert(split[1]!.label === 'live', `the drifted horizon should stand alone (got "${split[1]!.label}")`);
+  assert(split[0]!.value !== split[1]!.value, 'two rows must never carry the same numbers');
 });
+
 console.log(`modelSemanticsFocus: ${passed} passed`);

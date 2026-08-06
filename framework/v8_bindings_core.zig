@@ -896,6 +896,21 @@ fn hostMeshSemanticNamePrimitive(info_c: ?*const v8.c.FunctionCallbackInfo) call
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_semantic_region_edit(region, remove, tableJson) → faces changed, or -1 when
+/// refused. Rename (remove=0) leaves membership alone and lands only the rewritten
+/// table; remove=1 additionally unnames every face wearing the region (req_3894).
+fn hostMeshSemanticRegionEdit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const region_raw = argToI32(info, 0) orelse return setReturnNumber(info, -1);
+    if (region_raw < 0) return setReturnNumber(info, -1);
+    const remove = (argToI32(info, 1) orelse 0) != 0;
+    const table_json = argToStringAlloc(info, 2) orelse return setReturnNumber(info, -1);
+    defer std.heap.c_allocator.free(table_json);
+    const changed = scene3d.meshSemanticRegionEdit(@intCast(region_raw), remove, table_json);
+    if (changed >= 0) state.markDirty();
+    setReturnNumber(info, @floatFromInt(changed));
+}
+
 /// __mesh_semantic_state() → cold-agent percept JSON.
 fn hostMeshSemanticState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -4697,6 +4712,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
     v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
     v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
+    v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
     v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
     v8_runtime.registerHostFn("__mesh_select_audit", hostMeshSelectAudit);
     v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);

@@ -131,13 +131,16 @@ export function modelFocusSemantics(
 /** One horizon's line in the SEMANTICS readout. */
 export type SemanticHorizonLine = { label: string; value: string };
 
+/** Short horizon names, so a shared row's label still fits the fixed label column. */
+const HORIZON_SHORT_NAMES = { saved: 'saved', mount: 'mount', live: 'live' } as const;
+
 /** Collapse the saved/mount/resident horizons into what actually needs saying.
  *
- * The three horizons exist to LOCATE a semantic drop — which is information only
- * when they disagree. Printing all three when they carry identical numbers said
- * "7 regions · 124/762" three times in a row and buried the one case that matters
- * (req_3889). Agreement is one line; divergence keeps every horizon so the drop is
- * still readable, plus hidden-face detail whenever the resident mesh is filtered.
+ * The three horizons exist to LOCATE a semantic drop, so a horizon only earns its
+ * own row by DISAGREEING with the others. Horizons carrying identical numbers share
+ * one row (req_3892 — an all-or-nothing collapse still printed saved and mount twice
+ * whenever the resident mesh alone had drifted, which is the common case while
+ * naming). All three agreeing reads "in sync"; nothing repeats at any point.
  *
  * The counts are per TRIANGLE (the percept aggregates that way), so they are
  * labelled as such rather than dressed up as faces (req_3888). */
@@ -145,21 +148,19 @@ export function semanticHorizonLines(semantics: ModelFocusSemantics): SemanticHo
   const hidden = semantics.residentHiddenFaces > 0
     ? ` · ${semantics.residentHiddenNamedFaces}/${semantics.residentHiddenFaces} hidden`
     : '';
-  const agree = semantics.savedRegions === semantics.mountRegions
-    && semantics.mountRegions === semantics.residentRegions
-    && semantics.savedNamedFaces === semantics.mountNamedFaces
-    && semantics.mountNamedFaces === semantics.residentNamedFaces
-    && semantics.savedFaces === semantics.mountFaces
-    && semantics.mountFaces === semantics.residentFaces;
-  if (agree) {
-    return [{
-      label: 'saved · mount · live',
-      value: `${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} tris${hidden}`,
-    }];
-  }
-  return [
-    { label: 'saved blob', value: `${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} tris` },
-    { label: `mount ${semantics.mountSource ?? ''}`.trim(), value: `${semantics.mountRegions} regions · ${semantics.mountNamedFaces}/${semantics.mountFaces} tris` },
-    { label: 'resident', value: `${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} tris${hidden}` },
+  const horizons = [
+    { name: HORIZON_SHORT_NAMES.saved, value: `${semantics.savedRegions} regions · ${semantics.savedNamedFaces}/${semantics.savedFaces} tris` },
+    { name: HORIZON_SHORT_NAMES.mount, value: `${semantics.mountRegions} regions · ${semantics.mountNamedFaces}/${semantics.mountFaces} tris` },
+    { name: HORIZON_SHORT_NAMES.live, value: `${semantics.residentRegions} regions · ${semantics.residentNamedFaces}/${semantics.residentFaces} tris${hidden}` },
   ];
+  const byValue: { value: string; names: string[] }[] = [];
+  for (const horizon of horizons) {
+    const existing = byValue.find((group) => group.value === horizon.value);
+    if (existing) existing.names.push(horizon.name);
+    else byValue.push({ value: horizon.value, names: [horizon.name] });
+  }
+  return byValue.map((group) => ({
+    label: group.names.length === horizons.length ? 'in sync' : group.names.join('+'),
+    value: group.value,
+  }));
 }

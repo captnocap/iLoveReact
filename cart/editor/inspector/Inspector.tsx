@@ -381,17 +381,17 @@ function SemanticsSection({ semantics, onRefresh, onOpenNames }: {
       {semantics.status === 'mount-mismatch' ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
-          <C.HW_ReadValue>saved names exist; viewport input dropped them</C.HW_ReadValue>
+          <C.HW_ReadValue>viewport input dropped them</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : semantics.status === 'load-mismatch' ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
-          <C.HW_ReadValue>saved names exist; native hydration lost them</C.HW_ReadValue>
+          <C.HW_ReadValue>native hydration lost them</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : semantics.status === 'visibility-filtered' ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>diagnosis</C.HW_FormLabel>
-          <C.HW_ReadValue>hidden parts are excluded from the viewport; saved semantics remain intact</C.HW_ReadValue>
+          <C.HW_ReadValue>hidden parts, names intact</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : null}
       {semantics.rows.length > 0 ? (
@@ -554,6 +554,8 @@ export default function Inspector(props: {
   // 'save-snapshot' command as File → Save; onDisk feeds the save-state chip.
   onRenameModel: (id: string, name: string) => void;
   onSaveModel: () => void;
+  /** Report an outcome on the shell status line (req_3894 — refusals must be seen). */
+  onStatus: (message: string) => void;
   modelOnDisk: boolean;
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
@@ -922,6 +924,7 @@ export default function Inspector(props: {
                 semantics={focusBridge?.semantics ?? null}
                 bridge={focusBridge}
                 onRefresh={() => focusBridge?.refreshSemantics()}
+                onStatus={props.onStatus}
               />
             ) : (
               <RigSection
