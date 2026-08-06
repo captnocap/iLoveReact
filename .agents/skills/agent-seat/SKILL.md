@@ -53,6 +53,7 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
    open. If it returns `state:"no-live-model"`, create the intended first model with
    `tools/seat new`; never ask the user to prepare a disposable bootstrap model.
 1.1 Gather your context images. Use the image generation script provided*
+1.2 After `look` or `new`, claim the model you are about to work on before structural work with `tools/seat claim <password> [agent]`; export the credentials for the engagement.
 2. A new cube should report the six primitive names before further editing.
 3. Select a durable name whenever one exists. Use a geometric selector only for the first
    reach or a deliberate spatial query.
@@ -69,6 +70,7 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
 8. Report changes in terms of semantic names and dimensions, not face indices. When cold
    persistence is material to the task, fully stop and reopen the editor and prove the names
    with a generation-1 `look`.
+9. Dismiss the claim after the final `save` and `semantic-status`, at the end of the engagement.
 
 *(
 `cart/editor/img.cjs` is the user's generation console (nano-gpt API through the local
@@ -103,6 +105,97 @@ Queue line grammar: `[prompt] [resolution] [imgs/batch] [batches] [model] [refs]
 - **gpt-image-2 WxH must be multiples of 16** (`816x1248`, not `810x1245`) or the API
   400s with INVALID_RESOLUTION. Round up to the nearest 16 and fix it in the resize step.
 )
+
+## Parallel agents: claims and background models
+
+### Claims — lock the model, not the reads
+
+Claim the model you are about to work on, then keep the token in the environment for the
+whole engagement:
+
+```bash
+tools/seat claim <password> [agent]
+export RJIT_SEAT_TOKEN=<password>
+export RJIT_SEAT_AGENT=<agent>
+```
+
+`RJIT_SEAT_TOKEN` is stamped onto every later request; `RJIT_SEAT_AGENT` supplies the claim's
+tab-badge name when the claim command omits its optional agent argument. `tools/seat dismiss`
+releases the claim when you are done; `tools/seat claims` lists the in-memory claims. To claim
+a parked target, set `RJIT_SEAT_MODEL=<model id>` before the claim; otherwise claim the active
+model. Re-claiming with the same password is idempotent; another password is refused while the
+claim stands.
+
+Claims live in editor process memory. Restarting the editor wipes every claim. A claimed model
+refuses mutations from everyone else — other agents and the user's UI — but claim admission
+never gates reads or viewing. The read lane is `look`, `semantic-status`, `elements`,
+`boundary-continuation`, `uv-state`, `recipe-list`, `shot`, and `claims`, plus structured
+`operation:"read"` and `follow` `operation:"inspect"`; background routing can still refuse a
+visible-UI bridge operation below, which is a session-routing refusal, not a claim lock. The
+model's tab wears a lock badge with the agent name.
+
+### Background models — park, route, restore
+
+```bash
+export RJIT_SEAT_MODEL=<model id>
+```
+
+`RJIT_SEAT_MODEL` targets an OPEN TAB that has been activated at least once. If the tab is not
+open, the row refuses with `model <id> is not an open document tab — open it first`. If it is
+open but has never become resident, every row refuses with `model <id> has no resident native
+session — open its tab once so the editor loads it, then retry`. Do not confuse a package on
+disk with a resident session.
+
+Serveable background rows use the target's parked native session while the user works another
+tab. The percept header identifies the target as `· model <id>`, and the generation guard is
+per-model, including across batch rows. The shell selects the target session, runs the row,
+then restores the user's active session. If restoration fails, the wedge failsafe says
+`the editor's native session could not be restored — switch tabs to recover; the Agent Seat is refusing every request until then`;
+switch tabs to recover before retrying.
+
+Tab switches park the outgoing session: undo history, selection, and paint survive switching
+away and back. Closing the tab parks its session; reopening the tab reclaims it. A background
+save can persist the target, but `semantic-status` belongs to the visible ModelView, so run the
+final status check with that model active.
+
+### Background refusal families — name the trap before routing
+
+The serveable lane is the remaining resident/native work — for example `select`, topology
+verbs such as `extrude`, `save`, `part-select`, `part-rename`, `texture-slot`, `rig`,
+`recipe-list`, and `retopo-bands` with `operation:"read"`. The following families are refused
+for a background target:
+
+- Visible viewport: `viewport`, `reference`, `paint-tool`, and `path`. The exact refusal is
+  `<action> drives the visible model viewport; a background model is not the document on screen`:
+  these actions need the model currently rendered in the viewport.
+- UV/paint focus bridge: `uv-state`, `uv-select`, `uv-layout`, `uv-prestack`, `uv-stitch`,
+  `uv-two-sheet`, `uv-geometry`, `uv-history`, `uv-atlas`, `uv-layer`, `paint-variant`, and
+  `semantic-status`. The exact refusal is `the UV/paint focus bridge belongs to the visible
+  ModelView; <action> cannot target a background model`: these operations are owned by the
+  visible focus panel and painter.
+- `shot`. The exact refusal is `a capture renders the frame the editor is composing; a
+  background model has no framed scene`: visual verification of a background model therefore
+  means asking for its tab or working it while active.
+- Visible editor commands: `command`, `model-export`, `model-starter`, and `model-import`.
+  The exact refusal is `editor commands run against the visible editor`.
+- Part geometry: `add`, `detach`, `part-visibility`, `part-delete`, `part-duplicate`,
+  `part-merge`, `part-path-array`, and `part-import`. The exact refusal is `part geometry ops
+  mirror through the visible viewer's part-range table; they cannot target a background model
+  yet`. The shell applies the same refusal to `group-visibility` and `group-duplicate`.
+- `atlas`. The exact refusal is `the paint atlas transaction is owned by the visible painter`:
+  rebuild the atlas with that model active.
+- `follow`. The exact refusal is `Follow records the human's demonstrations in the visible
+  editor`.
+- `new`. The exact refusal is `new creates a document and has no target model`.
+- `recipe`. The exact refusal is `recipes compose part-geometry verbs`.
+- Mutating `retopo-bands` operations. The exact refusal is `retopology guides persist into the
+  visible model package`; `operation:"read"` remains serveable.
+- A nested `batch`. The shell refuses it with `nested batches cannot hold a background session
+  across the row cadence`.
+
+Claim admission and background routing are separate gates: a correct token does not make a
+visible-UI operation serveable in the background, and an unclaimed background target still
+needs a resident session.
 
 ---
 
@@ -164,7 +257,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat action mirror-replace '{"axis":0}'` | `{"action":"mirror-replace","args":{"axis":0}}` | Selection-scoped mirror stamp (req_3864): reflect the SELECTED faces across the model-origin axis plane — every whole twin face buried in the stamped space is deleted, the selection is re-created reflected (quads stay quads, diagonals preserved), and the seam + region borders WELD (near-plane corners share the source vertex; border corners snap onto surviving twin verts). Unselected faces are never deleted and never reflected, so deliberate asymmetry survives by not being selected. Reply carries `copied/replaced/welded/seam`. |
 | `tools/seat collect-uv-orientation` | `{"action":"collect-uv-orientation"}` | Expand one selected face to the same signed UV orientation. |
 | `tools/seat mirror <x\|y\|z> [-]` | `{"action":"mirror","args":{"axis":0,"keep":true}}` | Symmetrize. WHOLE-MODEL scope cuts at the model-origin plane; a FOCUSED part symmetrizes about its OWN centerline (req_3886) — scope to the part first to repair it in place. `-` keeps the −side. Armed mirror-EDIT twinning always stays on the fixed origin plane. |
-| `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | The app captures its OWN frame. |
+| `tools/seat shot <path>` | `{"action":"shot","args":{"path":"/tmp/x.png"}}` | Whole-window swapchain capture at the live camera; use the structured offscreen lane below for an active-model stage render. |
 | `tools/seat command <editor-command-id>` | `{"action":"command","args":{"id":"mesh-wire"}}` | Invoke an existing zero-argument editor command through `runCommand`. |
 | `tools/seat action <name> '<json>'` | Any structured action below. | Parameterized parity lane; JSON must be one object. |
 | `tools/seat do '<json-array>'` | `{"action":"batch","args":{"requests":[…]}}` | See Batching. |
@@ -312,11 +405,18 @@ drop to overlays only when you need indices.
 
 ```bash
 tools/seat shot /tmp/model.png    # then read the PNG back
+tools/seat action shot '{"path":"/tmp/x.png","offscreen":true,"width":1024,"height":1024,"pose":[yaw,pitch,dist,tx,ty,tz]}'
 ```
 
 Captures the app's own composed frame (SELFSHOT-0606) — it never touches the desktop,
 which is banned. **Use it to check your own work** instead of asking the user what they
-see. It captures the whole editor window, chrome included, at the current camera.
+see. Plain `tools/seat shot` stays the whole-window swapchain capture, chrome included, at
+the current live camera. The structured `offscreen:true` lane renders the active model stage
+to the PNG at the optional `[yaw,pitch,dist,targetX,targetY,targetZ]` pose, without moving the
+user's camera and without capturing editor chrome; omit `pose` to use the live camera. Pose
+values are radians, positive pitch looks down, and the convention is the same as the viewport
+pose. The offscreen lane is active-model only; a background model has no framed scene and
+refuses `shot`.
 
 Transforms act on **the current selection** — they take no selector. Always `select`
 first. All values are model-space; state the axis and pivot explicitly rather than relying
