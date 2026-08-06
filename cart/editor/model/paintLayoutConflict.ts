@@ -61,6 +61,24 @@ export type PaintLayoutKeepLiveOptions = {
   allowSemanticClear?: boolean;
 };
 
+/** Hot-session acknowledgement scope. The value is a concrete disk revision,
+ * not a boolean: an external/cold disk change therefore demands a new choice,
+ * while saves descended from an acknowledged checkpoint can roll it forward. */
+export function paintLayoutConflictAckHotKey(documentId: string): string {
+  return `editor:paint-layout-conflict-ack:v1:${documentId}`;
+}
+
+export function paintLayoutConflictRevision(disk: PaintLayoutDiskFacts | null): string {
+  return disk?.marker?.docStamp ?? disk?.doc?.stamp ?? 'stale-without-readable-stamp';
+}
+
+export function paintLayoutConflictRevisionIsAcknowledged(
+  acknowledgedRevision: string | null,
+  disk: PaintLayoutDiskFacts | null,
+): boolean {
+  return acknowledgedRevision !== null && acknowledgedRevision === paintLayoutConflictRevision(disk);
+}
+
 export function paintEraTriangleCount(cornerUv: unknown): number | null {
   if (!Array.isArray(cornerUv) || cornerUv.length === 0 || cornerUv.length % UV_FLOATS_PER_TRIANGLE !== 0) return null;
   return cornerUv.every((value) => typeof value === 'number' && Number.isFinite(value))

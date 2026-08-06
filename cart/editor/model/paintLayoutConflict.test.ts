@@ -9,6 +9,8 @@
 
 import {
   paintEraTriangleCount,
+  paintLayoutConflictRevision,
+  paintLayoutConflictRevisionIsAcknowledged,
   paintLayoutKeepLiveClearsSemantics,
   paintLayoutMismatchSentence,
   type PaintLayoutDiskFacts,
@@ -61,6 +63,27 @@ test('Keep LIVE recognizes the disclosed removal of disk-only names', () => {
   assert(
     !paintLayoutKeepLiveClearsSemantics({ namedFaces: 1 }, facts),
     'a resident named state was mistaken for a semantic clear',
+  );
+});
+
+test('an acknowledged disk checkpoint remains resolved until disk actually changes', () => {
+  const facts = disk([]);
+  const revision = paintLayoutConflictRevision(facts);
+  assert(revision === '81099:1', 'the stale marker did not define the conflict revision');
+  assert(
+    paintLayoutConflictRevisionIsAcknowledged(revision, facts),
+    'the checkpoint chosen by the user was immediately forgotten',
+  );
+  assert(
+    paintLayoutConflictRevision({ ...facts, marker: null }) === revision,
+    'remaking the atlas made the same saved document look like a new conflict',
+  );
+  assert(
+    !paintLayoutConflictRevisionIsAcknowledged(revision, {
+      ...facts,
+      marker: { ...facts.marker!, docStamp: '85543:2' },
+    }),
+    'an actual disk revision change reused the old acknowledgement',
   );
 });
 

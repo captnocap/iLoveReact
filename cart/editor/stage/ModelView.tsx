@@ -104,6 +104,9 @@ import { shouldRestoreSavedGlass } from '../model/glassHydration';
 import {
   formatConflictBytes,
   formatConflictTime,
+  paintLayoutConflictAckHotKey,
+  paintLayoutConflictRevision,
+  paintLayoutConflictRevisionIsAcknowledged,
   paintLayoutKeepLiveClearsSemantics,
   paintLayoutMismatchSentence,
   readPaintLayoutDiskFacts,
@@ -1665,15 +1668,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // groups when it carries authored grouping; null for plain/per-triangle imports. The
   // prompt reads faces to the user and triangles to the byte math, never conflating them.
   const [authoredFaces, setAuthoredFaces] = useState<number | null>(null);
-  const paintConflictAckKey = hotDocId ? `editor:paint-layout-conflict-ack:v1:${hotDocId}` : null;
-  const paintConflictMarkerKey = (disk: PaintLayoutDiskFacts | null): string =>
-    disk?.marker?.docStamp ?? disk?.doc?.stamp ?? 'stale-without-readable-stamp';
+  const paintConflictAckKey = hotDocId ? paintLayoutConflictAckHotKey(hotDocId) : null;
   const acknowledgePaintConflict = (disk: PaintLayoutDiskFacts | null) => {
-    if (paintConflictAckKey) setHotState(paintConflictAckKey, paintConflictMarkerKey(disk));
+    if (paintConflictAckKey) setHotState(paintConflictAckKey, paintLayoutConflictRevision(disk));
   };
   const paintConflictWasAcknowledged = (disk: PaintLayoutDiskFacts | null): boolean =>
     !!paintConflictAckKey
-    && getHotState<string | null>(paintConflictAckKey, null) === paintConflictMarkerKey(disk);
+    && paintLayoutConflictRevisionIsAcknowledged(
+      getHotState<string | null>(paintConflictAckKey, null),
+      disk,
+    );
   const openPaintLayoutConflict = (
     origin: PaintLayoutConflictSession['origin'],
     requestedVariant: PaintVariant | null = null,
@@ -1748,6 +1752,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintConflict(null);
     discard?.();
   };
+  // A hot reload can leave the pre-fix save modal mounted after the shell learns
+  // that this exact disk checkpoint was already chosen. Retire that stale prompt
+  // immediately; it is not a new conflict and must not demand one final click.
+  useEffect(() => {
+    if (paintConflict?.origin !== 'save' || !paintTarget) return;
+    const disk = readPaintLayoutDiskFacts(paintTarget);
+    if (paintConflictWasAcknowledged(disk)) setPaintConflict(null);
+  }, [paintConflict?.origin, paintTarget?.kind, paintTarget?.id]);
   // Model-space bounds CENTER, computed one-shot from the composed vertices at load
   // (req_2618 G). File imports have no vertices cart-side → null (honest-empty).
   const [boundsCenter, setBoundsCenter] = useState<[number, number, number] | null>(null);
@@ -2583,7 +2595,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   useEffect(() => {
     if (!model || !paintTarget || !paintTargetOnDisk || !modelPaintLayoutIsStale(paintTarget)) return;
     const disk = readPaintLayoutDiskFacts(paintTarget);
-    const marker = paintConflictMarkerKey(disk);
+    const marker = paintLayoutConflictRevision(disk);
     host.__model_paint_layout_invalidate?.();
     atlasReadyRef.current = false;
     atlasInvalidatedRef.current = true;

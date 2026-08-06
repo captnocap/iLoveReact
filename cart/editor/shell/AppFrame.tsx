@@ -100,7 +100,13 @@ import {
   type UvIslandRect,
   type UvTwoSheetZone,
 } from '../model/uvLayout';
-import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
+import {
+  paintLayoutConflictAckHotKey,
+  paintLayoutConflictRevision,
+  paintLayoutConflictRevisionIsAcknowledged,
+  readPaintLayoutDiskFacts,
+  type PaintLayoutKeepLiveOptions,
+} from '../model/paintLayoutConflict';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -191,6 +197,7 @@ import { subscribe } from '@reactjit/runtime/ffi';
 // Live modifier state (no re-render) — the outliner's shift-click multi-select
 // (req_2659) reads shift at press time instead of threading it through every row.
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
 import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
@@ -1518,7 +1525,13 @@ export default function AppFrame() {
     const stalePaintLayout = (globalThis as any).__model_paint_layout_stale?.() === 1;
     const hasRecoverablePaint = alreadyOnDisk
       && (hasStoredModelPaint(pkg) || modelPaintLayoutIsStale(pkg));
-    if (!allowStalePaintLayout && stalePaintLayout && hasRecoverablePaint) {
+    const paintConflictDisk = alreadyOnDisk ? readPaintLayoutDiskFacts(pkg) : null;
+    const paintConflictAckKey = paintLayoutConflictAckHotKey(modelDocSessionId(pkg.kind, pkg.id));
+    const paintConflictAcknowledged = paintLayoutConflictRevisionIsAcknowledged(
+      getHotState<string | null>(paintConflictAckKey, null),
+      paintConflictDisk,
+    );
+    if (!allowStalePaintLayout && stalePaintLayout && hasRecoverablePaint && !paintConflictAcknowledged) {
       const opened = modelToolApiRef.current?.openPaintLayoutConflict({
         origin: 'save',
         unsaved: Boolean(current.modelDirty[pkg.id]),
@@ -1564,6 +1577,16 @@ export default function AppFrame() {
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
     if (ok) {
       consumeModelSaveAuthorizations(pkg.id);
+      // Keep LIVE resolves ownership for this in-process editing lineage, not
+      // just for one write. Roll the acknowledged disk revision forward after
+      // every descendant save; otherwise the newly written checkpoint is offered
+      // back as a competing DISK state on the very next edit (req_3901).
+      if (allowStalePaintLayout || paintConflictAcknowledged) {
+        setHotState(
+          paintConflictAckKey,
+          paintLayoutConflictRevision(readPaintLayoutDiskFacts(pkg)),
+        );
+      }
       // Existing package rows must be replaced too: world/livePush resolves
       // emitted lights and face rigs through MODEL_PACKAGES, so a successful
       // Save has to become live truth immediately, not only after a restart.
