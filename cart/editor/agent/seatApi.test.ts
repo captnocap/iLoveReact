@@ -14,6 +14,7 @@ function assert(condition: boolean, message: string) { if (!condition) throw new
 
 const percept: SeatPercept = {
   version: 1, model: null, generation: 4, faces: 60, authoredFaces: 30, islands: 0, footprints: 0, unnamed: 0,
+  placeholders: 0, placeholderFaces: 0,
   activePartId: null, parts: [],
   regions: [{ id: 7, faces: 16, instances: 4, bbox: [0, 0, 0, 1, 2, 1] }],
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
@@ -58,6 +59,52 @@ test('percept and brief distinguish logical UV islands from paint footprints', (
   assert(reply.percept?.islands === 4, 'percept discarded the logical atlas island count');
   assert(reply.percept?.footprints === 3, 'percept failed to collapse stacked texture footprints');
   assert(compactSeatReply(reply).brief.includes('3 paint footprints · 4 logical UV islands'), 'brief output conflated topology with paint cost');
+});
+
+test('percept measures every live generator-named region and its triangles', () => {
+  const generated = {
+    ...percept,
+    faces: 12,
+    regions: [
+      { id: 1, faces: 2, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+      { id: 2, faces: 4, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+      { id: 3, faces: 6, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+    ],
+    table: { version: 1, regions: [
+      { id: 1, name: 'right', createdBy: { op: 'new cube' } },
+      { id: 2, name: 'body.top', createdBy: { op: 'add cube' } },
+      { id: 3, name: 'body.wall', createdBy: { op: 'add cylinder' } },
+    ] },
+  };
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(generated);
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'look' });
+  assert(reply.percept?.placeholders === 3, 'generator region count was not measured');
+  assert(reply.percept?.placeholderFaces === 12, 'generator triangle coverage was not measured');
+  assert(formatSeatPercept(reply.percept!).includes('⚠ 3 generator names over 12 triangles — no intentional naming pass yet'),
+    'placeholder debt was absent from the percept readout');
+});
+
+test('intentional names, empty generator regions, and missing provenance do not count as placeholders', () => {
+  const named = {
+    ...percept,
+    faces: 12,
+    regions: [
+      { id: 1, faces: 0, instances: 0, bbox: [0, 0, 0, 0, 0, 0] },
+      { id: 2, faces: 7, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+      { id: 3, faces: 3, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+      { id: 4, faces: 2, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+    ],
+    table: { version: 1, regions: [
+      { id: 1, name: 'body.top', createdBy: { op: 'add cube' } },
+      { id: 2, name: 'seat_cushion', createdBy: { op: 'name' } },
+      { id: 3, name: 'legacy_backrest' },
+      { id: 4, name: 'body.wall', createdBy: { op: 'add cylinder' } },
+    ] },
+  };
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(named);
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'look' });
+  assert(reply.percept?.placeholders === 1 && reply.percept.placeholderFaces === 2,
+    'intentional, emptied, or provenance-less regions were charged as generator debt');
 });
 
 test('shell Seat bootstraps the first model without a mounted ModelView', () => {
@@ -372,6 +419,7 @@ test('anonymous growth is blocked after the naming-debt budget', () => {
 test('adding a primitive keeps every existing name', () => {
   const named: SeatPercept = {
     version: 1, model: null, generation: 9, faces: 132, authoredFaces: 66, islands: 0, footprints: 0, unnamed: 0,
+    placeholders: 0, placeholderFaces: 0,
     activePartId: null, parts: [],
     regions: [{ id: 7, faces: 8, instances: 1, bbox: [0, 0, 0, 1, 1, 1] }],
     table: { version: 1, regions: [{ id: 7, name: 'faceplate.wall' }], nextRegionId: 8 },
@@ -763,6 +811,25 @@ test('save is a zero-debt durable boundary', () => {
   assert(reply.reason?.includes('zero naming debt'), 'save did not explain the durable-boundary invariant');
 });
 
+test('save refuses generator-named regions until the intentional naming pass', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify({
+    ...percept,
+    regions: [
+      { id: 1, faces: 2, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+      { id: 2, faces: 4, instances: 1, bbox: [0, 0, 0, 1, 1, 1] },
+    ],
+    table: { version: 1, regions: [
+      { id: 1, name: 'right', createdBy: { op: 'new cube' } },
+      { id: 2, name: 'body.wall', createdBy: { op: 'add cube' } },
+    ] },
+  });
+  let persisted = false;
+  const reply = executeSeatRequest(createAgentSeat({ persist: () => { persisted = true; return true; } }), { action: 'save' });
+  assert(!reply.ok && !persisted, 'save persisted unresolved generator names');
+  assert(reply.reason === 'save blocked — 2 generator-named regions still cover 6 triangles. Do the intentional naming pass first: select each real part or affordance and `name` it, so the table describes the model instead of its construction.',
+    `save returned the wrong generator-name refusal: ${reply.reason}`);
+});
+
 test('dial is a callable candidate recipe that seats a resident cylinder on a target face', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   (globalThis as any).__mesh_select_query = () => JSON.stringify({ ok: true, faces: 2, bbox: [1, 2, 3, 1, 4, 5] });
@@ -786,6 +853,7 @@ test('percept leads with authored faces and names triangle soup out loud', () =>
   const quads = formatSeatPercept({ ...percept, faces: 132, authoredFaces: 66 });
   assert(quads.includes('66 authored faces · 132 triangles'), `authored faces missing from readout: ${quads.split('\n')[0]}`);
   assert(!quads.includes('TRIANGLE SOUP'), 'a healthy quad mesh was reported as soup');
+  assert(!quads.includes('intentional naming pass'), 'a zero-placeholder percept printed generator debt');
 
   // The exact state radio_001 was found in: same triangle count, every quad flattened.
   // The old readout printed "132 faces" for both and could not tell them apart.

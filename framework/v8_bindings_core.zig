@@ -723,6 +723,13 @@ fn liveOrbitScene() ?*host_tree.Node {
     return null;
 }
 
+fn retargetSnapshotGeometry(children: []host_tree.Node, resident_key: []const u8) void {
+    for (children) |*child| {
+        if (child.scene3d_geom_key != null) child.scene3d_geom_key = resident_key;
+        retargetSnapshotGeometry(child.children, resident_key);
+    }
+}
+
 /// __model_shot_offscreen(path, w, h[, yaw, pitch, dist, tx, ty, tz]) -> 1|0.
 /// Re-materialize the orbit Scene3D subtree through the same host-tree path the
 /// live frame uses before engine.paintNode hands it to scene3d.render.
@@ -749,6 +756,14 @@ fn hostModelShotOffscreen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     defer arena.deinit();
     var scene = source_scene.*;
     scene.children = host_tree.materializeChildren(arena.allocator(), source_scene.id);
+    if (scene3d.meshEditActiveKey()) |resident_key| {
+        if (resident_key.len > 0) {
+            const snapshot_key = arena.allocator().dupe(u8, resident_key) catch
+                return setReturnNumber(info, 0);
+            // Rewrite every copied mesh child's scene3d_geom_key, never the live host tree.
+            retargetSnapshotGeometry(scene.children, snapshot_key);
+        }
+    }
     const ok = scene3d.modelShotOffscreen(
         host.io,
         host.environ,

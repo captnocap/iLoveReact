@@ -63,6 +63,11 @@ export type SeatPercept = {
   /** Exact coverage-compatible texture footprints after stacking. */
   footprints: number;
   unnamed: number;
+  /** Regions still carrying geometry that a GENERATOR named, not a person: the
+   * naming debt an intentional pass must clear (req_3961). */
+  placeholders: number;
+  /** Triangles under those regions. */
+  placeholderFaces: number;
   hiddenFaces?: number;
   hiddenNamedFaces?: number;
   hiddenRegions?: number;
@@ -427,6 +432,25 @@ function countAuthoredFaces(triangles: readonly number[] | undefined): number | 
   return groups.size;
 }
 
+function measurePlaceholderRegions(
+  regions: SeatPercept['regions'],
+  table: SemanticTable,
+): Pick<SeatPercept, 'placeholders' | 'placeholderFaces'> {
+  const provenance = new Map(table.regions.map((region) => [region.id, region.createdBy?.op]));
+  let placeholders = 0;
+  let placeholderFaces = 0;
+  for (const region of regions) {
+    if (region.faces <= 0) continue;
+    const op = provenance.get(region.id);
+    // Missing provenance belongs to an older saved blob. Treat it as intentional:
+    // a lossy historical boundary must never lock a person out of their model.
+    if (typeof op !== 'string' || (!op.startsWith('new ') && !op.startsWith('add '))) continue;
+    placeholders += 1;
+    placeholderFaces += region.faces;
+  }
+  return { placeholders, placeholderFaces };
+}
+
 export function readSeatPercept(): SeatPercept | null {
   const value = parseJson<SeatPercept>(host.__mesh_semantic_state?.());
   if (!value || value.version !== 1 || !Array.isArray(value.regions) || value.table?.version !== 1) return null;
@@ -446,6 +470,7 @@ export function readSeatPercept(): SeatPercept | null {
     islands,
     footprints,
     authoredFaces: countAuthoredFaces(atlas?.triangles),
+    ...measurePlaceholderRegions(value.regions, value.table),
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
   };
@@ -587,6 +612,7 @@ export function formatSeatPercept(percept: SeatPercept): string {
   }
   for (const row of percept.regions) lines.push(`  ${names.get(row.id) ?? `region:${row.id}`}  ${row.faces} faces${row.instances > 1 ? ` ×${row.instances}` : ''}  bbox ${row.bbox.join(',')}`);
   if (percept.unnamed > 0) lines.push(`  ⚠ unnamed  ${percept.unnamed}`);
+  if (percept.placeholders > 0) lines.push(`  ⚠ ${percept.placeholders} generator names over ${percept.placeholderFaces} triangles — no intentional naming pass yet`);
   return lines.join('\n');
 }
 
@@ -1321,6 +1347,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       ok: false,
       reason: `save blocked — ${percept.unnamed} unnamed faces remain; durable boundaries require zero naming debt`,
     };
+    if (percept.placeholderFaces > 0) return {
+      ok: false,
+      reason: `save blocked — ${percept.placeholders} generator-named regions still cover ${percept.placeholderFaces} triangles. Do the intentional naming pass first: select each real part or affordance and \`name\` it, so the table describes the model instead of its construction.`,
+    };
     return adapter.persist?.() === true
       ? { ok: true }
       : { ok: false, reason: 'the shell could not persist the active model package' };
@@ -1522,7 +1552,9 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
   if (BACKGROUND_FOCUS_BRIDGE_ACTIONS.has(action)) {
     return `the UV/paint focus bridge belongs to the visible ModelView; ${action} cannot target a background model`;
   }
-  if (action === 'shot') return 'a capture renders the frame the editor is composing; a background model has no framed scene';
+  if (action === 'shot' && args.offscreen !== true) {
+    return 'a window capture renders the frame the editor is composing; a background model has no framed scene — pass offscreen:true to render the model itself';
+  }
   if (BACKGROUND_EDITOR_COMMAND_ACTIONS.has(action)) return 'editor commands run against the visible editor';
   if (BACKGROUND_PART_GEOMETRY_ACTIONS.has(action)) return "part geometry ops mirror through the visible viewer's part-range table; they cannot target a background model yet";
   if (action === 'atlas') return 'the paint atlas transaction is owned by the visible painter';

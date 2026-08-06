@@ -65,12 +65,16 @@ y=0**. Keep models grounded at y=0 by scaling y about a pivot of `0`.
    it throws away ~43% of the model as geometry no camera can reach. `part-merge` resolves
    NOTHING: it welds no vertex and deletes no face, and using it to tidy the Outliner over
    unjoined solids is the worse of the two failures, not the fix.
-7. Run `tools/seat save`, then `tools/seat semantic-status`. Require `status:"healthy"`
+7. Run the **intentional naming pass**. Select each real part or affordance and `name` it so
+   every generator label is replaced by a concept. The goal is a handful of regions, each
+   spanning a real swath — not one label per face: **11 regions over 489 triangles reads as
+   a model; 175 over 300 is noise.**
+8. Run `tools/seat save`, then `tools/seat semantic-status`. Require `status:"healthy"`
    and matching nonzero saved/mount/resident counts before claiming that names are durable.
-8. Report changes in terms of semantic names and dimensions, not face indices. When cold
+9. Report changes in terms of semantic names and dimensions, not face indices. When cold
    persistence is material to the task, fully stop and reopen the editor and prove the names
    with a generation-1 `look`.
-9. Dismiss the claim after the final `save` and `semantic-status`, at the end of the engagement.
+10. Dismiss the claim after the final `save` and `semantic-status`, at the end of the engagement.
 
 *(
 `cart/editor/img.cjs` is the user's generation console (nano-gpt API through the local
@@ -248,7 +252,7 @@ These are the only actions; `tools/seat <anything-else>` exits 2.
 | `tools/seat atlas <template\|solid\|blank> [r g b] [fit]` | `{"action":"atlas","args":{"base":"solid","rgb":[180,40,20],"fit":1024}}` | Explicitly rebuild a stale paint atlas after topology edits. `fit` is the atlas BUDGET — 512/1024/2048/4096, default **1024²**. Replies with the sheet you got: `{density,fit,w,h}`. |
 | `tools/seat material <slot\|clear>` | `{"action":"material","args":{"slot":2}}` | Assign/clear an existing texture-role slot on selected faces. |
 | `tools/seat uv <restore\|auto-size\|project-view>` | `{"action":"uv","args":{"operation":"auto-size"}}` | Operate on UV islands belonging to the face selection. |
-| `tools/seat save` | `{"action":"save"}` | Full package save. Re-reads the written RJMD and rejects/rolls back a semantic drop. |
+| `tools/seat save` | `{"action":"save"}` | Full package save. Refuses unnamed faces and unresolved generator names; otherwise re-reads the written RJMD and rejects/rolls back a semantic drop. |
 | `tools/seat add <kind> <size> <height> <sides> <name> [x y z]` | `{"action":"add","args":{"kind":"cylinder","size":0.26,"height":0.1,"sides":6,"name":"dial"}}` | Appends a part whose surfaces are named at creation. **Meters.** |
 | `tools/seat cut <dir> <cuts> [offset]` | `{"action":"cut","args":{"direction":0,"cuts":2,"offset":0.5}}` | Loop cut: PROPAGATES the edge ring around the whole body — one hood cut also cuts windshield/roof/underbody (measured: +66 tris where basic-cut adds +6). Reach for it only when you want the full ring. |
 | `tools/seat basic-cut <dir> <cuts> [offset]` | `{"action":"basic-cut","args":{"direction":0,"cuts":1,"offset":0.5}}` | Subdivides ONLY the selected faces — the bounded local cut. This is the one you want for a local detail line; it never walks the ring. The receipt's `worldDirection` is the seed vector applied geometrically across every selected face. |
@@ -357,14 +361,17 @@ next `move`/`rotate` positions it. The name is required (an unnamed part is refu
 an anonymous extrude). Cylinders stand on their Y axis; a knob facing ±X needs a
 `rotate 0 0 1 <pivot> 90` after the add.
 
-Surfaces are named in the same creation transaction: cubes get `.right/.left/.top/.bottom/.back/.front`;
+Surfaces receive generator scaffold names in the same creation transaction: cubes get `.right/.left/.top/.bottom/.back/.front`;
 cylinders get `.cap.top/.cap.bottom/.wall`; cones and pyramids get `.base/.wall`; other
-primitives get `.surface`. The root name selects the whole descendant family.
+primitives get `.surface`. The root name selects the whole descendant family. These labels
+prevent anonymous geometry during construction; they do not replace the intentional naming
+pass before save.
 
 **`add` produces a sealed solid, and a pile of sealed solids is a BLOCKOUT, not a model.**
 This verb is the cheapest thing in the seat: it never fails, it auto-names all six surfaces
-so naming debt never rises, and it needs no `elements` read and no topology reasoning. That
-is exactly why it is the trap — across this repo's 216 model packages, **1,203 of 1,305
+so unnamed debt never rises, and it needs no `elements` read and no topology reasoning. Its
+generator labels are still intentional-naming debt. That is exactly why it is the trap —
+across this repo's 216 model packages, **1,203 of 1,305
 region creations came from `add`, and 12 came from actually editing a mesh.** Every one of
 those models measures ~43% unreachable geometry (see the Topology finish gate).
 
@@ -759,6 +766,8 @@ Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
   "islands": 27,             // logical UV islands; 0 until an atlas is readable
   "footprints": 19,          // exact independently painted regions after stacking
   "unnamed": 0,              // naming debt
+  "placeholders": 0,         // live regions still named by new/add generators
+  "placeholderFaces": 0,     // triangles still covered by those generator names
   "activePartId": "part:body", // current Outliner/native edit scope
   "parts": [ { "id": "part:body", "name": "Body", "kind": "cube",
                "visible": true, "lo": 0, "hi": 24,
@@ -774,6 +783,9 @@ Every reply carries `percept`, the whole state. Shape (`SeatPercept`):
 are reported as `null`, never inferred. The shell restores these rows from saved part metadata
 on a cold open. `regions[]` carries live geometry (face count + bbox per semantic id), while
 `table.regions[]` carries meaning (name, role, parent, provenance). Join those on `id`.
+`placeholders` and `placeholderFaces` are that join's live generator debt: only nonempty
+regions whose `createdBy.op` begins with `new ` or `add ` count. Missing provenance from an
+older blob is treated as intentional so dropped history cannot lock its owner out of save.
 
 Use `tools/seat --brief ...` for agent work. The live transport calls
 `formatSeatPercept()`, removes repeated per-row percepts from batches, and prints one final
@@ -801,17 +813,23 @@ all three horizons, and rows marked `resident`, `mount-only`, or `saved-only`. R
 Focus or call `semantic-status` after a save instead of guessing whether a CLI or UI display
 is stale.
 
-`save` writes RJMD v4 geometry and semantic membership/table together, then re-reads the
-written blob. If named resident geometry would become anonymous, save fails and restores the
-previous exact blob. Therefore `ok:true` is the save postcondition; the reply's embedded
-`percept` is still only the live view. Follow it with `semantic-status` for the horizon
-diagnosis.
+`save` first refuses either unnamed faces or live faces still covered by generator names,
+because a durable model needs both complete coverage and an intentional naming pass. It then
+writes RJMD v4 geometry and semantic membership/table together and re-reads the written blob.
+If named resident geometry would become anonymous, save fails and restores the previous exact
+blob. Therefore `ok:true` is the save postcondition; the reply's embedded `percept` is still
+only the live view. Follow it with `semantic-status` for the horizon diagnosis.
 
 Use this normal-flow acceptance test whenever semantic persistence changes or is in doubt:
 
 ```bash
 tools/seat new cube 1 1 16
-tools/seat look                         # six primitive names, unnamed: 0
+tools/seat look                         # six generator names; placeholders: 6
+tools/seat select region:right && tools/seat name cabinet_right
+tools/seat select region:left && tools/seat name cabinet_left
+tools/seat select region:bottom && tools/seat name cabinet_base
+tools/seat select region:back && tools/seat name cabinet_back
+tools/seat select region:front && tools/seat name cabinet_front
 tools/seat select extremal:top
 tools/seat extrude 0.25 persistence_test
 tools/seat save
@@ -1020,6 +1038,9 @@ differs from the inherited source region.
 
 ## Naming rules
 
+- Names are **RIGGING input**, so intentional names describe parts and affordances:
+  `headrest_undersides`, `seat_rig_player_back_to_this_face`. Geometry restatements such as
+  `postFR.top` are generator scaffolding, not the finished table.
 - `extrude <dist> <name>` declares `<name>.cap` and `<name>.wall` in the same journal
   transaction as the topology.
 - **Extruding a `.cap` consumes it.** Extruding `faceplate.cap` into `grille` makes
@@ -1039,7 +1060,9 @@ differs from the inherited source region.
   creates the geometry.
 - Anonymous creation uses `_` as the name and is **refused once `unnamed` exceeds 8**
   (`DEFAULT_NAMING_DEBT_BUDGET`). This is only a construction backstop: `save` refuses
-  whenever `unnamed > 0`, so every durable model crosses the boundary at zero debt.
+  whenever `unnamed > 0`, and separately refuses generator-named regions that still carry
+  faces, so every durable model crosses the boundary with complete coverage and an intentional
+  naming pass.
 - `name` assigns the current selection to a region with role `authored`.
 - `create-face <name>` creates then names the selected result. Those are two undo units;
   all native geometry and its semantic table still persist together on `save`.
@@ -1086,6 +1109,11 @@ closed before. Re-run `look`; never apply an old plan to a changed mesh.
 ## Remaining boundary
 
 General set algebra is still absent; the supported compound is `region:<name> & facing:<axis>`.
+The current selector grammar cannot express **faces in this area AND facing this way** — only
+an already named `region:<name> & facing:<axis>` — and there is no per-face read. On a dense
+mesh, the intentional naming pass may therefore not be fully reachable yet. That is a gap in
+the tool, not a failure by the agent doing the pass; report it plainly instead of inventing a
+selector or pretending the generator labels are meaningful.
 Viewport-coordinate actions (`paint-tool` strokes and `path`) are intentionally
 camera-dependent; frame or set `viewport` first and checkpoint before using them. OS-picker
 commands can be opened through `command`, but prefer path-bearing actions when available.

@@ -3929,6 +3929,8 @@ export default function AppFrame() {
       partPercept: () => seatPartPercept(modelId),
       shellAction: (action, args) => seatShellActionRef.current(action, args, modelId),
       persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat (background)'),
+      shotOffscreen: (path, width, height, pose) =>
+        (globalThis as any).__model_shot_offscreen?.(path, width, height, ...(pose ?? [])) === 1,
     });
     backgroundSeatByModelRef.current.set(modelId, seat);
     return seat;
