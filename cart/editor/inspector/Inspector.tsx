@@ -556,6 +556,9 @@ export default function Inspector(props: {
   onSaveModel: () => void;
   /** Report an outcome on the shell status line (req_3894 — refusals must be seen). */
   onStatus: (message: string) => void;
+  /** A real Remove happened: mint the capability that lets an emptied semantic
+   *  table actually save (req_3898). */
+  onSemanticRegionRemoved: () => void;
   modelOnDisk: boolean;
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
@@ -925,6 +928,7 @@ export default function Inspector(props: {
                 bridge={focusBridge}
                 onRefresh={() => focusBridge?.refreshSemantics()}
                 onStatus={props.onStatus}
+                onRegionRemoved={props.onSemanticRegionRemoved}
               />
             ) : (
               <RigSection

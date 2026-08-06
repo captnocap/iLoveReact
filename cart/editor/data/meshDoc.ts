@@ -96,10 +96,21 @@ export function meshDocSemanticsMatch(
   });
 }
 
+/** True when saving would replace a named durable document with an anonymous mesh.
+ *
+ * This guard was written against a mesh that SILENTLY lost its names (a hydration or
+ * mount drop), where saving cements the loss. Deliberately removing the last region
+ * reaches the same zero by an entirely different road, and refusing that left the
+ * user unable to save at all (req_3898) — the model could be emptied but never
+ * committed. So emptying the table now needs the same one-shot capability a
+ * destructive part-count change needs: minted by a real Remove action in the NAMES
+ * pane, never by hydration or autosave. */
 export function meshDocWouldEraseSemantics(
   resident: ResidentSemanticSaveState,
   prior: Pick<PackageMeshDoc, 'semanticRegions'> | null,
+  explicitlyAuthorized = false,
 ): boolean {
+  if (explicitlyAuthorized) return false;
   const residentNamedFaces = Math.max(0, resident.faces - resident.unnamed);
   const priorNamedFaces = Array.from(prior?.semanticRegions ?? []).filter((id) => id !== 0xffffffff).length;
   return residentNamedFaces === 0 && priorNamedFaces > 0;
@@ -196,7 +207,7 @@ export function writeMeshDoc(
   dir: string,
   parts: MeshDocPartMeta[],
   recoveryRanges?: { lo: number; hi: number }[],
-  options: { allowPartShrink?: boolean } = {},
+  options: { allowPartShrink?: boolean; allowSemanticClear?: boolean } = {},
 ): boolean {
   // The editable document is a two-file transaction. No metadata-less caller is
   // admitted here; paint-only persistence must leave doc.blob + parts.json alone.
@@ -234,8 +245,8 @@ export function writeMeshDoc(
         residentSemantics = parsed as ResidentSemanticSaveState;
       }
     } catch { /* old host: the native write result remains the compatibility boundary */ }
-    if (residentSemantics && meshDocWouldEraseSemantics(residentSemantics, priorDoc)) {
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: resident mesh is anonymous but the durable document still has named faces`);
+    if (residentSemantics && meshDocWouldEraseSemantics(residentSemantics, priorDoc, options.allowSemanticClear === true)) {
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them`);
       return false;
     }
     const hostPartRanges = (): { lo: number; hi: number }[] => {

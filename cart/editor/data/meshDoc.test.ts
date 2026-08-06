@@ -208,6 +208,12 @@ test('save verification rejects geometry-only success that dropped resident name
   assert(meshDocWouldEraseSemantics({ ...resident, unnamed: 3 }, {
     semanticRegions: new Uint32Array([5, 5, 5]),
   }), 'anonymous hydration was allowed to erase a named durable document');
+  // req_3898: removing the LAST region reaches the same zero deliberately. Without a
+  // capability the model became unsaveable, so an explicit Remove must pass while the
+  // unauthorized drop above still refuses.
+  assert(!meshDocWouldEraseSemantics({ ...resident, unnamed: 3 }, {
+    semanticRegions: new Uint32Array([5, 5, 5]),
+  }, true), 'an explicitly authorized Remove could not clear the durable table');
 });
 
 test('an undecodable doc.blob is never rebuilt from base.blob, and blocks the save', () => {

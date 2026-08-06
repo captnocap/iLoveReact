@@ -900,7 +900,7 @@ export function writeModelArtifacts(
   pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
   parts?: MeshDocPartMeta[],
   recoveryRanges?: { lo: number; hi: number }[],
-  options: { allowPartShrink?: boolean; captureUvResetBaseline?: boolean } = {},
+  options: { allowPartShrink?: boolean; allowSemanticClear?: boolean; captureUvResetBaseline?: boolean } = {},
 ): boolean {
   const dir = claimPackageDir(pkg);
   const meshDir = `${dir}/mesh`;

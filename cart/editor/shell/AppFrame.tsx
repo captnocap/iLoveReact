@@ -451,8 +451,15 @@ export default function AppFrame() {
       }
     }
   }, [state.modelParts]);
+  // Emptying the semantic table needs the same shape of one-shot capability
+  // (req_3898): removing the LAST region legitimately reaches zero named faces, but
+  // the save guard cannot tell that apart from a mesh that silently LOST its names,
+  // so without this a deliberate clear left the document unsaveable. Only a real
+  // Remove in the NAMES pane mints it; hydration and autosave never do.
+  const authorizedSemanticClearRef = useRef(new Set<string>());
   const partShrinkSaveOptions = (modelId: string, liveCount: number) => ({
     allowPartShrink: authorizedPartShrinkTargetRef.current.get(modelId) === liveCount,
+    allowSemanticClear: authorizedSemanticClearRef.current.has(modelId),
   });
   const consumePartShrinkAuthorization = (modelId: string) => {
     authorizedPartShrinkTargetRef.current.delete(modelId);
@@ -6976,6 +6983,10 @@ export default function AppFrame() {
             activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
             onPane={pressRightPanel}
             onStatus={(status: string) => setState((prev) => ({ ...prev, status }))}
+            onSemanticRegionRemoved={() => {
+              if (activeModelId) authorizedSemanticClearRef.current.add(activeModelId);
+              markActiveModelDirty();
+            }}
             onCollapse={() => setState((prev) => ({ ...prev, rightPanelCollapsed: true, status: 'focus panel collapsed' }))}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}

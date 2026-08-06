@@ -41,13 +41,16 @@ function presenceTone(row: ModelFocusSemanticRow): string {
       : 'warning';
 }
 
-export default function NamesPanel({ semantics, bridge, onRefresh, onStatus }: {
+export default function NamesPanel({ semantics, bridge, onRefresh, onStatus, onRegionRemoved }: {
   semantics: ModelFocusSemantics | null;
   bridge: ModelFocusBridge | null;
   onRefresh: () => void;
   /** Refusals must be visible: a rename that silently does nothing is the same
    *  dead end as having no rename at all (req_3894). */
   onStatus: (message: string) => void;
+  /** A removal happened — the shell mints the save capability that lets an emptied
+   *  table be committed (req_3898). */
+  onRegionRemoved: () => void;
 }) {
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -84,6 +87,7 @@ export default function NamesPanel({ semantics, bridge, onRefresh, onStatus }: {
   const removeRegion = (row: ModelFocusSemanticRow) => {
     const result = bridge?.editRegion(row.id, { remove: true });
     if (selectedId === row.id) setSelectedId(null);
+    if (result) onRegionRemoved();
     onStatus(result
       ? `removed "${row.name}" — ${result.changed} faces are unnamed again (Ctrl+Z restores it)`
       : `could not remove "${row.name}" — the resident mesh refused the edit`);
