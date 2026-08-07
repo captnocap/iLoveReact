@@ -403,6 +403,22 @@ test('named extrude declares cap and wall roles before topology runs', () => {
   assert(table.regions.some((row: any) => row.name === 'window.wall'), 'wall role missing');
 });
 
+test('a native Create Face receipt crosses the Seat boundary and names the new face', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  let assigned: { id: number; instance: number; table: any } | null = null;
+  (globalThis as any).__mesh_topo_create_face = () => JSON.stringify({ ok: 1, key: 'doc', count: 62, generation: 5 });
+  (globalThis as any).__mesh_semantic_assign = (id: number, instance: number, table: string) => {
+    assigned = { id, instance, table: JSON.parse(table) };
+    return 2;
+  };
+  const reply = executeSeatRequest(createAgentSeat(), {
+    action: 'create-face', args: { name: 'torso_side_patch', instance: 0 },
+  });
+  assert(reply.ok && (reply.result as any).count === 62, 'accepted native face was lost at the Seat boundary');
+  assert(assigned?.table.regions.some((row: any) => row.id === assigned!.id && row.name === 'torso_side_patch'),
+    'Create Face returned without naming its selected result');
+});
+
 test('anonymous growth is blocked after the naming-debt budget', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify({ ...percept, unnamed: 9 });
   let called = false;

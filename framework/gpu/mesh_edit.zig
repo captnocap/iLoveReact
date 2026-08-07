@@ -1972,6 +1972,80 @@ pub fn bridgeCrossReferenceNormalPub(sel0: Edge, sel1: Edge, cross0: Edge, cross
     return if (vecDot(normal, normal) >= 0.5) normal else null;
 }
 
+/// The direction in which the sole incident triangle traverses a boundary edge,
+/// expressed relative to the caller's endpoint order. A manifold boundary owns
+/// exactly one such directed use; interior, missing, or out-of-scope edges have no
+/// usable circulation.
+fn boundaryFaceRunsEdgeForward(edge: Edge) ?bool {
+    const edge_idx = edgeIndexBetween(edge[0], edge[1]) orelse return null;
+    if (!edgeIsBoundaryPub(edge_idx) or !edgeInScopePub(edge_idx)) return null;
+    const corners = g_corner_vert orelse return null;
+    const face_count = model_paint.faceCount();
+    if (corners.len < @as(usize, face_count) * 3) return null;
+
+    var found: ?bool = null;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        const base = @as(usize, face) * 3;
+        var side: usize = 0;
+        while (side < 3) : (side += 1) {
+            const a = corners[base + side];
+            const b = corners[base + ((side + 1) % 3)];
+            const forward = a == edge[0] and b == edge[1];
+            const reverse = a == edge[1] and b == edge[0];
+            if (!forward and !reverse) continue;
+            if (found != null) return null;
+            found = forward;
+        }
+    }
+    return found;
+}
+
+fn loopRunsEdgeForward(loop: [4]u32, edge: Edge) ?bool {
+    var side: usize = 0;
+    while (side < loop.len) : (side += 1) {
+        const a = loop[side];
+        const b = loop[(side + 1) % loop.len];
+        if (a == edge[0] and b == edge[1]) return true;
+        if (a == edge[1] and b == edge[0]) return false;
+    }
+    return null;
+}
+
+/// Final Create Face winding authority for a valid two-edge boundary bridge when
+/// neither opposite neighbor-normal pair agrees. Surface normals can legitimately
+/// conflict around a corner transition; boundary circulation cannot. The candidate
+/// face must traverse both selected manifold edges opposite to their sole incident
+/// triangles. If those two constraints disagree, the bridge remains ambiguous and
+/// is rejected instead of minting an inconsistently wound face.
+pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u32) ?[3]f32 {
+    if (!ensureTopology()) return null;
+    var keep_candidate: ?bool = null;
+    inline for (.{ sel0, sel1 }) |edge| {
+        _ = edgeExtrusionFramePub(edgeIndexBetween(edge[0], edge[1]) orelse return null) orelse return null;
+        const adjacent_forward = boundaryFaceRunsEdgeForward(edge) orelse return null;
+        const candidate_forward = loopRunsEdgeForward(candidate, edge) orelse return null;
+        const keep = adjacent_forward != candidate_forward;
+        if (keep_candidate) |agreed| {
+            if (agreed != keep) return null;
+        } else {
+            keep_candidate = keep;
+        }
+    }
+
+    const a = vertPosPub(candidate[0]);
+    const b = vertPosPub(candidate[1]);
+    const c = vertPosPub(candidate[2]);
+    const d = vertPosPub(candidate[3]);
+    const area_normal = vecAdd(
+        vecCross(vecSub(b, a), vecSub(c, a)),
+        vecCross(vecSub(c, a), vecSub(d, a)),
+    );
+    const normal = vecNorm(area_normal);
+    if (vecDot(normal, normal) < 0.5) return null;
+    return if (keep_candidate orelse return null) normal else vecMul(normal, -1);
+}
+
 /// Geometry needed to extend one selected edge without inventing a perpendicular
 /// flap. The outer edge stays in the adjacent authored face's plane; the caller
 /// chooses only the distance and owns the topology transaction.

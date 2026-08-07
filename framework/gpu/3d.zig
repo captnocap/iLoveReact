@@ -2411,12 +2411,13 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             // The quad's other two edges carry the winding when the selected pair's
             // own neighbors disagree — a recess fill works from either opposite pair
             // of its loop (req_3840).
+            const candidate = [4]u32{ edges[0][0], edges[0][1], d_id, c_id };
             const winding = agreed_normal orelse mesh_edit.bridgeCrossReferenceNormalPub(
                 edges[0],
                 edges[1],
                 .{ edges[0][0], c_id },
                 .{ edges[0][1], d_id },
-            );
+            ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], candidate);
             if (winding) |reference| ok = appendQuadSplitFacing(&verts, a, b, d, c, reference);
         } else if (agreed_normal) |reference_normal| {
             var order: [3]u32 = undefined;

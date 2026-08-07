@@ -773,6 +773,78 @@ test "bridge winding falls back to the quad's other two edges across a recess" {
     try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(left, right, .{ tl.?, br.? }, .{ bl.?, tr.? }) == null);
 }
 
+test "bridge winding follows the oriented boundary when every neighbor-normal pair disagrees" {
+    // Four consistently wound triangles surround one missing quad, but each opposite
+    // pair bends across a different hard transition. Normal averaging therefore has
+    // no answer from either the selected edges or the other two sides. The boundary
+    // circulation still has one exact answer: the new face must traverse every shared
+    // edge opposite to its sole incident face (req_3963/req_3964).
+    var soup = [_]f32{
+        0,   0,   0, 0,  -1, -1, 0, 0,
+        1,   0,   0, 0,  -1, -1, 0, 0,
+        0.5, -1,  1, 0,  -1, -1, 0, 0,
+
+        1,   0,   0, 1,  0,  -1, 0, 0,
+        1,   1,   0, 1,  0,  -1, 0, 0,
+        2,   0.5, 1, 1,  0,  -1, 0, 0,
+
+        1,   1,   0, 0,  1,  -1, 0, 0,
+        0,   1,   0, 0,  1,  -1, 0, 0,
+        0.5, 2,   1, 0,  1,  -1, 0, 0,
+
+        0,   1,   0, -1, 0,  -1, 0, 0,
+        0,   0,   0, -1, 0,  -1, 0, 0,
+        -1,  0.5, 1, -1, 0,  -1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(3964, soup[0..], 12, &.{ 0, 1, 2, 3 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var a: ?u32 = null;
+    var b: ?u32 = null;
+    var c: ?u32 = null;
+    var d: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[2] != 0) continue;
+        if (at[0] == 0 and at[1] == 0) a = vertex;
+        if (at[0] == 1 and at[1] == 0) b = vertex;
+        if (at[0] == 1 and at[1] == 1) c = vertex;
+        if (at[0] == 0 and at[1] == 1) d = vertex;
+    }
+    const selected_0: mesh_edit.Edge = .{ a.?, b.? };
+    const selected_1: mesh_edit.Edge = .{ c.?, d.? };
+
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        const ends = mesh_edit.edgeEndpointsPub(edge);
+        const is_first = (ends[0] == selected_0[0] and ends[1] == selected_0[1]) or
+            (ends[0] == selected_0[1] and ends[1] == selected_0[0]);
+        const is_second = (ends[0] == selected_1[0] and ends[1] == selected_1[1]) or
+            (ends[0] == selected_1[1] and ends[1] == selected_1[0]);
+        if (is_first or is_second) try testing.expect(mesh_edit.selectEdgeByIndex(edge, true));
+    }
+
+    try testing.expect(mesh_edit.selectedEdgesReferenceNormalPub() == null);
+    try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(
+        selected_0,
+        selected_1,
+        .{ b.?, c.? },
+        .{ d.?, a.? },
+    ) == null);
+
+    const reference = mesh_edit.bridgeBoundaryReferenceNormalPub(
+        selected_0,
+        selected_1,
+        .{ a.?, b.?, c.?, d.? },
+    ).?;
+    try testing.expectApproxEqAbs(@as(f32, 0), reference[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), reference[1], 0.0001);
+    try testing.expect(reference[2] < -0.999);
+}
+
 test "twin-edge probe requires matching face incidence between source and twin" {
     // A mirrored op must mean the same thing on both sides: a bridge built from an
     // open source edge must not land on a twin edge that already carries two faces
