@@ -617,8 +617,12 @@ After the user says the demonstration is done:
    Face derives the new winding from the authored surface normals beside both selected
    boundary edges; when those neighbors disagree (bridging across a recess or ≥90°
    corner selects its two opposing flank walls), the quad's other two edges carry the
-   winding instead if they already exist and agree (req_3840) — either opposite pair
-   of a 4-edge hole fills it. Do not append an unconditional `flip` after it. This
+   winding instead if they already exist and agree (req_3840). When both opposite
+   normal pairs disagree across a harder corner transition, the selected manifold
+   boundary edges' directed circulation is the final authority: a consistent loop
+   still fills, while contradictory circulation rejects (req_3963/req_3964/req_3965).
+   Either opposite pair of a valid 4-edge hole therefore fills it. Do not append an
+   unconditional `flip` after it. This
    continuation resolver runs inside the editor, so large imports never depend on the full
    `elements` reply fitting across the socket. When deletion rekeys the endpoints, use
    `select-edge-points` with the two pre-delete coordinate pairs; it uniquely resolves the
