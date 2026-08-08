@@ -2146,6 +2146,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 
 const SEAT_READ_ACTIONS = new Set([
   'look', 'semantic-status', 'rig-status', 'elements', 'boundary-continuation', 'uv-state',
+  'topo-refusal',
   'recipe-list', 'shot', 'claims', 'lore',
   // Saved-package reads touch neither the resident mesh nor the live selection, so
   // a supervisor can inspect a claimed model's disk state without taking the claim.
@@ -2277,6 +2278,14 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'select': {
         const result = seat.select(String(args.selector ?? ''));
         return seat.reply('select', result.ok, result, result.reason);
+      }
+      // Why did the last topology op refuse? Reading it must not REQUIRE attempting an
+      // op: a probe that happens to succeed mutates a model somebody is editing, which
+      // is exactly the crossed wire that cost a face during req_4114. This is a pure
+      // read of the host's last recorded refusal.
+      case 'topo-refusal': {
+        const reason = seat.withTopoRefusal('');
+        return seat.reply('topo-refusal', true, { reason: reason || null }, undefined);
       }
       case 'elements': {
         const result = seat.elements();
