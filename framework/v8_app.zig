@@ -174,6 +174,7 @@ const diag_log = @import("diag/log.zig");
 // catalog gates `core` + `window` on has_gpu.
 const v8 = @import("v8");
 const cli_bindings = @import("v8_bindings_cli.zig");
+const proc_lifetime = @import("proc_lifetime.zig");
 const worker_bindings = @import("assistant/worker_bindings.zig");
 const host_window = if (@hasDecl(build_options, "has_window") and build_options.has_window)
     @import("v8_bindings_host_window.zig")
@@ -4257,6 +4258,12 @@ fn runHeadless(host: *HostContext) !void {
 pub fn main(init: std.process.Init) !void {
     var host = HostContext.fromInit(init);
     if (IS_LIB) return;
+
+    // A dev host launched by `rjit dev` must not outlive its supervisor. The
+    // supervisor's signal handlers only fire on a polite death; PR_SET_PDEATHSIG
+    // fires on every death, including the SIGKILLs and crashes that produced the
+    // orphan hosts in req_4074/req_4109. No-op for a shipped cart.
+    _ = proc_lifetime.dieWithParentOrExit(host.environ);
 
     // Bring up the observability bus before anything else so that boot-time
     // events (window-child detection, dev-mode bundle read, IPC start) all

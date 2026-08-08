@@ -225,7 +225,16 @@ What happens: esbuild bundles TSX → `bundle.js`, Zig compiles the cart host wi
 ```bash
 ./tools/rjit dev <cart-name>    # launches the dev host + watches <cart>
 ./tools/rjit dev <other-cart>   # second terminal: pushes to running host, adds tab
+./tools/rjit stop               # stops the dev host + its bundle watchers
 ```
+
+**`rjit stop` is how a dev session ends — never a hand-written `kill`.** Hosts
+launched by `rjit dev` also arm the kernel's parent-death signal
+(`framework/proc_lifetime.zig`), so a supervisor that dies — Ctrl-C, closed
+terminal, SIGKILL, crash — takes its host and watcher with it. `rjit orphans`
+remains the automatic sweep for hosts that predate that and outlived their
+launcher; it deliberately spares anything holding a window, which is why `stop`
+exists (req_4109).
 
 The dev host is a single persistent ReleaseFast binary:
 - **Hot reload for React / TSX / TS** — editing files under `cart/` or `runtime/` re-bundles and re-evals in ~300ms. No rebuild needed.

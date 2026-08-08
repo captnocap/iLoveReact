@@ -970,6 +970,24 @@ pub fn build(b: *std.Build) void {
     const luajit_runtime_test_step = b.step("test-luajit-runtime", "Run the LuaJIT runtime integration test");
     luajit_runtime_test_step.dependOn(&run_luajit_runtime_test.step);
 
+    // ── Process-lifetime tests ─────────────────────────────────────
+    // proc_lifetime.zig is what stops a dev host outliving its supervisor, and
+    // its entry point takes `anytype` — nothing in the body is compiled until
+    // something instantiates it. Its own file is the test ROOT, because inline
+    // tests in an imported module never run (req_4109).
+    const proc_lifetime_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/proc_lifetime.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const proc_lifetime_test = b.addTest(.{
+        .name = "proc-lifetime-test",
+        .root_module = proc_lifetime_test_mod,
+    });
+    const run_proc_lifetime_test = b.addRunArtifact(proc_lifetime_test);
+    const proc_lifetime_test_step = b.step("test-proc-lifetime", "Run the parent-death-signal contract tests");
+    proc_lifetime_test_step.dependOn(&run_proc_lifetime_test.step);
+
     // ── Zig 0.16 compiler-contract tests ───────────────────────────
     const zig016_idioms_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/zig016_idioms.zig"),

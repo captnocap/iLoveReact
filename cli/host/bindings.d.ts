@@ -5,6 +5,9 @@ declare global {
   function __env(name: string): string | null;
   function __exit(code: number): void;
   function __cwd(): string;
+  /** This process's own pid. A script that scans the process table needs it to
+   *  exclude itself — self-matching is the whole hazard class behind `pkill -f`. */
+  function __pid(): number;
   function __nowMs(): number;
   function __sleepMs(ms: number): void;
   function __writeStdout(text: string): void;

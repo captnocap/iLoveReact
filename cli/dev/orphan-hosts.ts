@@ -152,6 +152,30 @@ function waitForExit(pid: number, attempts: number): boolean {
   return !isAlive(pid);
 }
 
+/** Retire ONE pid, by number, and do not return until its fate is known. Shared by the
+ *  orphan sweep and by `rjit stop`, so both escalate and both verify identically. */
+export function retirePid(pid: number): OrphanKillOutcome {
+  if (!Number.isInteger(pid) || pid <= 1) return { pid, ok: false, reason: 'not a valid pid' };
+
+  // SIGTERM first: engine.zig catches it and flips the quit flag the main loop polls, so
+  // a healthy host runs its full teardown (SDL_CaptureMouse(false), SDL_Quit, state
+  // saves) instead of leaving the X server holding a captured pointer.
+  const termed = spawnSync('kill', [String(pid)]);
+  if (termed.code !== 0) {
+    return { pid, ok: false, reason: (termed.stderr ?? '').trim() || `kill exited ${termed.code}` };
+  }
+  if (waitForExit(pid, 20)) return { pid, ok: true, how: 'exited on SIGTERM' };
+
+  // Still here after 2s. `kill` exiting 0 only means the signal was DELIVERED, and an
+  // orphan is usually parked in futex_wait with its main loop already gone — nothing is
+  // left to poll the quit flag, so SIGTERM sits there forever. Reporting success off that
+  // exit code claimed "retired 9/9, reclaiming 4.7 GB" while all nine were still running
+  // (req_4088). Escalate, then verify again, and only then call it retired.
+  spawnSync('kill', ['-KILL', String(pid)]);
+  if (waitForExit(pid, 10)) return { pid, ok: true, how: 'wedged — needed SIGKILL' };
+  return { pid, ok: false, reason: 'survived SIGTERM and SIGKILL — likely stuck in an uninterruptible syscall (state D)' };
+}
+
 /** Kill exactly these pids, one numeric signal at a time. There is deliberately no
  *  pattern form and no "kill everything that looks like X" — see the header. Each pid is
  *  re-verified as an orphan immediately before its signal, so a host that acquired a
@@ -163,46 +187,60 @@ export function killOrphanHosts(
 ): OrphanKillOutcome[] {
   const scan = scanDevHosts(rjitHome, socketPath);
   const stillOrphaned = new Set(scan.orphans.map((row) => row.pid));
-  const outcomes: OrphanKillOutcome[] = [];
-  for (const pid of pids) {
-    if (!Number.isInteger(pid) || pid <= 1) {
-      outcomes.push({ pid, ok: false, reason: 'not a valid pid' });
-      continue;
-    }
-    if (!stillOrphaned.has(pid)) {
-      outcomes.push({ pid, ok: false, reason: 'no longer classifies as an orphan — it was spared' });
-      continue;
-    }
-    // SIGTERM first: engine.zig catches it and flips the quit flag the main loop polls, so
-    // a healthy host runs its full teardown (SDL_CaptureMouse(false), SDL_Quit, state
-    // saves) instead of leaving the X server holding a captured pointer.
-    const termed = spawnSync('kill', [String(pid)]);
-    if (termed.code !== 0) {
-      outcomes.push({ pid, ok: false, reason: (termed.stderr ?? '').trim() || `kill exited ${termed.code}` });
-      continue;
-    }
-    if (waitForExit(pid, 20)) {
-      outcomes.push({ pid, ok: true, how: 'exited on SIGTERM' });
-      continue;
-    }
-
-    // Still here after 2s. `kill` exiting 0 only means the signal was DELIVERED, and an
-    // orphan is usually parked in futex_wait with its main loop already gone — nothing is
-    // left to poll the quit flag, so SIGTERM sits there forever. Reporting success off that
-    // exit code claimed "retired 9/9, reclaiming 4.7 GB" while all nine were still running
-    // (req_4088). Escalate, then verify again, and only then call it retired.
-    spawnSync('kill', ['-KILL', String(pid)]);
-    if (waitForExit(pid, 10)) {
-      outcomes.push({ pid, ok: true, how: 'wedged — needed SIGKILL' });
-      continue;
-    }
-    outcomes.push({ pid, ok: false, reason: 'survived SIGTERM and SIGKILL — likely stuck in an uninterruptible syscall (state D)' });
-  }
-  return outcomes;
+  return pids.map((pid) => {
+    if (!Number.isInteger(pid) || pid <= 1) return { pid, ok: false, reason: 'not a valid pid' };
+    if (!stillOrphaned.has(pid)) return { pid, ok: false, reason: 'no longer classifies as an orphan — it was spared' };
+    return retirePid(pid);
+  });
 }
 
 export function formatGb(kb: number): string {
   return `${(kb / 1048576).toFixed(1)} GB`;
+}
+
+// ── the other half of a dev session ───────────────────────────────────────────
+// A `rjit dev` run supervises TWO children: the host and the bundle watcher. Only the
+// host was ever scanned, so abandoned watchers accumulated completely unseen — req_4109
+// found one still rebundling on a core-build-id two hours stale, next to the host it no
+// longer matched. A watcher costs 30 MB rather than a gigabyte, but a stale one pushes
+// bundles into whatever host it can reach, which is worse than merely wasteful.
+
+export type DevWatcherProcess = {
+  pid: number;
+  ppid: number;
+  elapsed: string;
+  /** The cart it watches — `rjit dev <cart>`'s argument. */
+  cart: string;
+};
+
+/**
+ * Parse `ps` output for `rjit watch-and-push` processes.
+ *
+ * The match is POSITIONAL, not a substring sweep: argv must be exactly
+ * `<v8cli> <rjit.js> watch-and-push <cart> …`. A substring test for
+ * "watch-and-push" would also match the shell running this scan — the
+ * self-matching bug that makes `pkill -f` unsafe here — so `selfPid` is
+ * excluded outright as well.
+ */
+export function parseDevWatchers(psOutput: string, rjitScript: string, selfPid: number): DevWatcherProcess[] {
+  const watchers: DevWatcherProcess[] = [];
+  for (const line of psOutput.split('\n')) {
+    const fields = line.trim().split(/\s+/);
+    // pid ppid rss stat etime <v8cli> <rjit.js> <verb> <cart>
+    if (fields.length < 9) continue;
+    if (fields[6] !== rjitScript) continue;
+    if (fields[7] !== 'watch-and-push') continue;
+    const pid = Number(fields[0]);
+    const ppid = Number(fields[1]);
+    if (!Number.isInteger(pid) || pid <= 1 || pid === selfPid) continue;
+    watchers.push({ pid, ppid, elapsed: fields[4] ?? '', cart: fields[8] ?? '?' });
+  }
+  return watchers;
+}
+
+export function scanDevWatchers(rjitHome: string, selfPid: number): DevWatcherProcess[] {
+  const listed = spawnSync('ps', ['-eo', 'pid,ppid,rss,stat,etime,args', '--no-headers']);
+  return parseDevWatchers(listed.stdout ?? '', `${rjitHome}/tools/rjit.js`, selfPid);
 }
 
 // ── the approval handshake ────────────────────────────────────────────────────

@@ -16,9 +16,15 @@ const cli_bindings = @import("v8_bindings_cli.zig");
 const fs_bindings = @import("v8_bindings_fs.zig");
 const sqlite_bindings = @import("v8_bindings_sqlite.zig");
 const localstore_bindings = @import("v8_bindings_localstore.zig");
+const proc_lifetime = @import("proc_lifetime.zig");
 
 pub fn main(init: std.process.Init) !void {
     const host = HostContext.fromInit(init);
+    // Before anything else: a script `rjit dev` launched under the
+    // die-with-parent contract (the bundle watcher) must not survive its
+    // supervisor. Signal handlers only catch a polite death; this catches
+    // every death. No-op for every other v8cli invocation.
+    _ = proc_lifetime.dieWithParentOrExit(host.environ);
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();

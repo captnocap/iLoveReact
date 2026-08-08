@@ -10,6 +10,7 @@ import {
   orphanCleanupToken,
   parseOrphanCleanupApproval,
   parseDevHostProcesses,
+  parseDevWatchers,
   parseSocketOwner,
   type DevHostProcess,
 } from './orphan-hosts';
@@ -146,6 +147,48 @@ test('an approval must carry the token prefix and real pids', () => {
   assert(parseOrphanCleanupApproval(JSON.stringify({ token: orphanCleanupToken([1]), pids: [1] })) === null, 'pid 1 survived the approval');
   assert(parseOrphanCleanupApproval('not json') === null, 'garbage parsed as an approval');
   assert(parseOrphanCleanupApproval(null) === null, 'a missing file parsed as an approval');
+});
+
+// ── watcher scan (req_4109) ───────────────────────────────────────────────────
+// Verbatim `ps -eo pid,ppid,rss,stat,etime,args` rows from the box on 2026-08-08:
+// two abandoned watchers (ppid 1) alongside the shell that is scanning for them.
+const RJIT_SCRIPT = '/home/siah/creative/reactjit/tools/rjit.js';
+const WATCHER_PS = [
+  '2895321       1  31532 Sl    02:37:42 /home/siah/creative/reactjit/tools/v8cli /home/siah/creative/reactjit/tools/rjit.js watch-and-push editor /home/siah/creative/reactjit/cart/editor/index.tsx /home/siah/creative/reactjit/.cache/bundle-editor.js --rjit-home /home/siah/creative/reactjit --core-build-id 1fdab7e6',
+  '3150989       1  33996 Sl       31:27 /home/siah/creative/reactjit/tools/v8cli /home/siah/creative/reactjit/tools/rjit.js watch-and-push editor /home/siah/creative/reactjit/cart/editor/index.tsx /home/siah/creative/reactjit/.cache/bundle-editor.js --rjit-home /home/siah/creative/reactjit --core-build-id eaf95ab3',
+  '3150988       1 655428 Rl       31:27 /home/siah/creative/reactjit/zig-out/bin/reactjit-dev',
+  '4000001 3999999  30000 Sl       00:01 /home/siah/creative/reactjit/tools/v8cli /home/siah/creative/reactjit/tools/rjit.js stop',
+].join('\n');
+
+test('watchers are found by argv POSITION, and the host row is not one of them', () => {
+  const watchers = parseDevWatchers(WATCHER_PS, RJIT_SCRIPT, 4000001);
+  assert(watchers.length === 2, `expected 2 watchers, got ${watchers.length}`);
+  assert(watchers.every((w) => w.cart === 'editor'), 'the watched cart was misread');
+  assert(watchers.some((w) => w.pid === 2895321 && w.elapsed === '02:37:42'), 'the two-hour watcher was missed');
+  assert(!watchers.some((w) => w.pid === 3150988), 'the dev HOST was mistaken for a watcher');
+});
+
+test('the scanning process never matches itself', () => {
+  // `rjit stop`'s own argv ends in `stop`, so the positional match already excludes
+  // it — but a watcher that ever runs this scan would match itself exactly, and
+  // self-matching is the bug class that killed 14 panes on 2026-04-22.
+  const asSelf = parseDevWatchers(WATCHER_PS, RJIT_SCRIPT, 3150989);
+  assert(!asSelf.some((w) => w.pid === 3150989), 'the scanner put its own pid on the kill list');
+  assert(asSelf.length === 1, 'excluding self dropped an unrelated watcher');
+});
+
+test('a foreign watch-and-push and malformed rows never reach the kill list', () => {
+  const hostile = [
+    // Same verb, DIFFERENT checkout — retiring it would reach outside this repo.
+    '5000001       1  30000 Sl       10:00 /other/repo/tools/v8cli /other/repo/tools/rjit.js watch-and-push editor',
+    // The verb appears in an argument rather than in the verb position.
+    '5000002       1  30000 Sl       10:00 /home/siah/creative/reactjit/tools/v8cli /home/siah/creative/reactjit/tools/rjit.js grep watch-and-push editor',
+    '      1       1  30000 Sl       10:00 /home/siah/creative/reactjit/tools/v8cli /home/siah/creative/reactjit/tools/rjit.js watch-and-push editor',
+    'garbage',
+    '',
+  ].join('\n');
+  const watchers = parseDevWatchers(hostile, RJIT_SCRIPT, 999);
+  assert(watchers.length === 0, `hostile rows produced ${watchers.length} kill candidates`);
 });
 
 log(`orphan-hosts: ${passed} passed${failed ? `, ${failed} FAILED` : ''}`);

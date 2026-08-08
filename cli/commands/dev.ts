@@ -5,7 +5,7 @@ import { loadManifest } from '../cart/manifest.ts';
 import { bakeIconAtlas } from './bake-icons.ts';
 import { fsExists, fsMkdir, fsRead, fsRemove, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
-import { spawn, spawnSync } from '../host/process.ts';
+import { spawnSync } from '../host/process.ts';
 import { trimZigCacheIfOversized } from '../host/zigcache.ts';
 import {
   DEV_SOCKET_PATH,
@@ -50,6 +50,7 @@ import {
   sameNativeFingerprints,
   type PendingNativeUpdate,
 } from '../dev/native-approval.ts';
+import { spawnTiedToUs } from '../dev/child-lifetime.ts';
 
 type Substrate = 'gui' | 'tui';
 
@@ -179,9 +180,9 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   if (substrate === 'tui') {
-    const child = spawn('env', [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
+    const child = spawnTiedToUs(bin, [], [`RJIT_DEV_CART_DIR=${cart.dir}`]);
     const watchArgs = ['watch-and-push', parsed.name, cart.entry, perCartBundle, '--rjit-home', rjitHome, '--tui'];
-    const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
+    const watcher = spawnTiedToUs(`${rjitHome}/tools/rjit`, watchArgs);
     out(`[dev] TUI host child=${child.id}`);
     drainUntilExit(child.id, watcher.id);
     return 0;
@@ -198,7 +199,7 @@ export async function run(argv: string[]): Promise<number> {
   const watchArgs = ['watch-and-push', parsed.name, cart.entry, perCartBundle, '--rjit-home', rjitHome];
   watchArgs.push('--core-build-id', fingerprints.core.hash);
   if (substrate === 'tui') watchArgs.push('--tui');
-  const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
+  const watcher = spawnTiedToUs(`${rjitHome}/tools/rjit`, watchArgs);
   const approvalPath = nativeApprovalPath(rjitHome);
   if (fsExists(approvalPath)) fsRemove(approvalPath);
   const orphanApproval = orphanApprovalPath(rjitHome);
@@ -486,8 +487,9 @@ function spawnDevHost(
     `RJIT_DEV_GAME_HASH=${game.artifactHash}`,
   ];
   if (hotstateHandoff) env.push(`RJIT_DEV_HOTSTATE_HANDOFF=${hotstateHandoff}`);
-  env.push(bin);
-  return spawn('env', env);
+  // Tied, not merely tracked: the host dies when this supervisor dies even if
+  // the supervisor never gets to run its own exit path.
+  return spawnTiedToUs(bin, [], env);
 }
 
 function sessionTab(name: string, bundlePath: string): { name: string; bundlePath: string; bundleHash: string } {

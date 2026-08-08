@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'clean', 'orphans', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'stop', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'clean', 'orphans', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -152,6 +152,28 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       'a .cls.ts classifier sheet. Subcommands handle migration, renaming,',
       'manual classifier insertion, partial-pattern mining, and theme-token',
       'suggestions.',
+    ],
+  },
+  stop: {
+    summary: 'stop the running dev host and its bundle watcher(s)',
+    usage: ['rjit stop', 'rjit stop --dry-run'],
+    detail: [
+      'The counterpart to `rjit dev`. Closing the terminal is not a reliable stop:',
+      'a supervisor killed outright never runs its exit path, and the host keeps',
+      'its window and its gigabyte of RSS (req_4109).',
+      '',
+      'This is an ORDER, not a sweep. `rjit orphans --kill` spares anything holding',
+      'the dev socket or a window — correct for an automatic sweep, wrong when you',
+      'have said "stop it". `stop` retires the host you can see, plus the bundle',
+      'watchers, which nothing else scanned at all.',
+      '',
+      'Every pid is printed with what it is before anything is signalled, exact',
+      'numeric pids only, and each is verified GONE (SIGTERM, verify, escalate,',
+      'verify) before it is reported stopped.',
+      '',
+      'Hosts launched after this change also die with their supervisor on their own:',
+      'they arm the kernel parent-death signal (framework/proc_lifetime.zig), which',
+      'covers the SIGKILLs and crashes no exit path can.',
     ],
   },
   orphans: {

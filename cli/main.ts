@@ -10,6 +10,7 @@ import * as cartBundle from './commands/cart-bundle.ts';
 import * as classify from './commands/classify.ts';
 import * as clean from './commands/clean.ts';
 import * as orphans from './commands/orphans.ts';
+import * as stop from './commands/stop.ts';
 import * as codegenBindings from './commands/codegen-bindings.ts';
 import * as dev from './commands/dev.ts';
 import * as firecrackerBuild from './commands/firecracker-build.ts';
@@ -61,6 +62,7 @@ const COMMANDS: Record<string, Command> = {
   'ship': ship,
   'ship-tui': shipTui,
   'shot': shot,
+  'stop': stop,
   'tui': tui,
   'watch-and-push': watchAndPush,
 };

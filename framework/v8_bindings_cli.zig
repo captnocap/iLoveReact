@@ -200,6 +200,14 @@ fn cwd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setString(info, buf[0..n]);
 }
 
+/// __pid() → this process's own pid. A script that scans the process table
+/// needs it to exclude itself; self-matching is the exact hazard that makes
+/// `pkill -f` unsafe in this repo.
+fn ownPid(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setNumber(info, std.os.linux.getpid());
+}
+
 fn nowMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
@@ -986,6 +994,7 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__env", envGet);
     v8_runtime.registerHostFn("__exit", exitProc);
     v8_runtime.registerHostFn("__cwd", cwd);
+    v8_runtime.registerHostFn("__pid", ownPid);
     v8_runtime.registerHostFn("__nowMs", nowMs);
     v8_runtime.registerHostFn("__sleepMs", sleepMs);
 
