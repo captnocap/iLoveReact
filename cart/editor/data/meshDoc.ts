@@ -76,6 +76,18 @@ export type ResidentSemanticSaveState = {
   table: MeshSemanticTable;
 };
 
+function readResidentSemanticSaveState(): ResidentSemanticSaveState | null {
+  try {
+    const raw = host.__mesh_semantic_state?.();
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+    if (Number.isInteger(parsed?.faces) && Number.isInteger(parsed?.unnamed) &&
+        parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) {
+      return parsed as ResidentSemanticSaveState;
+    }
+  } catch { /* an older host has no semantic percept */ }
+  return null;
+}
+
 /** Deep save postcondition: the blob must contain the same named-face count and
  * dictionary the resident editor reported. A successful geometry write is not a
  * successful model save when it silently drops rigging semantics. */
@@ -115,9 +127,9 @@ export function meshDocRangeObjectIdsMatch(
  * mount drop), where saving cements the loss. Deliberately removing the last region
  * reaches the same zero by an entirely different road, and refusing that left the
  * user unable to save at all (req_3898) — the model could be emptied but never
- * committed. So emptying the table now needs the same one-shot capability a
- * destructive part-count change needs: minted by a real Remove action in the NAMES
- * pane, never by hydration or autosave. */
+ * committed. So emptying the table needs an explicit capability: either the user
+ * removed the region in NAMES, or an explicit Save declared the complete live
+ * resident authoritative. Hydration and background autosave never get it. */
 export function meshDocWouldEraseSemantics(
   resident: ResidentSemanticSaveState,
   prior: Pick<PackageMeshDoc, 'semanticRegions'> | null,
@@ -153,6 +165,19 @@ const PARTS_META = 'mesh/parts.json';
 const docCache = new Map<string, PackageMeshDoc | null>();
 const metaCache = new Map<string, MeshDocPartMeta[] | null>();
 const characterArtifactCache = new Map<string, PackageMeshDoc | null>();
+let lastMeshDocWriteFailure: string | null = null;
+
+/** Exact refusal from the most recent write attempt. The save coordinator uses this
+ * instead of collapsing every deep document gate into "artifacts were not written". */
+export function meshDocLastWriteFailure(): string | null {
+  return lastMeshDocWriteFailure;
+}
+
+function refuseMeshDocSave(dir: string, reason: string): false {
+  lastMeshDocWriteFailure = reason;
+  console.error(`[meshdoc] REFUSING SAVE for ${dir}: ${reason}`);
+  return false;
+}
 
 export function meshDocPartRangesComplete(partCount: number, hostRangeCount: number): boolean {
   return partCount > 0 && hostRangeCount === partCount;
@@ -256,16 +281,15 @@ export function writeMeshDoc(
   recoveryRanges?: { lo: number; hi: number }[],
   options: { allowPartShrink?: boolean; allowSemanticClear?: boolean } = {},
 ): boolean {
+  lastMeshDocWriteFailure = null;
   // The editable document is a two-file transaction. No metadata-less caller is
   // admitted here; paint-only persistence must leave doc.blob + parts.json alone.
   if (parts.length === 0) {
-    console.error(`[meshdoc] REFUSING SAVE for ${dir}: an editable mesh document needs at least one named part`);
-    return false;
+    return refuseMeshDocSave(dir, 'an editable mesh document needs at least one named part');
   }
   const objectIds = parts.map((part) => part.objectId).filter((id): id is string => typeof id === 'string' && id.length > 0);
   if (objectIds.length > 0 && (objectIds.length !== parts.length || new Set(objectIds).size !== objectIds.length)) {
-    console.error(`[meshdoc] REFUSING SAVE for ${dir}: parts.json v2 requires one unique stable objectId per part`);
-    return false;
+    return refuseMeshDocSave(dir, 'parts.json v2 requires one unique stable objectId per part');
   }
   const priorDoc = readMeshDoc(dir);
   // Every gate below asks priorDoc what the durable model already had. A doc.blob that
@@ -274,13 +298,11 @@ export function writeMeshDoc(
   // top of a real model nobody could read (req_3740). An undecodable document is the one
   // case where the only safe move is to touch nothing.
   if (meshDocIsUnreadable(dir)) {
-    console.error(`[meshdoc] REFUSING SAVE for ${dir}: ${DOC_BLOB} exists but could not be decoded, so the durable model's parts, quad grouping and name table are unknown. Saving now would overwrite it with whatever the host currently holds. Fix or move the blob first.`);
-    return false;
+    return refuseMeshDocSave(dir, `${DOC_BLOB} exists but could not be decoded, so the durable model's parts, quad grouping and name table are unknown. Saving now would overwrite it with whatever the host currently holds. Fix or move the blob first.`);
   }
   const priorPartCount = readMeshDocParts(dir)?.length ?? 0;
   if (!meshDocPartMetadataCanShrink(priorDoc?.storedRangeCount, priorPartCount, parts.length, options.allowPartShrink === true)) {
-    console.error(`[meshdoc] REFUSING SAVE for ${dir}: durable document has ${Math.max(priorDoc?.storedRangeCount ?? 0, priorPartCount)} part(s), but the live outliner has ${parts.length} and no explicit Delete/Merge authorization`);
-    return false;
+    return refuseMeshDocSave(dir, `durable document has ${Math.max(priorDoc?.storedRangeCount ?? 0, priorPartCount)} part(s), but the live outliner has ${parts.length} and no explicit Delete/Merge authorization`);
   }
   // Save gate (req_3049/req_3226): writing fewer host ranges than outliner parts
   // destroys the only durable part-boundary table. Never replace a recoverable old
@@ -289,17 +311,30 @@ export function writeMeshDoc(
   {
     const docPath = `${dir}/${DOC_BLOB}`;
     const priorBlob = readFileBase64(docPath);
-    let residentSemantics: ResidentSemanticSaveState | null = null;
-    try {
-      const raw = host.__mesh_semantic_state?.();
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
-      if (Number.isInteger(parsed?.faces) && Number.isInteger(parsed?.unnamed) && parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) {
-        residentSemantics = parsed as ResidentSemanticSaveState;
-      }
-    } catch { /* old host: the native write result remains the compatibility boundary */ }
+    let residentSemantics = readResidentSemanticSaveState();
     if (residentSemantics && meshDocWouldEraseSemantics(residentSemantics, priorDoc, options.allowSemanticClear === true)) {
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them`);
-      return false;
+      // A stale mount may contain the saved named triangles while losing only their
+      // semantic rows. Native code may repair that one proven state by uniquely
+      // matching each named triangle's exact XYZ bits. Geometry never crosses into
+      // React/JS; missing or ambiguous faces remain a hard stop for background saves.
+      let recoveryReason = 'native named-face recovery is unavailable';
+      try {
+        const raw = host.__mesh_semantics_restore_from_rjmd?.(docPath);
+        const receipt = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+        recoveryReason = typeof receipt?.reason === 'string' ? receipt.reason : recoveryReason;
+        if (receipt?.ok === 1) {
+          const repaired = readResidentSemanticSaveState();
+          if (repaired && priorDoc && meshDocSemanticsMatch(repaired, priorDoc)) {
+            residentSemantics = repaired;
+            console.warn(`[meshdoc] restored ${receipt.restoredNamedFaces ?? (repaired.faces - repaired.unnamed)} durable named face(s) into the exact anonymous resident before saving ${dir}`);
+          } else recoveryReason = 'native repair did not reproduce the durable semantic state';
+        }
+      } catch {
+        recoveryReason = 'native named-face recovery returned an invalid receipt';
+      }
+      if (!residentSemantics || meshDocWouldEraseSemantics(residentSemantics, priorDoc, options.allowSemanticClear === true)) {
+        return refuseMeshDocSave(dir, `resident mesh is anonymous but the durable document still has named faces, and this background save has no live-save/Remove authority (${recoveryReason})`);
+      }
     }
     const hostPartRanges = (): { lo: number; hi: number }[] => {
       try {
@@ -333,18 +368,31 @@ export function writeMeshDoc(
       hostRanges = hostPartRanges();
     }
     if (hostRanges.length !== parts.length) {
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: host has ${hostRanges.length} part range(s) while the outliner declares ${parts.length} (${parts.map((p) => p.name).join(', ')}) — preserving the previous document instead of persisting merged parts (req_3049/req_3226/req_3234)`);
-      return false;
+      return refuseMeshDocSave(dir, `host has ${hostRanges.length} part range(s) while the outliner declares ${parts.length} (${parts.map((p) => p.name).join(', ')}) — preserving the previous document instead of persisting merged parts (req_3049/req_3226/req_3234)`);
     }
 
     // The expected count crosses as a scalar only. The host re-validates it at the
     // write boundary and atomically renames a complete fsynced RJMD over doc.blob;
     // resident geometry never crosses the JS bridge.
-    if (host.__model_meshdoc_write?.(docPath, parts.length, JSON.stringify(objectIds)) !== 1) return false;
+    if (host.__model_meshdoc_write?.(docPath, parts.length, JSON.stringify(objectIds)) !== 1) {
+      return refuseMeshDocSave(dir, 'native RJMD writer rejected the resident document');
+    }
     invalidateMeshDoc(dir);
     const writtenDoc = parseDocBlob(dir);
+    if (!writtenDoc) {
+      // The native door returning 1 proves only that bytes reached the atomic rename.
+      // It does not prove that this TS/editor revision can reopen those bytes. Before
+      // this gate, an anonymous resident mesh made `semanticsDropped` falsy and the
+      // optional range-object check was also falsy, so an unreadable RJMD could be
+      // acknowledged as a successful save and parts.json would advance beside it.
+      const restored = priorBlob !== null
+        ? writeFileBase64Atomic(docPath, priorBlob)
+        : remove(docPath);
+      invalidateMeshDoc(dir);
+      return refuseMeshDocSave(dir, `native writer produced an RJMD this editor cannot decode${restored ? '; prior document state restored' : '; prior document recovery failed'}`);
+    }
     const semanticsDropped = residentSemantics && !meshDocSemanticsMatch(residentSemantics, writtenDoc);
-    const rangeObjectsDropped = writtenDoc?.formatVersion === 5 && !meshDocRangeObjectIdsMatch(writtenDoc, parts);
+    const rangeObjectsDropped = writtenDoc.formatVersion === 5 && !meshDocRangeObjectIdsMatch(writtenDoc, parts);
     if (semanticsDropped || rangeObjectsDropped) {
       // A mixed-version dev session can run a new TS bundle against an older native
       // writer. Restore the exact prior blob instead of accepting geometry-only or
@@ -354,8 +402,7 @@ export function writeMeshDoc(
         : remove(docPath);
       invalidateMeshDoc(dir);
       const dropped = [semanticsDropped ? 'resident semantic names' : '', rangeObjectsDropped ? 'stable range object ids' : ''].filter(Boolean).join(' and ');
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: native writer dropped ${dropped}${restored ? '; prior document restored' : '; prior document recovery failed'}`);
-      return false;
+      return refuseMeshDocSave(dir, `native writer dropped ${dropped}${restored ? '; prior document restored' : '; prior document recovery failed'}`);
     }
   }
 
@@ -364,6 +411,7 @@ export function writeMeshDoc(
   const metadataVersion = objectIds.length === parts.length ? 2 : 1;
   const metadata = textBytes(JSON.stringify({ version: metadataVersion, parts }, null, 2));
   const ok = writeFileBytesAtomic(`${dir}/${PARTS_META}`, metadata);
+  if (!ok) lastMeshDocWriteFailure = 'parts.json atomic write failed after the RJMD commit';
   invalidateMeshDoc(dir);
   return ok;
 }
@@ -435,32 +483,160 @@ function parseDocBlob(dir: string): PackageMeshDoc | null {
   return parseMeshDocBytes(bytes);
 }
 
+export type MeshDocDecodeDiagnostic = {
+  code:
+    | 'truncated-header'
+    | 'bad-magic'
+    | 'unsupported-version'
+    | 'empty-vertices'
+    | 'invalid-flag'
+    | 'semantic-length-without-semantics'
+    | 'invalid-logical-header'
+    | 'face-count-mismatch'
+    | 'invalid-glass-boundary'
+    | 'truncated-payload'
+    | 'logical-id-out-of-range'
+    | 'logical-position-not-finite'
+    | 'logical-position-mismatch'
+    | 'logical-id-gap'
+    | 'missing-semantic-json'
+    | 'invalid-semantic-json'
+    | 'invalid-semantic-table'
+    | 'unknown-semantic-region'
+    | 'invalid-edge-logical-id'
+    | 'range-object-count-mismatch'
+    | 'range-object-range-mismatch'
+    | 'duplicate-range-object-id'
+    | 'file-read-failed'
+    | 'base64-decode-failed';
+  reason: string;
+  byteLength: number | null;
+  version: number | null;
+  details?: Record<string, number | string | boolean | null>;
+};
+
+export type MeshDocDecodeResult =
+  | { ok: true; doc: PackageMeshDoc }
+  | { ok: false; diagnostic: MeshDocDecodeDiagnostic };
+
+type MeshDocDiagnosticSink = (diagnostic: MeshDocDecodeDiagnostic) => null;
+
+/** The same pure RJMD decoder as parseMeshDocBytes, with the first rejecting
+ * invariant preserved as structured evidence for package diagnostics. */
+export function diagnoseMeshDocBytes(bytes: Uint8Array): MeshDocDecodeResult {
+  let diagnostic: MeshDocDecodeDiagnostic | null = null;
+  const doc = decodeMeshDocBytes(bytes, (value) => {
+    diagnostic = value;
+    return null;
+  });
+  return doc
+    ? { ok: true, doc }
+    : { ok: false, diagnostic: diagnostic ?? {
+        code: 'file-read-failed',
+        reason: 'RJMD decode failed without a diagnostic',
+        byteLength: bytes.length,
+        version: null,
+      } };
+}
+
+/** Read-only package failure evidence. This never falls back to base.blob and
+ * never mutates the document; Agent Seat package info is its only UI consumer. */
+export function meshDocUnreadableDiagnostic(dir: string): MeshDocDecodeDiagnostic | null {
+  const path = `${dir}/${DOC_BLOB}`;
+  if (!exists(path)) return null;
+  const b64 = readFileBase64(path);
+  if (!b64) return {
+    code: 'file-read-failed',
+    reason: 'mesh/doc.blob exists but the host could not read its bytes',
+    byteLength: null,
+    version: null,
+  };
+  let bytes: Uint8Array;
+  try { bytes = base64ToBytes(b64); }
+  catch {
+    return {
+      code: 'base64-decode-failed',
+      reason: 'mesh/doc.blob bytes did not cross the host base64 boundary intact',
+      byteLength: null,
+      version: null,
+    };
+  }
+  const result = diagnoseMeshDocBytes(bytes);
+  return result.ok ? null : result.diagnostic;
+}
+
 /** Pure RJMD decoder used by disk reads and the version-compatibility tests. */
 export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
-  if (bytes.length < 24) return null;
+  return decodeMeshDocBytes(bytes, () => null);
+}
+
+function decodeMeshDocBytes(bytes: Uint8Array, reject: MeshDocDiagnosticSink): PackageMeshDoc | null {
+  const fail = (
+    code: MeshDocDecodeDiagnostic['code'],
+    reason: string,
+    version: number | null,
+    details?: MeshDocDecodeDiagnostic['details'],
+  ): null => reject({ code, reason, byteLength: bytes.length, version, ...(details ? { details } : {}) });
+  if (bytes.length < 24) return fail('truncated-header', `RJMD needs at least 24 header bytes; found ${bytes.length}`, null, {
+    expectedBytes: 24,
+    actualBytes: bytes.length,
+  });
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const head = new Uint32Array(buf, 0, 6);
   const [magic, version, vertCount, faceCount, hasGroups, rangeCount] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, head[5]!];
-  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) || vertCount === 0) return null;
+  if (magic !== RJMD_MAGIC) return fail('bad-magic', `mesh/doc.blob is not RJMD (magic 0x${magic.toString(16)})`, version, {
+    magic,
+    expectedMagic: RJMD_MAGIC,
+  });
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+    return fail('unsupported-version', `RJMD version ${version} is not supported; this editor reads v1-v5`, version);
+  }
+  if (vertCount === 0) return fail('empty-vertices', 'RJMD declares zero render vertices', version);
   const headerBytes = version >= 5 ? 48 : version >= 4 ? 40 : version >= 3 ? 32 : version >= 2 ? 28 : 24;
-  if (bytes.length < headerBytes) return null;
+  if (bytes.length < headerBytes) return fail('truncated-header', `RJMD v${version} needs a ${headerBytes}-byte header; found ${bytes.length}`, version, {
+    expectedBytes: headerBytes,
+    actualBytes: bytes.length,
+  });
   const glassFirstVertex = version >= 2 ? new Uint32Array(buf, 24, 1)[0]! : null;
   const hasMaterials = version >= 3 ? new Uint32Array(buf, 28, 1)[0]! : 0;
   const hasSemantics = version >= 4 ? new Uint32Array(buf, 32, 1)[0]! : 0;
   const semanticJsonBytes = version >= 4 ? new Uint32Array(buf, 36, 1)[0]! : 0;
   const hasLogicalVertices = version >= 5 ? new Uint32Array(buf, 40, 1)[0]! : 0;
   const logicalVertexCount = version >= 5 ? new Uint32Array(buf, 44, 1)[0]! : 0;
-  if (hasMaterials !== 0 && hasMaterials !== 1) return null;
-  if (hasGroups !== 0 && hasGroups !== 1) return null;
-  if (hasSemantics !== 0 && hasSemantics !== 1) return null;
-  if (hasLogicalVertices !== 0 && hasLogicalVertices !== 1) return null;
-  if (hasSemantics === 0 && semanticJsonBytes !== 0) return null;
+  for (const [name, value] of [['hasGroups', hasGroups], ['hasMaterials', hasMaterials], ['hasSemantics', hasSemantics], ['hasLogicalVertices', hasLogicalVertices]] as const) {
+    if (value !== 0 && value !== 1) return fail('invalid-flag', `${name} must be 0 or 1; found ${value}`, version, { flag: name, value });
+  }
+  if (hasSemantics === 0 && semanticJsonBytes !== 0) {
+    return fail('semantic-length-without-semantics', `semantic JSON declares ${semanticJsonBytes} bytes while hasSemantics is 0`, version, { semanticJsonBytes });
+  }
   if ((hasLogicalVertices === 0 && logicalVertexCount !== 0) ||
-    (hasLogicalVertices === 1 && (logicalVertexCount === 0 || logicalVertexCount > vertCount))) return null;
-  if (faceCount !== Math.floor(vertCount / 3)) return null;
-  if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) return null;
+    (hasLogicalVertices === 1 && (logicalVertexCount === 0 || logicalVertexCount > vertCount))) {
+    return fail('invalid-logical-header', `logical topology flag/count disagree: flag ${hasLogicalVertices}, count ${logicalVertexCount}, render vertices ${vertCount}`, version, {
+      hasLogicalVertices,
+      logicalVertexCount,
+      renderVertexCount: vertCount,
+    });
+  }
+  if (faceCount !== Math.floor(vertCount / 3)) return fail('face-count-mismatch', `RJMD declares ${faceCount} faces for ${vertCount} render vertices`, version, {
+    faceCount,
+    renderVertexCount: vertCount,
+    expectedFaceCount: Math.floor(vertCount / 3),
+  });
+  if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) {
+    return fail('invalid-glass-boundary', `glassFirstVertex ${glassFirstVertex} is outside or not triangle-aligned for ${vertCount} vertices`, version, {
+      glassFirstVertex,
+      renderVertexCount: vertCount,
+    });
+  }
   const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + (hasSemantics ? faceCount * 8 : 0) + rangeCount * 8 + (hasLogicalVertices ? vertCount * 4 : 0) + semanticJsonBytes;
-  if (bytes.length < need) return null;
+  if (bytes.length < need) return fail('truncated-payload', `RJMD v${version} declares ${need} bytes but the file contains ${bytes.length}`, version, {
+    expectedBytes: need,
+    actualBytes: bytes.length,
+    renderVertexCount: vertCount,
+    faceCount,
+    rangeCount,
+    semanticJsonBytes,
+  });
   let at = headerBytes;
   const vertices = new Float32Array(buf, at, vertCount * 8);
   at += vertCount * 8 * 4;
@@ -492,34 +668,57 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   if (hasLogicalVertices) {
     renderCornerLogicalIds = new Uint32Array(buf, at, vertCount);
     at += vertCount * 4;
-    if (!meshDocLogicalTopologyValid(vertices, renderCornerLogicalIds, logicalVertexCount)) return null;
+    const issue = meshDocLogicalTopologyIssue(vertices, renderCornerLogicalIds, logicalVertexCount);
+    if (issue) return fail(issue.code, issue.reason, version, issue.details);
   }
   let semanticTable: MeshSemanticTable | null = null;
   let rangeObjectIds: string[] | null = null;
   if (hasSemantics) {
-    if (semanticJsonBytes === 0) return null;
+    if (semanticJsonBytes === 0) return fail('missing-semantic-json', 'hasSemantics is 1 but semantic JSON is empty', version);
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(bytesText(bytes.subarray(at, at + semanticJsonBytes)));
-      const table = parseMeshSemanticTable(parsed);
-      if (!table) return null;
-      const regions = table.regions;
-      const ids = new Set(regions.map((region) => region.id));
-      for (const region of semanticRegions ?? []) if (region !== 0xffffffff && !ids.has(region)) return null;
-      if (table.edgeRegions?.some((region: MeshEdgeRegion) =>
-        !hasLogicalVertices || region.vertices.some((vertex) => vertex >= logicalVertexCount))) return null;
-      let rangeObjects: MeshRangeObject[] | undefined;
-      if (version === 5 && table.rangeObjects !== undefined) {
-        if (table.rangeObjects.length !== ranges.length) return null;
-        rangeObjects = table.rangeObjects.map((row, index) => {
-          const range = ranges[index];
-          if (row.lo !== range?.lo || row.hi !== range?.hi) return null;
-          return row;
-        }).filter((row: MeshRangeObject | null): row is MeshRangeObject => row !== null);
-        if (rangeObjects.length !== ranges.length || new Set(rangeObjects.map((row) => row.objectId)).size !== rangeObjects.length) return null;
-        rangeObjectIds = rangeObjects.map((row) => row.objectId);
+      parsed = JSON.parse(bytesText(bytes.subarray(at, at + semanticJsonBytes)));
+    } catch {
+      return fail('invalid-semantic-json', `semantic JSON is not valid UTF-8 JSON (${semanticJsonBytes} bytes)`, version, { semanticJsonBytes });
+    }
+    const table = parseMeshSemanticTable(parsed);
+    if (!table) return fail('invalid-semantic-table', 'semantic JSON does not satisfy the version-1 semantic table contract', version);
+    const regions = table.regions;
+    const ids = new Set(regions.map((region) => region.id));
+    const unknownRegion = [...(semanticRegions ?? [])].find((region) => region !== 0xffffffff && !ids.has(region));
+    if (unknownRegion !== undefined) return fail('unknown-semantic-region', `face membership refers to semantic region ${unknownRegion}, which is absent from the dictionary`, version, { regionId: unknownRegion });
+    const invalidEdge = table.edgeRegions?.find((region: MeshEdgeRegion) =>
+      !hasLogicalVertices || region.vertices.some((vertex) => vertex >= logicalVertexCount));
+    if (invalidEdge) return fail('invalid-edge-logical-id', `edge region "${invalidEdge.name}" refers outside the saved logical-vertex table`, version, {
+      edgeRegionId: invalidEdge.id,
+      logicalVertexCount,
+      hasLogicalVertices: hasLogicalVertices === 1,
+    });
+    let rangeObjects: MeshRangeObject[] | undefined;
+    if (version === 5 && table.rangeObjects !== undefined) {
+      if (table.rangeObjects.length !== ranges.length) return fail('range-object-count-mismatch', `semantic rangeObjects has ${table.rangeObjects.length} rows but the RJMD range table has ${ranges.length}`, version, {
+        rangeObjectCount: table.rangeObjects.length,
+        rangeCount: ranges.length,
+      });
+      const driftedIndex = table.rangeObjects.findIndex((row, index) => row.lo !== ranges[index]?.lo || row.hi !== ranges[index]?.hi);
+      if (driftedIndex >= 0) {
+        const row = table.rangeObjects[driftedIndex]!;
+        const range = ranges[driftedIndex]!;
+        return fail('range-object-range-mismatch', `rangeObjects[${driftedIndex}] is [${row.lo},${row.hi}) but the binary range is [${range.lo},${range.hi})`, version, {
+          rangeIndex: driftedIndex,
+          objectLo: row.lo,
+          objectHi: row.hi,
+          binaryLo: range.lo,
+          binaryHi: range.hi,
+        });
       }
-      semanticTable = { ...table, ...(rangeObjects ? { rangeObjects } : {}) };
-    } catch { return null; }
+      if (new Set(table.rangeObjects.map((row) => row.objectId)).size !== table.rangeObjects.length) {
+        return fail('duplicate-range-object-id', 'semantic rangeObjects contains a duplicate stable objectId', version);
+      }
+      rangeObjects = table.rangeObjects;
+      rangeObjectIds = rangeObjects.map((row) => row.objectId);
+    }
+    semanticTable = { ...table, ...(rangeObjects ? { rangeObjects } : {}) };
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
   return {
@@ -540,25 +739,40 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   };
 }
 
-/** RJMD v5 topology invariant shared by the decoder and focused format tests. */
-export function meshDocLogicalTopologyValid(
+type MeshDocLogicalTopologyIssue = Pick<MeshDocDecodeDiagnostic, 'code' | 'reason' | 'details'>;
+
+function meshDocLogicalTopologyIssue(
   vertices: Float32Array,
   renderCornerLogicalIds: Uint32Array,
   logicalVertexCount: number,
-): boolean {
+): MeshDocLogicalTopologyIssue | null {
   const renderCornerCount = Math.floor(vertices.length / 8);
   if (!Number.isInteger(logicalVertexCount) || logicalVertexCount <= 0 || logicalVertexCount > renderCornerCount ||
-    renderCornerLogicalIds.length !== renderCornerCount) return false;
+    renderCornerLogicalIds.length !== renderCornerCount) return {
+      code: 'invalid-logical-header',
+      reason: `logical topology declares ${logicalVertexCount} ids for ${renderCornerCount} render corners`,
+      details: { logicalVertexCount, renderCornerCount, logicalIdRows: renderCornerLogicalIds.length },
+    };
   const seen = new Uint8Array(logicalVertexCount);
   const first = new Float64Array(logicalVertexCount * 3);
+  const firstCorner = new Int32Array(logicalVertexCount);
+  firstCorner.fill(-1);
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (let corner = 0; corner < renderCornerCount; corner += 1) {
     const id = renderCornerLogicalIds[corner]!;
-    if (id >= logicalVertexCount) return false;
+    if (id >= logicalVertexCount) return {
+      code: 'logical-id-out-of-range',
+      reason: `render corner ${corner} uses logical id ${id}, outside [0,${logicalVertexCount})`,
+      details: { corner, logicalId: id, logicalVertexCount },
+    };
     const at = corner * 8;
     for (let axis = 0; axis < 3; axis += 1) {
       const value = vertices[at + axis]!;
-      if (!Number.isFinite(value)) return false;
+      if (!Number.isFinite(value)) return {
+        code: 'logical-position-not-finite',
+        reason: `render corner ${corner} has a non-finite model-space position`,
+        details: { corner, axis, logicalId: id },
+      };
       min[axis] = Math.min(min[axis]!, value);
       max[axis] = Math.max(max[axis]!, value);
     }
@@ -571,6 +785,7 @@ export function meshDocLogicalTopologyValid(
     const at = corner * 8, firstAt = id * 3;
     if (!seen[id]) {
       seen[id] = 1;
+      firstCorner[id] = corner;
       first[firstAt] = vertices[at]!;
       first[firstAt + 1] = vertices[at + 1]!;
       first[firstAt + 2] = vertices[at + 2]!;
@@ -579,9 +794,29 @@ export function meshDocLogicalTopologyValid(
     const dx = vertices[at]! - first[firstAt]!;
     const dy = vertices[at + 1]! - first[firstAt + 1]!;
     const dz = vertices[at + 2]! - first[firstAt + 2]!;
-    if (dx * dx + dy * dy + dz * dz > toleranceSquared) return false;
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance * distance > toleranceSquared) return {
+      code: 'logical-position-mismatch',
+      reason: `logical id ${id} is carried by separated render corners ${firstCorner[id]} and ${corner} (${distance}m apart; tolerance ${tolerance}m)`,
+      details: { logicalId: id, firstCorner: firstCorner[id]!, corner, distance, tolerance, boundsDiagonal: diagonal },
+    };
   }
-  return seen.every((value) => value === 1);
+  const missingId = seen.findIndex((value) => value === 0);
+  if (missingId >= 0) return {
+    code: 'logical-id-gap',
+    reason: `logical id ${missingId} is absent; saved ids must be dense [0,${logicalVertexCount})`,
+    details: { logicalId: missingId, logicalVertexCount },
+  };
+  return null;
+}
+
+/** RJMD v5 topology invariant shared by the decoder and focused format tests. */
+export function meshDocLogicalTopologyValid(
+  vertices: Float32Array,
+  renderCornerLogicalIds: Uint32Array,
+  logicalVertexCount: number,
+): boolean {
+  return meshDocLogicalTopologyIssue(vertices, renderCornerLogicalIds, logicalVertexCount) === null;
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering
@@ -770,4 +1005,127 @@ export function meshDocBounds(
     }
   }
   return bounds;
+}
+
+/** Per-range breakdown of a SAVED document: how many triangles and how many distinct
+ *  authored face groups each persisted range actually holds, with its extent. `ranges: N`
+ *  alone cannot answer "did this part survive the save with its quads intact" — the group
+ *  count is what distinguishes a quad mesh from soup inside one part (req_4077). */
+export function meshDocRangeStats(
+  doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups' | 'ranges'>,
+): { lo: number; hi: number; triangles: number; groups: number; bbox: [number, number, number, number, number, number] | null }[] {
+  const triangleCount = Math.floor(doc.vertices.length / (MESHDOC_VERTEX_STRIDE * 3));
+  return doc.ranges.map((range) => {
+    const groups = new Set<number>();
+    let triangles = 0;
+    const bounds: [number, number, number, number, number, number] = [
+      Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity,
+    ];
+    for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+      const group = doc.faceGroups?.[triangle] ?? triangle;
+      if (group < range.lo || group >= range.hi) continue;
+      triangles += 1;
+      groups.add(group);
+      for (let corner = 0; corner < 3; corner += 1) {
+        const at = (triangle * 3 + corner) * MESHDOC_VERTEX_STRIDE;
+        for (let axis = 0; axis < 3; axis += 1) {
+          const value = doc.vertices[at + axis]!;
+          if (value < bounds[axis]!) bounds[axis] = value;
+          if (value > bounds[axis + 3]!) bounds[axis + 3] = value;
+        }
+      }
+    }
+    return { lo: range.lo, hi: range.hi, triangles, groups: groups.size, bbox: triangles > 0 ? bounds : null };
+  });
+}
+
+export type MeshDocTriangle = {
+  index: number;
+  group: number;
+  region: number | null;
+  instance: number | null;
+  material: number | null;
+  corners: [number, number, number][];
+  uvs: [number, number][];
+};
+
+/** One saved triangle, decoded. Positions AND uvs, because a hand reader that gets the
+ *  stride right for positions still reads uvs from the wrong columns. */
+export function meshDocTriangle(doc: PackageMeshDoc, index: number): MeshDocTriangle | null {
+  const triangleCount = Math.floor(doc.vertices.length / (MESHDOC_VERTEX_STRIDE * 3));
+  if (!Number.isInteger(index) || index < 0 || index >= triangleCount) return null;
+  const corners: [number, number, number][] = [];
+  const uvs: [number, number][] = [];
+  for (let corner = 0; corner < 3; corner += 1) {
+    const at = (index * 3 + corner) * MESHDOC_VERTEX_STRIDE;
+    corners.push([doc.vertices[at]!, doc.vertices[at + 1]!, doc.vertices[at + 2]!]);
+    uvs.push([doc.vertices[at + 6]!, doc.vertices[at + 7]!]);
+  }
+  const region = doc.semanticRegions?.[index];
+  return {
+    index,
+    group: doc.faceGroups?.[index] ?? index,
+    region: region === undefined ? null : region,
+    instance: doc.semanticInstances?.[index] ?? null,
+    material: doc.faceMaterials?.[index] ?? null,
+    corners,
+    uvs,
+  };
+}
+
+export type MeshDocComparison = {
+  triangles: { a: number; b: number; delta: number };
+  authoredFaces: { a: number | null; b: number | null };
+  ranges: { a: number; b: number };
+  formatVersion: { a: number | null; b: number | null };
+  /** Triangles whose corner positions differ by more than the tolerance, and by how much
+   *  at the worst corner. Empty when the two documents are geometrically identical. */
+  moved: { index: number; delta: number }[];
+  /** Present only when the two documents cannot be compared triangle-by-triangle. */
+  incomparable: string | null;
+};
+
+/** Compare two SAVED documents. This is the "did the save change what I think it changed"
+ *  question that agents were answering by reading both blobs by hand and diffing corner
+ *  floats — with an offset layout guessed from a format that has since moved on. */
+export function compareMeshDocs(
+  a: PackageMeshDoc,
+  b: PackageMeshDoc,
+  tolerance = 1e-5,
+  limit = 32,
+): MeshDocComparison {
+  const stride = MESHDOC_VERTEX_STRIDE * 3;
+  const countA = Math.floor(a.vertices.length / stride);
+  const countB = Math.floor(b.vertices.length / stride);
+  const shape = {
+    triangles: { a: countA, b: countB, delta: countB - countA },
+    authoredFaces: {
+      a: a.faceGroups ? new Set(a.faceGroups).size : null,
+      b: b.faceGroups ? new Set(b.faceGroups).size : null,
+    },
+    ranges: { a: a.ranges.length, b: b.ranges.length },
+    formatVersion: { a: a.formatVersion ?? null, b: b.formatVersion ?? null },
+  };
+  if (countA !== countB) {
+    return { ...shape, moved: [], incomparable: `triangle counts differ (${countA} vs ${countB}) — there is no per-triangle correspondence to compare` };
+  }
+  const moved: { index: number; delta: number }[] = [];
+  let overflowed = 0;
+  for (let triangle = 0; triangle < countA; triangle += 1) {
+    let worst = 0;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const at = (triangle * 3 + corner) * MESHDOC_VERTEX_STRIDE;
+      for (let axis = 0; axis < 3; axis += 1) {
+        worst = Math.max(worst, Math.abs(a.vertices[at + axis]! - b.vertices[at + axis]!));
+      }
+    }
+    if (worst <= tolerance) continue;
+    if (moved.length < limit) moved.push({ index: triangle, delta: worst });
+    else overflowed += 1;
+  }
+  return {
+    ...shape,
+    moved,
+    incomparable: overflowed > 0 ? `${moved.length + overflowed} triangles moved; the first ${limit} are listed` : null,
+  };
 }

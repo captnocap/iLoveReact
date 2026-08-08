@@ -125,6 +125,7 @@ import {
   readPaintLayoutDiskFacts,
   type PaintLayoutKeepLiveOptions,
 } from '../model/paintLayoutConflict';
+import { modelSaveAuthority, type ModelSaveIntent } from '../model/modelSaveAuthority';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -175,8 +176,9 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { MESHDOC_VERTEX_STRIDE, invalidateMeshDoc, meshDocBounds, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
+import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
+import { hydrateModelDocumentPartsAfterMount } from '../model/modelDocumentColdMount';
 import { parseModelHistory } from '../model/uvHistory';
 import {
   choosePartAppendRoute,
@@ -1692,6 +1694,7 @@ export default function AppFrame() {
   const saveModelDocumentNow = (
     modelId: string | null,
     reason = 'Save',
+    intent: ModelSaveIntent = 'explicit',
     allowStalePaintLayout = false,
     keepLiveOptions: PaintLayoutKeepLiveOptions = {},
   ): boolean => {
@@ -1707,12 +1710,13 @@ export default function AppFrame() {
       && (hasStoredModelPaint(pkg) || modelPaintLayoutIsStale(pkg));
     const paintConflictDisk = alreadyOnDisk ? readPaintLayoutDiskFacts(pkg) : null;
     const liveRows = current.modelParts[pkg.id] ?? [];
+    const saveAuthority = modelSaveAuthority(intent);
     const structuralSaveOptions = partShrinkSaveOptions(pkg.id, liveRows.length);
     const diskPartCount = paintConflictDisk?.doc?.parts ?? null;
     const partCountConflict = modelRevisionPartConflict(
       liveRows.length,
       diskPartCount,
-      structuralSaveOptions.allowPartShrink,
+      saveAuthority.allowLiveDiskPartCountMismatch || structuralSaveOptions.allowPartShrink,
     );
     const paintConflictAckKey = paintLayoutConflictAckHotKey(modelDocSessionId(pkg.kind, pkg.id));
     const paintConflictAcknowledged = paintLayoutConflictRevisionIsAcknowledged(
@@ -1720,7 +1724,9 @@ export default function AppFrame() {
       paintConflictDisk,
     );
     const paintLayoutConflict = stalePaintLayout && hasRecoverablePaint && !paintConflictAcknowledged;
-    if (!allowStalePaintLayout && (partCountConflict !== null || paintLayoutConflict)) {
+    const revisionConflictRequiresChoice =
+      partCountConflict !== null || (paintLayoutConflict && !saveAuthority.allowStalePaintLayout);
+    if (!allowStalePaintLayout && revisionConflictRequiresChoice) {
       if (modelId !== activeSessionModelIdRef.current) {
         setState((prev) => ({
           ...prev,
@@ -1735,7 +1741,7 @@ export default function AppFrame() {
           ? partCountConflict
           : { kind: 'paint-layout' },
         remakePaintAfterKeepLive: stalePaintLayout && hasRecoverablePaint,
-        keepLive: (options) => saveActiveModelNow(reason, true, options),
+        keepLive: (options) => saveActiveModelNow(reason, 'explicit', true, options),
         keepDisk: () => discardModelWorkingCopy(pkg.id, `Kept DISK for "${pkg.name}" — live edits and Ctrl+Z history were discarded`),
       }) === true;
       if (opened) {
@@ -1820,9 +1826,11 @@ export default function AppFrame() {
       meshDocPartRangesFromRows(liveRows) ?? undefined,
       {
         ...structuralSaveOptions,
-        allowPartShrink: keepLiveOptions.allowPartShrink === true
+        allowPartShrink: saveAuthority.allowLiveDiskPartCountMismatch
+          || keepLiveOptions.allowPartShrink === true
           || structuralSaveOptions.allowPartShrink,
-        allowSemanticClear: keepLiveOptions.allowSemanticClear === true
+        allowSemanticClear: saveAuthority.allowSemanticClear
+          || keepLiveOptions.allowSemanticClear === true
           || structuralSaveOptions.allowSemanticClear,
       },
     );
@@ -1834,7 +1842,7 @@ export default function AppFrame() {
       // just for one write. Roll the acknowledged disk revision forward after
       // every descendant save; otherwise the newly written checkpoint is offered
       // back as a competing DISK state on the very next edit (req_3901).
-      if (allowStalePaintLayout || paintConflictAcknowledged) {
+      if (saveAuthority.commitsLiveResident || allowStalePaintLayout || paintConflictAcknowledged) {
         setHotState(
           paintConflictAckKey,
           paintLayoutConflictRevision(readPaintLayoutDiskFacts(pkg)),
@@ -1864,9 +1872,10 @@ export default function AppFrame() {
 
   const saveActiveModelNow = (
     reason?: string,
+    intent: ModelSaveIntent = 'explicit',
     allowStalePaintLayout?: boolean,
     keepLiveOptions?: PaintLayoutKeepLiveOptions,
-  ): boolean => saveModelDocumentNow(activeSessionModelIdRef.current, reason, allowStalePaintLayout, keepLiveOptions);
+  ): boolean => saveModelDocumentNow(activeSessionModelIdRef.current, reason, intent, allowStalePaintLayout, keepLiveOptions);
 
   const markModelDirty = (modelId: string) => {
     setModelMutationRevision((revision) => revision + 1);
@@ -1941,7 +1950,7 @@ export default function AppFrame() {
   useEffect(() => {
     if (!persistenceSettings.autosave || !activeModelId || !activeModelOnDisk || !state.modelDirty[activeModelId]) return;
     const timer = setTimeout(
-      () => saveActiveModelNow('Autosaved'),
+      () => saveActiveModelNow('Autosaved', 'background'),
       persistenceSettings.autosaveDelayMs,
     );
     return () => clearTimeout(timer);
@@ -2701,7 +2710,7 @@ export default function AppFrame() {
         saveWorldNowAll();
         return;
       }
-      saveActiveModelNow('Saved');
+      saveActiveModelNow('Saved', 'explicit');
       return;
     }
     if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop') || command.id.startsWith('export-flora-')) {
@@ -4250,7 +4259,7 @@ export default function AppFrame() {
       newPrimitive: seatNewPrimitive,
       addPrimitive: seatAddPrimitive,
       detachSelection: seatDetachSelection,
-      persist: () => saveActiveModelNow('Saved by Agent Seat'),
+      persist: () => saveActiveModelNow('Saved by Agent Seat', 'explicit'),
       partPercept: (modelId?: string) => seatPartPercept(modelId),
       rigPercept: () => {
         const api = characterRigApiRef.current;
@@ -4289,7 +4298,7 @@ export default function AppFrame() {
       noteState: { read: (model) => readSeatNotes(model), write: (model, book) => writeSeatNotes(model, book) },
       corpus: seatCorpusAdapter,
       shellAction: (action, args) => seatShellActionRef.current(action, args, modelId),
-      persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat (background)'),
+      persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat', 'explicit'),
       shotOffscreen: (path, width, height, pose) =>
         (globalThis as any).__model_shot_offscreen?.(path, width, height, ...(pose ?? [])) === 1,
     });
@@ -6128,6 +6137,9 @@ export default function AppFrame() {
         setCharacterRigSnapshot(snapshot);
         return ok({ model: pkg.id, name: pkg.name, capability: 'attached', ...rigStatusFromSnapshot(snapshot) });
       }
+      // A page of saved triangles is a lookup, not a dump: past this the reply stops
+      // answering a question and becomes a transcript the agent has to re-parse.
+      const PACKAGE_TRIANGLE_PAGE = 64;
       // The saved-state lane (req_4052). Before this, the only way to see what a save
       // actually wrote was semantic-status (aggregate counts) or a cold reopen — so
       // agents read mesh/doc.blob themselves with a hand-written struct.unpack and a
@@ -6244,7 +6256,64 @@ export default function AppFrame() {
               drift.length === 0,
           });
         }
-        return fail(`unknown package operation "${operation}" — info, regions, or diff`);
+        if (operation === 'ranges') {
+          // `ranges: N` cannot answer "did this part survive the save with its quads
+          // intact" — the per-range GROUP count is what separates a quad mesh from soup
+          // inside one part, and it is what agents were counting by hand (req_4077).
+          const parts = packageMeshDocParts(pkg) ?? [];
+          return ok({
+            ...identity,
+            ranges: meshDocRangeStats(doc).map((range, at) => ({
+              ...range,
+              part: parts[at]?.name ?? null,
+              trianglesPerGroup: range.groups > 0 ? range.triangles / range.groups : null,
+            })),
+          });
+        }
+        if (operation === 'triangles') {
+          // Paged on purpose: a whole mesh of corner floats is not an answer, it is a
+          // transcript. Ask for the triangles the question is about.
+          const requested = Array.isArray(args.indices)
+            ? args.indices.map(Number).filter((index) => Number.isInteger(index) && index >= 0)
+            : [];
+          const lo = Number(args.lo);
+          const limit = Math.max(1, Math.min(Number(args.limit) || 16, PACKAGE_TRIANGLE_PAGE));
+          const indices = requested.length > 0
+            ? requested.slice(0, PACKAGE_TRIANGLE_PAGE)
+            : Array.from({ length: limit }, (unused, at) => (Number.isInteger(lo) ? lo : 0) + at);
+          const rows = indices.map((index) => meshDocTriangle(doc, index)).filter((row) => row !== null);
+          if (rows.length === 0) return fail(`no saved triangle in ${indices.slice(0, 4).join(', ')}… — the document holds ${savedTriangles}`);
+          return ok({ ...identity, savedTriangles, triangles: rows });
+        }
+        if (operation === 'compare') {
+          const otherId = String(args.other ?? '').trim();
+          if (!otherId) return fail('package compare needs a second model id — it diffs two SAVED packages (use `diff` for saved vs resident)');
+          const otherPkg = modelPackageById(otherId);
+          const otherDir = otherPkg ? resolvePackageDir(otherPkg.kind, otherPkg.id) : null;
+          if (!otherPkg || !otherDir) return fail(`no saved package "${otherId}"`);
+          invalidateMeshDoc(otherDir);
+          const otherDoc = packageMeshDoc(otherPkg);
+          if (!otherDoc) {
+            // Same diagnostic quality as `info`. A comparison that fails because the
+            // OTHER package is corrupt must say which package and why — "no readable
+            // document" sends the agent looking in the wrong file.
+            const decode = meshDocIsUnreadable(otherDir) ? meshDocUnreadableDiagnostic(otherDir) : null;
+            return {
+              ok: false,
+              reason: decode
+                ? `${otherDir}/mesh/doc.blob rejected by this editor's RJMD reader [${decode.code}]: ${decode.reason}`
+                : `${otherDir} carries no readable model document`,
+              result: { model: otherPkg.id, name: otherPkg.name, dir: otherDir, decode },
+            };
+          }
+          return ok({
+            a: { model: pkg.id, name: pkg.name, dir },
+            b: { model: otherPkg.id, name: otherPkg.name, dir: otherDir },
+            tolerance: Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : undefined,
+            ...compareMeshDocs(doc, otherDoc, Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : undefined),
+          });
+        }
+        return fail(`unknown package operation "${operation}" — info, regions, ranges, triangles, diff, or compare`);
       }
       if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
         exportCharacterAs(args.role);
@@ -7331,6 +7400,55 @@ export default function AppFrame() {
     }));
   };
 
+  // A cold RJMD apply replaced the native mesh from disk. Replace the shell's
+  // disposable hot rows from the SAME saved snapshot in one state commit, so a
+  // pre-reload detach/merge projection cannot be offered back to Save. This is
+  // a result handshake from ModelView, never a render-time count heuristic.
+  const acceptColdRjmdApply = (modelId: string, modelSourceKey: string) => {
+    const current = stateRef.current;
+    if (modelSourceKey !== modelId || activePartsModelId(current) !== modelId) {
+      console.error(`[modeldoc] refused cold RJMD row hydration for ${modelId}: source key ${modelSourceKey} does not own the active document`);
+      return;
+    }
+    const pkg = effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes);
+    const doc = pkg ? packageMeshDoc(pkg) : null;
+    if (!pkg || !doc || doc.vertices.length < 8) {
+      console.error(`[modeldoc] refused cold RJMD row hydration for ${modelId}: the saved document is no longer readable`);
+      return;
+    }
+    const hydration = hydrateModelDocumentPartsAfterMount({
+      mountResult: 'cold-rjmd',
+      modelId,
+      modelName: pkg.name,
+      currentParts: current.modelParts[modelId] ?? [],
+      currentActivePartId: current.modelActivePartId,
+      ranges: doc.ranges,
+      rangeObjectIds: doc.rangeObjectIds,
+      savedParts: packageMeshDocParts(pkg) ?? [],
+      fallbackColors: PART_TINTS,
+    });
+    if (!hydration.applied) return;
+
+    if (partReconcileTimerRef.current) {
+      clearTimeout(partReconcileTimerRef.current);
+      partReconcileTimerRef.current = null;
+    }
+    consumeModelSaveAuthorizations(modelId);
+    savedMeshDepthRef.current[modelId] = 0;
+    const next: EditorState = {
+      ...current,
+      modelParts: { ...current.modelParts, [modelId]: hydration.parts },
+      modelActivePartId: hydration.activePartId,
+      modelDirty: { ...current.modelDirty, [modelId]: false },
+      status: `cold-open restored ${hydration.parts.length} saved part${hydration.parts.length === 1 ? '' : 's'} from RJMD`,
+    };
+    const selection = hydration.activePartId ? [hydration.activePartId] : [];
+    selectedPartIdsRef.current = selection;
+    setSelectedPartIds(selection);
+    stateRef.current = next;
+    setState(next);
+  };
+
   // Leaving a model doc writes it only when autosave is enabled, it is dirty,
   // and a valid manifest already exists. A new unsaved model never acquires a
   // disk identity from background policy. The custom close control uses this
@@ -7346,7 +7464,7 @@ export default function AppFrame() {
     // RJSK read-back + manifest-last replacement; props retain their existing
     // meshdoc path through the same dispatcher. A refusal keeps the dirty
     // document mounted instead of silently crossing the navigation boundary.
-    return { id: pkg.id, name: pkg.name, ok: saveModelDocumentNow(pkg.id, 'Autosaved') };
+    return { id: pkg.id, name: pkg.name, ok: saveModelDocumentNow(pkg.id, 'Autosaved', 'background') };
   };
 
   /** Discard is a real rollback, not a dirty-chip reset. Drop the host-resume
@@ -7405,7 +7523,7 @@ export default function AppFrame() {
     if (!persistenceSettings.autosave && currentModelId && current.modelDirty[currentModelId]) {
       requestUnsavedDecision(
         currentDoc?.title ?? 'Model',
-        () => { if (saveActiveModelNow()) activateWorldBible(); },
+        () => { if (saveActiveModelNow('Saved', 'explicit')) activateWorldBible(); },
         () => { discardModelWorkingCopy(currentModelId); activateWorldBible(); },
       );
       return;
@@ -7420,7 +7538,7 @@ export default function AppFrame() {
       if (currentModelId && state.modelDirty[currentModelId]) {
         requestUnsavedDecision(
           currentDoc?.title ?? 'Model',
-          () => { if (saveActiveModelNow()) selectWorkspaceDocument(activeWorkspaceDocumentId, true); },
+          () => { if (saveActiveModelNow('Saved', 'explicit')) selectWorkspaceDocument(activeWorkspaceDocumentId, true); },
           () => {
             discardModelWorkingCopy(currentModelId);
             selectWorkspaceDocument(activeWorkspaceDocumentId, true);
@@ -7524,7 +7642,7 @@ export default function AppFrame() {
       if (currentModelId && state.modelDirty[currentModelId] && !autosaveCovers) {
         requestUnsavedDecision(
           currentDoc?.title ?? 'Model',
-          () => { if (saveActiveModelNow()) closeWorkspaceDocument(documentId, true); },
+          () => { if (saveActiveModelNow('Saved', 'explicit')) closeWorkspaceDocument(documentId, true); },
           () => {
             discardModelWorkingCopy(currentModelId);
             closeWorkspaceDocument(documentId, true);
@@ -7806,6 +7924,7 @@ export default function AppFrame() {
     onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
     onImportModel: guarded(() => setImportPartOpen(true)),
     onStampRanges: stampModelPartRanges,
+    onColdRjmdApplied: acceptColdRjmdApply,
     onPathPlaneCreated: registerPathPlanePart,
     roleNamer: roleNamerSession
       ? {
@@ -7934,7 +8053,7 @@ export default function AppFrame() {
     const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
     const modelId = doc?.kind === 'model' ? doc.sourceId : null;
     const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
-    if (pkg && current.modelDirty[pkg.id] && !saveActiveModelNow('Saved before exit')) return false;
+    if (pkg && current.modelDirty[pkg.id] && !saveActiveModelNow('Saved before exit', 'explicit')) return false;
     if (manualWorldDirty && !saveWorldNowAll('Saved before exit')) return false;
     return true;
   };
@@ -7955,7 +8074,7 @@ export default function AppFrame() {
     if (persistenceSettings.autosave) {
       // A never-saved model deliberately has no autosave target and is discarded
       // on process exit. Once a manifest exists, the latest edit is flushed.
-      if (pkg && modelDirty && isMaterialized(pkg.kind, pkg.id) && !saveActiveModelNow('Autosaved before exit')) return;
+      if (pkg && modelDirty && isMaterialized(pkg.kind, pkg.id) && !saveActiveModelNow('Autosaved before exit', 'background')) return;
       if (!saveWorldNowAll('Autosaved before exit')) return;
     }
     closeHostWindow();
@@ -8094,8 +8213,8 @@ export default function AppFrame() {
             onDiscardActiveModel={() => {
               if (activeModelId) discardModelWorkingCopy(activeModelId, 'Kept DISK — live edits and Ctrl+Z history were discarded');
             }}
-            onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', true, options)}
-            onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
+            onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', 'explicit', true, options)}
+            onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas', 'explicit')}
             onModelDocumentMutated={markActiveModelDirty}
             characterRigApi={characterRigApiRef.current}
             characterRigSnapshot={characterRigSnapshot}

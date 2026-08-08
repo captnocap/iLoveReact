@@ -46,9 +46,19 @@ else if (action === 'follow') {
 // package <info|regions|diff> [model-id] — read what the last SAVE actually wrote,
 // with the editor's own RJMD decoder. Never parse mesh/doc.blob by hand: the header
 // grew 40 → 48 bytes at RJMD v5 and a hand reader just returns wrong numbers.
-else if (action === 'package') request = { action, args: {
-  operation: args[0] || 'info', ...(args[1] ? { model: args[1] } : {}),
-} };
+// package <info|regions|ranges|diff> [model] · package triangles <lo> [count] | <a,b,c>
+// · package compare <otherModel> — all read through the editor's own RJMD decoder.
+else if (action === 'package') {
+  const operation = args.shift() || 'info';
+  if (operation === 'triangles') {
+    const head = String(args[0] ?? '0');
+    request = { action, args: head.includes(',')
+      ? { operation, indices: head.split(',').map(Number) }
+      : { operation, lo: Number(head), limit: Number(args[1] || 16) } };
+  } else if (operation === 'compare') {
+    request = { action, args: { operation, other: args[0], ...(args[1] ? { tolerance: Number(args[1]) } : {}) } };
+  } else request = { action, args: { operation, ...(args[0] ? { model: args[0] } : {}) } };
+}
 // measure <bbox <target> | distance <a> <b> | contact <a> <b>> — the editor does the
 // arithmetic. Targets are any selector, plus `selection` and `model`.
 else if (action === 'measure') {
@@ -226,7 +236,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|ranges|diff> [model]|package triangles <lo> [n]|<a,b,c>|package compare <model>|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 
