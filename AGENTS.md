@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Context for AI agents working in this repository. Last updated: 2026-07-28.
+Context for AI agents working in this repository. Last updated: 2026-08-08.
 
 do not commit game 3d models
 
@@ -19,6 +19,25 @@ There is no `document`, no `fetch`, no `window`, no `localStorage` (unless you i
 Dynamic content lives in `StringHashMap(Value)` or tagged unions. That's the pattern. The LuaJIT detour (JSRT) was a wrong turn from this reflex and has been deleted. Don't suggest adding Lua for dynamism — Zig handles it fine.
 
 ---
+
+**3. Reaching for a scripting language instead of building the capability.**
+
+If you find yourself about to write `node -e`, `bun -e`, or `python3 -c` to inspect or
+compute something about this project's own data — that reach IS the specification of a
+missing verb. Build the verb.
+
+A hand-written reader is unversioned. It encodes today's layout as a constant and then
+returns confident wrong answers forever. A 2026-08-08 survey of 132 agent sessions found
+461 such escapes; every blob reader among them assumed RJMD v4's 40-byte header while v5
+with 48 was already on disk beside it. They were four missing capabilities, not four bad
+habits, and they became `--fields`, `tools/seat package`, `measure`/`stats`/`align`, and
+`--wait`. See the full rule in `CLAUDE.md` → **THE ESCAPE HATCH IS THE SPEC**.
+
+Build it where the data lives — the parser of a format beside the format, the walker of a
+topology beside the topology. A capability written into a scratch script serves one
+session; the next agent writes it again, differently, wrong. If you genuinely cannot build
+it now, name the gap plainly: a named gap is a filed feature request, a silent hand-parse
+is a wrong number with a confident face on it.
 
 ## Game work: the oracle comes FIRST
 
@@ -212,6 +231,8 @@ class appearing after your change is an automatic FAIL of that change.
 - **`love2d/` and `tsz/` are read-only.** Copy OUT for porting, never write INTO them. Same treatment for `archive/`.
 - **Zig 0.16.0.** Read `framework/ZIG_016_API_NOTES.md`; inject `std.Io` through signatures/owners and check the compiler's actual std source before assuming API shapes.
 
+- **A scripting escape is a feature request.** `node -e` / `bun -e` / `python3 -c` over
+  this project's own data means a verb is missing — build the verb, or name the gap.
 - **Dev builds are always `ReleaseFast`.** Debug builds crash on click — pre-existing framework bug.
 
 ---

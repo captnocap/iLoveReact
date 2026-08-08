@@ -23,16 +23,31 @@ tools/seat oracle ask "<question>"                      # lookup mid-phase; neve
 plan you get is smaller than this document ever was, and every reply then carries
 `percept.oracle` telling you your phase and how much debt stands between you and the next.
 
-## The seat is the complete capability surface
+## The escape hatch is the spec
 
-**Never read model packages or compute geometry facts with bun, node, or python.** The seat
-is the only correct parser of its own formats and the only source that reflects the resident
-mesh — a hand-written blob reader silently returned RJMD v4 numbers after the format went
-v5, and nobody was warned. `package`, `measure`, `stats`, and `align` answer every question
-those escapes were answering; `--fields` reshapes a reply without `jq`; `--wait` and
-`wait-ready` replace sleeping a guessed number of seconds. If a fact you need has no verb,
-**report the gap plainly** — like the selector-algebra boundary — instead of hand-parsing a
-blob or doing the arithmetic yourself. Every such gap is a filed feature request.
+**Never read model packages or compute geometry facts with bun, node, or python.** The
+seat is the only correct parser of its own formats and the only source that reflects the
+resident mesh — hand-written readers assumed RJMD v4's 40-byte header and kept returning
+confident wrong numbers after the format went v5 with 48, on packages sitting in the same
+directory.
+
+The rule is not "don't script." It is: **the thing you were about to script is the
+specification of a missing verb — so build the verb.** A survey of 132 sessions found 461
+of these; they were four missing capabilities, not four bad habits:
+
+| the reach | the verb |
+|---|---|
+| parse `mesh/doc.blob` | `package info \| regions \| ranges \| triangles \| diff \| compare` |
+| do geometry math over `look` | `measure` · `stats` · `align` |
+| walk topology / build an id list | `select-path \| loop \| ring \| grow \| similar` · `for-each` |
+| compute a delta to feed `move` | `set-position` · `align --dry-run` |
+| reshape a reply with `jq` | `--fields ok,result.frontier` |
+| sleep before a call that might race | `--wait <s>` · `wait-ready` · `state:` |
+
+If a fact you need has no verb, **report the gap plainly** — like the selector-algebra
+boundary — instead of hand-parsing a blob or doing the arithmetic yourself. A named gap is
+a filed feature request that becomes someone's next verb. A silent hand-parse is a wrong
+number with a confident face on it, and it survives you.
 
 Common verbs have short CLI forms; the rest are `tools/seat action <name> '<json>'`. Do not
 invent an unlisted action (`tools/seat oracle ask "verb table"` lists them all).

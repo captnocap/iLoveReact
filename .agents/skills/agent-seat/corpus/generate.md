@@ -22,6 +22,12 @@ cd $W && NANO_PROMPTS_DIR=$W/prompts NANO_IMG2IMG_DIR=$W NANO_OUTPUT_DIR=$W/out 
   node /home/siah/creative/reactjit/cart/editor/img.cjs --headless
 ```
 
+> **Why `node` is correct here.** `img.cjs` is the USER'S generation console — an external
+> tool with its own runtime and API key, invoked as itself. THE ESCAPE HATCH IS THE SPEC
+> bans reaching for a scripting language *in place of a capability this project should
+> own*; it does not ban calling a real tool. Driving img.cjs is calling a tool. Parsing a
+> model blob by hand is not.
+
 Queue line grammar: `[prompt] [resolution] [imgs/batch] [batches] [model] [refs] [style] [k=v,...]`.
 
 - **Always set batches explicitly** — the default is 25.

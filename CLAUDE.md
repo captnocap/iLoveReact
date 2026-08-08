@@ -76,6 +76,44 @@ Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loo
 
 ---
 
+# HARD RULE: THE ESCAPE HATCH IS THE SPEC
+
+**When you reach for node, bun, or python to inspect or compute something about this
+project's own data — stop. The thing you were about to script IS the specification of a
+capability the tooling is missing. Build that capability instead.**
+
+This is not a style preference. A hand-written reader is UNVERSIONED: it encodes today's
+layout as a constant and keeps returning confident wrong answers the moment the format
+moves. On 2026-08-08 a survey of 132 agent sessions found **461** such escapes, and every
+one of the blob readers among them hardcoded RJMD v4's 40-byte header — while v5 with a
+48-byte header was already on disk, in the same model directory, for half the models.
+Nobody was ever warned. They decomposed into four missing verbs, not four bad habits:
+
+| what was being scripted | what was missing |
+|---|---|
+| 236 × reshaping a reply with `jq` | `--fields a,b.c` |
+| 155 × parsing `mesh/doc.blob` by hand | `tools/seat package info\|regions\|ranges\|triangles\|diff\|compare` |
+| 89 × geometry math over `look` output | `tools/seat measure` / `stats` / `align` |
+| 3 × `sleep` before a call that might race | `--wait` / `wait-ready` + an explicit `state:` |
+
+The rule, in order:
+
+1. **Name the capability.** "I need the saved per-range group counts" is a verb; "I need
+   to read the blob" is a workaround.
+2. **Build it where the data lives.** The parser of a format belongs beside the format;
+   the walker of a topology belongs beside the topology. A capability built in a scratch
+   script serves one session, and the next agent writes it again, differently, wrong.
+3. **Provide before you ban.** Banning an escape hatch without a replacement produces
+   worse workarounds — guessed numbers and stale assumptions instead of visible ones.
+4. **If you cannot build it now, report the gap plainly.** A named gap is a filed feature
+   request. A silent hand-parse is a wrong number with a confident face on it.
+
+`bun` remains correct for running an ad-hoc `.js`/`.mjs` script, and `tools/v8cli` for
+this repo's own build scripts (`node` stays banned outright). What is banned is using any
+of them as a substitute for a capability the tool should own.
+
+---
+
 ## Who Maintains This
 
 **You do.** Bugs are from other versions of yourself in parallel instances. If a bug from another Claude is blocking you, fix it — it is your code. All of it.

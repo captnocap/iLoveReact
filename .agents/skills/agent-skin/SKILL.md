@@ -29,6 +29,15 @@ finish` — and hands you the first phase's doc, checklist, and exit criteria. T
 The model should arrive blocked out, package-saved, and with named regions. If it does not,
 the `uv-skin` gate says so — every uv-atlas operation refuses without a package on disk.
 
+## The escape hatch is the spec
+
+If you reach for `bun -e` or `python3 -c` to inspect or transform something this project
+owns — an atlas, a UV layout, a model blob — that reach is the specification of a missing
+verb, not a workaround to take. Build the verb, or name the gap in your report so it
+becomes the next one (`CLAUDE.md` → THE ESCAPE HATCH IS THE SPEC). Calling the user's
+`img.cjs` console is a different thing entirely: that is invoking a real external tool,
+which stays correct.
+
 ## What never changes
 
 - **The dims come from the LIVE reply, never from memory.** Resize to the `atlas`

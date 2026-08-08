@@ -9,7 +9,7 @@
 1. **Resize to the exact atlas dims** from the `atlas` reply (models return arbitrary
    sizes; 810×1245 came back 848×1264):
    ```bash
-   node -e "require('sharp')('$W/out/<pick>.png').resize(<w>,<h>,{fit:'fill'}).png().toFile('$W/skin_1.png')"
+   bun -e "…"   # see the NAMED GAP below — there is no shell verb for this yet
    ```
 2. **Import onto the live model:**
    ```bash
@@ -35,3 +35,30 @@
    resize dims were wrong — re-check against the live `atlas` reply, never memory. UV
    geometry itself (`uv-geometry`, island moves) is a last resort and belongs to deliberate
    remapping, not to fixing a lazy generation.
+
+---
+
+## NAMED GAP: resizing to the atlas dims has no verb yet
+
+The resize step above is the one place this pipeline still leaves the tool. That is a
+**missing capability, not a licence to script** (`CLAUDE.md` → THE ESCAPE HATCH IS THE
+SPEC). The engine already owns the whole pipeline — `framework/image/codec.zig` behind
+`__imageops_*`, wrapped by `runtime/image.ts` with a resize that takes the same
+`(width, height, { fit: 'fill' })` shape the old `sharp` call used:
+
+```ts
+image(bytes).resize(w, h, { fit: 'fill' }).png().toFile(path);
+```
+
+What is missing is a SHELL entry point, so an agent at a terminal cannot reach it. The
+right verb is not a generic resizer either — it is one that never asks the agent for the
+dimensions at all, because "resize to the LIVE atlas dims" is the intent every single
+time, and a remembered number is the documented failure mode of this whole phase:
+
+```bash
+tools/seat atlas-fit <src.png> <dst.png>    # NOT BUILT YET — resize to the live atlas
+```
+
+Until that exists, do the resize through `runtime/image.ts` rather than `sharp`, read the
+dims from the LIVE `atlas`/`uv-state` reply, and say in your report that you had to leave
+the tool. That report is what turns this gap into the next verb.
