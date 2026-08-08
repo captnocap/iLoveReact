@@ -4,9 +4,16 @@
 // loss. Transports (CLI/dev socket) are adapters around this module.
 
 import { countUvTextureFootprints, parseUvIslandRects } from '../model/uvLayout';
+import {
+  NO_SEMANTIC_ID,
+  declareRegion,
+  type MeshSemanticRegion as SemanticRegion,
+  type MeshSemanticTable as SemanticTable,
+} from '../model/meshSemantics';
 import { claimActiveModel, claimAdmits, claimModel, dismissClaim, listClaims } from './claims';
 
-export const NO_SEMANTIC_ID = 0xffffffff;
+export { NO_SEMANTIC_ID, declareRegion } from '../model/meshSemantics';
+export type { MeshSemanticRegion as SemanticRegion, MeshSemanticTable as SemanticTable } from '../model/meshSemantics';
 export const DEFAULT_NAMING_DEBT_BUDGET = 8;
 const PAINT_ATLAS_TUNING = {
   minMedianIslandTexels: 8,
@@ -16,15 +23,6 @@ const PAINT_ATLAS_TUNING = {
 
 const host = globalThis as any;
 
-export type SemanticRegion = {
-  id: number;
-  name: string;
-  parent?: number | null;
-  role?: string;
-  createdBy?: { op: string; take?: number; at?: number };
-};
-
-export type SemanticTable = { version: 1; regions: SemanticRegion[]; nextRegionId?: number };
 export type SeatPart = {
   id: string;
   name: string;
@@ -494,20 +492,6 @@ function regionFamily(table: SemanticTable, name: string): number[] {
     }
     return false;
   }).map((region) => region.id);
-}
-
-export function declareRegion(table: SemanticTable, name: string, role: string, op: string, take?: number, parent?: number): { table: SemanticTable; region: SemanticRegion } {
-  const existing = regionByName(table, name);
-  if (existing) return { table, region: existing };
-  const occupied = new Set(table.regions.map((region) => region.id));
-  let id = Math.max(0, table.nextRegionId ?? 0);
-  while (occupied.has(id) || id === NO_SEMANTIC_ID) id += 1;
-  const region: SemanticRegion = {
-    id, name, role,
-    ...(parent === undefined ? {} : { parent }),
-    createdBy: { op, ...(take === undefined ? {} : { take }), at: Date.now() },
-  };
-  return { table: { ...table, regions: [...table.regions, region], nextRegionId: id + 1 }, region };
 }
 
 function axisIndex(axis: string): number | null {
@@ -1143,6 +1127,12 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(factor) && automation(() => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor)) === 1;
   const scaleUniform = (factor: number) => Number.isFinite(factor) && factor !== 0
     && automation(() => host.__mesh_gizmo_scale_by?.(factor)) === 1;
+  const alignLoop = (): { axis: 'x' | 'y' | 'z' } | null => {
+    const code = Number(automation(() => host.__mesh_align_loop?.()) ?? 0);
+    return code >= 1 && code <= 3 && Number.isInteger(code)
+      ? { axis: 'xyz'[code - 1] as 'x' | 'y' | 'z' }
+      : null;
+  };
   const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) =>
     finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees) && automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1;
   const topology = (invoke: () => unknown): TopologyReceipt | null => {
@@ -1164,14 +1154,14 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!Number.isFinite(width) || width <= 0) return null;
     const begin = parseJson<{
       ok?: number;
-      kind?: 'edge' | 'vertex' | 'boundary';
+      kind?: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
       defaultTargetSides?: number;
       minimumTargetSides?: number;
       maximumTargetSides?: number;
     }>(host.__mesh_bevel_begin?.());
     if (begin?.ok !== 1) return null;
     let targetSides = 0;
-    if (begin.kind === 'boundary') {
+    if (begin.kind === 'boundary' || begin.kind === 'face-polygon') {
       targetSides = requestedTargetSides ?? begin.defaultTargetSides ?? 0;
       if (!Number.isSafeInteger(targetSides) ||
           targetSides < (begin.minimumTargetSides ?? Number.POSITIVE_INFINITY) ||
@@ -1511,7 +1501,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   return {
     look, elements, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
-    connectVertices, createFace, bevel, inset, move, scale, scaleUniform, rotate, deleteSelection,
+    connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
@@ -1534,7 +1524,7 @@ export type SeatBootstrapAdapter = { newPrimitive: (spec: SeatPrimitiveSpec) => 
 export const seatRequestTarget = (request: SeatRequest, activeModel: string | null): string | null =>
   request.model ?? activeModel ?? null;
 
-const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path']);
+const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path', 'thumbnail']);
 const BACKGROUND_FOCUS_BRIDGE_ACTIONS = new Set([
   'uv-state', 'uv-select', 'uv-layout', 'uv-prestack', 'uv-stitch', 'uv-two-sheet',
   'uv-geometry', 'uv-history', 'uv-atlas', 'uv-layer', 'paint-variant', 'semantic-status',
@@ -1769,7 +1759,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'bevel': {
         const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);
         const result = seat.bevel(Number(args.width ?? 0), targetSides);
-        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one bevelable edge/vertex or one complete 3+ edge open boundary loop, then use a valid width and targetSides');
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one filled convex face, one bevelable edge/vertex, or one complete 3+ edge open boundary loop, then use a valid width and targetSides');
       }
       case 'inset': {
         const result = seat.inset(
@@ -1784,6 +1774,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'move': { const ok = seat.move(args.delta as [number, number, number]); return seat.reply('move', ok, undefined, ok ? undefined : 'move rejected — needs delta:[x,y,z] finite meters and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
       case 'scale': { const ok = seat.scale(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.factor ?? 1)); return seat.reply('scale', ok, undefined, ok ? undefined : 'scale rejected — needs axis:[x,y,z], pivot:[x,y,z], finite nonzero factor, and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
       case 'scale-uniform': { const ok = seat.scaleUniform(Number(args.factor)); return seat.reply('scale-uniform', ok, undefined, ok ? undefined : 'uniform scale rejected — needs a finite nonzero factor and an in-scope vertex/edge/face selection'); }
+      case 'align-loop': {
+        const result = seat.alignLoop();
+        return seat.reply('align-loop', !!result, result ?? undefined, result ? undefined : 'align loop rejected — select a skewed vertex row or at least two connected loop edges');
+      }
       case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'rotate rejected — needs axis:[x,y,z], pivot:[x,y,z], finite degrees, and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
@@ -1910,12 +1904,14 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const result = seat.runRecipe(String(args.recipe ?? ''), (args.params as Record<string, unknown>) ?? {});
         return seat.reply('recipe', result.ok, result, result.reason);
       }
+      case 'editor-status':
       case 'command':
       case 'part-select': case 'part-rename': case 'part-visibility': case 'part-delete':
       case 'part-duplicate': case 'part-merge': case 'part-path-array': case 'part-import':
       case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
       case 'group-duplicate': case 'group-dissolve': case 'outliner-move': case 'role-name':
       case 'model-rename': case 'model-import': case 'model-export': case 'model-starter':
+      case 'thumbnail':
       case 'viewport': case 'reference': case 'uv-state': case 'uv-select': case 'uv-layout': case 'uv-prestack': case 'uv-stitch': case 'uv-two-sheet':
       case 'uv-geometry': case 'uv-history': case 'uv-atlas': case 'uv-layer':
       case 'paint-tool': case 'paint-variant': case 'texture-slot': case 'rig': case 'path': {

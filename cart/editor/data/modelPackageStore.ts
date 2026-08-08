@@ -17,6 +17,8 @@ import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
   categoryDir,
+  modelThumbFileName,
+  modelThumbRevision,
   modelFolderIdFor,
   modelSlug,
   packageDir,
@@ -29,13 +31,14 @@ import {
   type ModelPackageKind,
 } from './modelPackage';
 import type { ModelPackage } from './types';
-import { invalidateMeshDoc, readMeshDoc, readMeshDocParts, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
+import { invalidateMeshDoc, parseMeshDocBytes, readMeshDoc, readMeshDocParts, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
 import { base64ToBytes, textBytes } from '../../../runtime/workspace/lumps';
 import { encode as encodeImage } from '../../../runtime/image';
 import { compileOutlinerCollision, decodeCollisionBake, encodeCollisionBake } from '../model/meshCollision';
 import { groundRebase } from '../model/groundRebase';
 import { hasUvCoverageRasterWriter, writeUvCoverageRasters } from './uvCoverageRaster';
 import { readUvTextureWorkspace } from './uvTextureWorkspaceStore';
+import { validateSkinBindingRef, type CharacterSaveSnapshot } from '../../../runtime/skeleton';
 
 const host = globalThis as any;
 export const MODEL_RETOPO_GUIDE_FILE = 'mesh/retopo-guide.blob';
@@ -48,6 +51,7 @@ export type ModelRetopoGuideLoad = {
 };
 
 export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
+export type CharacterMaterializeResult = MaterializeResult & { package?: ModelPackage };
 
 // ── Package directory resolution (id → real on-disk home) ───────────────────
 
@@ -213,6 +217,165 @@ export function materializePackageArtifacts(pkg: ModelPackage, blobs: PackageArt
   return materializeModelPackage(pkg);
 }
 
+function fileSha256(path: string): string {
+  const value = host.__file_sha256?.(path);
+  return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value) ? value.toLowerCase() : '';
+}
+
+function preparedArtifactBytes(
+  sourcePath: string,
+  expectedHash: string,
+  expectedLength: number,
+): { base64: string; bytes: Uint8Array } | null {
+  if (!/^[0-9a-f]{64}$/i.test(expectedHash) || !Number.isInteger(expectedLength) || expectedLength < 1) return null;
+  if (fileSha256(sourcePath) !== expectedHash.toLowerCase()) return null;
+  const base64 = readFileBase64(sourcePath);
+  if (!base64) return null;
+  let bytes: Uint8Array;
+  try { bytes = base64ToBytes(base64); } catch { return null; }
+  return bytes.byteLength === expectedLength ? { base64, bytes } : null;
+}
+
+function installImmutableArtifact(path: string, base64: string, expectedHash: string): boolean {
+  const expected = expectedHash.toLowerCase();
+  const existing = fileSha256(path);
+  if (existing) return existing === expected;
+  return writeFileBase64Atomic(path, base64) && fileSha256(path) === expected;
+}
+
+/** Commit one native CharacterSaveSnapshot. Geometry and skin are immutable and
+ * verified first; the atomically replaced manifest is the sole commit point.
+ * Draft/needs-bind saves intentionally omit a binding reference, leaving any
+ * older content-addressed skin file unreachable rather than silently reusing it. */
+export function materializeCharacterSaveSnapshot(
+  pkg: ModelPackage,
+  snapshot: CharacterSaveSnapshot,
+  parts: readonly MeshDocPartMeta[],
+): CharacterMaterializeResult {
+  const dir = claimPackageDir(pkg);
+  if (!pkg.skeleton?.characterRig) return { ok: false, id: pkg.id, dir, error: 'model has no character rig capability' };
+  if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
+  if (!Number.isInteger(snapshot.revision) || snapshot.revision < 0 || snapshot.logicalVertexCount < 1) {
+    return { ok: false, id: pkg.id, dir, error: 'invalid native character save snapshot' };
+  }
+  const geometry = preparedArtifactBytes(
+    snapshot.geometry.temporaryPath,
+    snapshot.geometry.artifactHash,
+    snapshot.geometry.byteLength,
+  );
+  if (!geometry) return { ok: false, id: pkg.id, dir, error: 'prepared RJMD bytes or artifact hash are invalid' };
+  const decodedGeometry = parseMeshDocBytes(geometry.bytes);
+  if (decodedGeometry?.formatVersion !== 5 || decodedGeometry.hasLogicalVertices !== true ||
+      decodedGeometry.logicalVertexCount !== snapshot.logicalVertexCount || !decodedGeometry.renderCornerLogicalIds) {
+    return { ok: false, id: pkg.id, dir, error: 'prepared character geometry is not RJMD v5 logical topology' };
+  }
+  const persistedObjectIds = decodedGeometry.rangeObjectIds;
+  const descriptorObjectIds = snapshot.descriptor.objectBindings.map((binding) => binding.objectId);
+  if (!persistedObjectIds || persistedObjectIds.length !== descriptorObjectIds.length ||
+      new Set(descriptorObjectIds).size !== descriptorObjectIds.length ||
+      descriptorObjectIds.some((objectId) => !persistedObjectIds.includes(objectId))) {
+    return { ok: false, id: pkg.id, dir, error: 'prepared character geometry has no exact stable range/object table' };
+  }
+  if (parts.length !== persistedObjectIds.length || parts.some((part, index) =>
+    part.objectId !== persistedObjectIds[index] || typeof part.name !== 'string' || part.name.length === 0 ||
+    typeof part.color !== 'string' || typeof part.visible !== 'boolean')) {
+    return { ok: false, id: pkg.id, dir, error: 'character parts.json v2 rows do not exactly match the RJMD range order' };
+  }
+  const geometryRelativePath = `mesh/character-${snapshot.geometry.artifactHash.toLowerCase()}.rjmd`;
+  const geometryInstalledPath = `${dir}/${geometryRelativePath}`;
+  if (!installImmutableArtifact(geometryInstalledPath, geometry.base64, snapshot.geometry.artifactHash)) {
+    return { ok: false, id: pkg.id, dir, error: 'immutable character RJMD write/read-back failed' };
+  }
+  const installedGeometry = preparedArtifactBytes(
+    geometryInstalledPath,
+    snapshot.geometry.artifactHash,
+    snapshot.geometry.byteLength,
+  );
+  const installedGeometryDoc = installedGeometry ? parseMeshDocBytes(installedGeometry.bytes) : null;
+  if (installedGeometryDoc?.formatVersion !== 5 || installedGeometryDoc.hasLogicalVertices !== true ||
+      installedGeometryDoc.logicalVertexCount !== snapshot.logicalVertexCount || !installedGeometryDoc.renderCornerLogicalIds ||
+      !installedGeometryDoc.rangeObjectIds || installedGeometryDoc.rangeObjectIds.length !== descriptorObjectIds.length ||
+      descriptorObjectIds.some((objectId) => !installedGeometryDoc.rangeObjectIds!.includes(objectId))) {
+    return { ok: false, id: pkg.id, dir, error: 'installed character RJMD read-back failed validation' };
+  }
+
+  let binding = undefined as import('../../../runtime/skeleton').SkinBindingRef | undefined;
+  if (snapshot.descriptor.state === 'bound') {
+    const preparedSkin = snapshot.skin;
+    if (!preparedSkin) return { ok: false, id: pkg.id, dir, error: 'bound character snapshot has no RJSK artifact' };
+    const skin = preparedArtifactBytes(preparedSkin.temporaryPath, preparedSkin.artifactHash, preparedSkin.byteLength);
+    if (!skin) return { ok: false, id: pkg.id, dir, error: 'prepared RJSK bytes or artifact hash are invalid' };
+    const expectedRef = {
+      ...preparedSkin.binding,
+      artifactHash: preparedSkin.artifactHash.toLowerCase(),
+      logicalVertexCount: snapshot.logicalVertexCount,
+      topologyHash: snapshot.topologyHash,
+      semanticHash: snapshot.semanticHash,
+      skeletonHash: snapshot.skeletonHash,
+      objectBindingHash: snapshot.objectBindingHash,
+    } as const;
+    try { validateSkinBindingRef(skin.bytes, expectedRef); }
+    catch (error) {
+      return { ok: false, id: pkg.id, dir, error: `prepared RJSK read-back failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    const skinRelativePath = `mesh/skin-${preparedSkin.artifactHash.toLowerCase()}.rjsk`;
+    const skinInstalledPath = `${dir}/${skinRelativePath}`;
+    if (!installImmutableArtifact(skinInstalledPath, skin.base64, preparedSkin.artifactHash)) {
+      return { ok: false, id: pkg.id, dir, error: 'immutable character RJSK write/read-back failed' };
+    }
+    const installedSkin = preparedArtifactBytes(
+      skinInstalledPath,
+      preparedSkin.artifactHash,
+      preparedSkin.byteLength,
+    );
+    if (!installedSkin) return { ok: false, id: pkg.id, dir, error: 'installed character RJSK could not be read back' };
+    try { validateSkinBindingRef(installedSkin.bytes, expectedRef); }
+    catch (error) {
+      return { ok: false, id: pkg.id, dir, error: `installed character RJSK read-back failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    binding = { ...expectedRef, path: skinRelativePath };
+  } else if (snapshot.skin) {
+    return { ok: false, id: pkg.id, dir, error: 'draft character snapshot unexpectedly advertises a skin artifact' };
+  }
+
+  const partMetadata = textBytes(JSON.stringify({ version: 2, parts }, null, 2));
+  if (!writeFileBytesAtomic(`${dir}/mesh/parts.json`, partMetadata)) {
+    return { ok: false, id: pkg.id, dir, error: 'atomic character parts.json v2 write failed' };
+  }
+  invalidateMeshDoc(dir);
+  const installedParts = readMeshDocParts(dir);
+  if (!installedParts || JSON.stringify(installedParts) !== JSON.stringify(parts)) {
+    return { ok: false, id: pkg.id, dir, error: 'character parts.json v2 read-back failed validation' };
+  }
+
+  const characterRig = {
+    ...snapshot.descriptor,
+    state: binding ? 'bound' as const : snapshot.descriptor.state,
+  };
+  const skeleton = {
+    ...snapshot.skeleton,
+    characterRig,
+    meshes: {
+      kind: 'skinned' as const,
+      geometryPath: geometryRelativePath,
+      ...(binding ? { binding } : {}),
+    },
+  };
+  const committedPackage: ModelPackage = { ...pkg, skeleton };
+  const manifest = packageToManifest(committedPackage);
+  const prior = readManifest(pkg.kind, pkg.id);
+  manifest.placeable = manifest.placeable ?? prior?.placeable;
+  manifest.textureSlots = manifest.textureSlots ?? prior?.textureSlots;
+  manifest.lights = manifest.lights ?? prior?.lights;
+  const manifestBytes = textBytes(serializeManifest(manifest));
+  if (!writeFileBytesAtomic(`${dir}/manifest.json`, manifestBytes)) {
+    return { ok: false, id: pkg.id, dir, error: 'atomic character manifest commit failed' };
+  }
+  indexPackageDir(pkg.kind, pkg.id, dir);
+  invalidateMeshDoc(dir);
+  return { ok: true, id: pkg.id, dir, package: committedPackage };
+}
+
 // The current on-disk manifest, or null (absent/unreadable — callers treat both
 // as "no durable record yet").
 export function readManifest(kind: ModelPackageKind, id: string): ModelManifest | null {
@@ -225,6 +388,45 @@ export function readManifest(kind: ModelPackageKind, id: string): ModelManifest 
   } catch {
     return null;
   }
+}
+
+// ── Staged product shot (req_4044) ───────────────────────────────────────────
+// A model's thumbnail is a SCREENSHOT the author stages in the studio, not a
+// render the browser runs. `stageModelThumbnail` hands the capture callback the
+// destination path inside the package, then commits the manifest so the shot
+// survives a cold restart. The callback is the host capture door (owned by the
+// shell, which has the live viewport); this store only owns the disk layout.
+export type ThumbnailStageResult = { ok: boolean; path?: string; reason?: string };
+
+function nextThumbFileName(dir: string): string {
+  let highest = 0;
+  for (const name of listDir(dir)) {
+    const revision = modelThumbRevision(name);
+    if (revision !== null && revision > highest) highest = revision;
+  }
+  return modelThumbFileName(highest + 1);
+}
+
+export function stageModelThumbnail(
+  pkg: ModelPackage,
+  capture: (path: string) => boolean,
+): ThumbnailStageResult {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  // A shot describes a model that EXISTS on disk. Minting a package directory
+  // here would leave a manifest with no mesh beside it.
+  if (!dir) return { ok: false, reason: 'save the model before staging its thumbnail' };
+  const fileName = nextThumbFileName(dir);
+  const path = `${dir}/${fileName}`;
+  if (!capture(path)) return { ok: false, reason: 'the viewport capture door did not write a frame' };
+  pkg.thumbnail = path;
+  const result = materializeModelPackage(pkg);
+  if (!result.ok) return { ok: false, reason: result.error ?? 'manifest write failed' };
+  // Superseded shots go only after the manifest commits to the new one, so an
+  // interrupted stage leaves the package pointing at a file that exists.
+  for (const name of listDir(dir)) {
+    if (name !== fileName && modelThumbRevision(name) !== null) remove(`${dir}/${name}`);
+  }
+  return { ok: true, path };
 }
 
 // True when THIS model already has a package directory (manifest on disk). The

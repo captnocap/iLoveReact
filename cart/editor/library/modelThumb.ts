@@ -1,9 +1,8 @@
-// editor/library/modelThumb.ts — frame an orbit camera on a model's own bounds so
-// every model reads like a product shot — a phone booth and a bus both fill the
-// tile instead of one being a speck. The thumbnail itself is a static <Scene3D>
-// (ModelThumbnail.tsx); this module is the pure mesh + framing math it consumes.
-import { packageMeshDoc } from '../data/assetCatalog';
-import type { ModelPackage } from '../data/types';
+// editor/library/modelThumb.ts — frame an orbit camera on a CATALOG BUILD PIECE's
+// own bounds so every piece reads like a product shot — a phone booth and a bus
+// both fill the tile instead of one being a speck. The <Scene3D> tile that
+// consumes this is BuildBar's palette; this module is its pure mesh + framing
+// math. Saved MODELS stage a real screenshot instead (ModelThumbnail.tsx).
 
 // Package meshes are interleaved [px,py,pz, nx,ny,nz, u,v] — 8 floats/vertex.
 const STRIDE = 8;
@@ -21,34 +20,12 @@ export type ThumbView = {
   cam: { pos: [number, number, number]; target: [number, number, number]; fov: number };
 };
 
-/** Resolve a model to its resident triangle data, or null when only a file path
- *  / no geometry is available (the caller falls back to the colour swatch). */
-export function resolveModelMesh(model: ModelPackage): ThumbMesh | null {
-  // The package's saved meshdoc first (req_2753) — the tile shows the model as EDITED,
-  // not its primitive seed / colour swatch. The key carries a cheap content fingerprint:
-  // the thumb geometry interns by id (never evicted), so a re-save must mint a new key.
-  const doc = packageMeshDoc(model);
-  if (doc && doc.vertices.length >= STRIDE) {
-    const v = doc.vertices;
-    const stamp = `${v.length}:${Math.round((v[0] ?? 0) * 1e3)}:${Math.round((v[v.length - STRIDE] ?? 0) * 1e3)}`;
-    return { key: `pkgdoc:${model.id}:${stamp}`, vertices: v, count: Math.floor(v.length / STRIDE) };
-  }
-  return null;
-}
-
-/** Build the Scene3D-ready view (a one-mesh geometry def + an auto-framed
- *  camera) for a resolved mesh. Cheap; memoize by model id at the call site. */
-export function buildThumbView(mesh: ThumbMesh): ThumbView {
-  const b = meshBounds(mesh.vertices);
-  return {
-    geometry: {
-      id: `model-thumb:${mesh.key}`,
-      defaults: {},
-      generate: () => ({ positions: mesh.vertices, count: mesh.count, bounds: { radius: b.radius } }),
-    },
-    cam: thumbCamera(b),
-  };
-}
+// A MODEL's thumbnail is no longer framed here (req_4044): it is the staged
+// screenshot in its package (ModelThumbnail.tsx), because a camera guessing a
+// model's front shot it backwards as often as not — and re-rendering the mesh
+// per card cost the frame a second full draw of the model. What survives below
+// is the CATALOG build-piece palette, whose pieces are generated shapes with no
+// package to stage a shot into.
 
 // ── multi-part product shots (the build palette, req_2651) ─────────────────
 // A CATALOG build piece isn't one stored mesh — pieceShapes decomposes it into

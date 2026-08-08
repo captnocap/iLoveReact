@@ -661,6 +661,15 @@ test('uniform scale uses the same selection-pivot operation as the visible Scale
   assert(reply.ok && factor === 1.25, 'uniform scale did not reach the resident selection-pivot door');
 });
 
+test('loop alignment reports the native auto-selected world axis', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_align_loop = () => 3;
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'align-loop' });
+  assert(reply.ok && (reply.result as any).axis === 'z', 'Align Loop dropped or remapped the native axis receipt');
+  (globalThis as any).__mesh_align_loop = () => 0;
+  assert(!executeSeatRequest(createAgentSeat(), { action: 'align-loop' }).ok, 'rejected loop alignment reported success');
+});
+
 test('axis scale preserves sub-centimetre factors exactly at the seat boundary', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   let factor = 0;
@@ -702,6 +711,13 @@ test('bevel is one captured native session and cancels a rejected preview', () =
   assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02, targetSides: 6 } }).ok && ended === 1,
     'generalized boundary chamfer stayed unreachable through Bevel');
   assert(previewTarget === 6, 'Seat collapsed an explicit non-doubling target back to the default');
+  (globalThis as any).__mesh_bevel_begin = () => JSON.stringify({
+    ok: 1, kind: 'face-polygon', sidesBefore: 4,
+    defaultTargetSides: 8, minimumTargetSides: 3, maximumTargetSides: 256,
+  });
+  assert(executeSeatRequest(seat, { action: 'bevel', args: { width: 0.02, targetSides: 12 } }).ok && ended === 1,
+    'filled-face N-gon conversion stayed unreachable through the captured topology session');
+  assert(previewTarget === 12, 'Seat dropped the requested extrusion-center side count');
 });
 
 test('resident destructive and constructive topology doors are reachable', () => {
@@ -952,6 +968,9 @@ test('seat request target prefers the request model and otherwise uses the activ
 test('background seat policy names every refused limitation family', () => {
   const refused = [
     ['viewport', 'viewport'],
+    // A staged product shot IS the visible viewport (req_4044) — a background
+    // lane has no framed view to shoot.
+    ['thumbnail', 'viewport'],
     ['uv-state', 'UV/paint'],
     ['shot', 'capture'],
     ['add', 'part geometry'],

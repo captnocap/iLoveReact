@@ -3,7 +3,7 @@
 //   tools/esbuild cart/editor/data/modelPackage.test.ts --bundle \
 //     --outfile=/tmp/editor-model-package.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-model-package.test.js
-import { manifestToPackage, packageToManifest } from './modelPackage';
+import { manifestToPackage, modelThumbFileName, modelThumbRevision, packageToManifest } from './modelPackage';
 import type { ModelPackage } from './types';
 
 let passed = 0, failed = 0;
@@ -57,6 +57,35 @@ test('invalid manifest face purposes fall back without shifting role indexes', (
   assert(restored.textureSlots?.length === 2, 'repair shifted indexed face roles');
   assert(restored.textureSlots?.[0]?.purpose === undefined, 'unknown purpose did not become material');
   assert(restored.textureSlots?.[1]?.id === 'surface_2', 'invalid role row was not repaired in place');
+});
+
+test('a staged thumbnail survives the manifest, and revisions parse in file order', () => {
+  const pkg: ModelPackage = {
+    id: 'prop:shot-car', folderId: 'model-prop_shot-car', name: 'Shot Car',
+    path: '/tmp/shot-car', kind: 'prop', stage: 'ready', color: '#a34b43',
+    source: '/tmp/shot-car/manifest.json', rig: '-', data: '-', triangles: 3786,
+    lods: 0, decompositions: [], atlases: [], paints: [],
+    thumbnail: 'cart/editor/data/models/props/shot-car/thumb-3.png',
+  };
+  const restored = manifestToPackage(packageToManifest(pkg), 'cart/editor/data/models/props/shot-car');
+  assert(restored.thumbnail === pkg.thumbnail, 'the staged product shot did not survive the manifest');
+  // The revision is what defeats the host image cache — a re-shot thumbnail MUST
+  // land on a path nothing has loaded yet (gpu/image_cache.zig keys on the string).
+  assert(modelThumbRevision('thumb-3.png') === 3, 'a revision number did not parse');
+  assert(modelThumbRevision('thumb.png') === null, 'an unrevisioned name was read as a revision');
+  assert(modelThumbRevision('atlas-2.png') === null, 'a foreign png was read as a thumbnail');
+  assert(modelThumbFileName(4) === 'thumb-4.png', 'the next revision name drifted from the parser');
+});
+
+test('a model with no staged shot carries no thumbnail at all', () => {
+  const pkg: ModelPackage = {
+    id: 'prop:unshot', folderId: 'model-prop_unshot', name: 'Unshot',
+    path: '/tmp/unshot', kind: 'prop', stage: 'wip', color: '#778899',
+    source: '/tmp/unshot/manifest.json', rig: '-', data: '-', triangles: 12,
+    lods: 0, decompositions: [], atlases: [], paints: [],
+  };
+  const restored = manifestToPackage(packageToManifest(pkg), 'cart/editor/data/models/props/unshot');
+  assert(restored.thumbnail === undefined, 'an unshot model invented a thumbnail path');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -17,7 +17,8 @@ import type { MaterialRef } from '../world/pieces';
 import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
 import RigSection from './RigSection';
-import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
+import CharacterRigSection from './CharacterRigSection';
+import { skeletonToPropRig, type CharacterRigApi, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig } from '../../../runtime/skeleton';
 import PieceBody, { type PieceEditHandlers } from './PieceBody';
 import GlobalsSection from './GlobalsSection';
 import GcStressSection from './GcStressSection';
@@ -33,6 +34,7 @@ import UvEditor from './UvEditor';
 import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import {
   modelSelectionModeName,
   summarizeSelectedFaces,
@@ -554,6 +556,8 @@ export default function Inspector(props: {
   // 'save-snapshot' command as File → Save; onDisk feeds the save-state chip.
   onRenameModel: (id: string, name: string) => void;
   onSaveModel: () => void;
+  /** Shoot the current viewport as this model's browser thumbnail (req_4044). */
+  onStageThumbnail: () => void;
   /** Report an outcome on the shell status line (req_3894 — refusals must be seen). */
   onStatus: (message: string) => void;
   /** A real Remove happened: mint the capability that lets an emptied semantic
@@ -590,6 +594,13 @@ export default function Inspector(props: {
   // The outliner multi-select set (req_2659) — row highlights + the UV '+N' header.
   // AppFrame owns it (shell-local, not EditorState); primary stays modelActivePartId.
   selectedPartIds: string[];
+  characterRigApi: CharacterRigApi | null;
+  characterRigSnapshot: CharacterRigSnapshot | null;
+  onCharacterRigSnapshot: (snapshot: CharacterRigSnapshot) => void;
+  onCharacterRigMutated: () => void;
+  onSelectCharacterRigFaces: (indices: readonly number[]) => number;
+  onAssignHumanoidSemantic: (membership: HumanoidSemanticMembership) => void;
+  onAttachCharacterRig: (pkgId: string) => void;
 }) {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
@@ -787,6 +798,11 @@ export default function Inspector(props: {
     );
   }
   if (activeModel) {
+    const hasCharacterRig = hasCharacterRigCapability(activeModel);
+    const residentHumanoidSemanticRoles = (focusBridge?.semantics.rows ?? [])
+      .filter((row) => row.presence === 'resident' || row.presence === 'not-visible')
+      .map((row) => row.role)
+      .filter((role) => role.length > 0);
     const modelDirty = Boolean(props.state.modelDirty[activeModel.id]);
     // The ACTIVE outliner part labels the UV section header (req_2619 P): the UV read
     // is per-outliner even while the atlas storage stays whole-model.
@@ -804,12 +820,14 @@ export default function Inspector(props: {
     const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
     const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
     const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle
-      : activePane === 'rig' ? 'MODEL · RIG'
+      : activePane === 'rig' ? (hasCharacterRig ? 'CHARACTER · RIG' : 'MODEL · RIG')
         : activePane === 'names' ? 'MODEL · NAMES'
           : 'MODEL FOCUS';
     return (
       <C.HW_RightPanel style={{ width: activePane === 'paint'
         ? uvWorkspace.panelWidth
+        : activePane === 'rig' && hasCharacterRig
+          ? REGIONS.focusPanel.characterRigWidth
         : REGIONS.focusPanel.width }}>
         {activePane === 'paint' ? (
           <C.HW_RightResizeGrip
@@ -864,7 +882,10 @@ export default function Inspector(props: {
             ) : null}
             {activePane === 'inspector' ? (
               <>
-                <ModelDetailBody model={activeModel} />
+                <ModelDetailBody
+                  model={activeModel}
+                  onStageThumbnail={props.modelOnDisk ? props.onStageThumbnail : undefined}
+                />
                 <SelectionSection
                   selection={focusBridge?.readSelection() ?? null}
                   semantics={focusBridge?.semantics ?? null}
@@ -904,8 +925,8 @@ export default function Inspector(props: {
                     onMoveItem={props.outlinerHandlers.onMoveOutlinerItem}
                     onAdd={props.outlinerHandlers.onAddPart}
                     onImportModel={props.outlinerHandlers.onImportModel}
-                    roleNamer={props.outlinerHandlers.roleNamer}
-                    onStartRoleNamer={props.outlinerHandlers.onStartRoleNamer}
+                    roleNamer={activeModel.kind === 'vehicle' ? props.outlinerHandlers.roleNamer : null}
+                    onStartRoleNamer={activeModel.kind === 'vehicle' ? props.outlinerHandlers.onStartRoleNamer : undefined}
                     onSkipRole={props.outlinerHandlers.onSkipRole}
                     onCancelRoleNamer={props.outlinerHandlers.onCancelRoleNamer}
                   />
@@ -931,17 +952,47 @@ export default function Inspector(props: {
                 onStatus={props.onStatus}
                 onRegionRemoved={props.onSemanticRegionRemoved}
               />
-            ) : (
-              <RigSection
-                rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
-                onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
-                textureSlots={props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []}
-                onTextureSlotsChange={(slots) => props.onSetModelTextureSlots(activeModel.id, slots)}
-                onTextureMembershipChanged={(message, dirty) => props.onModelTextureMembershipChanged(activeModel.id, message, dirty)}
-                onPickLiveMaterial={(slotIndex) => props.onOpenLiveMaterialPicker(activeModel.id, slotIndex)}
-                lights={props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []}
-                onLightsChange={(lights) => props.onSetModelLights(activeModel.id, lights)}
+            ) : hasCharacterRig ? (
+              <CharacterRigSection
+                api={props.characterRigApi}
+                snapshot={props.characterRigSnapshot}
+                onSnapshot={props.onCharacterRigSnapshot}
+                onStatus={props.onStatus}
+                onMutated={props.onCharacterRigMutated}
+                onSelectDetachedFaces={props.onSelectCharacterRigFaces}
+                semanticRoleKeys={residentHumanoidSemanticRoles}
+                onAssignSemanticRole={props.onAssignHumanoidSemantic}
               />
+            ) : (
+              <>
+                <C.HW_RigSection>
+                  <C.HW_SectionHead>
+                    <C.HW_AccentBar style={{ backgroundColor: accentFor('active') }} />
+                    <C.HW_SectionTitle>CHARACTER RIGGING</C.HW_SectionTitle>
+                  </C.HW_SectionHead>
+                  <C.HW_RigNotice>
+                    <C.HW_RigNoticeLabel>OPTIONAL CAPABILITY</C.HW_RigNoticeLabel>
+                    <C.HW_RigWrapText>
+                      Attach the canonical humanoid skeleton to this model without replacing its geometry or changing its model category. Choose Player or NPC only when exporting.
+                    </C.HW_RigWrapText>
+                  </C.HW_RigNotice>
+                  <C.HW_ButtonRow>
+                    <C.HW_VerbPrimary tooltip="keep this mesh and add the independent humanoid bind skeleton" onPress={() => props.onAttachCharacterRig(activeModel.id)}>
+                      <C.HW_VerbText>Add Humanoid Rig</C.HW_VerbText>
+                    </C.HW_VerbPrimary>
+                  </C.HW_ButtonRow>
+                </C.HW_RigSection>
+                <RigSection
+                  rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
+                  onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
+                  textureSlots={props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []}
+                  onTextureSlotsChange={(slots) => props.onSetModelTextureSlots(activeModel.id, slots)}
+                  onTextureMembershipChanged={(message, dirty) => props.onModelTextureMembershipChanged(activeModel.id, message, dirty)}
+                  onPickLiveMaterial={(slotIndex) => props.onOpenLiveMaterialPicker(activeModel.id, slotIndex)}
+                  lights={props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []}
+                  onLightsChange={(lights) => props.onSetModelLights(activeModel.id, lights)}
+                />
+              </>
             )}
           </C.HW_InspectorBodyFixed>
         </C.HW_Inspector>

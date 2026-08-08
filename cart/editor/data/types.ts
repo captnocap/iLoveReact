@@ -15,7 +15,9 @@ import type { MapPaintState } from '../stage/mapPaint';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 import type { BuildKind, WallEdit } from '../world/buildCatalog';
-import type { Skeleton, PropRig } from '../../../runtime/skeleton';
+import type { HumanoidSemanticMembership, Skeleton, PropRig } from '../../../runtime/skeleton';
+import type { HumanoidSemanticAssignmentReceipt } from '../skeleton/humanoidSemanticAssignment';
+import type { MeshEdgeRegionEdit, MeshSemanticNameReceipt, MeshSemanticNameRequest } from '../model/meshSemantics';
 import type { WorldGlobals } from './globals';
 import type { PathArrayParams } from './pathArray';
 import type { PropExportRole } from './propExports';
@@ -147,7 +149,7 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // 'tris-to-quads' = the whole-topology dry run, 'paint-conflict' = the live/disk
 // save picker, 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
 // through ModelToolSnapshot so the shell's central gate can see the session.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
@@ -157,6 +159,8 @@ export type ModelToolApi = {
   gizmo: (t: number) => void;
   /** Exact uniform factor around the active host selection pivot. */
   scaleBy: (factor: number) => boolean;
+  /** Flatten the selected vertex row / edge loop on its nearest X/Y/Z plane. */
+  alignLoop: () => number;
   paint: () => void;
   pathPlane: () => void;
   pathEdges: () => void;
@@ -173,6 +177,7 @@ export type ModelToolApi = {
   camRemoveAt: (index: number) => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
+  facePolygon: () => void;
   createFace: () => void;
   // Merge the selected vertices at their center (req_3382); edge mode collapses
   // the selected edges' endpoints. Degenerated faces leave in the same undo step.
@@ -190,16 +195,21 @@ export type ModelToolApi = {
   retopoTint: (id: number) => { changed: number; persisted: boolean };
   retopoGhost: (visible: boolean) => { visible: boolean; faces: number; covered: number; persisted: boolean } | null;
   retopoClear: () => { cleared: boolean; persisted: boolean };
-  // GUI semantic naming (req_3872): name the current face selection as a durable
-  // region (same table+door as the Seat's `name` verb). null = host door absent.
-  nameSelection: (name: string) => { changed: number } | null;
+  // One mode-aware naming lane for durable face regions and logical-edge paths.
+  nameSelection: (request: MeshSemanticNameRequest) => MeshSemanticNameReceipt | null;
+  /** Stable anatomy authoring is independent from editable semantic names. */
+  assignHumanoidSemantic: (membership: HumanoidSemanticMembership) => HumanoidSemanticAssignmentReceipt | null;
+  /** Compact native face selection used by topology/readiness diagnostics. */
+  selectFaces: (indices: number[]) => number;
   // Select the triangles behind SHAPE's geometry counts (req_3883). null = host
   // door absent (old binary) or no live mesh.
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   // Select a named semantic region's faces by id (req_3884).
   selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
+  selectEdgeRegion: (id: number, additive?: boolean) => { edges: number } | null;
   // Rename a region, or remove it so its faces go back to unnamed (req_3894).
   editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
+  editEdgeRegion: (id: number, edit: MeshEdgeRegionEdit) => { changed: number } | null;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string, expectedPartCount: number) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".
@@ -439,6 +449,11 @@ export type ModelPackage = {
   source: string;
   viewerPath?: string;
   viewerMeshRef?: string;
+  /** Repo-relative path to the model's STAGED product shot — a screenshot the
+   * author framed in the studio and captured (req_4044). Absent until one is
+   * shot; cards then show the colour swatch. Never auto-generated: an
+   * auto-framed camera guesses the model's front and gets it backwards. */
+  thumbnail?: string;
   rig: string;
   data: string;
   triangles: number;

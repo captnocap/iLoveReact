@@ -35,6 +35,30 @@ export const MODEL_MANIFEST_VERSION = 1;
 // once here so the writer, the reader, and any future cleanup all agree.
 export const MODEL_PACKAGE_SUBDIRS = ['mesh', 'atlases', 'paints', 'shaders'] as const;
 
+// The staged product shot (req_4044): one PNG beside the manifest, captured from
+// the studio viewport at whatever framing the author staged. Beside manifest.json
+// rather than in a subdir — it describes the package, like the manifest does.
+//
+// The name carries a REVISION because the host's image cache keys on the source
+// string and never re-reads a path whose bytes changed (gpu/image_cache.zig): a
+// re-shot thumbnail written back to one fixed name would keep showing the old
+// picture until restart. A new revision is a new key, so the new shot appears at
+// once; the previous file is removed after the new one lands.
+export const MODEL_THUMB_PREFIX = 'thumb-';
+export const MODEL_THUMB_EXT = '.png';
+
+/** `thumb-7.png` → 7; anything else → null. */
+export function modelThumbRevision(fileName: string): number | null {
+  if (!fileName.startsWith(MODEL_THUMB_PREFIX) || !fileName.endsWith(MODEL_THUMB_EXT)) return null;
+  const digits = fileName.slice(MODEL_THUMB_PREFIX.length, fileName.length - MODEL_THUMB_EXT.length);
+  if (!/^[0-9]+$/.test(digits)) return null;
+  return Number(digits);
+}
+
+export function modelThumbFileName(revision: number): string {
+  return `${MODEL_THUMB_PREFIX}${revision}${MODEL_THUMB_EXT}`;
+}
+
 export type ModelPackageKind = ModelPackage['kind'];
 
 // The on-disk record. A superset-faithful projection of ModelPackage minus the
@@ -59,6 +83,9 @@ export type ModelManifest = {
   triangles: number;
   lods: number;
   mesh: { viewerPath?: string; viewerMeshRef?: string };
+  /** Repo-relative path to the staged product shot (req_4044), like mesh.viewerPath.
+   *  Absent = never staged; the browser falls back to the colour swatch. */
+  thumbnail?: string;
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
@@ -135,6 +162,7 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
     triangles: pkg.triangles,
     lods: pkg.lods,
     mesh: { viewerPath: pkg.viewerPath, viewerMeshRef: pkg.viewerMeshRef },
+    thumbnail: pkg.thumbnail,
     decompositions: pkg.decompositions,
     atlases: pkg.atlases,
     paints: pkg.paints,
@@ -164,6 +192,7 @@ export function manifestToPackage(manifest: ModelManifest, dir: string): ModelPa
     source: `${dir}/manifest.json`,
     viewerPath: manifest.mesh.viewerPath,
     viewerMeshRef: manifest.mesh.viewerMeshRef,
+    thumbnail: manifest.thumbnail,
     rig: manifest.rig,
     data: manifest.data,
     triangles: manifest.triangles,

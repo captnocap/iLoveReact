@@ -16,13 +16,18 @@ import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
 import ScaleByDialog from './ScaleByDialog';
-import NameFacesDialog from './NameFacesDialog';
+import NameSelectionDialog from './NameSelectionDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
+import { characterPreparedSaveExportReady, characterSnapshotExportReady } from './characterExportReadiness';
+import { attachCharacterRigCapability, hasCharacterRigCapability } from '../skeleton/characterRigCapability';
+import { characterRigBodyPartRow, characterRigPartMetadata } from '../skeleton/characterRigPartMetadata';
+import { playerCharacterPackage as boundPlayerCharacterPackage } from '../world/playerCharacterLoader';
 import { PaintPanel } from './PaintSidePanel';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
 import PreferencesDialog from './PreferencesDialog';
 import HotUpdateDialog from './HotUpdateDialog';
+import NativeUpdateNotice, { nativeUpdateApprovalJson, nativeUpdateNoticeFromPayload, type NativeUpdateNoticeState } from './NativeUpdateNotice';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
 import ModelActionMenu from '../library/ModelActionMenu';
@@ -46,6 +51,7 @@ import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
+import { parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -70,9 +76,10 @@ import {
 } from '../data/mapDocuments';
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
-import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
+import { propRigToSkeleton, skeletonToPropRig, describePropRig, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig } from '../../../runtime/skeleton';
+import { createCharacterRigApi, type NativeCharacterRigApi } from '../skeleton/characterRigSession';
 import {
-  activateMapDocumentPainting,
+  activateMapDocumentPaintingAsync,
   applyMapPaintEffects,
   flushMapDocumentPainting,
   defaultMapPaint,
@@ -85,7 +92,8 @@ import MapTexturePicker from '../stage/MapTexturePicker';
 import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
-import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
 import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
@@ -158,8 +166,9 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
-import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
+import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry } from '../data/meshDoc';
+import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
+import { parseModelHistory } from '../model/uvHistory';
 import {
   choosePartAppendRoute,
 } from '../model/partResidency';
@@ -187,6 +196,7 @@ import {
   MODEL_PARTS_UNGROUP_COMMAND_ID,
   modelOutlinerNote,
   modelPartRecords,
+  planDetachedPartHandoff,
   recoverAppendedPartUndoRows,
 } from '../model/outlinerCommand';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
@@ -205,11 +215,11 @@ import { subscribe } from '@reactjit/runtime/ffi';
 // Live modifier state (no re-render) — the outliner's shift-click multi-select
 // (req_2659) reads shift at press time instead of threading it through every row.
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
-import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
+import { getHotState, setHotState, useHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
 import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, nextBuildStarterDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { assetMatchesLibrarySearch } from '../data/librarySearch';
 import { isLibraryCollectionFolder, navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
 import {
@@ -222,13 +232,12 @@ import {
   type LeftPanelId,
   type RightPanelId,
 } from '../data/panelSystem';
-import { playerStarterParts } from '../model/playerStarter';
 import { buildPieceStarterParts } from '../model/buildPieceStarter';
 import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { hasStoredModelPaint, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage } from '../data/modelPackageStore';
+import { hasStoredModelPaint, materializeCharacterSaveSnapshot, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage, stageModelThumbnail, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -250,7 +259,7 @@ import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFol
 import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
 import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
-import { discardModelWorkingCopyState } from '../data/persistenceLifecycle';
+import { discardModelWorkingCopyState, upsertModelPackageProjection } from '../data/persistenceLifecycle';
 import { applyDevReload, devReloadRevision, devReloadWaiting, installDevReloadCheckpoint, setDevReloadPolicy } from '../../../runtime/devReload';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
@@ -369,6 +378,9 @@ export default function AppFrame() {
   const navigate = useNavigate();
   const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
+  const characterRigApiRef = useRef<NativeCharacterRigApi | null>(null);
+  if (characterRigApiRef.current === null) characterRigApiRef.current = createCharacterRigApi();
+  const [characterRigSnapshot, setCharacterRigSnapshot] = useState<CharacterRigSnapshot | null>(null);
   // Migrated application commands read and atomically replace this live
   // snapshot before publishing their outcome. React is a projection of that
   // commit; menu/toolbar/hotkey callers never receive setState.
@@ -376,6 +388,9 @@ export default function AppFrame() {
   stateRef.current = state;
   const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>, targetModelId?: string) => SeatShellReceipt>(
     () => ({ ok: false, reason: 'Agent Seat shell actions are not ready' }),
+  );
+  const stageThumbnailRef = useRef<() => ThumbnailStageResult>(
+    () => ({ ok: false, reason: 'the thumbnail verb is not ready' }),
   );
   const activeSessionTokenRef = useRef(0);
   const activeSessionModelIdRef = useRef<string | null>(null);
@@ -436,10 +451,11 @@ export default function AppFrame() {
   const roleNamerRef = useRef(roleNamerSession);
   roleNamerRef.current = roleNamerSession;
   const [scaleByOpen, setScaleByOpen] = useState(false);
-  const [nameFacesOpen, setNameFacesOpen] = useState(false);
+  const [nameSelectionOpen, setNameSelectionOpen] = useState(false);
   const [prefabCaptureOpen, setPrefabCaptureOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
+  const [nativeUpdateNotice, setNativeUpdateNotice] = useHotState<NativeUpdateNoticeState | null>('editor.native-update-notice.v1', null);
   const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
   const [unsavedActionLabels, setUnsavedActionLabels] = useState<{ save?: string; discard?: string; cancel?: string }>({});
   const unsavedDecisionRef = useRef<{ save: () => void; discard: () => void; cancel?: () => void } | null>(null);
@@ -458,6 +474,8 @@ export default function AppFrame() {
   useEffect(() => editorSettings.subscribe(() => setSettingsRevision((revision) => revision + 1)), []);
   const persistenceSettings = useMemo(editorPersistenceSettings, [settingsRevision]);
   const [manualWorldDirty, setManualWorldDirty] = useState(false);
+  const [mapSwitchPending, setMapSwitchPending] = useState(false);
+  const mapSwitchSerialRef = useRef(0);
   const [modelMutationRevision, setModelMutationRevision] = useState(0);
   const [modelReloadRevision, setModelReloadRevision] = useState(0);
   const retopoGhostVisibleRef = useRef(state.modelTool.retopoGhostVisible);
@@ -528,6 +546,27 @@ export default function AppFrame() {
     return () => clearInterval(timer);
   }, [persistenceSettings.hotUpdate]);
 
+  // Native compiles are candidates, never commands. The supervisor emits this
+  // notice only after compilation completes and watches a one-shot token file;
+  // keeping/collapsing the notice performs no host or model-session mutation.
+  useEffect(() => subscribe('system:notification', (payload: any) => {
+    const ready = nativeUpdateNoticeFromPayload(payload);
+    if (ready) {
+      setNativeUpdateNotice(ready);
+      setState((prev) => ({ ...prev, status: 'Native update compiled — waiting for your approval' }));
+      return;
+    }
+    if (payload?.kind === 'native-update-result') {
+      setNativeUpdateNotice(null);
+      setState((prev) => ({
+        ...prev,
+        status: typeof payload.message === 'string'
+          ? payload.message
+          : payload.ok === true ? 'Native update applied' : 'Native update was not applied',
+      }));
+    }
+  }), []);
+
   // Imported textures register as dynamic ShaderSpecs at boot (and after every
   // import), so they are first-class materials everywhere a catalog material is.
   const reloadImportedTextures = () => {
@@ -565,7 +604,7 @@ export default function AppFrame() {
     if (stlConversionName) return { id: 'stl-conversion', label: 'STL Conversion' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
-    if (nameFacesOpen) return { id: 'name-faces', label: 'Name Faces' };
+    if (nameSelectionOpen) return { id: 'name-selection', label: 'Name Selection' };
     if (prefabCaptureOpen) return { id: 'prefab-capture', label: 'Create Prefab' };
     if (preferencesOpen) return { id: 'preferences', label: 'Preferences', closerCommandId: 'open-preferences' };
     if (hotUpdatePromptOpen) return { id: 'hot-update', label: 'Code Update' };
@@ -1459,17 +1498,6 @@ export default function AppFrame() {
     }
   }, []);
 
-  // Publish the LIVE undo/redo depths (model → the host mesh journal via __mesh_history;
-  // Color Studio → its scoped command journal; world → worldUndo/worldRedo) so menu rows count-annotate and
-  // gray honestly. Every render is an event edge, so the menus read fresh depths whenever
-  // they can possibly be looked at (req_2620 gap W).
-  publishColorStudioUndoDepths(
-    colorStudioHistoryRef.current.undo.length,
-    colorStudioHistoryRef.current.redo.length,
-  );
-  const liveUndoDepths = undoDepths(state);
-  publishUndoDepths(liveUndoDepths);
-
   // ── Durable identity + visible save state (req_2620 gaps S/T/U) ──────────────
   // The model doc in view, resolved through the EFFECTIVE package (session rename
   // applied) — the same record every save writes, so what you see is what lands
@@ -1485,14 +1513,26 @@ export default function AppFrame() {
   // parent effect, so an effect-based select would arrive too late. Non-model
   // documents select token 0 (the primordial no-document session).
   const selectNativeModelSession = (doc: WorkspaceDocument | null) => {
-    const modelId = doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
-    const token = modelId ? modelDocumentToken(modelId) : 0;
-    if ((globalThis as any).__mesh_session_select?.(token) === 1) {
-      activeSessionTokenRef.current = token;
-      activeSessionModelIdRef.current = modelId;
-      seatSessionWedgedRef.current = false;
-    }
+    const reconciled = reconcileNativeModelSession(
+      { token: activeSessionTokenRef.current, modelId: activeSessionModelIdRef.current },
+      doc,
+      (token) => Number((globalThis as any).__mesh_session_select?.(token) ?? 0),
+    );
+    if (reconciled.status === 'refused') return;
+    activeSessionTokenRef.current = reconciled.binding.token;
+    activeSessionModelIdRef.current = reconciled.binding.modelId;
+    seatSessionWedgedRef.current = false;
   };
+  // AppFrame refs restart on a JS hot reload while the native model session and
+  // the persisted workspace document survive it. Re-bind them synchronously,
+  // before ModelView mounts, for the same reason tab switches select here rather
+  // than in an effect: Save and the first post-reload edit must address the
+  // resident model that is already on screen instead of silently receiving null.
+  if (activeSessionModelIdRef.current !== activeModelId) {
+    selectNativeModelSession(
+      state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId) ?? null,
+    );
+  }
   // Native journal outcomes are drained asynchronously. Stamp the resident mesh
   // with this document's compact identity so a tab switch cannot attribute an
   // already-queued transform to the newly active model. Keep prior mappings for
@@ -1546,7 +1586,39 @@ export default function AppFrame() {
   const [, setClaimsPulse] = useState(0);
   useEffect(() => subscribeClaims(() => setClaimsPulse((n) => n + 1)), []);
   const activeModelPkg = activeModelId ? effectiveModelPackage(activeModelId, state.modelOverrides, state.modelDupes) : null;
+  const residentRigSnapshot = characterRigApiRef.current?.currentSnapshot?.() ?? null;
+  const activeRigTarget = characterRigApiRef.current?.currentOpenTarget?.() ?? null;
+  const activeRigDocumentId = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)?.id ?? null;
+  const characterRigHistoryActive = characterRigHistoryShouldOwnInput(
+    activeModelPkg,
+    activeRigDocumentId,
+    state.rightPane,
+    state.rightPanelCollapsed,
+    state.modelTool,
+    characterRigSnapshot,
+    residentRigSnapshot,
+    activeRigTarget,
+  );
+  // Publish the LIVE undo/redo owner. Character rig history wins only while its
+  // pane owns viewport input; mesh/paint/world/material histories retain their
+  // existing authority everywhere else.
+  publishCharacterRigUndoDepths(
+    characterRigSnapshot?.history.undoDepth ?? 0,
+    characterRigSnapshot?.history.redoDepth ?? 0,
+    characterRigHistoryActive,
+  );
+  publishColorStudioUndoDepths(
+    colorStudioHistoryRef.current.undo.length,
+    colorStudioHistoryRef.current.redo.length,
+  );
+  const liveUndoDepths = undoDepths(state);
+  publishUndoDepths(liveUndoDepths);
   const activeModelOnDisk = activeModelPkg ? isMaterialized(activeModelPkg.kind, activeModelPkg.id) : false;
+  useEffect(() => {
+    if (!playing && hasCharacterRigCapability(activeModelPkg)) return;
+    try { characterRigApiRef.current?.close(); } catch { /* host teardown is best-effort */ }
+    setCharacterRigSnapshot(null);
+  }, [playing, activeModelPkg?.id, activeModelPkg?.kind]);
   // Mesh-journal baseline per model: the depth recorded at the last save (reset to
   // 0 on every doc activate — the host journal restarts with the remount). Depth
   // ABOVE the baseline = host-side edits since the last materialize (gizmo, paint,
@@ -1560,11 +1632,24 @@ export default function AppFrame() {
   useEffect(() => {
     if (!activeModelId || liveUndoDepths.source !== 'mesh') return;
     // The commit that switches docs still read the OLD viewer's journal (it only
-    // unmounts with this same commit) — skip one edge per doc so a stale depth
-    // can never dirty the incoming document.
+    // unmounts with this same commit). Defer one native read so the incoming
+    // session is selected before deciding. Merely skipping this edge stranded a
+    // hot-reloaded document clean forever when its next published depth happened
+    // to equal the old scalar value.
     if (dirtyProbeDocRef.current !== state.activeWorkspaceDocumentId) {
-      dirtyProbeDocRef.current = state.activeWorkspaceDocumentId;
-      return;
+      const documentId = state.activeWorkspaceDocumentId;
+      const modelId = activeModelId;
+      dirtyProbeDocRef.current = documentId;
+      const timer = setTimeout(() => {
+        const current = stateRef.current;
+        if (current.activeWorkspaceDocumentId !== documentId || current.modelDirty[modelId]) return;
+        const history = parseModelHistory((globalThis as any).__mesh_history?.());
+        if (history.undo <= (savedMeshDepthRef.current[modelId] ?? 0)) return;
+        setState((prev) => prev.activeWorkspaceDocumentId === documentId && !prev.modelDirty[modelId]
+          ? { ...prev, modelDirty: { ...prev.modelDirty, [modelId]: true } }
+          : prev);
+      }, 0);
+      return () => clearTimeout(timer);
     }
     if (liveUndoDepths.undo > (savedMeshDepthRef.current[activeModelId] ?? 0) && !state.modelDirty[activeModelId]) {
       setState((prev) => ({ ...prev, modelDirty: { ...prev.modelDirty, [activeModelId]: true } }));
@@ -1633,6 +1718,50 @@ export default function AppFrame() {
         }));
         return false;
       }
+    }
+
+    // Characters commit one native revision snapshot: its dense logical remap
+    // feeds both immutable RJMD and RJSK, both artifacts are read back, and the
+    // manifest lands last. The generic meshdoc writer is deliberately bypassed.
+    if (hasCharacterRigCapability(pkg)) {
+      let result: ReturnType<typeof materializeCharacterSaveSnapshot>;
+      try {
+        const prepared = characterRigApiRef.current?.prepareSave();
+        if (!prepared) throw new Error('character rig session is not open');
+        result = materializeCharacterSaveSnapshot(pkg, prepared, characterRigPartMetadata(
+          prepared.descriptor.objectBindings,
+          liveRows,
+          packageMeshDocParts(pkg) ?? [],
+          { name: pkg.name, color: pkg.color },
+        ));
+      } catch (error) {
+        result = {
+          ok: false,
+          id: pkg.id,
+          dir: pkg.path,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      const committed = result.package;
+      if (result.ok && committed) {
+        consumeModelSaveAuthorizations(pkg.id);
+        upsertSavedPackage(committed);
+        const depths = undoDepths(current);
+        savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
+      }
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        modelDirty: result.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
+        modelDupes: result.ok && committed
+          ? upsertModelPackageProjection(prev.modelDupes, committed)
+          : prev.modelDupes,
+        status: result.ok
+          ? `${reason}: character revision committed → ${result.dir}`
+          : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
+      }));
+      return result.ok;
     }
 
     const rigDraft = current.modelRigs[pkg.id];
@@ -1710,7 +1839,47 @@ export default function AppFrame() {
     setState(next);
   };
   const markActiveModelDirty = () => {
-    if (activeSessionModelIdRef.current) markModelDirty(activeSessionModelIdRef.current);
+    const modelId = activeSessionModelIdRef.current;
+    if (!modelId) return;
+    markModelDirty(modelId);
+
+    // Mesh edits happen in the resident native document. Ask the native rig
+    // owner to compare its live topology, semantics, object membership, and
+    // fitted-shape baseline immediately after each completed mutation. This
+    // keeps the inspector and export dialog from holding a stale green result
+    // without copying geometry arrays into React state.
+    const current = stateRef.current;
+    const pkg = effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes);
+    const api = characterRigApiRef.current;
+    if (!hasCharacterRigCapability(pkg) || !api?.currentSnapshot()) return;
+    try {
+      setCharacterRigSnapshot(api.snapshot());
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        status: `Character readiness refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+      }));
+    }
+  };
+
+  const assignHumanoidSemantic = (membership: HumanoidSemanticMembership) => {
+    const receipt = withNativeMeshActionSource('dock', () =>
+      modelToolApiRef.current?.assignHumanoidSemantic(membership) ?? null);
+    if (!receipt) {
+      setState((prev) => ({ ...prev, status: 'humanoid anatomy assignment is unavailable — restart into the rebuilt editor' }));
+      return;
+    }
+    if (!receipt.applied) {
+      setState((prev) => ({ ...prev, status: receipt.reason ?? `no faces changed for ${receipt.roleKey}` }));
+      return;
+    }
+    markActiveModelDirty();
+    setState((prev) => ({
+      ...prev,
+      status: receipt.changed > 0
+        ? `assigned ${receipt.changed} selected face${receipt.changed === 1 ? '' : 's'} to ${receipt.roleKey} — display name remains "${receipt.displayName}"`
+        : `assigned stable role ${receipt.roleKey} to display region "${receipt.displayName}"`,
+    }));
   };
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
@@ -1802,12 +1971,10 @@ export default function AppFrame() {
   };
 
   // ── Named map-document lifecycle ───────────────────────────────────────────
-  // A switch is a small transaction across the two persistence owners:
-  // validate target world.json → synchronously flush BOTH outgoing concerns →
-  // replace the native painting → persist/point at target → replace every
-  // React-authored map slice. Any failure reloads the just-flushed outgoing
-  // painting and leaves the active pointer/state untouched.
-  const switchMapDocument = (
+  // A switch is a transaction across the two persistence owners. The large
+  // target painting prepares off-thread while the outgoing world stays visible
+  // and read-only; publication is one native ownership handoff.
+  const switchMapDocument = async (
     stem: string,
     target: WorldSave,
     verb: 'opened' | 'created',
@@ -1816,7 +1983,7 @@ export default function AppFrame() {
     bypassUnsavedPrompt = false,
     discardOutgoing = false,
     initializePainting: (() => GeneratedMapPaintingInstallation) | null = null,
-  ) => {
+  ): Promise<void> => {
     if (outgoingTriangles !== null) recordMapDocumentRenderStats(state.activeMapStem, outgoingTriangles);
     if (stem === state.activeMapStem) {
       setState((prev) => ({ ...prev, mapDocumentOpen: false, openMenu: null, status: `${name} is already the active map` }));
@@ -1826,12 +1993,16 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: 'map switch unavailable — rebuild/run the editor with the game-map host enabled' }));
       return;
     }
+    if (mapSwitchPending) {
+      setState((prev) => ({ ...prev, status: 'a map switch is already preparing — the current world remains live' }));
+      return;
+    }
 
     if (!bypassUnsavedPrompt && !persistenceSettings.autosave && manualWorldDirty) {
       requestUnsavedDecision(
         state.activeMapName,
-        () => { if (saveWorldNowAll()) switchMapDocument(stem, target, verb, name, outgoingTriangles, true, false, initializePainting); },
-        () => switchMapDocument(stem, target, verb, name, outgoingTriangles, true, true, initializePainting),
+        () => { if (saveWorldNowAll()) void switchMapDocument(stem, target, verb, name, outgoingTriangles, true, false, initializePainting); },
+        () => { void switchMapDocument(stem, target, verb, name, outgoingTriangles, true, true, initializePainting); },
         verb === 'created' ? () => { deleteMapDocument(stem, state.activeMapStem); } : undefined,
       );
       return;
@@ -1851,53 +2022,80 @@ export default function AppFrame() {
     // Old authoring events are audit-feed material only; drain them before the
     // target state lands so they cannot be mislabeled with the target's legend.
     mapEventDrain();
-    const activation = activateMapDocumentPainting(stem, target.zones);
-    if (!activation.ok) {
-      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
-      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
+    const serial = ++mapSwitchSerialRef.current;
+    setMapSwitchPending(true);
+    setState((prev) => {
+      const mapPaint = prev.mapPaint.active
+        ? { ...prev.mapPaint, active: false, texturePickerOpen: false }
+        : prev.mapPaint;
+      if (mapPaint !== prev.mapPaint) applyMapPaintEffects(prev.mapPaint, mapPaint);
+      return {
+        ...prev,
+        mapPaint,
+        mapDocumentOpen: false,
+        openMenu: null,
+        status: `opening ${name} — current map is read-only while terrain prepares`,
+      };
+    });
+
+    try {
+      const activation = await activateMapDocumentPaintingAsync(stem, target.zones);
+      if (!activation.ok) {
+        const rollback = activation.replaced
+          ? await activateMapDocumentPaintingAsync(outgoingStem, outgoingZones)
+          : null;
+        if (!activation.replaced) setMapDocumentAutosave(persistenceSettings.autosave);
+        const restored = rollback === null || rollback.ok;
+        const cleanup = verb === 'created' && restored ? deleteMapDocument(stem, outgoingStem) : null;
+        setState((prev) => ({
+          ...prev,
+          status: `map switch refused — ${activation.error}${restored ? '; current map retained' : `; WARNING: current map reload also failed (${rollback && !rollback.ok ? rollback.error : 'unknown error'})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+        }));
+        return;
+      }
+
+      const initialized = initializePainting?.() ?? null;
+      if (initialized && !initialized.ok) {
+        const rollback = await activateMapDocumentPaintingAsync(outgoingStem, outgoingZones);
+        const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
+        setState((prev) => ({
+          ...prev,
+          status: `map generation stopped — ${initialized.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+        }));
+        return;
+      }
+
+      if (!saveWorldNow(target) || !setActiveMapDocumentStem(stem)) {
+        const rollback = await activateMapDocumentPaintingAsync(outgoingStem, outgoingZones);
+        const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
+        setState((prev) => ({
+          ...prev,
+          status: `map switch stopped — could not commit ${stem}'s world save/pointer${rollback.ok ? '; current map restored' : `; WARNING: current map reload failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+        }));
+        return;
+      }
+
+      const bindings = initialized?.bindings ?? activation.bindings;
+      const contentSummary = initialized
+        ? `${initialized.chunks} chunks, ${initialized.roads} roads, ${initialized.rails} rail lines, ${target.pieces.length} floor anchors`
+        : activation.seeded
+          ? 'clean seed chunk'
+          : `${activation.chunks} chunks, ${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`;
+      skipNextWorldDirtyRef.current = true;
       setState((prev) => ({
         ...prev,
-        status: `map switch refused — ${activation.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+        ...mapAuthoringSlicesFor(prev, stem, target, bindings, name),
+        openMenu: null,
+        actionMenu: 'File',
+        status: `${verb} map ${name} — ${contentSummary}; all map authoring switched together`,
       }));
-      return;
+      setManualWorldDirty(false);
+    } catch (error) {
+      setMapDocumentAutosave(persistenceSettings.autosave);
+      setState((prev) => ({ ...prev, status: `map switch failed — ${(error as Error).message}; current map retained` }));
+    } finally {
+      if (mapSwitchSerialRef.current === serial) setMapSwitchPending(false);
     }
-
-    const initialized = initializePainting?.() ?? null;
-    if (initialized && !initialized.ok) {
-      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
-      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
-      setState((prev) => ({
-        ...prev,
-        status: `map generation stopped — ${initialized.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
-      }));
-      return;
-    }
-
-    if (!saveWorldNow(target) || !setActiveMapDocumentStem(stem)) {
-      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
-      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
-      setState((prev) => ({
-        ...prev,
-        status: `map switch stopped — could not commit ${stem}'s world save/pointer${rollback.ok ? '; current map restored' : `; WARNING: current map reload failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
-      }));
-      return;
-    }
-
-    const bindings = initialized?.bindings ?? activation.bindings;
-    const contentSummary = initialized
-      ? `${initialized.chunks} chunks, ${initialized.roads} roads, ${initialized.rails} rail lines, ${target.pieces.length} floor anchors`
-      : activation.seeded
-        ? 'clean seed chunk'
-        : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`;
-    skipNextWorldDirtyRef.current = true;
-    setState((prev) => ({
-      ...prev,
-      ...mapAuthoringSlicesFor(prev, stem, target, bindings, name),
-      openMenu: null,
-      actionMenu: 'File',
-      status: `${verb} map ${name} — ${contentSummary}; all map authoring switched together`,
-    }));
-    setManualWorldDirty(false);
   };
 
   const openMapDocument = (stem: string, currentTriangles: number | null = null) => {
@@ -1907,7 +2105,7 @@ export default function AppFrame() {
       return;
     }
     const target = result.save ?? emptyWorldSave(stem, state.seq);
-    switchMapDocument(stem, target, 'opened', mapDocumentName(stem), currentTriangles);
+    void switchMapDocument(stem, target, 'opened', mapDocumentName(stem), currentTriangles);
   };
 
   const createNewMap = (rawName = 'untitled', currentTriangles: number | null = null) => {
@@ -1918,7 +2116,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `could not create map — ${(error as Error).message}; current map left untouched` }));
       return;
     }
-    switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created', mapDocumentName(stem), currentTriangles);
+    void switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created', mapDocumentName(stem), currentTriangles);
   };
 
   const createCoastalMap = (rawName: string, seed: number, currentTriangles: number | null = null) => {
@@ -1956,7 +2154,7 @@ export default function AppFrame() {
       return;
     }
 
-    switchMapDocument(
+    void switchMapDocument(
       stem,
       target,
       'created',
@@ -1994,33 +2192,47 @@ export default function AppFrame() {
   };
 
   const scaleBySourceRef = useRef('dock');
-  const nameFacesSourceRef = useRef('dock');
+  const nameSelectionSourceRef = useRef('dock');
   const pathArraySourceRef = useRef('dock');
   const addPartSourceRef = useRef('dock');
   // The live semantic table's names — the dialog's reuse chips. Read straight off
   // the resident door; an unreadable/absent table is just "no chips yet".
   const residentRegionNames = (): string[] => {
     try {
-      const parsed = JSON.parse(String((globalThis as any).__mesh_semantic_state?.() ?? 'null'));
-      if (parsed?.table?.version !== 1 || !Array.isArray(parsed.table.regions)) return [];
-      return (parsed.table.regions as { name?: unknown }[])
+      const state = JSON.parse(String((globalThis as any).__mesh_semantic_state?.() ?? 'null'));
+      const table = parseMeshSemanticTable(state?.table);
+      if (!table) return [];
+      return [...table.regions, ...(table.edgeRegions ?? [])]
         .map((region) => String(region?.name ?? ''))
         .filter((name) => name.length > 0)
         .sort();
     } catch { return []; }
   };
-  const applyNameFaces = (name: string) => {
-    const result = withNativeMeshActionSource(nameFacesSourceRef.current, () => modelToolApiRef.current?.nameSelection(name));
-    setNameFacesOpen(false);
+  const applyNameSelection = (name: string, role: MeshEdgeSemanticRole) => {
+    const edge = state.modelTool.selMode === 2;
+    const objectId = state.modelActivePartId;
+    if (edge && !objectId) {
+      setState((prev) => ({ ...prev, status: 'edge naming needs one active Outliner owner' }));
+      return;
+    }
+    const request = edge
+      ? { kind: 'edge' as const, name, role, objectId: objectId! }
+      : { kind: 'face' as const, name };
+    const result = withNativeMeshActionSource(nameSelectionSourceRef.current, () => modelToolApiRef.current?.nameSelection(request));
+    setNameSelectionOpen(false);
     setState((prev) => ({
       ...prev,
       contextOpen: false,
       openMenu: null,
       status: result == null
-        ? 'semantic naming is unavailable — restart into the rebuilt editor'
+        ? edge
+          ? 'edge naming refused — select one connected, non-branching edge chain or loop in one Outliner part'
+          : 'semantic naming is unavailable — restart into the rebuilt editor'
         : result.changed > 0
-          ? `named ${result.changed} faces "${name}" — save to make it durable`
-          : 'select one or more faces before naming',
+          ? result.kind === 'edge'
+            ? `named ${result.changed}-edge ${result.closed ? 'loop' : 'chain'} "${name}" (${result.role}) — save to make it durable`
+            : `named ${result.changed} faces "${name}" — save to make it durable`
+          : `select one or more ${edge ? 'edges' : 'faces'} before naming`,
     }));
     if ((result?.changed ?? 0) > 0) markActiveModelDirty();
   };
@@ -2052,6 +2264,31 @@ export default function AppFrame() {
       mapPaint: { ...prev.mapPaint, tileBindings },
       status: `${verb} ${MAP_HISTORY_LABEL[result.kind]} — ${result.undo} undo · ${result.redo} redo`,
     }));
+  };
+
+  const rigUndoRedo = (redo: boolean) => {
+    const verb = redo ? 'redo' : 'undo';
+    const api = characterRigApiRef.current;
+    if (!characterRigHistoryActive || !api) {
+      setState((prev) => ({ ...prev, status: `nothing to ${verb} in character rig history` }));
+      return;
+    }
+    try {
+      const restored = redo ? api.redo() : api.undo();
+      setCharacterRigSnapshot(restored);
+      const modelId = api.currentOpenTarget?.()?.modelId ?? activeModelId;
+      if (modelId) markModelDirty(modelId);
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        status: `${verb} character rig edit — ${redo ? restored.history.redoDepth : restored.history.undoDepth} ${verb} step${(redo ? restored.history.redoDepth : restored.history.undoDepth) === 1 ? '' : 's'} remain`,
+      }));
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        status: `character rig ${verb} failed: ${error instanceof Error ? error.message : String(error)}`,
+      }));
+    }
   };
 
   const runCommand = (commandId: string, source: string) => {
@@ -2214,9 +2451,25 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Scale By opened — ${source}` }));
       return;
     }
-    if (commandId === 'mesh-name-faces') {
-      nameFacesSourceRef.current = source;
-      setNameFacesOpen(true);
+    if (commandId === 'mesh-align-loop') {
+      const axis = withNativeMeshActionSource(source, () => modelToolApiRef.current?.alignLoop() ?? -1);
+      setState((prev) => ({
+        ...prev,
+        contextOpen: false,
+        openMenu: null,
+        status: axis >= 0 && axis <= 2
+          ? `aligned selected loop on ${'XYZ'[axis]} at its center — one Undo${state.modelTool.mirror ? ', mirrored' : ''}`
+          : 'align loop: select a skewed vertex row or at least two connected loop edges',
+      }));
+      return;
+    }
+    if (commandId === 'mesh-name-selection') {
+      if (state.modelTool.selMode !== 2 && state.modelTool.selMode !== 3) {
+        setState((prev) => ({ ...prev, status: 'Name Selection works in Edge or Face mode' }));
+        return;
+      }
+      nameSelectionSourceRef.current = source;
+      setNameSelectionOpen(true);
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Name Faces opened — ${source}` }));
       return;
     }
@@ -2260,6 +2513,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-sym-z') api.toggleMirror(2);
         else if (commandId === 'mesh-extrude') (state.modelTool.selMode === 3 ? api.extrudeFace() : api.extrudeEdge());
         else if (commandId === 'mesh-extrude-face') api.extrudeFace();
+        else if (commandId === 'mesh-face-polygon') api.facePolygon();
         else if (commandId === 'mesh-create-face') api.createFace();
         else if (commandId === 'mesh-weld') api.weld();
         else if (commandId === 'mesh-bevel') api.bevel();
@@ -2375,6 +2629,7 @@ export default function AppFrame() {
       // journal (mid-paint mesh mutations are gated anyway).
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') {
+        if (characterRigHistoryActive) { rigUndoRedo(false); return; }
         if (state.modelTool.paint) { paintUndoRedo(false); return; }
         meshUndoRedo(false, source);
         return;
@@ -2389,6 +2644,7 @@ export default function AppFrame() {
     if (command.id === 'redo-local') {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') {
+        if (characterRigHistoryActive) { rigUndoRedo(true); return; }
         if (state.modelTool.paint) { paintUndoRedo(true); return; }
         meshUndoRedo(true, source);
         return;
@@ -2592,12 +2848,6 @@ export default function AppFrame() {
     if (command.id.startsWith('new-build-starter-')) {
       const starterId = command.id.slice('new-build-starter-'.length) as BuildPieceStarterId;
       createBuildPieceStarterDocument(starterId);
-      return;
-    }
-    if (command.id === 'new-model-player') {
-      // New Mesh → Player / NPC Model: the starter opens straight into the editor —
-      // its dimensions are the stand-pose data table, so there is no size dialog.
-      createPlayerModelDocument();
       return;
     }
     if (command.id === 'export-character') {
@@ -3012,6 +3262,55 @@ export default function AppFrame() {
       modelDirty: { ...prev.modelDirty, [pkgId]: true },
       status: `rig: ${describePropRig(rig)}`,
     }));
+  };
+
+  const attachCharacterRig = (pkgId: string) => {
+    const current = stateRef.current;
+    const pkg = effectiveModelPackage(pkgId, current.modelOverrides, current.modelDupes);
+    if (!pkg) return;
+    const objectIds = (current.modelParts[pkg.id] ?? [])
+      .slice()
+      .sort((left, right) => (left.lo ?? Number.MAX_SAFE_INTEGER) - (right.lo ?? Number.MAX_SAFE_INTEGER))
+      .map((part) => part.id);
+    const bodyRow = objectIds.length === 0
+      ? characterRigBodyPartRow(
+          pkg.id,
+          pkg,
+          pkg.primitive
+            ? { kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive) }
+            : pkg.viewerPath && isViewerFile(pkg.viewerPath)
+              ? { sourcePath: pkg.viewerPath }
+              : {},
+        )
+      : null;
+    if (bodyRow) objectIds.push(bodyRow.id);
+    try {
+      const attached = attachCharacterRigCapability(pkg, objectIds);
+      setCharacterRigSnapshot(null);
+      setState((prev) => ({
+        ...prev,
+        modelDupes: prev.modelDupes.some((model) => model.id === attached.id)
+          ? prev.modelDupes.map((model) => model.id === attached.id ? attached : model)
+          : [...prev.modelDupes, attached],
+        // Explicitly opting an unpartitioned resident mesh into rigging gives it
+        // one durable body object with the exact id authored into the descriptor.
+        // ModelView keeps the same key across this projection change, so live
+        // host edits are not replaced by the file/primitive seed.
+        ...(bodyRow ? {
+          modelParts: { ...prev.modelParts, [attached.id]: [bodyRow] },
+          modelActivePartId: bodyRow.id,
+        } : {}),
+        modelDirty: { ...prev.modelDirty, [attached.id]: true },
+        rightPane: 'rig',
+        rightPanelCollapsed: false,
+        status: `Humanoid rig attached to “${attached.name}” — geometry and model category are unchanged; choose Player or NPC only when exporting.`,
+      }));
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        status: `Humanoid rig could not attach: ${error instanceof Error ? error.message : String(error)}`,
+      }));
+    }
   };
 
   const setModelTextureSlots = (pkgId: string, textureSlots: ModelTextureSlot[]) => {
@@ -3862,19 +4161,21 @@ export default function AppFrame() {
       lo: range.lo,
       hi: range.hi,
     };
-    const nextParts = [...parts, placed];
-    selectedPartIdsRef.current = [placed.id];
-    setSelectedPartIds([placed.id]);
-    pushPartSetToHost({ visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode }, nextParts, [placed.id], placed.id);
-    (globalThis as any).__mesh_journal_note?.(JSON.stringify({
-      modelId,
-      parts: nextParts.map(({ mesh: _mesh, ...rest }) => rest),
-    }));
+    const handoff = planDetachedPartHandoff(modelId, parts, placed);
+    selectedPartIdsRef.current = handoff.selectedIds;
+    setSelectedPartIds(handoff.selectedIds);
+    pushPartSetToHost(
+      { visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode },
+      handoff.parts,
+      handoff.selectedIds,
+      handoff.primaryId,
+    );
+    (globalThis as any).__mesh_journal_note?.(handoff.journalNote);
     setState((previous) => ({
       ...previous,
       seq: previous.seq + 1,
-      modelParts: { ...previous.modelParts, [modelId]: nextParts },
-      modelActivePartId: placed.id,
+      modelParts: { ...previous.modelParts, [modelId]: handoff.parts },
+      modelActivePartId: handoff.primaryId,
       modelDirty: { ...previous.modelDirty, [modelId]: true },
       status: `agent detached selection → ${placed.name} [${range.lo},${range.hi})`,
     }));
@@ -4234,93 +4535,74 @@ export default function AppFrame() {
     });
   };
 
-  // File → New Mesh → Player / NPC Model (req_2761): a fresh CHARACTER document
-  // seeded with the whole humanoid starter — one part per body bone (the outliner
-  // reads as the skeleton), the body formation riding the package as rig truth.
-  // No size dialog: the starter's stand-pose table IS its dimensions.
-  const createPlayerModelDocument = () => {
-    // Minted + retired before the document exists — see createNewMeshDocument.
-    const mid = nextPlayerModelDocId(stateRef.current.workspaceDocuments);
-    rememberMintedModelId(mid);
-    const doc = modelDocument(playerModelPackage(mid));
-    selectNativeModelSession(doc);
-    setState((prev) => {
-      const seeded = playerStarterParts();
-      const rangeById = new Map(composeModelParts(seeded).ranges.map((r) => [r.id, r]));
-      const parts = seeded.map((p) => {
-        const range = rangeById.get(p.id);
-        return { ...p, lo: range?.lo ?? 0, hi: range?.hi ?? 0 };
-      });
-      return {
-        ...prev,
-        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
-        activeWorkspaceDocumentId: doc.id,
-        modelParts: { ...prev.modelParts, [mid]: parts },
-        modelActivePartId: parts[0]?.id ?? prev.modelActivePartId,
-        materialFocused: false, contextOpen: false, newMeshPrompt: null,
-        openMenu: null, actionMenu: 'File',
-        status: `new player/NPC model — ${parts.length} body parts`,
-      };
-    });
-  };
-
-  // The package currently declared as THE played model, if any — the character
-  // export dialog names it, and a player-role export replaces it (req_2771).
-  // Session dupes carry the freshest declarations; the disk-loaded roster backs.
+  // The current WELDED, bound played model, if any. Retired segmented packages
+  // keep their historical role declarations untouched, but never enter the
+  // replacement/demotion path. Session dupes carry the freshest declarations.
   const currentPlayerCharacter = (): ModelPackage | null => {
-    const isPlayer = (m: ModelPackage) => m.placeable?.as === 'character' && m.placeable.role === 'player';
-    return state.modelDupes.find(isPlayer) ?? MODEL_PACKAGES.find(isPlayer) ?? null;
+    const current = new Map(MODEL_PACKAGES.map((model) => [model.id, model]));
+    for (const model of stateRef.current.modelDupes) current.set(model.id, model);
+    return boundPlayerCharacterPackage([...current.values()]);
   };
 
-  // Export → Player / NPC Model, confirmed (req_2771/req_2777). Tags along the
-  // prop/build export shape exactly: export implies save (artifacts land first),
-  // the declaration writes into the manifest (req_2718 disk truth), the roster
-  // mirrors it. The SKELETON is compiled FROM THE LIVE OUTLINER at export — the
-  // prop rig's measured-at-export law: part name → bone id is the binding, rest
-  // transforms stamp from the just-written meshdoc's measured range centers, a
-  // deleted part simply binds nothing, and strays report LOUDLY. Player role is
-  // EXCLUSIVE: any other package declared player demotes to NPC in the same move.
+  // Character export is only a role declaration on an already valid native
+  // bind snapshot. It never compiles a skeleton from part names and never runs
+  // the solver: the same immutable RJMD/RJSK transaction used by Save lands
+  // first, then that manifest advertises player/NPC placeability.
   const exportCharacterAs = (role: CharacterRole) => {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
-    if (!pkg) {
-      setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
+    if (!pkg || !hasCharacterRigCapability(pkg)) {
+      setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Character export needs an open model with a humanoid rig attached.' }));
       return;
     }
-    const liveRows = state.modelParts[pkg.id] ?? [];
-    if (!writeModelArtifacts(
-      pkg,
-      partsMetaFromRows(liveRows),
-      meshDocPartRangesFromRows(liveRows) ?? undefined,
-      partShrinkSaveOptions(pkg.id, liveRows.length),
-    )) {
-      setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Character export stopped: the model document could not be saved without losing part ranges.' }));
+    let currentRigSnapshot: CharacterRigSnapshot;
+    try {
+      const refreshed = characterRigApiRef.current?.snapshot();
+      if (!refreshed) throw new Error('character rig session is not open');
+      currentRigSnapshot = refreshed;
+      setCharacterRigSnapshot(refreshed);
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        status: `Character export could not refresh readiness: ${error instanceof Error ? error.message : String(error)}`,
+      }));
+      return;
+    }
+    if (!characterSnapshotExportReady(currentRigSnapshot)) {
+      setState((prev) => ({ ...prev, status: 'Character export blocked — complete every readiness check in Character · Rig.' }));
+      return;
+    }
+    const placeable: ModelPlaceable = { as: 'character', role };
+    let committed: ReturnType<typeof materializeCharacterSaveSnapshot>;
+    try {
+      const prepared = characterRigApiRef.current?.prepareSave();
+      if (!prepared) throw new Error('character rig session is not open');
+      if (!characterPreparedSaveExportReady(prepared)) {
+        throw new Error('resident character changed after readiness refresh and now needs a bind');
+      }
+      committed = materializeCharacterSaveSnapshot(
+        { ...pkg, placeable },
+        prepared,
+        characterRigPartMetadata(
+          prepared.descriptor.objectBindings,
+          state.modelParts[pkg.id] ?? [],
+          packageMeshDocParts(pkg) ?? [],
+          { name: pkg.name, color: pkg.color },
+        ),
+      );
+    } catch (error) {
+      committed = { ok: false, id: pkg.id, dir: pkg.path, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (!committed.ok || !committed.package) {
+      setState((prev) => ({
+        ...prev,
+        exportCharacterPrompt: null,
+        status: `Character export failed before manifest cutover: ${committed.error ?? 'unknown transaction error'}`,
+      }));
       return;
     }
     consumeModelSaveAuthorizations(pkg.id);
-    // Measured part centers off the meshdoc just written (host truth). Ranges
-    // pair with rows by RANK (both ascend by lo — the parts.json contract); a
-    // failed write degrades to name-only rows (binding holds, transforms identity).
-    const freshDoc = packageMeshDoc(pkg);
-    const centers = freshDoc ? meshDocRangeCenters(freshDoc) : [];
-    const rowsByLo = liveRows.slice().sort((a, b) => ((a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER)));
-    const partRows: CharacterPartRow[] = rowsByLo.map((row, rank) => ({ name: row.name, center: centers[rank] ?? undefined }));
-    const compiled = partsToCharacterSkeleton(authoredModelIdForPackage(pkg.id), partRows);
-    const placeable: ModelPlaceable = { as: 'character', role };
-    // The package keeps its own kind (its category dir on disk); the CHARACTER
-    // declaration is the placeable role, not a kind rewrite — rewriting kind on
-    // an already-materialized package would split it across two category dirs.
-    const pkgExported: ModelPackage = { ...pkg, placeable, skeleton: compiled.skeleton };
-    const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
-    let disk: string;
-    if (firstMaterialize) {
-      const res = materializeModelPackage(pkgExported);
-      disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
-    } else {
-      disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton: compiled.skeleton })
-        ? 'manifest updated'
-        : 'MANIFEST WRITE FAILED — export is session-only';
-    }
+    const pkgExported = committed.package;
     upsertSavedPackage(pkgExported);
     // ONE played model: demote the previous holder to NPC, on disk and in the roster.
     const previous = role === 'player' ? currentPlayerCharacter() : null;
@@ -4332,11 +4614,6 @@ export default function AppFrame() {
       upsertSavedPackage(demoted);
     }
     const roleLabel = role === 'player' ? 'THE PLAYER model' : 'an NPC model';
-    // The binding readout is part of the export's own report — silent truncation
-    // is the disease; "26/28 bind" + the stray names is the cure.
-    const bindReport = `${compiled.bound.length}/${liveRows.length} parts bind`
-      + (compiled.unbound.length ? ` · unbound: ${compiled.unbound.join(', ')}` : '')
-      + (compiled.duplicates.length ? ` · DUPLICATE bone claims: ${compiled.duplicates.join(', ')}` : '');
     setState((prev) => ({
       ...prev,
       exportCharacterPrompt: null,
@@ -4347,7 +4624,7 @@ export default function AppFrame() {
           : [...dupes, changed],
         prev.modelDupes,
       ),
-      status: `Exported "${pkg.name}" as ${roleLabel} — ${bindReport} — ${disk}${demoted ? ` · "${demoted.name}" demoted to NPC` : ''}`,
+      status: `Exported "${pkg.name}" as ${roleLabel} — saved RJMD v5 + RJSK v1 weights${demoted ? ` · "${demoted.name}" demoted to NPC` : ''}`,
     }));
   };
 
@@ -4362,13 +4639,7 @@ export default function AppFrame() {
     // the first eval created — minting ANOTHER fresh doc would switch documents and
     // defeat the host-session resume (req_2913's reload proof rides this harness).
     if (stateRef.current.workspaceDocuments.some((d) => d.kind === 'model')) return;
-    if (kind === 'player') createPlayerModelDocument();
-    else if (kind === 'player-export') {
-      // Headless repro of the character-export dialog (req_2771): boot the player
-      // starter doc with the role choice open.
-      createPlayerModelDocument();
-      setState((prev) => ({ ...prev, exportCharacterPrompt: true }));
-    } else if (kind === 'playtest') {
+    if (kind === 'playtest') {
       // Headless repro of the playtest tab (req_2780): the embodied world with
       // the exported player model (or the stand-in when none is declared).
       selectNativeModelSession(PLAYTEST_DOCUMENT);
@@ -5142,7 +5413,8 @@ export default function AppFrame() {
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
   // paint stay put). The panel becomes the focused part, ready to grab with the gizmo.
   const runDetachSelection = (source = 'dock') => {
-    const mid = activePartsModelId(state);
+    const current = stateRef.current;
+    const mid = activePartsModelId(current);
     const api = modelToolApiRef.current;
     if (!mid || !api) {
       setState((prev) => ({ ...prev, status: 'detach needs an open multi-part model document' }));
@@ -5153,16 +5425,32 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: 'detach: select faces first (face mode) — and the whole mesh cannot detach from itself' }));
       return;
     }
-    const parts = state.modelParts[mid] ?? [];
+    const parts = current.modelParts[mid] ?? [];
     const n = parts.filter((p) => p.id.startsWith('part:detach:')).length + 1;
-    const placed: ModelPart = { id: `part:detach:${state.seq}`, name: `Detached ${n}`, visible: true, color: PART_TINTS[parts.length % PART_TINTS.length]!, lo: r.lo, hi: r.hi };
-    setState((prev) => ({
-      ...prev,
-      seq: prev.seq + 1,
-      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), placed] },
-      modelActivePartId: placed.id,
+    const placed: ModelPart = { id: `part:detach:${current.seq}`, name: `Detached ${n}`, visible: true, color: PART_TINTS[parts.length % PART_TINTS.length]!, lo: r.lo, hi: r.hi };
+    const handoff = planDetachedPartHandoff(mid, parts, placed);
+    // This is deliberately synchronous. Ctrl+A / gizmo move can arrive before a
+    // React effect; both must already see the detached range and the next journal
+    // snapshot must already carry the appended Outliner row.
+    selectedPartIdsRef.current = handoff.selectedIds;
+    setSelectedPartIds(handoff.selectedIds);
+    pushPartSetToHost(
+      { visible: true, paint: current.modelTool.paint, selMode: current.modelTool.selMode },
+      handoff.parts,
+      handoff.selectedIds,
+      handoff.primaryId,
+    );
+    (globalThis as any).__mesh_journal_note?.(handoff.journalNote);
+    const next = {
+      ...current,
+      seq: current.seq + 1,
+      modelParts: { ...current.modelParts, [mid]: handoff.parts },
+      modelActivePartId: handoff.primaryId,
+      modelDirty: { ...current.modelDirty, [mid]: true },
       status: `detached selection → ${placed.name} [${r.lo},${r.hi})`,
-    }));
+    };
+    stateRef.current = next;
+    setState(next);
   };
 
   // Merge exactly the shift-selected outliner set into its PRIMARY (last-clicked) row.
@@ -5711,10 +5999,23 @@ export default function AppFrame() {
     try {
       if (action === 'editor-status') {
         const block = blockingNowRef.current(live);
+        const activeDocument = live.workspaceDocuments.find((document) => document.id === live.activeWorkspaceDocumentId) ?? null;
         return ok({
           status: live.status,
           blocking: block ? { id: block.id, label: block.label } : null,
           unsavedDocumentName,
+          activeWorkspaceDocumentId: live.activeWorkspaceDocumentId,
+          activeSurface: activeSurface(live),
+          activeDocument: activeDocument ? {
+            id: activeDocument.id,
+            kind: activeDocument.kind,
+            sourceId: activeDocument.sourceId,
+          } : null,
+          activeSessionModelId: activeSessionModelIdRef.current,
+          activePartsModelId: activePartsModelId(live),
+          modelDirty: modelId ? Boolean(live.modelDirty[modelId]) : null,
+          paintLayoutStale: (globalThis as any).__model_paint_layout_stale?.() === 1,
+          modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
         });
       }
       if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
@@ -5727,6 +6028,14 @@ export default function AppFrame() {
         if (!id || command.id !== id) return fail(`unknown editor command "${id}"`);
         runCommandRef.current(id, 'seat');
         return ok({ id, name: command.name });
+      }
+      if (action === 'thumbnail') {
+        // The staged product shot (req_4044). It renders the VISIBLE viewport's
+        // orbit scene, so it belongs to the model on screen — a background lane
+        // has no framed view to shoot.
+        if (background) return fail('a thumbnail is shot from the visible viewport; a background model is not the document on screen');
+        const staged = stageThumbnailRef.current();
+        return staged.ok ? ok({ path: staged.path }) : fail(staged.reason ?? 'thumbnail was not staged');
       }
       if (action === 'part-select') {
         if (!modelId) return fail('open a multipart model first');
@@ -6268,7 +6577,8 @@ export default function AppFrame() {
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
   //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
   //   modifier record for the call) · add:kind · import:model-id · eye:i · dup:i · mirror:i,axis ·
-  //   del:i · merge · undo · redo · wait:frames · report (rows + selected set + primary) ·
+  //   del:i · merge · thumb (stage the viewport as the package thumbnail) · undo · redo ·
+  //   wait:frames · report (rows + selected set + primary) ·
   //   audit (adds face counts + host selection) · dump:/abs/path (machine-readable audit) ·
   //   undodump:/abs/path (synchronous restored-note probe, before deferred reconciliation).
   // Handlers are per-render closures — the ref keeps the once-installed timer calling
@@ -6309,6 +6619,12 @@ export default function AppFrame() {
         h.duplicatePartById(id, axis);
       }
       else if (name === 'del' && id) h.deletePart(id);
+      else if (name === 'thumb') {
+        // Headless proof for the staged product shot (req_4044): shoots the
+        // current viewport into the package exactly like the Model Focus verb.
+        const staged = stageThumbnailRef.current();
+        console.error(`[partops] thumb → ${JSON.stringify(staged)}`);
+      }
       else if (name === 'merge') h.mergeSelectedParts();
       else if (name === 'undo') h.meshUndoRedo(false);
       else if (name === 'redo') h.meshUndoRedo(true);
@@ -6382,7 +6698,7 @@ export default function AppFrame() {
         else if (block.id === 'import-part') setImportPartOpen(false);
         else if (block.id === 'path-array') setPathArrayPrompt(null);
         else if (block.id === 'scale-by') setScaleByOpen(false);
-        else if (block.id === 'name-faces') setNameFacesOpen(false);
+        else if (block.id === 'name-selection') setNameSelectionOpen(false);
         else if (block.id === 'prefab-capture') setPrefabCaptureOpen(false);
         return;
       }
@@ -6553,7 +6869,7 @@ export default function AppFrame() {
         // ranges by rank; a legacy package (base.blob only) recovers as one part.
         const meta = savedMeta;
         parts = meshDoc.ranges.map((r, i) => ({
-          id: `part:doc:${mid}:${i}`,
+          id: meshDoc.rangeObjectIds?.[i] ?? meta[i]?.objectId ?? `part:doc:${mid}:${i}`,
           name: meta[i]?.name ?? (meshDoc.ranges.length === 1 ? (pkg?.name ?? 'part 1') : `part ${i + 1}`),
           kind: meta[i]?.kind as PrimitiveKind | undefined,
           visible: meta[i]?.visible ?? true,
@@ -6639,35 +6955,18 @@ export default function AppFrame() {
   // and a valid manifest already exists. A new unsaved model never acquires a
   // disk identity from background policy. The custom close control uses this
   // same synchronous artifact boundary before the viewer unmounts.
-  const autosaveActiveModelDoc = (s: EditorState): { id: string; name: string } | null => {
+  const autosaveActiveModelDoc = (s: EditorState): { id: string; name: string; ok: boolean } | null => {
     if (!persistenceSettings.autosave) return null;
     const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
     if (doc?.kind !== 'model' || !doc.sourceId) return null;
     const pkg = effectiveModelPackage(doc.sourceId, s.modelOverrides, s.modelDupes);
     if (!pkg || !s.modelDirty[pkg.id] || !isMaterialized(pkg.kind, pkg.id)) return null;
-    const rigDraft = s.modelRigs[pkg.id];
-    const rigModelId = authoredModelIdForPackage(pkg.id);
-    const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
-    const pkgToSave: ModelPackage = {
-      ...pkg,
-      ...(rigDraft && rigBounds ? { skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) } : {}),
-      textureSlots: s.modelTextureSlots[pkg.id] ?? pkg.textureSlots ?? [],
-      lights: normalizeModelLights(s.modelLights[pkg.id] ?? pkg.lights ?? []),
-    };
-    if (!materializeModelPackage(pkgToSave).ok) return null;
-    // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
-    // the NEXT mount seeds from the package, so this write is what edits survive by.
-    const liveRows = s.modelParts[pkg.id] ?? [];
-    if (!writeModelArtifacts(
-      pkg,
-      partsMetaFromRows(liveRows),
-      meshDocPartRangesFromRows(liveRows) ?? undefined,
-      partShrinkSaveOptions(pkg.id, liveRows.length),
-    )) return null;
-    upsertSavedPackage(pkgToSave);
-    consumeModelSaveAuthorizations(pkg.id);
-    savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
-    return { id: pkg.id, name: pkg.name };
+    // A document switch is still a Save. Reuse the sole commit boundary so a
+    // character can only travel through native prepareSave + immutable RJMD /
+    // RJSK read-back + manifest-last replacement; props retain their existing
+    // meshdoc path through the same dispatcher. A refusal keeps the dirty
+    // document mounted instead of silently crossing the navigation boundary.
+    return { id: pkg.id, name: pkg.name, ok: saveModelDocumentNow(pkg.id, 'Autosaved') };
   };
 
   /** Discard is a real rollback, not a dirty-chip reset. Drop the host-resume
@@ -6701,8 +7000,10 @@ export default function AppFrame() {
 
   const activateWorldBible = () => {
     refreshWorldBibleForOpen();
+    const autosave = autosaveActiveModelDoc(stateRef.current);
+    if (autosave && !autosave.ok) return;
+    const autosaved = autosave?.ok ? autosave : null;
     if (playing) navigate.push('/editor');
-    const autosaved = autosaveActiveModelDoc(stateRef.current);
     selectNativeModelSession(WORLD_BIBLE_DOCUMENT);
     setState((prev) => ({
       ...prev,
@@ -6751,7 +7052,9 @@ export default function AppFrame() {
     const nextDoc = state.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
     if (!nextDoc) return;
     if (activeWorkspaceDocumentId === WORLD_BIBLE_DOCUMENT_ID) refreshWorldBibleForOpen();
-    const autosaved = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
+    const autosave = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
+    if (autosave && !autosave.ok) return;
+    const autosaved = autosave?.ok ? autosave : null;
     if (state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) selectNativeModelSession(nextDoc);
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
@@ -6852,7 +7155,9 @@ export default function AppFrame() {
     }
     // Closing the ACTIVE model doc is a doc-switch too — same bounded autosave
     // (dirty + already-on-disk only), before the viewer unmounts (req_2620 T).
-    const autosaved = state.activeWorkspaceDocumentId === documentId ? autosaveActiveModelDoc(state) : null;
+    const autosave = state.activeWorkspaceDocumentId === documentId ? autosaveActiveModelDoc(state) : null;
+    if (autosave && !autosave.ok) return;
+    const autosaved = autosave?.ok ? autosave : null;
     // Release this document's claim on the host's live mesh. A lease outliving
     // its document is what let the NEXT document resume a closed model's mesh
     // and outliner (req_3773/req_3774); a background close leaves the active
@@ -6957,6 +7262,39 @@ export default function AppFrame() {
   // holding a model named "body").
   const renameSettleTimerRef = useRef<any>(null);
   const RENAME_SETTLE_DEBOUNCE_MS = 1200;
+  // The model's browser picture is a SHOT THE AUTHOR STAGES (req_4044): frame the
+  // model in the viewport, press the verb, and that exact view becomes the package's
+  // thumbnail. It renders the live orbit scene offscreen at the current camera —
+  // nothing about the window, and no auto-framed guess at the model's front.
+  const THUMBNAIL_SHOT_PX = 512;
+  const stageActiveModelThumbnail = (): ThumbnailStageResult => {
+    const s = stateRef.current;
+    const id = activeSessionModelIdRef.current;
+    const pkg = id ? effectiveModelPackage(id, s.modelOverrides, s.modelDupes) : null;
+    if (!pkg) {
+      const reason = 'no model document is open to shoot';
+      setState((prev) => ({ ...prev, status: reason }));
+      return { ok: false, reason };
+    }
+    const staged = stageModelThumbnail(pkg, (path) =>
+      (globalThis as any).__model_shot_offscreen?.(path, THUMBNAIL_SHOT_PX, THUMBNAIL_SHOT_PX) === 1);
+    if (staged.ok) upsertSavedPackage(pkg); // the roster is what every card reads
+    setState((prev) => ({
+      ...prev,
+      // Replace an existing projection only — staging a shot never promotes a
+      // package into the dupes list that was not already there.
+      modelDupes: staged.ok && prev.modelDupes.some((item) => item.id === pkg.id)
+        ? upsertModelPackageProjection(prev.modelDupes, pkg)
+        : prev.modelDupes,
+      status: staged.ok
+        ? `staged this view as "${pkg.name}"'s thumbnail`
+        : `thumbnail not staged: ${staged.reason ?? 'unknown error'}`,
+    }));
+    return staged;
+  };
+  // The seat dispatch is defined above this closure; the ref keeps it calling the
+  // CURRENT one (the same mount-frozen-closure rule the other shell refs follow).
+  stageThumbnailRef.current = stageActiveModelThumbnail;
   const renameModel = (id: string, name: string) => {
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
@@ -7010,16 +7348,17 @@ export default function AppFrame() {
     });
 
   // ── Guided role naming (req_3263) ───────────────────────────────────────────
-  // The formal-lazy pass over the rig naming contract: part name → bone id is the
-  // rigging contract (req_2777), so instead of remembering the roster, a session
-  // asks for each missing role and the user clicks the part that takes it. Roles
-  // already claimed by a part name are satisfied before the first ask.
+  // The vehicle-only formal-lazy pass over the segmented car formation. Character
+  // anatomy is semantic data owned by its rig session and never enters this
+  // name-based path. For a car, the session asks for each missing role and the
+  // user clicks the part that takes it.
   const startRoleNamer = (contractId: RoleContractId) => {
     const live = stateRef.current;
     const mid = activePartsModelId(live);
     const rows = mid ? (live.modelParts[mid] ?? []) : [];
-    if (!mid || rows.length === 0) {
-      setState((prev) => ({ ...prev, status: 'role naming needs an open multi-part model' }));
+    const pkg = mid ? effectiveModelPackage(mid, live.modelOverrides, live.modelDupes) : null;
+    if (!mid || !pkg || pkg.kind !== 'vehicle' || rows.length === 0) {
+      setState((prev) => ({ ...prev, status: 'vehicle role naming needs an open multi-part vehicle model' }));
       return;
     }
     const plan = roleNamerPlan(contractId, rows.map((row) => row.name));
@@ -7350,6 +7689,7 @@ export default function AppFrame() {
         <RenderProbe id="Workspace">
           <Workspace
             state={workspaceState}
+            mapSwitchPending={mapSwitchPending}
             activeAsset={activeAsset}
             selectedPartCount={selectedPartCount}
             onCommand={runCommand}
@@ -7377,6 +7717,10 @@ export default function AppFrame() {
             onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', true, options)}
             onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
             onModelDocumentMutated={markActiveModelDirty}
+            characterRigApi={characterRigApiRef.current}
+            characterRigSnapshot={characterRigSnapshot}
+            onCharacterRigSnapshot={setCharacterRigSnapshot}
+            onCharacterRigStatus={(status) => setState((prev) => ({ ...prev, status }))}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
@@ -7468,7 +7812,18 @@ export default function AppFrame() {
             // Save verb runs the SAME 'save-snapshot' command as File → Save.
             onRenameModel={renameModel}
             onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
+            onStageThumbnail={stageActiveModelThumbnail}
             modelOnDisk={activeModelOnDisk}
+            characterRigApi={characterRigApiRef.current}
+            characterRigSnapshot={characterRigSnapshot}
+            onCharacterRigSnapshot={setCharacterRigSnapshot}
+            onCharacterRigMutated={() => {
+              const modelId = activeSessionModelIdRef.current;
+              if (modelId) markModelDirty(modelId);
+            }}
+            onSelectCharacterRigFaces={(indices) => modelToolApiRef.current?.selectFaces([...indices]) ?? 0}
+            onAssignHumanoidSemantic={assignHumanoidSemantic}
+            onAttachCharacterRig={attachCharacterRig}
             onSetModelRig={setModelRig}
             onSetModelTextureSlots={setModelTextureSlots}
             onSetModelLights={setModelLights}
@@ -7564,15 +7919,20 @@ export default function AppFrame() {
         <BuildDock
           state={state}
           journal={journal}
+          liveUndoDepths={liveUndoDepths}
           onBuild={guarded(() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` })))}
           onEventbus={guarded(() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, memoryPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' })))}
           // Toolbar undo/redo route EXACTLY like Ctrl+Z — through runCommand, which
-          // sends a model doc to the host mesh journal and the world to the real
-          // world undo stacks (req_2620 W). Never the old feed-splice placebo.
+          // sends a model doc to its current native owner (rig, paint, or mesh)
+          // and the world to the real world undo stacks (req_2620 W). Never the
+          // old feed-splice placebo.
           onUndo={() => runCommand('undo-local', 'dock')}
           onRedo={() => runCommand('redo-local', 'dock')}
           onPerf={guarded(() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, memoryPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' })))}
           onMemory={guarded(() => setState((prev) => ({ ...prev, memoryPopoverOpen: !prev.memoryPopoverOpen, perfPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.memoryPopoverOpen ? 'memory accumulation closed' : 'memory accumulation opened' })))}
+          nativeUpdateReady={nativeUpdateNotice !== null}
+          nativeUpdateOpen={nativeUpdateNotice?.collapsed === false}
+          onNativeUpdate={() => setNativeUpdateNotice((current) => current ? { ...current, collapsed: !current.collapsed } : null)}
         />
       </RenderProbe>
       {state.eventbusPopoverOpen ? (
@@ -7612,6 +7972,42 @@ export default function AppFrame() {
           <HotUpdateDialog
             onLater={() => setHotUpdatePromptOpen(false)}
             onApply={() => { setHotUpdatePromptOpen(false); applyDevReload(); }}
+          />
+        </RenderProbe>
+      ) : null}
+      {nativeUpdateNotice && !nativeUpdateNotice.collapsed ? (
+        <RenderProbe id="Native Update Notice">
+          <NativeUpdateNotice
+            notice={nativeUpdateNotice}
+            onLater={() => setNativeUpdateNotice((current) => current ? { ...current, collapsed: true } : null)}
+            onApply={() => {
+              const current = nativeUpdateNotice;
+              if (!current) return;
+              const editor = stateRef.current;
+              const dirtyModels = Object.entries(editor.modelDirty).filter(([, dirty]) => dirty).map(([id]) => id);
+              if (dirtyModels.length > 0 || manualWorldDirty) {
+                setState((prev) => ({
+                  ...prev,
+                  status: `Native update still waiting — save ${dirtyModels.length > 0 ? `${dirtyModels.length} dirty model${dirtyModels.length === 1 ? '' : 's'}` : 'the dirty world'} first`,
+                }));
+                return;
+              }
+              const blocking = blockingNow(editor);
+              if (blocking) {
+                setState((prev) => ({ ...prev, status: `Native update still waiting — finish ${blocking.label} first` }));
+                return;
+              }
+              const wrote = (globalThis as any).__fs_write?.(
+                current.approvalPath,
+                nativeUpdateApprovalJson(current.token),
+              ) === true;
+              if (wrote) {
+                setNativeUpdateNotice(null);
+                setState((prev) => ({ ...prev, status: 'Applying the approved native update…' }));
+              } else {
+                setState((prev) => ({ ...prev, status: 'Could not send native update approval — the running editor was not touched' }));
+              }
+            }}
           />
         </RenderProbe>
       ) : null}
@@ -7670,13 +8066,14 @@ export default function AppFrame() {
           />
         </RenderProbe>
       ) : null}
-      {nameFacesOpen ? (
-        <RenderProbe id="Name Faces Dialog">
-          <NameFacesDialog
-            selectedFaces={state.modelTool.sel}
+      {nameSelectionOpen ? (
+        <RenderProbe id="Name Selection Dialog">
+          <NameSelectionDialog
+            kind={state.modelTool.selMode === 2 ? 'edge' : 'face'}
+            selectedCount={state.modelTool.sel}
             existingNames={residentRegionNames()}
-            onCancel={() => { setNameFacesOpen(false); setState((prev) => ({ ...prev, status: 'name faces cancelled' })); }}
-            onApply={applyNameFaces}
+            onCancel={() => { setNameSelectionOpen(false); setState((prev) => ({ ...prev, status: 'name selection cancelled' })); }}
+            onApply={applyNameSelection}
           />
         </RenderProbe>
       ) : null}
@@ -7693,13 +8090,7 @@ export default function AppFrame() {
         <ExportCharacterDialog
           modelName={activeModelPkg?.name ?? 'model'}
           currentPlayerName={currentPlayerCharacter()?.name ?? null}
-          binding={(() => {
-            // Binding preview is NAME-only (centers only matter at write time),
-            // so the dialog readout costs nothing and always matches the compiler.
-            const rows = activeModelPkg ? (state.modelParts[activeModelPkg.id] ?? []) : [];
-            const match = matchCharacterBones(rows.map((r) => r.name));
-            return { total: rows.length, bound: match.bound.length, unbound: match.unbound, duplicates: match.duplicates };
-          })()}
+          readiness={characterRigSnapshot?.readiness ?? []}
           onCancel={() => setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'character export cancelled' }))}
           onExport={exportCharacterAs}
         />

@@ -24,7 +24,14 @@ function atlasListHeight(count: number): number {
   return rows * ATLAS_ROW_HEIGHT + Math.max(0, rows - 1) * ATLAS_ROW_GAP;
 }
 
-export default function ModelDetailBody({ model }: { model: ModelPackage }) {
+export default function ModelDetailBody({
+  model,
+  onStageThumbnail,
+}: {
+  model: ModelPackage;
+  /** Present only while the model is on disk to hold the shot (req_4044). */
+  onStageThumbnail?: () => void;
+}) {
   return (
     <>
       <C.HW_ModelTop>
@@ -35,6 +42,16 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
           <C.HW_MaterialTitleRow>
             <C.HW_MaterialName>{model.name}</C.HW_MaterialName>
             <C.HW_Spacer />
+            {onStageThumbnail ? (
+              <C.HW_IconMiniButton
+                tooltip={model.thumbnail
+                  ? 'Re-shoot the thumbnail from this view'
+                  : 'Shoot this view as the model’s thumbnail'}
+                onPress={onStageThumbnail}
+              >
+                <Icon name="Camera" size={13} color={accentFor(model.thumbnail ? 'textFaint' : 'primary')} />
+              </C.HW_IconMiniButton>
+            ) : null}
             <C.HW_MaterialStat>{model.stage}</C.HW_MaterialStat>
           </C.HW_MaterialTitleRow>
           {model.triangles > 0 ? (
