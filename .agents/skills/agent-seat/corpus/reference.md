@@ -232,3 +232,47 @@ single request reports `stale generation N`; an interrupted batch reports the ex
 closed before. Re-run `look`; never apply an old plan to a changed mesh.
 
 ---
+
+---
+
+## Intent amplifiers — two decisions expand to N elements
+
+You supply INTENT (two picks, a seed, a target coordinate); the host supplies TOPOLOGY.
+Reach for these before writing an id list: 2 ids you just read beat 40 you must keep
+consistent across a generation bump, and the walk runs beside the mesh, so it works on
+models far too dense to page across the socket.
+
+```bash
+tools/seat select-path <fromVert> <toVert> [axis]   # shortest edge-walk between two verts
+tools/seat select-loop <edge>                       # follow the edge loop
+tools/seat select-ring <edge>                       # parallel edges across quads
+tools/seat select-grow [rings]                      # expand the live face selection
+tools/seat select-similar <face> [normal|coplanar|area] [tolerance]
+```
+
+**Every walk PREVIEWS by default** and touches nothing. The reply carries `count`,
+`elements`, `bbox`, `terminated` (`closed` / `boundary` / `pole` / `unreached`), the
+vertex it `stoppedAt`, and the `tieBreak` rule that resolved ambiguity — **lowest element
+id wins an equal-cost step**. Read that sentence instead of re-deriving the geometry; a
+walk that went somewhere you did not intend tells you why.
+
+Commit with `--apply` (add `+` for additive). Apply uses the token the preview reported,
+so a topology change in between is a refusal — never a silently different set.
+
+`select-similar ... coplanar` is the one that replaces the brittle `inside:box(...)` dance
+for isolating a flat panel: same facing AND the same plane, so the far side of a slab
+cannot join. A path with an `axis` travels monotonically along it, so a spine walk cannot
+detour around a limb.
+
+### Absolute placement and repeats
+
+```bash
+tools/seat set-position y 0.75 [min|center|max]   # "tabletop at 0.75 m", not read-then-subtract
+tools/seat for-each rivet scale-uniform '{"factor":0.8}'
+```
+
+`set-position` deletes the read-bbox → subtract → move loop agents run constantly; the
+anchor says which face of the selection lands on the coordinate. `for-each` applies one
+decision per matching Outliner PART — parts are the unit because they survive the
+generation bump each step causes, which a list of triangle ids does not. Each row is its
+own transaction and a partial sweep names the parts that refused.

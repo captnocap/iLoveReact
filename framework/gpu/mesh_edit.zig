@@ -774,8 +774,10 @@ var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the act
 // selection bounds: a bounds-derived plane moves the moment a one-sided edit lands, which
 // silently invalidated the very symmetry it was supposed to maintain (req_3795 — the chair
 // whose arm dragged the "center" to x=0.05). Twins are matched by reflected position ONCE per
-// topology into an index table — same outliner part preferred, any part otherwise (a
-// mirror-duplicated part pairs with its twin part) — so a vertex stays paired through the
+// topology into an index table. A whole-part correspondence is resolved first: same-part
+// symmetry or one unique cross-part owner with majority reflected coverage. Individual
+// vertices then pair only inside that owner. This prevents coincident seam vertices in an
+// unrelated body/door from stealing a detached bumper's mirror target — so a vertex stays paired through the
 // whole modeling session even mid-drag; per-frame deltas then reflect through plain index
 // lookups, no per-frame hashing. Multiple planes compose: every non-empty subset of the
 // enabled axes is one reflection (X+Y on → the X twin, the Y twin, AND the XY-diagonal twin
@@ -2046,9 +2048,28 @@ pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u3
     return if (keep_candidate orelse return null) normal else vecMul(normal, -1);
 }
 
+pub const ExtrudeTuning = struct {
+    pub const maximum_absolute_angle_degrees: f32 = 89.0;
+    pub const angle_epsilon_radians: f32 = 1.0e-7;
+    pub const minimum_radial_radius: f32 = 1.0e-6;
+    pub const minimum_face_scale: f32 = 1.0 / 1024.0;
+};
+
+/// Strict angle boundary shared by edge departure and face draft. Angles at or
+/// beyond 90 degrees fold the new walls back across the source topology.
+pub fn extrusionAngleRadiansPub(angle_degrees: f32) ?f32 {
+    if (!std.math.isFinite(angle_degrees) or
+        @abs(angle_degrees) > ExtrudeTuning.maximum_absolute_angle_degrees)
+    {
+        return null;
+    }
+    return angle_degrees * std.math.pi / 180.0;
+}
+
 /// Geometry needed to extend one selected edge without inventing a perpendicular
-/// flap. The outer edge stays in the adjacent authored face's plane; the caller
-/// chooses only the distance and owns the topology transaction.
+/// flap. Zero angle stays in the adjacent authored face's plane. A signed angle
+/// tilts the new strip toward/away from that face's front while keeping the outer
+/// edge parallel to the source edge.
 pub const EdgeExtrusionFrame = struct {
     a: [3]f32,
     b: [3]f32,
@@ -2062,7 +2083,94 @@ pub const EdgeExtrusionFrame = struct {
             vecAdd(self.b, vecMul(self.outward, distance)),
         };
     }
+
+    pub fn outerAtAngleRadians(self: EdgeExtrusionFrame, distance: f32, angle_radians: f32) [2][3]f32 {
+        if (@abs(angle_radians) <= ExtrudeTuning.angle_epsilon_radians) return self.outer(distance);
+        const direction = vecNorm(vecAdd(
+            vecMul(self.outward, @cos(angle_radians)),
+            vecMul(self.face_normal, @sin(angle_radians)),
+        ));
+        return .{
+            vecAdd(self.a, vecMul(direction, distance)),
+            vecAdd(self.b, vecMul(direction, distance)),
+        };
+    }
 };
+
+pub const AnchoredEdgeExtrusion = struct {
+    outer: [2][3]f32,
+    shared_index: u1,
+    open_index: u1,
+    triangle: bool,
+};
+
+/// Replace one outer corner of an ordinary edge extrusion with a selected
+/// resident vertex. Selecting an endpoint explicitly anchors that endpoint and
+/// produces one triangle; selecting any other same-part vertex produces a quad
+/// that reuses it. The untouched outer corner is the only new open vertex.
+pub fn anchoredEdgeExtrusionPub(
+    frame: EdgeExtrusionFrame,
+    source_vertices: [2]u32,
+    target_vertex: u32,
+    target_position: [3]f32,
+    distance: f32,
+    angle_radians: f32,
+) AnchoredEdgeExtrusion {
+    var outer = frame.outerAtAngleRadians(distance, angle_radians);
+    const shared_index: u1 = if (target_vertex == source_vertices[0])
+        0
+    else if (target_vertex == source_vertices[1])
+        1
+    else if (vecDot(vecSub(target_position, outer[0]), vecSub(target_position, outer[0])) <=
+        vecDot(vecSub(target_position, outer[1]), vecSub(target_position, outer[1])))
+        0
+    else
+        1;
+    outer[shared_index] = target_position;
+    return .{
+        .outer = outer,
+        .shared_index = shared_index,
+        .open_index = 1 - shared_index,
+        .triangle = target_vertex == source_vertices[shared_index],
+    };
+}
+
+/// Uniform cap scale corresponding to a face draft angle at DISTANCE. Positive
+/// draft widens the cap; negative draft narrows it. Null refuses a collapsed or
+/// numerically invalid cap before topology is rebuilt.
+pub fn faceExtrudeScalePub(max_radius: f32, distance: f32, angle_radians: f32) ?f32 {
+    if (!std.math.isFinite(max_radius) or !std.math.isFinite(distance) or
+        !std.math.isFinite(angle_radians) or max_radius < ExtrudeTuning.minimum_radial_radius)
+    {
+        return null;
+    }
+    if (@abs(angle_radians) <= ExtrudeTuning.angle_epsilon_radians) return 1.0;
+    const scale = 1.0 + @tan(angle_radians) * @abs(distance) / max_radius;
+    if (!std.math.isFinite(scale) or scale < ExtrudeTuning.minimum_face_scale) return null;
+    return scale;
+}
+
+/// Move one cap point along NORMAL while uniformly scaling only its in-plane
+/// component around CENTER. Keeping the tiny normal residue preserves non-planar
+/// authored input instead of flattening it as a side effect of extrusion.
+pub fn faceExtrudePointPub(
+    point: [3]f32,
+    center: [3]f32,
+    normal: [3]f32,
+    distance: f32,
+    scale: f32,
+) [3]f32 {
+    const relative = vecSub(point, center);
+    const normal_component = vecMul(normal, vecDot(relative, normal));
+    const tangent_component = vecSub(relative, normal_component);
+    return vecAdd(
+        center,
+        vecAdd(
+            vecAdd(vecMul(tangent_component, scale), normal_component),
+            vecMul(normal, distance),
+        ),
+    );
+}
 
 /// Solve the default edge-extrusion direction from the authored face beside the
 /// edge. Using the whole face group matters: deriving it from only the incident
@@ -2990,6 +3098,23 @@ pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {
     return true;
 }
 
+/// Select durable authored edges by logical endpoint identity. The entire request is
+/// validated before selection changes, so a stale named path cannot leave a partial
+/// orange selection behind.
+pub fn selectEdgesByEndpointPairsPub(pairs: []const Edge, additive: bool) u32 {
+    if (pairs.len == 0 or !ensureTopology()) return 0;
+    const sel = g_sel_edge orelse return 0;
+    for (pairs) |pair| {
+        const edge = edgeIndexBetween(pair[0], pair[1]) orelse return 0;
+        if (edge >= sel.len or !edgeIsBoundaryPub(edge) or !edgeInScopePub(edge)) return 0;
+    }
+    g_mode = .edge;
+    if (!additive) @memset(sel, false);
+    for (pairs) |pair| sel[edgeIndexBetween(pair[0], pair[1]).?] = true;
+    applyFaceHighlight();
+    return @intCast(pairs.len);
+}
+
 // An extrusion rebuilds the resident soup before it can hand its new outer edge
 // back to the editor.  The rebuilt positions can differ by a few float ULPs, so
 // selection uses this deliberately small squared endpoint tolerance rather than
@@ -3802,6 +3927,20 @@ pub const scale_by_value_tuning = ScaleByValueTuning{
     .no_op_epsilon = 1e-5,
 };
 
+/// Align Loop chooses the least-varying world axis,
+/// then collapses the selected row/loop to its centroid on that axis. Keeping
+/// the epsilon in one tuning contract prevents model scale from changing which
+/// nearly-planar coordinate wins and makes a repeated invocation a no-op.
+pub const AlignLoopTuning = struct {
+    pub const minimum_span_m: f32 = 0.000001;
+};
+
+pub const AlignLoopResult = struct {
+    mutation: Mutation,
+    axis: u8,
+    coordinate: f32,
+};
+
 fn exactScaleByFactor(factor: f32) ?f32 {
     if (!std.math.isFinite(factor)) return null;
     const magnitude = @abs(factor);
@@ -3887,19 +4026,12 @@ fn reflectPointAround(p: [3]f32, subset: u8, center: [3]f32) [3]f32 {
     return r;
 }
 
-/// Sentinel part id for the any-part position map — never a real part index.
-const ANY_PART: u32 = MIRROR_NONE;
-
-/// Position→vertex lookup for twin matching: the same-part map keeps welded identity
-/// domains self-consistent; the any-part map lets a mirror-duplicated part pair with
-/// its twin part across the shared plane. Same part always wins.
+/// Position→vertex lookup for twin matching, keyed by exact authored part owner.
 const MirrorMap = struct {
     by_part: std.AutoHashMapUnmanaged(MirrorKey, u32) = .empty,
-    any_part: std.AutoHashMapUnmanaged(MirrorKey, u32) = .empty,
 
     fn deinit(self: *MirrorMap) void {
         self.by_part.deinit(alloc);
-        self.any_part.deinit(alloc);
     }
 
     fn build(parts: []const u32) ?MirrorMap {
@@ -3911,19 +4043,109 @@ const MirrorMap = struct {
                 map.deinit();
                 return null;
             };
-            map.any_part.put(alloc, mirrorKey(ANY_PART, p), i) catch {
-                map.deinit();
-                return null;
-            };
         }
         return map;
     }
 
     fn get(self: *const MirrorMap, part: u32, p: [3]f32) ?u32 {
-        if (self.by_part.get(mirrorKey(part, p))) |v| return v;
-        return self.any_part.get(mirrorKey(ANY_PART, p));
+        return self.by_part.get(mirrorKey(part, p));
     }
 };
+
+/// Resolve one destination owner for every source-owner/reflection subset. Cross-part
+/// pairing is accepted only when one owner uniquely covers at least half of the source
+/// vertices. A lone coincident seam point is evidence of contact, not mirror ownership.
+const MirrorPartPartners = struct {
+    labels: []u32,
+    count: usize,
+    partners: []u32,
+
+    fn deinit(self: *MirrorPartPartners) void {
+        alloc.free(self.labels);
+        alloc.free(self.partners);
+        self.* = undefined;
+    }
+
+    fn get(self: *const MirrorPartPartners, source: u32, subset: u8) ?u32 {
+        for (self.labels[0..self.count], 0..) |label, index| {
+            if (label != source) continue;
+            const target_index = self.partners[index * 7 + @as(usize, subset - 1)];
+            return if (target_index == MIRROR_NONE or target_index >= @as(u32, @intCast(self.count))) null else self.labels[target_index];
+        }
+        return null;
+    }
+};
+
+fn mirrorPartPartnersAlloc(parts: []const u32, map: *const MirrorMap) ?MirrorPartPartners {
+    if (parts.len == 0) return null;
+    const labels = alloc.alloc(u32, parts.len) catch return null;
+    var label_count: usize = 0;
+    for (parts) |part| {
+        var known = false;
+        for (labels[0..label_count]) |label| {
+            if (label == part) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            if (label_count >= 4096) {
+                alloc.free(labels);
+                return null;
+            }
+            labels[label_count] = part;
+            label_count += 1;
+        }
+    }
+    const partners = alloc.alloc(u32, label_count * 7) catch {
+        alloc.free(labels);
+        return null;
+    };
+    @memset(partners, MIRROR_NONE);
+    const scores = alloc.alloc(u32, label_count) catch {
+        alloc.free(labels);
+        alloc.free(partners);
+        return null;
+    };
+    defer alloc.free(scores);
+
+    for (labels[0..label_count], 0..) |source_part, source_index| {
+        var source_vertices: u32 = 0;
+        for (parts) |part| if (part == source_part) {
+            source_vertices += 1;
+        };
+        if (source_vertices == 0) continue;
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            @memset(scores, 0);
+            var vertex: u32 = 0;
+            while (vertex < g_vert_count) : (vertex += 1) {
+                if (parts[@intCast(vertex)] != source_part) continue;
+                const reflected = reflectPointAround(vertPos(vertex), subset, MIRROR_PLANE_CENTER);
+                for (labels[0..label_count], 0..) |target_part, target_index| {
+                    if (map.get(target_part, reflected) != null) scores[target_index] += 1;
+                }
+            }
+            var best_index: u32 = MIRROR_NONE;
+            var best_score: u32 = 0;
+            var tied = false;
+            for (scores, 0..) |score, target_index| {
+                if (score > best_score) {
+                    best_score = score;
+                    best_index = @intCast(target_index);
+                    tied = false;
+                } else if (score != 0 and score == best_score) {
+                    tied = true;
+                }
+            }
+            const minimum = (source_vertices + 1) / 2;
+            if (!tied and best_score >= minimum) {
+                partners[source_index * 7 + @as(usize, subset - 1)] = best_index;
+            }
+        }
+    }
+    return .{ .labels = labels, .count = label_count, .partners = partners };
+}
 
 /// Build (or reuse) the twin table: for every non-empty subset of ALL three axes, each
 /// vertex's reflection partner across MIRROR_PLANE_CENTER. Built for the full 7 subsets
@@ -3944,13 +4166,19 @@ fn ensureMirrorTwins() ?[]u32 {
         return null;
     };
     defer map.deinit();
+    var partners = mirrorPartPartnersAlloc(parts, &map) orelse {
+        alloc.free(twins);
+        return null;
+    };
+    defer partners.deinit();
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
         const part = parts[@intCast(i)];
         const p = vertPos(i);
         var s: u8 = 1;
         while (s <= 7) : (s += 1) {
-            if (map.get(part, reflectPointAround(p, s, MIRROR_PLANE_CENTER))) |t| {
+            const partner = partners.get(part, s) orelse continue;
+            if (map.get(partner, reflectPointAround(p, s, MIRROR_PLANE_CENTER))) |t| {
                 twins[@as(usize, s - 1) * g_vert_count + i] = t;
             }
         }
@@ -3983,16 +4211,14 @@ pub fn mirrorTwinOfVertPub(v: u32, subset: u8) ?u32 {
 
 /// Live symmetry report against the exact same identity domains and
 /// the shared MIRROR_PLANE_CENTER plane as mirrored transforms. Only vertices in the
-/// current outliner scope contribute; pairing prefers the vertex's own part and falls
-/// back to any part, exactly like the twin table.
+/// current outliner scope contribute; pairing uses the same whole-owner correspondence
+/// as actual mirror transforms.
 pub fn symmetryReportPub(axis: u8) ?[3]f32 {
     if (axis > 2 or !ensureTopology()) return null;
     const parts = g_vert_part orelse return null;
     if (parts.len < g_vert_count) return null;
-    var map = MirrorMap.build(parts) orelse return null;
-    defer map.deinit();
-
     const subset: u8 = @as(u8, 1) << @intCast(axis);
+    const twins = ensureMirrorTwins() orelse return null;
     const epsilon: f32 = 1.5 / MIRROR_Q;
     var unmatched: u32 = 0;
     var total: u32 = 0;
@@ -4001,10 +4227,11 @@ pub fn symmetryReportPub(axis: u8) ?[3]f32 {
         if (!vertInScopePub(vertex)) continue;
         total += 1;
         const reflected = reflectPointAround(vertPos(vertex), subset, MIRROR_PLANE_CENTER);
-        const twin = map.get(parts[@intCast(vertex)], reflected) orelse {
+        const twin = twins[@as(usize, subset - 1) * g_vert_count + vertex];
+        if (twin == MIRROR_NONE or twin >= g_vert_count) {
             unmatched += 1;
             continue;
-        };
+        }
         const actual = vertPos(twin);
         if (@abs(actual[0] - reflected[0]) > epsilon or
             @abs(actual[1] - reflected[1]) > epsilon or
@@ -4105,6 +4332,119 @@ pub fn translateSelection(delta: [3]f32) Mutation {
 pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation {
     const factor = exactScaleByFactor(factor_raw) orelse return .{};
     return applyTransform(.scale_axis, .{ 0, 0, 0 }, axis, pivot, factor);
+}
+
+fn selectedAlignmentEdge(edge: u32, mask: []const bool) bool {
+    const edges = g_edges orelse return false;
+    if (edge >= g_edge_count) return false;
+    const a = edges[edge * 2];
+    const b = edges[edge * 2 + 1];
+    if (a >= mask.len or b >= mask.len or !mask[a] or !mask[b]) return false;
+    return switch (g_mode) {
+        .edge => if (g_sel_edge) |selected| edge < selected.len and selected[edge] and edgeInScopePub(edge) else false,
+        .vertex => edgeIsBoundaryPub(edge) and edgeInScopePub(edge),
+        else => false,
+    };
+}
+
+/// Refuse branched or disconnected selections before a center-plane collapse.
+/// Edge mode follows exactly the selected authored edges; vertex mode follows
+/// visible authored edges between selected vertices (never hidden quad diagonals).
+fn selectionFormsOnePathOrLoop(mask: []const bool, selected_count: u32) bool {
+    const edges = g_edges orelse return false;
+    const degrees = alloc.alloc(u8, g_vert_count) catch return false;
+    defer alloc.free(degrees);
+    @memset(degrees, 0);
+    var selected_edges: u32 = 0;
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!selectedAlignmentEdge(edge, mask)) continue;
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        if (degrees[a] == 2 or degrees[b] == 2) return false;
+        degrees[a] += 1;
+        degrees[b] += 1;
+        selected_edges += 1;
+    }
+    if (selected_edges == 0) return false;
+    var endpoints: u32 = 0;
+    var first: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!mask[vertex]) continue;
+        if (degrees[vertex] == 0) return false;
+        if (degrees[vertex] == 1) endpoints += 1;
+        if (first == null) first = vertex;
+    }
+    if (endpoints != 0 and endpoints != 2) return false;
+
+    const visited = alloc.alloc(bool, g_vert_count) catch return false;
+    defer alloc.free(visited);
+    @memset(visited, false);
+    const queue = alloc.alloc(u32, selected_count) catch return false;
+    defer alloc.free(queue);
+    queue[0] = first orelse return false;
+    visited[queue[0]] = true;
+    var head: usize = 0;
+    var tail: usize = 1;
+    while (head < tail) : (head += 1) {
+        const current = queue[head];
+        edge = 0;
+        while (edge < g_edge_count) : (edge += 1) {
+            if (!selectedAlignmentEdge(edge, mask)) continue;
+            const a = edges[edge * 2];
+            const b = edges[edge * 2 + 1];
+            const next = if (a == current) b else if (b == current) a else continue;
+            if (visited[next]) continue;
+            visited[next] = true;
+            if (tail >= queue.len) return false;
+            queue[tail] = next;
+            tail += 1;
+        }
+    }
+    return tail == selected_count;
+}
+
+/// Flatten the current vertex/edge selection in one motion. The smallest
+/// coordinate span is the intended station plane: a vertical body row
+/// chooses X, a horizontal ring chooses Y, and a depth station chooses Z. Axes
+/// already flat make the operation an idempotent no-op. The ordinary transform
+/// core owns welded corners and live mirror twins, so alignment keeps both guarantees.
+pub fn alignSelectedLoop() ?AlignLoopResult {
+    if (g_mode != .vertex and g_mode != .edge) return null;
+    const mask = fillAffectedVerts() orelse return null;
+    var min = [3]f32{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) };
+    var max = [3]f32{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    var count: u32 = 0;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!mask[vertex]) continue;
+        const position = vertPos(vertex);
+        inline for (0..3) |axis| {
+            min[axis] = @min(min[axis], position[axis]);
+            max[axis] = @max(max[axis], position[axis]);
+        }
+        count += 1;
+    }
+    if (count < 2) return null;
+    if (!selectionFormsOnePathOrLoop(mask, count)) return null;
+
+    var best_axis: ?u8 = null;
+    var best_span = std.math.inf(f32);
+    for (0..3) |axis| {
+        const span = max[axis] - min[axis];
+        if (!std.math.isFinite(span) or span >= best_span) continue;
+        best_axis = @intCast(axis);
+        best_span = span;
+    }
+    const axis = best_axis orelse return null;
+    if (best_span <= AlignLoopTuning.minimum_span_m) return null;
+    const pivot = selectionPivot() orelse return null;
+    var direction = [3]f32{ 0, 0, 0 };
+    direction[axis] = 1;
+    const mutation = applyTransform(.scale_axis, .{ 0, 0, 0 }, direction, pivot, 0);
+    if (!mutation.changed) return null;
+    return .{ .mutation = mutation, .axis = axis, .coordinate = pivot[axis] };
 }
 
 /// Bounding sphere for the resident interleaved position/normal/UV soup. This is
@@ -4983,6 +5323,17 @@ fn findVertAt(p: [3]f32) ?u32 {
     return null;
 }
 
+fn findVertAtInPart(p: [3]f32, part: u32) ?u32 {
+    const parts = g_vert_part orelse return null;
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        if (parts[@intCast(i)] != part) continue;
+        const v = vertPos(i);
+        if (@abs(v[0] - p[0]) < 0.001 and @abs(v[1] - p[1]) < 0.001 and @abs(v[2] - p[2]) < 0.001) return i;
+    }
+    return null;
+}
+
 test "mirror X: translating a vertex drags its position twin to the reflected spot" {
     var soup: [12 * 3 * 8]f32 = undefined;
     buildCubeSoup(&soup);
@@ -5124,6 +5475,60 @@ test "mirror X pairs across outliner parts — a mirror-duplicated part follows 
     try testing.expect(m.changed);
     // Its reflection lives in the OTHER part and still followed.
     try testing.expect(findVertAt(.{ 2.5, -0.25, -0.5 }) != null);
+}
+
+test "mirror X keeps a detached part on one whole counterpart owner despite a coincident seam vertex" {
+    var first: [12 * 3 * 8]f32 = undefined;
+    var second: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&first);
+    buildCubeSoup(&second);
+    var corner: usize = 0;
+    while (corner < 12 * 3) : (corner += 1) {
+        first[corner * 8 + 0] -= 2;
+        second[corner * 8 + 0] += 2;
+    }
+    var soup: [25 * 3 * 8]f32 = undefined;
+    @memcpy(soup[0..first.len], first[0..]);
+    @memcpy(soup[first.len .. first.len + second.len], second[0..]);
+    const decoy = [3][3]f32{
+        .{ 2.5, -0.5, -0.5 }, // coincides with one legitimate target-part vertex
+        .{ 9.0, 9.0, 9.0 },
+        .{ 9.0, 10.0, 9.0 },
+    };
+    for (decoy, 0..) |point, slot| {
+        const base = (24 * 3 + slot) * 8;
+        soup[base + 0] = point[0];
+        soup[base + 1] = point[1];
+        soup[base + 2] = point[2];
+        @memset(soup[base + 3 .. base + 8], 0);
+    }
+    var groups: [25]u32 = undefined;
+    for (0..12) |face| {
+        groups[face] = @intCast(face / 2);
+        groups[12 + face] = @intCast(6 + face / 2);
+    }
+    groups[24] = 12;
+    model_source.setFaceGroups(groups[0..]);
+    model_source.setPartRanges(&.{ 0, 6, 6, 12, 12, 13 });
+    model_paint.setTarget(799, soup[0..], 75);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(1);
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const source = findVertAtInPart(.{ -2.5, -0.5, -0.5 }, 0).?;
+    const target = findVertAtInPart(.{ 2.5, -0.5, -0.5 }, 1).?;
+    const unrelated = findVertAtInPart(.{ 2.5, -0.5, -0.5 }, 2).?;
+    g_sel_vert.?[source] = true;
+
+    const mutation = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(mutation.changed);
+    try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(target)[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(unrelated)[1], 0.0001);
 }
 
 test "symmetry report measures scoped vertices against the shared origin plane" {
@@ -5299,4 +5704,814 @@ pub fn sessionReset() void {
         @field(@This(), f.name) = @field(fresh, f.name);
     // Deliberately frees NOTHING: ownership of the previous state lives in the
     // record the coordinator just parked.
+}
+
+// ── Intent amplifiers: two decisions expand to N correct elements (req_4061) ─────
+//
+// The agent supplies INTENT (two picks, a seed edge, a seed face); the editor supplies
+// TOPOLOGY (the walk). This exists because agents are bad at exactly what it removes:
+// long ephemeral id lists, per-element loops, and re-reading `elements` between steps.
+// A walk that runs here also works on meshes far too dense to page across the socket.
+//
+// Two rules every walk obeys, because a silent arbitrary answer makes an agent undo-loop:
+//   1. PREVIEW FIRST. A walk stages its result and reports what it computed; nothing
+//      touches the live selection until `walkApply` is handed the matching token.
+//   2. STATE WHY IT STOPPED AND HOW TIES BROKE. "Shortest path" and "loop continuation"
+//      both have ambiguous cases; the reply names the rule that resolved them.
+
+pub const WalkKind = enum { path, loop, ring, grow, similar };
+pub const WalkSimilarBy = enum { normal, coplanar, area };
+pub const WalkDomain = enum { vertex, edge, face };
+
+pub const WalkRequest = struct {
+    kind: WalkKind,
+    /// path: logical vertex endpoints.
+    from: u32 = 0,
+    to: u32 = 0,
+    /// path: restrict travel to edges that make monotone progress along this axis
+    /// (0/1/2). 255 = unconstrained.
+    axis: u8 = 255,
+    /// loop / ring: the seed edge.
+    edge: u32 = 0,
+    /// grow: how many adjacency rings to expand by.
+    rings: u32 = 1,
+    /// similar: the seed face and what "similar" means.
+    face: u32 = 0,
+    by: WalkSimilarBy = .normal,
+    /// degrees for normal/coplanar, relative fraction for area.
+    tolerance: f32 = 10,
+};
+
+// `unreached` rather than `unreachable`: the latter is a Zig keyword.
+pub const WalkTermination = enum { closed, boundary, pole, exhausted, unreached, complete };
+
+pub const WalkPlan = struct {
+    token: u64,
+    domain: WalkDomain,
+    count: u32,
+    terminated: WalkTermination,
+    /// The vertex a loop/ring walk stopped at, when the reason names one.
+    stopped_at: u32,
+    bbox: [6]f32,
+};
+
+/// The staged set. One at a time: a second plan replaces the first, so an agent can
+/// never apply a walk it did not just read.
+var g_walk_ids: ?[]u32 = null;
+var g_walk_domain: WalkDomain = .face;
+var g_walk_token: u64 = 0;
+var g_walk_built_for: u32 = 0;
+var g_walk_counter: u64 = 0;
+
+fn clearWalkPlan() void {
+    if (g_walk_ids) |ids| alloc.free(ids);
+    g_walk_ids = null;
+    g_walk_token = 0;
+}
+
+/// vertex → its incident boundary-edge ids, flattened CSR-style. Built per walk so a
+/// traversal is linear in the mesh instead of rescanning the edge table per step.
+const VertexEdgeIndex = struct {
+    offsets: []u32,
+    edges: []u32,
+
+    fn deinit(self: VertexEdgeIndex) void {
+        alloc.free(self.offsets);
+        alloc.free(self.edges);
+    }
+    fn slice(self: VertexEdgeIndex, vertex: u32) []const u32 {
+        if (vertex + 1 >= self.offsets.len) return &.{};
+        return self.edges[self.offsets[vertex]..self.offsets[vertex + 1]];
+    }
+};
+
+fn walkEdgeUsable(edge: u32) bool {
+    const boundary = g_edge_boundary orelse return false;
+    if (edge >= g_edge_count or edge >= boundary.len or !boundary[edge]) return false;
+    if (g_scope_active) {
+        ensureScopeMasks();
+        const mask = g_scope_edge orelse return false;
+        if (edge >= mask.len or !mask[edge]) return false;
+    }
+    return true;
+}
+
+fn buildVertexEdgeIndex() ?VertexEdgeIndex {
+    const edges = g_edges orelse return null;
+    const counts = alloc.alloc(u32, g_vert_count + 1) catch return null;
+    @memset(counts, 0);
+    var edge: u32 = 0;
+    var usable: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!walkEdgeUsable(edge)) continue;
+        counts[edges[edge * 2]] += 1;
+        counts[edges[edge * 2 + 1]] += 1;
+        usable += 1;
+    }
+    const offsets = alloc.alloc(u32, g_vert_count + 1) catch {
+        alloc.free(counts);
+        return null;
+    };
+    var running: u32 = 0;
+    for (0..g_vert_count) |vertex| {
+        offsets[vertex] = running;
+        running += counts[vertex];
+    }
+    offsets[g_vert_count] = running;
+    const flat = alloc.alloc(u32, running) catch {
+        alloc.free(counts);
+        alloc.free(offsets);
+        return null;
+    };
+    @memset(counts, 0);
+    edge = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!walkEdgeUsable(edge)) continue;
+        for ([2]u32{ edges[edge * 2], edges[edge * 2 + 1] }) |vertex| {
+            flat[offsets[vertex] + counts[vertex]] = edge;
+            counts[vertex] += 1;
+        }
+    }
+    alloc.free(counts);
+    return .{ .offsets = offsets, .edges = flat };
+}
+
+fn walkOtherEnd(edge: u32, vertex: u32) u32 {
+    const edges = g_edges orelse return vertex;
+    const a = edges[edge * 2];
+    const b = edges[edge * 2 + 1];
+    return if (a == vertex) b else a;
+}
+
+/// The authored face-groups touching an edge. Two for an interior quad edge, one at a
+/// boundary. Groups are how a ring knows what a "quad" is.
+fn walkEdgeGroups(edge: u32, out: *[8]u32) u32 {
+    const corners = g_corner_vert orelse return 0;
+    const edges = g_edges orelse return 0;
+    const a = edges[edge * 2];
+    const b = edges[edge * 2 + 1];
+    const face_count = model_paint.faceCount();
+    var found: u32 = 0;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (!faceInScope(face)) continue;
+        const base = @as(usize, face) * 3;
+        if (base + 2 >= corners.len) break;
+        var has_a = false;
+        var has_b = false;
+        for (0..3) |corner| {
+            if (corners[base + corner] == a) has_a = true;
+            if (corners[base + corner] == b) has_b = true;
+        }
+        if (!has_a or !has_b) continue;
+        const group = model_source.faceGroupOf(face);
+        if (group == model_source.NO_FACE_GROUP) continue;
+        var seen = false;
+        for (out[0..found]) |existing| {
+            if (existing == group) seen = true;
+        }
+        if (seen) continue;
+        if (found >= out.len) break;
+        out[found] = group;
+        found += 1;
+    }
+    return found;
+}
+
+/// The boundary edge of `group` that shares NO vertex with `edge` — a quad's opposite
+/// side, which is the step a ring walk takes.
+fn walkOppositeEdgeInGroup(group: u32, edge: u32) ?u32 {
+    const corners = g_corner_vert orelse return null;
+    const edges = g_edges orelse return null;
+    const a = edges[edge * 2];
+    const b = edges[edge * 2 + 1];
+    const face_count = model_paint.faceCount();
+    var candidate: ?u32 = null;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (model_source.faceGroupOf(face) != group or !faceInScope(face)) continue;
+        const base = @as(usize, face) * 3;
+        if (base + 2 >= corners.len) break;
+        for (0..3) |corner| {
+            const p = corners[base + corner];
+            const q = corners[base + (corner + 1) % 3];
+            if (p == a or p == b or q == a or q == b) continue;
+            const found = edgeIndexBetween(p, q) orelse continue;
+            if (!walkEdgeUsable(found)) continue;
+            // A quad has exactly one opposite side; ties can only come from a group
+            // that is not a quad, and the LOWEST edge id keeps that case deterministic.
+            if (candidate == null or found < candidate.?) candidate = found;
+        }
+    }
+    return candidate;
+}
+
+/// Face geometry comes from the WELDED topology (corner -> logical vertex -> position),
+/// the same source selection and the overlay already trust. The raw paint soup is not a
+/// stride-8 position array, and reading it as one silently produced 45-degree "normals".
+fn walkFaceCorners(face: u32) ?[3][3]f32 {
+    const corners = g_corner_vert orelse return null;
+    const base = @as(usize, face) * 3;
+    if (base + 2 >= corners.len) return null;
+    return .{
+        vertPosPub(corners[base]),
+        vertPosPub(corners[base + 1]),
+        vertPosPub(corners[base + 2]),
+    };
+}
+
+fn walkFaceCross(face: u32) ?[3]f32 {
+    const corner = walkFaceCorners(face) orelse return null;
+    const u = [3]f32{ corner[1][0] - corner[0][0], corner[1][1] - corner[0][1], corner[1][2] - corner[0][2] };
+    const v = [3]f32{ corner[2][0] - corner[0][0], corner[2][1] - corner[0][1], corner[2][2] - corner[0][2] };
+    return .{ u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0] };
+}
+
+fn walkFaceNormal(face: u32) ?[3]f32 {
+    var n = walkFaceCross(face) orelse return null;
+    const length = @sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (length <= 1e-12) return null;
+    n[0] /= length;
+    n[1] /= length;
+    n[2] /= length;
+    return n;
+}
+
+fn walkFaceArea(face: u32) f32 {
+    const c = walkFaceCross(face) orelse return 0;
+    return @sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) / 2;
+}
+
+fn walkFacePlaneOffset(face: u32, normal: [3]f32) f32 {
+    const corner = walkFaceCorners(face) orelse return 0;
+    return normal[0] * corner[0][0] + normal[1] * corner[0][1] + normal[2] * corner[0][2];
+}
+
+fn stageWalk(ids: []u32, domain: WalkDomain, terminated: WalkTermination, stopped_at: u32) ?WalkPlan {
+    clearWalkPlan();
+    g_walk_ids = ids;
+    g_walk_domain = domain;
+    g_walk_built_for = model_paint.faceCount();
+    g_walk_counter +%= 1;
+    // The token folds in the facecount the plan was computed for, so applying a walk
+    // across a topology change cannot silently hit different elements.
+    g_walk_token = (g_walk_counter << 32) | @as(u64, g_walk_built_for);
+    var bbox = [6]f32{
+        std.math.inf(f32),  std.math.inf(f32),  std.math.inf(f32),
+        -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32),
+    };
+    for (ids) |id| {
+        switch (domain) {
+            .vertex => accumulateWalkVertex(&bbox, id),
+            .edge => {
+                const edges = g_edges orelse break;
+                accumulateWalkVertex(&bbox, edges[id * 2]);
+                accumulateWalkVertex(&bbox, edges[id * 2 + 1]);
+            },
+            .face => {
+                const corners = g_corner_vert orelse break;
+                const base = @as(usize, id) * 3;
+                if (base + 2 >= corners.len) break;
+                for (0..3) |corner| accumulateWalkVertex(&bbox, corners[base + corner]);
+            },
+        }
+    }
+    return .{
+        .token = g_walk_token,
+        .domain = domain,
+        .count = @intCast(ids.len),
+        .terminated = terminated,
+        .stopped_at = stopped_at,
+        .bbox = bbox,
+    };
+}
+
+fn accumulateWalkVertex(bbox: *[6]f32, vertex: u32) void {
+    const position = vertPosPub(vertex);
+    for (0..3) |axis| {
+        bbox[axis] = @min(bbox[axis], position[axis]);
+        bbox[axis + 3] = @max(bbox[axis + 3], position[axis]);
+    }
+}
+
+/// Shortest edge-walk between two logical vertices. Ties are broken by LOWEST vertex
+/// id at every step — arbitrary, but stated and reproducible, so an agent that gets a
+/// walk it did not want can reason about why instead of retrying blindly.
+fn walkPath(request: WalkRequest) ?WalkPlan {
+    const edges = g_edges orelse return null;
+    if (request.from >= g_vert_count or request.to >= g_vert_count) return null;
+    const index = buildVertexEdgeIndex() orelse return null;
+    defer index.deinit();
+    const previous = alloc.alloc(u32, g_vert_count) catch return null;
+    defer alloc.free(previous);
+    const visited = alloc.alloc(bool, g_vert_count) catch return null;
+    defer alloc.free(visited);
+    @memset(visited, false);
+    const queue = alloc.alloc(u32, g_vert_count) catch return null;
+    defer alloc.free(queue);
+
+    const target = vertPosPub(request.to);
+    visited[request.from] = true;
+    previous[request.from] = request.from;
+    queue[0] = request.from;
+    var head: usize = 0;
+    var tail: usize = 1;
+    var reached = request.from == request.to;
+    while (head < tail and !reached) : (head += 1) {
+        const current = queue[head];
+        const here = vertPosPub(current);
+        // Deterministic frontier order: ascending neighbour id.
+        var candidates: [64]u32 = undefined;
+        var candidate_count: u32 = 0;
+        for (index.slice(current)) |edge| {
+            const next = walkOtherEnd(edge, current);
+            if (visited[next]) continue;
+            if (request.axis < 3) {
+                // Monotone travel: never step away from the target along the axis the
+                // caller constrained, so a spine walk cannot detour around a limb.
+                const axis: usize = request.axis;
+                const there = vertPosPub(next);
+                const closer = @abs(there[axis] - target[axis]) <= @abs(here[axis] - target[axis]);
+                if (!closer) continue;
+            }
+            if (candidate_count >= candidates.len) break;
+            candidates[candidate_count] = next;
+            candidate_count += 1;
+        }
+        std.mem.sort(u32, candidates[0..candidate_count], {}, std.sort.asc(u32));
+        for (candidates[0..candidate_count]) |next| {
+            if (visited[next]) continue;
+            visited[next] = true;
+            previous[next] = current;
+            queue[tail] = next;
+            tail += 1;
+            if (next == request.to) {
+                reached = true;
+                break;
+            }
+        }
+    }
+    if (!reached) {
+        const empty = alloc.alloc(u32, 0) catch return null;
+        return stageWalk(empty, .vertex, .unreached, request.to);
+    }
+    var length: u32 = 1;
+    var cursor = request.to;
+    while (cursor != request.from) : (length += 1) cursor = previous[cursor];
+    const chain = alloc.alloc(u32, length) catch return null;
+    cursor = request.to;
+    var at: usize = length;
+    while (at > 0) {
+        at -= 1;
+        chain[at] = cursor;
+        if (cursor == request.from) break;
+        cursor = previous[cursor];
+    }
+    _ = edges;
+    return stageWalk(chain, .vertex, .complete, request.to);
+}
+
+/// Follow an edge loop from one seed. The continuation at a vertex is the edge that
+/// shares NO authored face-group with the edge we arrived on — the classic quad-loop
+/// rule. Anything other than a clean 4-way junction ends the walk and says so, because
+/// guessing at a pole is how a loop silently swallows half a model.
+fn walkLoop(request: WalkRequest) ?WalkPlan {
+    if (!walkEdgeUsable(request.edge)) return null;
+    const index = buildVertexEdgeIndex() orelse return null;
+    defer index.deinit();
+    var collected = std.ArrayListUnmanaged(u32).empty;
+    defer collected.deinit(alloc);
+    const seen = alloc.alloc(bool, g_edge_count) catch return null;
+    defer alloc.free(seen);
+    @memset(seen, false);
+    collected.append(alloc, request.edge) catch return null;
+    seen[request.edge] = true;
+
+    var termination: WalkTermination = .closed;
+    var stopped_at: u32 = request.edge;
+    const edges = g_edges orelse return null;
+    // Walk both ways from the seed so a loop opened at a boundary still returns the
+    // whole run rather than half of it.
+    for ([2]u32{ edges[request.edge * 2], edges[request.edge * 2 + 1] }) |start| {
+        var current_edge = request.edge;
+        var vertex = start;
+        while (true) {
+            var groups: [8]u32 = undefined;
+            const group_count = walkEdgeGroups(current_edge, &groups);
+            var next_edge: ?u32 = null;
+            var incident: u32 = 0;
+            for (index.slice(vertex)) |edge| {
+                incident += 1;
+                if (edge == current_edge) continue;
+                var candidate_groups: [8]u32 = undefined;
+                const candidate_count = walkEdgeGroups(edge, &candidate_groups);
+                var shares = false;
+                for (candidate_groups[0..candidate_count]) |candidate| {
+                    for (groups[0..group_count]) |group| {
+                        if (candidate == group) shares = true;
+                    }
+                }
+                if (shares) continue;
+                if (next_edge == null or edge < next_edge.?) next_edge = edge;
+            }
+            if (incident != 4) {
+                termination = if (incident < 3) .boundary else .pole;
+                stopped_at = vertex;
+                break;
+            }
+            const step = next_edge orelse {
+                termination = .boundary;
+                stopped_at = vertex;
+                break;
+            };
+            if (seen[step]) {
+                termination = .closed;
+                stopped_at = vertex;
+                break;
+            }
+            seen[step] = true;
+            collected.append(alloc, step) catch return null;
+            vertex = walkOtherEnd(step, vertex);
+            current_edge = step;
+        }
+        if (termination == .closed) break;
+    }
+    const owned = collected.toOwnedSlice(alloc) catch return null;
+    return stageWalk(owned, .edge, termination, stopped_at);
+}
+
+/// Follow an edge ring: step across each quad to its opposite side. Stops when a group
+/// is not a quad, when the ring closes, or at an open boundary.
+fn walkRing(request: WalkRequest) ?WalkPlan {
+    if (!walkEdgeUsable(request.edge)) return null;
+    var collected = std.ArrayListUnmanaged(u32).empty;
+    defer collected.deinit(alloc);
+    const seen = alloc.alloc(bool, g_edge_count) catch return null;
+    defer alloc.free(seen);
+    @memset(seen, false);
+    collected.append(alloc, request.edge) catch return null;
+    seen[request.edge] = true;
+
+    var termination: WalkTermination = .boundary;
+    var groups: [8]u32 = undefined;
+    const seed_groups = walkEdgeGroups(request.edge, &groups);
+    var direction: u32 = 0;
+    while (direction < seed_groups) : (direction += 1) {
+        var current_edge = request.edge;
+        var current_group = groups[direction];
+        while (true) {
+            const opposite = walkOppositeEdgeInGroup(current_group, current_edge) orelse {
+                termination = .boundary;
+                break;
+            };
+            if (seen[opposite]) {
+                termination = .closed;
+                break;
+            }
+            seen[opposite] = true;
+            collected.append(alloc, opposite) catch return null;
+            var next_groups: [8]u32 = undefined;
+            const next_count = walkEdgeGroups(opposite, &next_groups);
+            var stepped: ?u32 = null;
+            for (next_groups[0..next_count]) |group| {
+                if (group != current_group and (stepped == null or group < stepped.?)) stepped = group;
+            }
+            current_group = stepped orelse {
+                termination = .boundary;
+                break;
+            };
+            current_edge = opposite;
+        }
+        if (termination == .closed) break;
+    }
+    const owned = collected.toOwnedSlice(alloc) catch return null;
+    return stageWalk(owned, .edge, termination, request.edge);
+}
+
+/// Expand the LIVE face selection by adjacency. The one amplifier that reads the current
+/// selection rather than a seed, because "a bit more than what I have" is the intent.
+fn walkGrow(request: WalkRequest) ?WalkPlan {
+    const corners = g_corner_vert orelse return null;
+    const face_count = model_paint.faceCount();
+    const live = g_sel_face orelse return null;
+    var mask = alloc.alloc(bool, face_count) catch return null;
+    defer alloc.free(mask);
+    @memset(mask, false);
+    var selected: u32 = 0;
+    var face: u32 = 0;
+    while (face < face_count and face < live.len) : (face += 1) {
+        if (!live[face] or !faceInScope(face)) continue;
+        mask[face] = true;
+        selected += 1;
+    }
+    if (selected == 0) return null;
+    const vertex_hit = alloc.alloc(bool, g_vert_count) catch return null;
+    defer alloc.free(vertex_hit);
+    const rings = @max(1, @min(request.rings, 16));
+    var ring: u32 = 0;
+    while (ring < rings) : (ring += 1) {
+        @memset(vertex_hit, false);
+        face = 0;
+        while (face < face_count) : (face += 1) {
+            if (!mask[face]) continue;
+            const base = @as(usize, face) * 3;
+            if (base + 2 >= corners.len) break;
+            for (0..3) |corner| vertex_hit[corners[base + corner]] = true;
+        }
+        face = 0;
+        while (face < face_count) : (face += 1) {
+            if (mask[face] or !faceInScope(face)) continue;
+            const base = @as(usize, face) * 3;
+            if (base + 2 >= corners.len) break;
+            for (0..3) |corner| {
+                if (vertex_hit[corners[base + corner]]) {
+                    mask[face] = true;
+                    break;
+                }
+            }
+        }
+    }
+    return stageWalkFaceMask(mask, .complete);
+}
+
+/// Faces resembling a seed face. `coplanar` is the one that replaces the brittle
+/// inside:box dance for isolating a flat panel: same normal AND the same plane.
+fn walkSimilar(request: WalkRequest) ?WalkPlan {
+    const face_count = model_paint.faceCount();
+    if (request.face >= face_count or !faceInScope(request.face)) return null;
+    const seed_normal = walkFaceNormal(request.face) orelse return null;
+    const seed_area = walkFaceArea(request.face);
+    const seed_offset = walkFacePlaneOffset(request.face, seed_normal);
+    const cosine = @cos(std.math.degreesToRadians(std.math.clamp(request.tolerance, 0, 180)));
+    var mask = alloc.alloc(bool, face_count) catch return null;
+    defer alloc.free(mask);
+    @memset(mask, false);
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (!faceInScope(face)) continue;
+        switch (request.by) {
+            .area => {
+                const area = walkFaceArea(face);
+                const span = @max(seed_area, 1e-9);
+                if (@abs(area - seed_area) / span <= @max(request.tolerance, 0)) mask[face] = true;
+            },
+            .normal, .coplanar => {
+                const normal = walkFaceNormal(face) orelse continue;
+                const dot = normal[0] * seed_normal[0] + normal[1] * seed_normal[1] + normal[2] * seed_normal[2];
+                if (dot < cosine) continue;
+                if (request.by == .coplanar) {
+                    // Same facing is not the same panel: the far side of a slab passes a
+                    // normal test and must fail a plane test.
+                    if (@abs(walkFacePlaneOffset(face, seed_normal) - seed_offset) > 1e-3) continue;
+                }
+                mask[face] = true;
+            },
+        }
+    }
+    return stageWalkFaceMask(mask, .complete);
+}
+
+fn stageWalkFaceMask(mask: []const bool, terminated: WalkTermination) ?WalkPlan {
+    var count: u32 = 0;
+    for (mask) |hit| {
+        if (hit) count += 1;
+    }
+    const ids = alloc.alloc(u32, count) catch return null;
+    var at: usize = 0;
+    for (mask, 0..) |hit, face| {
+        if (!hit) continue;
+        ids[at] = @intCast(face);
+        at += 1;
+    }
+    return stageWalk(ids, .face, terminated, 0);
+}
+
+pub fn walkPlan(request: WalkRequest) ?WalkPlan {
+    if (!ensureTopology()) return null;
+    return switch (request.kind) {
+        .path => walkPath(request),
+        .loop => walkLoop(request),
+        .ring => walkRing(request),
+        .grow => walkGrow(request),
+        .similar => walkSimilar(request),
+    };
+}
+
+/// Commit the staged walk. The token must match the plan that was just read AND the
+/// facecount it was computed for — a topology change between preview and apply is a
+/// refusal, never a silently different set.
+pub fn walkApply(token: u64, additive: bool) ?u32 {
+    const ids = g_walk_ids orelse return null;
+    if (token == 0 or token != g_walk_token) return null;
+    if (g_walk_built_for != model_paint.faceCount()) return null;
+    switch (g_walk_domain) {
+        .face => {
+            setMode(.face);
+            const face_count = model_paint.faceCount();
+            const mask = alloc.alloc(bool, face_count) catch return null;
+            defer alloc.free(mask);
+            @memset(mask, false);
+            if (additive) {
+                if (g_sel_face) |live| {
+                    var face: usize = 0;
+                    while (face < face_count and face < live.len) : (face += 1) mask[face] = live[face];
+                }
+            }
+            for (ids) |id| {
+                if (id < face_count) mask[id] = true;
+            }
+            return selectFacesByTriangleMask(mask);
+        },
+        .edge => {
+            setMode(.edge);
+            var applied: u32 = 0;
+            for (ids, 0..) |id, at| {
+                if (selectEdgeByIndex(id, additive or at > 0)) applied += 1;
+            }
+            return applied;
+        },
+        .vertex => {
+            setMode(.vertex);
+            var applied: u32 = 0;
+            for (ids, 0..) |id, at| {
+                if (selectVertexByIndex(id, additive or at > 0)) applied += 1;
+            }
+            return applied;
+        },
+    }
+}
+
+pub fn walkPlanJson(allocator: std.mem.Allocator, request: WalkRequest) ?[]u8 {
+    const plan = walkPlan(request) orelse return null;
+    const ids = g_walk_ids orelse return null;
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    const writer = &out.writer;
+    writer.print(
+        "{{\"ok\":true,\"token\":\"{d}\",\"domain\":\"{s}\",\"count\":{d},\"terminated\":\"{s}\",\"stoppedAt\":{d},\"tieBreak\":\"{s}\",\"bbox\":[",
+        .{
+            plan.token,
+            @tagName(plan.domain),
+            plan.count,
+            @tagName(plan.terminated),
+            plan.stopped_at,
+            "lowest element id wins an equal-cost step",
+        },
+    ) catch return null;
+    for (plan.bbox, 0..) |value, at| {
+        writer.print("{s}{d:.6}", .{ if (at == 0) "" else ",", value }) catch return null;
+    }
+    writer.writeAll("],\"elements\":[") catch return null;
+    for (ids, 0..) |id, at| {
+        writer.print("{s}{d}", .{ if (at == 0) "" else ",", id }) catch return null;
+    }
+    writer.writeAll("]}") catch return null;
+    return out.toOwnedSlice() catch null;
+}
+
+// ── intent amplifier walks (req_4061) ────────────────────────────────────────────
+
+fn setupGroupedCube(soup: *[12 * 3 * 8]f32) void {
+    buildCubeSoup(soup);
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    model_source.setFaceGroups(groups[0..]);
+    model_paint.setTarget(9101, soup[0..], 36);
+}
+
+test "a path walk spans two picks and reports the chain, not a pair" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    // Two corners of a cube that share no edge: the walk must find the run between them.
+    const plan = walkPlan(.{ .kind = .path, .from = 0, .to = 7 }) orelse return error.NoPlan;
+    try testing.expectEqual(WalkDomain.vertex, plan.domain);
+    try testing.expectEqual(WalkTermination.complete, plan.terminated);
+    try testing.expect(plan.count >= 2);
+    const ids = g_walk_ids orelse return error.NoIds;
+    try testing.expectEqual(@as(u32, 0), ids[0]);
+    try testing.expectEqual(@as(u32, 7), ids[ids.len - 1]);
+    // Every consecutive pair must be a real edge, or it is not a walk.
+    for (ids[0 .. ids.len - 1], ids[1..]) |a, b| try testing.expect(hasEdgeBetweenPub(a, b));
+}
+
+test "an unreachable target refuses instead of inventing a chain" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    const plan = walkPlan(.{ .kind = .path, .from = 0, .to = 99 });
+    try testing.expect(plan == null); // out of range is a refusal, not an empty walk
+}
+
+test "a walk stages a preview and changes no selection until it is applied" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    const plan = walkPlan(.{ .kind = .path, .from = 0, .to = 7 }) orelse return error.NoPlan;
+    var picked: [64]u32 = undefined;
+    try testing.expectEqual(@as(u32, 0), selectedVerticesPub(picked[0..]));
+    const applied = walkApply(plan.token, false) orelse return error.NotApplied;
+    try testing.expectEqual(plan.count, applied);
+    try testing.expectEqual(plan.count, selectedVerticesPub(picked[0..]));
+}
+
+test "a stale token cannot apply a walk" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    const first = walkPlan(.{ .kind = .path, .from = 0, .to = 7 }) orelse return error.NoPlan;
+    _ = walkPlan(.{ .kind = .path, .from = 1, .to = 6 }) orelse return error.NoPlan;
+    // The superseded plan's token is dead: an agent can only apply the walk it just read.
+    try testing.expect(walkApply(first.token, false) == null);
+    try testing.expect(walkApply(0, false) == null);
+}
+
+test "a cube edge loop closes at four edges and says so" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    var seed: u32 = 0;
+    while (seed < g_edge_count and !walkEdgeUsable(seed)) : (seed += 1) {}
+    const plan = walkPlan(.{ .kind = .loop, .edge = seed }) orelse return error.NoPlan;
+    try testing.expectEqual(WalkDomain.edge, plan.domain);
+    // Every vertex of a cube is 3-valent in boundary edges, so a quad loop cannot
+    // continue — the walk must stop at the pole rather than guess a continuation.
+    try testing.expectEqual(WalkTermination.pole, plan.terminated);
+    try testing.expectEqual(@as(u32, 1), plan.count);
+}
+
+test "similar by coplanar isolates one panel, by normal takes the whole facing" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    const coplanar = walkPlan(.{ .kind = .similar, .face = 0, .by = .coplanar, .tolerance = 5 }) orelse return error.NoPlan;
+    // One cube side is two triangles; the opposite side faces the other way and must
+    // not join, and a same-facing far plane must fail the plane test.
+    try testing.expectEqual(@as(u32, 2), coplanar.count);
+    const normals = walkPlan(.{ .kind = .similar, .face = 0, .by = .normal, .tolerance = 5 }) orelse return error.NoPlan;
+    try testing.expect(normals.count >= coplanar.count);
+}
+
+test "grow expands the live face selection by adjacency" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    try testing.expect(selectFaceByIndex(0, false));
+    const plan = walkPlan(.{ .kind = .grow, .rings = 1 }) orelse return error.NoPlan;
+    try testing.expectEqual(WalkDomain.face, plan.domain);
+    try testing.expect(plan.count > 1); // a corner triangle always has neighbours
+}
+
+test "grow with nothing selected refuses rather than selecting everything" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    setupGroupedCube(&soup);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        clearWalkPlan();
+    }
+    try testing.expect(ensureTopology());
+    try testing.expect(walkPlan(.{ .kind = .grow, .rings = 1 }) == null);
 }

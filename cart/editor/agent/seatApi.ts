@@ -49,6 +49,7 @@ import {
   type OracleFacts,
   type OracleSession,
 } from './seatOracle';
+import type { CharacterRigSeatStatus } from './characterRigSeat';
 
 export { NO_SEMANTIC_ID, declareRegion } from '../model/meshSemantics';
 export type { MeshSemanticRegion as SemanticRegion, MeshSemanticTable as SemanticTable } from '../model/meshSemantics';
@@ -115,6 +116,9 @@ export type SeatPercept = {
    * counts only percept-derivable and already-attested checks — `oracle status` is
    * what pays for the disk and diagnostics reads. */
   oracle?: { phase: string; blocked: number; plan: string; position: string };
+  /** Ambient resident character-rig debt. Null means no attached/open native
+   * character rig; a value is the same structured matrix as `rig-status`. */
+  rig?: CharacterRigSeatStatus | null;
   /** Shell-owned Outliner identity paired with the host-authored ranges. This is
    * durable parts.json data, not a reconstruction from semantic face names. */
   activePartId: string | null;
@@ -455,6 +459,9 @@ export type SeatAdapter = {
   /** Live shell-owned Outliner names and hierarchy. The native semantic state
    *  intentionally knows geometry only; the seat joins both truths at look time. */
   partPercept?: () => SeatPartPercept;
+  /** Cached compact character-rig state. Reading a Seat reply must never poll
+   * native or acquire the viewport, so the shell supplies its latest snapshot. */
+  rigPercept?: () => CharacterRigSeatStatus | null;
   /** Existing shell/Outliner/focus-panel authority for human-facing commands
    *  whose truth is cart-owned rather than a native mesh operation. */
   shellAction?: (action: string, args: Record<string, unknown>) => SeatShellReceipt;
@@ -721,7 +728,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const withParts = (percept: SeatPercept | null): SeatPercept | null => {
     if (!percept) return null;
     const shell = adapter.partPercept?.();
-    return shell ? { ...percept, ...shell, model: shell.model ?? null } : { ...percept, model: null };
+    const rig = adapter.rigPercept?.();
+    return shell
+      ? { ...percept, ...shell, model: shell.model ?? null, ...(adapter.rigPercept ? { rig: rig ?? null } : {}) }
+      : { ...percept, model: null, ...(adapter.rigPercept ? { rig: rig ?? null } : {}) };
   };
   // Viewport input already emits this one committed-selection notification. Seat
   // automation changes the same resident sets, so it must wake the human's inspector too.
@@ -1656,6 +1666,78 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       ? { selector, patch, selectionSet: true }
       : { reason: `the topology patch for "${selector}" was unavailable` };
   };
+  // ── intent amplifiers: two decisions expand to N elements (req_4061) ──────────
+  // The agent supplies intent; the HOST supplies the walk. Preview is the default and
+  // the token is the whole safety story: an agent applies only the walk it just read,
+  // and a topology change in between is a refusal rather than a different set.
+  const WALK_SYNTAX = 'path {from,to,[axis]} · loop {edge} · ring {edge} · grow {rings} · similar {face,by:normal|coplanar|area,tolerance}';
+  const walk = (kind: string, args: Record<string, unknown>): SeatShellReceipt => {
+    const request: Record<string, unknown> = { kind };
+    const whole = (value: unknown, fallback?: number) => {
+      const number = Number(value);
+      return Number.isInteger(number) && number >= 0 ? number : fallback;
+    };
+    if (kind === 'path') {
+      const from = whole(args.from);
+      const to = whole(args.to);
+      if (from === undefined || to === undefined) return { ok: false, reason: `path needs from and to vertex ids from \`elements\` — ${WALK_SYNTAX}` };
+      request.from = from;
+      request.to = to;
+      const axis = axisIndexOf(args.axis);
+      // 255 is the host's "unconstrained" sentinel; an axis restricts travel to
+      // monotone progress so a spine walk cannot detour around a limb.
+      request.axis = args.axis === undefined || axis === null ? 255 : axis;
+    } else if (kind === 'loop' || kind === 'ring') {
+      const edge = whole(args.edge);
+      if (edge === undefined) return { ok: false, reason: `${kind} needs a seed edge id from \`elements\` — ${WALK_SYNTAX}` };
+      request.edge = edge;
+    } else if (kind === 'grow') {
+      request.rings = whole(args.rings, 1);
+    } else if (kind === 'similar') {
+      const face = whole(args.face);
+      if (face === undefined) return { ok: false, reason: `similar needs a seed face id — ${WALK_SYNTAX}` };
+      request.face = face;
+      const by = String(args.by ?? 'normal');
+      if (!['normal', 'coplanar', 'area'].includes(by)) return { ok: false, reason: 'similar compares by normal, coplanar, or area' };
+      request.by = by;
+      request.tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : 10;
+    } else {
+      return { ok: false, reason: `unknown walk "${kind}" — ${WALK_SYNTAX}` };
+    }
+    const plan = parseJson<Record<string, unknown>>(host.__mesh_walk?.(JSON.stringify(request)));
+    if (!plan || plan.ok !== true) {
+      return { ok: false, reason: String(plan?.reason ?? 'the walk door is unavailable on this host — rebuild the editor binary') };
+    }
+    if (args.apply !== true) return { ok: true, result: { ...plan, applied: false } };
+    const applied = Number(automation(() => host.__mesh_walk_apply?.(String(plan.token), args.additive === true ? 1 : 0)) ?? -1);
+    if (applied < 0) {
+      return { ok: false, result: plan, reason: 'the walk was computed but its token no longer matches the live topology — re-read the walk and apply again' };
+    }
+    notifySelectionChanged();
+    return { ok: true, result: { ...plan, applied: true, selected: applied } };
+  };
+  /** Absolute placement. Agents think in target coordinates — "tabletop at 0.75 m" —
+   *  but only relative `move` existed, so every placement became read-bbox, subtract,
+   *  move. The delta is computed from the host's own selection bounds and applied as
+   *  one transaction, so the number reported is the number that moved. */
+  const setPosition = (args: Record<string, unknown>): SeatShellReceipt => {
+    const axis = axisIndexOf(args.axis);
+    if (axis === null) return { ok: false, reason: 'set-position needs axis x, y, or z' };
+    const value = Number(args.value);
+    if (!Number.isFinite(value)) return { ok: false, reason: 'set-position needs a finite target coordinate in METERS' };
+    const anchor = String(args.anchor ?? 'min');
+    if (!['min', 'center', 'max'].includes(anchor)) {
+      return { ok: false, reason: 'set-position anchors the selection by its min, center, or max on that axis' };
+    }
+    const patch = followPatch(undefined, 0);
+    const box = boxOfPoints((patch?.vertices ?? []).map((vertex) => vertex.at));
+    if (!box) return { ok: false, reason: 'nothing is selected — select the faces to place first' };
+    const current = anchor === 'min' ? box[axis]! : anchor === 'max' ? box[axis + 3]! : (box[axis]! + box[axis + 3]!) / 2;
+    const delta: [number, number, number] = [0, 0, 0];
+    delta[axis] = value - current;
+    if (!move(delta)) return { ok: false, reason: `set-position computed delta ${delta[axis]} but the move was rejected — check the active part scope` };
+    return { ok: true, result: { axis: String(args.axis).toLowerCase(), anchor, from: current, to: value, delta, bbox: box } };
+  };
   const measure = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
     const tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : CONTACT_EPSILON;
     if (operation === 'bbox') {
@@ -1987,7 +2069,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
-    measure, stats, align, oracle,
+    measure, stats, align, oracle, walk, setPosition,
   };
 }
 
@@ -2019,6 +2101,12 @@ const BACKGROUND_PART_GEOMETRY_ACTIONS = new Set([
 ]);
 
 export function backgroundSeatRefusal(action: string, args: Record<string, unknown>): string | null {
+  if (action === 'rig-status') {
+    return 'character rig status belongs to the visible model document; open the target model before reading its resident rig';
+  }
+  if (action === 'rig' && !['read', 'replace', 'lights-replace'].includes(String(args.operation ?? 'read'))) {
+    return 'character rig operations belong to the visible model document; open the target model before changing its resident rig';
+  }
   if (BACKGROUND_VISIBLE_VIEWPORT_ACTIONS.has(action)) {
     return `${action} drives the visible model viewport; a background model is not the document on screen`;
   }
@@ -2046,7 +2134,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 // actions (viewport, retopo-bands, follow, uv-prestack diagnostics, ...).
 
 const SEAT_READ_ACTIONS = new Set([
-  'look', 'semantic-status', 'elements', 'boundary-continuation', 'uv-state',
+  'look', 'semantic-status', 'rig-status', 'elements', 'boundary-continuation', 'uv-state',
   'recipe-list', 'shot', 'claims',
   // Saved-package reads touch neither the resident mesh nor the live selection, so
   // a supervisor can inspect a claimed model's disk state without taking the claim.
@@ -2137,6 +2225,34 @@ export function executeSeatRequestAtShell(
   };
 }
 
+/** One decision applied per matching part, instead of the 40-row batch an agent must
+ *  generate and get every id right in. Parts are the unit because they are the durable
+ *  identities a repeat is actually about — they survive the generation bump each step
+ *  causes, which a list of triangle ids does not. Each row is its own transaction and a
+ *  refusal names the part that refused, so a partial sweep is visible rather than silent. */
+export function runSeatForEach(seat: AgentSeat, args: Record<string, unknown>): SeatShellReceipt {
+  const selector = String(args.selector ?? '').trim();
+  const step = args.do as { action?: string; args?: Record<string, unknown> } | undefined;
+  if (!selector || !step?.action) return { ok: false, reason: 'for-each needs a selector and a {action,args} step' };
+  if (step.action === 'for-each' || step.action === 'batch') return { ok: false, reason: 'for-each cannot nest — it is already the repeat' };
+  const percept = seat.look();
+  if (!percept) return { ok: false, reason: 'no live mesh' };
+  const needle = selector.replace(/^part:/, '');
+  const targets = percept.parts.filter((part) => part.visible && part.name.includes(needle));
+  if (targets.length === 0) return { ok: false, reason: `no visible Outliner part matches "${selector}"` };
+  const rows: { part: string; ok: boolean; reason?: string }[] = [];
+  for (const part of targets) {
+    const scoped = seat.shellAction('part-select', { ids: [part.id] });
+    if (!scoped.ok) { rows.push({ part: part.name, ok: false, reason: scoped.reason }); continue; }
+    const outcome = executeSeatRequest(seat, { action: step.action, args: step.args ?? {} });
+    rows.push({ part: part.name, ok: outcome.ok, ...(outcome.reason ? { reason: outcome.reason } : {}) });
+  }
+  const failed = rows.filter((row) => !row.ok);
+  return failed.length === 0
+    ? { ok: true, result: { selector, applied: rows.length, rows } }
+    : { ok: false, result: { selector, applied: rows.length - failed.length, rows }, reason: `${failed.length} of ${rows.length} parts refused: ${failed.map((row) => row.part).join(', ')}` };
+}
+
 /** Transport-neutral request dispatcher used by the live editor and tests. */
 export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatReply {
   const args = request.args ?? {};
@@ -2172,6 +2288,19 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       // The phase-gate router (req_4053). `start`/`ask`/`plans` are reads; `advance`
       // and `attest` move the agent's own workflow cursor, never the model.
+      case 'select-path': case 'select-loop': case 'select-ring':
+      case 'select-grow': case 'select-similar': {
+        const result = seat.walk(request.action.slice('select-'.length), args);
+        return seat.reply(request.action, result.ok, result.result, result.reason);
+      }
+      case 'set-position': {
+        const result = seat.setPosition(args);
+        return seat.reply('set-position', result.ok, result.result, result.reason);
+      }
+      case 'for-each': {
+        const result = runSeatForEach(seat, args);
+        return seat.reply('for-each', result.ok, result.result, result.reason);
+      }
       case 'oracle': {
         const result = seat.oracle(String(args.operation ?? 'status'), args);
         return seat.reply('oracle', result.ok, result.result, result.reason);
@@ -2417,6 +2546,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('recipe', result.ok, result, result.reason);
       }
       case 'editor-status':
+      case 'rig-status':
       case 'command':
       // The saved package is disk state, so only the shell can read it — but the
       // READER is this editor's own RJMD decoder (req_4052). Agents were parsing

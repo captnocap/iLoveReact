@@ -6,9 +6,10 @@ comptime {
     _ = @hasDecl(build_options, "is_lib");
 }
 
-const v8_runtime = @import("v8_runtime.zig");
+const module_binding_build = build_options.dev_native_modules and (build_options.dev_scene3d_module or build_options.dev_game_module);
+const v8_runtime = if (module_binding_build) @import("dev_modules/v8_runtime_api.zig") else @import("v8_runtime.zig");
 const HostContext = @import("host_context.zig");
-const state = @import("state/dirty.zig");
+const state = if (module_binding_build) @import("dev_modules/dirty_api.zig") else @import("state/dirty.zig");
 const input = @import("primitive/input.zig");
 const selection = @import("state/selection.zig");
 const prepared_input = @import("state/prepared_input.zig");
@@ -20,7 +21,10 @@ const localstore = @import("storage/localstore.zig");
 const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
-const scene3d = @import("gpu/3d.zig");
+const scene3d = if (build_options.dev_native_modules and !build_options.dev_scene3d_module)
+    struct {}
+else
+    @import("gpu/3d.zig");
 const mesh_edit = @import("gpu/mesh_edit.zig");
 const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");
 const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
@@ -31,7 +35,8 @@ const meshdoc_format = @import("gpu/meshdoc_format.zig");
 const material_tex = @import("gpu/material_tex.zig");
 const paint_program = @import("gpu/paint_program.zig");
 const capture = @import("gpu/capture.zig");
-const host_tree = @import("host_tree.zig");
+const character_rig_session = @import("skeleton/character_rig_session.zig");
+const host_tree = if (module_binding_build) @import("dev_modules/host_tree_api.zig") else @import("host_tree.zig");
 const root = @import("root");
 
 // Retained source mesh + its path, so the live quality slider can re-decimate from the
@@ -536,8 +541,8 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 }
 
 /// __mesh_load_vertices(key, float32Verts, vertCount?, groups?, materials?,
-/// semanticRegions?, semanticInstances?, semanticTableJson?) →
-/// JSON {"key","count","radius","semantics"} | "".
+/// semanticRegions?, semanticInstances?, semanticTableJson?, logicalIds?,
+/// logicalVertexCount?) → JSON {"key","count","radius","semantics","logical"} | "".
 /// Adopt already-cooked scene3d triangle data into the same resident model-viewer path
 /// as OBJ/GLB file imports. RJMD metadata lands in the SAME native transaction as its
 /// geometry: a cold load may never display the right mesh while silently losing rigging
@@ -590,13 +595,25 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     else
         null;
     defer if (semantic_table) |json| std.heap.c_allocator.free(json);
+    const logical_ids = typedRows(info, 8, mesh.vert_count) orelse return setReturnString(info, "");
+    const has_logical_vertices = logical_ids.len > 0;
+    const logical_vertex_count: u32 = if (has_logical_vertices) blk: {
+        const count = argToI32(info, 9) orelse return setReturnString(info, "");
+        if (count <= 0) return setReturnString(info, "");
+        break :blk @intCast(count);
+    } else 0;
     // Cooked arrivals are imports too — same winding repair before retention (req_3450).
-    const rewound = scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
+    // Saved v5 rows describe exact corners. Reordering those corners without moving the
+    // logical row in lockstep would corrupt topology, and an RJMD document is already a
+    // validated authored mesh rather than an arbitrary external import.
+    const rewound = if (has_logical_vertices) 0 else scene3d.normalizeSoupWinding(mesh.verts, mesh.vert_count);
     if (rewound > 0) std.log.warn("[mesh-load] cooked {s}: repaired {d} inconsistently wound triangle(s)", .{ key, rewound });
 
     // Keep the original cooked factor for quality/paint projection, then adopt a
     // paint-ready working copy into the resident host stash.
     model_source.retain(key, mesh.verts, mesh.vert_count);
+    if (has_logical_vertices and !model_source.setLogicalTopology(logical_ids, logical_vertex_count))
+        return setReturnString(info, "");
     scene3d.meshEditBeginModel();
     scene3d.setPaintTarget(key, mesh.verts, mesh.vert_count);
     if (groups.len > 0) scene3d.meshEditSetFaceGroups(groups);
@@ -628,7 +645,12 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
             else => w.writeByte(ch) catch return,
         }
     }
-    w.print("\",\"count\":{d},\"radius\":{d:.6},\"semantics\":{d}}}", .{ mesh.vert_count, mesh.radius, @intFromBool(has_semantics) }) catch {
+    w.print("\",\"count\":{d},\"radius\":{d:.6},\"semantics\":{d},\"logical\":{d}}}", .{
+        mesh.vert_count,
+        mesh.radius,
+        @intFromBool(has_semantics),
+        @intFromBool(has_logical_vertices),
+    }) catch {
         setReturnString(info, "");
         return;
     };
@@ -924,6 +946,32 @@ fn hostMeshSemanticAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnNumber(info, changed);
 }
 
+/// __mesh_edge_semantic_assign(name, role, objectId) → canonical path receipt JSON.
+fn hostMeshEdgeSemanticAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const allocator = std.heap.c_allocator;
+    const name = argToStringAlloc(info, 0) orelse return setReturnString(info, "");
+    defer allocator.free(name);
+    const role = argToStringAlloc(info, 1) orelse return setReturnString(info, "");
+    defer allocator.free(role);
+    const object_id = argToStringAlloc(info, 2) orelse return setReturnString(info, "");
+    defer allocator.free(object_id);
+    const receipt = scene3d.meshEdgeSemanticAssignSelection(allocator, name, role, object_id) orelse
+        return setReturnString(info, "");
+    defer allocator.free(receipt);
+    state.markDirty();
+    setReturnString(info, receipt);
+}
+
+/// __mesh_edge_semantic_select(id, additive) → selected authored edges.
+fn hostMeshEdgeSemanticSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToI32(info, 0) orelse return setReturnNumber(info, 0);
+    if (id < 0) return setReturnNumber(info, 0);
+    const additive = (argToI32(info, 1) orelse 0) != 0;
+    setReturnNumber(info, scene3d.meshEdgeSemanticSelect(@intCast(id), additive));
+}
+
 /// __mesh_semantic_extrude_intent(capRegion, wallRegion, instance, tableJson).
 /// Stages roles for exactly one subsequent face extrusion; the op consumes it.
 fn hostMeshSemanticExtrudeIntent(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1178,6 +1226,19 @@ fn hostMeshGizmoScaleBy(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_align_loop() -> 1|2|3 for X|Y|Z, 0 on refusal. The native mesh editor
+/// chooses the selected row/loop's least-varying non-flat world axis and journals
+/// the centroid alignment as one mirrored transform.
+fn hostMeshAlignLoop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis = scene3d.meshAlignLoop() orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    state.markDirty();
+    setReturnNumber(info, @as(u32, axis) + 1);
+}
+
 fn hostMeshTransformTranslate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const delta = [3]f32{
@@ -1303,18 +1364,22 @@ fn setMeshBevelPreviewReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     setReturnString(info, json);
 }
 
-/// __mesh_topo_extrude_edge(distance) → JSON {"ok","key","count"}. Extrude exactly
-/// one selected welded edge, appending a bridged quad split into triangles.
+/// __mesh_topo_extrude_edge(distance, angleDegrees?) → JSON {"ok","key","count"}.
+/// Extrude exactly one selected welded edge, appending a bridged quad split into
+/// triangles. Zero angle continues in-plane; signed angle tilts toward/away from
+/// the source face normal.
 fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
-    const ok = scene3d.meshTopoExtrudeEdge(distance);
+    const angle_degrees: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const ok = scene3d.meshTopoExtrudeEdge(distance, angle_degrees);
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_topo_extrude_face(distance) → JSON {"ok","key","count"}. One selected
-/// authored face extrudes as before (cap + side walls). A MULTI-face selection
+/// __mesh_topo_extrude_face(distance, taperDegrees?) → JSON {"ok","key","count"}.
+/// One selected authored face extrudes as before (cap + side walls); signed taper
+/// uniformly widens/narrows its cap. A MULTI-face selection
 /// region-extrudes as one shell (req_3763 P1-1): the patch translates along its
 /// average normal as the cap and walls rise only on the selection boundary —
 /// never between selected faces. The selection must stay inside one part; wire
@@ -1322,7 +1387,8 @@ fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
 fn hostMeshTopoExtrudeFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
-    const ok = scene3d.meshTopoExtrudeFace(distance);
+    const taper_degrees: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const ok = scene3d.meshTopoExtrudeFace(distance, taper_degrees);
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
 }
@@ -1418,9 +1484,10 @@ fn hostMeshTopoConnectVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callco
 
 /// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth",
 /// "sidesBefore"?,"defaultTargetSides"?,"minimumTargetSides"?,"maximumTargetSides"?}.
-/// Capture one selected sharp manifold edge, one
-/// 3+-edge corner, or one complete selected open-boundary loop as a host-owned live
-/// preview session. Widths are metres; the Studio popup converts them to modeling u.
+/// Capture one selected sharp manifold edge, one 3+-edge corner, one complete
+/// selected open-boundary loop, or one filled authored face as a host-owned live
+/// preview session. A filled face becomes a welded N-gon center ready to extrude.
+/// Widths are metres; the Studio popup converts them to modeling u.
 fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const bevel = scene3d.meshBevelBegin() orelse {
@@ -1431,9 +1498,10 @@ fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         .edge => "edge",
         .vertex => "vertex",
         .boundary => "boundary",
+        .face_polygon => "face-polygon",
     };
     var buf: [320]u8 = undefined;
-    const json = if (bevel.kind == .boundary)
+    const json = if (bevel.kind == .boundary or bevel.kind == .face_polygon)
         std.fmt.bufPrint(
             &buf,
             "{{\"ok\":1,\"kind\":\"{s}\",\"defaultWidth\":{d},\"minimumWidth\":{d},\"maxWidth\":{d},\"sidesBefore\":{d},\"defaultTargetSides\":{d},\"minimumTargetSides\":{d},\"maximumTargetSides\":{d}}}",
@@ -2787,6 +2855,35 @@ fn hostMeshRetopoGuideLoad(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
 /// __mesh_follow_patch(faceIds?, rings?) → exact selected/local topology JSON.
 /// Omit faceIds to read the current native face selection. Passing the recorded
 /// ids after Merge Faces reads those same triangles with their new group ids.
+/// __mesh_walk(json) → the computed element set, STAGED not selected (req_4061). The
+/// walk runs beside the topology it queries, so it works on meshes far too dense to
+/// page across the socket, and the reply states why it stopped and how ties broke.
+fn hostMeshWalk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const allocator = std.heap.c_allocator;
+    const json = argToStringAlloc(info, 0) orelse return setReturnString(info, "{\"ok\":false,\"reason\":\"invalid walk request\"}");
+    defer allocator.free(json);
+    var parsed = std.json.parseFromSlice(scene3d.MeshWalkRequest, allocator, json, .{ .ignore_unknown_fields = false }) catch
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"invalid walk request\"}");
+    defer parsed.deinit();
+    const reply = scene3d.meshWalkPlanJson(allocator, parsed.value) orelse
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"the walk found no usable topology from that seed\"}");
+    defer allocator.free(reply);
+    setReturnString(info, reply);
+}
+
+/// __mesh_walk_apply(token, additive) → selected count, or -1 when the token is stale.
+/// A topology change between preview and apply is a refusal, never a different set.
+fn hostMeshWalkApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const token = argToStringAlloc(info, 0) orelse return setReturnNumber(info, -1);
+    defer std.heap.c_allocator.free(token);
+    const value = std.fmt.parseInt(u64, token, 10) catch return setReturnNumber(info, -1);
+    const additive = (argToI32(info, 1) orelse 0) == 1;
+    const applied = scene3d.meshWalkApply(value, additive) orelse return setReturnNumber(info, -1);
+    setReturnNumber(info, @floatFromInt(applied));
+}
+
 fn hostMeshFollowPatch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const raw_faces = argBytes(info, 0);
@@ -3022,15 +3119,17 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
-/// __model_meshdoc_write(path, expectedRangeCount?) → 1 on success. The model DOCUMENT blob (RJMD v4) — the
+/// __model_meshdoc_write(path, expectedRangeCount?, rangeObjectIdsJson?) → 1 on success. The model DOCUMENT blob (RJMD v4/v5) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
-/// header u32×10 [magic 'RJMD', version=4, vertCount, faceCount, hasGroups, rangeCount,
+/// v4 header u32×10 [magic 'RJMD', version=4, vertCount, faceCount, hasGroups, rangeCount,
 /// glassFirstVertex, hasMaterials, hasSemantics, semanticJsonBytes],
+/// v5 appends [hasLogicalVertices, logicalVertexCount] to that header,
 /// then vertCount×8 f32 durable verts, then faceCount u32 authored-face-group ids (when
 /// hasGroups=1), faceCount u32 texture-role indices (when hasMaterials=1), semantic
 /// region + instance rows (when hasSemantics=1), rangeCount×2 u32 flattened [lo,hi)
-/// per-part group ranges, then the versioned semantic dictionary JSON. All
+/// per-part group ranges, one logical id per render corner (v5), then the versioned
+/// semantic dictionary JSON. All
 /// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
 fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -3048,6 +3147,7 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const materials: ?[]const u32 = if (document.materials) |rows| rows else null;
     const semantic_regions: ?[]const u32 = if (document.semantic_regions) |rows| rows else null;
     const semantic_instances: ?[]const u32 = if (document.semantic_instances) |rows| rows else null;
+    const render_corner_logical_ids: ?[]const u32 = if (document.render_corner_logical_ids) |rows| rows else null;
     const empty_semantic_table = "{\"version\":1,\"regions\":[]}";
     const ranges = model_source.partRanges();
     const has_groups: u32 = if (groups != null and groups.?.len == face_count) 1 else 0;
@@ -3062,12 +3162,19 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     }
     const has_semantics: u32 = if (semantic_regions != null and semantic_instances != null and
         semantic_regions.?.len == face_count and semantic_instances.?.len == face_count) 1 else 0;
-    const semantic_json: []const u8 = if (has_semantics == 1)
+    const base_semantic_json: []const u8 = if (has_semantics == 1)
         (document.semantic_table_json orelse empty_semantic_table)
     else
         &.{};
-    if (semantic_json.len > model_source.MAX_SEMANTIC_TABLE_BYTES) return setReturnNumber(info, 0);
-    const semantic_json_bytes: u32 = @intCast(semantic_json.len);
+    const has_logical_vertices: u32 = if (render_corner_logical_ids != null and
+        render_corner_logical_ids.?.len == vert_count and document.logical_vertex_count > 0) 1 else 0;
+    if (has_logical_vertices == 1 and !meshdoc_format.logicalRowsValid(
+        alloc,
+        verts[0 .. @as(usize, vert_count) * 8],
+        render_corner_logical_ids.?,
+        document.logical_vertex_count,
+        true,
+    )) return setReturnNumber(info, 0);
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
     if (!meshdoc_format.rangesValid(ranges, range_count)) return setReturnNumber(info, 0);
     if (!meshdoc_format.rangesOwnEveryFace(ranges, groups, range_count)) {
@@ -3077,6 +3184,26 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     if (argToI32(info, 1)) |expected| {
         if (expected < 0 or @as(u32, @intCast(expected)) != range_count) return setReturnNumber(info, 0);
     }
+    var owned_semantic_json: ?[]u8 = null;
+    defer if (owned_semantic_json) |json| alloc.free(json);
+    var semantic_json = base_semantic_json;
+    if (has_logical_vertices == 1) {
+        if (has_semantics != 1) return setReturnNumber(info, 0);
+        const range_object_ids_json = argToStringAlloc(info, 2) orelse return setReturnNumber(info, 0);
+        defer alloc.free(range_object_ids_json);
+        var parsed_ids = std.json.parseFromSlice([]const []const u8, alloc, range_object_ids_json, .{}) catch
+            return setReturnNumber(info, 0);
+        defer parsed_ids.deinit();
+        owned_semantic_json = meshdoc_format.semanticTableWithRangeObjectIdsAlloc(
+            alloc,
+            base_semantic_json,
+            ranges orelse return setReturnNumber(info, 0),
+            parsed_ids.value,
+        ) catch return setReturnNumber(info, 0);
+        semantic_json = owned_semantic_json.?;
+    }
+    if (semantic_json.len > model_source.MAX_SEMANTIC_TABLE_BYTES) return setReturnNumber(info, 0);
+    const semantic_json_bytes: u32 = @intCast(semantic_json.len);
 
     // Never truncate the durable document in place. A complete, fsynced temp file is
     // atomically renamed over it only after every section succeeds (req_3234).
@@ -3084,8 +3211,13 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch return setReturnNumber(info, 0);
     const file = std.Io.Dir.cwd().createFile(io, tmp_path, .{ .truncate = true }) catch return setReturnNumber(info, 0);
     const glass_first_vertex = @min(document.glass_first_vertex, vert_count);
-    const header = [10]u32{ 0x444D4A52, 4, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials, has_semantics, semantic_json_bytes };
-    file.writeStreamingAll(io, std.mem.sliceAsBytes(header[0..])) catch {
+    const header_v4 = [10]u32{ 0x444D4A52, 4, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials, has_semantics, semantic_json_bytes };
+    const header_v5 = [12]u32{ 0x444D4A52, 5, vert_count, face_count, has_groups, range_count, glass_first_vertex, has_materials, has_semantics, semantic_json_bytes, has_logical_vertices, document.logical_vertex_count };
+    const header_bytes = if (has_logical_vertices == 1)
+        std.mem.sliceAsBytes(header_v5[0..])
+    else
+        std.mem.sliceAsBytes(header_v4[0..]);
+    file.writeStreamingAll(io, header_bytes) catch {
         file.close(io);
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
         return setReturnNumber(info, 0);
@@ -3128,6 +3260,13 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
             return setReturnNumber(info, 0);
         };
     }
+    if (has_logical_vertices == 1) {
+        file.writeStreamingAll(io, std.mem.sliceAsBytes(render_corner_logical_ids.?[0..vert_count])) catch {
+            file.close(io);
+            std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+            return setReturnNumber(info, 0);
+        };
+    }
     if (semantic_json_bytes > 0) {
         file.writeStreamingAll(io, semantic_json) catch {
             file.close(io);
@@ -3146,6 +3285,53 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         return setReturnNumber(info, 0);
     };
     setReturnNumber(info, 1);
+}
+
+/// __character_rig_session(requestJson) -> replyJson
+///
+/// The editor's entire inspect/bind workflow crosses this one revisioned door.
+/// The session module owns mutable rig state; React receives compact JSON
+/// snapshots and never receives resident geometry or weight arrays.
+fn hostCharacterRigSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const allocator = std.heap.c_allocator;
+    const request_json = argToStringAlloc(info, 0) orelse {
+        return setReturnString(info, "{\"ok\":false,\"error\":\"character rig request must be JSON text\"}");
+    };
+    defer allocator.free(request_json);
+    if (model_source.path()) |resident_source_key| {
+        if (character_rig_session.preflightOpenRangeObjectCount(
+            allocator,
+            request_json,
+            resident_source_key,
+        )) |expected_range_object_count| {
+            const preparation = scene3d.characterRigPrepareOpenTopology(expected_range_object_count);
+            if (preparation.changed) state.markDirty();
+        }
+    }
+    var snapshot = scene3d.modelDocumentSnapshot(allocator);
+    defer if (snapshot) |*document| document.deinit(allocator);
+    const resident_context: ?character_rig_session.ResidentContext = if (snapshot) |*document| .{
+        .io = io,
+        .source_key = model_source.path() orelse "",
+        .snapshot = document,
+        .ranges = model_source.partRanges() orelse &.{},
+        .pick_logical_vertex = scene3d.characterRigPickLogicalVertex,
+        .pick_bone = scene3d.characterRigPickBone,
+        .select_faces = scene3d.characterRigSelectFaces,
+        .sync_rig_viewport = scene3d.characterRigSyncViewport,
+        .clear_rig_viewport = scene3d.characterRigClearViewport,
+    } else null;
+    const reply = character_rig_session.handleResident(
+        allocator,
+        request_json,
+        if (resident_context) |*context| context else null,
+    ) catch {
+        return setReturnString(info, "{\"ok\":false,\"error\":\"character rig session allocation failed\"}");
+    };
+    defer allocator.free(reply);
+    setReturnString(info, reply);
 }
 
 /// __model_atlas_base(mode, r, g, b) → 1. Set the atlas base TYPE — 0 Texture Template,
@@ -4793,6 +4979,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__getInputTextForNode", hostGetInputTextForNode);
     v8_runtime.registerHostFn("__hostLoadFileToBuffer", hostLoadFileToBuffer);
     v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
+    if (!build_options.dev_native_modules) {
     v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
     v8_runtime.registerHostFn("__mesh_preview_file", hostMeshPreviewFile);
@@ -4801,6 +4988,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_set_face_materials", hostMeshSetFaceMaterials);
     v8_runtime.registerHostFn("__mesh_set_face_semantics", hostMeshSetFaceSemantics);
     v8_runtime.registerHostFn("__mesh_semantic_assign", hostMeshSemanticAssign);
+    v8_runtime.registerHostFn("__mesh_edge_semantic_assign", hostMeshEdgeSemanticAssign);
+    v8_runtime.registerHostFn("__mesh_edge_semantic_select", hostMeshEdgeSemanticSelect);
     v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
     v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
     v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
@@ -4837,6 +5026,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
+    v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
     v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
     v8_runtime.registerHostFn("__mesh_transform_scale_axis", hostMeshTransformScaleAxis);
     v8_runtime.registerHostFn("__mesh_transform_rotate_axis", hostMeshTransformRotateAxis);
@@ -4927,6 +5117,8 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_retopo_guide_write", hostMeshRetopoGuideWrite);
     v8_runtime.registerHostFn("__mesh_retopo_guide_load", hostMeshRetopoGuideLoad);
     v8_runtime.registerHostFn("__mesh_follow_patch", hostMeshFollowPatch);
+    v8_runtime.registerHostFn("__mesh_walk", hostMeshWalk);
+    v8_runtime.registerHostFn("__mesh_walk_apply", hostMeshWalkApply);
     v8_runtime.registerHostFn("__mesh_follow_action_drain", hostMeshFollowActionDrain);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
@@ -4969,6 +5161,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
     v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
     v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
+    v8_runtime.registerHostFn("__character_rig_session", hostCharacterRigSession);
     v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
@@ -4977,6 +5170,7 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_program_apply_over_base", hostModelPaintProgramApplyOverBase);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
+    }
     v8_runtime.registerHostFn("__file_sha256", hostFileSha256);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
@@ -5029,6 +5223,203 @@ pub fn registerCore(host: *HostContext) void {
     v8_runtime.registerHostFn("__fswatchAdd", hostFswatchAdd);
     v8_runtime.registerHostFn("__fswatchRemove", hostFswatchRemove);
     v8_runtime.registerHostFn("__fswatchDrain", hostFswatchDrain);
+}
+
+/// Register only callbacks whose implementations and retained state live in
+/// the Scene3D module. Keeping this list separate is what lets a fresh V8
+/// context stop referring to the retiring library before it is unmapped.
+pub fn registerScene3D(_: *HostContext) void {
+    ensureContentStore();
+    v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
+    v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
+    v8_runtime.registerHostFn("__mesh_preview_file", hostMeshPreviewFile);
+    v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
+    v8_runtime.registerHostFn("__mesh_set_face_groups", hostMeshSetFaceGroups);
+    v8_runtime.registerHostFn("__mesh_set_face_materials", hostMeshSetFaceMaterials);
+    v8_runtime.registerHostFn("__mesh_set_face_semantics", hostMeshSetFaceSemantics);
+    v8_runtime.registerHostFn("__mesh_semantic_assign", hostMeshSemanticAssign);
+    v8_runtime.registerHostFn("__mesh_edge_semantic_assign", hostMeshEdgeSemanticAssign);
+    v8_runtime.registerHostFn("__mesh_edge_semantic_select", hostMeshEdgeSemanticSelect);
+    v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
+    v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
+    v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
+    v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
+    v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
+    v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
+    v8_runtime.registerHostFn("__mesh_select_audit", hostMeshSelectAudit);
+    v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
+    v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
+    v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);
+    v8_runtime.registerHostFn("__mesh_texture_slot_select", hostMeshTextureSlotSelect);
+    v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
+    v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
+    v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
+    v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
+    v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
+    v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
+    v8_runtime.registerHostFn("__model_shot_offscreen", hostModelShotOffscreen);
+    v8_runtime.registerHostFn("__model_orbit_frame", hostModelOrbitFrame);
+    v8_runtime.registerHostFn("__mesh_live_frame", hostMeshLiveFrame);
+    v8_runtime.registerHostFn("__model_bd_gizmo_set", hostModelBdGizmoSet);
+    v8_runtime.registerHostFn("__model_bd_gizmo_clear", hostModelBdGizmoClear);
+    v8_runtime.registerHostFn("__model_bd_gizmo_pos", hostModelBdGizmoPos);
+    v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
+    v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
+    v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
+    v8_runtime.registerHostFn("__mesh_edit_xray", hostMeshEditXray);
+    v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);
+    v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
+    v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
+    v8_runtime.registerHostFn("__mesh_edit_box", hostMeshEditBox);
+    v8_runtime.registerHostFn("__mesh_edit_capture", hostMeshEditCapture);
+    v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
+    v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
+    v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
+    v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
+    v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
+    v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
+    v8_runtime.registerHostFn("__mesh_transform_scale_axis", hostMeshTransformScaleAxis);
+    v8_runtime.registerHostFn("__mesh_transform_rotate_axis", hostMeshTransformRotateAxis);
+    v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
+    v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
+    v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
+    v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
+    v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+    v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
+    v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
+    v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
+    v8_runtime.registerHostFn("__mesh_topo_connect_vertices", hostMeshTopoConnectVertices);
+    v8_runtime.registerHostFn("__mesh_bevel_begin", hostMeshBevelBegin);
+    v8_runtime.registerHostFn("__mesh_bevel_preview", hostMeshBevelPreview);
+    v8_runtime.registerHostFn("__mesh_bevel_end", hostMeshBevelEnd);
+    v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
+    v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);
+    v8_runtime.registerHostFn("__mesh_lc_end", hostMeshLcEnd);
+    v8_runtime.registerHostFn("__mesh_lc_state", hostMeshLcState);
+    v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
+    v8_runtime.registerHostFn("__mesh_delete_group_range", hostMeshDeleteGroupRange);
+    v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
+    v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
+    v8_runtime.registerHostFn("__mesh_append_path_plane", hostMeshAppendPathPlane);
+    v8_runtime.registerHostFn("__mesh_append_path_edges", hostMeshAppendPathEdges);
+    v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);
+    v8_runtime.registerHostFn("__mesh_undo", hostMeshUndo);
+    v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);
+    v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
+    v8_runtime.registerHostFn("__mesh_history_log", hostMeshHistoryLog);
+    v8_runtime.registerHostFn("__mesh_action_source", hostMeshActionSource);
+    v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
+    v8_runtime.registerHostFn("__mesh_session_select", hostMeshSessionSelect);
+    v8_runtime.registerHostFn("__mesh_session_resident", hostMeshSessionResident);
+    v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
+    v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
+    v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
+    v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
+    v8_runtime.registerHostFn("__mesh_path_array", hostMeshPathArray);
+    v8_runtime.registerHostFn("__mesh_path_array_points", hostMeshPathArrayPoints);
+    v8_runtime.registerHostFn("__mesh_path_array_spans", hostMeshPathArraySpans);
+    v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
+    v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
+    v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
+    v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
+    v8_runtime.registerHostFn("__mesh_topo_mirror_quads", hostMeshTopoMirrorQuads);
+    v8_runtime.registerHostFn("__mesh_topo_mirror_replace", hostMeshTopoMirrorReplace);
+    v8_runtime.registerHostFn("__mesh_quadify_begin", hostMeshQuadifyBegin);
+    v8_runtime.registerHostFn("__mesh_quadify_preview", hostMeshQuadifyPreview);
+    v8_runtime.registerHostFn("__mesh_quadify_end", hostMeshQuadifyEnd);
+    v8_runtime.registerHostFn("__mesh_topo_glass", hostMeshTopoGlass);
+    v8_runtime.registerHostFn("__model_glass_restore", hostModelGlassRestore);
+    v8_runtime.registerHostFn("__mesh_topo_solidify", hostMeshTopoSolidify);
+    v8_runtime.registerHostFn("__mesh_append_file", hostMeshAppendFile);
+    v8_runtime.registerHostFn("__mesh_surviving_groups", hostMeshSurvivingGroups);
+    v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
+    v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
+    v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
+    v8_runtime.registerHostFn("__mesh_edit_select_vertex", hostMeshEditSelectVertex);
+    v8_runtime.registerHostFn("__mesh_edit_select_uv_orientation", hostMeshEditSelectUvOrientation);
+    v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
+    v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
+    v8_runtime.registerHostFn("__mesh_edit_scope_ranges", hostMeshEditScopeRanges);
+    v8_runtime.registerHostFn("__mesh_paint_session", hostMeshPaintSession);
+    v8_runtime.registerHostFn("__model_paint_layout_stale", hostModelPaintLayoutStale);
+    v8_runtime.registerHostFn("__model_paint_layout_invalidate", hostModelPaintLayoutInvalidate);
+    v8_runtime.registerHostFn("__mesh_paint_stroke_end", hostMeshPaintStrokeEnd);
+    v8_runtime.registerHostFn("__mesh_paint_undo", hostMeshPaintUndo);
+    v8_runtime.registerHostFn("__mesh_paint_redo", hostMeshPaintRedo);
+    v8_runtime.registerHostFn("__mesh_paint_history", hostMeshPaintHistory);
+    v8_runtime.registerHostFn("__mesh_paint_layers", hostMeshPaintLayers);
+    v8_runtime.registerHostFn("__mesh_paint_layer_op", hostMeshPaintLayerOp);
+    v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
+    v8_runtime.registerHostFn("__mesh_part_ranges", hostMeshPartRanges);
+    v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
+    v8_runtime.registerHostFn("__model_paint_selection", hostModelPaintSelection);
+    v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
+    v8_runtime.registerHostFn("__mesh_edit_elements", hostMeshEditElements);
+    v8_runtime.registerHostFn("__mesh_edit_selection", hostMeshEditSelection);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_plan", hostMeshRetopoBandsPlan);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_plan_rails", hostMeshRetopoBandsPlanRails);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_read", hostMeshRetopoBandsRead);
+    v8_runtime.registerHostFn("__mesh_retopo_bands_clear", hostMeshRetopoBandsClear);
+    v8_runtime.registerHostFn("__mesh_retopo_band_tint_selection", hostMeshRetopoBandTintSelection);
+    v8_runtime.registerHostFn("__mesh_retopo_band_select", hostMeshRetopoBandSelect);
+    v8_runtime.registerHostFn("__mesh_retopo_source_ghost", hostMeshRetopoSourceGhost);
+    v8_runtime.registerHostFn("__mesh_retopo_source_ghost_read", hostMeshRetopoSourceGhostRead);
+    v8_runtime.registerHostFn("__mesh_retopo_guide_write", hostMeshRetopoGuideWrite);
+    v8_runtime.registerHostFn("__mesh_retopo_guide_load", hostMeshRetopoGuideLoad);
+    v8_runtime.registerHostFn("__mesh_follow_patch", hostMeshFollowPatch);
+    v8_runtime.registerHostFn("__mesh_walk", hostMeshWalk);
+    v8_runtime.registerHostFn("__mesh_walk_apply", hostMeshWalkApply);
+    v8_runtime.registerHostFn("__mesh_follow_action_drain", hostMeshFollowActionDrain);
+    v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
+    v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
+    v8_runtime.registerHostFn("__mesh_symmetry_report", hostMeshSymmetryReport);
+    v8_runtime.registerHostFn("__mesh_symmetrize", hostMeshSymmetrize);
+    v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
+    v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
+    v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
+    v8_runtime.registerHostFn("__model_paint_mode", hostModelPaintMode);
+    v8_runtime.registerHostFn("__model_paint_stroke_begin", hostModelPaintStrokeBegin);
+    v8_runtime.registerHostFn("__model_paint_stamp", hostModelPaintStamp);
+    v8_runtime.registerHostFn("__model_paint_polygon", hostModelPaintPolygon);
+    v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
+    v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
+    v8_runtime.registerHostFn("__model_region_formula", hostModelRegionFormula);
+    v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
+    v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
+    v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
+    v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
+    v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
+    v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
+    v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
+    v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
+    v8_runtime.registerHostFn("__model_uv_layout_apply", hostModelUvLayoutApply);
+    v8_runtime.registerHostFn("__model_uv_geometry_apply", hostModelUvGeometryApply);
+    v8_runtime.registerHostFn("__model_uv_restore_shape", hostModelUvRestoreShape);
+    v8_runtime.registerHostFn("__model_uv_auto_size", hostModelUvAutoSize);
+    v8_runtime.registerHostFn("__model_uv_project_view", hostModelUvProjectView);
+    v8_runtime.registerHostFn("__model_uv_selection_read", hostModelUvSelectionRead);
+    v8_runtime.registerHostFn("__model_uv_island_select", hostModelUvIslandSelect);
+    v8_runtime.registerHostFn("__model_uv_islands_select", hostModelUvIslandsSelect);
+    v8_runtime.registerHostFn("__model_atlas_replace", hostModelAtlasReplace);
+    v8_runtime.registerHostFn("__model_atlas_import", hostModelAtlasImport);
+    v8_runtime.registerHostFn("__model_atlas_resize", hostModelAtlasResize);
+    v8_runtime.registerHostFn("__model_atlas_workspace_apply", hostModelAtlasWorkspaceApply);
+    v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
+    v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);
+    v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
+    v8_runtime.registerHostFn("__model_uv_coverage_write", hostModelUvCoverageWrite);
+    v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
+    v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
+    v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
+    v8_runtime.registerHostFn("__character_rig_session", hostCharacterRigSession);
+    v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
+    v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
+    v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
+    v8_runtime.registerHostFn("__model_paint_baseline_read", hostModelPaintBaselineRead);
+    v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);
+    v8_runtime.registerHostFn("__model_paint_program_apply_over_base", hostModelPaintProgramApplyOverBase);
+    v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
+    v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
 }
 
 fn hostGetInputText(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

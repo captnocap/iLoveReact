@@ -1,8 +1,9 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { runSeatForEach, backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 import { resetClaimsForTest, setClaimActiveModel } from './claims';
+import type { CharacterRigSeatStatus } from './characterRigSeat';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -20,6 +21,53 @@ const percept: SeatPercept = {
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
 };
 (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+
+const rigPercept: CharacterRigSeatStatus = {
+  state: 'needs_bind',
+  rows: {
+    connected_body: { status: 'blocked', components: 2, main: 4732, detached: 1 },
+    required_semantics: { status: 'blocked', missing: ['hand:left'], uncoveredBodyFaces: 214 },
+    canonical_skeleton: 'ready',
+    current_topology_hash: 'waiting',
+    current_semantic_hash: 'waiting',
+    current_object_binding_hash: 'waiting',
+    saved_four_influence_weights: 'waiting',
+  },
+  weightsStale: false,
+  fitReview: true,
+  bindReview: false,
+};
+
+test('resident rig debt rides unrelated Seat replies without native polling', () => {
+  let reads = 0;
+  const seat = createAgentSeat({ rigPercept: () => { reads += 1; return rigPercept; } });
+  const look = executeSeatRequest(seat, { action: 'look' });
+  const recipes = executeSeatRequest(seat, { action: 'recipe-list' });
+  assert(look.percept?.rig === rigPercept && recipes.percept?.rig === rigPercept,
+    'ambient replies dropped the cached character-rig matrix');
+  assert(look.percept?.rig?.rows.required_semantics.uncoveredBodyFaces === 214,
+    'ambient rig percept collapsed structured semantic debt into prose');
+  assert(reads > 0, 'Seat did not read the shell-owned cached rig percept');
+});
+
+test('rig-status forwards through the shell and returns the same ambient matrix', () => {
+  let forwarded: { action: string; args: Record<string, unknown> } | null = null;
+  const seat = createAgentSeat({
+    rigPercept: () => rigPercept,
+    shellAction: (action, args) => {
+      forwarded = { action, args };
+      return action === 'rig-status'
+        ? { ok: true, result: rigPercept }
+        : { ok: false, reason: `unexpected ${action}` };
+    },
+  });
+  const reply = executeSeatRequest(seat, { action: 'rig-status' });
+  assert(reply.ok && reply.result === rigPercept, 'rig-status rewrote or discarded the shell result');
+  assert(forwarded?.action === 'rig-status' && Object.keys(forwarded.args).length === 0,
+    'rig-status did not use the bounded zero-argument shell route');
+  assert(reply.percept?.rig === rigPercept && reply.percept.rig.weightsStale === false,
+    'rig-status reply disagreed with its ambient rig debt');
+});
 
 test('cold agent resolves a durable name without geometry archaeology', () => {
   const query = compileSeatSelector('window.rim', percept);
@@ -960,6 +1008,9 @@ test('a claimed model admits only the password lane and stays readable (req_3850
 
   const read = executeSeatRequestAtShell(null, { action: 'look' }, bootstrap);
   assert(read.ok, 'a claimed model stopped answering reads');
+  const rigRead = executeSeatRequestAtShell(null, { action: 'rig-status' }, bootstrap);
+  assert(!rigRead.ok && rigRead.reason?.includes('no live model') === true &&
+    rigRead.reason?.includes('lane-a') !== true, 'rig-status was blocked by the claim instead of reaching ordinary model routing');
 
   const wrongDismiss = executeSeatRequestAtShell(null, { action: 'dismiss', args: { password: 'nope' } }, bootstrap);
   assert(!wrongDismiss.ok, 'a wrong password released the claim');
@@ -985,6 +1036,7 @@ test('background seat policy names every refused limitation family', () => {
     // lane has no framed view to shoot.
     ['thumbnail', 'viewport'],
     ['uv-state', 'UV/paint'],
+    ['rig-status', 'character rig'],
     ['shot', 'capture'],
     ['add', 'part geometry'],
     ['atlas', 'atlas'],
@@ -999,6 +1051,12 @@ test('background seat policy names every refused limitation family', () => {
   }
   for (const action of ['extrude', 'select', 'save', 'part-rename', 'part-select', 'texture-slot', 'rig', 'recipe-list']) {
     assert(backgroundSeatRefusal(action, {}) === null, `${action} was incorrectly refused for a background model`);
+  }
+  assert(backgroundSeatRefusal('rig', { operation: 'bind' })?.includes('character rig') === true,
+    'a background character bind was allowed to target the singleton resident rig');
+  for (const operation of ['read', 'replace', 'lights-replace']) {
+    assert(backgroundSeatRefusal('rig', { operation }) === null,
+      `legacy prop rig ${operation} was mistaken for a resident character operation`);
   }
   assert(backgroundSeatRefusal('retopo-bands', { operation: 'read' }) === null, 'retopology guide read was refused');
   assert(backgroundSeatRefusal('retopo-bands', { operation: 'plan' })?.includes('retopology guides') === true,
@@ -1217,6 +1275,114 @@ test('align refuses to move the whole model onto part of itself', () => {
     const reply = executeSeatRequest(createAgentSeat(), { action: 'align', args: { moving: 'model', onto: 'region:floor' } });
     assert(!reply.ok, 'aligning the model onto its own part was allowed');
     assert(calls.moves.length === 0, 'the refused align still moved geometry');
+  });
+});
+
+
+// ── intent amplifiers (req_4061) ───────────────────────────────────────────────
+
+function withWalkHost(run: (calls: { requests: any[]; applied: any[] }) => void) {
+  const host = globalThis as any;
+  const saved = { walk: host.__mesh_walk, apply: host.__mesh_walk_apply, state: host.__mesh_semantic_state, atlas: host.__model_atlas_read, patch: host.__mesh_follow_patch, translate: host.__mesh_transform_translate };
+  const calls = { requests: [] as any[], applied: [] as any[] };
+  host.__mesh_semantic_state = () => JSON.stringify(measurePercept);
+  host.__model_atlas_read = () => null;
+  host.__mesh_walk = (json: string) => {
+    calls.requests.push(JSON.parse(json));
+    return JSON.stringify({ ok: true, token: '77', domain: 'edge', count: 12, terminated: 'closed', stoppedAt: 4, tieBreak: 'lowest element id wins an equal-cost step', bbox: [0, 0, 0, 1, 1, 1], elements: [1, 2, 3] });
+  };
+  host.__mesh_walk_apply = (token: string, additive: number) => { calls.applied.push([token, additive]); return 12; };
+  host.__mesh_follow_patch = () => JSON.stringify({
+    version: 1, rings: 0, selectedTriangles: [0], selectedGroups: [0], frontier: [],
+    vertices: [{ id: 0, at: [0, 0.2, 0] }, { id: 1, at: [1, 0.2, 0] }, { id: 2, at: [1, 0.9, 0] }],
+    triangles: [{ id: 0, selected: true, group: 0, part: 0, material: 0, region: 2, instance: 0, vertices: [0, 1, 2] }],
+  });
+  host.__mesh_transform_translate = (x: number, y: number, z: number) => { calls.applied.push(['move', x, y, z]); return 1; };
+  try { run(calls); } finally {
+    host.__mesh_walk = saved.walk; host.__mesh_walk_apply = saved.apply; host.__mesh_semantic_state = saved.state;
+    host.__model_atlas_read = saved.atlas; host.__mesh_follow_patch = saved.patch; host.__mesh_transform_translate = saved.translate;
+  }
+}
+
+test('a walk previews by default and touches no selection', () => {
+  withWalkHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'select-loop', args: { edge: 31 } });
+    const result = reply.result as any;
+    assert(reply.ok, `select-loop failed: ${reply.reason}`);
+    assert(result.applied === false, 'a preview reported itself applied');
+    assert(calls.applied.length === 0, 'a preview committed the walk');
+    assert(result.terminated === 'closed' && result.tieBreak.length > 0, 'the reply did not carry its diagnostics');
+  });
+});
+
+test('--apply commits the token the preview reported, never a recomputed one', () => {
+  withWalkHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'select-ring', args: { edge: 31, apply: true, additive: true } });
+    assert(reply.ok, `select-ring failed: ${reply.reason}`);
+    assert((reply.result as any).selected === 12, 'the applied count was not carried through');
+    assert(calls.applied[0]![0] === '77' && calls.applied[0]![1] === 1, `applied with ${calls.applied[0]}`);
+  });
+});
+
+test('a stale token surfaces as a refusal that names the fix', () => {
+  withWalkHost(() => {
+    (globalThis as any).__mesh_walk_apply = () => -1;
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'select-path', args: { from: 0, to: 7, apply: true } });
+    assert(!reply.ok, 'a stale token applied anyway');
+    assert(/re-read the walk/.test(reply.reason ?? ''), `reason was ${reply.reason}`);
+  });
+});
+
+test('an unconstrained path sends the host sentinel, a constrained one sends the axis', () => {
+  withWalkHost((calls) => {
+    const seat = createAgentSeat();
+    executeSeatRequest(seat, { action: 'select-path', args: { from: 0, to: 7 } });
+    assert(calls.requests[0]!.axis === 255, `unconstrained axis was ${calls.requests[0]!.axis}`);
+    executeSeatRequest(seat, { action: 'select-path', args: { from: 0, to: 7, axis: 'y' } });
+    assert(calls.requests[1]!.axis === 1, `y resolved to ${calls.requests[1]!.axis}`);
+  });
+});
+
+test('a walk missing its seed names the whole syntax rather than failing bare', () => {
+  withWalkHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'select-loop', args: {} });
+    assert(!reply.ok, 'a seedless loop walked');
+    assert(/select-loop|loop \{edge\}/.test(reply.reason ?? ''), `reason was ${reply.reason}`);
+    const similar = executeSeatRequest(createAgentSeat(), { action: 'select-similar', args: { face: 3, by: 'vibes' } });
+    assert(!similar.ok && /normal, coplanar, or area/.test(similar.reason ?? ''), 'an invalid comparison was accepted');
+  });
+});
+
+test('set-position places by absolute coordinate instead of a computed delta', () => {
+  withWalkHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'set-position', args: { axis: 'y', value: 0.75 } });
+    const result = reply.result as any;
+    assert(reply.ok, `set-position failed: ${reply.reason}`);
+    // The selection's min y is 0.2, so seating it at 0.75 is a +0.55 move.
+    assert(Math.abs(result.delta[1] - 0.55) < 1e-9, `delta was ${result.delta}`);
+    const move = calls.applied.find((row) => row[0] === 'move')!;
+    assert(Math.abs(move[2] - 0.55) < 1e-9, `moved ${move}`);
+  });
+});
+
+test('set-position anchors by min, center, or max and refuses anything else', () => {
+  withWalkHost(() => {
+    const seat = createAgentSeat();
+    const center = executeSeatRequest(seat, { action: 'set-position', args: { axis: 'y', value: 1, anchor: 'center' } });
+    // bbox y spans 0.2..0.9, so its center is 0.55 and the delta is +0.45.
+    assert(Math.abs((center.result as any).delta[1] - 0.45) < 1e-9, `center delta was ${(center.result as any).delta}`);
+    const bad = executeSeatRequest(seat, { action: 'set-position', args: { axis: 'y', value: 1, anchor: 'edge' } });
+    assert(!bad.ok, 'an unknown anchor was accepted');
+  });
+});
+
+test('for-each refuses to nest and names the parts it could not reach', () => {
+  withWalkHost(() => {
+    const seat = createAgentSeat();
+    const nested = runSeatForEach(seat, { selector: 'rivet', do: { action: 'for-each', args: {} } });
+    assert(!nested.ok && /cannot nest/.test(nested.reason ?? ''), 'for-each nested');
+    const missing = runSeatForEach(seat, { selector: 'rivet', do: { action: 'flip', args: {} } });
+    assert(!missing.ok && /no visible Outliner part/.test(missing.reason ?? ''), `reason was ${missing.reason}`);
   });
 });
 

@@ -29,7 +29,7 @@ if (args.indexOf('--wait') >= 0 || args.indexOf('--fields') >= 0) {
 const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
-if (['look', 'semantic-status', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save', 'tris-to-quads', 'collect-uv-orientation'].includes(action)) request = { action };
+if (['look', 'semantic-status', 'rig-status', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save', 'tris-to-quads', 'collect-uv-orientation'].includes(action)) request = { action };
 else if (action === 'follow') {
   const operation = args.shift() || 'read';
   if (operation === 'inspect') {
@@ -114,6 +114,37 @@ else if (action === 'oracle') {
     request = { action, args: { operation, ...(docIndex >= 0 ? { doc: true } : {}) } };
   } else request = { action, args: { operation } };
 }
+// Intent amplifiers (req_4061): two decisions expand to N elements. Every one PREVIEWS
+// by default — the reply says what it computed, why the walk stopped, and how ties
+// broke — and only commits when you pass --apply.
+//   select-path <fromVert> <toVert> [axis] [--apply] [+]
+//   select-loop|select-ring <edge> [--apply] [+]
+//   select-grow [rings] [--apply] [+]
+//   select-similar <face> [normal|coplanar|area] [tolerance] [--apply] [+]
+else if (['select-path', 'select-loop', 'select-ring', 'select-grow', 'select-similar'].includes(action)) {
+  const applyIndex = args.indexOf('--apply');
+  const apply = applyIndex >= 0;
+  if (apply) args.splice(applyIndex, 1);
+  const plusIndex = args.indexOf('+');
+  const additive = plusIndex >= 0;
+  if (additive) args.splice(plusIndex, 1);
+  const extra = { ...(apply ? { apply: true } : {}), ...(additive ? { additive: true } : {}) };
+  if (action === 'select-path') request = { action, args: { from: Number(args[0]), to: Number(args[1]), ...(args[2] ? { axis: args[2] } : {}), ...extra } };
+  else if (action === 'select-grow') request = { action, args: { rings: Number(args[0] || 1), ...extra } };
+  else if (action === 'select-similar') request = { action, args: { face: Number(args[0]), ...(args[1] ? { by: args[1] } : {}), ...(args[2] ? { tolerance: Number(args[2]) } : {}), ...extra } };
+  else request = { action, args: { edge: Number(args[0]), ...extra } };
+}
+// set-position <axis> <value> — absolute placement. Agents think in target coordinates
+// ("tabletop at 0.75 m"); without this every one becomes read-bbox, subtract, move.
+else if (action === 'set-position') request = { action, args: { axis: args[0], value: Number(args[1]), ...(args[2] ? { anchor: args[2] } : {}) } };
+// for-each <selector> <action> [json-args] — one decision applied per matching part.
+else if (action === 'for-each') {
+  const selector = args.shift();
+  const inner = args.shift();
+  let innerArgs = {};
+  if (args.length) { try { innerArgs = JSON.parse(args.join(' ')); } catch { console.error('seat for-each expects a JSON object after the action name'); process.exit(2); } }
+  request = { action, args: { selector, do: { action: inner, args: innerArgs } } };
+}
 // wait-ready [seconds] — block until the shell answers healthy. The sanctioned
 // replacement for sleeping a guessed number of seconds before the first real call.
 else if (action === 'wait-ready') request = { action: 'editor-status', args: {} };
@@ -195,7 +226,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 
