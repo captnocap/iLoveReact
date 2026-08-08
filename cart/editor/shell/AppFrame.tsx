@@ -51,7 +51,7 @@ import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
-import { parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
+import { NO_SEMANTIC_ID, parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -94,7 +94,7 @@ import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
-import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
+import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, readSeatPercept, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
   countUvTextureFootprints,
@@ -166,7 +166,7 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry } from '../data/meshDoc';
+import { MESHDOC_VERTEX_STRIDE, invalidateMeshDoc, meshDocBounds, meshDocIsUnreadable, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { parseModelHistory } from '../model/uvHistory';
 import {
@@ -237,7 +237,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { hasStoredModelPaint, materializeCharacterSaveSnapshot, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage, stageModelThumbnail, type ThumbnailStageResult } from '../data/modelPackageStore';
+import { resolvePackageDir, hasStoredModelPaint, materializeCharacterSaveSnapshot, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage, stageModelThumbnail, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -6000,7 +6000,16 @@ export default function AppFrame() {
       if (action === 'editor-status') {
         const block = blockingNowRef.current(live);
         const activeDocument = live.workspaceDocuments.find((document) => document.id === live.activeWorkspaceDocumentId) ?? null;
+        // One explicit readiness word (req_4052). The transcripts show agents pre-sleeping
+        // a guessed number of seconds before their first real call, because a refusal
+        // never said whether WAITING would help. `starting` and `dialog-blocked` clear on
+        // their own and `tools/seat --wait` will poll through them; `ready` means the
+        // shell is answering and any later refusal is about the request, not the timing.
+        const readiness = block
+          ? 'dialog-blocked'
+          : activeSessionModelIdRef.current || activeDocument ? 'ready' : 'starting';
         return ok({
+          state: readiness,
           status: live.status,
           blocking: block ? { id: block.id, label: block.label } : null,
           unsavedDocumentName,
@@ -6017,6 +6026,116 @@ export default function AppFrame() {
           paintLayoutStale: (globalThis as any).__model_paint_layout_stale?.() === 1,
           modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
         });
+      }
+      // The saved-state lane (req_4052). Before this, the only way to see what a save
+      // actually wrote was semantic-status (aggregate counts) or a cold reopen — so
+      // agents read mesh/doc.blob themselves with a hand-written struct.unpack and a
+      // hardcoded header offset. That reader was already wrong: it assumed RJMD v4's
+      // 40-byte header while the format is v5 with 48, and nothing told anyone. The
+      // seat is the only correct parser of its own format, so it exposes one.
+      if (action === 'package') {
+        const operation = String(args.operation ?? 'info');
+        const requested = typeof args.model === 'string' && args.model.length > 0 ? args.model : modelId;
+        if (!requested) return fail('no model in view — open a model document or pass model:"<id>"');
+        const pkg = modelPackageById(requested);
+        if (!pkg) return fail(`no model package "${requested}" — pass the model id from look's percept`);
+        const dir = resolvePackageDir(pkg.kind, pkg.id);
+        if (!dir) return fail(`"${pkg.name}" has never been saved — there is no package on disk to read`);
+        // Read from disk, not from the decode cache: the whole point is to see what
+        // the last save actually wrote.
+        invalidateMeshDoc(dir);
+        const doc = packageMeshDoc(pkg);
+        if (!doc) {
+          return fail(meshDocIsUnreadable(dir)
+            ? `${dir}/mesh/doc.blob exists but did not decode with this editor's RJMD reader`
+            : `${dir} carries no readable model document`);
+        }
+        const savedTable = doc.semanticTable ?? null;
+        const savedRegions = savedTable?.regions ?? [];
+        const savedTriangles = doc.vertices.length / (MESHDOC_VERTEX_STRIDE * 3);
+        const savedFaceCount = (values: Uint32Array | null | undefined) => (values ? new Set(values).size : null);
+        const identity = {
+          model: pkg.id,
+          name: pkg.name,
+          kind: pkg.kind,
+          dir,
+          formatVersion: doc.formatVersion ?? null,
+          legacy: doc.formatVersion === undefined,
+        };
+        if (operation === 'info') {
+          const parts = packageMeshDocParts(pkg) ?? [];
+          return ok({
+            ...identity,
+            triangles: savedTriangles,
+            vertices: doc.vertices.length / MESHDOC_VERTEX_STRIDE,
+            authoredFaces: savedFaceCount(doc.faceGroups),
+            logicalVertices: doc.hasLogicalVertices ? doc.logicalVertexCount ?? null : null,
+            regions: savedRegions.length,
+            namedTriangles: doc.semanticRegions
+              ? [...doc.semanticRegions].filter((id) => id !== NO_SEMANTIC_ID).length
+              : null,
+            ranges: doc.ranges.length,
+            storedRangeCount: doc.storedRangeCount ?? null,
+            recoveredPartRanges: doc.recoveredPartRanges === true,
+            rangeObjectIds: doc.rangeObjectIds?.length ?? null,
+            glassFirstVertex: doc.glassFirstVertex ?? null,
+            bbox: meshDocBounds(doc),
+            parts: parts.map((part) => ({ name: part.name, objectId: part.objectId ?? null, kind: part.kind ?? null, visible: part.visible })),
+          });
+        }
+        if (operation === 'regions') {
+          const triangleCounts = new Map<number, number>();
+          for (const id of doc.semanticRegions ?? []) triangleCounts.set(id, (triangleCounts.get(id) ?? 0) + 1);
+          return ok({
+            ...identity,
+            regions: savedRegions.map((region) => ({
+              id: region.id,
+              name: region.name,
+              parent: region.parent ?? null,
+              createdBy: region.createdBy ?? null,
+              triangles: triangleCounts.get(region.id) ?? 0,
+            })),
+            unnamedTriangles: triangleCounts.get(NO_SEMANTIC_ID) ?? 0,
+          });
+        }
+        if (operation === 'diff') {
+          const resident = readSeatPercept();
+          if (!resident) return fail('no live mesh to compare the saved package against');
+          const residentNames = new Map(resident.table.regions.map((region) => [region.name, region] as const));
+          const savedNames = new Map(savedRegions.map((region) => [region.name, region] as const));
+          const residentFaces = new Map(resident.regions.map((region) => [region.id, region.faces] as const));
+          const savedFaces = new Map<number, number>();
+          for (const id of doc.semanticRegions ?? []) savedFaces.set(id, (savedFaces.get(id) ?? 0) + 1);
+          const drift = [...savedNames.keys()]
+            .filter((name) => residentNames.has(name))
+            .map((name) => ({
+              name,
+              saved: savedFaces.get(savedNames.get(name)!.id) ?? 0,
+              resident: residentFaces.get(residentNames.get(name)!.id) ?? 0,
+            }))
+            .filter((row) => row.saved !== row.resident)
+            .map((row) => ({ ...row, delta: row.resident - row.saved }));
+          return ok({
+            ...identity,
+            dirty: Boolean(live.modelDirty[requested]),
+            triangles: { saved: savedTriangles, resident: resident.faces, delta: resident.faces - savedTriangles },
+            authoredFaces: { saved: savedFaceCount(doc.faceGroups), resident: resident.authoredFaces },
+            regions: {
+              saved: savedRegions.length,
+              resident: resident.table.regions.length,
+              addedSinceSave: [...residentNames.keys()].filter((name) => !savedNames.has(name)),
+              removedSinceSave: [...savedNames.keys()].filter((name) => !residentNames.has(name)),
+              drift,
+            },
+            // A resident mesh that matches on every count still differs if a vertex
+            // moved, so say what was compared rather than implying byte identity.
+            compared: 'triangle, authored-face, and per-region face counts plus the region name set',
+            inSync: savedTriangles === resident.faces &&
+              savedRegions.length === resident.table.regions.length &&
+              drift.length === 0,
+          });
+        }
+        return fail(`unknown package operation "${operation}" — info, regions, or diff`);
       }
       if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
         exportCharacterAs(args.role);

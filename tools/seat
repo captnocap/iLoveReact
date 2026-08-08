@@ -9,6 +9,23 @@ const args = process.argv.slice(2);
 const briefIndex = args.indexOf('--brief');
 const brief = briefIndex >= 0;
 if (brief) args.splice(briefIndex, 1);
+// --wait <seconds> and --fields <dotted,paths> (req_4052). Both exist because the
+// transcripts showed agents papering over their absence: `python3 -c "time.sleep(4)"`
+// before a call that might race the editor's boot, and `| jq '{ok,reason,result}'` on
+// a reply whose default shape answered more than the question did.
+const takeOption = (flag) => {
+  const at = args.indexOf(flag);
+  if (at < 0) return null;
+  const value = args[at + 1];
+  args.splice(at, value === undefined ? 1 : 2);
+  return value ?? null;
+};
+let waitSeconds = Number(takeOption('--wait') ?? 0);
+const fields = (takeOption('--fields') ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+if (args.indexOf('--wait') >= 0 || args.indexOf('--fields') >= 0) {
+  console.error('seat: --wait and --fields each take one value, and must precede the action');
+  process.exit(2);
+}
 const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
@@ -26,6 +43,43 @@ else if (action === 'follow') {
     } : {}),
   } };
 }
+// package <info|regions|diff> [model-id] — read what the last SAVE actually wrote,
+// with the editor's own RJMD decoder. Never parse mesh/doc.blob by hand: the header
+// grew 40 → 48 bytes at RJMD v5 and a hand reader just returns wrong numbers.
+else if (action === 'package') request = { action, args: {
+  operation: args[0] || 'info', ...(args[1] ? { model: args[1] } : {}),
+} };
+// measure <bbox <target> | distance <a> <b> | contact <a> <b>> — the editor does the
+// arithmetic. Targets are any selector, plus `selection` and `model`.
+else if (action === 'measure') {
+  const operation = args.shift() || 'bbox';
+  request = { action, args: operation === 'bbox'
+    ? { operation, target: args.join(' ') }
+    : { operation, a: args[0], b: args[1] } };
+}
+// stats <edges [target] | symmetry <axis> | anomalies [target]>
+else if (action === 'stats') {
+  const operation = args.shift() || 'anomalies';
+  request = { action, args: operation === 'symmetry'
+    ? { operation, axis: args[0] || 'x' }
+    : { operation, ...(args.length ? { target: args.join(' ') } : {}) } };
+}
+// align <moving> onto <target> [axis] [--dry-run] — computes the seating delta and
+// applies it as one transaction, so the number reported is the number that moved.
+else if (action === 'align') {
+  const dryIndex = args.indexOf('--dry-run');
+  const dryRun = dryIndex >= 0;
+  if (dryRun) args.splice(dryIndex, 1);
+  const ontoIndex = args.indexOf('onto');
+  if (ontoIndex < 0) { console.error('seat align expects: align <moving> onto <target> [axis] [--dry-run]'); process.exit(2); }
+  const moving = args.slice(0, ontoIndex).join(' ');
+  const rest = args.slice(ontoIndex + 1);
+  const axis = ['x', 'y', 'z'].includes(rest[rest.length - 1]) ? rest.pop() : undefined;
+  request = { action, args: { moving, onto: rest.join(' '), ...(axis ? { axis } : {}), ...(dryRun ? { dryRun: true } : {}) } };
+}
+// wait-ready [seconds] — block until the shell answers healthy. The sanctioned
+// replacement for sleeping a guessed number of seconds before the first real call.
+else if (action === 'wait-ready') request = { action: 'editor-status', args: {} };
 else if (action === 'select') request = { action, args: { selector: args.join(' ') } };
 else if (action === 'select-edge' || action === 'select-vertex' || action === 'select-face') request = { action, args: { index: Number(args[0]), additive: args[1] === '+' } };
 else if (action === 'name') request = { action, args: { name: args[0], instance: Number(args[1] || 0) } };
@@ -104,54 +158,119 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 
-const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const replyPath = `/tmp/reactjit-seat-${id}.json`;
-const payload = JSON.stringify({
-  kind: 'agent-seat', id, replyPath, request, brief,
-  ...(process.env.RJIT_SEAT_GENERATION ? { generation: Number(process.env.RJIT_SEAT_GENERATION) } : {}),
-  // Claim credentials (req_3850): stamped payload-level so batches carry them
-  // once; the shell copies them onto every row.
-  ...(process.env.RJIT_SEAT_TOKEN ? { token: process.env.RJIT_SEAT_TOKEN } : {}),
-  ...(process.env.RJIT_SEAT_MODEL ? { model: process.env.RJIT_SEAT_MODEL } : {}),
+
+// `wait-ready` is a poll by definition; give it a real default instead of making
+// every caller remember to pass --wait.
+if (action === 'wait-ready') waitSeconds = Number(args[0]) > 0 ? Number(args[0]) : 20;
+
+/** Project a reply down to the fields actually asked for. Dotted paths index into
+ *  objects and arrays alike, so `result.frontier` or `percept.regions.0.bbox` both
+ *  work — this is the `| jq` the transcripts kept reaching for, minus the dependency
+ *  and the shell-quoting hazards. */
+const projectFields = (value, paths) => {
+  const pick = (root, path) => path.split('.').reduce(
+    (node, key) => (node === null || node === undefined ? undefined : node[key]),
+    root,
+  );
+  const out = {};
+  for (const path of paths) out[path] = pick(value, path);
+  return out;
+};
+
+const REPLY_TIMEOUT_MS = 15000;
+const RETRY_DELAY_MS = 250;
+
+/** True when a reply means "the editor is not ready yet", as opposed to "the editor
+ *  answered and the answer is no". Only the former is worth waiting through: retrying
+ *  a rejected extrude forever would just hide the rejection. */
+const notReadyYet = (reply) => {
+  if (!reply) return false;
+  // The explicit word wins over ok/not-ok, because editor-status answers `ok` with a
+  // full percept even while a modal is blocking every other verb — reading the state
+  // is how a caller learns that waiting is the right move.
+  const state = reply.result && typeof reply.result === 'object' ? reply.result.state : null;
+  if (state === 'starting' || state === 'dialog-blocked') return true;
+  if (reply.ok) return false;
+  return typeof reply.reason === 'string' && /no live model|not ready|still starting|shell bridge is unavailable/i.test(reply.reason);
+};
+
+const sendOnce = () => new Promise((resolve) => {
+  const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const replyPath = `/tmp/reactjit-seat-${id}.json`;
+  const payload = JSON.stringify({
+    kind: 'agent-seat', id, replyPath, request, brief,
+    ...(process.env.RJIT_SEAT_GENERATION ? { generation: Number(process.env.RJIT_SEAT_GENERATION) } : {}),
+    // Claim credentials (req_3850): stamped payload-level so batches carry them
+    // once; the shell copies them onto every row.
+    ...(process.env.RJIT_SEAT_TOKEN ? { token: process.env.RJIT_SEAT_TOKEN } : {}),
+    ...(process.env.RJIT_SEAT_MODEL ? { model: process.env.RJIT_SEAT_MODEL } : {}),
+  });
+  const socketPath = process.env.RJIT_SOCKET || '/tmp/reactjit.sock';
+  const socket = net.createConnection(socketPath);
+  socket.setEncoding('utf8');
+  let ack = '';
+  let settled = false;
+  const done = (outcome) => { if (!settled) { settled = true; resolve(outcome); } };
+  socket.on('connect', () => socket.write(`NOTICE ${Buffer.byteLength(payload)}\n${payload}`));
+  socket.on('data', (chunk) => { ack += chunk; });
+  socket.on('error', (error) => done({ kind: 'transport', message: error.message }));
+  socket.on('close', () => {
+    if (!ack.startsWith('OK')) return done({ kind: 'transport', message: `editor refused request: ${ack.trim()}` });
+    const started = Date.now();
+    const poll = () => {
+      if (fs.existsSync(replyPath)) {
+        const text = fs.readFileSync(replyPath, 'utf8');
+        try { fs.unlinkSync(replyPath); } catch {}
+        try { return done({ kind: 'reply', reply: JSON.parse(text), text }); }
+        catch { return done({ kind: 'malformed', message: `unparseable reply in ${path.basename(replyPath)}` }); }
+      }
+      if (Date.now() - started > REPLY_TIMEOUT_MS) {
+        return done({ kind: 'transport', message: `timed out waiting for ${path.basename(replyPath)}` });
+      }
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
 });
-const socketPath = process.env.RJIT_SOCKET || '/tmp/reactjit.sock';
-const socket = net.createConnection(socketPath);
-socket.setEncoding('utf8');
-let ack = '';
-socket.on('connect', () => socket.write(`NOTICE ${Buffer.byteLength(payload)}\n${payload}`));
-socket.on('data', (chunk) => { ack += chunk; });
-socket.on('error', (error) => { console.error(`seat: ${error.message}`); process.exit(1); });
-socket.on('close', () => {
-  if (!ack.startsWith('OK')) { console.error(`seat: editor refused request: ${ack.trim()}`); process.exit(1); }
-  const started = Date.now();
-  const poll = () => {
-    if (fs.existsSync(replyPath)) {
-      const result = fs.readFileSync(replyPath, 'utf8');
-      try { fs.unlinkSync(replyPath); } catch {}
-      try {
-        const parsed = JSON.parse(result);
-        if (!brief) process.stdout.write(`${result}\n`);
-        else {
-          const rows = parsed.op === 'batch' && Array.isArray(parsed.result) ? parsed.result : [parsed];
-          for (const row of rows) {
-            if (!row || typeof row !== 'object') continue;
-            const summary = { ok: row.ok, op: row.op, ...(row.result === undefined ? {} : { result: row.result }), ...(row.reason ? { reason: row.reason } : {}) };
-            process.stdout.write(`${JSON.stringify(summary)}\n`);
-          }
-          process.stdout.write(`${parsed.brief || 'no live mesh'}\n`);
-        }
-        process.exit(parsed.ok ? 0 : 1);
-      } catch { process.exit(1); }
+
+const emit = (outcome) => {
+  const { reply, text } = outcome;
+  if (fields.length > 0) {
+    process.stdout.write(`${JSON.stringify(projectFields(reply, fields))}\n`);
+  } else if (!brief) {
+    process.stdout.write(`${text}\n`);
+  } else {
+    const rows = reply.op === 'batch' && Array.isArray(reply.result) ? reply.result : [reply];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const summary = { ok: row.ok, op: row.op, ...(row.result === undefined ? {} : { result: row.result }), ...(row.reason ? { reason: row.reason } : {}) };
+      process.stdout.write(`${JSON.stringify(summary)}\n`);
     }
-    if (Date.now() - started > 15000) {
-      console.error(`seat: timed out waiting for ${path.basename(replyPath)}`);
-      process.exit(1);
-    }
-    setTimeout(poll, 25);
-  };
-  poll();
-});
+    process.stdout.write(`${reply.brief || 'no live mesh'}\n`);
+  }
+  process.exit(reply.ok ? 0 : 1);
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+(async () => {
+  const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
+  let last = null;
+  for (;;) {
+    const outcome = await sendOnce();
+    last = outcome;
+    if (outcome.kind === 'reply' && !notReadyYet(outcome.reply)) emit(outcome);
+    if (outcome.kind === 'malformed') { console.error(`seat: ${outcome.message}`); process.exit(1); }
+    // Everything below this line is a "not yet": the socket is not up, or the shell
+    // answered that it is still starting or blocked behind a dialog.
+    if (Date.now() >= deadline) break;
+    await sleep(RETRY_DELAY_MS);
+  }
+  if (last?.kind === 'reply') emit(last);
+  console.error(`seat: ${last?.message ?? 'no reply'}${waitSeconds > 0 ? ` (waited ${waitSeconds}s)` : ''}`);
+  process.exit(1);
+})();

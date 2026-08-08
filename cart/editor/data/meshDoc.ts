@@ -6,14 +6,14 @@
 // doc switch rebuilt the seed (edits gone from view) and a restart re-armed the
 // primitive generator (cube, no outliner). The meshdoc is the durable, READABLE form:
 //
-//   mesh/doc.blob    RJMD v4 — verts + authored face groups + stable per-face texture
-//                    roles + semantic region/instance membership and its name table +
-//                    per-part group ranges + trailing glass boundary (v1-v3 readable),
+//   mesh/doc.blob    RJMD v5 — verts + authored face groups + stable per-face texture
+//                    roles + semantic region/instance membership, its name table, and
+//                    stable range/object IDs + welded logical-corner ids + trailing glass
+//                    boundary (v1-v4 readable for non-character props),
 //                    written by the host door __model_meshdoc_write (the format's twin
 //                    lives in framework/v8_bindings_core.zig hostModelMeshdocWrite).
-//   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind/group), matching
-//                    doc.blob's ranges ascending — names are cart truth, geometry is
-//                    host truth, the rank ties them together.
+//   mesh/parts.json  v2 range-ranked METADATA with stable object ids. Rank locates the
+//                    geometry range only; object identity survives rename/reorder/hide.
 //   mesh/retopo-guide.blob  versioned teaching bands + the frozen original triangle
 //                    soup used for cold-restart ghost comparison. It is authored
 //                    package data but deliberately not part of runtime mesh geometry.
@@ -26,10 +26,21 @@
 // writeModelArtifacts calls down into this writer).
 import { exists, readFile, readFileBase64, remove, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import { base64ToBytes, bytesText, textBytes } from '../../../runtime/workspace';
+import {
+  parseMeshSemanticTable,
+  type MeshEdgeRegion,
+  type MeshRangeObject,
+  type MeshSemanticRegion,
+  type MeshSemanticTable,
+} from '../model/meshSemantics';
+
+export type { MeshEdgeRegion, MeshRangeObject, MeshSemanticRegion, MeshSemanticTable } from '../model/meshSemantics';
 
 const host = globalThis as any;
 
 export type PackageMeshDoc = {
+  /** Wire version when decoded from RJMD; absent for legacy bare-vertex blobs. */
+  formatVersion?: 1 | 2 | 3 | 4 | 5;
   /** interleaved source verts, stride 8 (pos3/normal3/uv2) */
   vertices: Float32Array;
   /** one authored-group id per triangle, or null (plain soup — identity granularity) */
@@ -41,6 +52,12 @@ export type PackageMeshDoc = {
   semanticInstances?: Uint32Array | null;
   /** Versioned dictionary that turns numeric membership into names and provenance. */
   semanticTable?: MeshSemanticTable | null;
+  /** Stable object ID for each persisted range in range order (RJMD v5 only). */
+  rangeObjectIds?: string[] | null;
+  /** RJMD v5 explicit welded topology. Legacy prop documents carry no table. */
+  hasLogicalVertices?: boolean;
+  logicalVertexCount?: number;
+  renderCornerLogicalIds?: Uint32Array | null;
   /** per-part [lo,hi) authored-group ranges, ascending lo; always ≥1 entry */
   ranges: { lo: number; hi: number }[];
   /** Number physically stored in RJMD. Zero means `ranges` is only the decoder's
@@ -51,20 +68,6 @@ export type PackageMeshDoc = {
   recoveredPartRanges?: boolean;
   /** First vertex in the stable trailing glass run; absent on legacy RJMD v1. */
   glassFirstVertex?: number | null;
-};
-
-export type MeshSemanticRegion = {
-  id: number;
-  name: string;
-  parent?: number | null;
-  role?: string;
-  createdBy?: { op: string; take?: number; at?: number };
-};
-
-export type MeshSemanticTable = {
-  version: 1;
-  regions: MeshSemanticRegion[];
-  nextRegionId?: number;
 };
 
 export type ResidentSemanticSaveState = {
@@ -96,6 +99,16 @@ export function meshDocSemanticsMatch(
   });
 }
 
+export function meshDocRangeObjectIdsMatch(
+  doc: Pick<PackageMeshDoc, 'ranges' | 'rangeObjectIds'> | null,
+  parts: readonly Pick<MeshDocPartMeta, 'objectId'>[],
+): boolean {
+  if (!doc?.rangeObjectIds || doc.rangeObjectIds.length !== doc.ranges.length || parts.length !== doc.ranges.length) return false;
+  const expected = parts.map((part) => part.objectId);
+  return expected.every((objectId, index) => typeof objectId === 'string' && objectId.length > 0 && doc.rangeObjectIds![index] === objectId) &&
+    new Set(doc.rangeObjectIds).size === doc.rangeObjectIds.length;
+}
+
 /** True when saving would replace a named durable document with an anonymous mesh.
  *
  * This guard was written against a mesh that SILENTLY lost its names (a hydration or
@@ -118,6 +131,8 @@ export function meshDocWouldEraseSemantics(
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
 export type MeshDocPartMeta = {
+  /** Stable outliner object identity (parts.json v2); independent of name and rank. */
+  objectId?: string;
   name: string;
   color: string;
   visible: boolean;
@@ -137,6 +152,7 @@ const PARTS_META = 'mesh/parts.json';
 // every render) — cache by dir, invalidated by this module's own writers.
 const docCache = new Map<string, PackageMeshDoc | null>();
 const metaCache = new Map<string, MeshDocPartMeta[] | null>();
+const characterArtifactCache = new Map<string, PackageMeshDoc | null>();
 
 export function meshDocPartRangesComplete(partCount: number, hostRangeCount: number): boolean {
   return partCount > 0 && hostRangeCount === partCount;
@@ -206,6 +222,30 @@ export function invalidateMeshDoc(dir: string): void {
   docCache.delete(dir);
   metaCache.delete(dir);
   unreadableDocs.delete(dir);
+  for (const path of characterArtifactCache.keys()) {
+    if (path.startsWith(`${dir}/`)) characterArtifactCache.delete(path);
+  }
+}
+
+/** Cold-open one manifest-declared immutable character geometry artifact. Character
+ * packages never fall back to mesh/doc.blob: an absent, malformed, or non-v5 target
+ * remains visibly unreadable/unbound instead of entering the prop compatibility path. */
+export function readCharacterMeshDoc(dir: string, geometryPath: string | undefined): PackageMeshDoc | null {
+  if (!/^mesh\/character-[0-9a-f]{64}\.rjmd$/i.test(geometryPath ?? '')) return null;
+  const path = `${dir}/${geometryPath}`;
+  if (characterArtifactCache.has(path)) return characterArtifactCache.get(path)!;
+  let doc: PackageMeshDoc | null = null;
+  if (exists(path)) {
+    const base64 = readFileBase64(path);
+    if (base64) {
+      try { doc = parseMeshDocBytes(base64ToBytes(base64)); }
+      catch { doc = null; }
+    }
+  }
+  if (doc?.formatVersion !== 5 || doc.hasLogicalVertices !== true || !doc.renderCornerLogicalIds ||
+      !doc.rangeObjectIds || doc.rangeObjectIds.length !== doc.ranges.length) doc = null;
+  characterArtifactCache.set(path, doc);
+  return doc;
 }
 
 /** Transactionally write the resident host model and its exact Outliner/range table.
@@ -220,6 +260,11 @@ export function writeMeshDoc(
   // admitted here; paint-only persistence must leave doc.blob + parts.json alone.
   if (parts.length === 0) {
     console.error(`[meshdoc] REFUSING SAVE for ${dir}: an editable mesh document needs at least one named part`);
+    return false;
+  }
+  const objectIds = parts.map((part) => part.objectId).filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (objectIds.length > 0 && (objectIds.length !== parts.length || new Set(objectIds).size !== objectIds.length)) {
+    console.error(`[meshdoc] REFUSING SAVE for ${dir}: parts.json v2 requires one unique stable objectId per part`);
     return false;
   }
   const priorDoc = readMeshDoc(dir);
@@ -295,23 +340,29 @@ export function writeMeshDoc(
     // The expected count crosses as a scalar only. The host re-validates it at the
     // write boundary and atomically renames a complete fsynced RJMD over doc.blob;
     // resident geometry never crosses the JS bridge.
-    if (host.__model_meshdoc_write?.(docPath, parts.length) !== 1) return false;
+    if (host.__model_meshdoc_write?.(docPath, parts.length, JSON.stringify(objectIds)) !== 1) return false;
     invalidateMeshDoc(dir);
-    if (residentSemantics && !meshDocSemanticsMatch(residentSemantics, parseDocBlob(dir))) {
+    const writtenDoc = parseDocBlob(dir);
+    const semanticsDropped = residentSemantics && !meshDocSemanticsMatch(residentSemantics, writtenDoc);
+    const rangeObjectsDropped = writtenDoc?.formatVersion === 5 && !meshDocRangeObjectIdsMatch(writtenDoc, parts);
+    if (semanticsDropped || rangeObjectsDropped) {
       // A mixed-version dev session can run a new TS bundle against an older native
-      // writer. Restore the exact prior blob instead of accepting geometry-only success.
+      // writer. Restore the exact prior blob instead of accepting geometry-only or
+      // range-identity-less success.
       const restored = priorBlob !== null
         ? writeFileBase64Atomic(docPath, priorBlob)
         : remove(docPath);
       invalidateMeshDoc(dir);
-      console.error(`[meshdoc] REFUSING SAVE for ${dir}: native writer dropped resident semantic names${restored ? '; prior document restored' : '; prior document recovery failed'}`);
+      const dropped = [semanticsDropped ? 'resident semantic names' : '', rangeObjectsDropped ? 'stable range object ids' : ''].filter(Boolean).join(' and ');
+      console.error(`[meshdoc] REFUSING SAVE for ${dir}: native writer dropped ${dropped}${restored ? '; prior document restored' : '; prior document recovery failed'}`);
       return false;
     }
   }
 
   // doc.blob commits first. If the second atomic write fails, the old metadata remains
   // paired by rank as far as it goes; geometry can never collapse to a one-range file.
-  const metadata = textBytes(JSON.stringify({ version: 1, parts }, null, 2));
+  const metadataVersion = objectIds.length === parts.length ? 2 : 1;
+  const metadata = textBytes(JSON.stringify({ version: metadataVersion, parts }, null, 2));
   const ok = writeFileBytesAtomic(`${dir}/${PARTS_META}`, metadata);
   invalidateMeshDoc(dir);
   return ok;
@@ -357,8 +408,16 @@ export function readMeshDocParts(dir: string): MeshDocPartMeta[] | null {
   if (text) {
     try {
       const o = JSON.parse(text);
-      if (o?.version === 1 && Array.isArray(o.parts)) {
-        parts = (o.parts as MeshDocPartMeta[]).filter((p) => typeof p?.name === 'string');
+      if ((o?.version === 1 || o?.version === 2) && Array.isArray(o.parts)) {
+        const rows = o.parts as MeshDocPartMeta[];
+        if (rows.every((p) => typeof p?.name === 'string')) {
+          if (o.version === 1) {
+            parts = rows;
+          } else {
+            const ids = rows.map((p) => p.objectId);
+            if (ids.every((id): id is string => typeof id === 'string' && id.length > 0) && new Set(ids).size === ids.length) parts = rows;
+          }
+        }
       }
     } catch { /* unreadable metadata — geometry still loads, names fall back */ }
   }
@@ -382,20 +441,25 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const head = new Uint32Array(buf, 0, 6);
   const [magic, version, vertCount, faceCount, hasGroups, rangeCount] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, head[5]!];
-  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3 && version !== 4) || vertCount === 0) return null;
-  const headerBytes = version >= 4 ? 40 : version >= 3 ? 32 : version >= 2 ? 28 : 24;
+  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) || vertCount === 0) return null;
+  const headerBytes = version >= 5 ? 48 : version >= 4 ? 40 : version >= 3 ? 32 : version >= 2 ? 28 : 24;
   if (bytes.length < headerBytes) return null;
   const glassFirstVertex = version >= 2 ? new Uint32Array(buf, 24, 1)[0]! : null;
   const hasMaterials = version >= 3 ? new Uint32Array(buf, 28, 1)[0]! : 0;
   const hasSemantics = version >= 4 ? new Uint32Array(buf, 32, 1)[0]! : 0;
   const semanticJsonBytes = version >= 4 ? new Uint32Array(buf, 36, 1)[0]! : 0;
+  const hasLogicalVertices = version >= 5 ? new Uint32Array(buf, 40, 1)[0]! : 0;
+  const logicalVertexCount = version >= 5 ? new Uint32Array(buf, 44, 1)[0]! : 0;
   if (hasMaterials !== 0 && hasMaterials !== 1) return null;
   if (hasGroups !== 0 && hasGroups !== 1) return null;
   if (hasSemantics !== 0 && hasSemantics !== 1) return null;
+  if (hasLogicalVertices !== 0 && hasLogicalVertices !== 1) return null;
   if (hasSemantics === 0 && semanticJsonBytes !== 0) return null;
+  if ((hasLogicalVertices === 0 && logicalVertexCount !== 0) ||
+    (hasLogicalVertices === 1 && (logicalVertexCount === 0 || logicalVertexCount > vertCount))) return null;
   if (faceCount !== Math.floor(vertCount / 3)) return null;
   if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) return null;
-  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + (hasSemantics ? faceCount * 8 : 0) + rangeCount * 8 + semanticJsonBytes;
+  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + (hasMaterials ? faceCount * 4 : 0) + (hasSemantics ? faceCount * 8 : 0) + rangeCount * 8 + (hasLogicalVertices ? vertCount * 4 : 0) + semanticJsonBytes;
   if (bytes.length < need) return null;
   let at = headerBytes;
   const vertices = new Float32Array(buf, at, vertCount * 8);
@@ -424,25 +488,100 @@ export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
     for (let i = 0; i < rangeCount; i += 1) ranges.push({ lo: pairs[i * 2]!, hi: pairs[i * 2 + 1]! });
     at += rangeCount * 8;
   }
+  let renderCornerLogicalIds: Uint32Array | null = null;
+  if (hasLogicalVertices) {
+    renderCornerLogicalIds = new Uint32Array(buf, at, vertCount);
+    at += vertCount * 4;
+    if (!meshDocLogicalTopologyValid(vertices, renderCornerLogicalIds, logicalVertexCount)) return null;
+  }
   let semanticTable: MeshSemanticTable | null = null;
+  let rangeObjectIds: string[] | null = null;
   if (hasSemantics) {
     if (semanticJsonBytes === 0) return null;
     try {
       const parsed = JSON.parse(bytesText(bytes.subarray(at, at + semanticJsonBytes)));
-      if (parsed?.version !== 1 || !Array.isArray(parsed.regions)) return null;
-      const regions = parsed.regions.filter((region: unknown): region is MeshSemanticRegion => {
-        const row = region as Partial<MeshSemanticRegion> | null;
-        return !!row && Number.isInteger(row.id) && row.id! >= 0 && typeof row.name === 'string' && row.name.length > 0;
-      });
-      if (regions.length !== parsed.regions.length) return null;
+      const table = parseMeshSemanticTable(parsed);
+      if (!table) return null;
+      const regions = table.regions;
       const ids = new Set(regions.map((region) => region.id));
-      if (ids.size !== regions.length) return null;
       for (const region of semanticRegions ?? []) if (region !== 0xffffffff && !ids.has(region)) return null;
-      semanticTable = { ...parsed, version: 1, regions };
+      if (table.edgeRegions?.some((region: MeshEdgeRegion) =>
+        !hasLogicalVertices || region.vertices.some((vertex) => vertex >= logicalVertexCount))) return null;
+      let rangeObjects: MeshRangeObject[] | undefined;
+      if (version === 5 && table.rangeObjects !== undefined) {
+        if (table.rangeObjects.length !== ranges.length) return null;
+        rangeObjects = table.rangeObjects.map((row, index) => {
+          const range = ranges[index];
+          if (row.lo !== range?.lo || row.hi !== range?.hi) return null;
+          return row;
+        }).filter((row: MeshRangeObject | null): row is MeshRangeObject => row !== null);
+        if (rangeObjects.length !== ranges.length || new Set(rangeObjects.map((row) => row.objectId)).size !== rangeObjects.length) return null;
+        rangeObjectIds = rangeObjects.map((row) => row.objectId);
+      }
+      semanticTable = { ...table, ...(rangeObjects ? { rangeObjects } : {}) };
     } catch { return null; }
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
-  return { vertices, faceGroups, faceMaterials, semanticRegions, semanticInstances, semanticTable, ranges, glassFirstVertex, storedRangeCount: rangeCount };
+  return {
+    formatVersion: version,
+    vertices,
+    faceGroups,
+    faceMaterials,
+    semanticRegions,
+    semanticInstances,
+    semanticTable,
+    rangeObjectIds,
+    hasLogicalVertices: hasLogicalVertices === 1,
+    logicalVertexCount,
+    renderCornerLogicalIds,
+    ranges,
+    glassFirstVertex,
+    storedRangeCount: rangeCount,
+  };
+}
+
+/** RJMD v5 topology invariant shared by the decoder and focused format tests. */
+export function meshDocLogicalTopologyValid(
+  vertices: Float32Array,
+  renderCornerLogicalIds: Uint32Array,
+  logicalVertexCount: number,
+): boolean {
+  const renderCornerCount = Math.floor(vertices.length / 8);
+  if (!Number.isInteger(logicalVertexCount) || logicalVertexCount <= 0 || logicalVertexCount > renderCornerCount ||
+    renderCornerLogicalIds.length !== renderCornerCount) return false;
+  const seen = new Uint8Array(logicalVertexCount);
+  const first = new Float64Array(logicalVertexCount * 3);
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let corner = 0; corner < renderCornerCount; corner += 1) {
+    const id = renderCornerLogicalIds[corner]!;
+    if (id >= logicalVertexCount) return false;
+    const at = corner * 8;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = vertices[at + axis]!;
+      if (!Number.isFinite(value)) return false;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  }
+  const diagonal = Math.hypot(max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!);
+  const tolerance = 1e-6 * Math.max(1, diagonal);
+  const toleranceSquared = tolerance * tolerance;
+  for (let corner = 0; corner < renderCornerCount; corner += 1) {
+    const id = renderCornerLogicalIds[corner]!;
+    const at = corner * 8, firstAt = id * 3;
+    if (!seen[id]) {
+      seen[id] = 1;
+      first[firstAt] = vertices[at]!;
+      first[firstAt + 1] = vertices[at + 1]!;
+      first[firstAt + 2] = vertices[at + 2]!;
+      continue;
+    }
+    const dx = vertices[at]! - first[firstAt]!;
+    const dy = vertices[at + 1]! - first[firstAt + 1]!;
+    const dz = vertices[at + 2]! - first[firstAt + 2]!;
+    if (dx * dx + dy * dy + dz * dz > toleranceSquared) return false;
+  }
+  return seen.every((value) => value === 1);
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering
@@ -477,7 +616,7 @@ function groupSpanEnd(groups: Uint32Array | null, faceCount: number): number {
  * into exactly the number of contiguous edge-connectivity runs declared by parts.json.
  * This recovers documents whose range header was cleared while refusing ambiguous
  * multi-shell parts (run count mismatch). No spatial tolerance or primitive guessing. */
-export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups'>, partCount: number): { lo: number; hi: number }[] | null {
+export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups' | 'renderCornerLogicalIds'>, partCount: number): { lo: number; hi: number }[] | null {
   const runs = meshDocConnectivityRuns(doc);
   return runs.length === partCount ? runs : null;
 }
@@ -487,7 +626,7 @@ export function inferMeshDocPartRanges(doc: Pick<PackageMeshDoc, 'vertices' | 'f
  *  semantic part has multiple shells (a five-finger part is the motivating
  *  case). Character staging can then regroup those runs against exported bone
  *  centers without inventing mesh boundaries. */
-export function meshDocConnectivityRuns(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups'>): { lo: number; hi: number }[] {
+export function meshDocConnectivityRuns(doc: Pick<PackageMeshDoc, 'vertices' | 'faceGroups' | 'renderCornerLogicalIds'>): { lo: number; hi: number }[] {
   const groups = doc.faceGroups;
   const triangleCount = Math.floor(doc.vertices.length / 24);
   if (!groups || groups.length !== triangleCount || triangleCount === 0) return [];
@@ -507,6 +646,8 @@ export function meshDocConnectivityRuns(doc: Pick<PackageMeshDoc, 'vertices' | '
     if (ar !== br) parent[br] = ar;
   };
   const vertexKey = (triangle: number, corner: number): string => {
+    const logicalId = doc.renderCornerLogicalIds?.[triangle * 3 + corner];
+    if (logicalId !== undefined) return `logical:${logicalId}`;
     const at = (triangle * 3 + corner) * 8;
     const x = doc.vertices[at] || 0, y = doc.vertices[at + 1] || 0, z = doc.vertices[at + 2] || 0;
     return `${x},${y},${z}`;
@@ -549,11 +690,12 @@ export function meshDocConnectivityRuns(doc: Pick<PackageMeshDoc, 'vertices' | '
 
 /** Rank-order live outliner rows into meshdoc part metadata (ascending lo — the same
  *  order the host reports ranges in). */
-export function partsMetaFromRows(rows: readonly { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string; groupPath?: { id: string; name: string }[]; outlinerOrder?: number; lo?: number }[]): MeshDocPartMeta[] {
+export function partsMetaFromRows(rows: readonly { id?: string; objectId?: string; name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string; groupPath?: { id: string; name: string }[]; outlinerOrder?: number; lo?: number }[]): MeshDocPartMeta[] {
   return rows
     .slice()
     .sort((a, b) => (a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER))
     .map((p, rangeRank) => ({
+      objectId: p.objectId ?? p.id,
       name: p.name,
       color: p.color,
       visible: p.visible,
@@ -572,35 +714,6 @@ export function meshDocHiddenRanges(
   rankedRows: readonly { visible: boolean }[],
 ): { lo: number; hi: number }[] {
   return ranges.filter((_, rank) => rankedRows[rank]?.visible === false);
-}
-
-/** Per-range bounds centers, rank-ordered to match `doc.ranges` — the MEASURED
- *  part centers the character rig compiler stamps rest transforms from
- *  (req_2777: measured at export, never a stored table). A range with no
- *  triangles yields null (its bone keeps identity). */
-export function meshDocRangeCenters(doc: PackageMeshDoc): ([number, number, number] | null)[] {
-  const triCount = Math.floor(doc.vertices.length / 24);
-  const box = doc.ranges.map(() => ({ n: 0, min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }));
-  for (let tri = 0; tri < triCount; tri += 1) {
-    const group = doc.faceGroups ? doc.faceGroups[tri]! : tri;
-    const rank = doc.ranges.findIndex((r) => group >= r.lo && group < r.hi);
-    if (rank < 0) continue;
-    const b = box[rank]!;
-    for (let corner = 0; corner < 3; corner += 1) {
-      const at = (tri * 3 + corner) * 8;
-      for (let axis = 0; axis < 3; axis += 1) {
-        const v = doc.vertices[at + axis]!;
-        if (v < b.min[axis]!) b.min[axis] = v;
-        if (v > b.max[axis]!) b.max[axis] = v;
-      }
-    }
-    b.n += 1;
-  }
-  return box.map((b) => (b.n === 0 ? null : [
-    (b.min[0]! + b.max[0]!) / 2,
-    (b.min[1]! + b.max[1]!) / 2,
-    (b.min[2]! + b.max[2]!) / 2,
-  ]));
 }
 
 /** Extract one package part as standalone appendable geometry. Face-group ids
@@ -629,4 +742,32 @@ export function meshDocRangeGeometry(
     faceGroups.push(targetGroup);
   }
   return { positions: new Float32Array(vertices), faceGroups: new Uint32Array(faceGroups) };
+}
+
+/** pos3 / normal3 / uv2 — the interleaved source-vertex stride every RJMD carries.
+ *  Named because readers outside this module compute counts from it (req_4052); the
+ *  bare 8s above predate the constant and are left where they read as local math. */
+export const MESHDOC_VERTEX_STRIDE = 8;
+
+/** World bounds of a saved document, as min x,y,z then max x,y,z — the same order the
+ *  Agent Seat percept's region bboxes use, so saved and resident extents compare
+ *  directly instead of through an agent's own transcription. */
+export function meshDocBounds(
+  doc: Pick<PackageMeshDoc, 'vertices'>,
+): [number, number, number, number, number, number] | null {
+  const count = Math.floor(doc.vertices.length / MESHDOC_VERTEX_STRIDE);
+  if (count === 0) return null;
+  const bounds: [number, number, number, number, number, number] = [
+    Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity,
+  ];
+  for (let vertex = 0; vertex < count; vertex += 1) {
+    const at = vertex * MESHDOC_VERTEX_STRIDE;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = doc.vertices[at + axis]!;
+      if (!Number.isFinite(value)) return null;
+      if (value < bounds[axis]!) bounds[axis] = value;
+      if (value > bounds[axis + 3]!) bounds[axis + 3] = value;
+    }
+  }
+  return bounds;
 }

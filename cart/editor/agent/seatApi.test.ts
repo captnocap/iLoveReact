@@ -321,6 +321,19 @@ test('camera orbit uses explicit degrees instead of undocumented pixel calibrati
   assert(pose?.slice(2).join(',') === '3,1,2,3', 'degree orbit moved the frame target');
 });
 
+test('accepted Seat transforms mark the document dirty and rejected transforms do not', () => {
+  let mutations = 0;
+  (globalThis as any).__mesh_transform_translate = () => 1;
+  (globalThis as any).__mesh_transform_rotate_axis = () => 0;
+  const seat = createAgentSeat({ documentMutated: () => { mutations += 1; } });
+  const moved = executeSeatRequest(seat, { action: 'move', args: { delta: [0.25, 0, 0] } });
+  const rejected = executeSeatRequest(seat, {
+    action: 'rotate', args: { axis: [0, 1, 0], pivot: [0, 0, 0], degrees: 15 },
+  });
+  assert(moved.ok && !rejected.ok && mutations === 1,
+    'Seat transform dirty notification did not follow accepted native mutations exactly');
+});
+
 test('look joins durable outliner parts to the resident semantic percept', () => {
   const partPercept: SeatPartPercept = {
     activePartId: 'part:body',
@@ -1060,4 +1073,151 @@ test('batch generation refusal names an optional target model without changing l
 });
 
 if (failed > 0) throw new Error(`${failed} seat API test(s) failed; ${passed} passed`);
-log(`seatApi: ${passed} passed`);
+
+// ── measure / stats / align: the verbs that replaced agent-side python (req_4052) ──
+
+const measurePercept: SeatPercept = {
+  version: 1, model: null, generation: 9, faces: 24, authoredFaces: 12, islands: 0, footprints: 0, unnamed: 0,
+  placeholders: 0, placeholderFaces: 0, auditComputed: true, intersectingFaces: 0, unreachableFaces: 2, auditDirections: 42,
+  activePartId: null, parts: [],
+  regions: [
+    { id: 1, faces: 12, instances: 1, bbox: [-1, 0, -1, 1, 0.1, 1] },
+    { id: 2, faces: 6, instances: 1, bbox: [-0.1, 0.14, -0.1, 0.1, 0.6, 0.1] },
+    { id: 3, faces: 6, instances: 1, bbox: [-0.1, 0.6, -0.1, 0.1, 0.7, 0.1] },
+  ],
+  table: { version: 1, regions: [
+    { id: 1, name: 'floor' },
+    { id: 2, name: 'leg' },
+    { id: 3, name: 'leg.cap', parent: 2 },
+  ], nextRegionId: 4 },
+};
+
+/** Install the measure fixture and record whether anything touched the live selection. */
+function withMeasureHost(run: (calls: { selectQueries: number; moves: number[][] }) => void) {
+  const host = globalThis as any;
+  const saved = {
+    state: host.__mesh_semantic_state, query: host.__mesh_select_query, mode: host.__mesh_edit_mode,
+    elements: host.__mesh_edit_elements, patch: host.__mesh_follow_patch, translate: host.__mesh_transform_translate,
+    atlas: host.__model_atlas_read,
+  };
+  const calls = { selectQueries: 0, moves: [] as number[][] };
+  host.__mesh_semantic_state = () => JSON.stringify(measurePercept);
+  host.__model_atlas_read = () => null;
+  host.__mesh_edit_mode = () => 3;
+  host.__mesh_select_query = () => { calls.selectQueries += 1; return JSON.stringify({ ok: true, faces: 6, bbox: [-0.1, 0.14, -0.1, 0.1, 0.6, 0.1] }); };
+  host.__mesh_edit_elements = () => JSON.stringify({
+    vertices: [
+      { id: 0, at: [-0.5, 1, 0] }, { id: 1, at: [0.5, 1, 0] }, { id: 2, at: [0, 1, 0.25] },
+    ],
+    edges: [
+      { id: 0, vertices: [0, 1], faces: 1, open: true },
+      { id: 1, vertices: [1, 2], faces: 3, open: false },
+    ],
+  });
+  host.__mesh_follow_patch = () => JSON.stringify({
+    version: 1, rings: 0, selectedTriangles: [0], selectedGroups: [0], frontier: [],
+    vertices: [{ id: 0, at: [0, 0, 0] }, { id: 1, at: [1, 0, 0] }, { id: 2, at: [1, 2, 0] }],
+    triangles: [{ id: 0, selected: true, group: 0, part: 0, material: 0, region: 2, instance: 0, vertices: [0, 1, 2] }],
+  });
+  host.__mesh_transform_translate = (x: number, y: number, z: number) => { calls.moves.push([x, y, z]); return 1; };
+  try { run(calls); } finally {
+    host.__mesh_semantic_state = saved.state; host.__mesh_select_query = saved.query; host.__mesh_edit_mode = saved.mode;
+    host.__mesh_edit_elements = saved.elements; host.__mesh_follow_patch = saved.patch;
+    host.__mesh_transform_translate = saved.translate; host.__model_atlas_read = saved.atlas;
+  }
+}
+
+test('measure bbox rolls a region family up without touching the live selection', () => {
+  withMeasureHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'measure', args: { operation: 'bbox', target: 'region:leg' } });
+    const result = reply.result as any;
+    assert(reply.ok, `measure bbox failed: ${reply.reason}`);
+    // leg (up to y=0.6) plus its child leg.cap (up to y=0.7) — the family, not one row.
+    assert(result.bbox[4] === 0.7, `family rollup missed the child region: ${result.bbox.join(',')}`);
+    assert(result.faces === 12, `expected 12 faces, got ${result.faces}`);
+    assert(result.selectionSet === false, 'a region measurement clobbered the live selection');
+    assert(calls.selectQueries === 0, 'a region measurement ran a host selector query');
+  });
+});
+
+test('measure contact reports the seating delta between two named regions', () => {
+  withMeasureHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'measure', args: { operation: 'contact', a: 'region:leg.cap', b: 'region:floor' } });
+    const result = reply.result as any;
+    assert(reply.ok, `measure contact failed: ${reply.reason}`);
+    assert(result.contact.axis === 'y', `contact axis was ${result.contact.axis}`);
+    assert(Math.abs(result.contact.delta - (0.1 - 0.6)) < 1e-9, `delta was ${result.contact.delta}`);
+    assert(result.verdict === 'gap', `verdict was ${result.verdict}`);
+  });
+});
+
+test('a richer selector target says so instead of pretending it left the selection alone', () => {
+  withMeasureHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'measure', args: { operation: 'bbox', target: 'facing:+y' } });
+    assert(reply.ok, `measure bbox on a facing selector failed: ${reply.reason}`);
+    assert((reply.result as any).selectionSet === true, 'a host-resolved target did not report that it set the selection');
+    assert(calls.selectQueries === 1, 'the facing selector never reached the host query');
+  });
+});
+
+test('measure names the target syntax when handed nothing usable', () => {
+  withMeasureHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'measure', args: { operation: 'bbox', target: 'region:nope' } });
+    assert(!reply.ok, 'an unknown region measured successfully');
+    assert(/region:<name>/.test(reply.reason ?? ''), `reason did not teach the target syntax: ${reply.reason}`);
+  });
+});
+
+test('stats anomalies never prints an audit zero it did not measure', () => {
+  withMeasureHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'stats', args: { operation: 'anomalies', target: 'selection' } });
+    const result = reply.result as any;
+    assert(reply.ok, `stats anomalies failed: ${reply.reason}`);
+    assert(result.audit.measured === true && result.audit.unreachableFaces === 2, 'the host audit counts were not carried through');
+    assert(result.counts.nonManifoldEdges === 1, 'the 3-face edge was not reported');
+    assert(result.openEdges === 1, 'the boundary edge was miscounted');
+  });
+});
+
+test('stats symmetry measures about the model origin', () => {
+  withMeasureHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'stats', args: { operation: 'symmetry', axis: 'x' } });
+    const result = reply.result as any;
+    assert(reply.ok, `stats symmetry failed: ${reply.reason}`);
+    assert(result.plane === 0, 'the symmetry plane left the origin');
+    assert(result.onPlane === 1 && result.unmatched === 0, `symmetry read ${result.onPlane} on-plane, ${result.unmatched} unmatched`);
+  });
+});
+
+test('align dry-run reports a delta and moves nothing', () => {
+  withMeasureHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'align', args: { moving: 'region:leg', onto: 'region:floor', dryRun: true } });
+    const result = reply.result as any;
+    assert(reply.ok, `align dry run failed: ${reply.reason}`);
+    assert(result.applied === false, 'a dry run reported itself as applied');
+    assert(Math.abs(result.delta[1] - (0.1 - 0.14)) < 1e-9, `delta was ${result.delta.join(',')}`);
+    assert(calls.moves.length === 0, 'a dry run moved geometry');
+  });
+});
+
+test('align applies exactly the delta its dry run reported', () => {
+  withMeasureHost((calls) => {
+    const seat = createAgentSeat();
+    const planned = (executeSeatRequest(seat, { action: 'align', args: { moving: 'region:leg', onto: 'region:floor', dryRun: true } }).result as any).delta;
+    const reply = executeSeatRequest(seat, { action: 'align', args: { moving: 'region:leg', onto: 'region:floor' } });
+    assert(reply.ok, `align failed: ${reply.reason}`);
+    assert((reply.result as any).applied === true, 'align did not report itself applied');
+    assert(calls.moves.length === 1, `expected one move, got ${calls.moves.length}`);
+    assert(calls.moves[0]!.every((value, axis) => Math.abs(value - planned[axis]) < 1e-9), `applied ${calls.moves[0]} but planned ${planned}`);
+  });
+});
+
+test('align refuses to move the whole model onto part of itself', () => {
+  withMeasureHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'align', args: { moving: 'model', onto: 'region:floor' } });
+    assert(!reply.ok, 'aligning the model onto its own part was allowed');
+    assert(calls.moves.length === 0, 'the refused align still moved geometry');
+  });
+});
+
+log(`seatApi: ${passed} passed${failed ? `, ${failed} FAILED` : ''}`);

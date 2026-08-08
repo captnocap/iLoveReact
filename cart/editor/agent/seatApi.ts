@@ -11,6 +11,22 @@ import {
   type MeshSemanticTable as SemanticTable,
 } from '../model/meshSemantics';
 import { claimActiveModel, claimAdmits, claimModel, dismissClaim, listClaims } from './claims';
+import {
+  CONTACT_EPSILON,
+  axisIndexOf,
+  boxFacts,
+  boxOfPoints,
+  findAnomalies,
+  isBox,
+  measureContact,
+  measureDistance,
+  measureSymmetry,
+  planAlign,
+  spread,
+  triangleEdgeLengths,
+  unionBoxes,
+  type SeatBox,
+} from './seatGeometry';
 
 export { NO_SEMANTIC_ID, declareRegion } from '../model/meshSemantics';
 export type { MeshSemanticRegion as SemanticRegion, MeshSemanticTable as SemanticTable } from '../model/meshSemantics';
@@ -361,6 +377,9 @@ export type SeatPrimitiveSpec = {
 export type SeatAdapter = {
   /** ModelView uses this to adopt the new host key/count after topology changes. */
   adoptTopology?: (result: TopologyReceipt | null) => void;
+  /** Resident transforms do not re-key the mesh, so they must explicitly tell
+   * the shell that the document no longer matches its on-disk package. */
+  documentMutated?: () => void;
   selectionChanged?: () => void;
   take?: () => number | undefined;
   namingDebtBudget?: number;
@@ -1122,19 +1141,26 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     adapter.adoptTopology?.(result);
     return result;
   };
-  const move = (delta: [number, number, number]) => finiteVec3(delta) && automation(() => host.__mesh_transform_translate?.(...delta)) === 1;
+  const recordTransform = (changed: boolean): boolean => {
+    if (changed) adapter.documentMutated?.();
+    return changed;
+  };
+  const move = (delta: [number, number, number]) => finiteVec3(delta)
+    && recordTransform(automation(() => host.__mesh_transform_translate?.(...delta)) === 1);
   const scale = (axis: [number, number, number], pivot: [number, number, number], factor: number) =>
-    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(factor) && automation(() => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor)) === 1;
+    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(factor)
+    && recordTransform(automation(() => host.__mesh_transform_scale_axis?.(...axis, ...pivot, factor)) === 1);
   const scaleUniform = (factor: number) => Number.isFinite(factor) && factor !== 0
-    && automation(() => host.__mesh_gizmo_scale_by?.(factor)) === 1;
+    && recordTransform(automation(() => host.__mesh_gizmo_scale_by?.(factor)) === 1);
   const alignLoop = (): { axis: 'x' | 'y' | 'z' } | null => {
     const code = Number(automation(() => host.__mesh_align_loop?.()) ?? 0);
-    return code >= 1 && code <= 3 && Number.isInteger(code)
-      ? { axis: 'xyz'[code - 1] as 'x' | 'y' | 'z' }
-      : null;
+    if (code < 1 || code > 3 || !Number.isInteger(code)) return null;
+    adapter.documentMutated?.();
+    return { axis: 'xyz'[code - 1] as 'x' | 'y' | 'z' };
   };
   const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) =>
-    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees) && automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1;
+    finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees)
+    && recordTransform(automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1);
   const topology = (invoke: () => unknown): TopologyReceipt | null => {
     const result = readTopology(automation(invoke));
     adapter.adoptTopology?.(result);
@@ -1497,6 +1523,178 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     steps.push(`move base to ${center.join(',')}`);
     return { ok: true, recipe: name, status, steps, result: { range, target: { faces: selected.faces, bbox }, normal, center } };
   };
+  // ── measure / stats / align: the editor computes, the agent reads ─────────────
+  // Every fact below was previously reconstructed agent-side by piping `look` into
+  // python3 (req_4052 found 89 such geometry-math escapes). Hand arithmetic over
+  // seat output is unversioned: when the meaning of a number changes, the private
+  // formula keeps returning a confident wrong answer. These verbs read the SAME
+  // resident data the viewport draws.
+  const TARGET_SYNTAX = 'targets are any selector (region:<name>, facing:+y, outermost:-x, faces:lo..hi, inside:box(...)), plus "selection" and "model"';
+  type ResolvedTarget = { selector: string; bbox: SeatBox; faces: number; selectionSet: boolean };
+  /** A target's extent. `region:` names and the whole model answer from the resident
+   *  percept and leave the live selection ALONE; the richer selector algebra has to
+   *  run through the host query, so the reply says which happened rather than
+   *  quietly clobbering a selection the agent spent ten verbs building. */
+  const resolveTargetBox = (spec: unknown): ResolvedTarget | { reason: string } => {
+    const selector = String(spec ?? '').trim();
+    if (!selector) return { reason: `missing target — ${TARGET_SYNTAX}` };
+    const percept = look();
+    if (!percept) return { reason: 'no live mesh' };
+    if (selector === 'selection') {
+      const patch = followPatch(undefined, 0);
+      const box = boxOfPoints((patch?.vertices ?? []).map((vertex) => vertex.at));
+      return box
+        ? { selector, bbox: box, faces: patch?.selectedTriangles.length ?? 0, selectionSet: false }
+        : { reason: 'nothing is selected — select faces first or name a selector target' };
+    }
+    if (selector === 'model' || selector === 'all') {
+      const rows = percept.regions.filter((region) => region.faces > 0);
+      const named = unionBoxes(rows.map((region) => region.bbox));
+      if (named) {
+        return { selector: 'model', bbox: named, faces: rows.reduce((sum, region) => sum + region.faces, 0), selectionSet: false };
+      }
+      // A freshly imported mesh has no names yet but still has an extent, and asking
+      // for it is exactly what an agent does before naming anything. Fall back to raw
+      // topology rather than refusing — `elements` honours the active part scope, so
+      // this measures the mesh in scope, which is what the viewport is showing.
+      const box = boxOfPoints((elements()?.vertices ?? []).map((vertex) => vertex.at));
+      return box
+        ? { selector: 'model', bbox: box, faces: percept.faces, selectionSet: false }
+        : { reason: 'the model carries no geometry to measure' };
+    }
+    const name = selector.startsWith('region:') ? selector.slice('region:'.length) : selector;
+    const family = new Set(regionFamily(percept.table, name));
+    if (family.size > 0) {
+      const rows = percept.regions.filter((region) => family.has(region.id) && region.faces > 0);
+      const box = unionBoxes(rows.map((region) => region.bbox));
+      if (!box) return { reason: `region "${name}" exists but carries no faces to measure` };
+      return { selector, bbox: box, faces: rows.reduce((sum, region) => sum + region.faces, 0), selectionSet: false };
+    }
+    const receipt = select(selector);
+    if (!receipt.ok || !isBox(receipt.bbox)) {
+      // A selector the host rejected outright is usually a target-syntax mistake, so
+      // repeat what a target may be rather than leaving the agent to guess.
+      const rejected = receipt.reason ?? `selector "${selector}" matched no faces`;
+      return { reason: receipt.ok ? rejected : `${rejected} — ${TARGET_SYNTAX}` };
+    }
+    return { selector, bbox: receipt.bbox, faces: receipt.faces ?? 0, selectionSet: true };
+  };
+  const isResolvedTarget = (value: ResolvedTarget | { reason: string }): value is ResolvedTarget => 'bbox' in value;
+  /** Per-triangle data for a target. Unlike a bbox this cannot come from the percept,
+   *  so it always sets the live selection — reported as `selectionSet` so the agent
+   *  never has to guess whether its selection survived a measurement. */
+  const resolveTargetPatch = (spec: unknown): { selector: string; patch: SeatFollowPatch; selectionSet: boolean } | { reason: string } => {
+    const selector = String(spec ?? 'selection').trim() || 'selection';
+    if (selector === 'selection') {
+      const patch = followPatch(undefined, 0);
+      return patch && patch.selectedTriangles.length > 0
+        ? { selector, patch, selectionSet: false }
+        : { reason: 'nothing is selected — select faces first or name a selector target' };
+    }
+    const receipt = select(selector === 'model' ? 'all' : selector);
+    if (!receipt.ok) return { reason: receipt.reason ?? `selector "${selector}" matched no faces — ${TARGET_SYNTAX}` };
+    const patch = followPatch(undefined, 0);
+    return patch
+      ? { selector, patch, selectionSet: true }
+      : { reason: `the topology patch for "${selector}" was unavailable` };
+  };
+  const measure = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
+    const tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : CONTACT_EPSILON;
+    if (operation === 'bbox') {
+      const target = resolveTargetBox(args.target);
+      if (!isResolvedTarget(target)) return { ok: false, reason: target.reason };
+      return { ok: true, result: { target: target.selector, faces: target.faces, selectionSet: target.selectionSet, ...boxFacts(target.bbox) } };
+    }
+    if (operation === 'distance' || operation === 'contact') {
+      const moving = resolveTargetBox(args.a ?? args.moving);
+      if (!isResolvedTarget(moving)) return { ok: false, reason: `first target: ${moving.reason}` };
+      const stationary = resolveTargetBox(args.b ?? args.target);
+      if (!isResolvedTarget(stationary)) return { ok: false, reason: `second target: ${stationary.reason}` };
+      const report = operation === 'contact'
+        ? measureContact(moving.bbox, stationary.bbox, tolerance)
+        : measureDistance(moving.bbox, stationary.bbox, tolerance);
+      return { ok: true, result: {
+        a: { target: moving.selector, faces: moving.faces, bbox: moving.bbox },
+        b: { target: stationary.selector, faces: stationary.faces, bbox: stationary.bbox },
+        selectionSet: moving.selectionSet || stationary.selectionSet,
+        tolerance,
+        ...report,
+      } };
+    }
+    return { ok: false, reason: `unknown measure operation "${operation}" — bbox, distance, or contact` };
+  };
+  const stats = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
+    const tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : CONTACT_EPSILON;
+    if (operation === 'edges') {
+      const target = resolveTargetPatch(args.target);
+      if ('reason' in target) return { ok: false, reason: target.reason };
+      const triangles = target.patch.triangles.filter((triangle) => triangle.selected);
+      const lengths = triangleEdgeLengths(triangles, target.patch.vertices);
+      const measured = spread(lengths);
+      return measured
+        ? { ok: true, result: { target: target.selector, selectionSet: target.selectionSet, triangles: triangles.length, edges: measured } }
+        : { ok: false, reason: `"${target.selector}" resolved to no measurable edges` };
+    }
+    if (operation === 'symmetry') {
+      const axis = axisIndexOf(args.axis ?? 'x');
+      if (axis === null) return { ok: false, reason: 'symmetry needs axis x, y, or z' };
+      const topology = elements();
+      if (!topology) return { ok: false, reason: 'topology descriptors unavailable' };
+      return { ok: true, result: measureSymmetry(topology.vertices, axis, tolerance) };
+    }
+    if (operation === 'anomalies') {
+      const percept = look();
+      const topology = elements();
+      if (!percept || !topology) return { ok: false, reason: 'no live mesh' };
+      const target = resolveTargetPatch(args.target ?? 'model');
+      if ('reason' in target) return { ok: false, reason: target.reason };
+      const triangles = target.patch.triangles.filter((triangle) => triangle.selected);
+      const report = findAnomalies(triangles, target.patch.vertices, topology.edges, tolerance);
+      return { ok: true, result: {
+        target: target.selector,
+        selectionSet: target.selectionSet,
+        ...report,
+        // The audit counts are the host's own pass, not a recomputation. Never
+        // print them as zero when the mesh was over budget and they were never run.
+        audit: percept.auditComputed === undefined
+          ? { measured: false, reason: 'host predates the geometry audit pass' }
+          : percept.auditComputed
+            ? { measured: true, intersectingFaces: percept.intersectingFaces ?? 0, unreachableFaces: percept.unreachableFaces ?? 0, directions: percept.auditDirections ?? 0 }
+            : { measured: false, reason: 'mesh is over the audit budget — intersecting/unreachable are UNKNOWN, not zero' },
+      } };
+    }
+    return { ok: false, reason: `unknown stats operation "${operation}" — edges, symmetry, or anomalies` };
+  };
+  /** Seat one target's facing plane onto another's. `dryRun` returns the delta the
+   *  agent used to compute by hand; the plain form applies it as one undo step, so
+   *  the number that was reported is provably the number that moved. */
+  const align = (args: Record<string, unknown>): SeatShellReceipt => {
+    const tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : CONTACT_EPSILON;
+    const axis = args.axis === undefined || args.axis === null ? null : axisIndexOf(args.axis);
+    if (args.axis !== undefined && args.axis !== null && axis === null) {
+      return { ok: false, reason: 'align axis must be x, y, or z — omit it to let the seat pick the contact axis' };
+    }
+    const moving = resolveTargetBox(args.moving ?? args.a);
+    if (!isResolvedTarget(moving)) return { ok: false, reason: `moving target: ${moving.reason}` };
+    const stationary = resolveTargetBox(args.onto ?? args.b);
+    if (!isResolvedTarget(stationary)) return { ok: false, reason: `onto target: ${stationary.reason}` };
+    const plan = planAlign(moving.bbox, stationary.bbox, axis, tolerance);
+    const summary = {
+      moving: { target: moving.selector, faces: moving.faces, bbox: moving.bbox },
+      onto: { target: stationary.selector, faces: stationary.faces, bbox: stationary.bbox },
+      tolerance,
+      ...plan,
+    };
+    if (args.dryRun === true) return { ok: true, result: { ...summary, applied: false } };
+    if (moving.selector === 'model') return { ok: false, reason: 'align refuses to move the whole model onto part of itself — name the part that should move' };
+    // Re-select the moving target so the transform lands on it and nothing else,
+    // even when resolveTargetBox answered from the percept without touching the
+    // selection. One selector, one delta, one undo step.
+    const selected = moving.selector === 'selection' ? { ok: true } : select(moving.selector);
+    if (!selected.ok) return { ok: false, reason: `align could not select "${moving.selector}": ${selected.reason ?? 'selector matched no faces'}` };
+    if (!move(plan.delta)) return { ok: false, reason: `align computed delta [${plan.delta.join(', ')}] but the move was rejected — check the active part scope` };
+    return { ok: true, result: { ...summary, applied: true } };
+  };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
   return {
     look, elements, retopoBands, boundaryContinuation, follow, followPatch,
@@ -1505,6 +1703,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
+    measure, stats, align,
   };
 }
 
@@ -1565,6 +1764,11 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 const SEAT_READ_ACTIONS = new Set([
   'look', 'semantic-status', 'elements', 'boundary-continuation', 'uv-state',
   'recipe-list', 'shot', 'claims',
+  // Saved-package reads touch neither the resident mesh nor the live selection, so
+  // a supervisor can inspect a claimed model's disk state without taking the claim.
+  // `measure`/`stats` are deliberately NOT here: their richer selector targets set
+  // the live selection, and clobbering a claimed agent's selection is a crossed wire.
+  'package',
 ]);
 
 const seatRequestReads = (request: SeatRequest): boolean => {
@@ -1663,6 +1867,21 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'elements': {
         const result = seat.elements();
         return seat.reply('elements', !!result, result ?? undefined, result ? undefined : 'topology descriptors unavailable');
+      }
+      // The read-only arithmetic lane (req_4052). These never generate geometry;
+      // `align` is the one that acts, and it applies exactly the delta its own
+      // dry run reports.
+      case 'measure': {
+        const result = seat.measure(String(args.operation ?? 'bbox'), args);
+        return seat.reply('measure', result.ok, result.result, result.reason);
+      }
+      case 'stats': {
+        const result = seat.stats(String(args.operation ?? 'anomalies'), args);
+        return seat.reply('stats', result.ok, result.result, result.reason);
+      }
+      case 'align': {
+        const result = seat.align(args);
+        return seat.reply('align', result.ok, result.result, result.reason);
       }
       case 'retopo-bands': {
         const result = seat.retopoBands(String(args.operation ?? 'read'), args);
@@ -1906,6 +2125,11 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'editor-status':
       case 'command':
+      // The saved package is disk state, so only the shell can read it — but the
+      // READER is this editor's own RJMD decoder (req_4052). Agents were parsing
+      // the blob by hand with a guessed header offset, which silently returned
+      // wrong counts the moment RJMD went v4 → v5 and the header grew 40 → 48 bytes.
+      case 'package':
       case 'part-select': case 'part-rename': case 'part-visibility': case 'part-delete':
       case 'part-duplicate': case 'part-merge': case 'part-path-array': case 'part-import':
       case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
