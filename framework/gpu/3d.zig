@@ -4007,10 +4007,24 @@ pub fn meshBevelBegin() ?BevelInfo {
             shared_max_width = resolved.max_width;
         },
         .face => face_target: {
-            const selected_mask = std.heap.c_allocator.alloc(bool, tri_count) catch return null;
+            const selected_mask = std.heap.c_allocator.alloc(bool, tri_count) catch {
+                topoRefuse("out of memory building the face selection mask");
+                return null;
+            };
             defer std.heap.c_allocator.free(selected_mask);
-            if (mesh_edit.buildDeleteMask(selected_mask) == 0) return null;
-            const resolved = base_mesh.resolveFacePolygon(selected_mask) orelse return null;
+            if (mesh_edit.buildDeleteMask(selected_mask) == 0) {
+                topoRefuse("no faces are selected");
+                return null;
+            }
+            const resolved = base_mesh.resolveFacePolygon(selected_mask) orelse {
+                const resolved_faces = indexed_edit_mesh.Mesh.last_face_polygon_faces;
+                g_topo_refusal = std.fmt.bufPrint(
+                    &g_topo_refusal_buf,
+                    "Face to N-gon refused: {s} (selection resolved to {d} authored face(s))",
+                    .{ indexed_edit_mesh.Mesh.last_face_polygon_stage, resolved_faces },
+                ) catch "Face to N-gon needs exactly one whole authored face";
+                return null;
+            };
             polygon_info = resolved;
             polygon_source_face = resolved.face_id;
             selection_index = resolved.selection_triangle;

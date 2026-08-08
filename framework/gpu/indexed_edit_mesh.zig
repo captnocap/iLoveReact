@@ -381,7 +381,19 @@ const MaximumQuadMatcher = struct {
 /// (16 u = 1 m) without owning a second set of limits.
 pub const BevelTuning = struct {
     pub const default_width_m: f32 = 2.0 / 16.0;
-    pub const minimum_width_m: f32 = 0.1 / 16.0;
+    /// The narrowest bevel/chamfer/N-gon inset worth minting, in METRES. This was
+    /// `0.1 / 16.0` — 6.25 mm — a "tenth of a sixteenth of a block" voxel-era number
+    /// sitting in a codebase whose ruled scale contract is 1 unit = 1 METRE (1 tile = 1 m,
+    /// player 1.65 m). It silently refused every face whose inradius fell under 7.81 mm,
+    /// i.e. anything narrower than ~15.6 mm — which is most panels on any real prop, so
+    /// Bevel, Chamfer Boundary and Face to N-gon all worked on big test cubes and died on
+    /// actual models (req_4125/req_4132).
+    ///
+    /// The honest floor is the mesh's OWN resolution: two vertices closer than
+    /// IMPORT_WELD_EPS merge on the next soup→indexed rebuild, so an inset thinner than
+    /// that writes topology that cannot survive its own save/load. Doubling it is the
+    /// same margin this file already uses for its other weld-derived epsilons.
+    pub const minimum_width_m: f32 = IMPORT_WELD_EPS * 2.0;
     pub const vertex_edge_fraction: f32 = 0.45;
     pub const edge_reach_fraction: f32 = 0.9;
     pub const coplanar_normal_dot: f32 = 0.999;
@@ -1340,21 +1352,51 @@ pub const Mesh = struct {
         return selected_triangle_count > 0 and covered_triangle_count == selected_triangle_count;
     }
 
+    /// Exactly which gate rejected the last Face-to-N-gon frame. Ten different geometric
+    /// conditions all returned one bare `null`, so the tool could only ever say "no" and
+    /// the user was left guessing between "too small", "concave", "not planar" and
+    /// "not one face" — which are four unrelated fixes (req_4132).
+    pub var last_face_polygon_stage: []const u8 = "";
+
     fn facePolygonFrame(mesh: *const Mesh, face_id: u32) ?FacePolygonFrame {
-        if (face_id >= mesh.faces.items.len) return null;
+        last_face_polygon_stage = "";
+        if (face_id >= mesh.faces.items.len) {
+            last_face_polygon_stage = "face id out of range";
+            return null;
+        }
         const face = &mesh.faces.items[face_id];
-        if (!face.alive or face.vertices.items.len < 3 or
-            face.vertices.items.len > FacePolygonTuning.maximum_target_sides or
-            face.source_triangles.items.len == 0 or mesh.loopIsConcavePositions(face.vertices.items))
-        {
+        if (!face.alive) {
+            last_face_polygon_stage = "that face is deleted";
+            return null;
+        }
+        if (face.vertices.items.len < 3) {
+            last_face_polygon_stage = "the face has fewer than 3 corners (wire/degenerate)";
+            return null;
+        }
+        if (face.vertices.items.len > FacePolygonTuning.maximum_target_sides) {
+            last_face_polygon_stage = "the face has more corners than the N-gon limit";
+            return null;
+        }
+        if (face.source_triangles.items.len == 0) {
+            last_face_polygon_stage = "the face has no source triangles";
+            return null;
+        }
+        if (mesh.loopIsConcavePositions(face.vertices.items)) {
+            last_face_polygon_stage = "the face boundary is CONCAVE — Face to N-gon needs a convex face";
             return null;
         }
         const normal = faceNormal(mesh, face);
-        if (length3(normal) < 0.5) return null;
+        if (length3(normal) < 0.5) {
+            last_face_polygon_stage = "the face normal is degenerate (zero-area or collapsed face)";
+            return null;
+        }
         const center = mesh.faceCentroid(face);
         for (face.vertices.items) |vertex_id| {
             const position = mesh.vertices.items[vertex_id].position;
-            if (@abs(dot3(sub3(position, center), normal)) > FacePolygonTuning.planar_epsilon_m) return null;
+            if (@abs(dot3(sub3(position, center), normal)) > FacePolygonTuning.planar_epsilon_m) {
+                last_face_polygon_stage = "the face is NOT PLANAR — its corners do not lie in one plane";
+                return null;
+            }
         }
 
         var inradius = std.math.inf(f32);
@@ -1364,13 +1406,17 @@ pub const Mesh = struct {
             const b = mesh.vertices.items[next_id].position;
             const edge = sub3(b, a);
             const edge_length = length3(edge);
-            if (edge_length <= IMPORT_WELD_EPS) return null;
+            if (edge_length <= IMPORT_WELD_EPS) {
+                last_face_polygon_stage = "one face edge is shorter than the weld epsilon";
+                return null;
+            }
             const distance = @abs(dot3(cross3(edge, sub3(center, a)), normal)) / edge_length;
             inradius = @min(inradius, distance);
         }
         if (!std.math.isFinite(inradius) or
             inradius * FacePolygonTuning.maximum_width_fraction < FacePolygonTuning.minimum_width_m)
         {
+            last_face_polygon_stage = "the face is TOO SMALL for the minimum inset width";
             return null;
         }
 
@@ -1392,12 +1438,32 @@ pub const Mesh = struct {
 
     /// One and only one complete selected authored face is the source. The popup
     /// may then vary width and target sides while rebuilding from the captured mesh.
+    /// How many WHOLE authored faces the last Face-to-N-gon selection resolved to, and
+    /// whether a polygon frame could be built from it. "your selection covers N faces"
+    /// and "that face has no usable frame" are completely different user errors with
+    /// completely different fixes; collapsing both into one null is what made this
+    /// impossible to act on (req_4125). -1 means selectedFaceIds itself failed.
+    pub var last_face_polygon_faces: i64 = -1;
+    pub var last_face_polygon_frame_ok: bool = false;
+
     pub fn resolveFacePolygon(mesh: *const Mesh, selected_triangles: []const bool) ?FacePolygonSelection {
+        last_face_polygon_faces = -1;
+        last_face_polygon_frame_ok = false;
         var selected = std.ArrayListUnmanaged(u32).empty;
         defer selected.deinit(mesh.allocator);
-        if (!(mesh.selectedFaceIds(selected_triangles, &selected) catch return null) or selected.items.len != 1) return null;
+        const whole = mesh.selectedFaceIds(selected_triangles, &selected) catch return null;
+        last_face_polygon_faces = @intCast(selected.items.len);
+        if (!whole) {
+            last_face_polygon_stage = "the selection covers only PART of an authored face";
+            return null;
+        }
+        if (selected.items.len != 1) {
+            last_face_polygon_stage = "the selection is not exactly one authored face";
+            return null;
+        }
         const face_id = selected.items[0];
         const frame = mesh.facePolygonFrame(face_id) orelse return null;
+        last_face_polygon_frame_ok = true;
         const face = &mesh.faces.items[face_id];
         const max_width = frame.inradius * FacePolygonTuning.maximum_width_fraction;
         const default_width = std.math.clamp(
@@ -4724,7 +4790,19 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
     const q2 = mesh.vertices.items[b[2]].position;
     const normal_a = norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
     const normal_b = norm3(cross3(sub3(q1, q0), sub3(q2, q0)));
-    if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < MERGE_FACE_NORMAL_DOT_MIN) return false;
+    _ = normal_b;
+    // NO coplanarity gate (req_4140). This used to also require
+    // `dot3(normal_a, normal_b) >= MERGE_FACE_NORMAL_DOT_MIN` — the two triangles' normals
+    // within 0.81° — which made Merge Faces refuse quads the editor is perfectly happy to
+    // build by any other route. Delete the same two triangles, select their edges, and
+    // `create-face` bridges them into the IDENTICAL quad with no planarity requirement at
+    // all; `mirror-quads` likewise fuses twin pairs untested, on the stated reasoning that
+    // an existing quad licenses an equally-warped twin. Three paths to one quad, and only
+    // this one refused — so the gate did not protect the mesh, it just made the cheap route
+    // fail and forced hours of delete-then-recreate to reach the same geometry.
+    // A quad is allowed to be warped. What is NOT allowed is a bowtie, and the winding-sign
+    // loop below still rejects that.
+    if (length3(normal_a) < 0.5) return false;
 
     const loop = [4]u32{ first_tip.?, shared[0], second_tip.?, shared[1] };
     var sign: f32 = 0;
