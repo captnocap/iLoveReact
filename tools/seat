@@ -77,6 +77,20 @@ else if (action === 'align') {
   const axis = ['x', 'y', 'z'].includes(rest[rest.length - 1]) ? rest.pop() : undefined;
   request = { action, args: { moving, onto: rest.join(' '), ...(axis ? { axis } : {}), ...(dryRun ? { dryRun: true } : {}) } };
 }
+// oracle <start "<task>" | status [--doc] | advance | attest <id> "<note>" | ask "<query>" | plans>
+// The phase-gate router: it classifies the task, serves only the doc slices that task
+// needs, and refuses to advance past a phase whose exit criteria are unmet.
+else if (action === 'oracle') {
+  const operation = args.shift() || 'status';
+  if (operation === 'start') request = { action, args: { operation, task: args.join(' ') } };
+  else if (operation === 'ask') request = { action, args: { operation, query: args.join(' ') } };
+  else if (operation === 'attest') request = { action, args: { operation, id: args.shift(), note: args.join(' ') } };
+  else if (operation === 'status') {
+    const docIndex = args.indexOf('--doc');
+    if (docIndex >= 0) args.splice(docIndex, 1);
+    request = { action, args: { operation, ...(docIndex >= 0 ? { doc: true } : {}) } };
+  } else request = { action, args: { operation } };
+}
 // wait-ready [seconds] — block until the shell answers healthy. The sanctioned
 // replacement for sleeping a guessed number of seconds before the first real call.
 else if (action === 'wait-ready') request = { action: 'editor-status', args: {} };
@@ -158,7 +172,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|ask "<query>"|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 

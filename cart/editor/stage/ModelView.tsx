@@ -30,9 +30,29 @@ import { BackdropsPanel, BackdropSurface, backdropFromPath, backdropQuad, backdr
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost } from '@reactjit/runtime/ffi';
-import { createAgentSeat, declareRegion, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt, type SemanticTable } from '../agent/seatApi';
+import { readSeatCorpusDoc } from '../agent/seatCorpus';
+import type { OracleSession } from '../agent/seatOracle';
+import { createAgentSeat, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt } from '../agent/seatApi';
+import {
+  declareRegion,
+  editEdgeRegion as rewriteEdgeRegion,
+  parseEdgeSemanticNameReceipt,
+  parseMeshSemanticTable,
+  type MeshSemanticNameReceipt,
+  type MeshSemanticNameRequest,
+  type MeshEdgeRegionEdit,
+  type MeshSemanticTable as SemanticTable,
+} from '../model/meshSemantics';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
+import { selectMeshFaces } from '../model/selectMeshFaces';
+import ExtrudeDialog from './ExtrudeDialog';
+import type { ExtrudeKind, ExtrudeParams } from '../data/extrudeParams';
+import {
+  assignHumanoidSemanticSelection,
+  type HumanoidSemanticAssignmentReceipt,
+} from '../skeleton/humanoidSemanticAssignment';
+import type { HumanoidSemanticMembership } from '../../../runtime/skeleton/readiness';
 import { captureFrame } from '@reactjit/capture';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
@@ -165,7 +185,13 @@ export type ModelViewInitialMesh = {
   /** durable semantic membership and its name/provenance table (RJMD v4) */
   semanticRegions?: Uint32Array | number[];
   semanticInstances?: Uint32Array | number[];
-  semanticTable?: { version: 1; regions: unknown[]; [key: string]: unknown };
+  semanticTable?: SemanticTable;
+  /** RJMD v5 welded identity: one dense logical id per render corner. */
+  logicalVertexCount?: number;
+  renderCornerLogicalIds?: Uint32Array | number[];
+  // Durable RJMD ownership is independent of Outliner presentation colours.
+  // It must survive the first render before shell rows have hydrated.
+  partRanges?: { lo: number; hi: number }[];
   // Per-part colour ranges (multi-part models): paint each part its outliner colour on load,
   // so a bare studio mesh reads as coloured parts instead of blank white.
   partColors?: { lo: number; hi: number; color: string }[];
@@ -193,7 +219,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // modal discipline): host-captured bevel/loop-cut/quadify popup sessions, the Create
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
-export type ModelBlockingSession = 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
+export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
@@ -291,8 +317,11 @@ export type ModelFocusBridge = {
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   /** Show WHERE a name lives: select that region's faces on the model (req_3884). */
   selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
+  /** Restore one durable logical-edge path to the live edge selection. */
+  selectEdgeRegion: (id: number, additive?: boolean) => { edges: number } | null;
   /** Rename a region, or remove it entirely (req_3894). */
   editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
+  editEdgeRegion: (id: number, edit: MeshEdgeRegionEdit) => { changed: number } | null;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -307,6 +336,7 @@ export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
   scaleBy: (factor: number) => boolean;
+  alignLoop: () => number;
   // The cart half of the integrity roll call (req_3484): re-read key, selection,
   // and part ranges from host truth after the host reports (or heals) a ledger
   // fault. Returns false when the host carries no ranges to mirror.
@@ -327,6 +357,7 @@ export type ModelToolApi = {
   camRemoveAt: (index: number) => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
+  facePolygon: () => void;
   createFace: () => void;
   weld: () => void;
   bevel: () => void;
@@ -338,18 +369,23 @@ export type ModelToolApi = {
   retopoTint: (id: number) => { changed: number; persisted: boolean };
   retopoGhost: (visible: boolean) => { visible: boolean; faces: number; covered: number; persisted: boolean } | null;
   retopoClear: () => { cleared: boolean; persisted: boolean };
-  // GUI semantic naming (req_3872): assign the current face selection to a named
-  // region — the same table+door the Agent Seat's `name` verb uses, but recorded
-  // as a toolbar action, not automation. null = the host door is absent.
-  nameSelection: (name: string) => { changed: number } | null;
+  // One mode-aware naming lane for face regions and logical-edge paths.
+  nameSelection: (request: MeshSemanticNameRequest) => MeshSemanticNameReceipt | null;
+  /** Assign exact humanoid anatomy to the current face selection. Display names
+   * remain independent; no name is interpreted as a role. */
+  assignHumanoidSemantic: (membership: HumanoidSemanticMembership) => HumanoidSemanticAssignmentReceipt | null;
+  /** Select compact native face ids for topology/readiness diagnostics. */
+  selectFaces: (indices: number[]) => number;
   // Select the triangles behind the SHAPE panel's geometry counts (req_3883).
   // null = the host door is absent (an old binary) or there is no live mesh.
   selectAuditFaces: (kind: 'intersecting' | 'unreachable' | 'both') => { faces: number } | null;
   // Select one named semantic region's faces by id (req_3884).
   selectRegion: (id: number, additive?: boolean) => { faces: number } | null;
+  selectEdgeRegion: (id: number, additive?: boolean) => { edges: number } | null;
   // Rename a region, or remove it (its faces go back to unnamed) — naming was a
   // one-way door before this (req_3894). null = refused or no host door.
   editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
+  editEdgeRegion: (id: number, edit: MeshEdgeRegionEdit) => { changed: number } | null;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
   // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
@@ -459,6 +495,25 @@ export type ModelViewProps = {
    * their faces per-frame over object-space position; membership binds BY SLOT
    * so face re-assignment/cuts/undo never need a JS re-push. */
   textureSlots?: readonly ModelTextureSlot[];
+  /** Native character-rig mode keeps the resident mesh but hands viewport
+   * selection/gizmos to the open character-rig session instead of mesh edit. */
+  characterRigMode?: boolean;
+  characterRigSpecimenSeparation?: number;
+  characterRigBound?: boolean;
+  characterRigBindVisible?: boolean;
+  characterRigDeformedVisible?: boolean;
+  /** Character-rig viewport clicks remain compact commands: the host performs
+   * the raycast against its resident mesh and React receives only the resulting
+   * logical-vertex probe snapshot. Coordinates are window-space pixels. */
+  onCharacterRigVertexPress?: (viewportX: number, viewportY: number) => void;
+  onCharacterRigJointTransform?: (boneIndex: number, transform: {
+    pos: [number, number, number];
+    rot: [number, number, number, number];
+    scale: [number, number, number];
+  }) => void;
+  /** Fires once the host has adopted or resumed this model source. The key is
+   * opaque and is the only geometry reference the rig session receives. */
+  onResidentModel?: (modelSourceKey: string) => void;
 };
 
 type PaintLayoutConflictSession = {
@@ -540,14 +595,20 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
     ? mesh.semanticInstances
     : mesh.semanticInstances ? new Uint32Array(mesh.semanticInstances) : new Uint32Array();
   const expectsSemantics = semanticRegions.length > 0 || semanticInstances.length > 0 || !!mesh.semanticTable;
+  const logicalIds = mesh.renderCornerLogicalIds instanceof Uint32Array
+    ? mesh.renderCornerLogicalIds
+    : mesh.renderCornerLogicalIds ? new Uint32Array(mesh.renderCornerLogicalIds) : new Uint32Array();
+  const logicalVertexCount = logicalIds.length > 0 ? Math.trunc(mesh.logicalVertexCount ?? 0) : 0;
+  const expectsLogicalTopology = logicalIds.length > 0 || logicalVertexCount > 0;
   const json = fn(
     mesh.key, verts, count, groups, materials, semanticRegions, semanticInstances,
     mesh.semanticTable ? JSON.stringify(mesh.semanticTable) : '',
+    logicalIds, logicalVertexCount,
   );
   if (typeof json !== 'string' || json.length === 0) return null;
   try {
     const o = JSON.parse(json);
-    if (!o || typeof o.key !== 'string' || (expectsSemantics && o.semantics !== 1)) return null;
+    if (!o || typeof o.key !== 'string' || (expectsSemantics && o.semantics !== 1) || (expectsLogicalTopology && o.logical !== 1)) return null;
     // Tint each part its outliner colour (multi-part models) so a bare studio mesh isn't a
     // blank white blob and the model matches the outliner swatches.
     for (const pc of mesh.partColors ?? []) {
@@ -624,6 +685,8 @@ const meshSymmetrize = (axis: number, keepPositive: boolean): TopoResult | null 
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
 const meshScaleBy = (factor: number) => host.__mesh_gizmo_scale_by?.(factor) === 1;
+// Align Loop returns 1/2/3 for X/Y/Z; normalize that to 0/1/2 and -1 refusal.
+const meshAlignLoop = () => Math.trunc(Number(host.__mesh_align_loop?.() ?? 0)) - 1;
 const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
 // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
@@ -693,19 +756,19 @@ const readQuadifyPlan = (json: any): QuadifyPlan | null => {
   if (plan.quads * 2 > plan.triangleFaces || plan.candidatePairs < plan.quads || plan.ambiguousTriangles > plan.triangleFaces) return null;
   return plan;
 };
-const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
-const meshExtrudeFace = (distance: number) => readTopoResult(host.__mesh_topo_extrude_face?.(distance));
+const meshExtrudeEdge = (distance: number, angleDegrees = 0) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance, angleDegrees));
+const meshExtrudeFace = (distance: number, taperDegrees = 0) => readTopoResult(host.__mesh_topo_extrude_face?.(distance, taperDegrees));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 // Weld (req_3382): merge the selected vertices at their center (host op).
 const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
-// Bevel: a host-owned captured-base session shared by one vertex, one sharp edge,
-// or every corner of one selected open boundary loop.
+// Bevel / Face to N-gon: one captured-base session shared by one vertex, one
+// sharp edge, every corner of one selected open boundary loop, or one filled face.
 type BevelInfo = {
   ok: number;
-  kind?: 'edge' | 'vertex' | 'boundary';
+  kind?: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
   defaultWidth?: number;
   minimumWidth?: number;
   maxWidth?: number;
@@ -1038,7 +1101,7 @@ const PAINT_CONFLICT_LAYOUT = {
   savedLooksHeight: 92,
 } as const;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, documentDirty, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [] }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, documentDirty, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [], characterRigMode = false, characterRigSpecimenSeparation = 0, characterRigBound = false, characterRigBindVisible = true, characterRigDeformedVisible = true, onCharacterRigVertexPress, onCharacterRigJointTransform, onResidentModel }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -1069,6 +1132,39 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
   // owns the reflection (mesh_edit.zig twin table); this is the toggle's UI truth.
   const [mirrorMask, setMirrorMask] = useState(toolTwig?.mirrorMask ?? 0);
+  // A character rig session reuses this resident viewport but owns its native
+  // selection, joint gizmos, overlays, and vertex probes. Enter from a neutral
+  // mesh-edit state so two input interpreters never compete for one click.
+  useEffect(() => {
+    if (!characterRigMode) return;
+    setPaintMode(false);
+    setPathPlaneMode(false);
+    setPathEdgesMode(false);
+    setFocusMode(false);
+    setSelMode(0);
+    meshSetMode(0);
+    meshFocusTool(false);
+    host.__mesh_paint_session?.(0);
+  }, [characterRigMode]);
+  useEffect(() => {
+    if (!characterRigMode) return;
+    const root = globalThis as any;
+    const select = (viewportX: number, viewportY: number) => onCharacterRigVertexPress?.(viewportX, viewportY);
+    const commit = (
+      boneIndex: number,
+      px: number, py: number, pz: number,
+      qx: number, qy: number, qz: number, qw: number,
+      sx: number, sy: number, sz: number,
+    ) => onCharacterRigJointTransform?.(boneIndex, {
+      pos: [px, py, pz], rot: [qx, qy, qz, qw], scale: [sx, sy, sz],
+    });
+    root.__characterRigViewportSelect = select;
+    root.__characterRigGizmoCommit = commit;
+    return () => {
+      if (root.__characterRigViewportSelect === select) root.__characterRigViewportSelect = null;
+      if (root.__characterRigGizmoCommit === commit) root.__characterRigGizmoCommit = null;
+    };
+  }, [characterRigMode, onCharacterRigVertexPress, onCharacterRigJointTransform]);
   // Reference-image backdrops (req_2758 — the studio's req_1280 tracing planes). TWIG:
   // localstore-backed working state, never model data — and scoped to THIS document
   // (req_3621): trace planes from one model must never haunt another. bdEpoch is a
@@ -1307,12 +1403,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
   };
 
-  // ── Bevel popup: one selected edge/vertex or one complete open boundary loop.
+  // Extrude is an exact-value authoring decision, not a camera-scale shortcut.
+  // Opening this panel does not touch topology; Apply crosses the native boundary
+  // once, so the complete distance + angle result remains one undo step.
+  const [extrude, setExtrude] = useState<null | { kind: ExtrudeKind; anchored: boolean }>(null);
+  const openExtrude = (kind: ExtrudeKind) => {
+    const selectionValid = kind === 'edge'
+      ? (selMode === 2 && selInfo.sel === 1) || (selMode === 1 && selInfo.sel === 1)
+      : selMode === 3 && selInfo.sel > 0;
+    if (!model || !selectionValid) {
+      setError(kind === 'edge' ? 'Select one edge, or retain one edge then Shift-select one target vertex' : 'Select one or more connected faces to extrude');
+      return;
+    }
+    setError(null);
+    setExtrude({ kind, anchored: kind === 'edge' && selMode === 1 });
+  };
+  const applyExtrude = (params: ExtrudeParams) => {
+    if (!extrude) return;
+    const result = extrude.kind === 'edge'
+      ? meshExtrudeEdge(params.distanceMeters, params.angleDegrees)
+      : meshExtrudeFace(params.distanceMeters, params.angleDegrees);
+    applyTopo(result, extrude.kind === 'edge'
+      ? extrude.anchored
+        ? 'Edge-to-vertex extrusion rejected — retain one boundary edge, then Shift-select one same-part vertex'
+        : 'Edge extrusion rejected — check the selected boundary edge and exact distance/angle'
+      : 'Face extrusion rejected — check the selected patch and taper');
+    if (result?.ok) setExtrude(null);
+  };
+
+  // ── Bevel popup: one selected edge/vertex, one complete open boundary loop,
+  // or one filled face becoming a welded N-gon extrusion center.
   // Width is displayed in modeling units (16 u = 1 m), while the host keeps geometry
   // and limits in metres. Every step rebuilds from the captured base; Apply commits
   // one journal entry and Cancel restores the base plus its original selection.
   const [bv, setBv] = useState<null | {
-    kind: 'edge' | 'vertex' | 'boundary';
+    kind: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
     width: number;
     min: number;
     max: number;
@@ -1324,24 +1449,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   }>(null);
   const openBevel = () => {
     const info = meshBevelBegin();
-    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex' && info.kind !== 'boundary') ||
+    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex' && info.kind !== 'boundary' && info.kind !== 'face-polygon') ||
         typeof info.defaultWidth !== 'number' || typeof info.minimumWidth !== 'number' || typeof info.maxWidth !== 'number') {
-      setError('Select one sharp manifold edge, one corner with at least 3 edges, or every edge of one open boundary loop');
+      setError('Select one filled convex face, one sharp manifold edge, one corner with at least 3 edges, or every edge of one open boundary loop');
       return;
     }
     const min = roundBevelUnits(info.minimumWidth * U_PER_TILE);
     const max = Math.max(min, roundBevelUnits(info.maxWidth * U_PER_TILE));
     const width = Math.max(min, Math.min(max, roundBevelUnits(info.defaultWidth * U_PER_TILE)));
-    const sidesBefore = info.kind === 'boundary' ? Math.trunc(info.sidesBefore ?? 0) : 0;
-    const minTargetSides = info.kind === 'boundary' ? Math.trunc(info.minimumTargetSides ?? 0) : 0;
-    const maxTargetSides = info.kind === 'boundary' ? Math.trunc(info.maximumTargetSides ?? 0) : 0;
-    const targetSides = info.kind === 'boundary' ? Math.trunc(info.defaultTargetSides ?? 0) : 0;
-    if (info.kind === 'boundary' && (
-      sidesBefore < 3 || minTargetSides <= sidesBefore || maxTargetSides < minTargetSides ||
+    const choosesSides = info.kind === 'boundary' || info.kind === 'face-polygon';
+    const sidesBefore = choosesSides ? Math.trunc(info.sidesBefore ?? 0) : 0;
+    const minTargetSides = choosesSides ? Math.trunc(info.minimumTargetSides ?? 0) : 0;
+    const maxTargetSides = choosesSides ? Math.trunc(info.maximumTargetSides ?? 0) : 0;
+    const targetSides = choosesSides ? Math.trunc(info.defaultTargetSides ?? 0) : 0;
+    if (choosesSides && (
+      sidesBefore < 3 || minTargetSides <= 0 || (info.kind === 'boundary' && minTargetSides <= sidesBefore) || maxTargetSides < minTargetSides ||
       targetSides < minTargetSides || targetSides > maxTargetSides
     )) {
       meshBevelEnd(false);
-      setError('The selected boundary did not provide a valid target side-count range');
+      setError('The selected topology did not provide a valid target side-count range');
       return;
     }
     const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
@@ -1361,7 +1487,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const changeBevel = (widthRaw: number, targetSidesRaw = bv?.targetSides ?? 0) => {
     if (!bv) return;
     const width = Math.max(bv.min, Math.min(bv.max, roundBevelUnits(widthRaw)));
-    const targetSides = bv.kind === 'boundary'
+    const targetSides = bv.kind === 'boundary' || bv.kind === 'face-polygon'
       ? Math.max(bv.minTargetSides, Math.min(bv.maxTargetSides, Math.trunc(targetSidesRaw)))
       : 0;
     const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
@@ -1583,6 +1709,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (changed) (globalThis as any).__modelPartRangesChanged?.(ranges);
     return true;
   };
+
+  // The native source key is opaque. Publishing it after adoption lets the
+  // shell open one rig session without ever lifting geometry arrays into React.
+  useEffect(() => {
+    if (model && onResidentModel) {
+      // The rig-open boundary may promote one rangeless resident mesh into one
+      // stable body range. Re-read immediately so the native range mirror and
+      // the shell's descriptor-owned Outliner row agree before the next edit.
+      onResidentModel(model.key);
+      resyncPartRanges();
+    }
+  }, [model?.key, Boolean(onResidentModel)]);
 
   // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
   // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
@@ -2878,6 +3016,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const runSymmetrize = (axis: number, keepPositive: boolean) => {
     if (!adoptMesh(meshSymmetrize(axis, keepPositive))) setError('symmetrize: no mesh half to keep');
   };
+  const alignLoop = (): number => {
+    const axis = meshAlignLoop();
+    if (axis < 0 || axis > 2) {
+      setError('align loop: select a skewed vertex row or 2+ connected loop edges');
+      return -1;
+    }
+    setError(null);
+    onDocumentMutated?.();
+    return axis;
+  };
   const runMirrorQuads = (axis: number) => {
     const { result, doorPresent } = meshMirrorQuads(axis);
     if (adoptMesh(result)) return;
@@ -2902,6 +3050,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     selMode: chooseSelMode,
     gizmo: chooseGizmoTool,
     scaleBy: meshScaleBy,
+    alignLoop,
     resyncFromHost: () => {
       const session = readModelSession();
       if (session?.key) setModel((m) => (m && m.key !== session.key ? { ...m, key: session.key, count: session.count } : m));
@@ -2925,8 +3074,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     camRecall: camRecallView,
     camRecallAt,
     camRemoveAt,
-    extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
-    extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
+    extrudeEdge: () => openExtrude('edge'),
+    extrudeFace: () => openExtrude('face'),
+    facePolygon: openBevel,
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     weld: () => applyTopo(meshWeld(), 'Select at least two vertices (or an edge) to weld'),
     bevel: openBevel,
@@ -2951,19 +3101,38 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     },
     // The caller (AppFrame) wraps this in withNativeMeshActionSource — no source
     // stamping here, or the inner set would clobber the invocation's provenance.
-    nameSelection: (name) => {
-      const trimmed = name.trim();
+    nameSelection: (request) => {
+      const trimmed = request.name.trim();
+      if (!trimmed || trimmed === '_') return request.kind === 'face' ? { kind: 'face', changed: 0 } : null;
+      if (request.kind === 'edge') {
+        if (!host.__mesh_edge_semantic_assign) return null;
+        try {
+          const raw = String(host.__mesh_edge_semantic_assign(trimmed, request.role, request.objectId) ?? '');
+          const receipt = parseEdgeSemanticNameReceipt(JSON.parse(raw));
+          if (receipt?.changed) setSemanticRevision((value) => value + 1);
+          return receipt;
+        } catch { return null; }
+      }
       if (!host.__mesh_semantic_assign || !host.__mesh_semantic_state) return null;
-      if (!trimmed || trimmed === '_') return { changed: 0 };
       let table: SemanticTable = { version: 1, regions: [] };
       try {
-        const parsed = JSON.parse(String(host.__mesh_semantic_state() ?? 'null'));
-        if (parsed?.table?.version === 1 && Array.isArray(parsed.table.regions)) table = parsed.table;
-      } catch { /* a fresh mesh reports no table yet — declare into an empty one */ }
-      const declared = declareRegion(table, trimmed, 'authored', 'name');
-      const changed = Number(host.__mesh_semantic_assign(declared.region.id, 0, JSON.stringify(declared.table)) ?? 0);
-      if (changed > 0) setSemanticRevision((value) => value + 1);
-      return { changed };
+        const state = JSON.parse(String(host.__mesh_semantic_state() ?? 'null'));
+        table = parseMeshSemanticTable(state?.table) ?? table;
+        const declared = declareRegion(table, trimmed, 'authored', 'name');
+        const changed = Number(host.__mesh_semantic_assign(declared.region.id, 0, JSON.stringify(declared.table)) ?? 0);
+        if (changed > 0) setSemanticRevision((value) => value + 1);
+        return { kind: 'face', changed };
+      } catch { return { kind: 'face', changed: 0 }; }
+    },
+    assignHumanoidSemantic: (membership) => {
+      const receipt = assignHumanoidSemanticSelection(host, membership);
+      if (receipt?.applied) setSemanticRevision((value) => value + 1);
+      return receipt;
+    },
+    selectFaces: (indices) => {
+      const selected = selectMeshFaces(host, indices);
+      if (selected > 0) adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: selected });
+      return selected;
     },
     // Select one semantic region by id (req_3884): the names list is only useful
     // if clicking a name shows you WHERE it is. Same native selector query the
@@ -3444,7 +3613,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
   useEffect(() => {
     const seat = createAgentSeat({
-      adoptTopology: (result) => adoptMesh(result as TopoResult | null),
+      readSkillDoc: readSeatCorpusDoc,
+      adoptTopology: (result) => {
+        if (adoptMesh(result as TopoResult | null)) onDocumentMutated?.();
+      },
+      documentMutated: () => onDocumentMutated?.(),
       selectionChanged: () => host.__meshEditSelChanged?.(),
       // `add` has to reach the SHELL: this viewer owns the host mesh, but the outliner
       // part table lives in AppFrame, and req_3465 is what their divergence costs. Same
@@ -3462,6 +3635,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       followState: {
         read: () => getHotState<SeatFollowSession | null>('editor.agent-seat.follow.v1', null),
         write: (state) => setHotState('editor.agent-seat.follow.v1', state),
+      },
+      oracleState: {
+        read: () => getHotState<OracleSession | null>('editor.agent-seat.oracle.v1', null),
+        write: (state) => setHotState('editor.agent-seat.oracle.v1', state),
       },
       // SELFSHOT-0606: the app reads back its OWN composed frame. Never the desktop.
       captureFrame: (path) => captureFrame(path),
@@ -3524,7 +3701,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The viewer's unresolved BLOCKING session, mirrored up with the tool state so the
   // shell can enforce modal discipline (req_2626 HH): while one is live, the shell
   // holds every other input surface inert until the user resolves it HERE.
-  const blocking: ModelBlockingSession = bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
+  const blocking: ModelBlockingSession = extrude ? 'extrude' : bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
   }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
@@ -3660,6 +3837,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // emits lowercase names, so the old 'Escape' binding never fired (dead Esc was
     // part of the req_2620 undo-path break; same normalization story as keymap.ts).
     escape: () => {
+      if (extrude) { setExtrude(null); return; }
       if (bv) { closeBevel(false); return; } // restore the captured pre-bevel mesh + selection
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
       if (quadify) { closeQuadify(false); return; } // discard the dry run and restore grouping
@@ -3680,6 +3858,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setUvPanel(null);
     atlasReadyRef.current = false;
     atlasInvalidatedRef.current = false;
+    setExtrude(null);
     setBv(null); // the host drops a live bevel session with the old mesh's journal
     setLc(null); // the host drops a live loop-cut session with the old mesh's journal
     setQuadify(null); // the host drops a whole-topology dry run with the old mesh
@@ -3725,9 +3904,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // atlas prompt reads to the user as "faces".
       setAuthoredFaces(mesh.faceGroups && mesh.faceGroups.length > 0 ? new Set(mesh.faceGroups).size : null);
       setBoundsCenter(meshBoundsCenter(mesh)); // vertices are cart-side here — real center, one pass
-      // Seed the weld's part ranges from the composed parts (partColors carries every
-      // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
-      partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
+      // Seed ownership from the RJMD itself. Outliner colours are only the fallback
+      // for fresh composed meshes; a transient row-hydration gap must never turn a
+      // durable multi-part document into an empty ownership push.
+      partRangesRef.current = (mesh.partRanges ?? mesh.partColors ?? []).map((range) => ({ lo: range.lo, hi: range.hi }));
       meshSetPartRanges(partRangesRef.current);
       let current = loaded;
       for (const range of mesh.hiddenRanges ?? []) {
@@ -3921,7 +4101,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // report "1 part". The doc's saved ranges are recovery truth; re-push them
       // whenever the live partition owns fewer faces than the resident mesh. The
       // native single-part boundary expands that seed to include fresh groups.
-      const docRanges = (initialMesh?.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
+      const docRanges = (initialMesh?.partRanges ?? initialMesh?.partColors ?? []).map((range) => ({ lo: range.lo, hi: range.hi }));
       const residentFaces = Math.floor(session.count / 3);
       const ownedFaces = partRangesRef.current.reduce(
         (sum, range) => sum + Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? 0),
@@ -4527,12 +4707,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         )) : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
-        {model && (
+        {model && (!characterRigMode || characterRigBindVisible) && (
           <Scene3D.Mesh
             hostKey={model.key}
             material={xrayActive
               ? { color: '#ffffff', opacity: MODEL_EDIT_PRESENTATION.xrayOpacity }
               : '#ffffff'}
+          />
+        )}
+        {model && characterRigMode && characterRigBound && characterRigDeformedVisible && (
+          <Scene3D.Mesh
+            skinHostKey="__character_rig_deformed"
+            position={[characterRigSpecimenSeparation, 0, 0]}
+            material="#ffffff"
           />
         )}
         {/* Reference backdrops (req_2758): translucent trace planes. White material so the
@@ -4897,6 +5084,31 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   >
                     <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Bevel</Text>
                   </Pressable>
+                  <Pressable
+                    onPress={() => openExtrude('edge')}
+                    tooltip="Retain one edge selection, then Shift-select this target vertex and extrude (E)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude to Vertex</Text>
+                  </Pressable>
+                </>
+              )}
+              {selMode === 1 && selInfo.sel >= 2 && (
+                <>
+                  <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+                  <Pressable
+                    onPress={alignLoop}
+                    tooltip="Align selected vertex row on its nearest X/Y/Z plane (A)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Align Loop</Text>
+                  </Pressable>
                 </>
               )}
               {selMode === 2 && selInfo.sel > 0 && (
@@ -4904,8 +5116,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
                   {selInfo.sel === 1 && (
                     <Pressable
-                      onPress={() => applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude')}
-                      tooltip="Extrude selected edge"
+                      onPress={() => openExtrude('edge')}
+                      tooltip="Extrude selected edge with exact distance and angle"
                       style={{
                         paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
                         backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
@@ -4942,6 +5154,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   )}
                   {selInfo.sel >= 2 && (
                     <Pressable
+                      onPress={alignLoop}
+                      tooltip="Align selected edge loop on its nearest X/Y/Z plane (A)"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Align Loop</Text>
+                    </Pressable>
+                  )}
+                  {selInfo.sel >= 2 && (
+                    <Pressable
                       onPress={() => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop')}
                       tooltip="Create face from selected edges"
                       style={{
@@ -4958,16 +5182,28 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <>
                   <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
                   {selInfo.sel === 1 && (
-                    <Pressable
-                      onPress={() => applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude')}
-                      tooltip="Extrude selected face (E)"
-                      style={{
-                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
-                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
-                      }}
-                    >
-                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
-                    </Pressable>
+                    <>
+                      <Pressable
+                        onPress={openBevel}
+                        tooltip="Replace this face with a welded N-sided center and transition ring"
+                        style={{
+                          paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                          backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                        }}
+                      >
+                        <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Face to N-gon</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => openExtrude('face')}
+                        tooltip="Extrude selected face with exact distance and taper (E)"
+                        style={{
+                          paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                          backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                        }}
+                      >
+                        <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
+                      </Pressable>
+                    </>
                   )}
                   <Pressable
                     onPress={() => { if (!adoptMesh(meshFlipFaces())) setError('Select face(s) to flip'); }}
@@ -5155,7 +5391,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Box>
       ) : null}
 
-      {/* Bevel / Chamfer Boundary uses a dedicated readable panel. It deliberately
+      {extrude ? (
+        <ExtrudeDialog
+          kind={extrude.kind}
+          anchored={extrude.anchored}
+          onCancel={() => setExtrude(null)}
+          onApply={applyExtrude}
+        />
+      ) : null}
+
+      {/* Bevel / Chamfer Boundary / Face to N-gon uses one dedicated readable panel. It deliberately
           does NOT reuse the 20px inspector grid: this is a modal modeling decision,
           so the width control and both exit actions must be legible at a glance. */}
       {bv ? (
@@ -5174,18 +5419,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               padding: BEVEL_POPUP_LAYOUT.panelPadding,
               backgroundColor: 'rgba(7,13,21,0.98)',
               borderWidth: 2,
-              borderColor: bv.kind === 'boundary' ? '#42d9e8' : '#4e75a4',
+              borderColor: bv.kind === 'boundary' || bv.kind === 'face-polygon' ? '#42d9e8' : '#4e75a4',
               borderRadius: BEVEL_POPUP_LAYOUT.cornerRadius,
               gap: BEVEL_POPUP_LAYOUT.panelGap,
             }}
           >
             <Col style={{ gap: 4 }}>
               <Text style={{ color: '#edf5f7', fontSize: 17, fontWeight: 800 }}>
-                {bv.kind === 'boundary' ? 'Chamfer Boundary' : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
+                {bv.kind === 'boundary' ? 'Chamfer Boundary' : bv.kind === 'face-polygon' ? 'Face to N-gon' : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
               </Text>
               <Text style={{ color: '#b8c6d0', fontSize: 12 }}>
                 {bv.kind === 'boundary' && bv.sidesBefore > 0
                   ? `${bv.sidesBefore}-sided opening → ${bv.targetSides}-sided opening`
+                  : bv.kind === 'face-polygon' && bv.sidesBefore > 0
+                    ? `${bv.sidesBefore}-corner face → welded ${bv.targetSides}-sided extrusion center`
                   : 'Adjust how far the selected corner is cut back.'}
               </Text>
             </Col>
@@ -5194,10 +5441,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Text style={{ color: '#ffd792', fontSize: 12, fontWeight: 700 }}>{bv.fallbackReason}</Text>
               </Box>
             ) : null}
-            {bv.kind === 'boundary' ? (
+            {bv.kind === 'boundary' || bv.kind === 'face-polygon' ? (
               <Col style={{ gap: 10, padding: 12, backgroundColor: '#10212a', borderWidth: 1, borderColor: '#2d6971', borderRadius: 7 }}>
                 <Row style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#d9f1f3', fontSize: 13, fontWeight: 800, flexGrow: 1 }}>Target opening sides</Text>
+                  <Text style={{ color: '#d9f1f3', fontSize: 13, fontWeight: 800, flexGrow: 1 }}>
+                    {bv.kind === 'face-polygon' ? 'Center face sides' : 'Target opening sides'}
+                  </Text>
                   <Text style={{ color: '#83a7aa', fontSize: 11, fontFamily: 'monospace' }}>
                     {`${bv.minTargetSides}–${bv.maxTargetSides}`}
                   </Text>
@@ -5205,7 +5454,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Row style={{ alignItems: 'center', gap: 10 }}>
                   <Pressable
                     onPress={() => changeBevel(bv.width, bv.targetSides - 1)}
-                    tooltip="Use one fewer side in the opening"
+                    tooltip={bv.kind === 'face-polygon' ? 'Use one fewer side in the extrusion center' : 'Use one fewer side in the opening'}
                     style={{
                       width: 112,
                       height: BEVEL_POPUP_LAYOUT.controlHeight,
@@ -5226,7 +5475,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   </Col>
                   <Pressable
                     onPress={() => changeBevel(bv.width, bv.targetSides + 1)}
-                    tooltip="Use one more side in the opening"
+                    tooltip={bv.kind === 'face-polygon' ? 'Use one more side in the extrusion center' : 'Use one more side in the opening'}
                     style={{
                       width: 112,
                       height: BEVEL_POPUP_LAYOUT.controlHeight,
@@ -5243,13 +5492,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   </Pressable>
                 </Row>
                 <Text style={{ color: '#83a7aa', fontSize: 10, textAlign: 'center' }}>
-                  New sides are distributed as evenly as possible around the selected loop.
+                  {bv.kind === 'face-polygon'
+                    ? 'The center is welded to a deterministic triangle/quad transition ring and remains selected for Extrude.'
+                    : 'New sides are distributed as evenly as possible around the selected loop.'}
                 </Text>
               </Col>
             ) : null}
             <Col style={{ gap: 10, padding: 12, backgroundColor: '#0d1823', borderWidth: 1, borderColor: '#263b4d', borderRadius: 7 }}>
               <Row style={{ alignItems: 'center' }}>
-                <Text style={{ color: '#d5e0e7', fontSize: 13, fontWeight: 700, flexGrow: 1 }}>Corner cut width</Text>
+                <Text style={{ color: '#d5e0e7', fontSize: 13, fontWeight: 700, flexGrow: 1 }}>
+                  {bv.kind === 'face-polygon' ? 'Transition ring width' : 'Corner cut width'}
+                </Text>
                 <Text style={{ color: '#788692', fontSize: 11, fontFamily: 'monospace' }}>
                   {`${bv.min.toFixed(1)}–${bv.max.toFixed(1)} units`}
                 </Text>
@@ -5257,7 +5510,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               <Row style={{ alignItems: 'center', gap: 10 }}>
                 <Pressable
                   onPress={() => changeBevel(bv.width - BEVEL_POPUP_TUNING.stepUnits)}
-                  tooltip={`Make the cut ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units narrower`}
+                  tooltip={`${bv.kind === 'face-polygon' ? 'Make the transition ring' : 'Make the cut'} ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units narrower`}
                   style={{
                     width: 112,
                     height: BEVEL_POPUP_LAYOUT.controlHeight,
@@ -5279,7 +5532,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 </Col>
                 <Pressable
                   onPress={() => changeBevel(bv.width + BEVEL_POPUP_TUNING.stepUnits)}
-                  tooltip={`Make the cut ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units wider`}
+                  tooltip={`${bv.kind === 'face-polygon' ? 'Make the transition ring' : 'Make the cut'} ${BEVEL_POPUP_TUNING.stepUnits.toFixed(1)} units wider`}
                   style={{
                     width: 112,
                     height: BEVEL_POPUP_LAYOUT.controlHeight,
@@ -5336,7 +5589,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 }}
               >
                 <Text style={{ color: bv.fallbackReason ? '#d7a9a9' : '#b9f6cf', fontSize: 13, fontWeight: 800 }}>
-                  {bv.fallbackReason ? 'Cannot Apply' : bv.kind === 'boundary' ? 'Apply Chamfer' : 'Apply Bevel'}
+                  {bv.fallbackReason ? 'Cannot Apply' : bv.kind === 'boundary' ? 'Apply Chamfer' : bv.kind === 'face-polygon' ? 'Create N-gon' : 'Apply Bevel'}
                 </Text>
               </Pressable>
             </Row>

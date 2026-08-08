@@ -94,6 +94,7 @@ import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
+import { readSeatCorpusDoc } from '../agent/seatCorpus';
 import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, readSeatPercept, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
@@ -4228,6 +4229,7 @@ export default function AppFrame() {
     if (existing) return existing;
     const seat = createAgentSeat({
       partPercept: () => seatPartPercept(modelId),
+      readSkillDoc: readSeatCorpusDoc,
       shellAction: (action, args) => seatShellActionRef.current(action, args, modelId),
       persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat (background)'),
       shotOffscreen: (path, width, height, pose) =>

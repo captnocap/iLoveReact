@@ -27,6 +27,18 @@ import {
   unionBoxes,
   type SeatBox,
 } from './seatGeometry';
+import {
+  ORACLE_PLANS,
+  advanceSession,
+  askCorpus,
+  currentPhase,
+  isComplete,
+  startSession,
+  viewSession,
+  type OracleDocReader,
+  type OracleFacts,
+  type OracleSession,
+} from './seatOracle';
 
 export { NO_SEMANTIC_ID, declareRegion } from '../model/meshSemantics';
 export type { MeshSemanticRegion as SemanticRegion, MeshSemanticTable as SemanticTable } from '../model/meshSemantics';
@@ -87,6 +99,12 @@ export type SeatPercept = {
   hiddenRegions?: number;
   regions: { id: number; faces: number; instances: number; bbox: [number, number, number, number, number, number] }[];
   table: SemanticTable;
+  /** Ambient workflow position (req_4053). Present on EVERY reply once a plan is
+   * running, so an agent is reminded where it is and how much debt stands between it
+   * and the next phase without having to remember to ask. Cheap by construction: it
+   * counts only percept-derivable and already-attested checks — `oracle status` is
+   * what pays for the disk and diagnostics reads. */
+  oracle?: { phase: string; blocked: number; plan: string; position: string };
   /** Shell-owned Outliner identity paired with the host-authored ranges. This is
    * durable parts.json data, not a reconstruction from semantic face names. */
   activePartId: string | null;
@@ -403,6 +421,10 @@ export type SeatAdapter = {
   /** Retopology tint/ghost mutations persist immediately into the active model
    * package; false means the live change landed but its cold-restart record did not. */
   retopoStateChanged?: (clearWhenAbsent?: boolean) => boolean;
+  /** Read one phase slice of the agent-seat corpus by name. The docs live as markdown
+   *  under .agents/skills/agent-seat/corpus/ so they stay reviewable and editable in
+   *  the repo; the oracle only routes them. Absent = phases run on checklists alone. */
+  readSkillDoc?: (name: string) => string | null;
   /** Live shell-owned Outliner names and hierarchy. The native semantic state
    *  intentionally knows geometry only; the seat joins both truths at look time. */
   partPercept?: () => SeatPartPercept;
@@ -424,6 +446,15 @@ export type SeatAdapter = {
   followState?: {
     read: () => SeatFollowSession | null;
     write: (state: SeatFollowSession | null) => void;
+  };
+  /** The oracle's plan cursor rides the same hot-state twig as Follow, so a JS hot
+   *  reload does not silently drop an agent's workflow position mid-plan. It is
+   *  deliberately the ONLY oracle state that persists — every exit criterion is
+   *  recomputed from the live model, so a reconnecting agent gets real answers rather
+   *  than a remembered verdict. */
+  oracleState?: {
+    read: () => OracleSession | null;
+    write: (state: OracleSession | null) => void;
   };
 };
 
@@ -1695,7 +1726,117 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!move(plan.delta)) return { ok: false, reason: `align computed delta [${plan.delta.join(', ')}] but the move was rejected — check the active part scope` };
     return { ok: true, result: { ...summary, applied: true } };
   };
-  const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: look(), ...(reason ? { reason } : {}) });
+  // ── the oracle: phased docs behind a gate (req_4053) ─────────────────────────
+  // Sessions are per-agent-seat and live for as long as the editor process does, so a
+  // cold AGENT reconnects into its plan. Almost nothing is stored — the task string and
+  // the phase cursor — because every check is recomputed from the live model, which is
+  // what makes `oracle status` answer honestly for an agent that has forgotten everything.
+  const restoredOracle = adapter.oracleState?.read();
+  let oracleSession: OracleSession | null =
+    restoredOracle && Array.isArray(restoredOracle.phases) && restoredOracle.phases.length > 0 ? restoredOracle : null;
+  const storeOracle = (state: OracleSession | null) => {
+    oracleSession = state;
+    adapter.oracleState?.write(state);
+  };
+  /** Facts a check can read. `shell` is true only for the lanes that pay for a disk or
+   *  diagnostics read; the ambient per-reply counter never does. */
+  const oracleFacts = (percept: SeatPercept | null, shell: boolean): OracleFacts => {
+    const diagnostics = shell ? (host.__modelSemanticDiagnostics ?? null) : null;
+    const savedDiff = shell && percept?.model
+      ? adapter.shellAction?.('package', { operation: 'diff', model: percept.model })
+      : null;
+    const saved = savedDiff?.ok ? savedDiff.result as Record<string, unknown> : null;
+    return {
+      model: percept ? {
+        id: percept.model,
+        faces: percept.faces,
+        unnamed: percept.unnamed,
+        placeholders: percept.placeholders,
+        regions: percept.table.regions.length,
+        islands: percept.islands,
+        parts: percept.parts.length,
+        auditComputed: percept.auditComputed,
+        intersectingFaces: percept.intersectingFaces,
+        unreachableFaces: percept.unreachableFaces,
+      } : null,
+      claimed: percept?.model ? claimActiveModel() === percept.model : null,
+      packageInSync: saved ? saved.inSync === true : null,
+      packageDirty: saved ? saved.dirty === true : null,
+      semanticHealthy: diagnostics ? (diagnostics as Record<string, unknown>).status === 'healthy' : null,
+      attest: oracleSession?.attest ?? {},
+    };
+  };
+  const readOracleDoc: OracleDocReader = (name) => adapter.readSkillDoc?.(name) ?? null;
+  const oracleDocFor = (phase: string): string =>
+    readOracleDoc(phase) ?? `(no corpus slice for "${phase}" — the phase runs on its checklist alone; that gap is worth reporting)`;
+  const oracle = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
+    if (operation === 'plans') {
+      return { ok: true, result: { plans: ORACLE_PLANS.map(({ id, summary, phases }) => ({ id, summary, phases })) } };
+    }
+    if (operation === 'ask') {
+      const query = String(args.query ?? '').trim();
+      const hits = askCorpus(query, readOracleDoc, Number(args.limit) || 3);
+      // A lookup must never move the plan: routing is not state.
+      return hits.length > 0
+        ? { ok: true, result: { query, hits, phaseUnchanged: oracleSession ? currentPhase(oracleSession) : null } }
+        : { ok: false, reason: query ? `nothing in the corpus matches "${query}"` : 'oracle ask needs a query' };
+    }
+    if (operation === 'start') {
+      const task = String(args.task ?? '').trim();
+      if (!task) return { ok: false, reason: 'oracle start needs a task description — it is what selects the plan' };
+      storeOracle(startSession(task));
+      const view = viewSession(oracleSession, oracleFacts(look(), true));
+      return { ok: true, result: { ...view, matched: oracleSession.matchedSignal, doc: oracleDocFor(view.phase!) } };
+    }
+    if (!oracleSession) {
+      return { ok: false, reason: 'no plan is running — start one with `tools/seat oracle start "<what you are here to do>"`' };
+    }
+    if (operation === 'stop') {
+      // Abandoning a plan is a real move: a lane that finished, or picked the wrong
+      // task description, should be able to clear the ambient counter rather than
+      // leaving a stale phase on every reply for the next agent to misread.
+      const ending = { plan: oracleSession.planId, phase: currentPhase(oracleSession), complete: isComplete(oracleSession) };
+      storeOracle(null);
+      return { ok: true, result: { stopped: ending } };
+    }
+    if (operation === 'status') {
+      const view = viewSession(oracleSession, oracleFacts(look(), true));
+      return { ok: true, result: { ...view, ...(args.doc === true ? { doc: view.phase ? oracleDocFor(view.phase) : null } : {}) } };
+    }
+    if (operation === 'attest') {
+      const id = String(args.id ?? '').trim();
+      const note = String(args.note ?? '').trim();
+      const known = viewSession(oracleSession, oracleFacts(look(), false)).checks.find((check) => check.id === id);
+      if (!known) return { ok: false, reason: `"${id}" is not an exit criterion of the current phase` };
+      if (known.verified === 'host') {
+        return { ok: false, reason: `"${id}" is HOST-measured — attesting cannot pass it. ${known.detail}` };
+      }
+      if (!note) return { ok: false, reason: `attesting "${id}" requires saying how you verified it` };
+      oracleSession.attest[id] = note;
+      storeOracle(oracleSession);
+      return { ok: true, result: viewSession(oracleSession, oracleFacts(look(), true)) };
+    }
+    if (operation === 'advance') {
+      const outcome = advanceSession(oracleSession, oracleFacts(look(), true));
+      if (outcome.ok) storeOracle(oracleSession);
+      // Passing hands back the next phase's doc in the SAME reply — the agent never has
+      // to remember to fetch it, which is what keeps the gate on the path of least
+      // resistance rather than beside it.
+      return outcome.ok
+        ? { ok: true, result: { ...outcome, doc: outcome.to ? oracleDocFor(outcome.to) : null } }
+        : { ok: false, reason: outcome.reason, result: { failing: outcome.failing, view: outcome.view } };
+    }
+    return { ok: false, reason: `unknown oracle operation "${operation}" — start, status, advance, attest, ask, stop, or plans` };
+  };
+  /** The ambient field every reply carries. Percept-only, so it costs nothing. */
+  const oracleAmbient = (percept: SeatPercept | null): SeatPercept | null => {
+    if (!percept || !oracleSession) return percept;
+    const view = viewSession(oracleSession, oracleFacts(percept, false));
+    return { ...percept, oracle: {
+      phase: view.phase ?? 'complete', blocked: view.blocked, plan: view.plan, position: view.position,
+    } };
+  };
+  const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: oracleAmbient(look()), ...(reason ? { reason } : {}) });
   return {
     look, elements, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
@@ -1703,7 +1844,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
-    measure, stats, align,
+    measure, stats, align, oracle,
   };
 }
 
@@ -1769,6 +1910,9 @@ const SEAT_READ_ACTIONS = new Set([
   // `measure`/`stats` are deliberately NOT here: their richer selector targets set
   // the live selection, and clobbering a claimed agent's selection is a crossed wire.
   'package',
+  // The oracle routes docs and reads its own workflow cursor. It never touches the
+  // resident mesh or the live selection, so a lane can consult it before it claims.
+  'oracle',
 ]);
 
 const seatRequestReads = (request: SeatRequest): boolean => {
@@ -1882,6 +2026,12 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'align': {
         const result = seat.align(args);
         return seat.reply('align', result.ok, result.result, result.reason);
+      }
+      // The phase-gate router (req_4053). `start`/`ask`/`plans` are reads; `advance`
+      // and `attest` move the agent's own workflow cursor, never the model.
+      case 'oracle': {
+        const result = seat.oracle(String(args.operation ?? 'status'), args);
+        return seat.reply('oracle', result.ok, result.result, result.reason);
       }
       case 'retopo-bands': {
         const result = seat.retopoBands(String(args.operation ?? 'read'), args);
