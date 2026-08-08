@@ -1,6 +1,0 @@
-{
-  "name": "OpenAI-Compat Chat",
-  "description": "Minimal end-to-end test of useAssistant → __worker_* → openai-compat HTTP. Reads endpoint/key/model from OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL env vars; falls back to LMStudio defaults.",
-  "width": 900,
-  "height": 700
-}

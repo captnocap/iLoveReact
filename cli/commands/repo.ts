@@ -41,19 +41,45 @@ export async function run(argv: string[]): Promise<number> {
   const verb = argv[0];
 
   if (verb === 'archive' || verb === 'unpublish') {
-    const flags = argv.slice(1).filter((arg) => arg.startsWith('-'));
-    const trees = argv.slice(1).filter((arg) => !arg.startsWith('-'));
-    const unknownFlag = flags.find((flag) => flag !== '--drop');
+    const rest = argv.slice(1);
+    const trees: string[] = [];
+    const flags: string[] = [];
+    let into: string | null = null;
+    for (let i = 0; i < rest.length; i += 1) {
+      const arg = rest[i]!;
+      if (arg === '--into') {
+        into = rest[i + 1] ?? null;
+        i += 1;
+        if (!into) {
+          err('[repo] --into needs a name, e.g. --into carts-legacy');
+          return 1;
+        }
+        continue;
+      }
+      if (arg.startsWith('-')) flags.push(arg);
+      else trees.push(arg);
+    }
+    const unknownFlag = flags.find((flag) => flag !== '--drop' && flag !== '--tracked-only');
     if (unknownFlag) {
       err(`[repo] ${verb}: unknown flag ${unknownFlag}`);
       return 1;
     }
     if (trees.length === 0) {
       err(`[repo] ${verb}: name at least one tree`);
-      err(`Usage: rjit repo ${verb} <tree>... [--drop]`);
+      err(`Usage: rjit repo ${verb} <tree>... [--drop] [--tracked-only] [--into <name>]`);
       return 1;
     }
-    return applyVerb(verb, trees, flags.includes('--drop'));
+    const trackedOnly = flags.includes('--tracked-only');
+    const drop = flags.includes('--drop');
+    if (trackedOnly && drop) {
+      // A tracked-only zip deliberately omits everything git does not track, so the
+      // coverage proof --drop depends on can never pass. Refusing here is clearer than
+      // letting that proof fail confusingly on the first untracked file it meets.
+      err('[repo] --tracked-only and --drop are incompatible: the zip omits untracked files by design,');
+      err('[repo]   so it cannot prove it covers the disk. Remove the tree yourself if that is what you want.');
+      return 1;
+    }
+    return applyVerb(verb, trees, drop, trackedOnly, into);
   }
 
   if (verb !== undefined && verb !== '--candidates') {
@@ -98,13 +124,34 @@ function reportCandidates(): void {
   }
 }
 
-function applyVerb(verb: 'archive' | 'unpublish', trees: string[], drop: boolean): number {
+function applyVerb(
+  verb: 'archive' | 'unpublish',
+  trees: string[],
+  drop: boolean,
+  trackedOnly: boolean = false,
+  into: string | null = null,
+): number {
   const entries = trackedEntries();
   const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
   announce(findings, sourceFiles, sourceBytes, out);
   out('');
 
   const rjitHome = __env('RJIT_HOME') || __cwd();
+
+  // One zip for the whole set. Packing 130 legacy carts into 130 zips buries the useful
+  // ones; `--into` keeps them a single restorable artifact. Built ONCE, before the loop,
+  // so a failure here stops everything while every tree is still tracked.
+  if (into !== null) {
+    if (verb !== 'archive') {
+      err('[repo] --into only applies to `archive`');
+      return 1;
+    }
+    const combined = `archive/${into}.zip`;
+    const packed = trackedOnly
+      ? packTrackedInto(rjitHome, trees, combined)
+      : (() => { err('[repo] --into currently requires --tracked-only'); return 1; })();
+    if (packed !== 0) return packed;
+  }
 
   for (const raw of trees) {
     const tree = raw.replace(/\/+$/, '');
@@ -130,7 +177,7 @@ function applyVerb(verb: 'archive' | 'unpublish', trees: string[], drop: boolean
     const bytes = tracked.reduce((sum, entry) => sum + entry.bytes, 0);
 
     let zipRel: string | null = null;
-    if (verb === 'archive') {
+    if (verb === 'archive' && into === null) {
       zipRel = `archive/${zipName(tree)}.zip`;
       if (fsExists(`${rjitHome}/${zipRel}`)) {
         out(`[repo] ${tree}: ${zipRel} already exists — reusing it (coverage is re-checked below)`);
@@ -244,6 +291,43 @@ function listZipEntries(rjitHome: string, zipRel: string): string[] {
 function zipName(tree: string): string {
   const withinArchive = tree.startsWith('archive/') ? tree.slice('archive/'.length) : tree;
   return withinArchive.replace(/\//g, '-');
+}
+
+/** Pack the TRACKED content of several trees into one zip, straight out of HEAD.
+ *
+ *  `git archive` is the right tool rather than `zip -r`, because these trees carry gigabytes
+ *  of gitignored runtime state that is not part of the cart: cart/hmsc-int is 7.4GB on disk
+ *  and 9.9MB in git — the difference is sqlite stores, compaction backups and tool blobs
+ *  nobody wants in a source archive. Packing from HEAD gets the cart and nothing else, and
+ *  it is versioned by definition.
+ *
+ *  Because the result deliberately excludes untracked files it can NEVER authorise a --drop;
+ *  the caller refuses that combination up front. */
+function packTrackedInto(rjitHome: string, trees: string[], zipRel: string): number {
+  const zipAbs = `${rjitHome}/${zipRel}`;
+  if (fsExists(zipAbs)) {
+    err(`[repo] ${zipRel} already exists — refusing to overwrite an existing archive`);
+    return 1;
+  }
+  spawnSync('mkdir', ['-p', '--', `${rjitHome}/archive`]);
+
+  out(`[repo] packing tracked content of ${trees.length} trees → ${zipRel} ...`);
+  const packed = spawnSync('git', ['archive', '--format=zip', '-o', zipAbs, 'HEAD', '--', ...trees]);
+  if (packed.code !== 0) {
+    err(`[repo] git archive failed (exit ${packed.code})`);
+    err(packed.stderr.trim());
+    return packed.code || 1;
+  }
+
+  const tested = spawnSync('zip', ['-T', zipAbs]);
+  if (tested.code !== 0) {
+    err(`[repo] ${zipRel}: zip -T verification FAILED — leaving everything tracked`);
+    return 1;
+  }
+  const count = listZipEntries(rjitHome, zipRel).length;
+  const size = spawnSync('du', ['-sh', zipAbs]).stdout.trim().split('\t')[0] ?? '?';
+  out(`[repo] packed → ${zipRel} (${count} files, ${size}, verified)`);
+  return 0;
 }
 
 /** Zip the tree and VERIFY the result before the caller untracks anything. An unverified

@@ -1,6 +1,0 @@
-{
-  "name": "LLM Lab",
-  "description": "Loads a local text-generation .gguf via dlopen'd LM Studio backend (default ROCm). Validates useAssistant({ backend: 'local_ai' }) end-to-end without the renderer's wgpu Vulkan stack fighting llama.cpp.",
-  "width": 960,
-  "height": 720
-}

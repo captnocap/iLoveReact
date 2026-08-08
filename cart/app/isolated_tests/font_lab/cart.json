@@ -1,7 +1,0 @@
-{
-  "name": "Font Lab",
-  "description": "Compare common font families at UI-relevant sizes.",
-  "customChrome": false,
-  "width": 1280,
-  "height": 900
-}

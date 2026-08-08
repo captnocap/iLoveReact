@@ -1,6 +1,0 @@
-{
-  "name": "Embed Lab",
-  "description": "Build and query a local embedding index. Validates runtime/hooks/useEmbed end-to-end against the framework/embed.zig host bindings.",
-  "width": 960,
-  "height": 720
-}

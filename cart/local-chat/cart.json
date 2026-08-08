@@ -1,6 +1,0 @@
-{
-  "name": "Local Chat",
-  "description": "Minimal end-to-end test of useAssistant → __worker_* → embedded llama.cpp on a local GGUF.",
-  "width": 900,
-  "height": 700
-}

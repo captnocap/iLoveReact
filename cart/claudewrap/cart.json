@@ -1,4 +1,0 @@
-{
-  "name": "claudewrap",
-  "description": "Claude operator TUI — terminal + live IFTTT rules + OpenAI-compatible HTTP bridge + settings window (bridge config, backends, memory, library, VM)."
-}

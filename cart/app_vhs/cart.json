@@ -1,7 +1,0 @@
-{
-  "name": "AppVHS",
-  "description": "cart/app through the VHS post-process filter (wobble + tape grain + color bleed).",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

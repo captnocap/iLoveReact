@@ -262,12 +262,6 @@ cart/hmsc-int/data/decal-pixels/
 # GitHub-web directory deletions of 2026-08-03) ─────────────────────────────────
 # cart/editor/data's assets (models/, textures/, stickers/, anything later) are
 # covered wholesale at the top of this file — one rule, nothing to keep in sync.
-/cart/hmsc-int/assets/tex/
-/cart/hmsc-int/exports/*.png
-/cart/hmsc-int/exports/.cache/
-/cart/hmsc-int/texture.png
-/cart/hmsc-int/Desk.glb
-/cart/hmsc-int/car.obj
 /pics/
 /world/knowledge/
 /tmp/
@@ -291,7 +285,6 @@ userdata/
 # asset: 16MB of PNG frame captures from self-shot verification runs
 /shots/
 # asset: baked .rjpkg export output including a 15MB city.map
-/cart/hmsc-int/exports/
 # artifact: 114MB prebuilt DuckDB (libduckdb_static.a + the linux-amd64 zip) with ZERO references in build.zig, framework/, cli/ or scripts/
 /deps/duckdb/
 # oneoff: output of one-off research sweeps
@@ -299,7 +292,6 @@ userdata/
 # oneoff: a graveyard directory
 /dead/
 # oneoff: a .jsx snapshot of cart/app taken during the TS migration — and cart/ is .tsx/.ts only
-/cart/app-jsx-backup/
 # oneoff: one-off verification script from the 0.16 migration, left at repo root
 /verify-zig016-bins.sh
 # oneoff: one-off verification script from the 0.16 migration, left at repo root
@@ -314,3 +306,14 @@ userdata/
 /bunch of dogshit /
 # asset: a 3D model sitting at the repo root, untracked but UNIGNORED — one `git add -A` from publication
 /torso_quad.glb
+
+# frozen: previous-era carts. USER RULING req_4096 — cart/editor is the only cart being
+# worked on; the other 128 are in archive/carts-legacy.zip (tracked source only, since
+# cart/hmsc-int alone is 7.4GB on disk against 9.9MB in git).
+#
+# The `*` + re-include form, the same idiom as /cart/editor/data/* above: ignoring `cart/`
+# outright stops git descending, so cart/editor could never be re-included. Ignoring the
+# CONTENTS and exempting the one live cart keeps both halves true — and stays ONE rule as
+# carts come and go, instead of the 128 lines this replaced.
+/cart/*
+!/cart/editor/

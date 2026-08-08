@@ -1,7 +1,0 @@
-{
-  "name": "FilterMorph",
-  "description": "Filter-intensity-as-animation. Pixelate transitions on boot, item selection, and menu swap.",
-  "customChrome": true,
-  "width": 900,
-  "height": 700
-}

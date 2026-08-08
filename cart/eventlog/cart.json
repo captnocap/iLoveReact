@@ -1,7 +1,0 @@
-{
-  "name": "EventLog",
-  "description": "Observability bus tail — every cross-bridge event with importance + parent-chain. Tail Zig telemetry + cart-emitted events together.",
-  "customChrome": false,
-  "width": 1280,
-  "height": 860
-}

@@ -1,7 +1,0 @@
-{
-  "name": "AppPixelate",
-  "description": "cart/app through the pixelate post-process filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

@@ -9874,7 +9874,18 @@ ${IMPORTS_MARKER}`).replace(
     },
     { path: "runtime", kind: "source", what: "JS cart-facing layer \u2014 JSX shim, primitives, hooks, host globals" },
     { path: "renderer", kind: "source", what: "reconciler host config \u2014 emits the CREATE/APPEND/UPDATE stream" },
-    { path: "cart", kind: "source", what: ".tsx apps; cart/editor (+ /play) is the active surface (V32)" },
+    // cart/ is deliberately NOT source as a whole. USER RULING (req_4096): "the only one
+    // we're working on is editor/, so everything else can be archived." cart/editor is the
+    // active surface (V32) and publishes; the other ~130 carts are previous eras. A NEW cart
+    // therefore reports as frozen until someone declares it source — which is the allowlist
+    // working as intended: it asks, rather than silently publishing whatever lands in cart/.
+    { path: "cart/editor", kind: "source", what: "THE active surface (V32) \u2014 the editor cart and its /play route" },
+    {
+      path: "cart",
+      kind: "frozen",
+      what: "previous-era carts \u2014 labs, demos, probes, chat clients, hmsc-int. Only cart/editor is worked on",
+      insteadOf: "archive/carts-legacy.zip (tracked source only \u2014 cart/hmsc-int alone is 7.4GB on disk against 9.9MB in git)"
+    },
     { path: "docs", kind: "source", what: "the game knowledge layer \u2014 DECISIONS.md, per-cart audits, _index/, _requests/" },
     { path: "cli", kind: "source", what: "rjit CLI source \u2014 tools/rjit.js is BUILT from here, this is the truth" },
     { path: "scripts", kind: "source", what: "build pipeline + git hooks \u2014 cart-bundle.js, fetch-*, install-hooks" },
@@ -10197,19 +10208,42 @@ ${IMPORTS_MARKER}`).replace(
   async function run23(argv) {
     const verb = argv[0];
     if (verb === "archive" || verb === "unpublish") {
-      const flags = argv.slice(1).filter((arg) => arg.startsWith("-"));
-      const trees = argv.slice(1).filter((arg) => !arg.startsWith("-"));
-      const unknownFlag = flags.find((flag) => flag !== "--drop");
+      const rest = argv.slice(1);
+      const trees = [];
+      const flags = [];
+      let into = null;
+      for (let i = 0; i < rest.length; i += 1) {
+        const arg = rest[i];
+        if (arg === "--into") {
+          into = rest[i + 1] ?? null;
+          i += 1;
+          if (!into) {
+            err("[repo] --into needs a name, e.g. --into carts-legacy");
+            return 1;
+          }
+          continue;
+        }
+        if (arg.startsWith("-")) flags.push(arg);
+        else trees.push(arg);
+      }
+      const unknownFlag = flags.find((flag) => flag !== "--drop" && flag !== "--tracked-only");
       if (unknownFlag) {
         err(`[repo] ${verb}: unknown flag ${unknownFlag}`);
         return 1;
       }
       if (trees.length === 0) {
         err(`[repo] ${verb}: name at least one tree`);
-        err(`Usage: rjit repo ${verb} <tree>... [--drop]`);
+        err(`Usage: rjit repo ${verb} <tree>... [--drop] [--tracked-only] [--into <name>]`);
         return 1;
       }
-      return applyVerb(verb, trees, flags.includes("--drop"));
+      const trackedOnly = flags.includes("--tracked-only");
+      const drop = flags.includes("--drop");
+      if (trackedOnly && drop) {
+        err("[repo] --tracked-only and --drop are incompatible: the zip omits untracked files by design,");
+        err("[repo]   so it cannot prove it covers the disk. Remove the tree yourself if that is what you want.");
+        return 1;
+      }
+      return applyVerb(verb, trees, drop, trackedOnly, into);
     }
     if (verb !== void 0 && verb !== "--candidates") {
       err(`[repo] unknown verb: ${verb}`);
@@ -10245,12 +10279,24 @@ ${IMPORTS_MARKER}`).replace(
       out(`    ${path}  \u2192  would be ${verdict.kind}: ${verdict.what}`);
     }
   }
-  function applyVerb(verb, trees, drop) {
+  function applyVerb(verb, trees, drop, trackedOnly = false, into = null) {
     const entries = trackedEntries();
     const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
     announce2(findings, sourceFiles, sourceBytes, out);
     out("");
     const rjitHome = __env("RJIT_HOME") || __cwd();
+    if (into !== null) {
+      if (verb !== "archive") {
+        err("[repo] --into only applies to `archive`");
+        return 1;
+      }
+      const combined = `archive/${into}.zip`;
+      const packed = trackedOnly ? packTrackedInto(rjitHome, trees, combined) : (() => {
+        err("[repo] --into currently requires --tracked-only");
+        return 1;
+      })();
+      if (packed !== 0) return packed;
+    }
     for (const raw of trees) {
       const tree = raw.replace(/\/+$/, "");
       const verdict = classifyTracked(tree);
@@ -10272,7 +10318,7 @@ ${IMPORTS_MARKER}`).replace(
       const tracked = entries.filter((entry) => entry.path === tree || entry.path.startsWith(`${tree}/`));
       const bytes = tracked.reduce((sum, entry) => sum + entry.bytes, 0);
       let zipRel = null;
-      if (verb === "archive") {
+      if (verb === "archive" && into === null) {
         zipRel = `archive/${zipName(tree)}.zip`;
         if (fsExists(`${rjitHome}/${zipRel}`)) {
           out(`[repo] ${tree}: ${zipRel} already exists \u2014 reusing it (coverage is re-checked below)`);
@@ -10356,6 +10402,30 @@ ${IMPORTS_MARKER}`).replace(
   function zipName(tree) {
     const withinArchive = tree.startsWith("archive/") ? tree.slice("archive/".length) : tree;
     return withinArchive.replace(/\//g, "-");
+  }
+  function packTrackedInto(rjitHome, trees, zipRel) {
+    const zipAbs = `${rjitHome}/${zipRel}`;
+    if (fsExists(zipAbs)) {
+      err(`[repo] ${zipRel} already exists \u2014 refusing to overwrite an existing archive`);
+      return 1;
+    }
+    spawnSync("mkdir", ["-p", "--", `${rjitHome}/archive`]);
+    out(`[repo] packing tracked content of ${trees.length} trees \u2192 ${zipRel} ...`);
+    const packed = spawnSync("git", ["archive", "--format=zip", "-o", zipAbs, "HEAD", "--", ...trees]);
+    if (packed.code !== 0) {
+      err(`[repo] git archive failed (exit ${packed.code})`);
+      err(packed.stderr.trim());
+      return packed.code || 1;
+    }
+    const tested = spawnSync("zip", ["-T", zipAbs]);
+    if (tested.code !== 0) {
+      err(`[repo] ${zipRel}: zip -T verification FAILED \u2014 leaving everything tracked`);
+      return 1;
+    }
+    const count = listZipEntries(rjitHome, zipRel).length;
+    const size = spawnSync("du", ["-sh", zipAbs]).stdout.trim().split("	")[0] ?? "?";
+    out(`[repo] packed \u2192 ${zipRel} (${count} files, ${size}, verified)`);
+    return 0;
   }
   function packTree(rjitHome, tree, zipRel) {
     const source = `${rjitHome}/${tree}`;

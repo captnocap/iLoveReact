@@ -1,6 +1,0 @@
-# smoke.cmds — the milestone-0 verify script (V19: green exists from day one).
-# A verify script is a recorded command sequence replayed headless; the boot
-# must survive a minute of state ticks (45 = the V8 cadence) and report status.
-boot
-tick 45
-status

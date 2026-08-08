@@ -1,6 +1,0 @@
-# map-roundtrip.cmds — PLATMOD slice-1 equality proof.
-# The headless boot world is compiled to a binary mapfile and loaded back
-# through the platform map facts reader. The command fails if the facts differ.
-boot
-map_roundtrip
-status

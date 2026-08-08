@@ -1,7 +1,0 @@
-{
-  "name": "InputLab",
-  "description": "Transition lab — InputStrip moving between focal / side / docked layouts.",
-  "customChrome": false,
-  "width": 1280,
-  "height": 860
-}

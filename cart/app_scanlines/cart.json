@@ -1,7 +1,0 @@
-{
-  "name": "AppScanlines",
-  "description": "cart/app through the scanlines post-process filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

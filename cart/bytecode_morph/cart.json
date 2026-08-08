@@ -1,7 +1,0 @@
-{
-  "name": "BytecodeMorph",
-  "description": "Bytecode-decode transitions — boot fade-in and list swap through the deterministic-decode shader.",
-  "customChrome": true,
-  "width": 900,
-  "height": 700
-}

@@ -1,7 +1,0 @@
-{
-  "name": "Whiteboard",
-  "description": "An Excalidraw-style infinite canvas demo with shapes, pen strokes, text, and draggable objects.",
-  "customChrome": false,
-  "width": 1280,
-  "height": 860
-}

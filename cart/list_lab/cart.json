@@ -1,7 +1,0 @@
-{
-  "name": "ListLab",
-  "description": "Animation lab — list building (staggered springs) + draw-outwards reveal (box wipe and SVG path trace).",
-  "customChrome": false,
-  "width": 1280,
-  "height": 860
-}

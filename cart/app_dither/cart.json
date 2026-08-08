@@ -1,7 +1,0 @@
-{
-  "name": "AppDither",
-  "description": "cart/app through the dither post-process filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

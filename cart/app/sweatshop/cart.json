@@ -1,7 +1,0 @@
-{
-  "name": "Sweatshop",
-  "description": "Canvas + sequencer + trace. The build-time/runtime/prose seam.",
-  "customChrome": true,
-  "width": 1440,
-  "height": 900
-}

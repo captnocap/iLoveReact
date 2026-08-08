@@ -1,6 +1,0 @@
-{
-  "name": "Scene3D Lab",
-  "description": "Six-tile test surface for the rewritten <Scene3D> primitive. Each tile exercises one slice of the host wgpu pipeline: single mesh, geometry zoo, lighting, color spread, transforms, mini avatar.",
-  "width": 1280,
-  "height": 800
-}

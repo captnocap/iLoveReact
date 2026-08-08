@@ -1,6 +1,0 @@
-{
-  "name": "Claude Chat",
-  "description": "Minimal end-to-end test of useAssistant → __worker_* → claude CLI. Mirrors cart/kimi-chat but binds to backend='claude_code'.",
-  "width": 900,
-  "height": 700
-}

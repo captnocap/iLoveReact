@@ -1,7 +1,0 @@
-{
-  "name": "AppCRT-TUI",
-  "description": "CRT filter over a vterm running our half-block <Effect> gallery. Four-layer rendering: JS WGSL sampler → ANSI → PTY → GPU cell grid → CRT post-process.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 800
-}

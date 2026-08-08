@@ -1,7 +1,0 @@
-{
-  "name": "AppFried",
-  "description": "cart/app rendered through the deepfry post-process filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

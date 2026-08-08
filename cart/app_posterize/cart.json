@@ -1,7 +1,0 @@
-{
-  "name": "AppPosterize",
-  "description": "cart/app through the posterize post-process filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

@@ -1,7 +1,0 @@
-{
-  "name": "HMSC ASCII TUI",
-  "description": "Terminal view over the compiled HMSC gamefile data.",
-  "surface": "tui",
-  "width": 1200,
-  "height": 780
-}

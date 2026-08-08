@@ -1,7 +1,0 @@
-{
-  "name": "AppChromatic",
-  "description": "cart/app through the chromatic-aberration RGB-shift filter.",
-  "customChrome": true,
-  "width": 1280,
-  "height": 860
-}

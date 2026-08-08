@@ -1,6 +1,0 @@
-{
-  "name": "Codex Chat",
-  "description": "Minimal end-to-end test of useAssistant → __worker_* → codex app-server. Mirrors cart/local-chat but binds to backend='codex_app_server'.",
-  "width": 900,
-  "height": 700
-}

@@ -70,7 +70,18 @@ export const PUBLISH_RULES: PublishRule[] = [
   },
   { path: 'runtime', kind: 'source', what: 'JS cart-facing layer — JSX shim, primitives, hooks, host globals' },
   { path: 'renderer', kind: 'source', what: 'reconciler host config — emits the CREATE/APPEND/UPDATE stream' },
-  { path: 'cart', kind: 'source', what: '.tsx apps; cart/editor (+ /play) is the active surface (V32)' },
+  // cart/ is deliberately NOT source as a whole. USER RULING (req_4096): "the only one
+  // we're working on is editor/, so everything else can be archived." cart/editor is the
+  // active surface (V32) and publishes; the other ~130 carts are previous eras. A NEW cart
+  // therefore reports as frozen until someone declares it source — which is the allowlist
+  // working as intended: it asks, rather than silently publishing whatever lands in cart/.
+  { path: 'cart/editor', kind: 'source', what: 'THE active surface (V32) — the editor cart and its /play route' },
+  {
+    path: 'cart',
+    kind: 'frozen',
+    what: 'previous-era carts — labs, demos, probes, chat clients, hmsc-int. Only cart/editor is worked on',
+    insteadOf: 'archive/carts-legacy.zip (tracked source only — cart/hmsc-int alone is 7.4GB on disk against 9.9MB in git)',
+  },
   { path: 'docs', kind: 'source', what: 'the game knowledge layer — DECISIONS.md, per-cart audits, _index/, _requests/' },
   { path: 'cli', kind: 'source', what: 'rjit CLI source — tools/rjit.js is BUILT from here, this is the truth' },
   { path: 'scripts', kind: 'source', what: 'build pipeline + git hooks — cart-bundle.js, fetch-*, install-hooks' },

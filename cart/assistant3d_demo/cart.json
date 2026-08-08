@@ -1,6 +1,0 @@
-{
-  "name": "Assistant 3D",
-  "description": "useAssistant (claude_code) writes a scene.json; a hot 3D surface watches the file, rebuilds the scene, and lets you click any mesh inspector-style.",
-  "width": 1280,
-  "height": 820
-}

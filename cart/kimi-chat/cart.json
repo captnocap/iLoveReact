@@ -1,6 +1,0 @@
-{
-  "name": "Kimi Chat",
-  "description": "Minimal end-to-end test of useAssistant → __worker_* → kimi --wire. Mirrors cart/codex-chat but binds to backend='kimi_cli_wire'.",
-  "width": 900,
-  "height": 700
-}
