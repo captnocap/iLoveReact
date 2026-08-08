@@ -128,7 +128,29 @@ export function scanDevHosts(rjitHome: string, socketPath: string): OrphanScan {
   return classifyDevHosts(hosts, owner, displayHandleCount);
 }
 
-export type OrphanKillOutcome = { pid: number; ok: boolean; reason?: string };
+export type OrphanKillOutcome = {
+  pid: number;
+  /** TRUE only when the process is confirmed GONE — never merely "the signal was sent". */
+  ok: boolean;
+  /** How it ended, so a wedged host is visible as a wedge instead of a clean retirement. */
+  how?: 'exited on SIGTERM' | 'wedged — needed SIGKILL';
+  reason?: string;
+};
+
+/** Is this pid still alive? `kill -0` signals nothing and only tests deliverability. */
+function isAlive(pid: number): boolean {
+  return spawnSync('kill', ['-0', String(pid)]).code === 0;
+}
+
+/** Poll for a pid to disappear, up to `attempts` × 100ms. A healthy dev host drops out of
+ *  its main loop and exits well inside this window. */
+function waitForExit(pid: number, attempts: number): boolean {
+  for (let i = 0; i < attempts; i += 1) {
+    if (!isAlive(pid)) return true;
+    spawnSync('sleep', ['0.1']);
+  }
+  return !isAlive(pid);
+}
 
 /** Kill exactly these pids, one numeric signal at a time. There is deliberately no
  *  pattern form and no "kill everything that looks like X" — see the header. Each pid is
@@ -151,10 +173,30 @@ export function killOrphanHosts(
       outcomes.push({ pid, ok: false, reason: 'no longer classifies as an orphan — it was spared' });
       continue;
     }
-    const killed = spawnSync('kill', [String(pid)]);
-    outcomes.push(killed.code === 0
-      ? { pid, ok: true }
-      : { pid, ok: false, reason: (killed.stderr ?? '').trim() || `kill exited ${killed.code}` });
+    // SIGTERM first: engine.zig catches it and flips the quit flag the main loop polls, so
+    // a healthy host runs its full teardown (SDL_CaptureMouse(false), SDL_Quit, state
+    // saves) instead of leaving the X server holding a captured pointer.
+    const termed = spawnSync('kill', [String(pid)]);
+    if (termed.code !== 0) {
+      outcomes.push({ pid, ok: false, reason: (termed.stderr ?? '').trim() || `kill exited ${termed.code}` });
+      continue;
+    }
+    if (waitForExit(pid, 20)) {
+      outcomes.push({ pid, ok: true, how: 'exited on SIGTERM' });
+      continue;
+    }
+
+    // Still here after 2s. `kill` exiting 0 only means the signal was DELIVERED, and an
+    // orphan is usually parked in futex_wait with its main loop already gone — nothing is
+    // left to poll the quit flag, so SIGTERM sits there forever. Reporting success off that
+    // exit code claimed "retired 9/9, reclaiming 4.7 GB" while all nine were still running
+    // (req_4088). Escalate, then verify again, and only then call it retired.
+    spawnSync('kill', ['-KILL', String(pid)]);
+    if (waitForExit(pid, 10)) {
+      outcomes.push({ pid, ok: true, how: 'wedged — needed SIGKILL' });
+      continue;
+    }
+    outcomes.push({ pid, ok: false, reason: 'survived SIGTERM and SIGKILL — likely stuck in an uninterruptible syscall (state D)' });
   }
   return outcomes;
 }

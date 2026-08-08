@@ -66,10 +66,16 @@ export async function run(argv: string[]): Promise<number> {
     out(JSON.stringify({ killed: outcomes, reclaimedKb: scan.reclaimableKb }));
   } else {
     for (const outcome of outcomes) {
-      if (outcome.ok) out(`[orphans] retired pid ${outcome.pid}`);
-      else err(`[orphans] spared pid ${outcome.pid}: ${outcome.reason}`);
+      if (outcome.ok) out(`[orphans] retired pid ${outcome.pid} — ${outcome.how}`);
+      else err(`[orphans] NOT retired, pid ${outcome.pid}: ${outcome.reason}`);
     }
-    out(`[orphans] retired ${retired.length}/${outcomes.length}, reclaiming about ${formatGb(scan.reclaimableKb)}`);
+    // Every "retired" above is a CONFIRMED exit, not a delivered signal. Only count the
+    // memory of hosts that actually went away.
+    const wedged = retired.filter((row) => row.how === 'wedged — needed SIGKILL').length;
+    out(`[orphans] retired ${retired.length}/${outcomes.length}${retired.length === outcomes.length ? '' : ' — the rest are STILL RUNNING'}, reclaiming about ${formatGb(scan.reclaimableKb)}`);
+    if (wedged > 0) {
+      out(`[orphans] ${wedged} ignored SIGTERM and needed SIGKILL — their main loop was already gone, so the quit flag had no reader`);
+    }
   }
   return retired.length === outcomes.length ? 0 : 1;
 }

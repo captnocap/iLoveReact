@@ -5260,6 +5260,16 @@ ${entry}
     const owner = parseSocketOwner(sockets.stdout ?? "", socketPath);
     return classifyDevHosts(hosts, owner, displayHandleCount);
   }
+  function isAlive(pid) {
+    return spawnSync("kill", ["-0", String(pid)]).code === 0;
+  }
+  function waitForExit(pid, attempts) {
+    for (let i = 0; i < attempts; i += 1) {
+      if (!isAlive(pid)) return true;
+      spawnSync("sleep", ["0.1"]);
+    }
+    return !isAlive(pid);
+  }
   function killOrphanHosts2(rjitHome, socketPath, pids) {
     const scan2 = scanDevHosts2(rjitHome, socketPath);
     const stillOrphaned = new Set(scan2.orphans.map((row) => row.pid));
@@ -5273,8 +5283,21 @@ ${entry}
         outcomes.push({ pid, ok: false, reason: "no longer classifies as an orphan \u2014 it was spared" });
         continue;
       }
-      const killed = spawnSync("kill", [String(pid)]);
-      outcomes.push(killed.code === 0 ? { pid, ok: true } : { pid, ok: false, reason: (killed.stderr ?? "").trim() || `kill exited ${killed.code}` });
+      const termed = spawnSync("kill", [String(pid)]);
+      if (termed.code !== 0) {
+        outcomes.push({ pid, ok: false, reason: (termed.stderr ?? "").trim() || `kill exited ${termed.code}` });
+        continue;
+      }
+      if (waitForExit(pid, 20)) {
+        outcomes.push({ pid, ok: true, how: "exited on SIGTERM" });
+        continue;
+      }
+      spawnSync("kill", ["-KILL", String(pid)]);
+      if (waitForExit(pid, 10)) {
+        outcomes.push({ pid, ok: true, how: "wedged \u2014 needed SIGKILL" });
+        continue;
+      }
+      outcomes.push({ pid, ok: false, reason: "survived SIGTERM and SIGKILL \u2014 likely stuck in an uninterruptible syscall (state D)" });
     }
     return outcomes;
   }
@@ -5733,10 +5756,14 @@ done
       out(JSON.stringify({ killed: outcomes, reclaimedKb: scan2.reclaimableKb }));
     } else {
       for (const outcome of outcomes) {
-        if (outcome.ok) out(`[orphans] retired pid ${outcome.pid}`);
-        else err(`[orphans] spared pid ${outcome.pid}: ${outcome.reason}`);
+        if (outcome.ok) out(`[orphans] retired pid ${outcome.pid} \u2014 ${outcome.how}`);
+        else err(`[orphans] NOT retired, pid ${outcome.pid}: ${outcome.reason}`);
       }
-      out(`[orphans] retired ${retired.length}/${outcomes.length}, reclaiming about ${formatGb(scan2.reclaimableKb)}`);
+      const wedged = retired.filter((row) => row.how === "wedged \u2014 needed SIGKILL").length;
+      out(`[orphans] retired ${retired.length}/${outcomes.length}${retired.length === outcomes.length ? "" : " \u2014 the rest are STILL RUNNING"}, reclaiming about ${formatGb(scan2.reclaimableKb)}`);
+      if (wedged > 0) {
+        out(`[orphans] ${wedged} ignored SIGTERM and needed SIGKILL \u2014 their main loop was already gone, so the quit flag had no reader`);
+      }
     }
     return retired.length === outcomes.length ? 0 : 1;
   }
