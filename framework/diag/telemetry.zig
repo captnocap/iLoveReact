@@ -7,7 +7,10 @@
 const std = @import("std");
 const layout = @import("../layout.zig");
 const gpu = @import("../gpu/gpu.zig");
-const scene3d = @import("../gpu/3d.zig");
+// Through the scene3d call boundary, never `gpu/3d.zig` directly: under the
+// modular dev host the drawing lives in a loaded library, so a direct import
+// reads a dead statically-linked copy whose counters never move (req_4040).
+const scene3d = @import("../dev_modules/scene3d_runtime.zig");
 const canvas = @import("../primitive/canvas.zig");
 const selection = @import("../state/selection.zig");
 const input = @import("../primitive/input.zig");

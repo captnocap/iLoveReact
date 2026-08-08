@@ -12,7 +12,9 @@
 //! stays explicit and must never be labeled "driver": these counters identify
 //! only allocations whose owners can state their sizes directly.
 
-const geo3d = @import("../gpu/3d.zig");
+// Through the scene3d call boundary, never `gpu/3d.zig` directly — see the
+// import note in telemetry.zig (req_4040).
+const geo3d = @import("../dev_modules/scene3d_runtime.zig");
 const text = @import("../gpu/text.zig");
 const rects = @import("../gpu/rects.zig");
 const paintable = @import("../gpu/paintable.zig");
@@ -65,21 +67,20 @@ pub const Breakdown = struct {
 
 pub fn read() Breakdown {
     const loader_map = world_loader.mapMemoryStats();
-    const gpu_instances = geo3d.staticInstanceMemoryStats();
-    const gpu3d = geo3d.gpuMemoryStats();
+    const gpu3d = geo3d.memoryStats();
     const native = system_memory.readAllocatorSnapshot();
     const shader_compile = compile_progress.memoryStats();
     var b = Breakdown{
-        .geom_intern_bytes = geo3d.retainedGeometryBytes(),
-        .host_mesh_stash_bytes = geo3d.hostStashBytes(),
+        .geom_intern_bytes = gpu3d.retained_geometry_bytes,
+        .host_mesh_stash_bytes = gpu3d.host_stash_bytes,
         .glyph_atlas_bytes = text.atlasTextureBytes(),
         .glyph_buffer_bytes = text.glyphBufferBytes(),
         .ui_rect_bytes = rects.instanceBufferBytes(),
         .paint_texture_bytes = paintable.residentTextureBytes(),
-        .gpu_map_static_instances_used_bytes = gpu_instances.standard_used_bytes,
-        .gpu_map_static_instances_capacity_bytes = gpu_instances.standard_capacity_bytes,
-        .gpu_map_slim_instances_used_bytes = gpu_instances.slim_used_bytes,
-        .gpu_map_slim_instances_capacity_bytes = gpu_instances.slim_capacity_bytes,
+        .gpu_map_static_instances_used_bytes = gpu3d.static_standard_used_bytes,
+        .gpu_map_static_instances_capacity_bytes = gpu3d.static_standard_capacity_bytes,
+        .gpu_map_slim_instances_used_bytes = gpu3d.static_slim_used_bytes,
+        .gpu_map_slim_instances_capacity_bytes = gpu3d.static_slim_capacity_bytes,
         .gpu_render3d_core_capacity_bytes = gpu3d.core_buffer_capacity_bytes,
         .gpu_render3d_target_bytes = gpu3d.render_target_bytes,
         .gpu_render3d_diffuse_texture_bytes = gpu3d.diffuse_texture_bytes,
