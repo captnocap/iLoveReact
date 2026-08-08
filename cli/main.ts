@@ -23,6 +23,7 @@ import * as pack from './commands/pack.ts';
 import * as packSdk from './commands/pack-sdk.ts';
 import * as play from './commands/play.ts';
 import * as pushBundle from './commands/push-bundle.ts';
+import * as repo from './commands/repo.ts';
 import * as ship from './commands/ship.ts';
 import * as shipTui from './commands/ship-tui.ts';
 import * as shot from './commands/shot.ts';
@@ -56,6 +57,7 @@ const COMMANDS: Record<string, Command> = {
   'pack-sdk': packSdk,
   'play': play,
   'push-bundle': pushBundle,
+  'repo': repo,
   'ship': ship,
   'ship-tui': shipTui,
   'shot': shot,

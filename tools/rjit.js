@@ -7977,8 +7977,8 @@ if (failures.length > 0) {
       `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
-    const run28 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    const runOut = run28.stdout.trim();
+    const run29 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    const runOut = run29.stdout.trim();
     if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
     const match = runOut.match(/built (\d+) mesh instances/);
@@ -8044,10 +8044,10 @@ if (failures.length > 0) {
       return 1;
     }
     out("[game] launching live window \u2014 close it or press ESC to exit...");
-    const run28 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
-    if (run28.stdout.trim()) out(run28.stdout.trim());
-    if (run28.stderr.trim()) err(run28.stderr.trim());
-    return run28.code === 0 ? 0 : 1;
+    const run29 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run29.stdout.trim()) out(run29.stdout.trim());
+    if (run29.stderr.trim()) err(run29.stderr.trim());
+    return run29.code === 0 ? 0 : 1;
   }
   function verify(root) {
     if (bundleVerifyHarness(root) !== 0) {
@@ -9829,12 +9829,487 @@ ${IMPORTS_MARKER}`).replace(
     return bytes;
   }
 
+  // cli/commands/repo.ts
+  var repo_exports = {};
+  __export(repo_exports, {
+    run: () => run23
+  });
+
+  // cli/dev/publishable.ts
+  var PUBLISH_RULES = [
+    // ── Published: what a fresh clone needs to build and understand this project ──────────
+    {
+      path: "framework",
+      kind: "source",
+      what: "Zig runtime \u2014 layout, engine, GPU, events, input, state, effects, text, windows"
+    },
+    { path: "runtime", kind: "source", what: "JS cart-facing layer \u2014 JSX shim, primitives, hooks, host globals" },
+    { path: "renderer", kind: "source", what: "reconciler host config \u2014 emits the CREATE/APPEND/UPDATE stream" },
+    { path: "cart", kind: "source", what: ".tsx apps; cart/editor (+ /play) is the active surface (V32)" },
+    { path: "docs", kind: "source", what: "the game knowledge layer \u2014 DECISIONS.md, per-cart audits, _index/, _requests/" },
+    { path: "cli", kind: "source", what: "rjit CLI source \u2014 tools/rjit.js is BUILT from here, this is the truth" },
+    { path: "scripts", kind: "source", what: "build pipeline + git hooks \u2014 cart-bundle.js, fetch-*, install-hooks" },
+    { path: "tools", kind: "source", what: "agent entry points \u2014 rjit, seat, oracle, request, parity harnesses" },
+    { path: "tui", kind: "source", what: "TUI stack" },
+    { path: "sdk", kind: "source", what: "packaged SDK surface" },
+    { path: "stb", kind: "source", what: "vendored single-header C libs \u2014 build.zig adds these include paths" },
+    { path: "deps", kind: "source", what: "external deps the build links against (zig-v8, wgpu, whisper, onnxruntime, ...)" },
+    { path: ".github", kind: "source", what: "CI + repo config" },
+    { path: ".claude", kind: "source", what: "project skills, hooks, agent config" },
+    { path: ".agents", kind: "source", what: "agent skill definitions (agent-seat, agent-skin)" },
+    { path: ".codex", kind: "source", what: "codex CLI config for the delegation handoff" },
+    { path: "build.zig", kind: "source", what: "the root build \u2014 every cart host, dev module and test root" },
+    { path: "build.zig.zon", kind: "source", what: "dependency manifest" },
+    { path: "README.md", kind: "source", what: "repo overview" },
+    { path: "CLAUDE.md", kind: "source", what: "the rules \u2014 hard rules, ship path, where features live" },
+    { path: "AGENTS.md", kind: "source", what: "agent entry contract" },
+    { path: "GUIDING_LIGHT.md", kind: "source", what: "the architectural north star" },
+    { path: "install.sh", kind: "source", what: "clone-side setup" },
+    { path: ".gitignore", kind: "source", what: "ignore rules (the blocklist half \u2014 this module is the allowlist half)" },
+    { path: ".gitattributes", kind: "source", what: "git attributes" },
+    { path: ".hardened-paths", kind: "source", what: "paths guarded against sweeps" },
+    { path: "vocabulary.yaml", kind: "source", what: "ContextForge vocabulary \u2014 what words mean in this project" },
+    { path: "plan_store.yaml", kind: "source", what: "ContextForge plan store" },
+    { path: "questions.yaml", kind: "source", what: "ContextForge Q&A store" },
+    // ── Carved out of published trees. Longest-prefix wins, so these override the rules
+    //    above for their exact subtree. Each names what regenerates it. ─────────────────────
+    {
+      path: "tools/v8cli",
+      kind: "artifact",
+      what: "prebuilt 55MB V8 script host binary",
+      insteadOf: "a scripts/fetch-v8cli.sh alongside fetch-zig.sh / fetch-v8-prebuilt.sh",
+      blockedBy: "nothing fetches or builds it \u2014 untracking it breaks `tools/rjit` on a fresh clone"
+    },
+    {
+      path: "tools/esbuild",
+      kind: "artifact",
+      what: "prebuilt 11MB esbuild binary",
+      insteadOf: "a fetch script pinning the esbuild version",
+      blockedBy: "nothing fetches it \u2014 untracking it breaks cart bundling on a fresh clone"
+    },
+    {
+      path: "tools/rjit.js",
+      kind: "artifact",
+      what: "430KB bundle of cli/ \u2014 generated, not authored",
+      insteadOf: "tools/esbuild cli/main.ts --bundle --outfile=tools/rjit.js --format=iife --platform=neutral --target=es2022",
+      blockedBy: "building it needs tools/esbuild, which is itself unfetched \u2014 unpublish these three together"
+    },
+    {
+      path: "framework/gpu/icon_atlas.zig",
+      kind: "artifact",
+      what: "9.7MB of generated Zig \u2014 a baked SDF icon atlas, @import-ed by the GPU path",
+      insteadOf: "rjit bake-icons",
+      blockedBy: "the build @import-s it, so a clone cannot compile until bake-icons has run"
+    },
+    {
+      path: "framework/gpu/icon_atlas_debug.ppm.txt",
+      kind: "artifact",
+      what: "5MB debug dump of the icon atlas \u2014 a visual aid, not an input",
+      insteadOf: "rjit bake-icons"
+    },
+    {
+      path: "deps/duckdb",
+      kind: "artifact",
+      what: "114MB prebuilt DuckDB (libduckdb_static.a + the linux-amd64 zip) with ZERO references in build.zig, framework/, cli/ or scripts/",
+      insteadOf: "nothing \u2014 no code links it. Re-fetch from the DuckDB release page if it is ever wanted"
+    },
+    {
+      path: "cart/hmsc-int/exports",
+      kind: "asset",
+      what: "baked .rjpkg export output including a 15MB city.map",
+      insteadOf: "rjit game bake \u2014 and the previous-era surface is not the build site anyway"
+    },
+    {
+      // Reinstated as source against the binary SHAPE rule below: these are vendored
+      // cross-compilation inputs, not build output. Nothing in this repo can produce them.
+      path: "deps/windows",
+      kind: "source",
+      vouched: true,
+      what: "vendored Windows import libraries (SDL2, FreeType) \u2014 cross-compile inputs the build links"
+    },
+    {
+      path: "cart/app-jsx-backup",
+      kind: "oneoff",
+      what: "a .jsx snapshot of cart/app taken during the TS migration \u2014 and cart/ is .tsx/.ts only",
+      insteadOf: "git history, which already holds it"
+    },
+    // ── Frozen eras. Read for reference, never built. The repo already zips these into
+    //    archive/*.zip and gitignores the zip (editor/experiments/images/os did this) — that
+    //    informal move is what `rjit repo archive` makes into a real, announcing verb. ──────
+    {
+      path: "tsz",
+      kind: "frozen",
+      what: "Smith era \u2014 .tsz compiler, d-suite conformance, cockpit carts. 4163 files, FROZEN by CLAUDE.md",
+      insteadOf: "archive/tsz.zip (build.zig only references tsz/zig-out/lib, a gitignored build output \u2014 no tracked file here is load-bearing)"
+    },
+    {
+      path: "love2d",
+      kind: "frozen",
+      what: "the Lua reference stack \u2014 the proven reconciler-on-Lua implementation. 1894 files, FROZEN by CLAUDE.md",
+      insteadOf: "archive/love2d.zip"
+    },
+    {
+      path: "archive",
+      kind: "frozen",
+      what: "old compiler iterations (v1 tsz, v2 tsz-gen) + the evicted QJS stack. Already the archive, but tracked",
+      insteadOf: "archive/*.zip, which .gitignore already expects \u2014 build.zig mentions archive/qjs-stack only in comments"
+    },
+    // ── One-offs. Each served one session and then stopped being anybody's input. ──────────
+    {
+      path: "recovered-models",
+      kind: "asset",
+      what: "86MB of 3D mesh JSON from a recovery dump \u2014 32MB in a single file",
+      insteadOf: 'local disk. CLAUDE.md: "do not commit 3d models to github"; USER RULING req_3772 says the same'
+    },
+    {
+      path: "shots",
+      kind: "asset",
+      what: "16MB of PNG frame captures from self-shot verification runs",
+      insteadOf: "local disk \u2014 `rjit shot` regenerates any of them on demand"
+    },
+    {
+      path: "research_runs",
+      kind: "oneoff",
+      what: "output of one-off research sweeps",
+      insteadOf: "local disk; conclusions belong in docs/ if they matter"
+    },
+    {
+      path: "dead",
+      kind: "oneoff",
+      what: "a graveyard directory",
+      insteadOf: "deletion \u2014 git history is the graveyard"
+    },
+    {
+      path: "verify-zig016-bins.sh",
+      kind: "oneoff",
+      what: "one-off verification script from the 0.16 migration, left at repo root",
+      insteadOf: "scripts/ if still useful, otherwise nothing"
+    },
+    {
+      path: "verify-zig016-editor.sh",
+      kind: "oneoff",
+      what: "one-off verification script from the 0.16 migration, left at repo root",
+      insteadOf: "scripts/ if still useful, otherwise nothing"
+    },
+    {
+      path: "verify-zig016-lane0.sh",
+      kind: "oneoff",
+      what: "one-off verification script from the 0.16 migration, left at repo root",
+      insteadOf: "scripts/ if still useful, otherwise nothing"
+    },
+    {
+      path: "verify-zig016-tests.sh",
+      kind: "oneoff",
+      what: "one-off verification script from the 0.16 migration, left at repo root",
+      insteadOf: "scripts/ if still useful, otherwise nothing"
+    }
+  ];
+  var ARTIFACT_SHAPES = [
+    { test: (p) => /(^|\/)bundle(-[^/]*)?\.js$/.test(p), what: "esbuild cart bundle \u2014 rebuilt by `rjit ship` / `rjit dev`" },
+    { test: (p) => /\.metafile\.json$/.test(p), what: "esbuild metafile \u2014 rebuilt with the bundle" },
+    { test: (p) => /\.(png|jpg|jpeg|ppm|gif|webp)$/i.test(p), what: "raster image \u2014 an asset or a capture, never source" },
+    { test: (p) => /\.(glb|gltf|obj|fbx|blend)$/i.test(p), what: "3D model \u2014 CLAUDE.md forbids publishing these" },
+    { test: (p) => /\.(a|so|dylib|dll|o|wasm)$/i.test(p), what: "compiled binary object" },
+    { test: (p) => /\.(zip|tar|tar\.gz|tgz|iso)$/i.test(p), what: "archive blob" },
+    { test: (p) => /\.(db|sqlite)(-wal|-shm)?$/i.test(p), what: "database file \u2014 runtime state" },
+    { test: (p) => /(^|\/)_?tmp[^/]*\//.test(p), what: "temp directory" },
+    { test: (p) => /\.(log|bak|orig|rej|swp)$/i.test(p), what: "editor or process leftover" },
+    { test: (p) => /_old\.[a-z]+$/i.test(p), what: "a `_old` rewrite breadcrumb \u2014 meant to be diffed then dropped" }
+  ];
+  function classifyTracked(path) {
+    let best = null;
+    for (const rule of PUBLISH_RULES) {
+      const isPrefix = path === rule.path || path.startsWith(`${rule.path}/`);
+      if (!isPrefix) continue;
+      if (!best || rule.path.length > best.path.length) best = rule;
+    }
+    if (best && best.kind !== "source") {
+      return { path, kind: best.kind, what: best.what, insteadOf: best.insteadOf, blockedBy: best.blockedBy, ruledBy: best.path };
+    }
+    if (best?.vouched) return { path, kind: "source", what: best.what, ruledBy: best.path };
+    for (const shape of ARTIFACT_SHAPES) {
+      if (!shape.test(path)) continue;
+      return { path, kind: "artifact", what: shape.what, insteadOf: "regenerate it; add an ignore rule", ruledBy: "artifact shape" };
+    }
+    if (best) return { path, kind: "source", what: best.what, ruledBy: best.path };
+    return {
+      path,
+      kind: "unknown",
+      what: "no rule in cli/dev/publishable.ts covers this path",
+      insteadOf: "declare it in PUBLISH_RULES (source) or unpublish it \u2014 a decision, not a default",
+      ruledBy: "(undeclared)"
+    };
+  }
+  function trackedEntries() {
+    const listed = spawnSync("git", ["ls-tree", "-r", "-l", "HEAD"]);
+    if (listed.code !== 0) return [];
+    const entries = [];
+    for (const line of listed.stdout.split("\n")) {
+      if (!line) continue;
+      const [meta, path] = line.split("	");
+      if (!meta || !path) continue;
+      const fields = meta.split(/\s+/);
+      const size = fields[3];
+      if (size === void 0 || size === "-") continue;
+      entries.push({ path, bytes: Number(size) });
+    }
+    return entries;
+  }
+  function unpublishedCandidates() {
+    const status = spawnSync("git", ["status", "--porcelain", "--untracked-files=normal"]);
+    if (status.code !== 0) return [];
+    return status.stdout.split("\n").filter((line) => line.startsWith("?? ")).map((line) => line.slice(3).trim()).filter((path) => path.length > 0);
+  }
+  function surveyTracked(entries) {
+    const grouped = /* @__PURE__ */ new Map();
+    let sourceFiles = 0;
+    let sourceBytes = 0;
+    for (const entry of entries) {
+      const verdict = classifyTracked(entry.path);
+      if (verdict.kind === "source") {
+        sourceFiles += 1;
+        sourceBytes += entry.bytes;
+        continue;
+      }
+      const key2 = verdict.kind === "unknown" || verdict.ruledBy === "artifact shape" ? topLevel(entry.path) : verdict.ruledBy;
+      const existing = grouped.get(`${verdict.kind}:${key2}`);
+      if (existing) {
+        existing.files += 1;
+        existing.bytes += entry.bytes;
+        if (existing.examples.length < 3) existing.examples.push(entry.path);
+        continue;
+      }
+      grouped.set(`${verdict.kind}:${key2}`, {
+        tree: key2,
+        kind: verdict.kind,
+        what: verdict.what,
+        insteadOf: verdict.insteadOf,
+        blockedBy: verdict.blockedBy,
+        files: 1,
+        bytes: entry.bytes,
+        examples: [entry.path]
+      });
+    }
+    const findings = [...grouped.values()].sort((a, b) => b.bytes - a.bytes);
+    return { findings, sourceFiles, sourceBytes };
+  }
+  function topLevel(path) {
+    const cut = path.indexOf("/");
+    return cut === -1 ? path : path.slice(0, cut);
+  }
+  function humanBytes(bytes) {
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1073741824).toFixed(1)}GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / 1048576).toFixed(1)}MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+    return `${bytes}B`;
+  }
+  var CLASS_HEADER = {
+    source: "PUBLISHED \u2014 declared source",
+    artifact: "ARTIFACT \u2014 generated, reproducible by a named command",
+    asset: "ASSET \u2014 models, textures, captures. USER RULING req_3772: never published",
+    frozen: "FROZEN ERA \u2014 reference only. Belongs in a zip under archive/",
+    oneoff: "ONE-OFF \u2014 served one session",
+    unknown: "UNDECLARED \u2014 no rule covers this. Decide, do not default"
+  };
+  function announce2(findings, sourceFiles, sourceBytes, write) {
+    write("");
+    write(`[repo] published source: ${sourceFiles} files, ${humanBytes(sourceBytes)}`);
+    if (findings.length === 0) {
+      write("[repo] nothing tracked outside the declared publish manifest. Clean.");
+      return;
+    }
+    const order = ["unknown", "asset", "artifact", "frozen", "oneoff"];
+    for (const kind of order) {
+      const group = findings.filter((finding) => finding.kind === kind);
+      if (group.length === 0) continue;
+      const files = group.reduce((sum, finding) => sum + finding.files, 0);
+      const bytes = group.reduce((sum, finding) => sum + finding.bytes, 0);
+      write("");
+      write(`  ${CLASS_HEADER[kind]}  \u2014  ${files} files, ${humanBytes(bytes)}`);
+      for (const finding of group) {
+        write(`    ${finding.tree}  (${finding.files} files, ${humanBytes(finding.bytes)})`);
+        write(`        is:      ${finding.what}`);
+        if (finding.insteadOf) write(`        instead: ${finding.insteadOf}`);
+        if (finding.blockedBy) write(`        BLOCKED: ${finding.blockedBy}`);
+        if (finding.tree === topLevel(finding.examples[0] ?? "") && finding.examples.length > 0 && finding.kind === "unknown") {
+          write(`        e.g.     ${finding.examples.join(", ")}`);
+        }
+      }
+    }
+    const totalFiles = findings.reduce((sum, finding) => sum + finding.files, 0);
+    const totalBytes = findings.reduce((sum, finding) => sum + finding.bytes, 0);
+    const blocked = findings.filter((finding) => finding.blockedBy);
+    write("");
+    write(`[repo] ${totalFiles} tracked files (${humanBytes(totalBytes)}) do not belong on GitHub`);
+    if (blocked.length > 0) {
+      write(`[repo] ${blocked.length} of those are BLOCKED \u2014 they stay published until the named capability exists`);
+    }
+  }
+
+  // cli/commands/repo.ts
+  async function run23(argv) {
+    const verb = argv[0];
+    if (verb === "archive" || verb === "unpublish") {
+      const trees = argv.slice(1).filter((arg) => !arg.startsWith("-"));
+      if (trees.length === 0) {
+        err(`[repo] ${verb}: name at least one tree`);
+        err(`Usage: rjit repo ${verb} <tree>...`);
+        return 1;
+      }
+      return applyVerb(verb, trees);
+    }
+    if (verb !== void 0 && verb !== "--candidates") {
+      err(`[repo] unknown verb: ${verb}`);
+      err("Usage: rjit repo [--candidates] | rjit repo archive <tree>... | rjit repo unpublish <tree>...");
+      return 1;
+    }
+    const entries = trackedEntries();
+    if (entries.length === 0) {
+      err("[repo] git ls-tree returned nothing \u2014 not a git repo, or HEAD is unborn");
+      return 1;
+    }
+    const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
+    announce2(findings, sourceFiles, sourceBytes, out);
+    if (argv.includes("--candidates")) reportCandidates();
+    out("");
+    out("[repo] this survey changed nothing. To act on a finding:");
+    out("[repo]   rjit repo archive <tree>     zip to archive/, untrack, ignore, keep on disk");
+    out("[repo]   rjit repo unpublish <tree>   untrack, ignore, keep on disk");
+    out("[repo] to PUBLISH something reported undeclared, add it to cli/dev/publishable.ts");
+    return 0;
+  }
+  function reportCandidates() {
+    const candidates = unpublishedCandidates();
+    out("");
+    if (candidates.length === 0) {
+      out("[repo] no untracked-and-unignored paths \u2014 nothing is one `git add -A` from publication");
+      return;
+    }
+    out(`  ONE \`git add -A\` FROM PUBLICATION  \u2014  ${candidates.length} untracked, unignored paths`);
+    for (const path of candidates) {
+      const verdict = classifyTracked(path.replace(/\/$/, ""));
+      out(`    ${path}  \u2192  would be ${verdict.kind}: ${verdict.what}`);
+    }
+  }
+  function applyVerb(verb, trees) {
+    const entries = trackedEntries();
+    const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
+    announce2(findings, sourceFiles, sourceBytes, out);
+    out("");
+    const rjitHome = __env("RJIT_HOME") || __cwd();
+    for (const raw of trees) {
+      const tree = raw.replace(/\/+$/, "");
+      const verdict = classifyTracked(tree);
+      if (verdict.kind === "source") {
+        err(`[repo] REFUSED ${tree}: declared source (${verdict.what})`);
+        err("[repo]   it belongs in a clone. Remove its rule from PUBLISH_RULES first if that is wrong.");
+        return 1;
+      }
+      if (verdict.kind === "unknown") {
+        err(`[repo] REFUSED ${tree}: ${verdict.what}`);
+        err("[repo]   declare it in cli/dev/publishable.ts first. An undeclared path never gets a default.");
+        return 1;
+      }
+      if (verdict.blockedBy) {
+        err(`[repo] REFUSED ${tree}: BLOCKED \u2014 ${verdict.blockedBy}`);
+        err(`[repo]   provide first: ${verdict.insteadOf ?? "the missing capability"}`);
+        return 1;
+      }
+      const tracked = entries.filter((entry) => entry.path === tree || entry.path.startsWith(`${tree}/`));
+      if (tracked.length === 0) {
+        out(`[repo] ${tree}: already untracked \u2014 nothing to do`);
+        continue;
+      }
+      const bytes = tracked.reduce((sum, entry) => sum + entry.bytes, 0);
+      if (verb === "archive") {
+        const zipRel = `archive/${zipName(tree)}.zip`;
+        const packed = packTree(rjitHome, tree, zipRel);
+        if (packed !== 0) return packed;
+        out(`[repo] ${tree}: packed \u2192 ${zipRel} (verified)`);
+      }
+      out(`[repo] ${tree}: untracking ${tracked.length} files (${humanBytes(bytes)}) \u2014 files stay on disk`);
+      const removed = spawnSync("git", ["rm", "-r", "--cached", "--quiet", "--", tree]);
+      if (removed.code !== 0) {
+        err(`[repo] ${tree}: git rm --cached failed (exit ${removed.code})`);
+        err(removed.stderr.trim());
+        return removed.code || 1;
+      }
+      const ignoreLine = addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what);
+      out(`[repo] ${tree}: ${ignoreLine}`);
+    }
+    out("");
+    out("[repo] staged. Nothing was deleted from disk; `git checkout -- <tree>` undoes any of it.");
+    out("[repo] review with `git status`, then commit .gitignore together with the removals.");
+    return 0;
+  }
+  function zipName(tree) {
+    return tree.replace(/\//g, "-");
+  }
+  function packTree(rjitHome, tree, zipRel) {
+    const source = `${rjitHome}/${tree}`;
+    if (!fsExists(source)) {
+      err(`[repo] ${tree}: not on disk \u2014 refusing to archive a tree that is not there`);
+      return 1;
+    }
+    const which = spawnSync("sh", ["-c", "command -v zip"]);
+    if (which.code !== 0) {
+      err("[repo] `zip` is not installed \u2014 cannot archive. Install zip, or use `unpublish` if the tree is already backed up.");
+      return 1;
+    }
+    if (zipRel === tree || zipRel.startsWith(`${tree}/`)) {
+      err(`[repo] ${tree}: the archive destination ${zipRel} is inside the tree being archived`);
+      err(`[repo]   ${tree} is already an archive location \u2014 use \`rjit repo unpublish ${tree}\` instead.`);
+      return 1;
+    }
+    const zipAbs = `${rjitHome}/${zipRel}`;
+    if (fsExists(zipAbs)) {
+      err(`[repo] ${zipRel} already exists \u2014 refusing to overwrite an existing archive`);
+      return 1;
+    }
+    spawnSync("mkdir", ["-p", "--", `${rjitHome}/archive`]);
+    out(`[repo] ${tree}: packing \u2192 ${zipRel} ...`);
+    const packed = spawnSync("sh", ["-c", `cd ${shellQuote3(rjitHome)} && zip -q -r -X ${shellQuote3(zipRel)} ${shellQuote3(tree)}`]);
+    if (packed.code !== 0) {
+      err(`[repo] ${tree}: zip failed (exit ${packed.code})`);
+      err(packed.stderr.trim());
+      return packed.code || 1;
+    }
+    const tested = spawnSync("zip", ["-T", zipAbs]);
+    if (tested.code !== 0) {
+      err(`[repo] ${zipRel}: zip -T verification FAILED \u2014 leaving the tree tracked`);
+      err(tested.stdout.trim() || tested.stderr.trim());
+      return 1;
+    }
+    return 0;
+  }
+  function shellQuote3(value) {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+  function addIgnoreRule(rjitHome, tree, kind, what) {
+    const path = `${rjitHome}/.gitignore`;
+    const heading = "# \u2500\u2500 Unpublished by `rjit repo` (see cli/dev/publishable.ts) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500";
+    const isDir = tryFsStat(`${rjitHome}/${tree}`)?.isDir === true;
+    const rule = isDir ? `/${tree}/` : `/${tree}`;
+    const existing = fsExists(path) ? fsRead(path) : "";
+    if (existing.split("\n").some((line) => line.trim() === rule || line.trim() === `/${tree}` || line.trim() === `/${tree}/`)) {
+      return "ignore rule already present";
+    }
+    const block = existing.includes(heading) ? "" : `
+${heading}
+`;
+    const body = `# ${kind}: ${what}
+${rule}
+`;
+    fsWrite(path, `${existing.replace(/\n*$/, "\n")}${block}${body}`);
+    return `ignore rule added (${rule})`;
+  }
+
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run23
+    run: () => run24
   });
-  async function run23(argv) {
+  async function run24(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -10377,18 +10852,18 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run24
+    run: () => run25
   });
-  async function run24(argv) {
-    return run23([...argv, "--tui"]);
+  async function run25(argv) {
+    return run24([...argv, "--tui"]);
   }
 
   // cli/commands/shot.ts
   var shot_exports = {};
   __export(shot_exports, {
-    run: () => run25
+    run: () => run26
   });
-  async function run25(argv) {
+  async function run26(argv) {
     let name = null;
     let outPath = null;
     let route = null;
@@ -10441,13 +10916,13 @@ __ARCHIVE__
     const env = [
       "ZIGOS_HEADLESS=1",
       "ZIGOS_SCREENSHOT=1",
-      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote3(png)}`,
+      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote4(png)}`,
       `ZIGOS_SCREENSHOT_FRAMES=${frames}`,
-      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote3(route)}`] : []
+      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote4(route)}`] : []
     ].join(" ");
     out(`[shot] booting ${name} hidden${route ? ` at ${route}` : ""}, capturing after ${frames} frames...`);
-    const argText = binaryArgs.map(shellQuote3).join(" ");
-    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote3(binary)} ${argText}`;
+    const argText = binaryArgs.map(shellQuote4).join(" ");
+    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote4(binary)} ${argText}`;
     out(`[shot] command: ${cmd}`);
     const result = spawnSync("sh", ["-c", `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
     if (result.stdout) __writeStdout(result.stdout);
@@ -10485,7 +10960,7 @@ __ARCHIVE__
     return newest;
   }
   function pngDims(path) {
-    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote3(path)} | od -An -v -tu1`]);
+    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote4(path)} | od -An -v -tu1`]);
     const bytes = dump.stdout.trim().split(/\s+/).map((token) => Number(token));
     if (bytes.length < 24 || bytes.some((value) => !Number.isFinite(value))) return null;
     const magic = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -10504,7 +10979,7 @@ __ARCHIVE__
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function shellQuote3(value) {
+  function shellQuote4(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
   function usage6(message) {
@@ -10522,9 +10997,9 @@ __ARCHIVE__
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run26
+    run: () => run27
   });
-  async function run26(argv) {
+  async function run27(argv) {
     const parsed = parseTuiArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -10700,10 +11175,10 @@ __ARCHIVE__
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run27
+    run: () => run28
   });
   var POLL_MS = 200;
-  async function run27(argv) {
+  async function run28(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -10797,6 +11272,7 @@ __ARCHIVE__
     "pack-sdk": pack_sdk_exports,
     "play": play_exports,
     "push-bundle": push_bundle_exports,
+    "repo": repo_exports,
     "ship": ship_exports,
     "ship-tui": ship_tui_exports,
     "shot": shot_exports,
