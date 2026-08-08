@@ -28,6 +28,16 @@ import {
   type SeatBox,
 } from './seatGeometry';
 import {
+  appendNote,
+  dropNote,
+  emptyNoteBook,
+  isNoteBook,
+  parseNoteKind,
+  summarizeNotes,
+  type SeatNoteBook,
+} from './seatNotes';
+import { classifyByCorpus, isClassCorpus } from './seatClassSpec';
+import {
   ORACLE_PLANS,
   advanceSession,
   askCorpus,
@@ -421,6 +431,23 @@ export type SeatAdapter = {
   /** Retopology tint/ghost mutations persist immediately into the active model
    * package; false means the live change landed but its cold-restart record did not. */
   retopoStateChanged?: (clearWhenAbsent?: boolean) => boolean;
+  /** Per-model handoff notes. Written into the model package when it has a dir on disk
+   *  (so the handoff survives a cold restart) and held in hot state otherwise; `write`
+   *  returns whether the note actually landed somewhere durable. */
+  noteState?: {
+    read: (model: string | null) => unknown;
+    write: (model: string | null, book: unknown) => boolean;
+  };
+  /** The curated class corpus: approved exemplars in, derived specs out, plus the
+   *  append-only telemetry log. Human-gated by construction — the shell only ever
+   *  records a verdict a person asked for. */
+  corpus?: {
+    readCorpus: () => unknown;
+    approve: (classId: string, model: string, verdict: 'approved' | 'rejected', reason: string | null, by: string) => SeatShellReceipt;
+    spec: (classId: string) => SeatShellReceipt;
+    logTelemetry: (row: unknown) => void;
+    telemetry: () => SeatShellReceipt;
+  };
   /** Read one phase slice of the agent-seat corpus by name. The docs live as markdown
    *  under .agents/skills/agent-seat/corpus/ so they stay reviewable and editable in
    *  the repo; the oracle only routes them. Absent = phases run on checklists alone. */
@@ -1746,7 +1773,19 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       ? adapter.shellAction?.('package', { operation: 'diff', model: percept.model })
       : null;
     const saved = savedDiff?.ok ? savedDiff.result as Record<string, unknown> : null;
+    const classSpec = shell && oracleSession?.classId
+      ? (() => {
+          const derived = adapter.corpus?.spec(oracleSession.classId!);
+          return derived?.ok ? derived.result as never : null;
+        })()
+      : null;
     return {
+      classSpec,
+      shape: percept ? {
+        bbox: unionBoxes(percept.regions.filter((region) => region.faces > 0).map((region) => region.bbox)),
+        regionNames: percept.table.regions.map((region) => region.name),
+        partNames: percept.parts.map((part) => part.name),
+      } : null,
       model: percept ? {
         id: percept.model,
         faces: percept.faces,
@@ -1766,6 +1805,61 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       attest: oracleSession?.attest ?? {},
     };
   };
+  // ── notes: cheap, mutable, disposable handoff memory ─────────────────────────
+  // Deliberately NOT the class corpus. Notes carry intent a percept can never answer;
+  // the corpus carries measurements. Keeping them apart is what stops the corpus
+  // filling with noise.
+  const noteBook = (percept: SeatPercept | null): SeatNoteBook => {
+    const stored = adapter.noteState?.read(percept?.model ?? null);
+    return isNoteBook(stored) ? stored : emptyNoteBook(percept?.model ?? null);
+  };
+  const notes = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
+    const percept = look();
+    const generation = percept?.generation ?? 0;
+    const book = noteBook(percept);
+    if (operation === 'read') {
+      return { ok: true, result: { model: book.model, ...summarizeNotes(book, generation), generation } };
+    }
+    if (operation === 'append') {
+      const kind = parseNoteKind(args.kind);
+      if (!kind) return { ok: false, reason: 'a note is a decision, an observation, or a todo' };
+      const appended = appendNote(book, {
+        text: String(args.text ?? ''), kind, generation,
+        phase: oracleSession ? currentPhase(oracleSession) : null,
+        agent: typeof args.agent === 'string' ? args.agent : null,
+        at: new Date().toISOString(),
+      });
+      if ('reason' in appended) return { ok: false, reason: appended.reason };
+      const durable = adapter.noteState?.write(book.model, appended.book) ?? false;
+      return { ok: true, result: {
+        note: appended.note, dropped: appended.dropped, durable,
+        ...(durable ? {} : { warning: 'this model has no package on disk yet, so the note lives only in hot state — save the model to make the handoff survive a cold restart' }),
+      } };
+    }
+    if (operation === 'drop') {
+      const dropped = dropNote(book, Number(args.id));
+      if ('reason' in dropped) return { ok: false, reason: dropped.reason };
+      adapter.noteState?.write(book.model, dropped);
+      return { ok: true, result: summarizeNotes(dropped, generation) };
+    }
+    if (operation === 'clear') {
+      const cleared = emptyNoteBook(book.model);
+      adapter.noteState?.write(book.model, cleared);
+      return { ok: true, result: { cleared: book.notes.length } };
+    }
+    return { ok: false, reason: `unknown note operation "${operation}" — read, append, drop, or clear` };
+  };
+  // One tag per resident seat, so telemetry can tell "four attempts in one session"
+  // apart from "one attempt in four sessions" — the whole point of the difficulty stat.
+  const refusalsByPhase = new Map<string, number>();
+  const sessionTag = `seat-${Math.random().toString(16).slice(2, 10)}`;
+  const logTrajectory = (event: string, view: { phase: string | null; plan: string; classId: string | null }, checks: string[], attempt?: number) => {
+    adapter.corpus?.logTelemetry({
+      at: new Date().toISOString(), session: sessionTag, model: look()?.model ?? null,
+      plan: view.plan, classId: view.classId, phase: view.phase ?? 'complete', event,
+      ...(checks.length ? { checks } : {}), ...(attempt === undefined ? {} : { attempt }),
+    });
+  };
   const readOracleDoc: OracleDocReader = (name) => adapter.readSkillDoc?.(name) ?? null;
   const oracleDocFor = (phase: string): string =>
     readOracleDoc(phase) ?? `(no corpus slice for "${phase}" — the phase runs on its checklist alone; that gap is worth reporting)`;
@@ -1784,9 +1878,52 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (operation === 'start') {
       const task = String(args.task ?? '').trim();
       if (!task) return { ok: false, reason: 'oracle start needs a task description — it is what selects the plan' };
-      storeOracle(startSession(task));
-      const view = viewSession(oracleSession, oracleFacts(look(), true));
-      return { ok: true, result: { ...view, matched: oracleSession.matchedSignal, doc: oracleDocFor(view.phase!) } };
+      const session = startSession(task);
+      // A class is matched from the SAME task string that picked the plan, so
+      // "build a compact sedan" loads the car spec and gets graded against the
+      // distribution of approved cars rather than against a phrase.
+      const corpus = adapter.corpus?.readCorpus();
+      session.classId = isClassCorpus(corpus) ? classifyByCorpus(task, corpus)?.classId ?? null : null;
+      storeOracle(session);
+      const view = viewSession(session, oracleFacts(look(), true));
+      logTrajectory('start', view, []);
+      return { ok: true, result: { ...view, matched: session.matchedSignal, doc: oracleDocFor(view.phase!) } };
+    }
+    if (operation === 'spec') {
+      const classId = String(args.class ?? oracleSession?.classId ?? '').trim();
+      if (!classId) return { ok: false, reason: 'name a class, or start a plan whose task matches one' };
+      return adapter.corpus?.spec(classId) ?? { ok: false, reason: 'the class corpus is unavailable in this editor' };
+    }
+    if (operation === 'exemplar') {
+      // Human-gated on purpose: an unguarded corpus converges on average agent output.
+      const verdict = args.verdict === 'rejected' ? 'rejected' as const : 'approved' as const;
+      const classId = String(args.class ?? '').trim();
+      const model = String(args.model ?? look()?.model ?? '').trim();
+      const by = String(args.by ?? '').trim();
+      if (!classId || !model) return { ok: false, reason: 'oracle exemplar needs a class and a model id' };
+      if (!by) return { ok: false, reason: 'oracle exemplar needs --by: only a person can approve an exemplar, and the corpus records who' };
+      const reason = typeof args.reason === 'string' ? args.reason : null;
+      if (verdict === 'rejected' && !reason) {
+        return { ok: false, reason: 'a rejection needs a reason — rejections with reasons are the rows that become new checks' };
+      }
+      const recorded = adapter.corpus?.approve(classId, model, verdict, reason, by)
+        ?? { ok: false, reason: 'the class corpus is unavailable in this editor' };
+      if (recorded.ok) {
+        const percept = look();
+        adapter.corpus?.logTelemetry({
+          at: new Date().toISOString(), session: sessionTag, model, plan: oracleSession?.planId ?? 'none',
+          classId, phase: oracleSession ? currentPhase(oracleSession) : 'none', event: 'outcome',
+          outcome: { verdict, ...(reason ? { reason } : {}), triangles: percept?.faces ?? 0, unnamed: percept?.unnamed ?? 0,
+            unreachableFaces: percept?.auditComputed ? percept.unreachableFaces ?? 0 : null },
+        });
+      }
+      return recorded;
+    }
+    if (operation === 'telemetry') {
+      return adapter.corpus?.telemetry() ?? { ok: false, reason: 'the telemetry store is unavailable in this editor' };
+    }
+    if (operation === 'note') {
+      return notes(String(args.note ?? 'read'), args);
     }
     if (!oracleSession) {
       return { ok: false, reason: 'no plan is running — start one with `tools/seat oracle start "<what you are here to do>"`' };
@@ -1818,7 +1955,13 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     }
     if (operation === 'advance') {
       const outcome = advanceSession(oracleSession, oracleFacts(look(), true));
-      if (outcome.ok) storeOracle(oracleSession);
+      if (outcome.ok) {
+        storeOracle(oracleSession);
+        logTrajectory('advance', outcome.view, outcome.view.checks.map((check) => check.id));
+      } else {
+        refusalsByPhase.set(outcome.view.phase ?? 'complete', (refusalsByPhase.get(outcome.view.phase ?? 'complete') ?? 0) + 1);
+        logTrajectory('refused', outcome.view, outcome.failing.map((check) => check.id), refusalsByPhase.get(outcome.view.phase ?? 'complete'));
+      }
       // Passing hands back the next phase's doc in the SAME reply — the agent never has
       // to remember to fetch it, which is what keeps the gate on the path of least
       // resistance rather than beside it.
@@ -1826,7 +1969,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         ? { ok: true, result: { ...outcome, doc: outcome.to ? oracleDocFor(outcome.to) : null } }
         : { ok: false, reason: outcome.reason, result: { failing: outcome.failing, view: outcome.view } };
     }
-    return { ok: false, reason: `unknown oracle operation "${operation}" — start, status, advance, attest, ask, stop, or plans` };
+    return { ok: false, reason: `unknown oracle operation "${operation}" — start, status, advance, attest, note, ask, spec, exemplar, telemetry, stop, or plans` };
   };
   /** The ambient field every reply carries. Percept-only, so it costs nothing. */
   const oracleAmbient = (percept: SeatPercept | null): SeatPercept | null => {

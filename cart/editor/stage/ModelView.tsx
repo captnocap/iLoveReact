@@ -31,6 +31,7 @@ import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost } from '@reactjit/runtime/ffi';
 import { readSeatCorpusDoc } from '../agent/seatCorpus';
+import { readSeatNotes, seatCorpusAdapter, writeSeatNotes } from '../agent/seatCorpusStore';
 import type { OracleSession } from '../agent/seatOracle';
 import { createAgentSeat, orbitPoseByDegrees, readSeatPercept, type AtlasReceipt, type SeatFollowSession, type SeatShellReceipt } from '../agent/seatApi';
 import {
@@ -3636,6 +3637,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         read: () => getHotState<SeatFollowSession | null>('editor.agent-seat.follow.v1', null),
         write: (state) => setHotState('editor.agent-seat.follow.v1', state),
       },
+      noteState: {
+        read: (model) => readSeatNotes(model),
+        write: (model, book) => writeSeatNotes(model, book),
+      },
+      corpus: seatCorpusAdapter,
       oracleState: {
         read: () => getHotState<OracleSession | null>('editor.agent-seat.oracle.v1', null),
         write: (state) => setHotState('editor.agent-seat.oracle.v1', state),

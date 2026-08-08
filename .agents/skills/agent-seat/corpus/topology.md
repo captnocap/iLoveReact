@@ -189,3 +189,36 @@ differs from the inherited source region.
 - Never use raw face indices as durable memory.
 - A cold agent must be able to continue from `tools/seat look` alone. If the percept cannot
   support that, pay down naming debt before continuing.
+
+---
+
+## Class specs — the depth you are being graded against
+
+When the task matches a class with approved exemplars, the oracle loads a spec DERIVED from
+those models and grades you against it:
+
+```bash
+tools/seat oracle spec car          # triangles, quad ratio, metre dimensions, parts, naming
+```
+
+The part list of an approved model **is its articulation spec**. Doors, lids, and bumpers
+are separate Outliner parts because they open or break — which is exactly when mating faces
+legitimately survive junction resolution. So "keep the faces that articulation can expose"
+stops being a judgement call: for the class, these named parts stay separate and every other
+junction welds.
+
+Class criteria are graded **during blockout**, not at the end — a model that is 4x oversized
+or ten times over budget is cheapest to fix before detail exists. Every bound is widened by
+the class tolerance, and a spec derived from one exemplar says so in its `caveat`: it is that
+model widened, not a distribution.
+
+A person adds exemplars, never an agent:
+
+```bash
+tools/seat oracle exemplar car <model-id> --by <who>
+tools/seat oracle exemplar car <model-id> --by <who> --reject "doors welded shut"
+```
+
+An unguarded corpus converges on average agent output — which is the disease these gates
+exist to cure. Rejections with reasons are the most valuable rows in the store: each one is
+a check that does not exist yet.

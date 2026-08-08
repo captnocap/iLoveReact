@@ -52,3 +52,29 @@ Then fully terminate the editor process, cold-open that saved model, and run
 test.
 
 ---
+
+---
+
+## Handoff notes — intent only, never a fact the seat can measure
+
+```bash
+tools/seat oracle note decision    "user wants the hood asymmetric — do NOT mirror it"
+tools/seat oracle note observation "the rear seam still reads soft at grazing angles"
+tools/seat oracle note todo        "bridge the underbody once the fascia is final"
+tools/seat oracle note read        # what the last agent left you
+tools/seat oracle note drop <id> | clear
+```
+
+**If the seat can measure it, do not write it down.** "Hood bbox is 1.2 m" is poison: three
+edits later the next agent still trusts it, and `measure bbox region:hood` would have told
+them the truth. A note carries the one thing `look` can never answer — what the user
+decided and why. Intent, constraints, deliberate exceptions.
+
+Every note is stamped with the mesh generation it was written at. **Decisions stay durable**
+(intent does not expire because geometry moved); **observations and todos go suspect** the
+moment the mesh advances, and `oracle note read` marks them. Read decisions as law and
+suspect notes as leads to re-verify.
+
+Notes ride the model's package (`notes.json`), so they survive a cold restart and die with
+the model. A model with no package yet keeps its pad in memory and the reply says
+`durable:false` — save before relying on the handoff.

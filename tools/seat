@@ -85,6 +85,29 @@ else if (action === 'oracle') {
   if (operation === 'start') request = { action, args: { operation, task: args.join(' ') } };
   else if (operation === 'ask') request = { action, args: { operation, query: args.join(' ') } };
   else if (operation === 'attest') request = { action, args: { operation, id: args.shift(), note: args.join(' ') } };
+  // note [decision|observation|todo] "<text>" | note read | note drop <id> | note clear
+  else if (operation === 'note') {
+    const kinds = ['decision', 'observation', 'todo'];
+    const verbs = ['read', 'drop', 'clear'];
+    const head = args[0];
+    if (verbs.includes(head)) request = { action, args: { operation, note: args.shift(), ...(args.length ? { id: Number(args[0]) } : {}) } };
+    else {
+      const kind = kinds.includes(head) ? args.shift() : 'observation';
+      request = { action, args: { operation, note: 'append', kind, text: args.join(' '), ...(process.env.RJIT_SEAT_AGENT ? { agent: process.env.RJIT_SEAT_AGENT } : {}) } };
+    }
+  }
+  else if (operation === 'spec') request = { action, args: { operation, ...(args[0] ? { class: args[0] } : {}) } };
+  // exemplar <class> <model> --by <who> [--reject "<reason>"] — a PERSON's verdict.
+  else if (operation === 'exemplar') {
+    const take = (flag) => { const at = args.indexOf(flag); if (at < 0) return null; const value = args[at + 1]; args.splice(at, value === undefined ? 1 : 2); return value ?? null; };
+    const by = take('--by');
+    const reject = take('--reject');
+    request = { action, args: {
+      operation, class: args[0], model: args[1], by,
+      ...(reject === null ? {} : { verdict: 'rejected', reason: reject }),
+    } };
+  }
+  else if (operation === 'telemetry') request = { action, args: { operation } };
   else if (operation === 'status') {
     const docIndex = args.indexOf('--doc');
     if (docIndex >= 0) args.splice(docIndex, 1);
@@ -172,7 +195,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|ask "<query>"|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|diff> [model]|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 

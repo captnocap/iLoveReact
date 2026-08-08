@@ -36,6 +36,7 @@ const cleanModel = {
 };
 const facts = (over: Partial<OracleFacts> = {}, model: Partial<typeof cleanModel> = {}): OracleFacts => ({
   model: { ...cleanModel, ...model },
+  classSpec: null, shape: { bbox: [0, 0, 0, 4, 1.5, 2], regionNames: [], partNames: [] },
   claimed: true, packageInSync: true, packageDirty: false, semanticHealthy: true, attest: {},
   ...over,
 });

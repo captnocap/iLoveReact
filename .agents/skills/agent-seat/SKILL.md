@@ -53,6 +53,16 @@ tools/seat dismiss                      # after the final save + semantic-status
 Claims lock writes, not reads. Lanes run in parallel against one editor; an unclaimed
 structural edit on someone else's model is a crossed wire.
 
+## Two memories, kept apart
+
+`oracle note` is a per-model scratch pad for **intent** — cheap, mutable, disposable, and
+the one thing `look` can never tell a cold agent. **If the seat can measure it, do not write
+it down.** Decisions stay durable; observations go suspect the moment the mesh advances.
+
+The **class corpus** is the opposite: curated, measured, permanent. `oracle spec <class>`
+derives a target distribution from exemplars a PERSON approved, and grades your model
+against it. Never mix them — a corpus that accepts notes fills with noise.
+
 ## Refusal semantics
 
 A refusal is data, not an obstacle. `save` refuses unnamed faces; `paint` refuses an

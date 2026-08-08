@@ -95,6 +95,7 @@ import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit,
 import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
 import { readSeatCorpusDoc } from '../agent/seatCorpus';
+import { readSeatNotes, seatCorpusAdapter, writeSeatNotes } from '../agent/seatCorpusStore';
 import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, readSeatPercept, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
 import { claimHolder, setClaimActiveModel, subscribeClaims } from '../agent/claims';
 import {
@@ -4230,6 +4231,8 @@ export default function AppFrame() {
     const seat = createAgentSeat({
       partPercept: () => seatPartPercept(modelId),
       readSkillDoc: readSeatCorpusDoc,
+      noteState: { read: (model) => readSeatNotes(model), write: (model, book) => writeSeatNotes(model, book) },
+      corpus: seatCorpusAdapter,
       shellAction: (action, args) => seatShellActionRef.current(action, args, modelId),
       persist: () => saveModelDocumentNow(modelId, 'Saved by Agent Seat (background)'),
       shotOffscreen: (path, width, height, pose) =>

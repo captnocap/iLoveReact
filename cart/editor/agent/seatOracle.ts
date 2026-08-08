@@ -24,6 +24,15 @@
 // Pure by construction: doc text arrives through a reader function and model facts
 // through a plain record, so the whole router is testable without a live editor.
 
+import {
+  articulationExemption,
+  gradeArticulation,
+  gradeDimensions,
+  gradeNaming,
+  gradeTriangleBudget,
+  type ClassSpec,
+} from './seatClassSpec';
+
 export const ORACLE_PHASES = [
   'setup', 'blockout', 'topology', 'retopo', 'naming',
   'uv-skin', 'generate', 'map-back', 'variants', 'rig', 'finish',
@@ -120,6 +129,12 @@ export type OracleFacts = {
     intersectingFaces: number | undefined;
     unreachableFaces: number | undefined;
   } | null;
+  /** The class this task was matched to, with its spec derived from approved exemplars.
+   *  Null when no class matched or the class has no approved exemplars yet — a task
+   *  with no spec is graded on the universal checks alone, never on invented bounds. */
+  classSpec: ClassSpec | null;
+  /** Live shapes the class checks read. Null when nothing is live. */
+  shape: { bbox: [number, number, number, number, number, number] | null; regionNames: string[]; partNames: string[] } | null;
   claimed: boolean | null;
   /** From `package diff` — null when the shell lane was not consulted (the ambient
    *  per-reply counter deliberately does not pay for a disk read). */
@@ -272,6 +287,34 @@ const CHECKS: Record<string, CheckSpec> = {
         ? { pass: true, detail: 'saved RJMD, mount input, and resident semantics agree' }
         : { pass: false, detail: 'semantic-status is not healthy — names will not survive a cold restart' },
   },
+  'class-dimensions': {
+    id: 'class-dimensions', verified: 'host',
+    evaluate: (facts) => {
+      if (!facts.classSpec || !facts.shape) return { pass: null, detail: 'no class spec' };
+      const verdict = gradeDimensions(facts.classSpec, facts.shape.bbox);
+      return verdict ?? { pass: null, detail: 'the class spec carries no dimensions' };
+    },
+  },
+  'class-triangle-budget': {
+    id: 'class-triangle-budget', verified: 'host',
+    evaluate: (facts) => (facts.classSpec && facts.model
+      ? gradeTriangleBudget(facts.classSpec, facts.model.faces)
+      : { pass: null, detail: 'no class spec' }),
+  },
+  'class-articulation': {
+    id: 'class-articulation', verified: 'host',
+    evaluate: (facts) => {
+      if (!facts.classSpec || !facts.shape) return { pass: null, detail: 'no class spec' };
+      const verdict = gradeArticulation(facts.classSpec, facts.shape.partNames);
+      return verdict ?? { pass: null, detail: 'the class spec names no articulation parts' };
+    },
+  },
+  'class-naming': {
+    id: 'class-naming', verified: 'host',
+    evaluate: (facts) => (facts.classSpec && facts.shape
+      ? gradeNaming(facts.classSpec, facts.shape.regionNames)
+      : { pass: null, detail: 'no class spec' }),
+  },
   'scale-declared': attested('scale-declared', 'the model\'s intended real-world size in METERS is stated (1 unit = 1 meter)'),
   'proportions-declared': attested('proportions-declared', 'major parts and their meter dimensions are blocked out before detail'),
   'junctions-resolved': attested('junctions-resolved', 'every junction is joined by geometry — mating faces deleted on both sides, openings bridged, seams welded'),
@@ -366,8 +409,25 @@ export const PHASE_CHECKLISTS: Record<OraclePhase, string[]> = {
 
 // ── evaluation + state ────────────────────────────────────────────────────────
 
+/** Class-scoped criteria, appended to a phase's universal ones when a spec exists.
+ *  Budget and scale are graded DURING blockout rather than at the end, because a model
+ *  that is 4x oversized or ten times over budget is cheapest to fix before detail. */
+const CLASS_PHASE_CHECKS: Partial<Record<OraclePhase, string[]>> = {
+  blockout: ['class-dimensions', 'class-triangle-budget'],
+  topology: ['class-articulation', 'class-triangle-budget'],
+  retopo: ['class-triangle-budget'],
+  naming: ['class-naming'],
+  finish: ['class-dimensions', 'class-triangle-budget'],
+};
+
+export function checksForPhase(phase: OraclePhase, facts: OracleFacts): string[] {
+  const universal = PHASE_CHECKS[phase] ?? [];
+  if (!facts.classSpec) return universal;
+  return [...universal, ...(CLASS_PHASE_CHECKS[phase] ?? [])];
+}
+
 export function evaluatePhase(phase: OraclePhase, facts: OracleFacts): OracleCheck[] {
-  return (PHASE_CHECKS[phase] ?? []).map((id) => {
+  return checksForPhase(phase, facts).map((id) => {
     const spec = CHECKS[id];
     if (!spec) return { id, verified: 'agent-attest' as const, pass: null, detail: 'unknown check' };
     const outcome = spec.evaluate(facts);
@@ -384,6 +444,9 @@ export function blockedCount(checks: readonly OracleCheck[]): number {
 export type OracleSession = {
   task: string;
   planId: string;
+  /** Set when the task matched a corpus class. The spec itself is re-derived from the
+   *  approved exemplars on every read, so a session never carries a stale distribution. */
+  classId: string | null;
   phases: OraclePhase[];
   phaseIndex: number;
   attest: Record<string, string>;
@@ -392,7 +455,7 @@ export type OracleSession = {
 
 export function startSession(task: string): OracleSession {
   const { plan, matched } = classifyTask(task);
-  return { task: String(task ?? '').trim(), planId: plan.id, phases: [...plan.phases], phaseIndex: 0, attest: {}, matchedSignal: matched };
+  return { task: String(task ?? '').trim(), planId: plan.id, classId: null, phases: [...plan.phases], phaseIndex: 0, attest: {}, matchedSignal: matched };
 }
 
 export function currentPhase(session: OracleSession): OraclePhase {
@@ -406,6 +469,10 @@ export function isComplete(session: OracleSession): boolean {
 export type OracleView = {
   task: string;
   plan: string;
+  classId: string | null;
+  /** The one thing a spec changes about the finish gate, said in words so an agent
+   *  does not have to infer it from a part list. */
+  articulation: string;
   phase: OraclePhase | null;
   phases: OraclePhase[];
   position: string;
@@ -423,6 +490,8 @@ export function viewSession(session: OracleSession, facts: OracleFacts): OracleV
   return {
     task: session.task,
     plan: session.planId,
+    classId: session.classId,
+    articulation: articulationExemption(facts.classSpec),
     phase,
     phases: session.phases,
     position: complete
