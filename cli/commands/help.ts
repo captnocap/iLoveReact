@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'clean', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'clean', 'orphans', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -32,7 +32,8 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       '     re-pushes on every save.',
       '',
       'TSX / TS edits hot-reload in ~300ms. Zig / framework / build.zig',
-      'edits require a rebuild.',
+      'edits compile in the background, then wait for explicit approval in',
+      'the editor before any native module activation or host restart.',
       '',
       '--tui (alias --headless) runs the headless substrate; --gui is the',
       'default unless cart.json declares "surface": "tui".',
@@ -151,6 +152,30 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       'a .cls.ts classifier sheet. Subcommands handle migration, renaming,',
       'manual classifier insertion, partial-pattern mining, and theme-token',
       'suggestions.',
+    ],
+  },
+  orphans: {
+    summary: 'find dev hosts nothing is attached to, and retire them by exact pid',
+    usage: ['rjit orphans', 'rjit orphans --kill', 'rjit orphans --json'],
+    detail: [
+      'A `rjit dev` run that dies without taking its host down leaves the host',
+      'running, reparented to init. It holds no window and serves no socket, so',
+      'it is invisible — nine had accumulated over six days holding 4.7GB before',
+      'anyone noticed (req_4074).',
+      '',
+      'A pid is only called an orphan when THREE facts agree: reparented to init,',
+      'not the dev socket listener, and holding no dmabuf or display-server handle.',
+      'Anything failing one of them is kept, and the report says what kept it.',
+      '',
+      'There is deliberately no pattern form. `pkill -f <repo path>` matches the',
+      'polling shell that is running it and cascades — that is what logged the user',
+      'out of their desktop and killed all 14 worker panes on 2026-04-22. This',
+      'command emits exact numeric pids and signals them one at a time, re-checking',
+      'each immediately before it does.',
+      '',
+      'The editor shows the same finding as a notice; approving it there writes a',
+      'one-shot token the dev supervisor acts on, so the editor never signals',
+      'anything itself.',
     ],
   },
   clean: {

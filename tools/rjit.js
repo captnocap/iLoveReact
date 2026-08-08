@@ -859,212 +859,237 @@
     sides: 8,
     smoothShading: true
   };
-  function ringVerts(r, sides) {
-    const out2 = [];
-    const t = r.twist ?? 0;
-    for (let i = 0; i < sides; i++) {
-      const a = -Math.PI / 2 + t + i / sides * Math.PI * 2;
-      const x = r.cx + Math.cos(a) * r.rx;
-      const z = r.cz + Math.sin(a) * r.rz;
-      out2.push([x, r.y, z]);
-    }
-    return out2;
-  }
-  function cross(a, b) {
-    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  var HUMANOID_ATLAS = {
+    head: { u0: 0, u1: 0.5, v0: 0.5, v1: 0 },
+    arms: { u0: 0.5, u1: 1, v0: 0, v1: 0.5 },
+    torso: { u0: 0, u1: 0.5, v0: 1, v1: 0.5 },
+    legs: { u0: 0.5, u1: 1, v0: 0.5, v1: 1 }
+  };
+  var clamp01 = (value) => Math.max(0, Math.min(1, value));
+  function dot(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   }
   function sub(a, b) {
     return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
   }
-  function normalize3(v) {
-    const L = Math.hypot(v[0], v[1], v[2]) || 1;
-    return [v[0] / L, v[1] / L, v[2] / L];
+  function cross(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
   }
-  var HUMANOID_ATLAS = {
-    head: { u0: 0, u1: 0.5, v0: 0.5, v1: 0 },
-    // top-left, flipped (crown→image top)
-    arms: { u0: 0.5, u1: 1, v0: 0, v1: 0.5 },
-    // top-right (shoulder→top, tip→middle)
-    torso: { u0: 0, u1: 0.5, v0: 1, v1: 0.5 },
-    // bottom-left, flipped (hip→image bottom)
-    legs: { u0: 0.5, u1: 1, v0: 0.5, v1: 1 }
-    // bottom-right (hip→middle, toe→image bottom)
-  };
-  function emitSweep(g, rings, sides, smooth, rect) {
-    const ringPts = rings.map((r) => ringVerts(r, sides));
-    const numRings = ringPts.length;
-    const descending = rings.length >= 2 && rings[1].y <= rings[0].y;
-    const faceN = [];
-    for (let i = 0; i < numRings - 1; i++) {
-      const a = ringPts[i];
-      const b = ringPts[i + 1];
-      const row = [];
-      for (let s = 0; s < sides; s++) {
-        const s2 = (s + 1) % sides;
-        const p0 = a[s];
-        const p1 = a[s2];
-        const p3 = b[s];
-        const e1 = sub(p1, p0);
-        const e2 = sub(p3, p0);
-        const n = normalize3(descending ? cross(e1, e2) : cross(e2, e1));
-        row.push(n);
+  function normalize2(v) {
+    const length = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / length, v[1] / length, v[2] / length];
+  }
+  function ellipsoid(role, center, radii) {
+    return {
+      role,
+      metric(point2) {
+        const x = (point2[0] - center[0]) / radii[0];
+        const y = (point2[1] - center[1]) / radii[1];
+        const z = (point2[2] - center[2]) / radii[2];
+        return Math.hypot(x, y, z);
       }
-      faceN.push(row);
-    }
-    let vertN = null;
-    if (smooth) {
-      vertN = [];
-      for (let i = 0; i < numRings; i++) {
-        const row = [];
-        for (let s = 0; s < sides; s++) {
-          const sPrev = (s + sides - 1) % sides;
-          let nx = 0, ny = 0, nz = 0;
-          const acc = (qi, qs) => {
-            if (qi < 0 || qi >= faceN.length) return;
-            const n = faceN[qi][qs];
-            nx += n[0];
-            ny += n[1];
-            nz += n[2];
-          };
-          acc(i - 1, sPrev);
-          acc(i - 1, s);
-          acc(i, sPrev);
-          acc(i, s);
-          const L = Math.hypot(nx, ny, nz);
-          row.push(L > 1e-6 ? [nx / L, ny / L, nz / L] : [0, 1, 0]);
+    };
+  }
+  function taperedCapsule(role, from, to, fromRadius, toRadius) {
+    const axis = sub(to, from);
+    const axisLengthSquared = Math.max(1e-12, dot(axis, axis));
+    return {
+      role,
+      metric(point2) {
+        const t = clamp01(dot(sub(point2, from), axis) / axisLengthSquared);
+        const center = [
+          from[0] + axis[0] * t,
+          from[1] + axis[1] * t,
+          from[2] + axis[2] * t
+        ];
+        const radius = fromRadius + (toRadius - fromRadius) * t;
+        return Math.hypot(point2[0] - center[0], point2[1] - center[1], point2[2] - center[2]) / radius;
+      }
+    };
+  }
+  function authoredShapes(params) {
+    const h = Math.max(0.4, params.height);
+    const thickness = Math.max(0.45, params.limbThickness);
+    const shoulderHalf = Math.max(h * 0.13, params.shoulderWidth * 0.5);
+    const hipHalf = Math.max(h * 0.075, params.hipWidth * 0.5);
+    const limb = h * 0.044 * thickness;
+    const sideShapes = (sign) => {
+      const side = sign < 0 ? "left" : "right";
+      const shoulder = [sign * shoulderHalf * 0.92, h * 0.72, 0];
+      const elbow = [sign * (shoulderHalf + h * 0.018), h * 0.555, 0];
+      const wrist = [sign * (shoulderHalf + h * 0.035), h * 0.385, h * 6e-3];
+      const palm = [sign * (shoulderHalf + h * 0.039), h * 0.335, h * 0.012];
+      const fingerTip = [sign * (shoulderHalf + h * 0.043), h * 0.285, h * 0.018];
+      const hip = [sign * hipHalf * 0.58, h * 0.43, 0];
+      const knee = [sign * hipHalf * 0.64, h * 0.225, h * 4e-3];
+      const ankle = [sign * hipHalf * 0.67, h * 0.07, h * 0.025];
+      return [
+        taperedCapsule({ role: "clavicle", side }, [sign * h * 0.035, h * 0.725, 0], shoulder, h * 0.043, h * 0.04),
+        taperedCapsule({ role: "upper_arm", side }, shoulder, elbow, limb * 1.15, limb),
+        taperedCapsule({ role: "lower_arm", side }, elbow, wrist, limb, limb * 0.75),
+        taperedCapsule({ role: "hand", side }, wrist, palm, limb * 0.82, limb * 0.9),
+        taperedCapsule({ role: "fingers", side }, palm, fingerTip, limb * 0.67, limb * 0.42),
+        taperedCapsule({ role: "upper_leg", side }, hip, knee, limb * 1.45, limb * 1.17),
+        taperedCapsule({ role: "lower_leg", side }, knee, ankle, limb * 1.14, limb * 0.84),
+        ellipsoid({ role: "foot", side }, [ankle[0], h * 0.052, h * 0.075], [limb * 1.02, h * 0.047, h * 0.095]),
+        ellipsoid({ role: "toes", side }, [ankle[0], h * 0.043, h * 0.145], [limb * 0.92, h * 0.035, h * 0.065])
+      ];
+    };
+    return [
+      ellipsoid({ role: "pelvis" }, [0, h * 0.44, 0], [hipHalf * 1.2, h * 0.09, hipHalf * 0.9]),
+      ellipsoid({ role: "abdomen" }, [0, h * 0.545, 0], [hipHalf * 1.12, h * 0.125, hipHalf * 0.82]),
+      ellipsoid({ role: "chest" }, [0, h * 0.655, 0], [shoulderHalf, h * 0.14, shoulderHalf * 0.62]),
+      taperedCapsule({ role: "neck" }, [0, h * 0.735, 0], [0, h * 0.805, h * 4e-3], h * 0.055, h * 0.052),
+      ellipsoid(
+        { role: "head" },
+        [0, h * 0.89, h * 8e-3],
+        [Math.max(params.headSize, h * 0.1), h * 0.112, Math.max(params.headSize * 0.96, h * 0.095)]
+      ),
+      ...sideShapes(-1),
+      ...sideShapes(1)
+    ];
+  }
+  var cellKey = (x, y, z) => `${x}:${y}:${z}`;
+  var vertexKey = cellKey;
+  function atlasFor(role) {
+    if (role.role === "head" || role.role === "neck") return HUMANOID_ATLAS.head;
+    if (role.role === "clavicle" || role.role === "upper_arm" || role.role === "lower_arm" || role.role === "hand" || role.role === "fingers") return HUMANOID_ATLAS.arms;
+    if (role.role === "upper_leg" || role.role === "lower_leg" || role.role === "foot" || role.role === "toes") return HUMANOID_ATLAS.legs;
+    return HUMANOID_ATLAS.torso;
+  }
+  function uvFor(role, point2, height) {
+    const rect = atlasFor(role);
+    const around = (Math.atan2(point2[0], -point2[2]) / (Math.PI * 2) + 1) % 1;
+    const down = clamp01(1 - point2[1] / height);
+    return [
+      rect.u0 + around * (rect.u1 - rect.u0),
+      rect.v0 + down * (rect.v1 - rect.v0)
+    ];
+  }
+  var FACE_DIRECTIONS = [
+    { neighbor: [1, 0, 0], corners: (x, y, z) => [[x + 1, y, z], [x + 1, y + 1, z], [x + 1, y + 1, z + 1], [x + 1, y, z + 1]] },
+    { neighbor: [-1, 0, 0], corners: (x, y, z) => [[x, y, z + 1], [x, y + 1, z + 1], [x, y + 1, z], [x, y, z]] },
+    { neighbor: [0, 1, 0], corners: (x, y, z) => [[x, y + 1, z + 1], [x + 1, y + 1, z + 1], [x + 1, y + 1, z], [x, y + 1, z]] },
+    { neighbor: [0, -1, 0], corners: (x, y, z) => [[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]] },
+    { neighbor: [0, 0, 1], corners: (x, y, z) => [[x, y, z + 1], [x + 1, y, z + 1], [x + 1, y + 1, z + 1], [x, y + 1, z + 1]] },
+    { neighbor: [0, 0, -1], corners: (x, y, z) => [[x + 1, y, z], [x, y, z], [x, y + 1, z], [x + 1, y + 1, z]] }
+  ];
+  function generateLogical(params) {
+    const height = Math.max(0.4, params.height);
+    const verticalCells = Math.max(28, Math.min(48, Math.round(Math.max(6, params.sides) * 4)));
+    const cell = height / verticalCells;
+    const shapes = authoredShapes(params);
+    const maxX = Math.max(params.shoulderWidth * 0.72, params.hipWidth, height * 0.27);
+    const minXCell = Math.floor(-maxX / cell) - 1;
+    const maxXCell = Math.ceil(maxX / cell) + 1;
+    const minZCell = Math.floor(-height * 0.16 / cell) - 1;
+    const maxZCell = Math.ceil(height * 0.24 / cell) + 1;
+    const occupied = /* @__PURE__ */ new Map();
+    for (let y = 0; y < verticalCells + 1; y += 1) {
+      for (let x = minXCell; x < maxXCell; x += 1) {
+        for (let z = minZCell; z < maxZCell; z += 1) {
+          const point2 = [(x + 0.5) * cell, (y + 0.5) * cell, (z + 0.5) * cell];
+          let best = null;
+          let bestMetric = Infinity;
+          for (const shape of shapes) {
+            const metric = shape.metric(point2);
+            if (metric < bestMetric) {
+              best = shape;
+              bestMetric = metric;
+            }
+          }
+          if (best && bestMetric <= 1) occupied.set(cellKey(x, y, z), { x, y, z, role: best.role });
         }
-        vertN.push(row);
       }
     }
-    const uAt = (s) => rect.u0 + s / sides * (rect.u1 - rect.u0);
-    const vAt = (i) => numRings > 1 ? rect.v0 + i / (numRings - 1) * (rect.v1 - rect.v0) : rect.v0;
-    for (let i = 0; i < numRings - 1; i++) {
-      const a = ringPts[i];
-      const b = ringPts[i + 1];
-      for (let s = 0; s < sides; s++) {
-        const s2 = (s + 1) % sides;
-        const p0 = a[s];
-        const p1 = a[s2];
-        const p2 = b[s2];
-        const p3 = b[s];
-        const fn = faceN[i][s];
-        const n0 = vertN ? vertN[i][s] : fn;
-        const n1 = vertN ? vertN[i][s2] : fn;
-        const n2 = vertN ? vertN[i + 1][s2] : fn;
-        const n3 = vertN ? vertN[i + 1][s] : fn;
-        const uv0 = [uAt(s), vAt(i)];
-        const uv1 = [uAt(s + 1), vAt(i)];
-        const uv2 = [uAt(s + 1), vAt(i + 1)];
-        const uv3 = [uAt(s), vAt(i + 1)];
-        if (descending) {
-          g.tri(p0, n0, uv0, p1, n1, uv1, p2, n2, uv2);
-          g.tri(p0, n0, uv0, p2, n2, uv2, p3, n3, uv3);
-        } else {
-          g.tri(p0, n0, uv0, p3, n3, uv3, p2, n2, uv2);
-          g.tri(p0, n0, uv0, p2, n2, uv2, p1, n1, uv1);
+    const verts = [];
+    const vertexIds = /* @__PURE__ */ new Map();
+    const intern = (grid) => {
+      const key2 = vertexKey(grid[0], grid[1], grid[2]);
+      const prior = vertexIds.get(key2);
+      if (prior !== void 0) return prior;
+      const id = verts.length;
+      verts.push([grid[0] * cell, grid[1] * cell, grid[2] * cell]);
+      vertexIds.set(key2, id);
+      return id;
+    };
+    const faces = [];
+    for (const cellRow of occupied.values()) {
+      for (const direction of FACE_DIRECTIONS) {
+        const nx = cellRow.x + direction.neighbor[0];
+        const ny = cellRow.y + direction.neighbor[1];
+        const nz = cellRow.z + direction.neighbor[2];
+        if (occupied.has(cellKey(nx, ny, nz))) continue;
+        const grids = direction.corners(cellRow.x, cellRow.y, cellRow.z);
+        const loop = grids.map(intern);
+        const uv2 = loop.map((id) => uvFor(cellRow.role, verts[id], height));
+        faces.push({ loop, uv: uv2, semanticRole: cellRow.role });
+      }
+    }
+    return { verts, faces };
+  }
+  function generate11(params) {
+    const logical = generateLogical(params);
+    const faceNormals = logical.faces.map((face) => {
+      const a = logical.verts[face.loop[0]];
+      const b = logical.verts[face.loop[1]];
+      const c = logical.verts[face.loop[2]];
+      return normalize2(cross(sub(b, a), sub(c, a)));
+    });
+    const incident = /* @__PURE__ */ new Map();
+    logical.faces.forEach((face, faceId) => {
+      for (const vertexId of face.loop) {
+        const rows = incident.get(vertexId) ?? [];
+        rows.push(faceId);
+        incident.set(vertexId, rows);
+      }
+    });
+    const smoothNormal = (vertexId) => {
+      let x = 0, y = 0, z = 0;
+      for (const faceId of incident.get(vertexId) ?? []) {
+        const normal = faceNormals[faceId];
+        x += normal[0];
+        y += normal[1];
+        z += normal[2];
+      }
+      return normalize2([x, y, z]);
+    };
+    const render = [];
+    const cornerLogicalIds = [];
+    const triangleLogicalIndices = [];
+    const triangleFaceIds = [];
+    let maxRadiusSquared = 0;
+    logical.faces.forEach((face, faceId) => {
+      const triangles = [[0, 1, 2], [0, 2, 3]];
+      for (const triangle of triangles) {
+        for (const localCorner of triangle) {
+          const logicalId = face.loop[localCorner];
+          const position = logical.verts[logicalId];
+          const normal = params.smoothShading ? smoothNormal(logicalId) : faceNormals[faceId];
+          const uv2 = face.uv[localCorner];
+          render.push(position[0], position[1], position[2], normal[0], normal[1], normal[2], uv2[0], uv2[1]);
+          cornerLogicalIds.push(logicalId);
+          triangleLogicalIndices.push(logicalId);
+          maxRadiusSquared = Math.max(maxRadiusSquared, dot(position, position));
         }
+        triangleFaceIds.push(faceId);
       }
-    }
-  }
-  function emitCap(g, ring, sides, up, rect, vEdge) {
-    const pts = ringVerts(ring, sides);
-    const center = [ring.cx, ring.y, ring.cz];
-    const n = up ? [0, 1, 0] : [0, -1, 0];
-    const perimeterV = vEdge === "v0" ? rect.v0 : rect.v1;
-    const dv = (rect.v1 - rect.v0) * 0.08 * (vEdge === "v0" ? 1 : -1);
-    const centerUV = [(rect.u0 + rect.u1) * 0.5, perimeterV + dv];
-    const uAt = (s) => rect.u0 + s / sides * (rect.u1 - rect.u0);
-    for (let s = 0; s < sides; s++) {
-      const s2 = (s + 1) % sides;
-      const uv_s = [uAt(s), perimeterV];
-      const uv_s2 = [uAt(s + 1), perimeterV];
-      if (up) {
-        g.tri(center, n, centerUV, pts[s2], n, uv_s2, pts[s], n, uv_s);
-      } else {
-        g.tri(center, n, centerUV, pts[s], n, uv_s, pts[s2], n, uv_s2);
-      }
-    }
-  }
-  function generate11(p) {
-    const g = mesh();
-    const sides = Math.max(4, p.sides | 0);
-    const t = p.limbThickness;
-    const H = p.height;
-    const hipY = H * 0.46;
-    const waistY = H * 0.54;
-    const chestY = H * 0.66;
-    const shoulderY = H * 0.74;
-    const neckY = H * 0.78;
-    const chinY = H * 0.83;
-    const faceY = H * 0.92;
-    const crownY = H * 1;
-    const shoulderHalf = p.shoulderWidth * 0.5;
-    const hipHalf = p.hipWidth * 0.5;
-    const neckRing = { y: neckY, cx: 0, cz: 0, rx: H * 0.07, rz: H * 0.06 };
-    const bodyRings = [
-      { y: hipY, cx: 0, cz: 0, rx: hipHalf * 1.08, rz: hipHalf * 0.85 },
-      // hip
-      { y: waistY, cx: 0, cz: 0, rx: hipHalf * 1.02, rz: hipHalf * 0.82 },
-      // waist (no narrowing — straight column)
-      { y: shoulderY, cx: 0, cz: 0, rx: shoulderHalf, rz: shoulderHalf * 0.62 },
-      // shoulder
-      neckRing
-    ];
-    const headRings = [
-      neckRing,
-      { y: chinY, cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 },
-      // jaw
-      { y: faceY, cx: 0, cz: 0.01, rx: p.headSize * 1, rz: p.headSize * 1 },
-      // face (widest)
-      { y: H * 0.96, cx: 0, cz: 0, rx: p.headSize * 0.7, rz: p.headSize * 0.7 },
-      // upper-skull dome
-      { y: crownY, cx: 0, cz: 0, rx: p.headSize * 0.22, rz: p.headSize * 0.22 }
-      // crown (near-point)
-    ];
-    emitSweep(g, bodyRings, sides, p.smoothShading, HUMANOID_ATLAS.torso);
-    emitSweep(g, headRings, sides, p.smoothShading, HUMANOID_ATLAS.head);
-    emitCap(g, headRings[headRings.length - 1], sides, true, HUMANOID_ATLAS.head, "v0");
-    const legRings = (sx) => [
-      { y: hipY + 0.04, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
-      // root inside trunk
-      { y: hipY - H * 0.05, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
-      // upper thigh
-      { y: hipY - H * 0.18, cx: sx, cz: 0, rx: H * 0.078 * t, rz: H * 0.078 * t },
-      // knee
-      { y: hipY - H * 0.34, cx: sx, cz: 0.01, rx: H * 0.07 * t, rz: H * 0.07 * t },
-      // ankle
-      { y: hipY - H * 0.39, cx: sx, cz: 0.06, rx: H * 0.07 * t, rz: H * 0.14 * t },
-      // foot (forward-stretched, no X widen)
-      { y: hipY - H * 0.4, cx: sx, cz: 0.1, rx: H * 0.05 * t, rz: H * 0.09 * t }
-      // toe (taper forward + down)
-    ];
-    const legXOffset = hipHalf * 0.55;
-    for (const sx of [-legXOffset, legXOffset]) {
-      const rings = legRings(sx);
-      emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.legs);
-      emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.legs, "v1");
-    }
-    const armRings = (sx) => [
-      { y: shoulderY, cx: sx * 0.55, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
-      // root inside trunk
-      { y: shoulderY - H * 0.04, cx: sx, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
-      // shoulder bulge
-      { y: shoulderY - H * 0.16, cx: sx, cz: 0, rx: H * 0.062 * t, rz: H * 0.062 * t },
-      // bicep
-      { y: shoulderY - H * 0.3, cx: sx, cz: 0, rx: H * 0.055 * t, rz: H * 0.055 * t },
-      // forearm
-      { y: shoulderY - H * 0.4, cx: sx, cz: 0, rx: H * 0.045 * t, rz: H * 0.045 * t },
-      // wrist
-      { y: shoulderY - H * 0.43, cx: sx, cz: 0, rx: H * 0.02 * t, rz: H * 0.02 * t }
-      // arm end (near-point)
-    ];
-    const armX = shoulderHalf * 1.02;
-    for (const sx of [-armX, armX]) {
-      const rings = armRings(sx);
-      emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.arms);
-      emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.arms, "v1");
-    }
-    return g.build();
+    });
+    return {
+      positions: new Float32Array(render),
+      count: render.length / 8,
+      bounds: { radius: Math.sqrt(maxRadiusSquared) },
+      logicalVertices: new Float32Array(logical.verts.flat()),
+      logicalVertexCount: logical.verts.length,
+      renderCornerLogicalIds: new Uint32Array(cornerLogicalIds),
+      logicalTriangleIndices: new Uint32Array(triangleLogicalIndices),
+      renderTriangleLogicalFaceIds: new Uint32Array(triangleFaceIds),
+      logicalFaceRoles: logical.faces.map((face) => face.semanticRole)
+    };
   }
 
   // runtime/geometries/VoxelMesh.ts
@@ -1339,7 +1364,7 @@
       const cx = p.curve * (t * t * 0.7 + Math.sin(t * 2.8) * 0.05);
       return { r, cx };
     };
-    const ringVerts2 = (t) => {
+    const ringVerts = (t) => {
       const { r, cx } = at(t);
       const out2 = [];
       for (let s = 0; s <= sides; s += 1) {
@@ -1350,10 +1375,10 @@
       }
       return out2;
     };
-    let lower = ringVerts2(0);
+    let lower = ringVerts(0);
     for (let i = 1; i <= segs; i += 1) {
       const t = i / segs;
-      const upper = ringVerts2(t);
+      const upper = ringVerts(t);
       const v0 = (i - 1) / segs;
       const v1 = t;
       for (let s = 0; s < sides; s += 1) {
@@ -5142,16 +5167,25 @@ ${entry}
       }
     }
     const rjitHome = __env("RJIT_HOME") || __cwd();
+    const devCacheDomains = [".cache/zig/dev-core", ".cache/zig/dev-scene3d", ".cache/zig/dev-game"];
     if (drop) {
-      if (!fsExists(`${rjitHome}/.zig-cache`)) {
-        out("[clean] no local zig cache");
-        return 0;
+      if (fsExists(`${rjitHome}/.zig-cache`)) {
+        out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
+        const code = dropZigCache(rjitHome);
+        if (code !== 0) {
+          err(`[clean] failed (exit ${code})`);
+          return code || 1;
+        }
       }
-      out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
-      const code = dropZigCache(rjitHome);
-      if (code !== 0) {
-        err(`[clean] failed (exit ${code})`);
-        return code || 1;
+      for (const domain of devCacheDomains) {
+        const path = `${rjitHome}/${domain}`;
+        if (!fsExists(path)) continue;
+        out(`[clean] dropping whole ${domain} domain...`);
+        const removed = spawnSync("rm", ["-rf", "--", path]);
+        if (removed.code !== 0) {
+          err(`[clean] failed to drop ${domain} (exit ${removed.code})`);
+          return removed.code || 1;
+        }
       }
     } else {
       const maxGb = resolveCacheMaxGb();
@@ -5160,6 +5194,7 @@ ${entry}
       out("[clean] run `rjit clean --drop` to drop the cache now");
     }
     reportSize(rjitHome, ".zig-cache");
+    for (const domain of devCacheDomains) reportSize(rjitHome, domain);
     reportSize(rjitHome, "zig-out");
     return 0;
   }
@@ -5171,21 +5206,479 @@ ${entry}
     out(`[clean] ${rel3}: ${size}`);
   }
 
+  // cli/commands/orphans.ts
+  var orphans_exports = {};
+  __export(orphans_exports, {
+    run: () => run9
+  });
+
+  // cli/dev/orphan-hosts.ts
+  var DEV_HOST_BINARY = "zig-out/bin/reactjit-dev";
+  function parseDevHostProcesses(psOutput, binaryPath) {
+    const hosts = [];
+    for (const line of psOutput.split("\n")) {
+      const fields = line.trim().split(/\s+/);
+      if (fields.length < 6) continue;
+      if (fields[5] !== binaryPath) continue;
+      const pid = Number(fields[0]);
+      const ppid = Number(fields[1]);
+      const rssKb = Number(fields[2]);
+      if (!Number.isInteger(pid) || pid <= 1 || !Number.isInteger(ppid)) continue;
+      hosts.push({ pid, ppid, rssKb: Number.isFinite(rssKb) ? rssKb : 0, state: fields[3] ?? "", elapsed: fields[4] ?? "", startedAt: "" });
+    }
+    return hosts;
+  }
+  function parseSocketOwner(ssOutput, socketPath) {
+    for (const line of ssOutput.split("\n")) {
+      if (!line.includes(socketPath)) continue;
+      const match = /pid=(\d+)/.exec(line);
+      if (match) return Number(match[1]);
+    }
+    return null;
+  }
+  function classifyDevHosts(hosts, socketOwner, displayFdCount) {
+    const verdicts = hosts.map((host) => {
+      const keptBecause = [];
+      if (host.ppid !== 1) keptBecause.push(`its launcher is still alive (ppid ${host.ppid})`);
+      if (socketOwner !== null && host.pid === socketOwner) keptBecause.push("it owns the dev socket");
+      const fds = displayFdCount(host.pid);
+      if (fds > 0) keptBecause.push(`it holds ${fds} display/GPU handle${fds === 1 ? "" : "s"}`);
+      return { ...host, orphan: keptBecause.length === 0, keptBecause };
+    });
+    const orphans = verdicts.filter((row) => row.orphan);
+    return {
+      hosts: verdicts,
+      orphans,
+      live: verdicts.filter((row) => !row.orphan),
+      socketOwner,
+      reclaimableKb: orphans.reduce((sum, row) => sum + row.rssKb, 0)
+    };
+  }
+  function displayHandleCount(pid) {
+    const listed = spawnSync("ls", ["-l", `/proc/${pid}/fd`]);
+    if (listed.code !== 0) return 0;
+    let count = 0;
+    for (const line of (listed.stdout ?? "").split("\n")) {
+      if (/dmabuf|wayland|X11-unix/i.test(line)) count += 1;
+    }
+    return count;
+  }
+  function scanDevHosts2(rjitHome, socketPath) {
+    const binary = `${rjitHome}/${DEV_HOST_BINARY}`;
+    const listed = spawnSync("ps", ["-eo", "pid,ppid,rss,stat,etime,args", "--no-headers"]);
+    const hosts = parseDevHostProcesses(listed.stdout ?? "", binary);
+    const sockets = spawnSync("ss", ["-xlp"]);
+    const owner = parseSocketOwner(sockets.stdout ?? "", socketPath);
+    return classifyDevHosts(hosts, owner, displayHandleCount);
+  }
+  function killOrphanHosts2(rjitHome, socketPath, pids) {
+    const scan2 = scanDevHosts2(rjitHome, socketPath);
+    const stillOrphaned = new Set(scan2.orphans.map((row) => row.pid));
+    const outcomes = [];
+    for (const pid of pids) {
+      if (!Number.isInteger(pid) || pid <= 1) {
+        outcomes.push({ pid, ok: false, reason: "not a valid pid" });
+        continue;
+      }
+      if (!stillOrphaned.has(pid)) {
+        outcomes.push({ pid, ok: false, reason: "no longer classifies as an orphan \u2014 it was spared" });
+        continue;
+      }
+      const killed = spawnSync("kill", [String(pid)]);
+      outcomes.push(killed.code === 0 ? { pid, ok: true } : { pid, ok: false, reason: (killed.stderr ?? "").trim() || `kill exited ${killed.code}` });
+    }
+    return outcomes;
+  }
+  function formatGb(kb) {
+    return `${(kb / 1048576).toFixed(1)} GB`;
+  }
+
+  // cli/host/net.ts
+  var SocketError = class extends Error {
+  };
+  function tryUnixConnect(path) {
+    const fd = __unixConnect(path);
+    return fd < 0 ? null : fd;
+  }
+  function unixWrite(fd, data) {
+    const written = __unixWrite(fd, data);
+    if (written < 0) throw new SocketError(`write failed (fd=${fd})`);
+  }
+  function unixReadLine(fd, deadlineMs) {
+    let reply = "";
+    while (reply.indexOf("\n") === -1) {
+      const remaining = deadlineMs - __nowMs();
+      if (remaining <= 0) throw new SocketError("timeout");
+      const chunk = __unixReadAll(fd, remaining, 4096);
+      if (chunk === null) continue;
+      if (chunk === "") throw new SocketError("EOF before newline");
+      reply += chunk;
+    }
+    return reply.slice(0, reply.indexOf("\n"));
+  }
+  function unixClose(fd) {
+    __unixClose(fd);
+  }
+
+  // cli/dev/native-approval.ts
+  var NATIVE_APPROVAL_FILENAME = "dev-native-apply.json";
+  function nativeApprovalPath(rjitHome) {
+    return `${rjitHome}/.cache/${NATIVE_APPROVAL_FILENAME}`;
+  }
+  function changedNativeTiers(active, candidate) {
+    const changed = [];
+    if (active.core.hash !== candidate.core.hash) changed.push("core");
+    if (active.scene3d.hash !== candidate.scene3d.hash) changed.push("scene3d");
+    if (active.game.hash !== candidate.game.hash) changed.push("game");
+    return changed;
+  }
+  function sameNativeFingerprints(left, right) {
+    return left.core.hash === right.core.hash && left.scene3d.hash === right.scene3d.hash && left.game.hash === right.game.hash;
+  }
+  function nativeUpdateToken(fingerprints, scene3d, game, core = null) {
+    return [
+      "native-update-v1",
+      fingerprints.core.hash,
+      fingerprints.scene3d.hash,
+      fingerprints.game.hash,
+      scene3d.artifactHash,
+      game.artifactHash,
+      core?.artifactHash ?? "active-core"
+    ].join(":");
+  }
+  function parseNativeUpdateApproval(raw) {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed.token === "string" && parsed.token.startsWith("native-update-v1:") ? { token: parsed.token } : null;
+    } catch {
+      return null;
+    }
+  }
+  function nativeTierLabel(tier) {
+    return tier === "scene3d" ? "3D engine" : tier === "game" ? "game engine" : "core";
+  }
+
+  // cli/dev/rebuild-signal.ts
+  var DEV_SOCKET_PATH = __env("RJIT_DEV_SOCKET_PATH") || "/tmp/reactjit.sock";
+  var TIMEOUT_MS = 3e3;
+  var CHECKPOINT_TIMEOUT_MS = 5e3;
+  var HOTSTATE_SAVE_TIMEOUT_MS = 3e4;
+  function nativeBuildFingerprint(rjitHome) {
+    const manifest2 = spawnSync("sh", ["-c", nativeInputManifestScript(), "native-input-manifest", rjitHome]);
+    if (manifest2.code !== 0) {
+      throw new Error(`native input manifest failed
+${manifest2.stderr || manifest2.stdout}`);
+    }
+    const digest = spawnSync("sha256sum", [], manifest2.stdout);
+    if (digest.code !== 0) {
+      throw new Error(`native input digest failed
+${digest.stderr || digest.stdout}`);
+    }
+    const hash = digest.stdout.trim().split(/\s+/)[0] || "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`native input digest malformed: ${digest.stdout.trim()}`);
+    const inputCount = manifest2.stdout.split("\n").filter(Boolean).length;
+    return { hash, inputCount };
+  }
+  function nativeInputManifestScript() {
+    return `
+set -eu
+cd "$1"
+{
+  # framework/testing/** are zig 'test' modules pulled in ONLY by build.zig's
+  # test-* steps (b.addTest) - never by the 'app' step that builds the dev
+  # binary. Hashing them made any test-file touch (a test run, a git checkout,
+  # another worker editing tests) force a needless full dev rebuild on every
+  # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
+  find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
+  printf '%s\\n' build.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
+} | LC_ALL=C sort -u | while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  sha256sum "$f"
+done
+`;
+  }
+  function devBuildInfoPath(bin) {
+    return `${bin}.dev-build.json`;
+  }
+  function readDevBuildId(bin) {
+    const raw = tryFsRead(devBuildInfoPath(bin));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed.build_id === "string" ? parsed.build_id : null;
+    } catch {
+      return null;
+    }
+  }
+  function writeDevBuildInfo(bin, fingerprint) {
+    fsWrite(devBuildInfoPath(bin), `${JSON.stringify({
+      build_id: fingerprint.hash,
+      input_count: fingerprint.inputCount,
+      written_at: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2)}
+`);
+  }
+  function readDevHostInfo(socket = DEV_SOCKET_PATH) {
+    if (!fsExists(socket)) return null;
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return null;
+    try {
+      unixWrite(fd, "INFO\n");
+      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      const parsed = JSON.parse(line);
+      return typeof parsed.build_id === "string" ? parsed : null;
+    } catch {
+      return null;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function requestNativeReload(tier, hash, path, socket = DEV_SOCKET_PATH, timeoutMs = 1e4) {
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return "unreachable";
+    try {
+      unixWrite(fd, `NATIVE_RELOAD ${tier} ${hash} ${utf8ByteLength(path)}
+`);
+      unixWrite(fd, path);
+      const acknowledgement = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      if (!acknowledgement.startsWith("OK")) return "rejected";
+    } catch (error) {
+      if (error instanceof SocketError) return "unreachable";
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+    const deadline = __nowMs() + timeoutMs;
+    while (__nowMs() < deadline) {
+      const info = readDevHostInfo(socket);
+      if (!info) return "unreachable";
+      if (info.native_attempt_tier === tier && info.native_attempt_hash === hash) {
+        if (info.native_reload === "committed" && (tier === "scene3d" ? info.scene3d_hash : info.game_hash) === hash) return "committed";
+        if (info.native_reload === "restart_required") return "restart_required";
+        if (info.native_reload === "rejected") return "rejected";
+      }
+      __sleepMs(20);
+    }
+    return "timeout";
+  }
+  function requestDevCheckpoint(requestId, socket = DEV_SOCKET_PATH, timeoutMs = CHECKPOINT_TIMEOUT_MS) {
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return false;
+    try {
+      unixWrite(fd, `CHECKPOINT ${requestId}
+`);
+      const acknowledgement = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      if (!acknowledgement.startsWith("OK")) return false;
+    } catch (error) {
+      if (error instanceof SocketError) return false;
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+    const deadline = __nowMs() + timeoutMs;
+    while (__nowMs() < deadline) {
+      const info = readDevHostInfo(socket);
+      if (!info) return false;
+      if ((info.checkpoint_completed ?? 0) >= requestId) return true;
+      __sleepMs(10);
+    }
+    return false;
+  }
+  function saveDevHotState(path, socket = DEV_SOCKET_PATH) {
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return false;
+    try {
+      unixWrite(fd, `SAVE_HOTSTATE ${utf8ByteLength(path)}
+`);
+      unixWrite(fd, path);
+      return unixReadLine(fd, __nowMs() + HOTSTATE_SAVE_TIMEOUT_MS).trim().startsWith("OK");
+    } catch (error) {
+      if (error instanceof SocketError) return false;
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function sendRebuildNotice(stale, socket = DEV_SOCKET_PATH) {
+    const body = JSON.stringify({
+      id: "dev-host-stale",
+      type: "rebuild-required",
+      kind: "native-build-id-mismatch",
+      title: "Rebuild needed",
+      message: "The running dev host was built from different native engine or wire-format sources. Restart rjit dev before hot reload can continue.",
+      detail: `running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`,
+      persistent: true,
+      runningBuildId: stale.host.build_id,
+      currentBuildId: stale.current.hash,
+      inputCount: stale.current.inputCount
+    });
+    return sendDevNotice(body, socket);
+  }
+  function sendOrphanHostsNotice(orphans, reclaimableKb, token, approvalPath, socket = DEV_SOCKET_PATH) {
+    if (orphans.length === 0) return false;
+    const gb = (reclaimableKb / 1048576).toFixed(1);
+    const oldest = orphans.reduce((longest, row) => row.elapsed.length > longest.length ? row.elapsed : longest, "");
+    return sendDevNotice(JSON.stringify({
+      id: "dev-orphan-hosts",
+      type: "orphan-hosts",
+      kind: "orphan-hosts",
+      title: "Orphaned dev hosts",
+      message: `${orphans.length} dev host${orphans.length === 1 ? "" : "s"} kept running after their launcher exited. They hold no window and serve nothing.`,
+      detail: `${gb} GB held \xB7 oldest ${oldest} \xB7 this app is not among them`,
+      persistent: true,
+      token,
+      approvalPath,
+      pids: orphans.map((row) => row.pid),
+      reclaimableKb
+    }), socket);
+  }
+  function sendOrphanCleanupResultNotice(retired, attempted, socket = DEV_SOCKET_PATH) {
+    return sendDevNotice(JSON.stringify({
+      id: "dev-orphan-hosts-result",
+      type: "orphan-hosts-result",
+      kind: "orphan-hosts-result",
+      title: "Orphan cleanup finished",
+      message: retired === attempted ? `Retired ${retired} orphaned dev host${retired === 1 ? "" : "s"}` : `Retired ${retired} of ${attempted}; the rest were spared because they no longer looked orphaned`,
+      ok: retired > 0
+    }), socket);
+  }
+  function sendNativeUpdateReadyNotice(pending, approvalPath, socket = DEV_SOCKET_PATH) {
+    const labels = pending.changedTiers.map(nativeTierLabel);
+    return sendDevNotice(JSON.stringify({
+      id: "dev-native-update-ready",
+      type: "native-update-ready",
+      kind: "native-update-ready",
+      title: "Native update ready",
+      message: "Compilation finished. Keep working as long as you want; this update will not activate until you approve it.",
+      detail: `${labels.join(" + ")}${pending.changedTiers.includes("core") ? " \xB7 restart required" : " \xB7 activation may restart the host"}`,
+      persistent: true,
+      token: pending.token,
+      approvalPath,
+      changedTiers: pending.changedTiers
+    }), socket);
+  }
+  function sendNativeUpdateResultNotice(ok, message, socket = DEV_SOCKET_PATH) {
+    return sendDevNotice(JSON.stringify({
+      id: "dev-native-update-result",
+      type: "native-update-result",
+      kind: "native-update-result",
+      title: ok ? "Native update applied" : "Native update not applied",
+      message,
+      ok,
+      persistent: false
+    }), socket);
+  }
+  function sendDevNotice(body, socket) {
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return false;
+    try {
+      unixWrite(fd, `NOTICE ${utf8ByteLength(body)}
+`);
+      unixWrite(fd, body);
+      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      return line.startsWith("OK");
+    } catch (error) {
+      if (error instanceof SocketError) return false;
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function shortHash(hash) {
+    if (!hash) return "unknown";
+    return hash === "unknown" ? hash : hash.slice(0, 12);
+  }
+  function utf8ByteLength(value) {
+    let bytes = 0;
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code < 128) bytes += 1;
+      else if (code < 2048) bytes += 2;
+      else if (code >= 55296 && code <= 56319) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
+  // cli/commands/orphans.ts
+  function report(scan2) {
+    out(`[orphans] ${scan2.hosts.length} dev host${scan2.hosts.length === 1 ? "" : "s"} running \xB7 socket owner ${scan2.socketOwner ?? "none"}`);
+    for (const host of scan2.live) {
+      out(`[orphans]   KEEP pid ${host.pid} (${host.elapsed}, ${formatGb(host.rssKb)}) \u2014 ${host.keptBecause.join("; ")}`);
+    }
+    for (const host of scan2.orphans) {
+      out(`[orphans]   ORPHAN pid ${host.pid} (${host.elapsed}, ${formatGb(host.rssKb)}) \u2014 reparented to init, no socket, no window`);
+    }
+    if (scan2.orphans.length === 0) {
+      out("[orphans] nothing to retire");
+      return;
+    }
+    out(`[orphans] ${scan2.orphans.length} orphan${scan2.orphans.length === 1 ? "" : "s"} holding ${formatGb(scan2.reclaimableKb)}`);
+  }
+  async function run9(argv) {
+    let kill = false;
+    let json = false;
+    for (const arg of argv) {
+      if (arg === "--kill") kill = true;
+      else if (arg === "--json") json = true;
+      else {
+        err(`[orphans] unknown arg: ${arg}`);
+        err("Usage: rjit orphans [--kill] [--json]");
+        return 1;
+      }
+    }
+    const rjitHome = __env("RJIT_HOME") || __cwd();
+    const scan2 = scanDevHosts2(rjitHome, DEV_SOCKET_PATH);
+    if (!kill) {
+      if (json) out(JSON.stringify(scan2));
+      else report(scan2);
+      return 0;
+    }
+    if (scan2.orphans.length === 0) {
+      if (json) out(JSON.stringify({ killed: [], scan: scan2 }));
+      else out("[orphans] nothing to retire");
+      return 0;
+    }
+    const outcomes = killOrphanHosts2(rjitHome, DEV_SOCKET_PATH, scan2.orphans.map((row) => row.pid));
+    const retired = outcomes.filter((row) => row.ok);
+    if (json) {
+      out(JSON.stringify({ killed: outcomes, reclaimedKb: scan2.reclaimableKb }));
+    } else {
+      for (const outcome of outcomes) {
+        if (outcome.ok) out(`[orphans] retired pid ${outcome.pid}`);
+        else err(`[orphans] spared pid ${outcome.pid}: ${outcome.reason}`);
+      }
+      out(`[orphans] retired ${retired.length}/${outcomes.length}, reclaiming about ${formatGb(scan2.reclaimableKb)}`);
+    }
+    return retired.length === outcomes.length ? 0 : 1;
+  }
+
   // cli/commands/codegen-bindings.ts
   var codegen_bindings_exports = {};
   __export(codegen_bindings_exports, {
-    run: () => run9
+    run: () => run10
   });
-  async function run9(argv) {
+  var HUMANOID_SOURCE_PATH = "runtime/skeleton/data/humanoid-v1.json";
+  var HUMANOID_TS_PATH = "runtime/skeleton/generated/humanoid-v1.ts";
+  var HUMANOID_ZIG_PATH = "framework/skeleton/generated/humanoid_v1.zig";
+  async function run10(argv) {
     const args = parseArgs(argv, { flags: { check: "bool", strict: "bool" } });
     const ingredients = loadIngredients();
+    const humanoid = loadHumanoidSource();
     const zig = emitZig2(ingredients);
     const dts = emitDts(ingredients);
     const json = emitJson(ingredients);
     const outputs = [
       { path: "framework/_generated_bindings.zig", content: zig },
       { path: "runtime/_generated_host_globals.d.ts", content: dts },
-      { path: "sdk/bindings.generated.json", content: json }
+      { path: "sdk/bindings.generated.json", content: json },
+      { path: HUMANOID_TS_PATH, content: emitHumanoidTs(humanoid) },
+      { path: HUMANOID_ZIG_PATH, content: emitHumanoidZig(humanoid) }
     ];
     if (args.flags.check) {
       let clean = true;
@@ -5199,12 +5692,228 @@ ${entry}
       out("codegen-bindings: clean");
       return 0;
     }
+    ensureDirectory("runtime/skeleton/generated");
+    ensureDirectory("framework/skeleton/generated");
     for (const output of outputs) fsWrite(output.path, output.content);
     out(`codegen-bindings: wrote ${outputs.map((x) => x.path).join(", ")}`);
     if (args.flags.strict) {
       out("codegen-bindings: strict lints are not active until hook declarations land");
     }
     return 0;
+  }
+  function ensureDirectory(path) {
+    if (!fsExists(path)) fsMkdir(path);
+  }
+  function loadHumanoidSource() {
+    let parsed;
+    try {
+      parsed = JSON.parse(fsRead(HUMANOID_SOURCE_PATH));
+    } catch (error) {
+      throw new Error(`${HUMANOID_SOURCE_PATH}: ${error.message}`);
+    }
+    return validateHumanoidSource(parsed);
+  }
+  function validateHumanoidSource(value) {
+    const source = record(value, HUMANOID_SOURCE_PATH);
+    if (source.version !== 1) fail3("version must be 1");
+    if (source.id !== "humanoid-v1") fail3("id must be humanoid-v1");
+    if (!Array.isArray(source.bones) || source.bones.length !== 24) {
+      fail3("bones must contain exactly the canonical 24 entries");
+    }
+    const bones = source.bones.map((raw, index) => validateSourceBone(raw, index));
+    if (bones.length > 255) fail3("bone count exceeds the GPU palette limit of 255");
+    const byId = /* @__PURE__ */ new Map();
+    for (const bone of bones) {
+      if (!bone.id) fail3("bone ids must be non-empty");
+      if (byId.has(bone.id)) fail3(`duplicate bone id ${bone.id}`);
+      byId.set(bone.id, bone);
+    }
+    const roots = bones.filter((bone) => bone.parent == null);
+    if (roots.length !== 1 || roots[0].id !== "root") fail3("the sole root must have id root");
+    for (const bone of bones) {
+      if (bone.parent != null && !byId.has(bone.parent)) {
+        fail3(`unknown parent ${bone.parent} on ${bone.id}`);
+      }
+    }
+    for (const bone of bones) {
+      const seen = /* @__PURE__ */ new Set();
+      let cursor = bone;
+      while (cursor) {
+        if (seen.has(cursor.id)) fail3(`cycle at bone ${bone.id}`);
+        seen.add(cursor.id);
+        cursor = cursor.parent == null ? void 0 : byId.get(cursor.parent);
+      }
+    }
+    const childCounts = /* @__PURE__ */ new Map();
+    for (const bone of bones) childCounts.set(bone.id, 0);
+    for (const bone of bones) {
+      if (bone.parent != null) {
+        childCounts.set(bone.parent, childCounts.get(bone.parent) + 1);
+        if (lengthSquared(bone.transform.pos) <= 1e-12) {
+          fail3(`zero-length parent segment at ${bone.id}`);
+        }
+      }
+      if (bone.tip && lengthSquared(bone.tip) <= 1e-12) fail3(`zero-length tip at ${bone.id}`);
+    }
+    for (const bone of bones) {
+      if (childCounts.get(bone.id) === 0 && !bone.tip) {
+        fail3(`terminal bone ${bone.id} needs a non-zero local tip`);
+      }
+    }
+    if (!Array.isArray(source.semanticBindings)) fail3("semanticBindings must be an array");
+    const semanticBindings = source.semanticBindings.map((raw, index) => validateSemanticBinding(raw, index, byId));
+    validateSemanticCompleteness(semanticBindings);
+    const tuning = validateTuning(source.tuning);
+    return {
+      version: 1,
+      id: "humanoid-v1",
+      bones,
+      semanticBindings,
+      tuning
+    };
+  }
+  function validateSourceBone(value, index) {
+    const bone = record(value, `bones[${index}]`);
+    const id = stringValue(bone.id, `bones[${index}].id`);
+    const displayName = stringValue(bone.displayName, `${id}.displayName`);
+    const parent = bone.parent === null ? null : stringValue(bone.parent, `${id}.parent`);
+    const transform = record(bone.transform, `${id}.transform`);
+    const pos4 = vec3(transform.pos, `${id}.transform.pos`);
+    const rot = quat(transform.rot, `${id}.transform.rot`);
+    const scale = vec3(transform.scale, `${id}.transform.scale`);
+    if (scale.some((component) => Math.abs(component) <= 1e-12)) fail3(`${id}.transform.scale contains zero`);
+    const norm = Math.sqrt(rot.reduce((sum, component) => sum + component * component, 0));
+    if (Math.abs(norm - 1) > 1e-5) fail3(`${id}.transform.rot is not normalized`);
+    const tip = bone.tip === void 0 ? void 0 : vec3(bone.tip, `${id}.tip`);
+    const joint = bone.joint === void 0 ? void 0 : validateSourceJoint(bone.joint, id);
+    return { id, displayName, parent, transform: { pos: pos4, rot, scale }, tip, joint };
+  }
+  function validateSourceJoint(value, boneId) {
+    const joint = record(value, `${boneId}.joint`);
+    const kind = stringValue(joint.kind, `${boneId}.joint.kind`);
+    if (kind === "ball") {
+      return {
+        kind,
+        swingXDeg: range(joint.swingXDeg, `${boneId}.joint.swingXDeg`),
+        swingZDeg: range(joint.swingZDeg, `${boneId}.joint.swingZDeg`),
+        twistYDeg: range(joint.twistYDeg, `${boneId}.joint.twistYDeg`)
+      };
+    }
+    if (kind !== "hinge" && kind !== "slide" && kind !== "pivot" && kind !== "spin") {
+      fail3(`${boneId}.joint.kind is not supported`);
+    }
+    const axis = vec3(joint.axis, `${boneId}.joint.axis`);
+    if (lengthSquared(axis) <= 1e-12) fail3(`${boneId}.joint.axis is zero`);
+    return { kind, axis, limitsDeg: range(joint.limitsDeg, `${boneId}.joint.limitsDeg`) };
+  }
+  function validateSemanticBinding(value, index, bones) {
+    const binding = record(value, `semanticBindings[${index}]`);
+    const role = stringValue(binding.role, `semanticBindings[${index}].role`);
+    const boneId = stringValue(binding.boneId, `semanticBindings[${index}].boneId`);
+    if (!bones.has(boneId)) fail3(`semantic role ${role} references unknown bone ${boneId}`);
+    const centered = CENTER_ROLES.has(role);
+    const paired = PAIRED_ROLES.has(role);
+    if (!centered && !paired) fail3(`unknown humanoid semantic role ${role}`);
+    if (centered) {
+      if (binding.side !== void 0) fail3(`center role ${role} cannot have a side`);
+      return { role, boneId };
+    }
+    if (binding.side !== "left" && binding.side !== "right") fail3(`paired role ${role} needs left or right`);
+    return { role, side: binding.side, boneId };
+  }
+  var CENTER_ROLES = /* @__PURE__ */ new Set(["pelvis", "abdomen", "chest", "head", "neck"]);
+  var PAIRED_ROLES = /* @__PURE__ */ new Set([
+    "upper_arm",
+    "lower_arm",
+    "hand",
+    "upper_leg",
+    "lower_leg",
+    "foot",
+    "clavicle",
+    "fingers",
+    "toes"
+  ]);
+  var REQUIRED_CENTER_ROLES = ["pelvis", "abdomen", "chest", "head"];
+  var REQUIRED_PAIRED_ROLES = ["upper_arm", "lower_arm", "hand", "upper_leg", "lower_leg", "foot"];
+  function validateSemanticCompleteness(bindings) {
+    const keys = /* @__PURE__ */ new Set();
+    for (const binding of bindings) {
+      const key2 = `${binding.role}:${binding.side ?? "center"}`;
+      if (keys.has(key2)) fail3(`duplicate semantic seed ${key2}`);
+      keys.add(key2);
+    }
+    for (const role of REQUIRED_CENTER_ROLES) {
+      if (!keys.has(`${role}:center`)) fail3(`missing required semantic role ${role}`);
+    }
+    for (const role of REQUIRED_PAIRED_ROLES) {
+      for (const side of ["left", "right"]) {
+        if (!keys.has(`${role}:${side}`)) fail3(`missing required semantic role ${role}:${side}`);
+      }
+    }
+  }
+  function validateTuning(value) {
+    const tuning = record(value, "tuning");
+    const presets = record(tuning.bendPresetsDeg, "tuning.bendPresetsDeg");
+    const result = {
+      specimenSeparationBoundsWidth: finiteNumber(
+        tuning.specimenSeparationBoundsWidth,
+        "tuning.specimenSeparationBoundsWidth"
+      ),
+      bendPresetsDeg: {
+        shoulderAbduction: finiteNumber(presets.shoulderAbduction, "bendPresetsDeg.shoulderAbduction"),
+        elbowFlex: finiteNumber(presets.elbowFlex, "bendPresetsDeg.elbowFlex"),
+        wristFlex: finiteNumber(presets.wristFlex, "bendPresetsDeg.wristFlex"),
+        hipFlex: finiteNumber(presets.hipFlex, "bendPresetsDeg.hipFlex"),
+        kneeFlex: finiteNumber(presets.kneeFlex, "bendPresetsDeg.kneeFlex")
+      }
+    };
+    if (result.specimenSeparationBoundsWidth <= 0) fail3("specimen separation must be positive");
+    for (const [name, angle] of Object.entries(result.bendPresetsDeg)) {
+      if (angle < 0 || angle > 180) fail3(`bend preset ${name} is outside 0..180 degrees`);
+    }
+    return result;
+  }
+  function record(value, label) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) fail3(`${label} must be an object`);
+    return value;
+  }
+  function stringValue(value, label) {
+    if (typeof value !== "string" || value.length === 0) fail3(`${label} must be a non-empty string`);
+    return value;
+  }
+  function finiteNumber(value, label) {
+    if (typeof value !== "number" || !Number.isFinite(value)) fail3(`${label} must be finite`);
+    return value;
+  }
+  function vec3(value, label) {
+    if (!Array.isArray(value) || value.length !== 3) fail3(`${label} must have 3 components`);
+    return [
+      finiteNumber(value[0], `${label}[0]`),
+      finiteNumber(value[1], `${label}[1]`),
+      finiteNumber(value[2], `${label}[2]`)
+    ];
+  }
+  function quat(value, label) {
+    if (!Array.isArray(value) || value.length !== 4) fail3(`${label} must have 4 components`);
+    return [
+      finiteNumber(value[0], `${label}[0]`),
+      finiteNumber(value[1], `${label}[1]`),
+      finiteNumber(value[2], `${label}[2]`),
+      finiteNumber(value[3], `${label}[3]`)
+    ];
+  }
+  function range(value, label) {
+    const raw = record(value, label);
+    const min = finiteNumber(raw.min, `${label}.min`);
+    const max = finiteNumber(raw.max, `${label}.max`);
+    if (min > max) fail3(`${label} is inverted`);
+    return { min, max };
+  }
+  function lengthSquared(value) {
+    return value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
+  }
+  function fail3(message) {
+    throw new Error(`${HUMANOID_SOURCE_PATH}: ${message}`);
   }
   function loadIngredients() {
     const source = fsRead("framework/v8_ingredients.zig");
@@ -5309,6 +6018,141 @@ ${entry}
       }]))
     }, null, 2) + "\n";
   }
+  function emitHumanoidTs(source) {
+    const bones = source.bones.map((bone) => ({
+      id: bone.id,
+      displayName: bone.displayName,
+      parent: bone.parent,
+      transform: bone.transform,
+      ...bone.tip ? { tip: bone.tip } : {},
+      ...bone.joint ? { joint: runtimeJoint(bone.joint) } : {}
+    }));
+    return [
+      "// runtime/skeleton/generated/humanoid-v1.ts - DO NOT EDIT.",
+      `// Generated from ${HUMANOID_SOURCE_PATH} by \`rjit codegen-bindings\`.`,
+      "",
+      "import type { Bone, HumanoidRigTuning, HumanoidSemanticBinding, HumanoidTemplate } from '../schema';",
+      "",
+      `export const HUMANOID_V1_BONE_IDS = ${JSON.stringify(source.bones.map((bone) => bone.id), null, 2)} as const;`,
+      "export type HumanoidBoneId = typeof HUMANOID_V1_BONE_IDS[number];",
+      "",
+      `export const HUMANOID_V1_BONES: readonly Bone[] = ${JSON.stringify(bones, null, 2)};`,
+      "",
+      `export const HUMANOID_V1_SEMANTIC_BINDINGS: readonly HumanoidSemanticBinding[] = ${JSON.stringify(source.semanticBindings, null, 2)};`,
+      "",
+      `export const HUMANOID_RIG_TUNING: HumanoidRigTuning = Object.freeze(${JSON.stringify(source.tuning, null, 2)});`,
+      "",
+      "export const HUMANOID_V1: HumanoidTemplate = Object.freeze({",
+      "  version: 1,",
+      `  id: ${JSON.stringify(source.id)},`,
+      "  bones: HUMANOID_V1_BONES,",
+      "  semanticBindings: HUMANOID_V1_SEMANTIC_BINDINGS,",
+      "  tuning: HUMANOID_RIG_TUNING,",
+      "});",
+      ""
+    ].join("\n");
+  }
+  function runtimeJoint(joint) {
+    if (joint.kind === "ball") {
+      return {
+        kind: "ball",
+        swingX: radiansRange(joint.swingXDeg),
+        swingZ: radiansRange(joint.swingZDeg),
+        twistY: radiansRange(joint.twistYDeg)
+      };
+    }
+    return {
+      kind: joint.kind,
+      axis: joint.axis,
+      limits: radiansRange(joint.limitsDeg)
+    };
+  }
+  function radiansRange(value) {
+    return { min: generatedNumber(value.min * Math.PI / 180), max: generatedNumber(value.max * Math.PI / 180) };
+  }
+  function generatedNumber(value) {
+    const rounded = Number(value.toFixed(9));
+    return Object.is(rounded, -0) ? 0 : rounded;
+  }
+  function emitHumanoidZig(source) {
+    const lines = [
+      "//! framework/skeleton/generated/humanoid_v1.zig - DO NOT EDIT.",
+      `//! Generated from ${HUMANOID_SOURCE_PATH} by \`rjit codegen-bindings\`.`,
+      "",
+      'const sk = @import("../skeleton.zig");',
+      "",
+      "pub const HUMANOID_V1_BONE_IDS = [_][]const u8{",
+      ...source.bones.map((bone) => `    ${zigString(bone.id)},`),
+      "};",
+      "",
+      "pub const HUMANOID_V1_PARENT_IDS = [_]?[]const u8{",
+      ...source.bones.map((bone) => `    ${bone.parent == null ? "null" : zigString(bone.parent)},`),
+      "};",
+      "",
+      "pub const HUMANOID_V1_BONES = [_]sk.Bone{",
+      ...source.bones.map(emitZigBone),
+      "};",
+      "",
+      "pub const HUMANOID_V1_SEMANTIC_BINDINGS = [_]sk.HumanoidSemanticBinding{",
+      ...source.semanticBindings.map((binding) => `    .{ .role = .${binding.role}, .side = ${binding.side ? `.${binding.side}` : "null"}, .bone_id = ${zigString(binding.boneId)} },`),
+      "};",
+      "",
+      "pub const HUMANOID_RIG_TUNING = sk.HumanoidRigTuning{",
+      `    .specimen_separation_bounds_width = ${zigFloat(source.tuning.specimenSeparationBoundsWidth)},`,
+      "    .bend_presets_deg = .{",
+      `        .shoulder_abduction = ${zigFloat(source.tuning.bendPresetsDeg.shoulderAbduction)},`,
+      `        .elbow_flex = ${zigFloat(source.tuning.bendPresetsDeg.elbowFlex)},`,
+      `        .wrist_flex = ${zigFloat(source.tuning.bendPresetsDeg.wristFlex)},`,
+      `        .hip_flex = ${zigFloat(source.tuning.bendPresetsDeg.hipFlex)},`,
+      `        .knee_flex = ${zigFloat(source.tuning.bendPresetsDeg.kneeFlex)},`,
+      "    },",
+      "};",
+      "",
+      "pub const HUMANOID_V1 = sk.HumanoidTemplate{",
+      "    .version = 1,",
+      `    .id = ${zigString(source.id)},`,
+      "    .bones = &HUMANOID_V1_BONES,",
+      "    .semantic_bindings = &HUMANOID_V1_SEMANTIC_BINDINGS,",
+      "    .tuning = HUMANOID_RIG_TUNING,",
+      "};",
+      ""
+    ];
+    return lines.join("\n");
+  }
+  function emitZigBone(bone) {
+    const fields = [
+      `.id = ${zigString(bone.id)}`,
+      `.display_name = ${zigString(bone.displayName)}`,
+      `.parent = ${bone.parent == null ? "null" : zigString(bone.parent)}`,
+      `.transform = .{ .pos = ${zigVec(bone.transform.pos)}, .rot = ${zigQuat(bone.transform.rot)}, .scale = ${zigVec(bone.transform.scale)} }`
+    ];
+    if (bone.tip) fields.push(`.tip = ${zigVec(bone.tip)}`);
+    if (bone.joint) fields.push(`.joint = ${emitZigJoint(bone.joint)}`);
+    return `    .{ ${fields.join(", ")} },`;
+  }
+  function emitZigJoint(joint) {
+    if (joint.kind === "ball") {
+      return `.{ .kind = .ball, .swing_x = ${zigRange(radiansRange(joint.swingXDeg))}, .swing_z = ${zigRange(radiansRange(joint.swingZDeg))}, .twist_y = ${zigRange(radiansRange(joint.twistYDeg))} }`;
+    }
+    const limits = radiansRange(joint.limitsDeg);
+    return `.{ .kind = .${joint.kind}, .axis = ${zigVec(joint.axis)}, .limit_min = ${zigFloat(limits.min)}, .limit_max = ${zigFloat(limits.max)} }`;
+  }
+  function zigRange(value) {
+    return `.{ .min = ${zigFloat(value.min)}, .max = ${zigFloat(value.max)} }`;
+  }
+  function zigVec(value) {
+    return `.{ ${value.map(zigFloat).join(", ")} }`;
+  }
+  function zigQuat(value) {
+    return `.{ ${value.map(zigFloat).join(", ")} }`;
+  }
+  function zigFloat(value) {
+    const rounded = generatedNumber(value);
+    return Number.isInteger(rounded) ? `${rounded}.0` : String(rounded);
+  }
+  function zigString(value) {
+    return JSON.stringify(value);
+  }
   function mustMatch(source, re, context) {
     const match = re.exec(source);
     if (!match) throw new Error(`cannot parse ingredient row: ${context}`);
@@ -5318,171 +6162,207 @@ ${entry}
   // cli/commands/dev.ts
   var dev_exports = {};
   __export(dev_exports, {
-    run: () => run10
+    run: () => run11
   });
 
-  // cli/host/net.ts
-  var SocketError = class extends Error {
-  };
-  function tryUnixConnect(path) {
-    const fd = __unixConnect(path);
-    return fd < 0 ? null : fd;
+  // cli/dev/native-modules.ts
+  var REGISTRY_PATH = "sdk/dev-module-registry.json";
+  function fingerprintNativeTiers(rjitHome, profileSalt) {
+    const registry = loadRegistry(rjitHome);
+    const inputs = hashInputs(rjitHome, registry);
+    const sceneSet = new Set(registry.scene3dExclusive);
+    const gameSet = new Set(registry.gameExclusive);
+    const coreSet = new Set(registry.coreExclusive);
+    const isGame = (path) => gameSet.has(path) || registry.gameExclusivePrefixes.some((prefix) => path.startsWith(prefix));
+    const isScene = (path) => sceneSet.has(path);
+    const isCoreOnly = (path) => coreSet.has(path) || registry.coreExclusivePrefixes.some((prefix) => path.startsWith(prefix));
+    return {
+      core: digestTier("core", inputs.filter((input) => !isScene(input.path) && !isGame(input.path)), registry.version, profileSalt.core),
+      scene3d: digestTier("scene3d", inputs.filter((input) => !isGame(input.path) && !isCoreOnly(input.path)), registry.version, profileSalt.hot),
+      game: digestTier("game", inputs.filter((input) => !isScene(input.path) && !isCoreOnly(input.path)), registry.version, profileSalt.hot)
+    };
   }
-  function unixWrite(fd, data) {
-    const written = __unixWrite(fd, data);
-    if (written < 0) throw new SocketError(`write failed (fd=${fd})`);
-  }
-  function unixReadLine(fd, deadlineMs) {
-    let reply = "";
-    while (reply.indexOf("\n") === -1) {
-      const remaining = deadlineMs - __nowMs();
-      if (remaining <= 0) throw new SocketError("timeout");
-      const chunk = __unixReadAll(fd, remaining, 4096);
-      if (chunk === null) continue;
-      if (chunk === "") throw new SocketError("EOF before newline");
-      reply += chunk;
-    }
-    return reply.slice(0, reply.indexOf("\n"));
-  }
-  function unixClose(fd) {
-    __unixClose(fd);
-  }
-
-  // cli/dev/rebuild-signal.ts
-  var DEV_SOCKET_PATH = "/tmp/reactjit.sock";
-  var TIMEOUT_MS = 3e3;
-  function nativeBuildFingerprint(rjitHome) {
-    const manifest2 = spawnSync("sh", ["-c", nativeInputManifestScript(), "native-input-manifest", rjitHome]);
-    if (manifest2.code !== 0) {
-      throw new Error(`native input manifest failed
-${manifest2.stderr || manifest2.stdout}`);
-    }
-    const digest = spawnSync("sha256sum", [], manifest2.stdout);
-    if (digest.code !== 0) {
-      throw new Error(`native input digest failed
-${digest.stderr || digest.stdout}`);
-    }
-    const hash = digest.stdout.trim().split(/\s+/)[0] || "";
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`native input digest malformed: ${digest.stdout.trim()}`);
-    const inputCount = manifest2.stdout.split("\n").filter(Boolean).length;
-    return { hash, inputCount };
-  }
-  function nativeInputManifestScript() {
-    return `
-set -eu
-cd "$1"
-{
-  # framework/testing/** are zig 'test' modules pulled in ONLY by build.zig's
-  # test-* steps (b.addTest) - never by the 'app' step that builds the dev
-  # binary. Hashing them made any test-file touch (a test run, a git checkout,
-  # another worker editing tests) force a needless full dev rebuild on every
-  # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
-  find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
-  printf '%s\\n' build.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
-} | LC_ALL=C sort -u | while IFS= read -r f; do
-  [ -f "$f" ] || continue
-  sha256sum "$f"
-done
-`;
-  }
-  function devBuildInfoPath(bin) {
-    return `${bin}.dev-build.json`;
-  }
-  function readDevBuildId(bin) {
-    const raw = tryFsRead(devBuildInfoPath(bin));
+  function readModuleRecord(rjitHome, tier) {
+    const raw = tryFsRead(recordPath(rjitHome, tier));
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw);
-      return typeof parsed.build_id === "string" ? parsed.build_id : null;
+      if (parsed.tier !== tier || typeof parsed.sourceHash !== "string" || typeof parsed.artifactHash !== "string" || typeof parsed.path !== "string") return null;
+      if (!fsExists(parsed.path)) return null;
+      return parsed;
     } catch {
       return null;
     }
   }
-  function writeDevBuildInfo(bin, fingerprint) {
-    fsWrite(devBuildInfoPath(bin), `${JSON.stringify({
-      build_id: fingerprint.hash,
-      input_count: fingerprint.inputCount,
-      written_at: (/* @__PURE__ */ new Date()).toISOString()
-    }, null, 2)}
-`);
+  function moduleRecordIsCurrent(record2, fingerprint) {
+    return record2 !== null && record2.sourceHash === fingerprint.hash && fsExists(record2.path);
   }
-  function readDevHostInfo(socket = DEV_SOCKET_PATH) {
-    if (!fsExists(socket)) return null;
-    const fd = tryUnixConnect(socket);
-    if (fd === null) return null;
+  function writeModuleRecord(rjitHome, record2) {
+    writeRecord(rjitHome, record2.tier, record2);
+  }
+  function publishStagedModule(rjitHome, tier, sourceHash) {
+    const stagingDir = `${rjitHome}/zig-out/dev-modules/${tier}/staging`;
+    const filename = fsList(stagingDir).find((entry) => entry.endsWith(".so") || entry.endsWith(".dylib"));
+    if (!filename) throw new Error(`[dev-native] ${tier} build produced no shared library in ${stagingDir}`);
+    const stagingPath = `${stagingDir}/${filename}`;
+    const artifactHash = sha256File(stagingPath);
+    const artifactDir = `${rjitHome}/zig-out/dev-modules/${tier}/${artifactHash}`;
+    const artifactPath = `${artifactDir}/${filename}`;
+    fsMkdir(artifactDir);
+    if (!fsExists(artifactPath)) {
+      const temporaryPath = `${artifactPath}.publishing-${Math.floor(__nowMs())}`;
+      const copied = spawnSync("cp", ["--", stagingPath, temporaryPath]);
+      if (copied.code !== 0) throw new Error(`[dev-native] ${tier} publish copy failed
+${copied.stderr || copied.stdout}`);
+      const moved = spawnSync("mv", ["--", temporaryPath, artifactPath]);
+      if (moved.code !== 0) throw new Error(`[dev-native] ${tier} publish rename failed
+${moved.stderr || moved.stdout}`);
+    }
+    const record2 = {
+      tier,
+      sourceHash,
+      artifactHash,
+      path: artifactPath,
+      builtAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    writeRecord(rjitHome, tier, record2);
+    return record2;
+  }
+  function readCoreRecord(rjitHome) {
+    const raw = tryFsRead(recordPath(rjitHome, "core"));
+    if (!raw) return null;
     try {
-      unixWrite(fd, "INFO\n");
-      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
-      const parsed = JSON.parse(line);
-      return typeof parsed.build_id === "string" ? { build_id: parsed.build_id } : null;
+      const parsed = JSON.parse(raw);
+      if (parsed.tier !== "core" || typeof parsed.sourceHash !== "string" || typeof parsed.path !== "string") return null;
+      if (!fsExists(parsed.path)) return null;
+      return parsed;
     } catch {
       return null;
-    } finally {
-      unixClose(fd);
     }
   }
-  function staleDevHost(rjitHome, socket = DEV_SOCKET_PATH) {
-    const current = nativeBuildFingerprint(rjitHome);
-    const host = readDevHostInfo(socket);
-    if (!host) return null;
-    return host.build_id === current.hash ? null : { current, host };
+  function writeCoreRecord(rjitHome, sourceHash, path) {
+    const record2 = { tier: "core", sourceHash, path, builtAt: (/* @__PURE__ */ new Date()).toISOString() };
+    writeRecord(rjitHome, "core", record2);
+    return record2;
   }
-  function sendRebuildNotice(stale, socket = DEV_SOCKET_PATH) {
-    const fd = tryUnixConnect(socket);
-    if (fd === null) return false;
-    const body = JSON.stringify({
-      id: "dev-host-stale",
-      type: "rebuild-required",
-      kind: "native-build-id-mismatch",
-      title: "Rebuild needed",
-      message: "The running dev host was built from different native engine or wire-format sources. Restart rjit dev before hot reload can continue.",
-      detail: `running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`,
-      persistent: true,
-      runningBuildId: stale.host.build_id,
-      currentBuildId: stale.current.hash,
-      inputCount: stale.current.inputCount
-    });
+  function tierCacheDir(rjitHome, tier) {
+    return `${rjitHome}/.cache/zig/dev-${tier}`;
+  }
+  function useIncrementalCompilation() {
+    return __env("RJIT_DEV_FORCE_INCREMENTAL") === "1" && __env("RJIT_DEV_DISABLE_INCREMENTAL") !== "1";
+  }
+  function sha256File(path) {
+    const result = spawnSync("sha256sum", [path]);
+    if (result.code !== 0) throw new Error(`sha256sum failed for ${path}
+${result.stderr || result.stdout}`);
+    const hash = result.stdout.trim().split(/\s+/)[0] || "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`malformed sha256 for ${path}`);
+    return hash;
+  }
+  function readSessionManifest(rjitHome) {
+    const raw = tryFsRead(sessionPath(rjitHome));
+    if (!raw) return null;
     try {
-      unixWrite(fd, `NOTICE ${utf8ByteLength(body)}
-`);
-      unixWrite(fd, body);
-      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
-      return line.startsWith("OK");
-    } catch (error) {
-      if (error instanceof SocketError) return false;
-      throw error;
-    } finally {
-      unixClose(fd);
+      const parsed = JSON.parse(raw);
+      if (parsed.version !== 1 || !Array.isArray(parsed.tabs) || typeof parsed.activeTab !== "string") return null;
+      return parsed;
+    } catch {
+      return null;
     }
   }
-  function shortHash(hash) {
-    if (!hash) return "unknown";
-    return hash === "unknown" ? hash : hash.slice(0, 12);
+  function writeSessionManifest(rjitHome, manifest2) {
+    fsMkdir(`${rjitHome}/.cache`);
+    fsWrite(sessionPath(rjitHome), `${JSON.stringify(manifest2, null, 2)}
+`);
   }
-  function utf8ByteLength(value) {
-    let bytes = 0;
-    for (let i = 0; i < value.length; i++) {
-      const code = value.charCodeAt(i);
-      if (code < 128) bytes += 1;
-      else if (code < 2048) bytes += 2;
-      else if (code >= 55296 && code <= 56319) {
-        bytes += 4;
-        i++;
-      } else {
-        bytes += 3;
+  function rememberSessionTab(rjitHome, tab, scene3d, game) {
+    const previous = readSessionManifest(rjitHome);
+    const tabs = (previous?.tabs ?? []).filter((entry) => entry.name !== tab.name && fsExists(entry.bundlePath));
+    tabs.push(tab);
+    const manifest2 = { version: 1, activeTab: tab.name, tabs, scene3d, game };
+    writeSessionManifest(rjitHome, manifest2);
+    return manifest2;
+  }
+  function updateSessionModules(rjitHome, scene3d, game) {
+    const previous = readSessionManifest(rjitHome);
+    if (!previous) return null;
+    const manifest2 = { ...previous, scene3d, game };
+    writeSessionManifest(rjitHome, manifest2);
+    return manifest2;
+  }
+  function loadRegistry(rjitHome) {
+    const registry = fsReadJson(`${rjitHome}/${REGISTRY_PATH}`);
+    if (registry.version !== 1 || !Array.isArray(registry.inputRoots) || !Array.isArray(registry.sharedFiles) || !Array.isArray(registry.scene3dExclusive) || !Array.isArray(registry.gameExclusivePrefixes) || !Array.isArray(registry.gameExclusive) || !Array.isArray(registry.coreExclusivePrefixes) || !Array.isArray(registry.coreExclusive) || !Array.isArray(registry.forbiddenCoreImports)) {
+      throw new Error(`[dev-native] unsupported registry ${rjitHome}/${REGISTRY_PATH}`);
+    }
+    return registry;
+  }
+  function hashInputs(rjitHome, registry) {
+    const relativePaths = /* @__PURE__ */ new Set();
+    for (const root of registry.inputRoots) {
+      const absoluteRoot = `${rjitHome}/${root}`;
+      if (!fsExists(absoluteRoot)) continue;
+      const found = spawnSync("find", [absoluteRoot, "-type", "f"]);
+      if (found.code !== 0) throw new Error(`[dev-native] find failed for ${absoluteRoot}
+${found.stderr || found.stdout}`);
+      for (const absolutePath of found.stdout.split("\n").filter(Boolean)) {
+        const relativePath = absolutePath.startsWith(`${rjitHome}/`) ? absolutePath.slice(rjitHome.length + 1) : absolutePath;
+        if (relativePath.startsWith("framework/testing/")) continue;
+        relativePaths.add(relativePath);
       }
     }
-    return bytes;
+    for (const path of registry.sharedFiles) if (fsExists(`${rjitHome}/${path}`)) relativePaths.add(path);
+    const sorted = Array.from(relativePaths).sort();
+    const digest = spawnSync("sha256sum", sorted.map((path) => `${rjitHome}/${path}`));
+    if (digest.code !== 0) throw new Error(`[dev-native] native input hashing failed
+${digest.stderr || digest.stdout}`);
+    const byAbsolutePath = /* @__PURE__ */ new Map();
+    for (const line of digest.stdout.split("\n")) {
+      const match = /^([0-9a-f]{64})\s+(.+)$/.exec(line);
+      if (match) byAbsolutePath.set(match[2], match[1]);
+    }
+    return sorted.map((path) => {
+      const absolutePath = `${rjitHome}/${path}`;
+      const fileDigest = byAbsolutePath.get(absolutePath);
+      if (!fileDigest) throw new Error(`[dev-native] missing digest for ${path}`);
+      return { path, digest: fileDigest };
+    });
+  }
+  function digestTier(tier, inputs, registryVersion, profileSalt) {
+    const manifest2 = [
+      `registry=${registryVersion}`,
+      `tier=${tier}`,
+      `profile=${profileSalt}`,
+      ...inputs.map((input) => `${input.digest}  ${input.path}`),
+      ""
+    ].join("\n");
+    const digest = spawnSync("sha256sum", [], manifest2);
+    if (digest.code !== 0) throw new Error(`[dev-native] ${tier} digest failed
+${digest.stderr || digest.stdout}`);
+    const hash = digest.stdout.trim().split(/\s+/)[0] || "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`[dev-native] malformed ${tier} digest`);
+    return { hash, inputCount: inputs.length };
+  }
+  function writeRecord(rjitHome, tier, record2) {
+    fsMkdir(`${rjitHome}/zig-out/dev-modules/records`);
+    fsWrite(recordPath(rjitHome, tier), `${JSON.stringify(record2, null, 2)}
+`);
+  }
+  function recordPath(rjitHome, tier) {
+    return `${rjitHome}/zig-out/dev-modules/records/${tier}.json`;
+  }
+  function sessionPath(rjitHome) {
+    return `${rjitHome}/.cache/dev-native-session.json`;
   }
 
   // cli/commands/dev.ts
-  async function run10(argv) {
+  async function run11(argv) {
     const parsed = parseDevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
     const rjitHome = __env("RJIT_HOME") || cartRoot;
     const cart = resolveCart2(cartRoot, parsed.name);
-    if (!cart) return fail3(`[dev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    if (!cart) return fail4(`[dev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate(parsed.substrateFlag, cart.manifest);
     const bundleMode = substrate === "tui" ? "tui-host" : "gpu-host";
     const perCartBundle = `${cartRoot}/.cache/bundle-${parsed.name}.js`;
@@ -5492,7 +6372,6 @@ done
     runFixReactImports(rjitHome, cartRoot);
     const bakedIcons = bakeIconAtlas({ root: rjitHome, ifNeeded: true, quiet: true });
     if (bakedIcons !== 0) return bakedIcons;
-    reapOrphanWatchers();
     out(`[dev] bundling ${cart.entry} -> ${perCartBundle}`);
     const term = terminalSize();
     const bundle2 = bundleCart({
@@ -5505,45 +6384,102 @@ done
     });
     writeSpawnOutput2(bundle2);
     if (bundle2.code !== 0) return bundle2.code || 1;
-    const nativeFingerprint = nativeBuildFingerprint(rjitHome);
-    const needsBuild = devHostNeedsBuild(bin, nativeFingerprint);
+    const devFlags = resolveDevFlags(rjitHome);
+    if (!devFlags) return 1;
+    const profileSalt = nativeProfileSalt(substrate, devFlags);
+    const fingerprints = fingerprintNativeTiers(rjitHome, profileSalt);
     const socket = DEV_SOCKET_PATH;
     const hostAlive = isHostAlive(socket);
     if (hostAlive) {
       const hostInfo = readDevHostInfo(socket);
-      if (!hostInfo || hostInfo.build_id !== nativeFingerprint.hash) {
-        const stale = { current: nativeFingerprint, host: hostInfo ?? { build_id: "unknown" } };
+      const activeCoreId = readCoreRecord(rjitHome)?.sourceHash ?? null;
+      if (!hostInfo || hostInfo.build_id !== fingerprints.core.hash && hostInfo.build_id !== activeCoreId) {
+        const stale = { current: fingerprints.core, host: hostInfo ?? { build_id: "unknown" } };
         sendRebuildNotice(stale, socket);
-        err("[dev] STALE DEV HOST - running native build id differs from disk.");
-        err("[dev] refusing to push: bundle would talk to incompatible native code.");
-        err("[dev] kill the running dev host (ctrl-c its terminal) and rerun this command.");
+        err("[dev] cold core changed; its owning supervisor is rebuilding/restarting it.");
+        err("[dev] refusing this push until the core build id catches up.");
         err(`[dev] running build id: ${shortHash(stale.host.build_id)}`);
-        err(`[dev] disk build id:    ${shortHash(stale.current.hash)} (${stale.current.inputCount} native inputs)`);
+        err(`[dev] disk core id:     ${shortHash(stale.current.hash)} (${stale.current.inputCount} native inputs)`);
         return 1;
+      }
+      if (hostInfo.build_id !== fingerprints.core.hash) {
+        out("[dev-native] native sources have a compiled update pending; the running host remains authoritative until you approve it.");
       }
       out(`[dev] host detected - pushing '${parsed.name}'`);
       const push2 = spawnSync(`${rjitHome}/tools/rjit`, ["push-bundle", parsed.name, perCartBundle]);
       writeSpawnOutput2(push2);
       if (push2.code === 0) {
+        const activeSession = readSessionManifest(rjitHome);
+        const scene3d2 = activeSession?.scene3d ?? readModuleRecord(rjitHome, "scene3d");
+        const game2 = activeSession?.game ?? readModuleRecord(rjitHome, "game");
+        if (scene3d2 && game2) rememberSessionTab(rjitHome, sessionTab(parsed.name, perCartBundle), scene3d2, game2);
         out(`[dev] host switched to tab '${parsed.name}'`);
         return 0;
       }
       fsRemove(socket);
     }
     fsWrite(`${rjitHome}/bundle.js`, fsRead(perCartBundle));
-    if (needsBuild && fsExists(bin)) out("[dev] dev host inputs newer than binary - rebuilding...");
-    if (needsBuild) {
-      const built = buildDevHost(rjitHome, cartRoot, binName, substrate, perCartBundle, nativeFingerprint);
-      if (built !== 0) return built;
-      writeDevBuildInfo(bin, nativeFingerprint);
+    let scene3d = readModuleRecord(rjitHome, "scene3d");
+    let game = readModuleRecord(rjitHome, "game");
+    if (substrate === "gui") {
+      scene3d = ensureModule(rjitHome, cartRoot, "scene3d", fingerprints.scene3d, devFlags, scene3d);
+      if (!scene3d) return 1;
+      game = ensureModule(rjitHome, cartRoot, "game", fingerprints.game, devFlags, game);
+      if (!game) return 1;
     }
+    const coreRecord = readCoreRecord(rjitHome);
+    const coreStale = !coreRecord || coreRecord.sourceHash !== fingerprints.core.hash || coreRecord.path !== bin || !fsExists(bin);
+    if (coreStale && fsExists(bin)) out("[dev-native] cold core inputs changed - rebuilding core once...");
+    if (coreStale) {
+      const built = buildDevHost(rjitHome, cartRoot, binName, substrate, fingerprints.core, devFlags);
+      if (built !== 0) return built;
+      writeDevBuildInfo(bin, fingerprints.core);
+      writeCoreRecord(rjitHome, fingerprints.core.hash, bin);
+    }
+    if (substrate === "tui") {
+      const child2 = spawn("env", [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
+      const watchArgs2 = ["watch-and-push", parsed.name, cart.entry, perCartBundle, "--rjit-home", rjitHome, "--tui"];
+      const watcher2 = spawn(`${rjitHome}/tools/rjit`, watchArgs2);
+      out(`[dev] TUI host child=${child2.id}`);
+      drainUntilExit(child2.id, watcher2.id);
+      return 0;
+    }
+    if (!scene3d || !game) return fail4("[dev-native] GUI module bootstrap did not produce both module artifacts", 1);
+    rememberSessionTab(rjitHome, sessionTab(parsed.name, perCartBundle), scene3d, game);
     ensurePgRunning(rjitHome);
-    const child = spawn("env", [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
+    const inheritedHandoff = __env("RJIT_DEV_HOTSTATE_HANDOFF") || null;
+    const child = spawnDevHost(bin, cart.dir, scene3d, game, inheritedHandoff);
     out(`[dev] host child=${child.id} - run 'rjit dev <other>' from another terminal to add tabs`);
     const watchArgs = ["watch-and-push", parsed.name, cart.entry, perCartBundle, "--rjit-home", rjitHome];
+    watchArgs.push("--core-build-id", fingerprints.core.hash);
     if (substrate === "tui") watchArgs.push("--tui");
     const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
-    drainUntilExit(child.id, watcher.id);
+    const approvalPath = nativeApprovalPath(rjitHome);
+    if (fsExists(approvalPath)) fsRemove(approvalPath);
+    const orphanApproval = orphanApprovalPath(rjitHome);
+    if (fsExists(orphanApproval)) fsRemove(orphanApproval);
+    superviseDevHost({
+      rjitHome,
+      cartRoot,
+      cartDir: cart.dir,
+      bin,
+      binName,
+      substrate,
+      devFlags,
+      profileSalt,
+      hostId: child.id,
+      watcherId: watcher.id,
+      fingerprints,
+      activeFingerprints: fingerprints,
+      scene3d,
+      game,
+      pendingNative: null,
+      approvalPath,
+      orphanApprovalPath: orphanApproval,
+      // Orphans accumulate over days, not seconds. The first scan waits a minute so a
+      // host that is still coming up is never mistaken for one that was abandoned.
+      nextOrphanScanMs: __nowMs() + ORPHAN_FIRST_SCAN_MS
+    });
     return 0;
   }
   function parseDevArgs(argv) {
@@ -5593,48 +6529,50 @@ done
     const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
     writeSpawnOutput2(result);
   }
-  function reapOrphanWatchers() {
-    const pids = spawnSync("pgrep", ["-f", "scripts/watch-and-push.js|tools/rjit.js watch-and-push|tools/rjit watch-and-push"]);
-    if (pids.code !== 0) return;
-    for (const pid of pids.stdout.trim().split(/\s+/).filter(Boolean)) {
-      const ppid = spawnSync("ps", ["-o", "ppid=", "-p", pid]).stdout.trim();
-      if (ppid === "1") {
-        spawnSync("pkill", ["-TERM", "-P", pid]);
-        spawnSync("kill", ["-TERM", pid]);
-        err(`[dev] reaped orphan watcher pid=${pid}`);
-      }
-    }
-  }
-  function devHostNeedsBuild(bin, fingerprint) {
-    if (!fsExists(bin)) return true;
-    return readDevBuildId(bin) !== fingerprint.hash;
-  }
   function isHostAlive(socket) {
     if (!fsExists(socket)) return false;
-    const ss = spawnSync("ss", ["-lUp"]);
-    if (ss.code === 0 && ss.stdout.includes(socket)) return true;
+    if (readDevHostInfo(socket)) return true;
     fsRemove(socket);
     return false;
   }
-  function buildDevHost(rjitHome, cartRoot, binName, substrate, bundlePath, fingerprint) {
-    out(`[dev] compiling dev binary (${rjitHome}/zig-out/bin/${binName}, ${substrate}, ReleaseFast)...`);
+  function resolveDevFlags(rjitHome) {
     const flagsResult = spawnSync(`${rjitHome}/tools/rjit`, ["metafile-gate", "--format", "dev-zig-flags", "--build-zig", `${rjitHome}/build.zig`]);
     writeSpawnOutput2(flagsResult);
-    if (flagsResult.code !== 0) return flagsResult.code || 1;
+    if (flagsResult.code !== 0) return null;
     const devFlags = flagsResult.stdout.trim().split(/\s+/).filter(Boolean);
-    if (devFlags.length === 0) return fail3("[dev] FATAL: sdk-dependency-resolve produced no dev flags", 1);
+    if (devFlags.length === 0) {
+      err("[dev] FATAL: sdk-dependency-resolve produced no dev flags");
+      return null;
+    }
+    return devFlags;
+  }
+  function nativeProfileSalt(substrate, devFlags) {
+    const base = ["modular-dev-v1", substrate, ...devFlags.slice().sort()].join("\n");
+    return { core: `${base}
+socket=${DEV_SOCKET_PATH}`, hot: base };
+  }
+  function buildDevHost(rjitHome, cartRoot, binName, substrate, fingerprint, devFlags, installPrefix = `${rjitHome}/zig-out`) {
+    out(`[dev-native] compiling cold core (${installPrefix}/bin/${binName}, ${substrate}, ReleaseFast)...`);
     const zig = resolveZig(rjitHome);
+    const cacheDir = tierCacheDir(rjitHome, "core");
+    fsMkdir(cacheDir);
     const args = [
       "build",
       "app",
       "-p",
-      `${rjitHome}/zig-out`,
+      installPrefix,
       `-Dapp-name=${binName}`,
       "-Dapp-source=framework/v8_app.zig",
-      `-Dbundle-path=${bundlePath}`,
+      `-Dbundle-path=${rjitHome}/framework/dev_bundle_stub.js`,
+      `-Ddev-bundle-path=${rjitHome}/bundle.js`,
+      `-Ddev-socket-path=${DEV_SOCKET_PATH}`,
       `-Ddev-build-id=${fingerprint.hash}`,
+      `-Ddev-native-modules=${substrate === "gui" ? "true" : "false"}`,
       ...devFlags,
-      "-Doptimize=ReleaseFast"
+      "-Doptimize=ReleaseFast",
+      "--cache-dir",
+      cacheDir,
+      useIncrementalCompilation() ? "-fincremental" : "-fno-incremental"
     ];
     if (substrate === "tui") args.push("-Dhas-gpu=false");
     const cmd = cartRoot === rjitHome ? zig : "env";
@@ -5644,6 +6582,44 @@ done
     if (build.code !== 0) return build.code || 1;
     trimZigCacheIfOversized(rjitHome);
     return 0;
+  }
+  function buildNativeModule(rjitHome, cartRoot, tier, fingerprint, devFlags) {
+    const started = __nowMs();
+    out(`[dev-native] ${tier} ${shortHash(fingerprint.hash)} compiling (ReleaseFast${useIncrementalCompilation() ? ", incremental" : ""})...`);
+    const zig = resolveZig(rjitHome);
+    const cacheDir = tierCacheDir(rjitHome, tier);
+    fsMkdir(cacheDir);
+    const args = [
+      "build",
+      tier === "scene3d" ? "dev-scene3d-module" : "dev-game-module",
+      "-p",
+      `${rjitHome}/zig-out`,
+      "-Ddev-native-modules=true",
+      tier === "scene3d" ? "-Ddev-scene3d-module=true" : "-Ddev-game-module=true",
+      ...devFlags,
+      "-Doptimize=ReleaseFast",
+      "--cache-dir",
+      cacheDir,
+      useIncrementalCompilation() ? "-fincremental" : "-fno-incremental"
+    ];
+    const cmd = cartRoot === rjitHome ? zig : "env";
+    const finalArgs = cartRoot === rjitHome ? args : [`ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...args];
+    const built = spawnSync(cmd, finalArgs);
+    writeSpawnOutput2(built);
+    if (built.code !== 0) {
+      err(`[dev-native] ${tier} compile failed; active module remains loaded`);
+      return null;
+    }
+    const record2 = publishStagedModule(rjitHome, tier, fingerprint.hash);
+    out(`[dev-native] ${tier} published ${shortHash(record2.artifactHash)} in ${(__nowMs() - started).toFixed(0)}ms`);
+    return record2;
+  }
+  function ensureModule(rjitHome, cartRoot, tier, fingerprint, devFlags, record2) {
+    if (moduleRecordIsCurrent(record2, fingerprint)) {
+      out(`[dev-native] ${tier} ${shortHash(record2.artifactHash)} cached`);
+      return record2;
+    }
+    return buildNativeModule(rjitHome, cartRoot, tier, fingerprint, devFlags);
   }
   function ensurePgRunning(rjitHome) {
     const pg = resolvePg(rjitHome);
@@ -5705,12 +6681,316 @@ done
     if (fsExists(bundled)) return bundled;
     return "zig";
   }
+  function spawnDevHost(bin, cartDir, scene3d, game, hotstateHandoff = null) {
+    const env = [
+      `RJIT_DEV_CART_DIR=${cartDir}`,
+      `RJIT_DEV_SCENE3D_PATH=${scene3d.path}`,
+      `RJIT_DEV_SCENE3D_HASH=${scene3d.artifactHash}`,
+      `RJIT_DEV_GAME_PATH=${game.path}`,
+      `RJIT_DEV_GAME_HASH=${game.artifactHash}`
+    ];
+    if (hotstateHandoff) env.push(`RJIT_DEV_HOTSTATE_HANDOFF=${hotstateHandoff}`);
+    env.push(bin);
+    return spawn("env", env);
+  }
+  function sessionTab(name, bundlePath) {
+    return { name, bundlePath, bundleHash: sha256File(bundlePath) };
+  }
+  function superviseDevHost(state) {
+    let nextNativeCheck = __nowMs() + 500;
+    while (true) {
+      const hostLine = __childReadLine(state.hostId, 40);
+      if (hostLine === "") {
+        __childKill(state.watcherId);
+        return;
+      }
+      if (hostLine !== null) __writeStdout(`${hostLine}
+`);
+      const watcherLine = __childReadLine(state.watcherId, 20);
+      if (watcherLine === "") {
+        err("[dev] bundle watcher exited; stopping its exact host child");
+        __childKill(state.hostId);
+        return;
+      }
+      if (watcherLine !== null) __writeStdout(`${watcherLine}
+`);
+      if (__nowMs() >= nextNativeCheck) {
+        nextNativeCheck = __nowMs() + 500;
+        try {
+          const next = fingerprintNativeTiers(state.rjitHome, state.profileSalt);
+          applyNativeChanges(state, next);
+        } catch (error) {
+          err(`[dev-native] watcher scan failed: ${error.message}`);
+        }
+      }
+      try {
+        scanForOrphanHosts(state);
+        applyApprovedOrphanCleanup(state);
+      } catch (error) {
+        err(`[dev-orphans] scan failed without touching any process: ${error.message}`);
+      }
+      try {
+        applyApprovedNativeUpdate(state);
+      } catch (error) {
+        err(`[dev-native] approval handling failed without restarting the editor: ${error.message}`);
+        if (state.pendingNative) sendNativeUpdateReadyNotice(state.pendingNative, state.approvalPath);
+      }
+      __sleepMs(20);
+    }
+  }
+  function applyNativeChanges(state, next) {
+    if (sameNativeFingerprints(next, state.fingerprints)) return;
+    let nextScene = state.scene3d;
+    if (next.scene3d.hash !== state.activeFingerprints.scene3d.hash) {
+      const built = ensureModule(state.rjitHome, state.cartRoot, "scene3d", next.scene3d, state.devFlags, readModuleRecord(state.rjitHome, "scene3d"));
+      if (!built) return abandonNativeCandidate(state, next, "3D engine compile failed; the running editor was not touched");
+      nextScene = built;
+    }
+    let nextGame = state.game;
+    if (next.game.hash !== state.activeFingerprints.game.hash) {
+      const built = ensureModule(state.rjitHome, state.cartRoot, "game", next.game, state.devFlags, readModuleRecord(state.rjitHome, "game"));
+      if (!built) return abandonNativeCandidate(state, next, "game engine compile failed; the running editor was not touched");
+      nextGame = built;
+    }
+    let nextCore = null;
+    if (next.core.hash !== state.activeFingerprints.core.hash) {
+      const alreadyStaged = state.pendingNative?.fingerprints.core.hash === next.core.hash ? state.pendingNative.core : null;
+      if (alreadyStaged && fsExists(alreadyStaged.path)) {
+        nextCore = alreadyStaged;
+      } else {
+        const candidatePrefix = `${state.rjitHome}/.cache/dev-core-candidate`;
+        const candidatePath = `${candidatePrefix}/bin/${state.binName}`;
+        const built = buildDevHost(state.rjitHome, state.cartRoot, state.binName, state.substrate, next.core, state.devFlags, candidatePrefix);
+        if (built !== 0 || !fsExists(candidatePath)) {
+          return abandonNativeCandidate(state, next, "cold core compile failed; the running editor was not touched");
+        }
+        nextCore = { path: candidatePath, artifactHash: sha256File(candidatePath) };
+      }
+    } else if (next.core.hash !== state.fingerprints.core.hash) {
+      const activeRecord = readCoreRecord(state.rjitHome);
+      if (!activeRecord || activeRecord.sourceHash !== next.core.hash || !fsExists(state.bin)) {
+        const rebuilt = buildDevHost(state.rjitHome, state.cartRoot, state.binName, state.substrate, next.core, state.devFlags);
+        if (rebuilt !== 0) return abandonNativeCandidate(state, next, "active core restore failed; the running editor was not touched");
+        writeDevBuildInfo(state.bin, next.core);
+        writeCoreRecord(state.rjitHome, next.core.hash, state.bin);
+      }
+    }
+    state.fingerprints = next;
+    const changedTiers = changedNativeTiers(state.activeFingerprints, next);
+    if (changedTiers.length === 0) {
+      const hadPending = state.pendingNative !== null;
+      state.pendingNative = null;
+      writeModuleRecord(state.rjitHome, state.scene3d);
+      writeModuleRecord(state.rjitHome, state.game);
+      if (hadPending) sendNativeUpdateResultNotice(false, "The pending native update was canceled because the sources now match the running editor.");
+      return;
+    }
+    const pending = {
+      token: "",
+      fingerprints: next,
+      scene3d: nextScene,
+      game: nextGame,
+      core: nextCore,
+      changedTiers
+    };
+    pending.token = nativeUpdateToken(next, nextScene, nextGame, nextCore);
+    state.pendingNative = pending;
+    out(`[dev-native] ${changedTiers.join(" + ")} compiled and waiting for editor approval; running host child=${state.hostId} was not touched`);
+    if (!sendNativeUpdateReadyNotice(pending, state.approvalPath)) {
+      err("[dev-native] update is pending, but the editor notification could not be delivered");
+    }
+  }
+  function abandonNativeCandidate(state, observed, message) {
+    state.fingerprints = observed;
+    state.pendingNative = null;
+    writeModuleRecord(state.rjitHome, state.scene3d);
+    writeModuleRecord(state.rjitHome, state.game);
+    err(`[dev-native] ${message}`);
+    sendNativeUpdateResultNotice(false, message);
+  }
+  var ORPHAN_FIRST_SCAN_MS = 6e4;
+  var ORPHAN_RESCAN_MS = 3e5;
+  function scanForOrphanHosts(state) {
+    if (__nowMs() < state.nextOrphanScanMs) return;
+    state.nextOrphanScanMs = __nowMs() + ORPHAN_RESCAN_MS;
+    const scan2 = scanDevHosts(state.rjitHome, DEV_SOCKET_PATH);
+    if (scan2.orphans.length === 0) return;
+    const pids = scan2.orphans.map((row) => row.pid);
+    sendOrphanHostsNotice(scan2.orphans, scan2.reclaimableKb, orphanCleanupToken(pids), state.orphanApprovalPath);
+  }
+  function applyApprovedOrphanCleanup(state) {
+    const approval = parseOrphanCleanupApproval(tryFsRead(state.orphanApprovalPath));
+    if (!approval) return;
+    fsRemove(state.orphanApprovalPath);
+    if (approval.token !== orphanCleanupToken(approval.pids)) {
+      err("[dev-orphans] ignored a cleanup approval whose token did not match its pids");
+      return;
+    }
+    const outcomes = killOrphanHosts(state.rjitHome, DEV_SOCKET_PATH, approval.pids);
+    const retired = outcomes.filter((row) => row.ok);
+    for (const spared of outcomes.filter((row) => !row.ok)) {
+      err(`[dev-orphans] spared pid ${spared.pid}: ${spared.reason}`);
+    }
+    err(`[dev-orphans] retired ${retired.length}/${outcomes.length} orphaned host(s)`);
+    sendOrphanCleanupResultNotice(retired.length, outcomes.length);
+    state.nextOrphanScanMs = __nowMs() + ORPHAN_RESCAN_MS;
+  }
+  function applyApprovedNativeUpdate(state) {
+    const approval = parseNativeUpdateApproval(tryFsRead(state.approvalPath));
+    if (!approval) return;
+    fsRemove(state.approvalPath);
+    const pending = state.pendingNative;
+    if (!pending || approval.token !== pending.token) {
+      err("[dev-native] ignored stale native update approval");
+      if (pending) sendNativeUpdateReadyNotice(pending, state.approvalPath);
+      return;
+    }
+    const current = fingerprintNativeTiers(state.rjitHome, state.profileSalt);
+    if (!sameNativeFingerprints(current, pending.fingerprints)) {
+      err("[dev-native] approval arrived after a newer native source edit; staging the newer candidate first");
+      applyNativeChanges(state, current);
+      return;
+    }
+    activateNativeCandidate(state, pending);
+    state.pendingNative = null;
+  }
+  function activateNativeCandidate(state, pending) {
+    if (pending.changedTiers.includes("core")) {
+      if (!pending.core || !installPendingCore(pending.core.path, state.bin)) {
+        const message = "compiled core could not be installed; the running editor was not touched";
+        err(`[dev-native] ${message}`);
+        sendNativeUpdateResultNotice(false, message);
+        return;
+      }
+      state.scene3d = pending.scene3d;
+      state.game = pending.game;
+      state.activeFingerprints = pending.fingerprints;
+      writeDevBuildInfo(state.bin, pending.fingerprints.core);
+      writeCoreRecord(state.rjitHome, pending.fingerprints.core.hash, state.bin);
+      writeModuleRecord(state.rjitHome, state.scene3d);
+      writeModuleRecord(state.rjitHome, state.game);
+      updateSessionModules(state.rjitHome, state.scene3d, state.game);
+      restartExactHost(state, "user approved native core update");
+      return;
+    }
+    let restartReason = null;
+    const rejected = [];
+    for (const tier of ["scene3d", "game"]) {
+      if (!pending.changedTiers.includes(tier)) continue;
+      const candidate = tier === "scene3d" ? pending.scene3d : pending.game;
+      const active = tier === "scene3d" ? state.scene3d : state.game;
+      if (candidate.artifactHash === active.artifactHash) {
+        out(`[dev-native] ${tier} source changed but emitted identical library`);
+        commitActiveModule(state, pending, tier, candidate);
+        continue;
+      }
+      const outcome = requestNativeReload(tier, candidate.artifactHash, candidate.path);
+      out(`[dev-native] ${tier} user-approved activation ${outcome}`);
+      if (outcome === "committed") {
+        commitActiveModule(state, pending, tier, candidate);
+      } else if (outcome === "restart_required" || outcome === "timeout" || outcome === "unreachable") {
+        commitActiveModule(state, pending, tier, candidate);
+        restartReason = restartReason ?? `${tier} activation ${outcome}`;
+      } else {
+        rejected.push(tier);
+        writeModuleRecord(state.rjitHome, active);
+      }
+    }
+    updateSessionModules(state.rjitHome, state.scene3d, state.game);
+    if (restartReason) {
+      restartExactHost(state, `user approved ${restartReason}`);
+      return;
+    }
+    if (rejected.length > 0) {
+      sendNativeUpdateResultNotice(false, `${rejected.join(" + ")} rejected the compiled candidate; the previous native module remains active.`);
+    } else {
+      sendNativeUpdateResultNotice(true, "The approved native update is active.");
+    }
+  }
+  function commitActiveModule(state, pending, tier, candidate) {
+    if (tier === "scene3d") {
+      state.scene3d = candidate;
+      state.activeFingerprints.scene3d = pending.fingerprints.scene3d;
+    } else {
+      state.game = candidate;
+      state.activeFingerprints.game = pending.fingerprints.game;
+    }
+    writeModuleRecord(state.rjitHome, candidate);
+  }
+  function installPendingCore(candidatePath, activePath) {
+    const temporaryPath = `${activePath}.installing`;
+    const copied = spawnSync("cp", ["--", candidatePath, temporaryPath]);
+    if (copied.code !== 0) return false;
+    const installed = spawnSync("mv", ["--", temporaryPath, activePath]);
+    if (installed.code !== 0) {
+      if (fsExists(temporaryPath)) fsRemove(temporaryPath);
+      return false;
+    }
+    return true;
+  }
+  function restartExactHost(state, reason) {
+    const runningInfo = readDevHostInfo(DEV_SOCKET_PATH);
+    const manifest2 = readSessionManifest(state.rjitHome);
+    if (manifest2 && runningInfo?.active_tab && runningInfo.active_tab !== "main" && manifest2.tabs.some((tab) => tab.name === runningInfo.active_tab)) {
+      manifest2.activeTab = runningInfo.active_tab;
+      manifest2.scene3d = state.scene3d;
+      manifest2.game = state.game;
+      writeSessionManifest(state.rjitHome, manifest2);
+    }
+    const currentSession = readSessionManifest(state.rjitHome);
+    const active = currentSession?.tabs.find((tab) => tab.name === currentSession.activeTab);
+    if (active && fsExists(active.bundlePath)) fsWrite(`${state.rjitHome}/bundle.js`, fsRead(active.bundlePath));
+    const checkpointId = Math.max(1, Math.floor(__nowMs()));
+    const handoffPath = `${state.rjitHome}/.cache/dev-hotstate-handoff-${checkpointId}.json`;
+    const checkpointed = requestDevCheckpoint(checkpointId);
+    const handoffReady = checkpointed && saveDevHotState(handoffPath);
+    if (!handoffReady) {
+      err(`[dev-native] WARNING: could not capture exact-child state handoff (${checkpointed ? "save failed" : "checkpoint failed"})`);
+    }
+    out(`[dev-native] restarting exact host child=${state.hostId}: ${reason}`);
+    __childKill(state.hostId);
+    state.hostId = spawnDevHost(state.bin, state.cartDir, state.scene3d, state.game, handoffReady ? handoffPath : null).id;
+    if (!waitForHost(DEV_SOCKET_PATH, 15e3)) {
+      err(`[dev-native] replacement host child=${state.hostId} did not open ${DEV_SOCKET_PATH}`);
+      return;
+    }
+    replaySession(state.rjitHome, currentSession);
+    out(`[dev-native] replacement host child=${state.hostId} ready`);
+  }
+  function waitForHost(socket, timeoutMs) {
+    const deadline = __nowMs() + timeoutMs;
+    while (__nowMs() < deadline) {
+      if (readDevHostInfo(socket)) return true;
+      __sleepMs(25);
+    }
+    return false;
+  }
+  function replaySession(rjitHome, manifest2) {
+    if (!manifest2) return;
+    const available = manifest2.tabs.filter((tab) => fsExists(tab.bundlePath));
+    const ordered = [
+      ...available.filter((tab) => tab.name !== manifest2.activeTab),
+      ...available.filter((tab) => tab.name === manifest2.activeTab)
+    ];
+    for (const tab of ordered) {
+      const pushed = spawnSync(`${rjitHome}/tools/rjit`, ["push-bundle", tab.name, tab.bundlePath]);
+      if (pushed.code !== 0) err(`[dev-native] failed to replay tab '${tab.name}'`);
+    }
+  }
   function drainUntilExit(hostId, watcherId) {
     while (true) {
       const hostLine = __childReadLine(hostId, 50);
+      if (hostLine === "") {
+        __childKill(watcherId);
+        return;
+      }
       if (hostLine !== null) __writeStdout(`${hostLine}
 `);
       const watcherLine = __childReadLine(watcherId, 50);
+      if (watcherLine === "") {
+        __childKill(hostId);
+        return;
+      }
       if (watcherLine !== null) __writeStdout(`${watcherLine}
 `);
       __sleepMs(50);
@@ -5724,7 +7004,7 @@ done
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function fail3(message, code) {
+  function fail4(message, code) {
     err(message);
     return code;
   }
@@ -5732,9 +7012,9 @@ done
   // cli/commands/firecracker-build.ts
   var firecracker_build_exports = {};
   __export(firecracker_build_exports, {
-    run: () => run11
+    run: () => run12
   });
-  async function run11(argv) {
+  async function run12(argv) {
     const root = __cwd();
     const parsed = parseArgs2(argv, root);
     if (typeof parsed === "number") return parsed;
@@ -5748,11 +7028,11 @@ done
       parsed
     ]);
     if (bundled.stderr) __writeStderr(bundled.stderr);
-    if (bundled.code !== 0) return fail4(`esbuild failed: ${bundled.code}`, bundled.code || 1);
+    if (bundled.code !== 0) return fail5(`esbuild failed: ${bundled.code}`, bundled.code || 1);
     const spec = evalRecipe(bundled.stdout);
-    if (!spec) return fail4("recipe must default-export an object");
+    if (!spec) return fail5("recipe must default-export an object");
     const valid = validateSpec(spec);
-    if (valid) return fail4(valid);
+    if (valid) return fail5(valid);
     log2(`recipe: id=${spec.id} base=${spec.base} apt=${spec.apt.length} steps=${(spec.steps || []).length}`);
     const outPath = abs(root, spec.output.path);
     const outDir = dirname3(outPath);
@@ -5805,13 +7085,13 @@ done
   function parseArgs2(argv, root) {
     let recipePath = "";
     for (const arg of argv) {
-      if (arg.startsWith("--")) return fail4(`unknown flag: ${arg}`);
+      if (arg.startsWith("--")) return fail5(`unknown flag: ${arg}`);
       if (!recipePath) recipePath = arg;
-      else return fail4(`extra positional arg: ${arg}`);
+      else return fail5(`extra positional arg: ${arg}`);
     }
-    if (!recipePath) return fail4("usage: firecracker-build.js <recipe.ts>");
+    if (!recipePath) return fail5("usage: firecracker-build.js <recipe.ts>");
     const resolved = abs(root, recipePath);
-    if (!fsExists(resolved)) return fail4(`recipe not found: ${resolved}`);
+    if (!fsExists(resolved)) return fail5(`recipe not found: ${resolved}`);
     return resolved;
   }
   function evalRecipe(code) {
@@ -5849,7 +7129,7 @@ done
       } else if ("copyFromHost" in step) {
         const cf = step.copyFromHost;
         const src = abs(root, cf.src);
-        if (!fsExists(src)) return fail4(`copyFromHost src not found: ${src}`);
+        if (!fsExists(src)) return fail5(`copyFromHost src not found: ${src}`);
         const kind = spawnSync("/usr/bin/stat", ["-c", "%F", src]).stdout.trim();
         if (kind === "directory") {
           hooks.push(`chroot "$1" /bin/sh -c ${shellEscape(`mkdir -p ${cf.dest}`)}`);
@@ -5860,7 +7140,7 @@ done
           hooks.push(`upload ${src} ${cf.dest}`);
         }
       } else {
-        return fail4(`unknown step shape: ${JSON.stringify(step)}`);
+        return fail5(`unknown step shape: ${JSON.stringify(step)}`);
       }
     }
     return hooks;
@@ -5869,7 +7149,7 @@ done
     const result = spawnSync(bin, args);
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
-    if (result.code !== 0) return fail4(`${bin} exited ${result.code}`, result.code || 1);
+    if (result.code !== 0) return fail5(`${bin} exited ${result.code}`, result.code || 1);
     return 0;
   }
   function fileSize(path) {
@@ -5906,7 +7186,7 @@ done
   function log2(message) {
     out(`[fc-build] ${message}`);
   }
-  function fail4(message, code = 1) {
+  function fail5(message, code = 1) {
     err(`[fc-build] ${message}`);
     return code;
   }
@@ -5914,7 +7194,7 @@ done
   // cli/commands/game.ts
   var game_exports = {};
   __export(game_exports, {
-    run: () => run12
+    run: () => run13
   });
   var GAME_DIR = "cart/hmsc-int/game";
   var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "cart/hmsc-int/compile", "docs/game/_index"];
@@ -5991,7 +7271,7 @@ done
     "cutscene",
     "telemetry"
   ];
-  async function run12(argv) {
+  async function run13(argv) {
     const subcommand = argv[0];
     if (subcommand === "compile") return retiredCompileCommand();
     if (subcommand === "bake") return bake(__cwd(), argv.slice(1));
@@ -6506,13 +7786,13 @@ if (failures.length > 0) {
     const last = lines[lines.length - 1];
     if (!last) return null;
     try {
-      const report = JSON.parse(last);
-      return report.compiler === compiler ? report : null;
+      const report2 = JSON.parse(last);
+      return report2.compiler === compiler ? report2 : null;
     } catch {
       return null;
     }
   }
-  function sha256File(path) {
+  function sha256File2(path) {
     const result = spawnSync("sha256sum", [path]);
     if (result.code !== 0) return "<sha256sum failed>";
     return result.stdout.trim().split(/\s+/)[0] ?? "<sha256sum failed>";
@@ -6582,7 +7862,7 @@ if (failures.length > 0) {
       err("[game] parity FAILED: TS and Zig game-files differ");
       return 1;
     }
-    const hash = sha256File(absTsOut);
+    const hash = sha256File2(absTsOut);
     const speedup = zigReport.compileMs > 0 ? tsReport.compileMs / zigReport.compileMs : Infinity;
     out(`[game] TypeScript parity compile: ${tsReport.compileMs.toFixed(1)}ms inside compiler (${tsReport.wallMs.toFixed(1)}ms wall), ${tsReport.bytes} bytes`);
     out(`[game] Zig parity compile:        ${zigReport.compileMs.toFixed(1)}ms inside compiler (${zigReport.wallMs.toFixed(1)}ms wall), ${zigReport.bytes} bytes`);
@@ -6614,8 +7894,8 @@ if (failures.length > 0) {
       `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
-    const run27 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    const runOut = run27.stdout.trim();
+    const run28 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    const runOut = run28.stdout.trim();
     if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
     const match = runOut.match(/built (\d+) mesh instances/);
@@ -6681,10 +7961,10 @@ if (failures.length > 0) {
       return 1;
     }
     out("[game] launching live window \u2014 close it or press ESC to exit...");
-    const run27 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
-    if (run27.stdout.trim()) out(run27.stdout.trim());
-    if (run27.stderr.trim()) err(run27.stderr.trim());
-    return run27.code === 0 ? 0 : 1;
+    const run28 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run28.stdout.trim()) out(run28.stdout.trim());
+    if (run28.stderr.trim()) err(run28.stderr.trim());
+    return run28.code === 0 ? 0 : 1;
   }
   function verify(root) {
     if (bundleVerifyHarness(root) !== 0) {
@@ -6734,19 +8014,19 @@ if (failures.length > 0) {
   // cli/commands/gdev.ts
   var gdev_exports = {};
   __export(gdev_exports, {
-    run: () => run13
+    run: () => run14
   });
   var DEFAULT_GAME_CART = "hmsc-int";
   var PROFILE_VERSION = "gdev-v1";
   var GDEV_SOCKET_GUI = "/tmp/reactjit-gdev.sock";
   var GDEV_SOCKET_TUI = "/tmp/reactjit-gdev-tui.sock";
-  async function run13(argv) {
+  async function run14(argv) {
     const parsed = parseGdevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
     const rjitHome = __env("RJIT_HOME") || cartRoot;
     const cart = resolveCart3(cartRoot, parsed.name);
-    if (!cart) return fail5(`[gdev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    if (!cart) return fail6(`[gdev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate2(parsed.substrateFlag, cart.manifest);
     const socket = substrate === "tui" ? GDEV_SOCKET_TUI : GDEV_SOCKET_GUI;
     const bundleMode = substrate === "tui" ? "tui-host" : "gpu-host";
@@ -6793,7 +8073,7 @@ if (failures.length > 0) {
     } else if (fsExists(socket)) {
       fsRemove(socket);
     }
-    if (devHostNeedsBuild2(bin, nativeFingerprint)) {
+    if (devHostNeedsBuild(bin, nativeFingerprint)) {
       const built = buildGdevHost(rjitHome, cartRoot, binName, substrate, perCartBundle, socket, zigFlags, nativeFingerprint);
       if (built !== 0) return built;
       writeDevBuildInfo(bin, nativeFingerprint);
@@ -6884,7 +8164,7 @@ ${digest.stderr || digest.stdout}`);
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`gdev input digest malformed: ${digest.stdout.trim()}`);
     return { hash, inputCount: native.inputCount + zigFlags.length + 3 };
   }
-  function devHostNeedsBuild2(bin, fingerprint) {
+  function devHostNeedsBuild(bin, fingerprint) {
     if (!fsExists(bin)) return true;
     return readDevBuildId(bin) !== fingerprint.hash;
   }
@@ -6983,7 +8263,7 @@ ${digest.stderr || digest.stdout}`);
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function fail5(message, code) {
+  function fail6(message, code) {
     err(message);
     return code;
   }
@@ -7007,10 +8287,10 @@ ${digest.stderr || digest.stdout}`);
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run14
+    run: () => run15
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "clean", "bake-icons", "pack-sdk", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "clean", "orphans", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -7035,7 +8315,8 @@ ${digest.stderr || digest.stdout}`);
         "     re-pushes on every save.",
         "",
         "TSX / TS edits hot-reload in ~300ms. Zig / framework / build.zig",
-        "edits require a rebuild.",
+        "edits compile in the background, then wait for explicit approval in",
+        "the editor before any native module activation or host restart.",
         "",
         "--tui (alias --headless) runs the headless substrate; --gui is the",
         'default unless cart.json declares "surface": "tui".'
@@ -7156,6 +8437,30 @@ ${digest.stderr || digest.stdout}`);
         "suggestions."
       ]
     },
+    orphans: {
+      summary: "find dev hosts nothing is attached to, and retire them by exact pid",
+      usage: ["rjit orphans", "rjit orphans --kill", "rjit orphans --json"],
+      detail: [
+        "A `rjit dev` run that dies without taking its host down leaves the host",
+        "running, reparented to init. It holds no window and serves no socket, so",
+        "it is invisible \u2014 nine had accumulated over six days holding 4.7GB before",
+        "anyone noticed (req_4074).",
+        "",
+        "A pid is only called an orphan when THREE facts agree: reparented to init,",
+        "not the dev socket listener, and holding no dmabuf or display-server handle.",
+        "Anything failing one of them is kept, and the report says what kept it.",
+        "",
+        "There is deliberately no pattern form. `pkill -f <repo path>` matches the",
+        "polling shell that is running it and cascades \u2014 that is what logged the user",
+        "out of their desktop and killed all 14 worker panes on 2026-04-22. This",
+        "command emits exact numeric pids and signals them one at a time, re-checking",
+        "each immediately before it does.",
+        "",
+        "The editor shows the same finding as a notice; approving it there writes a",
+        "one-shot token the dev supervisor acts on, so the editor never signals",
+        "anything itself."
+      ]
+    },
     clean: {
       summary: "report / drop the local zig cache (the per-build disk eater)",
       usage: ["rjit clean", "rjit clean --drop"],
@@ -7206,7 +8511,7 @@ ${digest.stderr || digest.stdout}`);
       detail: []
     }
   };
-  async function run14(argv) {
+  async function run15(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -7285,16 +8590,16 @@ ${digest.stderr || digest.stdout}`);
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run15
+    run: () => run16
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run15(argv) {
+  async function run16(argv) {
     const parsed = parseArgs3(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
     const template = TEMPLATES2[parsed.template];
     const targetDir = resolveTarget(root, parsed.directory);
-    if (fsExists(targetDir)) return fail6(`target already exists: ${displayPath(root, targetDir)}`, 1);
+    if (fsExists(targetDir)) return fail7(`target already exists: ${displayPath(root, targetDir)}`, 1);
     const name = cartNameFor(targetDir);
     const title = titleForName(name);
     const inCart = dirname5(targetDir) === joinPath2(root, "cart");
@@ -7322,7 +8627,7 @@ ${digest.stderr || digest.stdout}`);
         fsWrite(path, content);
       }
     } catch (error) {
-      return fail6(error.message, 1);
+      return fail7(error.message, 1);
     }
     out(`[init] created ${displayPath(root, targetDir)}`);
     out(`[init] template ${parsed.template}`);
@@ -7336,7 +8641,7 @@ ${digest.stderr || digest.stdout}`);
       return 2;
     }
     for (const arg of argv) {
-      if (arg.startsWith("-")) return fail6("flags are not supported by init", 2);
+      if (arg.startsWith("-")) return fail7("flags are not supported by init", 2);
     }
     if (argv.length === 1) return { directory: argv[0], template: "basic" };
     if (argv.length === 2) {
@@ -7347,9 +8652,9 @@ ${digest.stderr || digest.stdout}`);
       if (aIsTemplate && !bIsTemplate) return { directory: b, template: a };
       if (bIsTemplate && !aIsTemplate) return { directory: a, template: b };
       if (bIsTemplate) return { directory: a, template: b };
-      return fail6(`unknown template: ${b}`, 2);
+      return fail7(`unknown template: ${b}`, 2);
     }
-    return fail6("too many positional arguments", 2);
+    return fail7("too many positional arguments", 2);
   }
   function usage3() {
     out([
@@ -7364,7 +8669,7 @@ ${digest.stderr || digest.stdout}`);
       "The one-argument form uses the basic template."
     ].join("\n"));
   }
-  function fail6(message, code) {
+  function fail7(message, code) {
     err(`[init] ${message}`);
     return code || 1;
   }
@@ -7643,7 +8948,7 @@ export default function App() {
   // cli/commands/lab.ts
   var lab_exports = {};
   __export(lab_exports, {
-    run: () => run16
+    run: () => run17
   });
   var LABS_DIR = "cart/hmsc-int/labs";
   var SCAFFOLD_SCENE = `${LABS_DIR}/_scaffold.tsx`;
@@ -7651,7 +8956,7 @@ export default function App() {
   var REGISTRY = `${LABS_DIR}/index.ts`;
   var IMPORTS_MARKER = "// rjit:lab-imports";
   var ENTRIES_MARKER = "// rjit:lab-entries";
-  async function run16(argv) {
+  async function run17(argv) {
     if (argv[0] !== "new" && argv[0] !== "remove") {
       err("Usage: rjit lab new <name>");
       err("       rjit lab remove <name>");
@@ -7735,7 +9040,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run17
+    run: () => run18
   });
 
   // cli/cart/metafile.ts
@@ -7785,7 +9090,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/registry/load.ts
-  function loadRegistry(path = "sdk/dependency-registry.json", tag = "registry") {
+  function loadRegistry2(path = "sdk/dependency-registry.json", tag = "registry") {
     const registry = fsReadJson(path);
     validateRegistry(registry, path, tag);
     return registry;
@@ -7860,7 +9165,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/commands/metafile-gate.ts
-  async function run17(argv) {
+  async function run18(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -7891,7 +9196,7 @@ ${IMPORTS_MARKER}`).replace(
       err("[metafile-gate] usage: metafile-gate [--registry path] --metafile path [--format json|ship-gate|zig-flags|dev-zig-flags]");
       return 1;
     }
-    const registry = loadRegistry(registryPath, "metafile-gate");
+    const registry = loadRegistry2(registryPath, "metafile-gate");
     const metafile = metafilePath ? loadMetafile(metafilePath) : null;
     const selection = resolveFeatures(registry, metafile);
     if (format === "ship-gate") {
@@ -7948,9 +9253,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack.ts
   var pack_exports = {};
   __export(pack_exports, {
-    run: () => run18
+    run: () => run19
   });
-  async function run18(argv) {
+  async function run19(argv) {
     const name = argv[0];
     let outDir = "";
     for (let i = 1; i < argv.length; i += 1) {
@@ -8021,7 +9326,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run19
+    run: () => run20
   });
   var ROOT = __cwd();
   var EXCLUDES = [
@@ -8082,11 +9387,11 @@ ${IMPORTS_MARKER}`).replace(
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run19(argv) {
+  async function run20(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT}/sdk/dependency-registry.json`;
-    if (!fsExists(registryPath)) return fail7(`registry missing: ${registryPath}`, 1);
+    if (!fsExists(registryPath)) return fail8(`registry missing: ${registryPath}`, 1);
     const registry = fsReadJson(registryPath);
     const stage = `/tmp/rjit-stage-${Date.now()}`;
     fsMkdir(stage);
@@ -8103,7 +9408,7 @@ ${IMPORTS_MARKER}`).replace(
       const missing = stageAlwaysNativeLibraries(stage, registry);
       if (missing.length) {
         for (const item of missing) err(`  - ${item}`);
-        return fail7("cannot pack SDK with missing foundational libs", 3);
+        return fail8("cannot pack SDK with missing foundational libs", 3);
       }
       const tarball = `/tmp/rjit-payload-${Date.now()}.tar.gz`;
       log3(`compressing -> ${tarball}`);
@@ -8128,7 +9433,7 @@ ${IMPORTS_MARKER}`).replace(
       const arg = argv[i];
       if (arg === "--out" || arg === "-o") {
         const value = argv[++i];
-        if (!value) return fail7("flag requires value: --out", 2);
+        if (!value) return fail8("flag requires value: --out", 2);
         outPath = value;
       } else if (arg === "--keep-stage") {
         keepStage = true;
@@ -8136,7 +9441,7 @@ ${IMPORTS_MARKER}`).replace(
         out("Usage: rjit pack-sdk [--out path] [--keep-stage]");
         return 0;
       } else {
-        return fail7(`unknown flag: ${arg}`, 2);
+        return fail8(`unknown flag: ${arg}`, 2);
       }
     }
     if (!outPath.startsWith("/")) outPath = `${ROOT}/${outPath}`;
@@ -8323,7 +9628,7 @@ ${IMPORTS_MARKER}`).replace(
   function log3(message) {
     out(`[pack-sdk] ${message}`);
   }
-  function fail7(message, code) {
+  function fail8(message, code) {
     err(`[pack-sdk] ${message}`);
     return code;
   }
@@ -8331,9 +9636,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/play.ts
   var play_exports = {};
   __export(play_exports, {
-    run: () => run20
+    run: () => run21
   });
-  async function run20(argv) {
+  async function run21(argv) {
     const pkg = argv[0];
     if (!pkg || argv.length > 1) return usage5(pkg ? "too many arguments" : "missing package path");
     const root = __cwd();
@@ -8361,11 +9666,11 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run21
+    run: () => run22
   });
-  var SOCKET_PATH = "/tmp/reactjit.sock";
+  var SOCKET_PATH = __env("RJIT_DEV_SOCKET_PATH") || "/tmp/reactjit.sock";
   var TIMEOUT_MS2 = 3e3;
-  async function run21(argv) {
+  async function run22(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -8444,9 +9749,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run22
+    run: () => run23
   });
-  async function run22(argv) {
+  async function run23(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -8454,7 +9759,7 @@ ${IMPORTS_MARKER}`).replace(
     const cartRoot = root;
     const zig = resolveZig4(rjitHome);
     const cart = resolveCart4(cartRoot, parsed.name);
-    if (!cart) return fail8(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    if (!cart) return fail9(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate3(parsed.substrateFlag, cart.manifest);
     const bundleOut = `${cartRoot}/bundle-${parsed.name}.js`;
     const embedBundle = cartRoot === rjitHome ? bundleOut : `${rjitHome}/bundles/bundle-${parsed.name}.js`;
@@ -8505,7 +9810,7 @@ ${IMPORTS_MARKER}`).replace(
     if (build.code !== 0) return build.code || 1;
     trimZigCacheIfOversized(rjitHome);
     const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
-    if (!fsExists(buildBin)) return fail8(`build produced no binary: ${buildBin}`, 1);
+    if (!fsExists(buildBin)) return fail9(`build produced no binary: ${buildBin}`, 1);
     if (!verifyIngredientLabels(cartRoot, buildBin, flags)) return 1;
     if (__env("SHIP_RUN_PACKAGE") === "0") {
       out(`[ship] done (packaging skipped) -> ${buildBin}`);
@@ -8973,7 +10278,7 @@ __ARCHIVE__
     if (result.stderr) __writeStderr(result.stderr);
     if (result.stdout) __writeStdout(result.stdout);
   }
-  function fail8(message, code) {
+  function fail9(message, code) {
     err(`[ship] ${message}`);
     return code;
   }
@@ -8989,18 +10294,18 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run23
+    run: () => run24
   });
-  async function run23(argv) {
-    return run22([...argv, "--tui"]);
+  async function run24(argv) {
+    return run23([...argv, "--tui"]);
   }
 
   // cli/commands/shot.ts
   var shot_exports = {};
   __export(shot_exports, {
-    run: () => run24
+    run: () => run25
   });
-  async function run24(argv) {
+  async function run25(argv) {
     let name = null;
     let outPath = null;
     let route = null;
@@ -9039,15 +10344,15 @@ __ARCHIVE__
     if (!name) return usage6("missing cart name");
     const root = __cwd();
     const cartEntry = resolveCartEntry(root, name);
-    if (!cartEntry) return fail9(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
+    if (!cartEntry) return fail10(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
     const binary = `${root}/zig-out/bin/${name}`;
     if (!binaryCurrent2(binary, cartEntry)) {
       out(`[shot] ${name} binary is stale/missing \u2014 building via ship...`);
       const build = spawnSync(`${root}/tools/rjit`, ["ship", name]);
       if (build.stderr) __writeStderr(build.stderr);
-      if (build.code !== 0) return fail9("[shot] BUILD FAILED");
+      if (build.code !== 0) return fail10("[shot] BUILD FAILED");
     }
-    if (!fsExists(binary)) return fail9(`[shot] binary not found at zig-out/bin/${name}`);
+    if (!fsExists(binary)) return fail10(`[shot] binary not found at zig-out/bin/${name}`);
     const png = outPath ?? `${root}/shots/${name}-${dateStamp2()}.png`;
     fsMkdir(dirname7(png));
     const env = [
@@ -9063,11 +10368,11 @@ __ARCHIVE__
     out(`[shot] command: ${cmd}`);
     const result = spawnSync("sh", ["-c", `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
     if (result.stdout) __writeStdout(result.stdout);
-    if (!fsExists(png)) return fail9(`[shot] FAIL \u2014 no PNG at ${png} (did the app crash before frame ${frames}?)`);
+    if (!fsExists(png)) return fail10(`[shot] FAIL \u2014 no PNG at ${png} (did the app crash before frame ${frames}?)`);
     const size = fsStat(png).size;
-    if (size < 1024) return fail9(`[shot] FAIL \u2014 ${png} is ${size} bytes (implausibly small for a rendered frame)`);
+    if (size < 1024) return fail10(`[shot] FAIL \u2014 ${png} is ${size} bytes (implausibly small for a rendered frame)`);
     const dims = pngDims(png);
-    if (!dims) return fail9(`[shot] FAIL \u2014 ${png} is not a well-formed PNG (bad magic/IHDR)`);
+    if (!dims) return fail10(`[shot] FAIL \u2014 ${png} is not a well-formed PNG (bad magic/IHDR)`);
     out(`[shot] PASS \u2014 ${png} (${dims.w}x${dims.h}, ${size} bytes)`);
     return 0;
   }
@@ -9126,7 +10431,7 @@ __ARCHIVE__
     err("  user's desktop is never touched). Asserts a well-formed PNG; exit 0 = PASS.");
     return 2;
   }
-  function fail9(message) {
+  function fail10(message) {
     err(message);
     return 1;
   }
@@ -9134,16 +10439,16 @@ __ARCHIVE__
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run25
+    run: () => run26
   });
-  async function run25(argv) {
+  async function run26(argv) {
     const parsed = parseTuiArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
     const rjitHome = __env("RJIT_HOME") || cartRoot;
     const cart = resolveTarget2(cartRoot, parsed.target);
     if (!cart) {
-      return fail10(`[tui] not found: ${parsed.target} (expected cart/<name>/index.tsx, cart/<name>.tsx, or an entry path)`, 1);
+      return fail11(`[tui] not found: ${parsed.target} (expected cart/<name>/index.tsx, cart/<name>.tsx, or an entry path)`, 1);
     }
     runFixReactImports4(rjitHome, cartRoot);
     const bundleOut = `${cartRoot}/.cache/tui-bundle-${cart.name}.js`;
@@ -9230,7 +10535,7 @@ __ARCHIVE__
     writeSpawnOutput7(build);
     if (build.code !== 0) return build.code || 1;
     trimZigCacheIfOversized(rjitHome);
-    if (!fsExists(bin)) return fail10(`[tui] build produced no binary: ${bin}`, 1);
+    if (!fsExists(bin)) return fail11(`[tui] build produced no binary: ${bin}`, 1);
     return 0;
   }
   function legacyTuiFlags() {
@@ -9304,7 +10609,7 @@ __ARCHIVE__
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
-  function fail10(message, code) {
+  function fail11(message, code) {
     err(message);
     return code;
   }
@@ -9312,15 +10617,16 @@ __ARCHIVE__
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run26
+    run: () => run27
   });
   var POLL_MS = 200;
-  async function run26(argv) {
+  async function run27(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
     const tui = argv.includes("--tui") || argv.includes("--headless");
     const rjitHome = flagValue(argv, "--rjit-home") ?? __cwd();
+    const expectedCoreBuildId = flagValue(argv, "--core-build-id");
     if (!cartName || !cartFile || !outPath) {
       err("[watch-and-push] usage: watch-and-push.js <cart-name> <cart-file> <out-path>");
       return 1;
@@ -9349,7 +10655,7 @@ __ARCHIVE__
       const mtime = statMtime(outAbs);
       if (mtime !== 0 && mtime !== lastMtime) {
         lastMtime = mtime;
-        push(root, rjitHome, cartName, outAbs);
+        push(root, rjitHome, cartName, outAbs, expectedCoreBuildId);
       }
     }
   }
@@ -9366,11 +10672,11 @@ __ARCHIVE__
     const stat = tryFsStat(path);
     return stat ? Number(stat.mtimeMs) || 0 : 0;
   }
-  function push(root, rjitHome, cartName, outAbs) {
-    const stale = staleDevHost(rjitHome, DEV_SOCKET_PATH);
-    if (stale) {
-      sendRebuildNotice(stale, DEV_SOCKET_PATH);
-      err(`[dev ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}] rebuild needed - native build id running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`);
+  function push(root, rjitHome, cartName, outAbs, expectedCoreBuildId) {
+    const host = readDevHostInfo(DEV_SOCKET_PATH);
+    const publishedCoreBuildId = readCoreRecord(rjitHome)?.sourceHash ?? expectedCoreBuildId;
+    if (publishedCoreBuildId && host && host.build_id !== publishedCoreBuildId) {
+      err(`[dev ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}] cold core restart in progress - running ${shortHash(host.build_id)} / expected ${shortHash(publishedCoreBuildId)}`);
       return;
     }
     const result = spawnSync(`${root}/tools/rjit`, ["push-bundle", cartName, outAbs]);
@@ -9394,6 +10700,7 @@ __ARCHIVE__
     "cart-manifest-field": cart_manifest_field_exports,
     "classify": classify_exports,
     "clean": clean_exports,
+    "orphans": orphans_exports,
     "codegen-bindings": codegen_bindings_exports,
     "dev": dev_exports,
     "firecracker-build": firecracker_build_exports,

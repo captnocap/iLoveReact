@@ -28,6 +28,7 @@ import MemoryPopover from './MemoryPopover';
 import PreferencesDialog from './PreferencesDialog';
 import HotUpdateDialog from './HotUpdateDialog';
 import NativeUpdateNotice, { nativeUpdateApprovalJson, nativeUpdateNoticeFromPayload, type NativeUpdateNoticeState } from './NativeUpdateNotice';
+import OrphanHostsNotice, { orphanCleanupApprovalJson, orphanHostsNoticeFromPayload, type OrphanHostsNoticeState } from './OrphanHostsNotice';
 import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
 import ModelActionMenu from '../library/ModelActionMenu';
@@ -76,8 +77,14 @@ import {
 } from '../data/mapDocuments';
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
-import { propRigToSkeleton, skeletonToPropRig, describePropRig, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig } from '../../../runtime/skeleton';
+import { propRigToSkeleton, skeletonToPropRig, describePropRig, type CharacterRigBoundaryAudit, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig, type SkinBindingRef } from '../../../runtime/skeleton';
 import { createCharacterRigApi, type NativeCharacterRigApi } from '../skeleton/characterRigSession';
+import { humanoidSemanticMembershipFromKey } from '../skeleton/humanoidSemanticAssignment';
+import {
+  parseCharacterRigSeatAction,
+  rigStatusFromSnapshot,
+  type CharacterRigSeatAction,
+} from '../agent/characterRigSeat';
 import {
   activateMapDocumentPaintingAsync,
   applyMapPaintEffects,
@@ -168,7 +175,7 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { MESHDOC_VERTEX_STRIDE, invalidateMeshDoc, meshDocBounds, meshDocIsUnreadable, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry } from '../data/meshDoc';
+import { MESHDOC_VERTEX_STRIDE, invalidateMeshDoc, meshDocBounds, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { parseModelHistory } from '../model/uvHistory';
 import {
@@ -278,6 +285,11 @@ const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'pen',
 const COLOR_STUDIO_UNDO_CAP = 32;
 const SEAT_SESSION_WEDGED_REASON = "the editor's native session could not be restored — switch tabs to recover; the Agent Seat is refusing every request until then";
 
+function savedCharacterBinding(pkg: ModelPackage): SkinBindingRef | null {
+  const meshes = pkg.skeleton?.meshes;
+  return meshes?.kind === 'skinned' ? meshes.binding ?? null : null;
+}
+
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
 // (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
 // (req_2677 — "literal burj khalifa levels of floors"); audited downstream:
@@ -383,6 +395,8 @@ export default function AppFrame() {
   const characterRigApiRef = useRef<NativeCharacterRigApi | null>(null);
   if (characterRigApiRef.current === null) characterRigApiRef.current = createCharacterRigApi();
   const [characterRigSnapshot, setCharacterRigSnapshot] = useState<CharacterRigSnapshot | null>(null);
+  const characterRigSnapshotRef = useRef<CharacterRigSnapshot | null>(characterRigSnapshot);
+  characterRigSnapshotRef.current = characterRigSnapshot;
   // Migrated application commands read and atomically replace this live
   // snapshot before publishing their outcome. React is a projection of that
   // commit; menu/toolbar/hotkey callers never receive setState.
@@ -458,6 +472,7 @@ export default function AppFrame() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
   const [nativeUpdateNotice, setNativeUpdateNotice] = useHotState<NativeUpdateNoticeState | null>('editor.native-update-notice.v1', null);
+  const [orphanHostsNotice, setOrphanHostsNotice] = useHotState<OrphanHostsNoticeState | null>('editor.orphan-hosts-notice.v1', null);
   const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
   const [unsavedActionLabels, setUnsavedActionLabels] = useState<{ save?: string; discard?: string; cancel?: string }>({});
   const unsavedDecisionRef = useRef<{ save: () => void; discard: () => void; cancel?: () => void } | null>(null);
@@ -556,6 +571,20 @@ export default function AppFrame() {
     if (ready) {
       setNativeUpdateNotice(ready);
       setState((prev) => ({ ...prev, status: 'Native update compiled — waiting for your approval' }));
+      return;
+    }
+    const orphans = orphanHostsNoticeFromPayload(payload);
+    if (orphans) {
+      setOrphanHostsNotice(orphans);
+      setState((prev) => ({ ...prev, status: `${orphans.pids.length} orphaned dev host(s) found — nothing is attached to them` }));
+      return;
+    }
+    if (payload?.kind === 'orphan-hosts-result') {
+      setOrphanHostsNotice(null);
+      setState((prev) => ({
+        ...prev,
+        status: typeof payload.message === 'string' ? payload.message : 'Orphan cleanup finished',
+      }));
       return;
     }
     if (payload?.kind === 'native-update-result') {
@@ -1745,11 +1774,18 @@ export default function AppFrame() {
         };
       }
       const committed = result.package;
+      let acknowledgementWarning: string | null = null;
       if (result.ok && committed) {
         consumeModelSaveAuthorizations(pkg.id);
         upsertSavedPackage(committed);
         const depths = undoDepths(current);
         savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
+        try {
+          const refreshed = characterRigApiRef.current?.commitSave(savedCharacterBinding(committed));
+          if (refreshed) setCharacterRigSnapshot(refreshed);
+        } catch (error) {
+          acknowledgementWarning = error instanceof Error ? error.message : String(error);
+        }
       }
       setState((prev) => ({
         ...prev,
@@ -1760,7 +1796,7 @@ export default function AppFrame() {
           ? upsertModelPackageProjection(prev.modelDupes, committed)
           : prev.modelDupes,
         status: result.ok
-          ? `${reason}: character revision committed → ${result.dir}`
+          ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}`
           : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
       }));
       return result.ok;
@@ -1821,7 +1857,7 @@ export default function AppFrame() {
         : prev.modelDupes,
       status: ok
         ? `${reason}: "${pkg.name}" → ${result.dir}`
-        : `${reason} failed: ${result.error ?? (artifactsOk ? 'unknown error' : 'model artifacts were not written')}`,
+        : `${reason} failed: ${result.error ?? (artifactsOk ? 'unknown error' : (meshDocLastWriteFailure() ?? 'model artifacts were not written'))}`,
     }));
     return ok;
   };
@@ -3266,10 +3302,10 @@ export default function AppFrame() {
     }));
   };
 
-  const attachCharacterRig = (pkgId: string) => {
+  const attachCharacterRig = (pkgId: string): ModelPackage | null => {
     const current = stateRef.current;
     const pkg = effectiveModelPackage(pkgId, current.modelOverrides, current.modelDupes);
-    if (!pkg) return;
+    if (!pkg) return null;
     const objectIds = (current.modelParts[pkg.id] ?? [])
       .slice()
       .sort((left, right) => (left.lo ?? Number.MAX_SAFE_INTEGER) - (right.lo ?? Number.MAX_SAFE_INTEGER))
@@ -3307,11 +3343,13 @@ export default function AppFrame() {
         rightPanelCollapsed: false,
         status: `Humanoid rig attached to “${attached.name}” — geometry and model category are unchanged; choose Player or NPC only when exporting.`,
       }));
+      return attached;
     } catch (error) {
       setState((prev) => ({
         ...prev,
         status: `Humanoid rig could not attach: ${error instanceof Error ? error.message : String(error)}`,
       }));
+      return null;
     }
   };
 
@@ -4214,6 +4252,23 @@ export default function AppFrame() {
       detachSelection: seatDetachSelection,
       persist: () => saveActiveModelNow('Saved by Agent Seat'),
       partPercept: (modelId?: string) => seatPartPercept(modelId),
+      rigPercept: () => {
+        const api = characterRigApiRef.current;
+        const target = api?.currentOpenTarget?.();
+        const visibleModelId = activeSessionModelIdRef.current;
+        if (!api || !target || target.modelId !== visibleModelId) return null;
+        try {
+          // Seat replies are event-driven, never per-frame. Refreshing here
+          // makes topology/anatomy debt ambient on the very next reply even
+          // when the edit came through a mesh verb rather than a rig command.
+          const snapshot = api.snapshot();
+          characterRigSnapshotRef.current = snapshot;
+          return rigStatusFromSnapshot(snapshot);
+        } catch {
+          const snapshot = characterRigSnapshotRef.current;
+          return snapshot ? rigStatusFromSnapshot(snapshot) : null;
+        }
+      },
       registerPathPart: (range: { lo: number; hi: number }, kind: 'plane' | 'edges') => registerPathPlanePart(range, kind),
       shellAction: (action: string, args: Record<string, unknown>, targetModelId?: string) => seatShellActionRef.current(action, args, targetModelId),
     };
@@ -4609,6 +4664,15 @@ export default function AppFrame() {
     consumeModelSaveAuthorizations(pkg.id);
     const pkgExported = committed.package;
     upsertSavedPackage(pkgExported);
+    try {
+      const refreshed = characterRigApiRef.current?.commitSave(savedCharacterBinding(pkgExported));
+      if (refreshed) setCharacterRigSnapshot(refreshed);
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        status: `Character files and manifest committed, but the resident save percept could not acknowledge them: ${error instanceof Error ? error.message : String(error)}`,
+      }));
+    }
     // ONE played model: demote the previous holder to NPC, on disk and in the roster.
     const previous = role === 'player' ? currentPlayerCharacter() : null;
     const demoted: ModelPackage | null = previous && previous.id !== pkg.id
@@ -6032,6 +6096,38 @@ export default function AppFrame() {
           modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
         });
       }
+      if (action === 'rig-status') {
+        if (background) return fail('character rig status belongs to the visible model document; open that model before inspecting its resident rig');
+        if (!modelId) return fail('no model in view — open a model document first');
+        const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
+        if (!pkg) return fail(`no model package "${modelId}"`);
+        if (!hasCharacterRigCapability(pkg)) return ok({
+          model: pkg.id,
+          name: pkg.name,
+          capability: 'absent',
+          state: 'detached',
+          rows: null,
+          weightsStale: false,
+          fitReview: false,
+          bindReview: false,
+        });
+        const api = characterRigApiRef.current;
+        const target = api?.currentOpenTarget?.();
+        if (!api || !target || target.modelId !== pkg.id) return ok({
+          model: pkg.id,
+          name: pkg.name,
+          capability: 'attached',
+          state: api?.currentOpenFault?.() ? 'blocked' : 'opening',
+          rows: null,
+          weightsStale: false,
+          fitReview: false,
+          bindReview: true,
+          fault: api?.currentOpenFault?.() ?? null,
+        });
+        const snapshot = api.snapshot();
+        setCharacterRigSnapshot(snapshot);
+        return ok({ model: pkg.id, name: pkg.name, capability: 'attached', ...rigStatusFromSnapshot(snapshot) });
+      }
       // The saved-state lane (req_4052). Before this, the only way to see what a save
       // actually wrote was semantic-status (aggregate counts) or a cold reopen — so
       // agents read mesh/doc.blob themselves with a hand-written struct.unpack and a
@@ -6051,9 +6147,17 @@ export default function AppFrame() {
         invalidateMeshDoc(dir);
         const doc = packageMeshDoc(pkg);
         if (!doc) {
-          return fail(meshDocIsUnreadable(dir)
-            ? `${dir}/mesh/doc.blob exists but did not decode with this editor's RJMD reader`
-            : `${dir} carries no readable model document`);
+          if (meshDocIsUnreadable(dir)) {
+            const decode = meshDocUnreadableDiagnostic(dir);
+            return {
+              ok: false,
+              reason: decode
+                ? `${dir}/mesh/doc.blob rejected by this editor's RJMD reader [${decode.code}]: ${decode.reason}`
+                : `${dir}/mesh/doc.blob exists but did not decode with this editor's RJMD reader`,
+              result: { model: pkg.id, name: pkg.name, kind: pkg.kind, dir, decode },
+            };
+          }
+          return fail(`${dir} carries no readable model document`);
         }
         const savedTable = doc.semanticTable ?? null;
         const savedRegions = savedTable?.regions ?? [];
@@ -6365,24 +6469,176 @@ export default function AppFrame() {
       }
       if (action === 'rig') {
         if (!modelId) return fail('open a model first');
-        const pkg = visibleModels.find((model) => model.id === modelId);
-        const operation = String(args.operation ?? 'read');
-        if (operation === 'read') return ok({
-          rig: live.modelRigs[modelId] ?? (pkg?.skeleton ? skeletonToPropRig(pkg.skeleton) : {}),
-          lights: normalizeModelLights(live.modelLights[modelId] ?? pkg?.lights ?? []),
-        });
-        if (operation === 'replace') {
-          if (!args.rig || typeof args.rig !== 'object') return fail('rig must be an object');
-          setModelRig(modelId, args.rig as PropRig);
-          return ok(args.rig);
-        }
-        if (operation === 'lights-replace') {
+        const parsed = parseCharacterRigSeatAction(args);
+        if (!parsed.ok) return fail(parsed.error);
+        if (parsed.value.kind === 'legacy-prop') {
+          const pkg = visibleModels.find((model) => model.id === modelId);
+          const operation = parsed.value.operation;
+          if (operation === 'read') return ok({
+            rig: live.modelRigs[modelId] ?? (pkg?.skeleton ? skeletonToPropRig(pkg.skeleton) : {}),
+            lights: normalizeModelLights(live.modelLights[modelId] ?? pkg?.lights ?? []),
+          });
+          if (operation === 'replace') {
+            if (!args.rig || typeof args.rig !== 'object') return fail('rig must be an object');
+            setModelRig(modelId, args.rig as PropRig);
+            return ok(args.rig);
+          }
           if (!Array.isArray(args.lights)) return fail('lights must be an array');
           const lights = normalizeModelLights(args.lights as LightRig[]);
           setModelLights(modelId, lights);
           return ok(lights);
         }
-        return fail(`unknown rig operation "${operation}"`);
+        if (background) return fail('character rig operations belong to the visible model document; open that model before changing its resident rig');
+        const rigAction: CharacterRigSeatAction = parsed.value.action;
+        const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
+        if (!pkg) return fail(`no model package "${modelId}"`);
+        if (rigAction.operation === 'attach-humanoid') {
+          if (hasCharacterRigCapability(pkg)) return ok({ model: pkg.id, capability: 'already-attached' });
+          const orderedObjectIds = (live.modelParts[pkg.id] ?? [])
+            .slice()
+            .sort((left, right) => (left.lo ?? Number.MAX_SAFE_INTEGER) - (right.lo ?? Number.MAX_SAFE_INTEGER))
+            .map((part) => part.id);
+          let preflight = null;
+          if (orderedObjectIds.length > 0) {
+            try {
+              preflight = characterRigApiRef.current?.preflightAttach(orderedObjectIds) ?? null;
+            } catch (error) {
+              return fail(`humanoid rig attachment preflight failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            if (preflight && !preflight.accepted) {
+              return {
+                ok: false,
+                reason: `attach-humanoid refused — first object ${preflight.candidateBodyObjectId} is not the largest connected mesh`,
+                result: {
+                  preflight,
+                  plan: [
+                    `move stable object ${preflight.recommendedBodyObjectId} to the first geometry range`,
+                    'rerun attach-humanoid; no rig descriptor was installed',
+                  ],
+                },
+              };
+            }
+          }
+          const attached = attachCharacterRig(pkg.id);
+          const attachedBodyObjectId = attached?.skeleton?.characterRig?.objectBindings
+            .find((binding) => binding.mode === 'body')?.objectId ?? null;
+          return attached
+            ? ok({
+                model: attached.id,
+                capability: 'attached',
+                bodyObjectId: attachedBodyObjectId,
+                preflight,
+                sessionState: 'opening',
+              })
+            : fail('humanoid rig attachment was refused; the editor status contains the exact package error');
+        }
+        if (!hasCharacterRigCapability(pkg)) {
+          return fail('this model has no humanoid rig capability — run attach-humanoid first; package kind is irrelevant');
+        }
+        const api = characterRigApiRef.current;
+        const target = api?.currentOpenTarget?.();
+        if (!api || !target || target.modelId !== pkg.id) {
+          return fail(api?.currentOpenFault?.() ?? 'the native character rig session is opening; retry after rig-status reports resident rows');
+        }
+        const adoptRigSnapshot = (snapshot: CharacterRigSnapshot, dirty = false) => {
+          setCharacterRigSnapshot(snapshot);
+          if (dirty) markModelDirty(pkg.id);
+          return snapshot;
+        };
+        const currentRigStatus = () => {
+          const snapshot = adoptRigSnapshot(api.snapshot());
+          return { snapshot, status: rigStatusFromSnapshot(snapshot) };
+        };
+        const blockedGateReceipt = (verb: string, rows: Record<string, unknown>): SeatShellReceipt => ({
+          ok: false,
+          reason: `${verb} refused — ${Object.keys(rows).join(', ')}`,
+          result: { failingRows: rows },
+        });
+        const primaryGateFailures = (status: ReturnType<typeof rigStatusFromSnapshot>): Record<string, unknown> => {
+          const failures: Record<string, unknown> = {};
+          if (status.rows.connected_body.status !== 'ready') failures.connected_body = status.rows.connected_body;
+          if (status.rows.required_semantics.status !== 'ready') failures.required_semantics = status.rows.required_semantics;
+          if (status.rows.canonical_skeleton !== 'ready') failures.canonical_skeleton = status.rows.canonical_skeleton;
+          return failures;
+        };
+
+        if (rigAction.operation === 'coverage') return ok(currentRigStatus().snapshot.semanticCoverage);
+        if (rigAction.operation === 'select-detached') return ok(api.inspect({ kind: 'selectDetached' }));
+        if (rigAction.operation === 'select-uncovered') return ok(api.inspect({ kind: 'selectUncovered' }));
+        if (rigAction.operation === 'boundary-audit') return ok(api.inspect({ kind: 'boundaryAudit' }));
+        if (rigAction.operation === 'probe') return ok(api.inspect({ kind: 'probe', logicalVertexId: rigAction.vertex }));
+        if (rigAction.operation === 'weights-summary') return ok(api.inspect({ kind: 'weightsSummary', boneId: rigAction.bone }));
+        if (rigAction.operation === 'weights-symmetry') return ok(api.inspect({
+          kind: 'weightsSymmetry',
+          ...(rigAction.tolerance === undefined ? {} : { tolerance: rigAction.tolerance }),
+        }));
+        if (rigAction.operation === 'skeleton') return ok(api.inspect({ kind: 'skeleton' }));
+        if (rigAction.operation === 'bend-test') {
+          const test = ({
+            shoulder: 'shoulder_abduction', elbow: 'elbow_flex', wrist: 'wrist_flex',
+            hip: 'hip_flex', knee: 'knee_flex',
+          } as const)[rigAction.test];
+          return ok(api.inspect({ kind: 'bendTest', test, side: rigAction.side }));
+        }
+        if (rigAction.operation === 'role') {
+          const membership = humanoidSemanticMembershipFromKey(rigAction.role);
+          if (!membership) return fail(`unknown stable humanoid role "${rigAction.role}"`);
+          const receipt = withNativeMeshActionSource('seat', () =>
+            modelToolApiRef.current?.assignHumanoidSemantic(membership) ?? null);
+          if (!receipt?.applied) return fail(receipt?.reason ?? 'select one or more BODY faces before assigning anatomy');
+          markModelDirty(pkg.id);
+          const snapshot = adoptRigSnapshot(api.snapshot());
+          return ok({ role: receipt.roleKey, changed: receipt.changed, status: rigStatusFromSnapshot(snapshot) });
+        }
+        if (rigAction.operation === 'object-mode') {
+          const binding = rigAction.mode === 'rigid'
+            ? { objectId: rigAction.id, mode: rigAction.mode, boneId: rigAction.bone } as const
+            : { objectId: rigAction.id, mode: rigAction.mode } as const;
+          const snapshot = adoptRigSnapshot(api.command({ kind: 'setObjectBinding', binding }), true);
+          return ok({ binding, status: rigStatusFromSnapshot(snapshot) });
+        }
+        if (rigAction.operation === 'fit') {
+          const before = currentRigStatus();
+          const failures = primaryGateFailures(before.status);
+          if (Object.keys(failures).length > 0) return blockedGateReceipt('rig fit', failures);
+          adoptRigSnapshot(api.command({ kind: 'fitSkeleton' }), true);
+          return ok(api.inspect({ kind: 'skeleton' }));
+        }
+        if (rigAction.operation === 'joint') {
+          const snapshot = 'lock' in rigAction
+            ? adoptRigSnapshot(api.command({ kind: 'setJointLock', boneId: rigAction.bone, locked: rigAction.lock }), true)
+            : adoptRigSnapshot(api.command({
+                kind: 'setJointGlobalTransform',
+                boneId: rigAction.bone,
+                origin: rigAction.origin,
+                ...(rigAction.frame ? { frame: rigAction.frame } : {}),
+              }), true);
+          return ok({ bone: rigAction.bone, status: rigStatusFromSnapshot(snapshot), skeleton: api.inspect({ kind: 'skeleton' }) });
+        }
+        if (rigAction.operation === 'mirror-joints') {
+          adoptRigSnapshot(api.command({ kind: 'mirrorJoints', source: rigAction.source }), true);
+          return ok(api.inspect({ kind: 'skeleton' }));
+        }
+        if (rigAction.operation === 'bind') {
+          const before = currentRigStatus();
+          const failures = primaryGateFailures(before.status);
+          if (Object.keys(failures).length > 0) return blockedGateReceipt('rig bind', failures);
+          const boundary = api.inspect<CharacterRigBoundaryAudit>({ kind: 'boundaryAudit' });
+          if (boundary.raggedCount > 0) return blockedGateReceipt('rig bind', {
+            boundary_audit: {
+              status: 'blocked',
+              ragged: boundary.raggedCount,
+              interfaces: boundary.entries.filter((row) => row.ragged).map((row) => `${row.proximalRole}->${row.distalRole}`),
+            },
+          });
+          const snapshot = adoptRigSnapshot(api.command({ kind: 'autoBind' }), true);
+          return ok({ status: rigStatusFromSnapshot(snapshot), saved: false });
+        }
+        if (rigAction.operation === 'undo' || rigAction.operation === 'redo') {
+          const snapshot = adoptRigSnapshot(rigAction.operation === 'undo' ? api.undo() : api.redo(), true);
+          return ok({ status: rigStatusFromSnapshot(snapshot), history: snapshot.history });
+        }
+        return fail(`unknown character rig operation "${(rigAction as CharacterRigSeatAction).operation}"`);
       }
       const bridge = (globalThis as any).__modelFocusBridge;
       if (action === 'uv-state') {
@@ -8130,6 +8386,31 @@ export default function AppFrame() {
                 setState((prev) => ({ ...prev, status: 'Applying the approved native update…' }));
               } else {
                 setState((prev) => ({ ...prev, status: 'Could not send native update approval — the running editor was not touched' }));
+              }
+            }}
+          />
+        </RenderProbe>
+      ) : null}
+      {orphanHostsNotice && !orphanHostsNotice.collapsed ? (
+        <RenderProbe id="Orphan Hosts Notice">
+          <OrphanHostsNotice
+            notice={orphanHostsNotice}
+            onLater={() => setOrphanHostsNotice((current) => current ? { ...current, collapsed: true } : null)}
+            onClean={() => {
+              const current = orphanHostsNotice;
+              if (!current) return;
+              // The editor NEVER signals a process. It writes a one-shot approval and
+              // the dev supervisor — the thing that owns process lifetime — does the
+              // work, pid by exact pid, re-verifying each one first.
+              const wrote = (globalThis as any).__fs_write?.(
+                current.approvalPath,
+                orphanCleanupApprovalJson(current.token, current.pids),
+              ) === true;
+              if (wrote) {
+                setOrphanHostsNotice(null);
+                setState((prev) => ({ ...prev, status: `Retiring ${current.pids.length} orphaned dev host(s)…` }));
+              } else {
+                setState((prev) => ({ ...prev, status: 'Could not send the cleanup approval — no process was signalled' }));
               }
             }}
           />
