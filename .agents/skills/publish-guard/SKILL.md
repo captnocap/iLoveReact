@@ -41,28 +41,43 @@ The allowlist decides publication once, positively, and forces new junk to annou
    - It is not → pick a verb below.
 3. **Act, with the verbs — never by hand:**
    ```bash
-   tools/rjit repo archive <tree>      # zip → archive/<tree>.zip, verify, untrack, ignore
-   tools/rjit repo unpublish <path>    # untrack + ignore, no zip
+   tools/rjit repo archive <tree>          # zip → archive/<tree>.zip, verify, untrack, ignore
+   tools/rjit repo archive <tree> --drop   # ...and remove the tree once the zip covers it
+   tools/rjit repo unpublish <path>        # untrack + ignore, no zip
    ```
    `archive` is for a **frozen era** you may want to read again (whole stacks, previous
    eras). `unpublish` is for anything regenerable, already backed up, or local-only
    (captures, models, bake output, prebuilt blobs).
+
+   **`archive/` holds zips, not directories.** Add `--drop` to reclaim the disk. It removes
+   the tree only after proving the zip contains every file and symlink currently on disk —
+   not "a zip exists", not "`zip -T` passed", both of which a valid archive of the *wrong
+   content* satisfies. An existing zip is reused but re-checked, so a stale archive can
+   never authorise a delete.
 4. **Rebuild the CLI if you edited `cli/`** — `tools/rjit.js` is generated:
    ```bash
    tools/esbuild cli/main.ts --bundle --outfile=tools/rjit.js --format=iife --platform=neutral --target=es2022
    ```
 5. **Commit** `.gitignore` together with the removals, and say what moved and why.
 
-## Nothing here deletes
+## Deleting: only one verb can, and only against a proof
 
-The only git command these verbs run against a tree is `git rm --cached`. Files stay exactly
-where they are on disk; a wrong call costs a `git checkout -- <path>`, never a file. That is
-deliberate — a freestyle `rm -rf` over a listing that read like build output once destroyed
-an authored world map (req_4083), and a whole-tree publish sweep invites the same mistake.
+Everything except `--drop` is non-destructive. The only git command run against a tree is
+`git rm --cached`, so the bytes stay on disk and a wrong call costs a `git checkout -- <path>`,
+never a file.
 
-**So: never `rm -rf` a tree to clean the repo. Untracking is the whole job.** If files
-genuinely must leave the disk too, that is `rjit clean` (declared artifacts only) or an
-explicit user decision — not this skill.
+`--drop` is the single exception, and it earns it by proving the archive first: every file
+and symlink on disk must appear in the zip, or it refuses and removes nothing. Reusing an
+existing zip re-runs that proof against current disk contents.
+
+**Never hand-write `rm -rf` against a repo tree.** A freestyle `rm -rf` over a listing that
+read like build output destroyed an authored world map (req_4083) — the scope was authorised,
+the mistake was deleting a listing instead of inspecting its contents. That is exactly what
+the coverage proof replaces. For build output, use `rjit clean` (declared artifacts only).
+
+When someone asks "what would actually go missing?", answer it concretely rather than
+hedging — a verified zip loses nothing, so the real question is what still READS the path.
+Check that (see below), then act.
 
 ## Respect the refusals
 
