@@ -10179,17 +10179,23 @@ ${IMPORTS_MARKER}`).replace(
   async function run23(argv) {
     const verb = argv[0];
     if (verb === "archive" || verb === "unpublish") {
+      const flags = argv.slice(1).filter((arg) => arg.startsWith("-"));
       const trees = argv.slice(1).filter((arg) => !arg.startsWith("-"));
-      if (trees.length === 0) {
-        err(`[repo] ${verb}: name at least one tree`);
-        err(`Usage: rjit repo ${verb} <tree>...`);
+      const unknownFlag = flags.find((flag) => flag !== "--drop");
+      if (unknownFlag) {
+        err(`[repo] ${verb}: unknown flag ${unknownFlag}`);
         return 1;
       }
-      return applyVerb(verb, trees);
+      if (trees.length === 0) {
+        err(`[repo] ${verb}: name at least one tree`);
+        err(`Usage: rjit repo ${verb} <tree>... [--drop]`);
+        return 1;
+      }
+      return applyVerb(verb, trees, flags.includes("--drop"));
     }
     if (verb !== void 0 && verb !== "--candidates") {
       err(`[repo] unknown verb: ${verb}`);
-      err("Usage: rjit repo [--candidates] | rjit repo archive <tree>... | rjit repo unpublish <tree>...");
+      err("Usage: rjit repo [--candidates] | rjit repo archive <tree>... [--drop] | rjit repo unpublish <tree>...");
       return 1;
     }
     const entries = trackedEntries();
@@ -10203,6 +10209,7 @@ ${IMPORTS_MARKER}`).replace(
     out("");
     out("[repo] this survey changed nothing. To act on a finding:");
     out("[repo]   rjit repo archive <tree>     zip to archive/, untrack, ignore, keep on disk");
+    out("[repo]   rjit repo archive <tree> --drop   ...and remove the tree once the zip provably covers it");
     out("[repo]   rjit repo unpublish <tree>   untrack, ignore, keep on disk");
     out("[repo] to PUBLISH something reported undeclared, add it to cli/dev/publishable.ts");
     return 0;
@@ -10220,7 +10227,7 @@ ${IMPORTS_MARKER}`).replace(
       out(`    ${path}  \u2192  would be ${verdict.kind}: ${verdict.what}`);
     }
   }
-  function applyVerb(verb, trees) {
+  function applyVerb(verb, trees, drop) {
     const entries = trackedEntries();
     const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
     announce2(findings, sourceFiles, sourceBytes, out);
@@ -10245,34 +10252,92 @@ ${IMPORTS_MARKER}`).replace(
         return 1;
       }
       const tracked = entries.filter((entry) => entry.path === tree || entry.path.startsWith(`${tree}/`));
-      if (tracked.length === 0) {
-        out(`[repo] ${tree}: already untracked \u2014 nothing to do`);
-        continue;
-      }
       const bytes = tracked.reduce((sum, entry) => sum + entry.bytes, 0);
+      let zipRel = null;
       if (verb === "archive") {
-        const zipRel = `archive/${zipName(tree)}.zip`;
-        const packed = packTree(rjitHome, tree, zipRel);
-        if (packed !== 0) return packed;
-        out(`[repo] ${tree}: packed \u2192 ${zipRel} (verified)`);
+        zipRel = `archive/${zipName(tree)}.zip`;
+        if (fsExists(`${rjitHome}/${zipRel}`)) {
+          out(`[repo] ${tree}: ${zipRel} already exists \u2014 reusing it (coverage is re-checked below)`);
+        } else {
+          const packed = packTree(rjitHome, tree, zipRel);
+          if (packed !== 0) return packed;
+          out(`[repo] ${tree}: packed \u2192 ${zipRel} (verified)`);
+        }
       }
-      out(`[repo] ${tree}: untracking ${tracked.length} files (${humanBytes(bytes)}) \u2014 files stay on disk`);
-      const removed = spawnSync("git", ["rm", "-r", "--cached", "--quiet", "--", tree]);
-      if (removed.code !== 0) {
-        err(`[repo] ${tree}: git rm --cached failed (exit ${removed.code})`);
-        err(removed.stderr.trim());
-        return removed.code || 1;
+      if (tracked.length === 0) {
+        out(`[repo] ${tree}: already untracked`);
+      } else {
+        out(`[repo] ${tree}: untracking ${tracked.length} files (${humanBytes(bytes)}) \u2014 files stay on disk`);
+        const removed = spawnSync("git", ["rm", "-r", "--cached", "--quiet", "--", tree]);
+        if (removed.code !== 0) {
+          err(`[repo] ${tree}: git rm --cached failed (exit ${removed.code})`);
+          err(removed.stderr.trim());
+          return removed.code || 1;
+        }
+        out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
       }
-      const ignoreLine = addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what);
-      out(`[repo] ${tree}: ${ignoreLine}`);
+      if (drop) {
+        if (!zipRel) {
+          err(`[repo] ${tree}: --drop only applies to \`archive\` \u2014 unpublish keeps the files by design`);
+          return 1;
+        }
+        const dropped = dropArchivedTree(rjitHome, tree, zipRel);
+        if (dropped !== 0) return dropped;
+      }
     }
     out("");
-    out("[repo] staged. Nothing was deleted from disk; `git checkout -- <tree>` undoes any of it.");
+    if (drop) {
+      out("[repo] trees removed from disk only after their zip was proven to contain every file.");
+    } else {
+      out("[repo] staged. Nothing was deleted from disk; `git checkout -- <tree>` undoes any of it.");
+    }
     out("[repo] review with `git status`, then commit .gitignore together with the removals.");
     return 0;
   }
+  function dropArchivedTree(rjitHome, tree, zipRel) {
+    const onDisk = listFilesAndLinks(rjitHome, tree);
+    if (onDisk.length === 0) {
+      out(`[repo] ${tree}: not on disk \u2014 nothing to remove`);
+      return 0;
+    }
+    const inZip = new Set(listZipEntries(rjitHome, zipRel));
+    if (inZip.size === 0) {
+      err(`[repo] ${tree}: could not read ${zipRel} \u2014 refusing to remove anything`);
+      return 1;
+    }
+    const missing = onDisk.filter((path) => !inZip.has(path));
+    if (missing.length > 0) {
+      err(`[repo] ${tree}: REFUSING to remove \u2014 ${missing.length} of ${onDisk.length} files on disk are NOT in ${zipRel}`);
+      for (const path of missing.slice(0, 10)) err(`[repo]     missing: ${path}`);
+      if (missing.length > 10) err(`[repo]     ... and ${missing.length - 10} more`);
+      return 1;
+    }
+    const size = spawnSync("du", ["-sh", `${rjitHome}/${tree}`]).stdout.trim().split("	")[0] ?? "?";
+    out(`[repo] ${tree}: all ${onDisk.length} files/symlinks on disk are present in ${zipRel}`);
+    out(`[repo] ${tree}: removing the unzipped tree (${size}) \u2014 the zip is the copy that remains`);
+    const removed = spawnSync("rm", ["-rf", "--", `${rjitHome}/${tree}`]);
+    if (removed.code !== 0) {
+      err(`[repo] ${tree}: rm failed (exit ${removed.code})`);
+      return removed.code || 1;
+    }
+    return 0;
+  }
+  function listFilesAndLinks(rjitHome, tree) {
+    const found = spawnSync("sh", [
+      "-c",
+      `cd ${shellQuote3(rjitHome)} && find ${shellQuote3(tree)} \\( -type f -o -type l \\) -print 2>/dev/null`
+    ]);
+    if (found.code !== 0) return [];
+    return found.stdout.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  }
+  function listZipEntries(rjitHome, zipRel) {
+    const listed = spawnSync("unzip", ["-Z1", `${rjitHome}/${zipRel}`]);
+    if (listed.code !== 0) return [];
+    return listed.stdout.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.endsWith("/"));
+  }
   function zipName(tree) {
-    return tree.replace(/\//g, "-");
+    const withinArchive = tree.startsWith("archive/") ? tree.slice("archive/".length) : tree;
+    return withinArchive.replace(/\//g, "-");
   }
   function packTree(rjitHome, tree, zipRel) {
     const source = `${rjitHome}/${tree}`;

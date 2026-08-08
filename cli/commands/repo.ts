@@ -41,18 +41,24 @@ export async function run(argv: string[]): Promise<number> {
   const verb = argv[0];
 
   if (verb === 'archive' || verb === 'unpublish') {
+    const flags = argv.slice(1).filter((arg) => arg.startsWith('-'));
     const trees = argv.slice(1).filter((arg) => !arg.startsWith('-'));
-    if (trees.length === 0) {
-      err(`[repo] ${verb}: name at least one tree`);
-      err(`Usage: rjit repo ${verb} <tree>...`);
+    const unknownFlag = flags.find((flag) => flag !== '--drop');
+    if (unknownFlag) {
+      err(`[repo] ${verb}: unknown flag ${unknownFlag}`);
       return 1;
     }
-    return applyVerb(verb, trees);
+    if (trees.length === 0) {
+      err(`[repo] ${verb}: name at least one tree`);
+      err(`Usage: rjit repo ${verb} <tree>... [--drop]`);
+      return 1;
+    }
+    return applyVerb(verb, trees, flags.includes('--drop'));
   }
 
   if (verb !== undefined && verb !== '--candidates') {
     err(`[repo] unknown verb: ${verb}`);
-    err('Usage: rjit repo [--candidates] | rjit repo archive <tree>... | rjit repo unpublish <tree>...');
+    err('Usage: rjit repo [--candidates] | rjit repo archive <tree>... [--drop] | rjit repo unpublish <tree>...');
     return 1;
   }
 
@@ -70,6 +76,7 @@ export async function run(argv: string[]): Promise<number> {
   out('');
   out('[repo] this survey changed nothing. To act on a finding:');
   out('[repo]   rjit repo archive <tree>     zip to archive/, untrack, ignore, keep on disk');
+  out('[repo]   rjit repo archive <tree> --drop   ...and remove the tree once the zip provably covers it');
   out('[repo]   rjit repo unpublish <tree>   untrack, ignore, keep on disk');
   out('[repo] to PUBLISH something reported undeclared, add it to cli/dev/publishable.ts');
   return 0;
@@ -91,7 +98,7 @@ function reportCandidates(): void {
   }
 }
 
-function applyVerb(verb: 'archive' | 'unpublish', trees: string[]): number {
+function applyVerb(verb: 'archive' | 'unpublish', trees: string[], drop: boolean): number {
   const entries = trackedEntries();
   const { findings, sourceFiles, sourceBytes } = surveyTracked(entries);
   announce(findings, sourceFiles, sourceBytes, out);
@@ -120,40 +127,119 @@ function applyVerb(verb: 'archive' | 'unpublish', trees: string[]): number {
     }
 
     const tracked = entries.filter((entry) => entry.path === tree || entry.path.startsWith(`${tree}/`));
-    if (tracked.length === 0) {
-      out(`[repo] ${tree}: already untracked — nothing to do`);
-      continue;
-    }
     const bytes = tracked.reduce((sum, entry) => sum + entry.bytes, 0);
 
+    let zipRel: string | null = null;
     if (verb === 'archive') {
-      const zipRel = `archive/${zipName(tree)}.zip`;
-      const packed = packTree(rjitHome, tree, zipRel);
-      if (packed !== 0) return packed;
-      out(`[repo] ${tree}: packed → ${zipRel} (verified)`);
+      zipRel = `archive/${zipName(tree)}.zip`;
+      if (fsExists(`${rjitHome}/${zipRel}`)) {
+        out(`[repo] ${tree}: ${zipRel} already exists — reusing it (coverage is re-checked below)`);
+      } else {
+        const packed = packTree(rjitHome, tree, zipRel);
+        if (packed !== 0) return packed;
+        out(`[repo] ${tree}: packed → ${zipRel} (verified)`);
+      }
     }
 
-    out(`[repo] ${tree}: untracking ${tracked.length} files (${humanBytes(bytes)}) — files stay on disk`);
-    const removed = spawnSync('git', ['rm', '-r', '--cached', '--quiet', '--', tree]);
-    if (removed.code !== 0) {
-      err(`[repo] ${tree}: git rm --cached failed (exit ${removed.code})`);
-      err(removed.stderr.trim());
-      return removed.code || 1;
+    if (tracked.length === 0) {
+      out(`[repo] ${tree}: already untracked`);
+    } else {
+      out(`[repo] ${tree}: untracking ${tracked.length} files (${humanBytes(bytes)}) — files stay on disk`);
+      const removed = spawnSync('git', ['rm', '-r', '--cached', '--quiet', '--', tree]);
+      if (removed.code !== 0) {
+        err(`[repo] ${tree}: git rm --cached failed (exit ${removed.code})`);
+        err(removed.stderr.trim());
+        return removed.code || 1;
+      }
+      out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
     }
 
-    const ignoreLine = addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what);
-    out(`[repo] ${tree}: ${ignoreLine}`);
+    if (drop) {
+      if (!zipRel) {
+        err(`[repo] ${tree}: --drop only applies to \`archive\` — unpublish keeps the files by design`);
+        return 1;
+      }
+      const dropped = dropArchivedTree(rjitHome, tree, zipRel);
+      if (dropped !== 0) return dropped;
+    }
   }
 
   out('');
-  out('[repo] staged. Nothing was deleted from disk; `git checkout -- <tree>` undoes any of it.');
+  if (drop) {
+    out('[repo] trees removed from disk only after their zip was proven to contain every file.');
+  } else {
+    out('[repo] staged. Nothing was deleted from disk; `git checkout -- <tree>` undoes any of it.');
+  }
   out('[repo] review with `git status`, then commit .gitignore together with the removals.');
   return 0;
 }
 
-/** archive/<name>.zip from a tree name, flattening any nesting. */
+/** Remove a tree from disk, but ONLY after proving its zip holds every file that is there.
+ *
+ *  This is the one place in this file that deletes, so the proof is the whole point. It is
+ *  not "a zip exists" or "zip -T passed" — a valid archive of the WRONG CONTENT passes both.
+ *  It is: enumerate every file and symlink on disk right now, enumerate the zip's entries,
+ *  and refuse if a single disk path is missing from the archive. The love2d pack already
+ *  proved the failure is real, not theoretical: `zip -r` without -y silently dropped all 11
+ *  symlinks while still producing a valid, `zip -T`-clean archive. */
+function dropArchivedTree(rjitHome: string, tree: string, zipRel: string): number {
+  const onDisk = listFilesAndLinks(rjitHome, tree);
+  if (onDisk.length === 0) {
+    out(`[repo] ${tree}: not on disk — nothing to remove`);
+    return 0;
+  }
+  const inZip = new Set(listZipEntries(rjitHome, zipRel));
+  if (inZip.size === 0) {
+    err(`[repo] ${tree}: could not read ${zipRel} — refusing to remove anything`);
+    return 1;
+  }
+
+  const missing = onDisk.filter((path) => !inZip.has(path));
+  if (missing.length > 0) {
+    err(`[repo] ${tree}: REFUSING to remove — ${missing.length} of ${onDisk.length} files on disk are NOT in ${zipRel}`);
+    for (const path of missing.slice(0, 10)) err(`[repo]     missing: ${path}`);
+    if (missing.length > 10) err(`[repo]     ... and ${missing.length - 10} more`);
+    return 1;
+  }
+
+  const size = spawnSync('du', ['-sh', `${rjitHome}/${tree}`]).stdout.trim().split('\t')[0] ?? '?';
+  out(`[repo] ${tree}: all ${onDisk.length} files/symlinks on disk are present in ${zipRel}`);
+  out(`[repo] ${tree}: removing the unzipped tree (${size}) — the zip is the copy that remains`);
+  const removed = spawnSync('rm', ['-rf', '--', `${rjitHome}/${tree}`]);
+  if (removed.code !== 0) {
+    err(`[repo] ${tree}: rm failed (exit ${removed.code})`);
+    return removed.code || 1;
+  }
+  return 0;
+}
+
+/** Every regular file and symlink under `tree`, repo-relative. Symlinks are listed as
+ *  themselves, never followed — following them is what inflated the first love2d zip. */
+function listFilesAndLinks(rjitHome: string, tree: string): string[] {
+  const found = spawnSync('sh', [
+    '-c',
+    `cd ${shellQuote(rjitHome)} && find ${shellQuote(tree)} \\( -type f -o -type l \\) -print 2>/dev/null`,
+  ]);
+  if (found.code !== 0) return [];
+  return found.stdout.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+}
+
+/** Zip entry names, minus directory entries (which end in /). */
+function listZipEntries(rjitHome: string, zipRel: string): string[] {
+  const listed = spawnSync('unzip', ['-Z1', `${rjitHome}/${zipRel}`]);
+  if (listed.code !== 0) return [];
+  return listed.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.endsWith('/'));
+}
+
+/** archive/<name>.zip from a tree name. A tree already under archive/ keeps its own name —
+ *  archive/qjs-stack becomes archive/qjs-stack.zip, not archive/archive-qjs-stack.zip.
+ *  Anything else flattens its nesting so the destination stays a flat directory of zips. */
 function zipName(tree: string): string {
-  return tree.replace(/\//g, '-');
+  const withinArchive = tree.startsWith('archive/') ? tree.slice('archive/'.length) : tree;
+  return withinArchive.replace(/\//g, '-');
 }
 
 /** Zip the tree and VERIFY the result before the caller untracks anything. An unverified
@@ -187,7 +273,11 @@ function packTree(rjitHome: string, tree: string, zipRel: string): number {
   spawnSync('mkdir', ['-p', '--', `${rjitHome}/archive`]);
 
   out(`[repo] ${tree}: packing → ${zipRel} ...`);
-  const packed = spawnSync('sh', ['-c', `cd ${shellQuote(rjitHome)} && zip -q -r -X ${shellQuote(zipRel)} ${shellQuote(tree)}`]);
+  // -y stores symlinks AS symlinks. Without it zip follows them and writes the target's
+  // bytes under the link's path: archiving love2d/ produced 4751 entries for 1882 real
+  // files and tripled 52MB into 144MB, while the 11 symlinks themselves vanished from the
+  // snapshot. An archive that silently reshapes the tree is not a backup of it.
+  const packed = spawnSync('sh', ['-c', `cd ${shellQuote(rjitHome)} && zip -q -r -y -X ${shellQuote(zipRel)} ${shellQuote(tree)}`]);
   if (packed.code !== 0) {
     err(`[repo] ${tree}: zip failed (exit ${packed.code})`);
     err(packed.stderr.trim());
