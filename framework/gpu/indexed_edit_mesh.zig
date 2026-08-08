@@ -123,6 +123,18 @@ fn explicitLogicalRowsValid(
 /// paths inside that exact maximum, giving the preview popup three useful,
 /// deterministic evaluations without changing how many quads are recovered.
 const QuadifyTuning = struct {
+    /// How far two triangles sharing a diagonal may FOLD across it and still be
+    /// recovered as one authored quad, as cos(angle). For exactly two triangles over one
+    /// shared edge, "coplanar" IS the dihedral angle, so this single number is the whole
+    /// test — the general plane-distance sweep adds nothing for a pair.
+    ///
+    /// This used to run through selectedFacesAreCoplanar at MERGE_FACE_NORMAL_DOT_MIN =
+    /// 0.9999 — agreement within 0.81 DEGREES. Imported quads are, in this file's own
+    /// words, "routinely millimetres out of plane", so almost nothing qualified and
+    /// Tris to Quads recovered 3 quads on a model with roughly 30 obvious ones (req_4143).
+    /// 40° is the same default Blender's Tris-to-Quads ships: loose enough to recover a
+    /// gently curved shell, tight enough that a hard crease is never fused into one face.
+    const pair_normal_dot_min: f32 = 0.766044443; // cos(40°)
     const diagonal_balance_weight: f32 = 0.50;
     const opposite_edge_balance_weight: f32 = 0.30;
     const corner_quality_weight: f32 = 0.20;
@@ -2588,8 +2600,14 @@ pub const Mesh = struct {
         const first_direction = directedDiagonalUse(first, diagonal);
         const second_direction = directedDiagonalUse(second, diagonal);
         if (first_direction == 0 or second_direction == 0 or first_direction == second_direction) return false;
-        const selected = [2]u32{ first_face, second_face };
-        if (!mesh.selectedFacesAreCoplanar(selected[0..])) return false;
+        // A pair folds only across its shared diagonal, so the dihedral angle is the exact
+        // and complete coplanarity test (req_4143). The old call into
+        // selectedFacesAreCoplanar imposed the interactive merge's 0.81° tolerance here,
+        // which rejected nearly every real imported quad.
+        const first_normal = faceNormal(mesh, first);
+        const second_normal = faceNormal(mesh, second);
+        if (length3(first_normal) < 0.5 or length3(second_normal) < 0.5) return false;
+        if (dot3(first_normal, second_normal) < QuadifyTuning.pair_normal_dot_min) return false;
 
         const loop = [4]u32{ first_tip, diagonal[0], second_tip, diagonal[1] };
         for (0..loop.len) |corner| {
@@ -4805,7 +4823,11 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
     const q2 = mesh.vertices.items[b[2]].position;
     const normal_a = norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
     const normal_b = norm3(cross3(sub3(q1, q0), sub3(q2, q0)));
-    if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < MERGE_FACE_NORMAL_DOT_MIN) return false;
+    // Import-time quad recovery is the same machine-chosen pairing as Tris to Quads, so it
+    // takes the same dihedral limit (req_4143). At MERGE_FACE_NORMAL_DOT_MIN's 0.81° this
+    // silently shredded every gently-curved authored quad into loose triangles on the way
+    // in, which is why imported models arrive as soup and stay that way.
+    if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < QuadifyTuning.pair_normal_dot_min) return false;
 
     const loop = [4]u32{ first_tip.?, shared[0], second_tip.?, shared[1] };
     var sign: f32 = 0;
