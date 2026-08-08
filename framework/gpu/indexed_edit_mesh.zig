@@ -2510,11 +2510,26 @@ pub const Mesh = struct {
         return false;
     }
 
-    /// Dissolve a connected coplanar face selection into one ordered boundary face.
-    /// A two-triangle merge records their real resident diagonal so later geometric
-    /// edits never have to guess how the authored quad was physically tessellated.
+    /// Dissolve a connected face selection into one ordered boundary face. A two-triangle
+    /// merge records their real resident diagonal so later geometric edits never have to
+    /// guess how the authored quad was physically tessellated.
+    ///
+    /// NOT coplanarity-gated (req_4140). It was, at MERGE_FACE_NORMAL_DOT_MIN — normals
+    /// within 0.81° and every corner within ~2mm of the reference plane — and the comment
+    /// on mergeSelectedTrusted below already concedes that "import-authored quads are
+    /// routinely millimetres out of plane". So the gate refused, on essentially every
+    /// imported model, the one cheap way to fuse two triangles into the quad they already
+    /// visually are. It was not protecting the mesh: delete those same two triangles,
+    /// select their edges, and create-face bridges them into the IDENTICAL quad with no
+    /// planarity requirement whatsoever. The gate only made the direct route fail and
+    /// forced hours of delete-then-recreate to reach byte-identical geometry by hand.
+    ///
+    /// This is a selection the USER made and an action they explicitly asked for; a warped
+    /// quad is a legitimate authored face. The machine-chosen bulk pairing in
+    /// trianglesFormConvexQuad (tris-to-quads) KEEPS its gate, because there nothing has
+    /// expressed intent and fusing across a crease would be a silent wrong answer.
     pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
-        return mesh.mergeSelectedImpl(selected_triangles, true);
+        return mesh.mergeSelectedImpl(selected_triangles, false);
     }
 
     /// Mirror-twin fusion (req_3855): mergeSelected WITHOUT the coplanarity gate.
@@ -4790,19 +4805,7 @@ fn trianglesFormConvexQuad(mesh: *const Mesh, first: u32, second: u32) bool {
     const q2 = mesh.vertices.items[b[2]].position;
     const normal_a = norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
     const normal_b = norm3(cross3(sub3(q1, q0), sub3(q2, q0)));
-    _ = normal_b;
-    // NO coplanarity gate (req_4140). This used to also require
-    // `dot3(normal_a, normal_b) >= MERGE_FACE_NORMAL_DOT_MIN` — the two triangles' normals
-    // within 0.81° — which made Merge Faces refuse quads the editor is perfectly happy to
-    // build by any other route. Delete the same two triangles, select their edges, and
-    // `create-face` bridges them into the IDENTICAL quad with no planarity requirement at
-    // all; `mirror-quads` likewise fuses twin pairs untested, on the stated reasoning that
-    // an existing quad licenses an equally-warped twin. Three paths to one quad, and only
-    // this one refused — so the gate did not protect the mesh, it just made the cheap route
-    // fail and forced hours of delete-then-recreate to reach the same geometry.
-    // A quad is allowed to be warped. What is NOT allowed is a bowtie, and the winding-sign
-    // loop below still rejects that.
-    if (length3(normal_a) < 0.5) return false;
+    if (length3(normal_a) < 0.5 or dot3(normal_a, normal_b) < MERGE_FACE_NORMAL_DOT_MIN) return false;
 
     const loop = [4]u32{ first_tip.?, shared[0], second_tip.?, shared[1] };
     var sign: f32 = 0;
