@@ -12,4 +12,4 @@ pub const enabledFor = source.enabledFor;
 pub const registerAll = source.registerAll;
 pub const tickDrain = source.tickDrain;
 
-pub const GENERATED_BINDING_COUNT = 46;
+pub const GENERATED_BINDING_COUNT = 47;

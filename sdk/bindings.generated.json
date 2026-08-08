@@ -3952,6 +3952,39 @@
         }
       ]
     },
+    "lore": {
+      "required": false,
+      "module": "framework/v8_bindings_lore.zig",
+      "registerFn": "registerLore",
+      "grepPrefix": "__lore_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__lore_snapshot",
+          "zig": "hostLoreSnapshot"
+        },
+        {
+          "js": "__lore_history",
+          "zig": "hostLoreHistory"
+        },
+        {
+          "js": "__lore_preview",
+          "zig": "hostLorePreview"
+        },
+        {
+          "js": "__lore_restore",
+          "zig": "hostLoreRestore"
+        },
+        {
+          "js": "__lore_pin",
+          "zig": "hostLorePin"
+        },
+        {
+          "js": "__lore_server_status",
+          "zig": "hostLoreServerStatus"
+        }
+      ]
+    },
     "imageops": {
       "required": false,
       "module": "framework/v8_bindings_image_ops.zig",

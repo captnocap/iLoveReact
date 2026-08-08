@@ -10764,6 +10764,7 @@ ${rule}
       embed: hasBuildFlag(flags, "has-embed"),
       whisper: hasBuildFlag(flags, "has-whisper"),
       onnx: hasBuildFlag(flags, "has-onnx"),
+      lore: hasBuildFlag(flags, "has-lore"),
       audio: hasBuildFlag(flags, "has-audio"),
       midi: hasBuildFlag(flags, "has-midi"),
       deej: hasBuildFlag(flags, "has-deej"),
@@ -10943,7 +10944,7 @@ done
     out(`[ship]   bundled postgres (${size}) - extract dir -> pg/bin/postgres`);
   }
   function bundleLinkedLibs(buildBin, libDir, rjitHome, fat) {
-    const prefixes = ["libSDL3", "libfreetype", "libsodium", "libsqlite3", "libwhisper", "libllama_ffi", "libmpv", "libbox2d", "libvterm", "libluajit", "libllama", "libggml"];
+    const prefixes = ["libSDL3", "libfreetype", "libsodium", "libsqlite3", "libwhisper", "liblore", "libllama_ffi", "libmpv", "libbox2d", "libvterm", "libluajit", "libllama", "libggml"];
     const sysrootLib = `${rjitHome}/deps/sysroot/usr/lib`;
     const ldd = spawnSync("ldd", [buildBin]);
     let count = 0;

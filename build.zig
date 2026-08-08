@@ -507,6 +507,19 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
     }
 
+    // ── Lore version control (has_lore) ────────────────────────
+    // The C header is tracked; the release-pinned liblore.so is fetched by
+    // scripts/fetch-lore.sh and remains out of Git. Lore is editor/GPU-only
+    // because the panic snapshot reads the resident scene3d mesh document.
+    const has_lore = (b.option(bool, "has-lore", "Link liblore + register __lore_* resident model snapshot bindings") orelse false) and
+        has_gpu_cli and os_tag == .linux;
+    if (has_lore) {
+        root_mod.addIncludePath(b.path("deps/lore/include"));
+        root_mod.addLibraryPath(b.path("deps/lore/lib"));
+        exe.root_module.linkSystemLibrary("lore", .{});
+        exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
+    }
+
     // ── llama.cpp via libllama_ffi.so (has_embed) ──────────────
     // Wraps the embedding + reranker work that experiments/embed-bench
     // validated. Pre-built .so lives at tsz/zig-out/lib/libllama_ffi.so
@@ -660,6 +673,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_embed", has_embed);
     options.addOption(bool, "has_whisper", has_whisper);
     options.addOption(bool, "has_onnx", has_onnx);
+    options.addOption(bool, "has_lore", has_lore);
 
     // ── Allergen label: V8 binding manifest ───────────────────────────
     // Writes one file per opt-in domain to zig-out/manifest/<name>.flag
@@ -698,6 +712,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/onnx.flag", if (has_onnx) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/lore.flag", if (has_lore) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/audio.flag", if (has_audio) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/midi.flag", if (has_midi) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/deej.flag", if (has_deej) "1\n" else "0\n");
@@ -729,6 +744,12 @@ pub fn build(b: *std.Build) void {
     const app_step = b.step("app", "Build the v8_app binary");
     app_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     app_step.dependOn(&install_manifest.step);
+    if (has_lore) {
+        const install_lore = b.addInstallBinFile(b.path("deps/lore/lib/liblore.so"), "liblore.so");
+        b.getInstallStep().dependOn(&install_lore.step);
+        app_step.dependOn(&install_lore.step);
+    }
+
 
     // ── v8-hello: smoke test for framework/v8_runtime.zig ──────
     const v8_hello_dep = b.dependency("v8", .{
@@ -2219,6 +2240,79 @@ pub fn build(b: *std.Build) void {
     });
     b.step("test-pty-io", "Run PTY native-I/O ownership tests")
         .dependOn(&b.addRunArtifact(pty_io_test).step);
+
+    // Resident model recovery must compile and execute against the exact
+    // vendored Lore ABI used by the editor host doors. The test remains
+    // read-only: the mutating cold-process round trip is an explicit gate.
+    const lore_snapshot_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_lore_snapshot.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const lore_snapshot_test = b.addTest(.{
+        .name = "lore-snapshot-test",
+        .root_module = lore_snapshot_test_mod,
+    });
+    lore_snapshot_test.root_module.addIncludePath(b.path("deps/lore/include"));
+    lore_snapshot_test.root_module.addLibraryPath(b.path("deps/lore/lib"));
+    lore_snapshot_test.root_module.linkSystemLibrary("lore", .{});
+    lore_snapshot_test.root_module.addRPath(b.path("deps/lore/lib"));
+    const run_lore_snapshot_test = b.addRunArtifact(lore_snapshot_test);
+    run_lore_snapshot_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    b.step("test-lore-snapshot", "Run native resident Lore snapshot boundary tests")
+        .dependOn(&run_lore_snapshot_test.step);
+
+    const lore_snapshot_live_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_lore_snapshot_live.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const lore_snapshot_live_test = b.addTest(.{
+        .name = "lore-snapshot-live-test",
+        .root_module = lore_snapshot_live_test_mod,
+    });
+    lore_snapshot_live_test.root_module.addIncludePath(b.path("deps/lore/include"));
+    lore_snapshot_live_test.root_module.addLibraryPath(b.path("deps/lore/lib"));
+    lore_snapshot_live_test.root_module.linkSystemLibrary("lore", .{});
+    lore_snapshot_live_test.root_module.addRPath(b.path("deps/lore/lib"));
+    const run_lore_snapshot_live_test = b.addRunArtifact(lore_snapshot_live_test);
+    run_lore_snapshot_live_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    b.step("test-lore-snapshot-live", "Run mutating live Lore snapshot durability integration proof")
+        .dependOn(&run_lore_snapshot_live_test.step);
+
+    const lore_snapshot_cold_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_lore_snapshot_cold.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const lore_snapshot_cold = b.addExecutable(.{
+        .name = "lore-snapshot-cold-proof",
+        .root_module = lore_snapshot_cold_mod,
+    });
+    lore_snapshot_cold.root_module.addIncludePath(b.path("deps/lore/include"));
+    lore_snapshot_cold.root_module.addLibraryPath(b.path("deps/lore/lib"));
+    lore_snapshot_cold.root_module.linkSystemLibrary("lore", .{});
+    lore_snapshot_cold.root_module.addRPath(b.path("deps/lore/lib"));
+    const run_lore_snapshot_cold_capture = b.addRunArtifact(lore_snapshot_cold);
+    run_lore_snapshot_cold_capture.addArg("capture");
+    const cold_token = run_lore_snapshot_cold_capture.addOutputFileArg(b.fmt(
+        "lore-cold-token-{x}.json",
+        .{b.graph.random_seed},
+    ));
+    // Capture mutates Lore even though the exact revision token is also a build
+    // output. Never let Zig's output cache skip the capture half of this proof.
+    run_lore_snapshot_cold_capture.has_side_effects = true;
+    run_lore_snapshot_cold_capture.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    const run_lore_snapshot_cold_browse = b.addRunArtifact(lore_snapshot_cold);
+    run_lore_snapshot_cold_browse.addArg("browse");
+    run_lore_snapshot_cold_browse.addFileArg(cold_token);
+    run_lore_snapshot_cold_browse.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    run_lore_snapshot_cold_browse.step.dependOn(&run_lore_snapshot_cold_capture.step);
+    b.step("test-lore-snapshot-cold", "Capture and browse a Lore revision in separate processes")
+        .dependOn(&run_lore_snapshot_cold_browse.step);
 
     // ── Localstore behavior tests (PAINTLOSS req_0695, P4) ──────
     // Exercises framework/storage/localstore.zig: large-value persistence

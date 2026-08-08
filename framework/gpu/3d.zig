@@ -5360,6 +5360,70 @@ pub fn modelDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDoc
     return composeDocumentSnapshot(allocator, false);
 }
 
+/// Recovery-only resident snapshot for the Lore panic lane. The strict model
+/// document above remains the ordinary Save authority. If strict composition
+/// rejects inconsistent auxiliary channels, this door still copies every
+/// complete live and hidden triangle from native memory into an owned snapshot;
+/// the Lore encoder can then persist a current-v5 geometry envelope instead of
+/// inheriting Save's refusal.
+pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+    if (composeDocumentSnapshot(allocator, false)) |snapshot| return snapshot;
+
+    const visible = visible_block: {
+        if (model_source.verts()) |rows| {
+            if (rows.len >= 24) break :visible_block rows;
+        }
+        if (g_edit_verts) |rows| {
+            if (rows.len >= 24) break :visible_block rows;
+        }
+        break :visible_block null;
+    };
+    const blocks = allocator.alloc(model_source.MeshDocFaceBlock, g_hidden_groups.items.len + 1) catch return null;
+    defer allocator.free(blocks);
+    var block_count: usize = 0;
+    if (visible) |rows| {
+        const usable = rows.len - (rows.len % 24);
+        if (usable > 0) {
+            blocks[block_count] = .{
+                .verts = rows[0..usable],
+                .groups = model_source.faceGroups(),
+                .materials = model_source.faceMaterials(),
+                .semantic_regions = model_source.faceSemanticRegions(),
+                .semantic_instances = model_source.faceSemanticInstances(),
+                .render_corner_logical_ids = model_source.renderCornerLogicalIds(),
+                .colors = model_source.colors(),
+            };
+            block_count += 1;
+        }
+    }
+    for (g_hidden_groups.items) |hidden| {
+        const usable = hidden.source_verts.len - (hidden.source_verts.len % 24);
+        if (usable == 0) continue;
+        blocks[block_count] = .{
+            .verts = hidden.source_verts[0..usable],
+            .groups = hidden.groups,
+            .materials = hidden.materials,
+            .semantic_regions = hidden.semantic_regions,
+            .semantic_instances = hidden.semantic_instances,
+            .render_corner_logical_ids = hidden.logical_ids,
+            .colors = hidden.colors,
+        };
+        block_count += 1;
+    }
+    if (block_count == 0) return null;
+    var snapshot = model_source.composeMeshDocRecoverySnapshot(allocator, blocks[0..block_count]) catch return null;
+    if (snapshot.semantic_regions != null) {
+        if (model_source.semanticTableJson()) |json| {
+            snapshot.semantic_table_json = if (snapshot.dense_to_stable_logical_ids) |dense_to_stable|
+                model_source.semanticTableForLogicalSnapshotAlloc(allocator, json, dense_to_stable) catch
+                    mesh_edge_semantics.recoveryTableAlloc(allocator, json, true, false) catch null
+            else
+                mesh_edge_semantics.recoveryTableAlloc(allocator, json, true, false) catch null;
+        }
+    }
+    return snapshot;
+}
+
 /// Paint-space twin used by painted.blob so saving with an eye closed cannot turn
 /// editor visibility into a destructive runtime export.
 pub fn paintedDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {

@@ -746,6 +746,8 @@ test('shell-owned modeling tools delegate through one bounded authority', () => 
   const reply = executeSeatRequest(seat, { action: 'viewport', args: { operation: 'pose', pose: [0, 0, 2, 0, 0, 0] } });
   assert(reply.ok && calls.length === 1 && calls[0]!.action === 'viewport', 'shell action bypassed or failed to delegate');
   assert((reply.result as any).accepted === 'viewport', 'shell receipt was not preserved');
+  const lore = executeSeatRequest(seat, { action: 'lore', args: { operation: 'history' } });
+  assert(lore.ok && calls.length === 2 && calls[1]!.action === 'lore', 'Lore recovery API did not use the bounded shell authority');
 });
 
 test('bevel is one captured native session and cancels a rejected preview', () => {

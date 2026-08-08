@@ -7,12 +7,17 @@
 const std = @import("std");
 const model_paint = @import("model_paint.zig");
 const meshdoc_format = @import("meshdoc_format.zig");
+const mesh_edge_semantics = @import("mesh_edge_semantics.zig");
 
 pub const partRangesValid = meshdoc_format.rangesValid;
 pub const MeshDocFaceBlock = meshdoc_format.FaceBlock;
 pub const MeshDocSnapshot = meshdoc_format.Snapshot;
 pub const composeMeshDocSnapshot = meshdoc_format.composeSnapshot;
+pub const composeMeshDocRecoverySnapshot = meshdoc_format.composeRecoverySnapshot;
 pub const meshDocRangesOwnEveryFace = meshdoc_format.rangesOwnEveryFace;
+pub const semanticTableForLogicalSnapshotAlloc = meshdoc_format.semanticTableForLogicalSnapshotAlloc;
+pub const semanticEdgeRegionCount = mesh_edge_semantics.edgeRegionCount;
+pub const semanticEdgePathsResolveInTopology = mesh_edge_semantics.pathsResolveInTopology;
 
 const alloc = std.heap.c_allocator;
 
@@ -33,6 +38,11 @@ pub const NO_FACE_MATERIAL: u32 = std.math.maxInt(u32);
 // inherit through topology splits and answer what a surface means across sessions.
 var g_source_face_region: ?[]u32 = null;
 var g_source_face_instance: ?[]u32 = null;
+// One native logical edit-vertex id per SOURCE render corner. Unlike normals and UVs,
+// every duplicate carrying an id resolves to one model-space position. IDs may be
+// sparse in a live edit session; the meshdoc save snapshot performs dense compaction.
+var g_render_corner_logical_id: ?[]u32 = null;
+var g_logical_vertex_count: u32 = 0;
 // Opaque, versioned JSON dictionary for region names, op roles, and provenance.
 // It is persisted atomically beside the face rows in RJMD and journal snapshots;
 // the native topology core only owns its lifetime, while the cart/seat interprets it.
@@ -40,8 +50,8 @@ var g_semantic_table_json: ?[]u8 = null;
 pub const NO_SEMANTIC_ID: u32 = std.math.maxInt(u32);
 pub const MAX_SEMANTIC_TABLE_BYTES: usize = 1024 * 1024;
 // Flattened [lo,hi) pairs of authored-group ids, sorted and non-overlapping — one pair
-// per outliner PART of a composed multi-part model. The mesh editor welds coincident
-// positions only WITHIN a part, so two stacked cubes stay independently editable.
+// per outliner PART of a composed multi-part model. Legacy soup import welds coincident
+// positions only WITHIN a part; RJMD v5 uses explicit logical ids instead.
 // Absent (like face groups) for plain imports; cleared by the next retain().
 var g_part_ranges: ?[]u32 = null;
 pub const NO_PART: u32 = std.math.maxInt(u32);
@@ -79,6 +89,7 @@ pub fn clear() void {
     if (g_source_face_material) |m| alloc.free(m);
     if (g_source_face_region) |m| alloc.free(m);
     if (g_source_face_instance) |m| alloc.free(m);
+    if (g_render_corner_logical_id) |m| alloc.free(m);
     if (g_semantic_table_json) |m| alloc.free(m);
     if (g_part_ranges) |m| alloc.free(m);
     g_source_verts = null;
@@ -89,6 +100,8 @@ pub fn clear() void {
     g_source_face_material = null;
     g_source_face_region = null;
     g_source_face_instance = null;
+    g_render_corner_logical_id = null;
+    g_logical_vertex_count = 0;
     g_semantic_table_json = null;
     g_part_ranges = null;
     g_source_count = 0;
@@ -209,10 +222,39 @@ pub fn faceSemanticInstances() ?[]const u32 {
     return g_source_face_instance;
 }
 
+/// Install explicit welded topology after resident geometry hydration. This path is
+/// the RJMD v5 boundary and deliberately does no position-based weld discovery.
+/// `logical_vertex_count` is the live stable-id upper bound; holes are legal until
+/// composeSnapshot produces the single dense save remap.
+pub fn setLogicalTopology(rows: []const u32, logical_vertex_count: u32) bool {
+    const source = g_source_verts orelse return false;
+    if (!meshdoc_format.logicalRowsValid(alloc, source, rows, logical_vertex_count, false)) return false;
+    const next = alloc.dupe(u32, rows) catch return false;
+    if (g_render_corner_logical_id) |old| alloc.free(old);
+    g_render_corner_logical_id = next;
+    g_logical_vertex_count = logical_vertex_count;
+    return true;
+}
+
+pub fn clearLogicalTopology() void {
+    if (g_render_corner_logical_id) |old| alloc.free(old);
+    g_render_corner_logical_id = null;
+    g_logical_vertex_count = 0;
+}
+
+pub fn renderCornerLogicalIds() ?[]const u32 {
+    return g_render_corner_logical_id;
+}
+
+pub fn logicalVertexCount() u32 {
+    return g_logical_vertex_count;
+}
+
 fn semanticTableJsonValid(json: []const u8) bool {
     if (json.len < 2 or json.len > MAX_SEMANTIC_TABLE_BYTES) return false;
     if (json[0] != '{' or json[json.len - 1] != '}') return false;
-    return std.mem.indexOfScalar(u8, json, 0) == null;
+    if (std.mem.indexOfScalar(u8, json, 0) != null) return false;
+    return mesh_edge_semantics.validateTableJson(alloc, json);
 }
 
 pub fn setSemanticTableJson(json: []const u8) bool {
@@ -265,6 +307,20 @@ pub fn faceSemanticOf(displayed_face: u32) FaceSemantic {
     }
     if (source_face >= regions.len or source_face >= instances.len) return .{};
     return .{ .region = regions[source_face], .instance = instances[source_face] };
+}
+
+/// Resolve one displayed triangle back to the durable source triangle. Rig
+/// probing uses this to map the exact raycast hit through RJMD's corner table.
+pub fn sourceFaceOf(displayed_face: u32) ?u32 {
+    if (displayed_face >= g_source_count / 3) {
+        const map = g_face_to_source orelse return null;
+        if (displayed_face >= map.len) return null;
+    }
+    if (g_face_to_source) |map| {
+        if (displayed_face >= map.len or map[displayed_face] >= g_source_count / 3) return null;
+        return map[displayed_face];
+    }
+    return if (displayed_face < g_source_count / 3) displayed_face else null;
 }
 
 test "semantic face membership follows displayed to source projection" {
@@ -428,7 +484,37 @@ pub fn replaceGeometrySameTriangleCount(interleaved: []const f32, vertex_count: 
     const source = g_source_verts orelse return false;
     const need = @as(usize, vertex_count) * 8;
     if (vertex_count != g_source_count or interleaved.len < need or source.len < need) return false;
+    if (g_render_corner_logical_id) |rows| {
+        if (!meshdoc_format.logicalRowsValid(alloc, interleaved[0..need], rows, g_logical_vertex_count, false)) return false;
+    }
     @memcpy(source[0..need], interleaved[0..need]);
+    return true;
+}
+
+/// Same-triangle-count topology transaction for a changed render order/diagonal.
+/// Geometry and its logical-corner rows validate together before either resident
+/// table changes, preventing one frame of mismatched welded identity.
+pub fn replaceGeometryAndLogicalTopologySameTriangleCount(
+    interleaved: []const f32,
+    vertex_count: u32,
+    render_corner_logical_ids: []const u32,
+    logical_vertex_count: u32,
+) bool {
+    const source = g_source_verts orelse return false;
+    const need = @as(usize, vertex_count) * 8;
+    if (vertex_count != g_source_count or interleaved.len < need or source.len < need) return false;
+    if (!meshdoc_format.logicalRowsValid(
+        alloc,
+        interleaved[0..need],
+        render_corner_logical_ids,
+        logical_vertex_count,
+        false,
+    )) return false;
+    const next_rows = alloc.dupe(u32, render_corner_logical_ids) catch return false;
+    @memcpy(source[0..need], interleaved[0..need]);
+    if (g_render_corner_logical_id) |old| alloc.free(old);
+    g_render_corner_logical_id = next_rows;
+    g_logical_vertex_count = logical_vertex_count;
     return true;
 }
 
@@ -449,6 +535,8 @@ pub const Session = struct {
     g_source_face_material: @TypeOf(g_source_face_material) = null,
     g_source_face_region: @TypeOf(g_source_face_region) = null,
     g_source_face_instance: @TypeOf(g_source_face_instance) = null,
+    g_render_corner_logical_id: @TypeOf(g_render_corner_logical_id) = null,
+    g_logical_vertex_count: @TypeOf(g_logical_vertex_count) = 0,
     g_semantic_table_json: @TypeOf(g_semantic_table_json) = null,
     g_part_ranges: @TypeOf(g_part_ranges) = null,
     face_materials_gen: @TypeOf(face_materials_gen) = 1,

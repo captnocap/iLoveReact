@@ -979,6 +979,14 @@ declare global {
   function __capture_frame(...args: unknown[]): unknown;
   function __capture_surface_pixels(...args: unknown[]): unknown;
 
+  // lore (framework/v8_bindings_lore.zig)
+  function __lore_snapshot(...args: unknown[]): unknown;
+  function __lore_history(...args: unknown[]): unknown;
+  function __lore_preview(...args: unknown[]): unknown;
+  function __lore_restore(...args: unknown[]): unknown;
+  function __lore_pin(...args: unknown[]): unknown;
+  function __lore_server_status(...args: unknown[]): unknown;
+
   // imageops (framework/v8_bindings_image_ops.zig)
   function __imageops_transcode(...args: unknown[]): unknown;
   function __imageops_info(...args: unknown[]): unknown;

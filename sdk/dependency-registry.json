@@ -252,6 +252,17 @@
       "buildFlag": "-Dhas-onnx",
       "note": "Microsoft ONNX Runtime CPU-only Linux x64 build (~22MB libonnxruntime.so + symlinks). Used by framework/ml/ for inference (currently MobileSAM for image segmentation in cart/cutout). See deps/onnxruntime/README.md for version + upgrade notes."
     },
+    "lore": {
+      "kind": "vendored-library",
+      "payloadPath": "deps/lore",
+      "systemNames": [
+        "lore"
+      ],
+      "linkPolicy": "feature-gated",
+      "bundlePolicy": "feature-gated",
+      "buildFlag": "-Dhas-lore",
+      "note": "Epic Games Lore 0.8.6 C API for resident editor-model snapshots. The tracked header lives in deps/lore/include; scripts/fetch-lore.sh installs the release-pinned liblore.so into deps/lore/lib and adds the upstream ELF's missing liblore.so SONAME so packaged $ORIGIN lookup is relocatable. Non-Lore carts neither parse the binding nor link the 34 MB library."
+    },
     "libvterm": {
       "kind": "vendored-library",
       "payloadPath": "deps/libvterm",
@@ -823,6 +834,24 @@
         "onnx-runtime"
       ],
       "note": "Embeds onnxruntime + registers __onnx_* / __segment_* / __pose_* host fns. MobileSAM segmentation (cart/cutout) + MoveNet pose estimation (the editor's animation capture, req_2786). Carts that import neither trigger pay nothing — onnxruntime.so is ~22MB."
+    },
+    "lore": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/vcs/lore.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-lore"
+      ],
+      "v8Bindings": [
+        "lore"
+      ],
+      "nativeLibraries": [
+        "lore"
+      ],
+      "note": "Resident model snapshots and version browsing through framework/vcs/snapshot.zig. Importing runtime/vcs/lore.ts is the only source gate; carts that do not import it receive no __lore_* globals and do not link liblore."
     },
     "lua-worker": {
       "triggers": [

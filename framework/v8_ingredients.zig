@@ -294,6 +294,14 @@ const v8_bindings_capture = if (enabledFor("capture") and has_gpu_flag) @import(
     pub fn registerCapture(_: anytype) void {}
 };
 
+// Native Lore version history for resident editor models. This composes with
+// the GPU gate because the panic snapshot reads scene3d's live mesh document;
+// a cart that never imports the Lore runtime door does not parse this module or
+// link the 34 MB liblore shared library.
+const v8_bindings_lore = if (enabledFor("lore") and has_gpu_flag) @import("v8_bindings_lore.zig") else struct {
+    pub fn registerLore(_: anytype) void {}
+};
+
 // Image transcode service (@reactjit/image): __imageops_* decode/resize/encode
 // for PNG/JPEG/WebP. Pure headless — codec.zig only touches stb + a dlopen'd
 // libwebp, never gpu.zig — so the gate does NOT compose with has_gpu (a TUI or
@@ -395,6 +403,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
     .{ .name = "compiled_world", .required = false, .grep_prefix = "__compiled_world_", .reg_fn = "registerCompiledWorld", .mod = v8_bindings_compiled_world },
     .{ .name = "capture", .required = false, .grep_prefix = "__capture_", .reg_fn = "registerCapture", .mod = v8_bindings_capture },
+    .{ .name = "lore", .required = false, .grep_prefix = "__lore_", .reg_fn = "registerLore", .mod = v8_bindings_lore },
     .{ .name = "imageops", .required = false, .grep_prefix = "__imageops_", .reg_fn = "registerImageOps", .mod = v8_bindings_image_ops },
 };
 

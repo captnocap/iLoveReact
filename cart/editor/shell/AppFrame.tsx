@@ -127,6 +127,18 @@ import {
 } from '../model/paintLayoutConflict';
 import { modelSaveAuthority, type ModelSaveIntent } from '../model/modelSaveAuthority';
 import {
+  loreSnapshotObjectIds,
+  modelPackageGeometryPath,
+  snapshotNormalModelSave,
+} from '../model/modelLoreSnapshots';
+import {
+  loreHistory,
+  lorePin,
+  lorePreview,
+  loreServerStatus,
+  loreSnapshot,
+} from '../../../runtime/vcs/lore';
+import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
   COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
@@ -1689,6 +1701,21 @@ export default function AppFrame() {
     }
   }, [liveUndoDepths.undo, liveUndoDepths.source, activeModelId, state.activeWorkspaceDocumentId, state.modelDirty]);
 
+  const archiveCommittedModelSave = (
+    pkg: ModelPackage,
+    packageDir: string,
+    liveRows: readonly ModelPart[],
+    label: string,
+  ) => snapshotNormalModelSave({
+    saveSucceeded: true,
+    modelId: pkg.id,
+    activeResidentModelId: activeSessionModelIdRef.current,
+    packageGeometryPath: modelPackageGeometryPath(packageDir, pkg.skeleton),
+    objectRows: liveRows,
+    label,
+    note: 'validated package Save',
+  }, loreSnapshot);
+
   /** The single model commit path used by File → Save, first-atlas gating,
    * close/switch boundaries, and background autosave after first save. */
   const saveModelDocumentNow = (
@@ -1781,6 +1808,7 @@ export default function AppFrame() {
       }
       const committed = result.package;
       let acknowledgementWarning: string | null = null;
+      let recoveryStatus = '';
       if (result.ok && committed) {
         consumeModelSaveAuthorizations(pkg.id);
         upsertSavedPackage(committed);
@@ -1792,6 +1820,12 @@ export default function AppFrame() {
         } catch (error) {
           acknowledgementWarning = error instanceof Error ? error.message : String(error);
         }
+        recoveryStatus = archiveCommittedModelSave(
+          committed,
+          result.dir,
+          liveRows,
+          reason,
+        ).statusSuffix;
       }
       setState((prev) => ({
         ...prev,
@@ -1802,7 +1836,7 @@ export default function AppFrame() {
           ? upsertModelPackageProjection(prev.modelDupes, committed)
           : prev.modelDupes,
         status: result.ok
-          ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}`
+          ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}${recoveryStatus}`
           : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
       }));
       return result.ok;
@@ -1836,6 +1870,7 @@ export default function AppFrame() {
     );
     const ok = result.ok && artifactsOk;
     if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
+    let recoveryStatus = '';
     if (ok) {
       consumeModelSaveAuthorizations(pkg.id);
       // Keep LIVE resolves ownership for this in-process editing lineage, not
@@ -1854,6 +1889,12 @@ export default function AppFrame() {
       upsertSavedPackage(pkgToSave);
       const depths = undoDepths(current);
       savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
+      recoveryStatus = archiveCommittedModelSave(
+        pkgToSave,
+        result.dir,
+        liveRows,
+        reason,
+      ).statusSuffix;
     }
     setState((prev) => ({
       ...prev,
@@ -1864,7 +1905,7 @@ export default function AppFrame() {
         ? [...prev.modelDupes, pkgToSave]
         : prev.modelDupes,
       status: ok
-        ? `${reason}: "${pkg.name}" → ${result.dir}`
+        ? `${reason}: "${pkg.name}" → ${result.dir}${recoveryStatus}`
         : `${reason} failed: ${result.error ?? (artifactsOk ? 'unknown error' : (meshDocLastWriteFailure() ?? 'model artifacts were not written'))}`,
     }));
     return ok;
@@ -6104,6 +6145,39 @@ export default function AppFrame() {
           paintLayoutStale: (globalThis as any).__model_paint_layout_stale?.() === 1,
           modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
         });
+      }
+      if (action === 'lore') {
+        const operation = String(args.operation ?? 'history');
+        if (operation === 'status') {
+          const response = loreServerStatus(args);
+          return response.ok ? ok(response) : { ok: false, result: response, reason: response.error ?? 'Lore status failed' };
+        }
+        if (!modelId) return fail('open a model document first');
+        const request = { ...args, modelId };
+        let response: ReturnType<typeof loreSnapshot>;
+        if (operation === 'snapshot') {
+          if (activeSessionModelIdRef.current !== modelId) return fail('Lore snapshot needs this model to own the resident native session');
+          const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
+          const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
+          const objectIds = loreSnapshotObjectIds(parts);
+          response = loreSnapshot({
+            ...request,
+            kind: 'panic',
+            push: false,
+            label: typeof args.label === 'string' ? args.label : 'Agent Seat panic snapshot',
+            ...(pkg && dir ? { packageGeometryPath: modelPackageGeometryPath(dir, pkg.skeleton) } : {}),
+            ...(objectIds ? { objectIds } : {}),
+          });
+        } else if (operation === 'history') {
+          response = loreHistory(request);
+        } else if (operation === 'preview') {
+          response = lorePreview(request);
+        } else if (operation === 'pin') {
+          response = lorePin(request);
+        } else {
+          return fail('Lore operation must be snapshot, history, preview, pin, or status');
+        }
+        return response.ok ? ok(response) : { ok: false, result: response, reason: response.error ?? `Lore ${operation} failed` };
       }
       if (action === 'rig-status') {
         if (background) return fail('character rig status belongs to the visible model document; open that model before inspecting its resident rig');

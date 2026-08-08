@@ -2135,7 +2135,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 
 const SEAT_READ_ACTIONS = new Set([
   'look', 'semantic-status', 'rig-status', 'elements', 'boundary-continuation', 'uv-state',
-  'recipe-list', 'shot', 'claims',
+  'recipe-list', 'shot', 'claims', 'lore',
   // Saved-package reads touch neither the resident mesh nor the live selection, so
   // a supervisor can inspect a claimed model's disk state without taking the claim.
   // `measure`/`stats` are deliberately NOT here: their richer selector targets set
@@ -2547,6 +2547,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'editor-status':
       case 'rig-status':
+      case 'lore':
       case 'command':
       // The saved package is disk state, so only the shell can read it — but the
       // READER is this editor's own RJMD decoder (req_4052). Agents were parsing

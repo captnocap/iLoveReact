@@ -322,3 +322,7 @@ userdata/
 # versioned in Lore against a local loreserver; .lore/ is that client's per-tree state
 # (config, local object store) and is machine-local, never git's.
 .lore/
+
+# Native-resident model snapshots are staged here before Lore ingests them.
+# They are durable recovery data, but never Git/game-model inputs.
+.lore-snapshots/
