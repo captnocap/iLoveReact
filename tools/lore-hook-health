@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# lore-hook-health — Claude Code SessionStart + UserPromptSubmit hook.
+#
+# The Lore server holds the game's models and their history. When it is down the
+# failure is SILENT: `lore stage` and `lore commit` work fully offline by design, so an
+# agent can do a whole session's asset work and only discover on `lore push` that there
+# was nothing to push to. This hook makes the outage arrive as context instead.
+#
+# Registered in .claude/settings.json alongside the request-ledger hooks.
+#
+# Contract: stdout on exit 0 becomes session context. It NEVER exits non-zero and never
+# blocks — a health probe that can stop the user working is worse than the outage it
+# reports. Every failure path falls through to "say nothing".
+
+set -uo pipefail
+
+HEALTH_URL="http://127.0.0.1:41339/health_check"
+UNIT="loreserver.service"
+
+# Down means "did not answer 200 within 2s". Keep the probe short: this runs on every
+# prompt, and a hung probe would stall the session it is meant to protect.
+code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$HEALTH_URL" 2>/dev/null)" || code="000"
+[ "$code" = "200" ] && exit 0
+
+state="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
+enabled="$(systemctl --user is-enabled "$UNIT" 2>/dev/null || true)"
+
+# Last few journal lines are what turns "it is down" into "here is why".
+why="$(journalctl --user -u "$UNIT" -n 5 --no-pager -o cat 2>/dev/null | tr '\n' ' | ' | cut -c1-400)"
+
+cat <<EOF
+[lore] THE LORE SERVER IS DOWN — game models and their history are not reachable.
+[lore]   health: ${HEALTH_URL} returned '${code}' (expected 200)
+[lore]   unit:   ${UNIT} is-active=${state:-unknown} is-enabled=${enabled:-unknown}
+[lore]   recent: ${why:-<no journal output>}
+[lore]
+[lore] RESTORE IT BEFORE DOING ASSET WORK. \`lore stage\` and \`lore commit\` succeed
+[lore] offline, so work will look fine and then fail at \`lore push\` with nowhere to land.
+[lore]   systemctl --user start ${UNIT}
+[lore]   systemctl --user status ${UNIT} --no-pager
+[lore]   journalctl --user -u ${UNIT} -n 50 --no-pager
+[lore] Store: /home/siah/.local/share/loreserver/store (durable; survives restarts).
+EOF
+exit 0

@@ -317,3 +317,8 @@ userdata/
 # carts come and go, instead of the 128 lines this replaced.
 /cart/*
 !/cart/editor/
+
+# Lore version control local state (EpicGames/lore). The game's models and code are
+# versioned in Lore against a local loreserver; .lore/ is that client's per-tree state
+# (config, local object store) and is machine-local, never git's.
+.lore/
