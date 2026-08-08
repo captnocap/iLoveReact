@@ -83,6 +83,7 @@ export const PUBLISH_RULES: PublishRule[] = [
     insteadOf: 'archive/carts-legacy.zip (tracked source only — cart/hmsc-int alone is 7.4GB on disk against 9.9MB in git)',
   },
   { path: 'docs', kind: 'source', what: 'the game knowledge layer — DECISIONS.md, per-cart audits, _index/, _requests/' },
+  { path: 'plan', kind: 'source', what: 'architectural execution and closure records needed to understand landed systems' },
   { path: 'cli', kind: 'source', what: 'rjit CLI source — tools/rjit.js is BUILT from here, this is the truth' },
   { path: 'scripts', kind: 'source', what: 'build pipeline + git hooks — cart-bundle.js, fetch-*, install-hooks' },
   { path: 'tools', kind: 'source', what: 'agent entry points — rjit, seat, oracle, request, parity harnesses' },

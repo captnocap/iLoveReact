@@ -9887,6 +9887,7 @@ ${IMPORTS_MARKER}`).replace(
       insteadOf: "archive/carts-legacy.zip (tracked source only \u2014 cart/hmsc-int alone is 7.4GB on disk against 9.9MB in git)"
     },
     { path: "docs", kind: "source", what: "the game knowledge layer \u2014 DECISIONS.md, per-cart audits, _index/, _requests/" },
+    { path: "plan", kind: "source", what: "architectural execution and closure records needed to understand landed systems" },
     { path: "cli", kind: "source", what: "rjit CLI source \u2014 tools/rjit.js is BUILT from here, this is the truth" },
     { path: "scripts", kind: "source", what: "build pipeline + git hooks \u2014 cart-bundle.js, fetch-*, install-hooks" },
     { path: "tools", kind: "source", what: "agent entry points \u2014 rjit, seat, oracle, request, parity harnesses" },
