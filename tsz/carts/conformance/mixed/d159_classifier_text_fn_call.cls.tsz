@@ -1,4 +1,0 @@
-classifier({
-  Label: { type: 'Text', fontSize: 10, color: '#94a3b8' },
-  Value: { type: 'Text', fontSize: 18, color: '#79c0ff' },
-});

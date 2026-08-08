@@ -1,8 +1,0 @@
-classifier({
-  LegendBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 8, paddingLeft: 12, paddingRight: 12, backgroundColor: '#0a0e18', borderRadius: 8, borderWidth: 1, borderColor: '#1a1f2e', flexWrap: 'wrap' } },
-  SearchBox: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10141e', borderRadius: 5, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderWidth: 1, borderColor: '#1a1f2e', width: 180 } },
-  Sep: { type: 'Box', style: { width: 1, height: 16, backgroundColor: '#1a1f2e' } },
-  Chip: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#1a1f2e' } },
-  ChipActive: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#a855f7', backgroundColor: '#1a1030' } },
-  Dot: { type: 'Box', style: { width: 8, height: 8, borderRadius: 4 } },
-})

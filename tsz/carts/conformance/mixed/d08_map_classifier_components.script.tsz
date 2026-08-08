@@ -1,8 +1,0 @@
-var c = [
-  { title: 'Database', kind: 0, value: 99 },
-  { title: 'API Gateway', kind: 1, value: 47 },
-  { title: 'Cache', kind: 2, value: 12 },
-  { title: 'CDN', kind: 0, value: 100 },
-  { title: 'Auth', kind: 1, value: 65 }
-];
-setCards(c);

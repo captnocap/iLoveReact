@@ -1,7 +1,0 @@
-export type Parser<T> = (input: string) => [T, string] | null;
-
-export const literal = (l: string): Parser<string> =>
-  input => input.startsWith(l) ? [l, input.slice(l.length)] : null;
-
-// usage
-console.log(literal("hi")("hi there"));

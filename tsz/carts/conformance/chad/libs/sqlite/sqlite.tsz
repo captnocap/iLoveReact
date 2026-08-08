@@ -1,7 +1,0 @@
-// SQLite library — connection + query modules.
-// Usage from a page: sq.connection.open('app.db'), sq.query.read(sql)
-
-<sq lib>
-  connection exact connection
-  query exact query
-</sq>

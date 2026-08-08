@@ -1,8 +1,0 @@
-// A header bar — demonstrates string prop substitution
-function Header({ title }: { title: string }) {
-  return (
-    <Box style={{ padding: 16, backgroundColor: '#2d2d3f' }}>
-      <Text fontSize={24} color="#ffffff">{title}</Text>
-    </Box>
-  );
-}

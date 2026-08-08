@@ -1,1 +1,0 @@
-Write permission test successful

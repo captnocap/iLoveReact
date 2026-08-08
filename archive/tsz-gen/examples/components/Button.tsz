@@ -1,8 +1,0 @@
-// A reusable button component — imported from other .tsz files
-function Button({ label, color }: { label: string; color: string }) {
-  return (
-    <Box style={{ padding: 12, paddingLeft: 24, paddingRight: 24, backgroundColor: color }}>
-      <Text fontSize={14} color="#ffffff">{label}</Text>
-    </Box>
-  );
-}

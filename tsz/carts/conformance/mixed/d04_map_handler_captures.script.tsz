@@ -1,7 +1,0 @@
-var e = [
-  { name: 'Alice', score: 100 },
-  { name: 'Bob', score: 200 },
-  { name: 'Carol', score: 300 }
-];
-setEntries(e);
-setBonus(5);

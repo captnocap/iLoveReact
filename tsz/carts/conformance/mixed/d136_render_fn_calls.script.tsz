@@ -1,9 +1,0 @@
-<script>
-  setEntries([
-    { label: "Day 1", commits: 5, files: 120, tests: 18, passing: 14, shortDay: "Apr 1", dotColor: 0x34d399 },
-    { label: "Day 2", commits: 3, files: 125, tests: 20, passing: 17, shortDay: "Apr 2", dotColor: 0xf59e0b },
-    { label: "Day 3", commits: 8, files: 131, tests: 22, passing: 20, shortDay: "Apr 3", dotColor: 0xf87171 },
-    { label: "Day 4", commits: 2, files: 134, tests: 24, passing: 22, shortDay: "Apr 4", dotColor: 0x60a5fa },
-    { label: "Day 5", commits: 6, files: 140, tests: 26, passing: 25, shortDay: "Apr 5", dotColor: 0x94a3b8 }
-  ]);
-</script>

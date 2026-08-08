@@ -1,9 +1,0 @@
-// Audio library — playback, mixing, DSP.
-// Usage: backend.audio.playback.play(track)
-
-<audio lib>
-  <lscript>
-    playback
-    mixer
-  </lscript>
-</audio>

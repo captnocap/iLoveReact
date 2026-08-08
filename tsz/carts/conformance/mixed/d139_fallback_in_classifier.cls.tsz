@@ -1,4 +1,0 @@
-classifier({
-  DetailLabel: { type: 'Text', fontSize: 9, color: '#7b93a6' },
-  DetailValue: { type: 'Text', fontSize: 12, color: '#d5dfeb' }
-})

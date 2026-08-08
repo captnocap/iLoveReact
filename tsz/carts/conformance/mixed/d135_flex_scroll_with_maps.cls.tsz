@@ -1,9 +1,0 @@
-classifier({
-  Panel: { type: 'Box', style: { flexDirection: 'column', gap: 6, padding: 12, backgroundColor: '#161b22', borderRadius: 6, borderWidth: 1, borderColor: '#30363d' } },
-  PanelTitle: { type: 'Text', fontSize: 13, color: '#e6edf3' },
-  PanelDim: { type: 'Text', fontSize: 10, color: '#8b949e' },
-  Row: { type: 'Box', style: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingTop: 2, paddingBottom: 2 } },
-  Label: { type: 'Text', fontSize: 11, color: '#e6edf3' },
-  Value: { type: 'Text', fontSize: 11, color: '#8b949e' },
-  Dot: { type: 'Box', style: { width: 10, height: 10, borderRadius: 5 } },
-})

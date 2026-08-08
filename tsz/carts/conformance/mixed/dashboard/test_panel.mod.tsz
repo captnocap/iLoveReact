@@ -1,9 +1,0 @@
-import { Panel } from './style_clsmod';
-
-function App() {
-  return (
-    <C.Panel>
-      <Text fontSize={12} color="#e6edf3">Inspector Module Test</Text>
-    </C.Panel>
-  );
-}

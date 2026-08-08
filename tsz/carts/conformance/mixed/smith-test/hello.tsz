@@ -1,7 +1,0 @@
-function App() {
-  return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: '#1e1e1e', justifyContent: 'center', alignItems: 'center' }}>
-      <Text style={{ color: '#ffffff', fontSize: 24 }}>Hello from Smith!</Text>
-    </Box>
-  );
-}

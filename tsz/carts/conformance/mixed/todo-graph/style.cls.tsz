@@ -1,5 +1,0 @@
-classifier({
-  Page: { type: 'Box', style: { height: '100%', width: '100%', backgroundColor: '#080c14', flexDirection: 'column', overflow: 'hidden' } },
-  Toolbar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', padding: 10, gap: 12, backgroundColor: '#10141e' } },
-  Spacer: { type: 'Box', style: { flexGrow: 1 } },
-})

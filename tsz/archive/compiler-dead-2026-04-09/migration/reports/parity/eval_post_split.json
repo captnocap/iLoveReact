@@ -1,9 +1,0 @@
-{
-  "timestamp": "2026-04-09",
-  "step": 648,
-  "cart": "carts/conformance/mixed/d102_effect_color_indexing.tsz",
-  "type": "eval/render-local-heavy",
-  "build_result": "SUCCESS",
-  "output_bytes": 4725,
-  "diff_status": "BUILD_PASS"
-}

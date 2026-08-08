@@ -1,8 +1,0 @@
-// Filesystem library — files, archives, media detection.
-// Usage: backend.fs.files.read(path), backend.fs.archive.extract(path)
-
-<fs lib>
-  files exact files
-  archive exact archive
-  media exact media
-</fs>

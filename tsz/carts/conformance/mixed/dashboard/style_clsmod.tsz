@@ -1,4 +1,0 @@
-classifier({
-  Panel: { type: 'Box', style: { padding: 8, backgroundColor: '#1a1a2e', borderRadius: 4 } },
-  PanelLabel: { type: 'Text', fontSize: 10, color: '#6e7681' },
-})

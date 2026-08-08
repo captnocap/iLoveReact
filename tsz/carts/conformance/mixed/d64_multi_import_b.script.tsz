@@ -1,7 +1,0 @@
-var p = [
-  { action: 'read', minRole: 0 },
-  { action: 'write', minRole: 1 },
-  { action: 'admin', minRole: 2 },
-  { action: 'super', minRole: 3 }
-];
-setPerms(p);

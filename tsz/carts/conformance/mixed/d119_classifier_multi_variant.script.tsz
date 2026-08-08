@@ -1,9 +1,0 @@
-export const d119_data = 'init';
-
-export function init(state) {
-  state.cards = [
-    { title: 'Inbox', subtitle: 'Unread messages', tag: 'New', count: 12 },
-    { title: 'Archive', subtitle: 'Past conversations', tag: 'Old', count: 340 },
-    { title: 'Drafts', subtitle: 'Work in progress', tag: 'WIP', count: 3 },
-  ];
-}

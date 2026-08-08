@@ -1,7 +1,0 @@
-classifier({
-  Card: { type: 'Box', flexDirection: 'column', gap: 2, padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#1f2937' },
-  Line: { type: 'Box', flexDirection: 'row', gap: 6 },
-  Label: { type: 'Text', fontSize: 10, color: '#60a5fa' },
-  Title: { type: 'Text', fontSize: 12, color: '#f3f4f6' },
-  Status: { type: 'Text', fontSize: 10, color: '#9ca3af' },
-});

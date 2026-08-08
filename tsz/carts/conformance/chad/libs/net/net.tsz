@@ -1,9 +1,0 @@
-// Networking library — HTTP + WebSocket.
-// Usage: backend.net.http.get(url), backend.net.socket.connect(url)
-
-<net lib>
-  <script>
-    http
-    socket
-  </script>
-</net>

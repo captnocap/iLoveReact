@@ -1,4 +1,0 @@
-classifier({
-  Row: { type: 'Box', style: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: '#161b22', borderRadius: 6 } },
-  Cell: { type: 'Box', style: { width: 40, height: 40, borderRadius: 4 } },
-})

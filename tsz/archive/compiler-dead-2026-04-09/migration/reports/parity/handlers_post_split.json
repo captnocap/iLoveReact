@@ -1,9 +1,0 @@
-{
-  "timestamp": "2026-04-09",
-  "step": 647,
-  "cart": "carts/conformance/mixed/d04_map_handler_captures.tsz",
-  "type": "handler-heavy",
-  "build_result": "SUCCESS",
-  "output_bytes": 6836,
-  "diff_status": "BUILD_PASS"
-}

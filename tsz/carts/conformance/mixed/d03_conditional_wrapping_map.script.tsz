@@ -1,8 +1,0 @@
-var list = [
-  { text: 'Buy milk', done: 1 },
-  { text: 'Write tests', done: 0 },
-  { text: 'Break compiler', done: 0 },
-  { text: 'Fix compiler', done: 0 }
-];
-setItems(list);
-setShowList(1);

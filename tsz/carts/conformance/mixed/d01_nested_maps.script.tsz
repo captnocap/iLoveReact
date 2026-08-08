@@ -1,6 +1,0 @@
-var g = [
-  { name: 'Alpha', items: [{ label: 'a1', value: 10 }, { label: 'a2', value: 20 }, { label: 'a3', value: 30 }] },
-  { name: 'Beta', items: [{ label: 'b1', value: 40 }, { label: 'b2', value: 50 }] },
-  { name: 'Gamma', items: [{ label: 'g1', value: 60 }] }
-];
-setGroups(g);

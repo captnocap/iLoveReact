@@ -1,9 +1,0 @@
-{
-  "name": "inspector-test",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-reconciler": "^0.29.0"
-  }
-}

@@ -1,8 +1,0 @@
-var r = [
-  { x: 10, y: 20, label: 'point-a' },
-  { x: 30, y: 40, label: 'point-b' },
-  { x: 50, y: 60, label: 'point-c' },
-  { x: 70, y: 80, label: 'point-d' }
-];
-setRows(r);
-setOffset(100);

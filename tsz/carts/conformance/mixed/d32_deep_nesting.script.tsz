@@ -1,8 +1,0 @@
-var list = [
-  { title: 'Auth Redesign', subtitle: 'OAuth2 + PKCE flow', tag: 'security', status: 1, priority: 2, assignee: 'A', team: 'Platform', progress: 65 },
-  { title: 'Dark Mode', subtitle: 'Theme token system', tag: 'design', status: 1, priority: 1, assignee: 'B', team: 'Frontend', progress: 40 },
-  { title: 'API Rate Limit', subtitle: 'Redis sliding window', tag: 'backend', status: 0, priority: 2, assignee: 'C', team: 'Infra', progress: 10 },
-  { title: 'Mobile Nav', subtitle: 'Bottom sheet + gestures', tag: 'mobile', status: 1, priority: 0, assignee: 'D', team: 'Frontend', progress: 90 },
-  { title: 'CI Pipeline', subtitle: 'Matrix builds + caching', tag: 'devops', status: 1, priority: 1, assignee: 'E', team: 'Infra', progress: 100 }
-];
-setCards(list);

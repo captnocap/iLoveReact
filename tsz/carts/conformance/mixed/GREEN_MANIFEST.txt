@@ -1,7 +1,0 @@
-# Green Manifest — known-good carts that pass flight check and render correctly.
-# If flight-check fails on ANY of these, something regressed. Fix it before moving on.
-# Updated: 2026-04-06
-# IMPORTANT: Every entry here has been VISUALLY VERIFIED by a human.
-# Count: 2
-d133_map_in_classifier_row
-d134_flex_scroll_panel_height

@@ -1,6 +1,0 @@
-// This should fail — classes are not supported
-class Foo {
-  constructor(x: number) {
-    this.x = x
-  }
-}

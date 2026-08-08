@@ -1,1 +1,0 @@
-{"id":12345,"user":{"name":"Jane Doe","email":"jane@example.com","address":{"street":"123 Main St","city":"Portland","state":"OR","zip":"97201"}},"items":[{"id":1,"name":"Item 0001","price":9.99,"category":"electronics","in_stock":false,"tags":["tag0"]}],"metadata":{"total":9.99,"currency":"USD","timestamp":"2026-03-28T12:00:00Z","request_id":"abc-def-123-456"}}

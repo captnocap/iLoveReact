@@ -1,8 +1,0 @@
-function TextAreaDemo() {
-  return (
-    <Box style={{ backgroundColor: '#0d1117', borderWidth: 1, borderColor: '#1c2333', borderRadius: 8, padding: 12, flexDirection: 'column', gap: 4 }}>
-      <Text fontSize={11} color="#8b949e">TextArea</Text>
-      <TextArea placeholder="Multi-line text input..." fontSize={11} style={{ height: 80, backgroundColor: '#161b22', borderWidth: 1, borderColor: '#30363d', borderRadius: 5, paddingLeft: 6, paddingRight: 6, paddingTop: 6, paddingBottom: 6 }} />
-    </Box>
-  );
-}

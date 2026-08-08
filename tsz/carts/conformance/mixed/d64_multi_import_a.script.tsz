@@ -1,7 +1,0 @@
-var u = [
-  { name: 'Alice', role: 3 },
-  { name: 'Bob', role: 1 },
-  { name: 'Carol', role: 2 },
-  { name: 'Dave', role: 0 }
-];
-setUsers(u);

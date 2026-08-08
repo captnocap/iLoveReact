@@ -1,8 +1,0 @@
-setStep(0);
-setName('');
-setPick(0);
-
-function goNext() {
-  if (step === 0 && name === '') { return; }
-  setStep(step + 1);
-}

@@ -1,9 +1,0 @@
-import { TabContent, PlaceholderText } from './style.cls';
-
-function ElementsTab() {
-  return (
-    <C.TabContent>
-      <C.PlaceholderText>Element inspector — select a node with the overlay</C.PlaceholderText>
-    </C.TabContent>
-  );
-}

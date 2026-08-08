@@ -1,5 +1,0 @@
-// This should fail — async is not supported
-async function fetchData() {
-  const result = await fetch("https://example.com")
-  return result
-}

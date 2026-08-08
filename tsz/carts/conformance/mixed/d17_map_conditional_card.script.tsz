@@ -1,9 +1,0 @@
-var list = [
-  { pid: 1234, port: 9100, name: 'Storybook', alive: 1 },
-  { pid: 5678, port: 9101, name: 'TodoMVC', alive: 1 },
-  { pid: 9999, port: 0, name: 'OldApp', alive: 0 },
-  { pid: 4242, port: 9102, name: 'HackerNews', alive: 1 },
-  { pid: 7777, port: 0, name: 'Crashed', alive: 0 }
-];
-setApps(list);
-setTotal(list.length);

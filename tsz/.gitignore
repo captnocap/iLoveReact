@@ -1,7 +1,0 @@
-conformance.db
-generated_app.zig
-stb/
-telemetry.csv
-.zig-cache/
-.zig-global-cache/
-zig-out/

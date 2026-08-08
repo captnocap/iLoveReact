@@ -1,8 +1,0 @@
-var t = [
-  { name: 'bug', color: 0xd73a4a },
-  { name: 'feature', color: 0x0075ca },
-  { name: 'docs', color: 0x0e8a16 },
-  { name: 'wontfix', color: 0x6a737d },
-  { name: 'duplicate', color: 0xcfd3d7 }
-];
-setTags(t);

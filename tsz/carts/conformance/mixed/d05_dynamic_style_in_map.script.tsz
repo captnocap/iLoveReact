@@ -1,8 +1,0 @@
-var b = [
-  { pct: 85, color: 0x03dac6, label: 'Rust' },
-  { pct: 72, color: 0xbb86fc, label: 'Zig' },
-  { pct: 60, color: 0xcf6679, label: 'C' },
-  { pct: 45, color: 0x018786, label: 'Go' },
-  { pct: 30, color: 0x3700b3, label: 'JS' }
-];
-setBars(b);

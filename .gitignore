@@ -395,3 +395,33 @@ cart/editor/data/corpus/trajectory.jsonl
 
 # Authored editor data — maps, world globals, libraries. NOT build output, never swept.
 userdata/
+
+# ── Unpublished by `rjit repo` (see cli/dev/publishable.ts) ──────────────
+# frozen: Smith era — .tsz compiler, d-suite conformance, cockpit carts. 4163 files, FROZEN by CLAUDE.md
+/tsz/
+# frozen: the Lua reference stack — the proven reconciler-on-Lua implementation. 1894 files, FROZEN by CLAUDE.md
+/love2d/
+# frozen: old compiler iterations (v1 tsz, v2 tsz-gen) + the evicted QJS stack. Already the archive, but tracked
+/archive/
+# asset: 86MB of 3D mesh JSON from a recovery dump — 32MB in a single file
+/recovered-models/
+# asset: 16MB of PNG frame captures from self-shot verification runs
+/shots/
+# asset: baked .rjpkg export output including a 15MB city.map
+/cart/hmsc-int/exports/
+# artifact: 114MB prebuilt DuckDB (libduckdb_static.a + the linux-amd64 zip) with ZERO references in build.zig, framework/, cli/ or scripts/
+/deps/duckdb/
+# oneoff: output of one-off research sweeps
+/research_runs/
+# oneoff: a graveyard directory
+/dead/
+# oneoff: a .jsx snapshot of cart/app taken during the TS migration — and cart/ is .tsx/.ts only
+/cart/app-jsx-backup/
+# oneoff: one-off verification script from the 0.16 migration, left at repo root
+/verify-zig016-bins.sh
+# oneoff: one-off verification script from the 0.16 migration, left at repo root
+/verify-zig016-editor.sh
+# oneoff: one-off verification script from the 0.16 migration, left at repo root
+/verify-zig016-lane0.sh
+# oneoff: one-off verification script from the 0.16 migration, left at repo root
+/verify-zig016-tests.sh

@@ -1,9 +1,0 @@
-export const d121_data = 'init';
-
-export function init(state) {
-  state.tiles = [
-    { title: 'Revenue', value: '$12.4k', caption: '+8% this month' },
-    { title: 'Users', value: '1,247', caption: '+23 today' },
-    { title: 'Orders', value: '89', caption: '12 pending' },
-  ];
-}

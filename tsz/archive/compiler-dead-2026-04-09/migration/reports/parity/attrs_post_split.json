@@ -1,9 +1,0 @@
-{
-  "timestamp": "2026-04-09",
-  "step": 646,
-  "cart": "carts/conformance/mixed/d05_dynamic_style_in_map.tsz",
-  "type": "parser/style-heavy",
-  "build_result": "SUCCESS",
-  "output_bytes": 6293,
-  "diff_status": "BUILD_PASS"
-}

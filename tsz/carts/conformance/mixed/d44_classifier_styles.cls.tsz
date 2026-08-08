@@ -1,9 +1,0 @@
-classifier({
-  Card: { type: 'Box', style: { padding: 12, backgroundColor: '#161b22', borderRadius: 8, borderWidth: 1, borderColor: '#30363d', gap: 8 } },
-  CardTitle: { type: 'Text', fontSize: 13, color: '#c9d1d9' },
-  CardDetail: { type: 'Text', fontSize: 10, color: '#8b949e' },
-  StatusBadge: { type: 'Box', style: { borderRadius: 4, paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 } },
-  StatusText: { type: 'Text', fontSize: 9, color: '#ffffff' },
-  ActionButton: { type: 'Pressable', style: { backgroundColor: '#238636', borderRadius: 6, padding: 8, alignItems: 'center' } },
-  ActionLabel: { type: 'Text', fontSize: 11, color: '#ffffff' }
-})

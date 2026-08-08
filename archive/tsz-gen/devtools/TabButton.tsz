@@ -1,9 +1,0 @@
-import { Tab } from './style.cls';
-
-function TabButton({ label, onPress }) {
-  return (
-    <C.Tab onPress={onPress}>
-      <Text fontSize={12} color="#aaaaaa">{label}</Text>
-    </C.Tab>
-  );
-}

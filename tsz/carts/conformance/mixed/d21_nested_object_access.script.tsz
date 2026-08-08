@@ -1,7 +1,0 @@
-var list = [
-  { name: 'Alice', role: 1, config: { theme: { bg: 0x1e1b4b, fg: 0xc7d2fe, accent: 0x6366f1 }, layout: { cols: 3, compact: 0 } }, stats: { posts: 142, likes: 891 } },
-  { name: 'Bob', role: 0, config: { theme: { bg: 0x1a2e05, fg: 0xd9f99d, accent: 0x84cc16 }, layout: { cols: 2, compact: 1 } }, stats: { posts: 37, likes: 203 } },
-  { name: 'Carol', role: 1, config: { theme: { bg: 0x2a0a1e, fg: 0xfecdd3, accent: 0xf43f5e }, layout: { cols: 4, compact: 0 } }, stats: { posts: 256, likes: 1420 } },
-  { name: 'Dave', role: 0, config: { theme: { bg: 0x1c1917, fg: 0xe7e5e4, accent: 0xa8a29e }, layout: { cols: 1, compact: 1 } }, stats: { posts: 8, likes: 12 } }
-];
-setUsers(list);

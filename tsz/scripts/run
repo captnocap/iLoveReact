@@ -1,8 +1,0 @@
-#!/bin/bash
-# Run a compiled cart binary with a 5s SIGKILL timeout
-# Usage: scripts/run d01_nested_maps
-#        scripts/run d01_nested_maps 10   (custom timeout)
-BIN="$(dirname "$0")/../zig-out/bin/$1"
-TIMEOUT="${2:-5}"
-[ ! -f "$BIN" ] && echo "not found: $BIN" && exit 1
-ZIGOS_HEADLESS=1 timeout -s KILL "$TIMEOUT" "$BIN" 2>&1

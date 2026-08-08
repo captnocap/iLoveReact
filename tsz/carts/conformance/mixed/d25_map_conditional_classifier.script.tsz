@@ -1,8 +1,0 @@
-var list = [
-  { name: 'api-gateway', status: 1, detail: 'Healthy — 2ms avg latency', score: 99 },
-  { name: 'auth-service', status: 0, detail: 'Connection refused on :8443', score: 0 },
-  { name: 'worker-pool', status: 1, detail: '12/12 workers active', score: 87 },
-  { name: 'cache-redis', status: 0, detail: 'OOM killed 3m ago', score: 0 },
-  { name: 'db-primary', status: 1, detail: 'Replication lag: 0.1s', score: 95 }
-];
-setItems(list);

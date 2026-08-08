@@ -1,9 +1,0 @@
-import { Button, ButtonText } from './style.cls';
-
-function ActionButton({ label, onPress }) {
-  return (
-    <C.Button onPress={onPress}>
-      <C.ButtonText>{label}</C.ButtonText>
-    </C.Button>
-  );
-}

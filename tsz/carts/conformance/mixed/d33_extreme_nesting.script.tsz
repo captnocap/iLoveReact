@@ -1,8 +1,0 @@
-var list = [
-  { name: 'reactjit', owner: 'S', status: 1, health: 98, bugs: 3, features: 47, coverage: 82, deploy: '2m ago', branch: 'main', env: 'prod' },
-  { name: 'auth-svc', owner: 'A', status: 1, health: 74, bugs: 8, features: 12, coverage: 91, deploy: '1h ago', branch: 'release/2.1', env: 'staging' },
-  { name: 'data-pipe', owner: 'B', status: 0, health: 23, bugs: 14, features: 6, coverage: 45, deploy: '3d ago', branch: 'hotfix/oom', env: 'prod' },
-  { name: 'mobile-app', owner: 'C', status: 1, health: 89, bugs: 1, features: 31, coverage: 67, deploy: '15m ago', branch: 'develop', env: 'beta' },
-  { name: 'infra-mon', owner: 'D', status: 1, health: 100, bugs: 0, features: 8, coverage: 95, deploy: '5m ago', branch: 'main', env: 'prod' }
-];
-setProjects(list);
