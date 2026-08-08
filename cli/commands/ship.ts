@@ -504,14 +504,20 @@ done
 function bundleLibMpv(rjitHome: string, libDir: string, bundleOut: string): void {
   const bundle = tryFsRead(bundleOut) ?? '';
   if (!/__jsxs?\(Video,/.test(bundle)) return;
-  const src = `${rjitHome}/love2d/storybook/lib/libmpv.so.2`;
+  // Pinning a known-good libmpv is optional: framework/render/videos.zig dlopens
+  // libmpv.so.2 / libmpv.so from the system at runtime and degrades gracefully when it is
+  // absent. This used to point at love2d/storybook/lib/, a path that did not exist in the
+  // checkout and now lives in archive/love2d.zip — so the pin never fired and the system
+  // lib has been doing the work all along. Repointed to the per-dep convention in deps/,
+  // where dropping the .so in actually re-enables pinning.
+  const src = `${rjitHome}/deps/libmpv/libmpv.so.2`;
   if (fsExists(src)) {
     runOrThrow('cp', ['-L', src, `${libDir}/libmpv.so.2`]);
     out('[ship]   bundled libmpv.so.2 (video cart - Video primitive detected)');
     return;
   }
-  err(`[ship]   WARNING: cart uses Video but pinned libmpv.so.2 not found at ${src}`);
-  err('[ship]            video playback will fall back to user system libmpv if installed, else no-op');
+  err(`[ship]   NOTE: cart uses Video and no pinned libmpv.so.2 is present at ${src}`);
+  err('[ship]         video playback loads the system libmpv at runtime; drop a .so there to pin one');
 }
 
 function bundlePostgres(rjitHome: string, tmpDir: string): void {

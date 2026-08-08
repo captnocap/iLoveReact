@@ -9429,8 +9429,10 @@ ${IMPORTS_MARKER}`).replace(
     "scripts",
     "sdk",
     "vendor",
-    "stb",
-    "love2d/quickjs"
+    "stb"
+    // 'love2d/quickjs' was here for the QJS bridge. The directory does not exist in the
+    // checkout (gitignored build output) so the fsExists guard always skipped it, and love2d
+    // is now archive/love2d.zip. QJS is legacy maintenance-only; V8 is the default runtime.
   ];
   var ZIG_PATH_DEPS = [
     "deps/tls.zig",
@@ -10268,7 +10270,7 @@ ${IMPORTS_MARKER}`).replace(
     }
     spawnSync("mkdir", ["-p", "--", `${rjitHome}/archive`]);
     out(`[repo] ${tree}: packing \u2192 ${zipRel} ...`);
-    const packed = spawnSync("sh", ["-c", `cd ${shellQuote3(rjitHome)} && zip -q -r -X ${shellQuote3(zipRel)} ${shellQuote3(tree)}`]);
+    const packed = spawnSync("sh", ["-c", `cd ${shellQuote3(rjitHome)} && zip -q -r -y -X ${shellQuote3(zipRel)} ${shellQuote3(tree)}`]);
     if (packed.code !== 0) {
       err(`[repo] ${tree}: zip failed (exit ${packed.code})`);
       err(packed.stderr.trim());
@@ -10744,14 +10746,14 @@ done
   function bundleLibMpv(rjitHome, libDir, bundleOut) {
     const bundle2 = tryFsRead(bundleOut) ?? "";
     if (!/__jsxs?\(Video,/.test(bundle2)) return;
-    const src = `${rjitHome}/love2d/storybook/lib/libmpv.so.2`;
+    const src = `${rjitHome}/deps/libmpv/libmpv.so.2`;
     if (fsExists(src)) {
       runOrThrow("cp", ["-L", src, `${libDir}/libmpv.so.2`]);
       out("[ship]   bundled libmpv.so.2 (video cart - Video primitive detected)");
       return;
     }
-    err(`[ship]   WARNING: cart uses Video but pinned libmpv.so.2 not found at ${src}`);
-    err("[ship]            video playback will fall back to user system libmpv if installed, else no-op");
+    err(`[ship]   NOTE: cart uses Video and no pinned libmpv.so.2 is present at ${src}`);
+    err("[ship]         video playback loads the system libmpv at runtime; drop a .so there to pin one");
   }
   function bundlePostgres(rjitHome, tmpDir) {
     const pg = `${rjitHome}/.pg-bundle`;

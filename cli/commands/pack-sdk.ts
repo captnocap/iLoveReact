@@ -30,7 +30,9 @@ const SOURCE_TREES = [
   'sdk',
   'vendor',
   'stb',
-  'love2d/quickjs',
+  // 'love2d/quickjs' was here for the QJS bridge. The directory does not exist in the
+  // checkout (gitignored build output) so the fsExists guard always skipped it, and love2d
+  // is now archive/love2d.zip. QJS is legacy maintenance-only; V8 is the default runtime.
 ];
 
 const ZIG_PATH_DEPS = [

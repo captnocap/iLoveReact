@@ -103,7 +103,9 @@ const SOURCE_TREES = [
   'framework', 'runtime', 'renderer', 'scripts', 'sdk', 'vendor',
   // C source roots referenced unconditionally by build.zig.
   'stb',                   // stb_image / stb_image_write
-  'love2d/quickjs',        // QJS compiled into the cart bridge regardless of runtime selection
+  // 'love2d/quickjs' removed: the directory is gitignored build output that is not in the
+  // checkout, and love2d is now archive/love2d.zip. This loop has no fsExists guard (unlike
+  // cli/commands/pack-sdk.ts), so the entry was a hard failure waiting on a QJS pack.
 ];
 for (const sub of SOURCE_TREES) {
   log('copy ' + sub + '/');
